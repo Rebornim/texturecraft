@@ -351,6 +351,59 @@ fn bench_history() {
     println!("[{res}²] memory: layer pixels {:.1} MB, composites {:.1} MB, hot-layer cache {:.1} MB", mb(m.pixels), mb(m.composites), mb(m.cache));
 }
 
+/// Drain the pending tiles with `Session::update`, returning how long that took.
+fn settle(s: &mut Session) -> Duration {
+    let t = Instant::now();
+    while s.pending_tiles() > 0 {
+        s.update();
+    }
+    t.elapsed()
+}
+
+/// Undo and redo of one small stroke: the tiles left pending and the time to recomposite them.
+/// `blur` keeps the stack's blurred mask (a neighbourhood filter forces a full recomposite).
+fn bench_undo_at(res: u32, blur: bool) {
+    use texturecraft_engine::core::{EffectKind, Filter};
+    let t = Instant::now();
+    let mut s = stack(res);
+    if !blur {
+        let blurs: Vec<_> = s
+            .doc
+            .project
+            .layers
+            .values()
+            .filter_map(|l| l.mask.as_ref())
+            .flat_map(|m| m.effects.iter())
+            .filter(|e| matches!(e.kind, EffectKind::Filter(Filter::Blur { .. })))
+            .map(|e| e.id.0)
+            .collect();
+        for id in blurs {
+            execute(&mut s, "effect.remove", &json!({"effect": id})).unwrap();
+        }
+    }
+    s.update();
+    let label = if blur { "blur mask kept" } else { "no neighbourhood filters" };
+    println!("[{res}², {label}] setup {:.2?} ({} covered tiles)", t.elapsed(), s.caches[0].covered_tiles.len());
+    // The first stroke on a layer creates its images (and recomposites everything when undone).
+    execute(&mut s, "tool.stroke", &json!({"points": [[500, 500], [520, 510]]})).unwrap();
+    execute(&mut s, "tool.stroke", &json!({"points": [[300, 300], [330, 310]]})).unwrap();
+    s.update();
+    for (name, cmd) in [("undo", "edit.undo"), ("redo", "edit.redo")] {
+        execute(&mut s, cmd, &Value::Null).unwrap();
+        let pending = s.pending_tiles();
+        println!("[{res}², {label}] {name}: {pending} tiles pending, settled in {:.2?}", settle(&mut s));
+    }
+}
+
+#[test]
+#[ignore]
+fn bench_undo() {
+    // 4096 only: the 8192 setup takes many minutes under load.
+    let res = 4096;
+    bench_undo_at(res, true);
+    bench_undo_at(res, false);
+}
+
 #[test]
 #[ignore]
 fn bench_8k_resize() {

@@ -1,15 +1,15 @@
 //! Bridge between the session and the wgpu renderer: per-frame scene sync (mesh, texture set
 //! layout, dirty tiles, environment) and the egui paint callback that renders and blits a view.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, ScreenDescriptor};
 use rayon::prelude::*;
 use texturecraft_engine::Session;
-use texturecraft_engine::compose::{DisplayKind, ImageRes, tile_bytes};
-use texturecraft_engine::core::BakedMap;
+use texturecraft_engine::compose::{DisplayKind, ImageRes, kinds_for, tile_bytes};
+use texturecraft_engine::core::{BakedMap, Channel};
 use texturecraft_engine::geom::Mesh;
 use texturecraft_render::{Frame, Renderer, wgpu};
 
@@ -75,6 +75,9 @@ pub struct GpuLink {
     env: (String, usize),
     /// What each set's aux texture holds: (mesh map or mask key, revision).
     aux: BTreeMap<usize, (String, u64)>,
+    /// The display kinds sent to the GPU per set: kinds the set has no channels for are not
+    /// converted, unless an earlier upload gave them content that must be overwritten.
+    sent: HashMap<usize, BTreeSet<DisplayKind>>,
     pub adapter: String,
     /// Most tiles waiting to be composited since compositing last caught up (progress).
     composite_total: usize,
@@ -122,6 +125,7 @@ pub fn init(rs: &egui_wgpu::RenderState, ctx: &egui::Context) -> GpuLink {
         shift: 0,
         env: Default::default(),
         aux: BTreeMap::new(),
+        sent: HashMap::new(),
         adapter: format!("{} ({:?})", info.name, info.backend),
         composite_total: 0,
     }
@@ -154,17 +158,20 @@ impl GpuLink {
             self.sets.clear();
             self.env = Default::default();
             self.reset.store(true, Ordering::Release);
+            self.sent.clear();
         }
         if self.mesh_id != s.mesh_id {
             out.mesh = Some((s.mesh.clone(), s.mesh_id));
             self.mesh_id = s.mesh_id;
             self.aux.clear();
+            self.sent.clear();
         }
         let sets: Vec<SetLayout> = s.doc.project.texture_sets.iter().map(|t| (t.size(), t.material)).collect();
         if sets != self.sets || shift != self.shift || out.mesh.is_some() {
             out.sets = Some((sets.clone(), s.mesh.materials.len().max(1), shift));
             self.sets = sets;
             self.shift = shift;
+            self.sent.clear();
         }
         let d = &s.doc.project.display;
         let image = d.environment_resource().and_then(|n| s.images.get(n));
@@ -178,6 +185,7 @@ impl GpuLink {
                 c.upload.extend(texturecraft_engine::compose::all_tiles(c.size.0, c.size.1));
             }
             self.aux.clear();
+            self.sent.clear();
         }
         for ts in 0..s.caches.len() {
             let tiles = s.take_uploads(ts);
@@ -189,11 +197,15 @@ impl GpuLink {
                 let empty = Default::default();
                 let baked = s.doc.baked.get(&ts).unwrap_or(&empty);
                 let comp = &cache.composite;
+                let channels: Vec<Channel> = comp.channels.keys().copied().collect();
+                let sent = self.sent.entry(ts).or_default();
+                let kinds: Vec<DisplayKind> = DisplayKind::ALL.into_iter().filter(|k| sent.contains(k) || kinds_for(&channels).any(|n| n == *k)).collect();
+                sent.extend(kinds.iter().copied());
                 // In chunks while the frame has time (at least one chunk); the rest waits.
                 for chunk in tiles.chunks(UPLOAD_CHUNK) {
                     let bytes: Vec<_> = chunk
                         .par_iter()
-                        .flat_map_iter(|&(tx, ty)| DisplayKind::ALL.into_iter().map(move |k| (k, tx, ty)))
+                        .flat_map_iter(|&(tx, ty)| kinds.iter().map(move |&k| (k, tx, ty)))
                         .map(|(k, tx, ty)| (ts, k, tx, ty, tile_bytes(comp, baked, k, tx, ty)))
                         .collect();
                     queued += bytes.len();

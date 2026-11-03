@@ -605,6 +605,8 @@ use unsupported as save_copy;
 #[cfg(target_arch = "wasm32")]
 use unsupported as reimport;
 #[cfg(target_arch = "wasm32")]
+use unsupported as change_mesh;
+#[cfg(target_arch = "wasm32")]
 use unsupported as export_textures;
 #[cfg(target_arch = "wasm32")]
 use unsupported as export_mesh;

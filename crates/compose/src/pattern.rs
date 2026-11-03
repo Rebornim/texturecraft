@@ -181,7 +181,11 @@ fn triplanar_weights(nrm: Vec3, sharpness: f32, gain: f32) -> Vec3 {
     let w = sharpen(nrm.abs(), sharpness);
     let w = w / (w.x + w.y + w.z).max(1e-6);
     let floor = TRIPLANAR_SKIP / gain.max(1.0);
-    Vec3::select(w.cmplt(Vec3::splat(floor)), Vec3::ZERO, w)
+    let kept = Vec3::select(w.cmplt(Vec3::splat(floor)), Vec3::ZERO, w);
+    // Every plane under the threshold (a sharpness above about 27 on a diagonal normal, where
+    // the sum's 1e-6 floor keeps the weights from summing to 1): skipping all three would drop
+    // more than a u16 step, so none is skipped.
+    if kept == Vec3::ZERO { w } else { kept }
 }
 
 /// Steepest slope of sRGB decoding (at 1.0: 2.4 / 1.055), the gain on triplanar image samples.
@@ -409,6 +413,12 @@ mod tests {
         // An oblique normal skips no plane.
         let oblique = triplanar_weights(Vec3::ONE.normalize(), 8.0, 16.0);
         assert!((oblique - Vec3::splat(1.0 / 3.0)).abs().max_element() < 1e-6, "{oblique}");
+        // So sharp that every plane of a diagonal normal is under the threshold (each about
+        // 6e-6, together over a u16 step): all three are kept, not dropped.
+        for sharpness in [47.0, 64.0] {
+            let diagonal = triplanar_weights(Vec3::ONE.normalize(), sharpness, 1.0);
+            assert!(diagonal.min_element() > 0.0, "sharpness {sharpness}: {diagonal}");
+        }
     }
 
     /// Repeated squaring agrees with `powf` to a few ulps for whole sharpnesses, and falls back

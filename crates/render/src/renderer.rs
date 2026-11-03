@@ -1378,10 +1378,14 @@ impl Renderer {
                     _ => None,
                 };
                 for level in 1..t.mips {
+                    // The parent rectangle plus one texel on every side: for even sizes the
+                    // 2×2 parents are exact, but at odd sizes (UV-tiled atlases, or `>> level`
+                    // of them) the bilinear footprint is wider, so a changed texel can reach a
+                    // destination texel just outside it.
                     let scissor = rect.map(|(px0, py0, px1, py1)| {
                         let (w, h) = ((t.texture.width() >> level).max(1), (t.texture.height() >> level).max(1));
-                        let (x0, y0) = ((px0 / 2).min(w - 1), (py0 / 2).min(h - 1));
-                        let (x1, y1) = (px1.div_ceil(2).clamp(x0 + 1, w), py1.div_ceil(2).clamp(y0 + 1, h));
+                        let (x0, y0) = ((px0 / 2).saturating_sub(1).min(w - 1), (py0 / 2).saturating_sub(1).min(h - 1));
+                        let (x1, y1) = ((px1.div_ceil(2) + 1).clamp(x0 + 1, w), (py1.div_ceil(2) + 1).clamp(y0 + 1, h));
                         (x0, y0, x1, y1)
                     });
                     rect = scissor;
@@ -2132,29 +2136,31 @@ mod tests {
         eprintln!("bench_mips [{}] 8192^2, one tile per frame: avg {avg:?}, worst {worst:?}", h.adapter_name);
     }
 
-    /// The levels 1, 2, 3 and the last of the base color texture of set 0.
+    /// Every mip level below 0 of the base color texture of set 0.
     fn mip_levels(h: &Headless) -> Vec<Vec<u8>> {
         let tex = h.renderer.display_textures()[0][0];
         let last = mip_count(tex.width().max(tex.height())) - 1;
-        [1, 2, 3, last].iter().map(|l| crate::readback::Readback::blocking_level(&h.device, &h.queue, tex, *l).unwrap().2).collect()
+        (1..=last).map(|l| crate::readback::Readback::blocking_level(&h.device, &h.queue, tex, l).unwrap().2).collect()
     }
 
-    #[test]
-    fn regional_mips_match_full() {
+    /// Paint `first` tiles, settle, then add each of `later` regionally and compare every level
+    /// against a forced full regeneration.
+    fn assert_regional_equals_full(size: (u32, u32), first: &[(u32, u32)], later: &[(u32, u32)]) {
         let Ok(mut h) = Headless::new() else {
             eprintln!("skipping: no GPU adapter");
             return;
         };
-        h.renderer.set_texture_sets(&h.device, &h.queue, &[((512, 512), 0)], 1);
-        let tile = |c: [u8; 4]| c.repeat(64 * 64);
-        let up = |h: &mut Headless, tx, ty, c| h.renderer.upload_tile(&h.device, &h.queue, 0, DisplayKind::BaseColor, tx, ty, &tile(c));
-        up(&mut h, 0, 0, [200, 30, 30, 255]);
-        up(&mut h, 4, 4, [30, 200, 30, 255]);
-        up(&mut h, 7, 2, [30, 30, 200, 255]);
+        h.renderer.set_texture_sets(&h.device, &h.queue, &[(size, 0)], 1);
+        let colour = |i: u32| [(37 * i % 200 + 40) as u8, (91 * i % 200 + 40) as u8, (151 * i % 200 + 40) as u8, 255];
+        let up = |h: &mut Headless, i: u32, (tx, ty): (u32, u32)| {
+            h.renderer.upload_tile(&h.device, &h.queue, 0, DisplayKind::BaseColor, tx, ty, &colour(i).repeat(64 * 64));
+        };
+        for (i, t) in (0..).zip(first) {
+            up(&mut h, i, *t);
+        }
         prepare(&mut h);
-        // One tile near the origin, then one in the last column and row: each regional.
-        for (tx, ty, c) in [(3u32, 5u32, [250, 250, 20, 255]), (7, 7, [20, 250, 250, 255])] {
-            up(&mut h, tx, ty, c);
+        for (i, t) in (10..).zip(later) {
+            up(&mut h, i, *t);
             assert!(matches!(h.renderer.sets[0].mips_dirty[0], MipsDirty::Region { .. }));
             prepare(&mut h);
             assert_eq!(h.renderer.sets[0].mips_dirty[0], MipsDirty::Clean);
@@ -2163,8 +2169,22 @@ mod tests {
             prepare(&mut h);
             let full = mip_levels(&h);
             for (level, (a, b)) in regional.iter().zip(&full).enumerate() {
-                assert_eq!(a, b, "tile ({tx}, {ty}): regional and full mips differ at checked level #{level}");
+                assert_eq!(a, b, "{size:?}, tile {t:?}: regional and full mips differ at level {}", level + 1);
             }
         }
+    }
+
+    #[test]
+    fn regional_mips_match_full() {
+        // The last column and row included (edge clamping).
+        assert_regional_equals_full((512, 512), &[(0, 0), (4, 4), (7, 2)], &[(3, 5), (7, 7)]);
+    }
+
+    #[test]
+    fn regional_mips_match_full_on_non_power_of_two_sets() {
+        // 3×1 tiles: odd widths further down the chain.
+        assert_regional_equals_full((192, 64), &[(0, 0)], &[(1, 0), (2, 0)]);
+        // Odd in both directions.
+        assert_regional_equals_full((192, 192), &[(0, 0)], &[(1, 1), (2, 2), (0, 2)]);
     }
 }

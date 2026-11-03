@@ -319,6 +319,35 @@ fn bench_8k_stroke_end() {
     }
 }
 
+/// What undo history costs: cloning a many-layer document, and a run of small strokes that each
+/// make one undo step.
+#[test]
+#[ignore]
+fn bench_history() {
+    let res = 4096;
+    let t = Instant::now();
+    let mut s = stack(res);
+    for _ in 0..20 {
+        execute(&mut s, "layer.add.paint", &Value::Null).unwrap();
+        execute(&mut s, "tool.stroke", &json!({"points": [[200, 300], [260, 320]]})).unwrap();
+    }
+    println!("[{res}²] history setup {:.2?}", t.elapsed());
+    let t = Instant::now();
+    for _ in 0..100 {
+        drop(std::hint::black_box(s.doc.clone()));
+    }
+    println!("[{res}²] document clone {:.2?} average over 100", t.elapsed() / 100);
+    let t = Instant::now();
+    for i in 0..100 {
+        let y = 400 + i * 5;
+        execute(&mut s, "tool.stroke", &json!({"points": [[200, y], [260, y + 20]]})).unwrap();
+    }
+    let total = t.elapsed();
+    println!("[{res}²] 100 strokes {total:.2?} ({:.2?} per stroke)", total / 100);
+    let m = s.memory();
+    println!("[{res}²] memory: layer pixels {:.1} MB, composites {:.1} MB, hot-layer cache {:.1} MB", mb(m.pixels), mb(m.composites), mb(m.cache));
+}
+
 #[test]
 #[ignore]
 fn bench_8k_resize() {

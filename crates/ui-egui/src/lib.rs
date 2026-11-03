@@ -53,6 +53,8 @@ pub struct BakeJob {
     pub total: usize,
     /// Bake only this map (an Auto-rebake); None bakes every ticked map.
     pub only: Option<texturecraft_engine::core::BakedMap>,
+    /// The mesh the job was started on: a result for another mesh (changed or reimported meanwhile) is not applied.
+    pub mesh_id: u64,
 }
 
 /// A MaterialCraft material re-cooking on a worker thread (one per layer at a time).
@@ -209,7 +211,7 @@ impl TextureCraftApp {
             return;
         }
         let total = sets.len();
-        self.bake = Some(BakeJob { queue: sets, current: None, total, only: None });
+        self.bake = Some(BakeJob { queue: sets, current: None, total, only: None, mesh_id: self.session.mesh_id });
     }
 
     /// Re-cook MaterialCraft material layer `layer` in the background. While one cook of the layer
@@ -263,6 +265,14 @@ impl TextureCraftApp {
 
     fn poll_bake(&mut self, ctx: &egui::Context) {
         let Some(job) = self.bake.as_mut() else { return };
+        if job.mesh_id != self.session.mesh_id {
+            // The mesh was swapped under the job: stop it and drop its result.
+            if let Some((_, p, _)) = &job.current {
+                p.cancel.store(true, Ordering::Relaxed);
+            }
+            self.bake = None;
+            return;
+        }
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
         if let Some((ts, _, rx)) = &job.current {
             match rx.try_recv() {
@@ -328,7 +338,7 @@ impl TextureCraftApp {
         let due = self.session.auto_rebake_due();
         if !due.is_empty() {
             let total = due.len();
-            self.bake = Some(BakeJob { queue: due, current: None, total, only: self.session.auto_rebake.map });
+            self.bake = Some(BakeJob { queue: due, current: None, total, only: self.session.auto_rebake.map, mesh_id: self.session.mesh_id });
         }
     }
 

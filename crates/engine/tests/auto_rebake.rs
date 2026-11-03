@@ -154,3 +154,44 @@ fn painting_or_clearing_the_skew_map_is_a_change() {
     assert_eq!(due(&mut s), [0], "and so is taking it away");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Edit > Change mesh swaps the mesh under a baked project: the high poly and Auto-rebake stay (the
+/// new mesh makes the map out of date), the project counts as changed, and image resources are decoded.
+#[test]
+fn changing_the_mesh_keeps_the_bake_setup_and_marks_the_project_changed() {
+    let (mut s, dir) = baked_session("change");
+    let mut obj = String::new();
+    let plane = primitives::builtin("plane").unwrap();
+    for p in &plane.positions {
+        obj += &format!("v {} {} {}\n", p.x, p.y, p.z);
+    }
+    for uv in &plane.uvs {
+        obj += &format!("vt {} {}\n", uv.x, 1.0 - uv.y);
+    }
+    for t in plane.indices.chunks_exact(3) {
+        obj += &format!("f {a}/{a} {b}/{b} {c}/{c}\n", a = t[0] + 1, b = t[1] + 1, c = t[2] + 1);
+    }
+    let new_mesh = dir.join("low.obj");
+    std::fs::write(&new_mesh, obj).unwrap();
+    // A 1x1 PNG as an image resource.
+    let png = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08,
+        0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0xf0, 0x1f, 0x00,
+        0x05, 0x00, 0x01, 0xff, 0x89, 0x99, 0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+    s.import_resource_bytes("dot.png", png.to_vec()).unwrap();
+    execute(&mut s, "bake.skew.set", &json!({ "value": 1.0 })).unwrap();
+    execute(&mut s, "bake.autoRebake", &json!({ "map": "height" })).unwrap();
+    assert!(due(&mut s).is_empty());
+    s.modified = false;
+
+    execute(&mut s, "file.changeMesh", &json!({ "path": new_mesh.display().to_string() })).unwrap();
+    assert_eq!(s.bake_meshes.high.len(), 1, "the high poly stays");
+    assert!(s.bake_meshes.skew.is_some(), "the skew map stays");
+    assert!(s.modified, "the project differs from the saved one");
+    assert_eq!(s.images.len(), 1, "image resources are decoded in the new session");
+    assert_eq!(execute(&mut s, "bake.autoRebake", &Value::Null).unwrap()["map"], "height", "Auto-rebake stays on");
+    assert_eq!(due(&mut s), [0], "and the map baked for the old mesh is out of date");
+
+    std::fs::remove_dir_all(&dir).ok();
+}

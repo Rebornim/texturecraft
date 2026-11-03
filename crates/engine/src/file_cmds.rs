@@ -436,6 +436,7 @@ impl Session {
     /// With `preserve_strokes`, painted pixels follow the surface where the UVs changed. Replies
     /// like `file.reimportMesh`: `{preserved?}`.
     pub fn reimport_mesh(&mut self, file: Option<texturecraft_formats::MeshFile>, preserve_strokes: bool) -> Result<Value> {
+        let from_file = file.is_some();
         let (mesh, source, warnings, mesh_file) = match file {
             Some(f) => {
                 let m = texturecraft_formats::import_mesh_bytes(&f.name, &f.bytes).map_err(fe)?.mesh;
@@ -457,6 +458,19 @@ impl Session {
         let mut next = Session::new(doc, mesh, source)?;
         next.log.extend(warnings);
         next.path = self.path.clone();
+        next.sync_images();
+        // The high polys and the skew map stay; the cage must have the new mesh's triangles.
+        next.bake_meshes = self.bake_meshes.clone();
+        if next.bake_meshes.cage.as_ref().is_some_and(|c| c.mesh.triangle_count() != next.mesh.triangle_count()) {
+            next.bake_meshes.cage = None;
+            next.log.push("the cage mesh was dropped: it does not have the new mesh's triangles".into());
+        }
+        if next.bake_meshes.skew.is_some() && self.source.uvs != next.source.uvs {
+            next.log.push("the skew map is laid over the old UV layout; check it in Bake mode".into());
+        }
+        // Auto-rebake stays on; the new mesh makes the baked map out of date, so it bakes again.
+        next.auto_rebake = self.auto_rebake.clone();
+        next.modified = self.modified || from_file;
         let preserved = preserve_strokes.then(|| crate::preserve::preserve_strokes(self, &mut next));
         self.switch_to(next);
         Ok(preserved.map_or(Value::Null, |n| json!({ "preserved": n })))

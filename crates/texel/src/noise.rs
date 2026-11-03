@@ -175,7 +175,8 @@ mod tests {
 
     /// FNV-1a of the bits of every noise over points spread across signs, lattice boundaries,
     /// −0 and huge values: the constant was taken from the `floor`/`match`/`fn`-pointer
-    /// implementation, so the faster one must reproduce every pattern bit for bit.
+    /// implementation, so the faster one must reproduce every pattern bit for bit. The points
+    /// use only basic arithmetic (no `sin`, whose last bits differ between platforms).
     #[test]
     fn noises_match_the_reference_bit_for_bit() {
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
@@ -183,7 +184,8 @@ mod tests {
             h = (h ^ u64::from(v.to_bits())).wrapping_mul(0x0100_0000_01b3);
         };
         let specials = [0.0, -0.0, 1.0, -1.0, 0.5, -0.5, 1e-7, -1e-7, 8_388_607.5, -8_388_607.5, 8_388_608.0, 3e9, -3e9];
-        let mut points: Vec<[f32; 3]> = (0..4000).map(|i| [i as f32 * 0.37 - 700.0, (i as f32 * 0.11).sin() * 40.0, (i % 97) as f32 * -0.53]).collect();
+        let mut points: Vec<[f32; 3]> =
+            (0..4000).map(|i| [i as f32 * 0.37 - 700.0, ((i * 7919) % 8000) as f32 * 0.01 - 40.0, (i % 97) as f32 * -0.53]).collect();
         points.extend(specials.iter().flat_map(|&a| specials.iter().map(move |&b| [a, b, a - b])));
         for p in points {
             for seed in [0, 7] {
@@ -199,7 +201,7 @@ mod tests {
         }
         assert_eq!(h, REFERENCE, "noise output changed: {h:#x}");
     }
-    const REFERENCE: u64 = 0x5d3e_ae9d_8220_2a52;
+    const REFERENCE: u64 = 0x67e8_14aa_2127_b333;
 
     /// A coordinate past the i32 range puts its cell at i32::MAX or MIN; the neighbouring cells
     /// wrap around instead of overflowing (which panics in debug builds).

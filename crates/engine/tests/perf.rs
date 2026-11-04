@@ -337,12 +337,15 @@ fn bench_history() {
         drop(std::hint::black_box(s.doc.clone()));
     }
     println!("[{res}²] document clone {:.2?} average over 100", t.elapsed() / 100);
+    let steps = s.history_labels().len();
     let t = Instant::now();
     for i in 0..100 {
-        let y = 400 + i * 5;
-        execute(&mut s, "tool.stroke", &json!({"points": [[200, y], [260, y + 20]]})).unwrap();
+        // Rows 300..490 of the 800-pixel viewport, across the framed sphere.
+        let y = 300 + (i % 20) * 10;
+        execute(&mut s, "tool.stroke", &json!({"points": [[300, y], [360, y + 20]]})).unwrap();
     }
     let total = t.elapsed();
+    assert_eq!(s.history_labels().len(), steps + 100, "every stroke paints the mesh and makes an undo step");
     println!("[{res}²] 100 strokes {total:.2?} ({:.2?} per stroke)", total / 100);
     let m = s.memory();
     println!("[{res}²] memory: layer pixels {:.1} MB, composites {:.1} MB, hot-layer cache {:.1} MB", mb(m.pixels), mb(m.composites), mb(m.cache));

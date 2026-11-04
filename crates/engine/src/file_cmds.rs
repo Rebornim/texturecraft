@@ -186,10 +186,11 @@ impl Session {
         check_materials(&pf.project, &mesh)?;
         let source = pf.mesh.clone();
         let resources = pf.resources.into_iter().map(|(k, v)| (k, std::sync::Arc::new(v))).collect();
-        let mut s = Session::new(Document { project: pf.project, pixels: pf.pixels, baked: pf.baked, resources }, mesh, source)?;
+        let mut s =
+            Session::new(Document { bake_paint: Default::default(), project: pf.project, pixels: pf.pixels, baked: pf.baked, resources }, mesh, source)?;
         s.sync_images();
         s.load_bake_meshes(pf.high_poly, pf.cage);
-        s.load_skew(pf.skew);
+        s.load_bake_paint(pf.bake_paint);
         Ok(s)
     }
 
@@ -217,7 +218,7 @@ impl Session {
             mesh: self.mesh_source.clone(),
             high_poly,
             cage,
-            skew: self.saved_skew(),
+            bake_paint: self.saved_bake_paint(),
             thumbnail: None,
             resources: self.doc.resources.iter().map(|(k, v)| (k.clone(), v.as_ref().clone())).collect(),
         }
@@ -465,11 +466,9 @@ impl Session {
             next.bake_meshes.cage = None;
             next.log.push("the cage mesh was dropped: it does not have the new mesh's triangles".into());
         }
-        if next.bake_meshes.skew.is_some() && self.source.uvs != next.source.uvs {
+        if self.doc.bake_paint.keys().any(|(_, target)| *target == texturecraft_core::BakePaintTarget::Skew) && self.source.uvs != next.source.uvs {
             next.log.push("the skew map is laid over the old UV layout; check it in Bake mode".into());
         }
-        // Auto-rebake stays on; the new mesh makes the baked map out of date, so it bakes again.
-        next.auto_rebake = self.auto_rebake.clone();
         next.modified = self.modified || from_file;
         let preserved = preserve_strokes.then(|| crate::preserve::preserve_strokes(self, &mut next));
         self.switch_to(next);

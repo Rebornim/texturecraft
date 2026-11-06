@@ -301,6 +301,18 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
     })
 }
 
+/// Whether any effect (mask or content) of a layer drawn in texture set `ts` reads texels
+/// around each texel (blur, sharpen, warp, edge, bevel, glow, mosaic, slope blur). Conservative:
+/// hidden layers and disabled masks count too.
+pub fn stack_reads_neighbours(project: &Project, ts: usize) -> bool {
+    let Some(set) = project.texture_sets.get(ts) else { return false };
+    project
+        .render_tree(&set.stack)
+        .iter()
+        .filter_map(|id| project.layers.get(id))
+        .any(|l| neighbourhood(&l.content_effects, 2048).is_some() || l.mask.as_ref().is_some_and(|m| neighbourhood(&m.effects, 2048).is_some()))
+}
+
 /// Unit texel-space vector of `angle` degrees. Texel rows run down: positive angles turn
 /// counterclockwise on screen.
 fn direction(angle: f32) -> [f32; 2] {
@@ -2489,6 +2501,22 @@ mod tests {
         effects.push(warp_on_top);
         let blurred_then_warped = row(&fixture);
         assert!(blurred_then_warped.iter().zip(&warped).any(|(chained, single)| (chained - single).abs() > 0.1), "the blur under the warp still runs");
+    }
+
+    #[test]
+    fn stack_reads_neighbours_sees_blurs_in_masks_and_content() {
+        let mut f = fixture();
+        let id = fill_layer(&mut f.project, [1.0; 3], 1.0);
+        assert!(!stack_reads_neighbours(&f.project, 0));
+        let mut mask = Mask::new(MaskBackground::White);
+        let eid = f.project.alloc_id();
+        mask.effects.push(Effect::new(eid, EffectKind::Filter(Filter::Blur { radius: 8.0 })));
+        f.project.layer_mut(id).unwrap().mask = Some(mask);
+        assert!(stack_reads_neighbours(&f.project, 0));
+        f.project.layer_mut(id).unwrap().mask = None;
+        assert!(!stack_reads_neighbours(&f.project, 0));
+        content_fx(&mut f, id, EffectKind::Filter(Filter::Mosaic { size: 8.0 }));
+        assert!(stack_reads_neighbours(&f.project, 0));
     }
 
     #[test]

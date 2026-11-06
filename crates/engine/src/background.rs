@@ -78,6 +78,7 @@ impl Job {
             gbuf: &gbuf,
             pixels: &pixels,
             baked: &baked,
+            block_scales: base.block_scales.clone(),
             preview: None,
             images: &images,
             bounds,

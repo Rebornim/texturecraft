@@ -217,9 +217,9 @@ fn shade(app: &TextureCraftApp) -> Shade {
     }
 }
 
-/// The texture set a shelf material dragged over the 3D view `response` would drop on, its edges drawn in the accent color
+/// The texture set a shelf material or image dragged over the 3D view `response` would drop on, its edges drawn in the accent color
 fn drop_highlight(app: &TextureCraftApp, ui: &Ui, response: &egui::Response) -> Option<SetHighlight> {
-    let set = crate::shelf::material_drop_set(app, ui, response)?;
+    let set = crate::shelf::drop_set(app, ui, response)?;
     let accent = egui::Rgba::from(Tokens::get(ui.ctx()).viewport_accent);
 
     Some(SetHighlight { set, color: [accent.r(), accent.g(), accent.b()] })
@@ -577,7 +577,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         visible: app.session.doc.project.texture_sets.iter().map(|t| t.visible).collect(),
     };
     add_callback(app, ui, rect, frame, sync);
-    // Shelf drops: a material goes above the selection of the set under the pointer, an alpha on the brush
+    // Shelf drops: a material goes above the selection of the set under the pointer, an image opens the decal menu there, an alpha goes on the brush
     crate::shelf::drop_target(app, ui, &resp, crate::shelf::DropZone::View3d);
 
     // Brush cursor.
@@ -649,6 +649,8 @@ impl DecalGrab {
 #[derive(Clone, Copy, Debug)]
 struct DecalDrag {
     layer: texturecraft_engine::core::LayerId,
+    /// The mask fill effect holding the decal, when it was placed as a mask
+    effect: Option<texturecraft_engine::core::LayerId>,
     grab: DecalGrab,
     /// Where the drag started, the decal's center on screen and the decal then.
     from: Pos2,
@@ -665,9 +667,11 @@ fn decal_drag_id() -> egui::Id {
 /// Screen distance from the top edge to the rotation handle (points).
 const DECAL_KNOB: f32 = 24.0;
 
-/// The selected decal layer (its content, not its mask) as the 3D view shows it.
+/// The selected decal (a decal layer's content, or a mask decal effect) as the 3D view shows it
 struct DecalFrame {
     layer: texturecraft_engine::core::LayerId,
+    /// The selected mask fill effect holding the decal, when it was placed as a mask
+    effect: Option<texturecraft_engine::core::LayerId>,
     decal: texturecraft_engine::core::Decal,
     /// Top left, top right, bottom right, bottom left.
     corners: [Pos2; 4],
@@ -679,20 +683,35 @@ struct DecalFrame {
 
 impl DecalFrame {
     fn of(app: &TextureCraftApp, rect: Rect) -> Option<DecalFrame> {
+        use texturecraft_engine::StackTarget;
         use texturecraft_engine::compose::pattern::{decal_axes, decal_corners};
-        use texturecraft_engine::core::{Fill, LayerKind, Projection};
-        if app.ui.mode != crate::state::Mode::Painting || app.session.target != texturecraft_engine::StackTarget::Content {
+        use texturecraft_engine::core::{EffectKind, Fill, LayerKind, Projection};
+        if app.ui.mode != crate::state::Mode::Painting {
             return None;
         }
-        let p = &app.session.doc.project;
-        let layer = app.session.selected_layer().and_then(|id| p.content_layer(id))?;
-        let LayerKind::Fill(Fill { projection: Projection::Decal(decal), .. }) = &layer.kind else { return None };
+
+        let layers = &app.session.doc.project;
+        let (layer, effect, decal) = match app.session.target {
+            StackTarget::Content => {
+                let layer = app.session.selected_layer().and_then(|id| layers.content_layer(id))?;
+                let LayerKind::Fill(Fill { projection: Projection::Decal(decal), .. }) = &layer.kind else { return None };
+
+                (layer.id, None, decal)
+            }
+            StackTarget::Effect(effect) => {
+                let (owner, mask_effect) = layers.effect(effect)?;
+                let EffectKind::Fill { projection: Projection::Decal(decal), .. } = &mask_effect.kind else { return None };
+
+                (owner, Some(effect), decal)
+            }
+            StackTarget::Mask => return None,
+        };
         let [a, b, c, d] = decal_corners(decal)?.map(|q| project(app, rect, q));
         let corners = [a?, b?, c?, d?];
         let center = project(app, rect, decal_axes(decal)?.0)?;
         let top = corners[0].lerp(corners[1], 0.5);
         let knob = top + (top - center).normalized() * DECAL_KNOB;
-        Some(DecalFrame { layer: layer.id, decal: *decal, corners, center, top, knob })
+        Some(DecalFrame { layer, effect, decal: *decal, corners, center, top, knob })
     }
 
     /// The handle under screen point `p`.
@@ -718,12 +737,13 @@ impl DecalFrame {
 fn decal_input(app: &mut TextureCraftApp, ui: &Ui, resp: &egui::Response, rect: Rect) -> bool {
     let ctx = ui.ctx();
     let frame = DecalFrame::of(app, rect);
-    let mut drag = ctx.data(|d| d.get_temp::<DecalDrag>(decal_drag_id())).filter(|d| frame.as_ref().is_some_and(|f| f.layer == d.layer));
+    let mut drag =
+        ctx.data(|d| d.get_temp::<DecalDrag>(decal_drag_id())).filter(|d| frame.as_ref().is_some_and(|f| f.layer == d.layer && f.effect == d.effect));
     if resp.drag_started_by(PointerButton::Primary)
         && let (Some(f), Some(from)) = (&frame, ctx.input(|i| i.pointer.press_origin()))
         && let Some(grab) = f.grab(from)
     {
-        drag = Some(DecalDrag { layer: f.layer, grab, from, center: f.center, start: f.decal, stepped: false });
+        drag = Some(DecalDrag { layer: f.layer, effect: f.effect, grab, from, center: f.center, start: f.decal, stepped: false });
     }
     let Some(mut d) = drag.filter(|_| resp.dragged_by(PointerButton::Primary) || resp.drag_started_by(PointerButton::Primary)) else {
         ctx.data_mut(|m| m.remove::<DecalDrag>(decal_drag_id()));
@@ -753,6 +773,9 @@ fn decal_input(app: &mut TextureCraftApp, ui: &Ui, resp: &egui::Response, rect: 
             }
         };
         params["layer"] = json!(d.layer.0);
+        if let Some(effect) = d.effect {
+            params["effect"] = json!(effect.0);
+        }
         params["merge"] = json!(d.stepped);
         // Off the mesh while moving: the decal waits where it is.
         d.stepped |= texturecraft_engine::execute(&mut app.session, "layer.decal.set", &params).is_ok();

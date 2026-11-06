@@ -1152,8 +1152,9 @@ impl<'a, 'b> Texel<'a, 'b> {
                     // Normal channels are OpenGL (+Y up the image): a DirectX image's green flips.
                     ChannelKind::NormalMap if *normal_format == NormalFormat::DirectX => [acc[0], 1.0 - acc[1], acc[2]],
                     ChannelKind::Color | ChannelKind::NormalMap => [acc[0], acc[1], acc[2]],
-                    ChannelKind::Scalar => [acc[0]; 3],
-                    ChannelKind::Signed => [acc[0] * 2.0 - 1.0; 3],
+                    // A one-value channel or mask reads the image's gray, so a color image works as a mask
+                    ChannelKind::Scalar => [lum([acc[0], acc[1], acc[2]]); 3],
+                    ChannelKind::Signed => [lum([acc[0], acc[1], acc[2]]) * 2.0 - 1.0; 3],
                 }
             }
             Source::Anchor { anchor, channel } => {

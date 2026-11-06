@@ -345,6 +345,83 @@ fn decal_drags_merge_into_one_undo_step() {
     assert_eq!(execute(&mut s, "project.inspect", &Value::Null).unwrap()["layers"], start);
 }
 
+/// A decal dropped on another texture set lands there and selects it, in one undo step
+#[test]
+fn a_decal_on_another_texture_set_selects_that_set() {
+    let mut s = Session::new_project("t", primitives::material_ball(), "builtin:material_ball", None, 256).unwrap();
+    s.viewport = Vec2::new(400.0, 400.0);
+    s.update();
+    let name = s.import_resource_bytes("logo.png", png(8, 8, |_, _| [255, 0, 0, 255])).unwrap();
+    let selected = s.ts();
+    let other_set_pixel = (0..40)
+        .flat_map(|row| (0..40).map(move |column| Vec2::new(column as f32 * 10.0 + 5.0, row as f32 * 10.0 + 5.0)))
+        .find(|&pixel| s.texture_set_at(pixel, s.viewport).is_some_and(|ts| ts != selected))
+        .expect("the material ball shows both of its texture sets");
+    let other = s.texture_set_at(other_set_pixel, s.viewport).unwrap();
+    let steps = s.history_labels().len();
+
+    let drop = json!({"image": name, "x": other_set_pixel.x, "y": other_set_pixel.y, "viewport": [400, 400]});
+    let layer = id(execute(&mut s, "layer.add.decal", &drop).unwrap(), "layer");
+
+    assert_eq!(s.ts(), other, "the set under the point is selected");
+    assert_eq!(s.doc.project.locate(layer).map(|(ts, _, _)| ts), Some(other), "the decal is in that set");
+    assert_eq!(s.selected_layer(), Some(layer));
+    assert_eq!(s.history_labels().len(), steps + 1, "one undo step");
+
+    execute(&mut s, "edit.undo", &Value::Null).unwrap();
+    assert!(s.doc.project.locate(layer).is_none(), "one undo takes the decal away");
+
+    let background = json!({"image": name, "x": 2, "y": 2, "viewport": [400, 400]});
+    assert!(s.texture_set_at(Vec2::new(2.0, 2.0), s.viewport).is_none());
+    assert!(execute(&mut s, "layer.add.decal", &background).is_err(), "the background still takes nothing");
+}
+
+/// A decal's image goes in the channel asked for, or masks a new fill layer
+#[test]
+fn a_decal_image_fills_a_chosen_channel_or_a_mask() {
+    let mut s = session();
+    let name = s.import_resource_bytes("logo.png", png(8, 8, |_, _| [255, 255, 255, 255])).unwrap();
+    let place = |channel: &str| json!({"image": name, "channel": channel, "x": 200, "y": 200, "size": 0.5});
+
+    let rough = id(execute(&mut s, "layer.add.decal", &place("roughness")).unwrap(), "layer");
+    assert_eq!(s.doc.project.layer(rough).unwrap().channels.keys().copied().collect::<Vec<_>>(), [Channel::Roughness]);
+    assert!(at(&mut s, Channel::Roughness, 200.0, 200.0)[0] > 0.95, "the white image is full roughness under the decal");
+    assert!(execute(&mut s, "layer.add.decal", &place("sparkle")).is_err(), "unknown channel");
+    let missing = Channel::ALL.into_iter().find(|c| !s.doc.project.texture_sets[0].has_channel(*c)).unwrap();
+    assert!(execute(&mut s, "layer.add.decal", &place(missing.id())).is_err(), "a channel the set lacks");
+
+    let r = execute(&mut s, "layer.add.decal", &place("mask")).unwrap();
+    let masked = id(r.clone(), "layer");
+    let mask = s.doc.project.layer(masked).unwrap().mask.as_ref().unwrap();
+    assert!(matches!(mask.effects.as_slice(), [e] if matches!(e.kind, EffectKind::Fill { projection: Projection::Decal(_), .. })));
+    assert_eq!(r["maskEffect"], json!(mask.effects[0].id.0));
+    execute(&mut s, "layer.fill.set", &json!({"layer": masked.0, "channel": "baseColor", "color": [1.0, 0.0, 0.0]})).unwrap();
+    assert!(red(at(&mut s, Channel::BaseColor, 200.0, 200.0)), "the mask shows the layer under the decal");
+    assert!(!red(at(&mut s, Channel::BaseColor, 120.0, 200.0)), "and hides it elsewhere");
+
+    let effect = &r["maskEffect"];
+    execute(&mut s, "layer.decal.set", &json!({"effect": effect, "x": 150, "y": 200})).unwrap();
+    assert!(red(at(&mut s, Channel::BaseColor, 150.0, 200.0)), "a mask decal moves like a decal layer");
+    assert!(!red(at(&mut s, Channel::BaseColor, 230.0, 200.0)));
+    assert!(execute(&mut s, "layer.decal.set", &json!({"effect": rough.0, "x": 150, "y": 200})).is_err(), "a layer id is not an effect");
+}
+
+/// A decal's new image stays in the channel the decal was placed in, read as gray there
+#[test]
+fn a_channel_decal_reads_its_image_as_gray_and_keeps_its_channel() {
+    let mut s = session();
+    let white = s.import_resource_bytes("white.png", png(8, 8, |_, _| [255, 255, 255, 255])).unwrap();
+    let green = s.import_resource_bytes("green.png", png(8, 8, |_, _| [0, 255, 0, 255])).unwrap();
+    let place = json!({"image": white, "channel": "roughness", "x": 200, "y": 200, "size": 0.5});
+    let layer = id(execute(&mut s, "layer.add.decal", &place).unwrap(), "layer");
+
+    execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "image": green})).unwrap();
+
+    assert_eq!(s.doc.project.layer(layer).unwrap().channels.keys().copied().collect::<Vec<_>>(), [Channel::Roughness]);
+    let roughness = at(&mut s, Channel::Roughness, 200.0, 200.0)[0];
+    assert!((roughness - texturecraft_engine::core::lum([0.0, 1.0, 0.0])).abs() < 0.02, "green reads as its gray, not its red: {roughness}");
+}
+
 /// The Geometry mask tool: a click toggles the selected layer on the part under it.
 #[test]
 fn geometry_mask_tool_toggles_the_clicked_part() {

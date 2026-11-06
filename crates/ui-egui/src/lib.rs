@@ -32,6 +32,7 @@ pub mod theme;
 pub mod thumbs;
 pub mod titlebar;
 pub mod toolbar;
+pub mod ui_state_store;
 pub mod viewport;
 pub mod web_files;
 pub mod widgets;
@@ -85,6 +86,8 @@ pub struct TextureCraftApp {
     /// A smooth move to a saved camera in progress.
     camera_glide: Option<CameraGlide>,
     pub ui: UiState,
+    /// Where `ui` is saved between runs
+    ui_store: ui_state_store::UiStateStore,
     pub gpu: Option<gpu::GpuLink>,
     pub control: Option<std::sync::mpsc::Receiver<ControlRequest>>,
     pub toasts: Vec<Toast>,
@@ -137,7 +140,8 @@ impl TextureCraftApp {
         texturecraft_engine::bake::install_gpu_tracer(Arc::new(texturecraft_render::gpu_bake::GpuBaker::new()));
         let gpu = cc.wgpu_render_state.as_ref().map(|rs| gpu::init(rs, &cc.egui_ctx));
         // The first run speaks the OS (or browser) language.
-        let ui = cc.storage.and_then(|s| eframe::get_value::<UiState>(s, "ui")).unwrap_or_else(|| {
+        let mut ui_store = ui_state_store::UiStateStore::new(ui_state_store::FILE.get().cloned());
+        let ui = ui_store.load(cc.storage).unwrap_or_else(|| {
             let mut ui = UiState::default();
             ui.prefs.language = i18n::os_language().into();
             ui
@@ -147,6 +151,7 @@ impl TextureCraftApp {
             camera_glide: None,
             session,
             ui,
+            ui_store,
             gpu,
             control: None,
             toasts: Vec::new(),
@@ -477,7 +482,7 @@ impl eframe::App for TextureCraftApp {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, "ui", &self.ui);
+        self.ui_store.save(&self.ui, storage);
         export_templates::save_library(self, storage);
     }
 

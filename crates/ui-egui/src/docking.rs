@@ -250,9 +250,8 @@ impl PartialEq for Dock {
 }
 
 impl Serialize for Dock {
-    /// Written as its JSON value: the app's settings format reads enum variants back without their names otherwise
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        serde_json::to_value(&self.workspace).map_err(serde::ser::Error::custom)?.serialize(s)
+        self.workspace.serialize(s)
     }
 }
 

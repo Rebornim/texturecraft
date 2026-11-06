@@ -429,101 +429,17 @@ mod tests {
         }
     }
 
-    /// The app's own settings store: eframe keeps `UiState` as RON text under a key
-    #[derive(Default)]
-    struct MemoryStorage(std::collections::HashMap<String, String>);
-
-    impl eframe::Storage for MemoryStorage {
-        fn get_string(&self, key: &str) -> Option<String> {
-            self.0.get(key).cloned()
-        }
-
-        fn set_string(&mut self, key: &str, value: String) {
-            self.0.insert(key.to_string(), value);
-        }
-
-        fn remove_string(&mut self, key: &str) {
-            self.0.remove(key);
-        }
-
-        fn flush(&mut self) {}
-    }
-
-    /// Save `ui` and load it back, as closing and reopening the app does
-    fn restart(ui: &UiState) -> (UiState, MemoryStorage) {
-        let mut storage = MemoryStorage::default();
-        eframe::set_value(&mut storage, "ui", ui);
-        let restarted = eframe::get_value::<UiState>(&storage, "ui").unwrap_or_else(|| panic!("the saved state loads: {}", storage.0["ui"]));
-        (restarted, storage)
-    }
-
     #[test]
     fn the_bake_layout_survives_a_restart_whichever_mode_was_open() {
         for mode in [Mode::Painting, Mode::Baking] {
             let mut ui = UiState { mode, ..UiState::default() };
             ui.sync_mode_dock();
 
-            let (mut restarted, _) = restart(&ui);
+            let mut restarted = crate::ui_state_store::tests::restart(&ui);
             restarted.sync_mode_dock();
             let bake_dock = if mode == Mode::Baking { &restarted.dock } else { &restarted.inactive_mode_dock };
             assert_eq!(*bake_dock, Dock::for_baking(), "{mode:?}");
             assert!(bake_dock.is_open(crate::docking::Panel::MeshMapBakers), "{mode:?}");
-        }
-    }
-
-    /// The painting default with Layers moved into a tab beside Assets and Properties floating
-    fn moved_panels() -> Dock {
-        use crate::docking::{Panel, default_workspace, permissions};
-        use craft_ui::docking::{Action, Placement};
-
-        let mut workspace = default_workspace();
-        let actions = [
-            Action::Move { panel: Panel::Layers, anchor: Panel::Assets, placement: Placement::Tab { before: None } },
-            Action::Float { panel: Panel::Properties, rect: [900.0, 120.0, 320.0, 400.0] },
-        ];
-        workspace.apply_all(actions, permissions).unwrap();
-        let dock = Dock::from_value(serde_json::to_value(&workspace).unwrap());
-        assert!(!dock.replaced_unreadable(), "the moved layout is valid");
-        dock
-    }
-
-    #[test]
-    fn panel_layouts_survive_a_restart() {
-        for dock in [Dock::default(), moved_panels()] {
-            let ui = UiState { dock, ..UiState::default() };
-            let (restarted, storage) = restart(&ui);
-            assert!(!restarted.dock.replaced_unreadable(), "the saved dock is read: {}", storage.0["ui"]);
-            assert!(!restarted.inactive_mode_dock.replaced_unreadable(), "the saved bake dock is read: {}", storage.0["ui"]);
-            assert_eq!(restarted, ui);
-        }
-    }
-
-    #[test]
-    fn an_unreadable_saved_layout_loads_the_default_and_keeps_the_other_settings() {
-        let ui = UiState { dock: moved_panels(), split_ratio: 0.3, ..UiState::default() };
-        let (_, mut storage) = restart(&ui);
-        let saved = storage.0["ui"].clone();
-        let mut dock_storage = MemoryStorage::default();
-        eframe::set_value(&mut dock_storage, "dock", &ui.dock);
-        let saved_dock = &dock_storage.0["dock"];
-        assert_eq!(saved.matches(saved_dock.as_str()).count(), 1, "the painting dock is saved once: {saved}");
-        assert!(saved_dock.contains("Assets"), "{saved_dock}");
-
-        let unreadable = [
-            // A panel this build does not know
-            saved_dock.replace("Assets", "Bogus"),
-            // Not a layout
-            "[1,2]".to_owned(),
-            // A layout written field by field, as builds before this format saved it
-            "(version:2,layout:(root:Some(Tabs(panels:[Viewport],active:0)),floating:[]),hidden:[])".to_owned(),
-        ];
-        for dock in unreadable {
-            storage.0.insert("ui".to_owned(), saved.replace(saved_dock.as_str(), &dock));
-
-            let restarted = eframe::get_value::<UiState>(&storage, "ui").unwrap_or_else(|| panic!("the saved state loads: {dock}"));
-            assert!(restarted.dock.replaced_unreadable(), "{dock}");
-            assert_eq!(restarted.dock, Dock::default(), "{dock}");
-            assert_eq!(restarted.split_ratio, 0.3, "{dock}");
         }
     }
 

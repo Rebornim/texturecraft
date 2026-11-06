@@ -475,6 +475,7 @@ mod tests {
     fn moved_panels() -> Dock {
         use crate::docking::{Panel, default_workspace, permissions};
         use craft_ui::docking::{Action, Placement};
+
         let mut workspace = default_workspace();
         let actions = [
             Action::Move { panel: Panel::Layers, anchor: Panel::Assets, placement: Placement::Tab { before: None } },
@@ -502,9 +503,10 @@ mod tests {
         let ui = UiState { dock: moved_panels(), split_ratio: 0.3, ..UiState::default() };
         let (_, mut storage) = restart(&ui);
         let saved = storage.0["ui"].clone();
-        let dock_start = saved.find("dock:").unwrap() + "dock:".len();
-        let dock_end = saved.find(",inactive_mode_dock:").unwrap();
-        let saved_dock = &saved[dock_start..dock_end];
+        let mut dock_storage = MemoryStorage::default();
+        eframe::set_value(&mut dock_storage, "dock", &ui.dock);
+        let saved_dock = &dock_storage.0["dock"];
+        assert_eq!(saved.matches(saved_dock.as_str()).count(), 1, "the painting dock is saved once: {saved}");
         assert!(saved_dock.contains("Assets"), "{saved_dock}");
 
         let unreadable = [
@@ -516,9 +518,8 @@ mod tests {
             "(version:2,layout:(root:Some(Tabs(panels:[Viewport],active:0)),floating:[]),hidden:[])".to_owned(),
         ];
         for dock in unreadable {
-            let mut text = saved.clone();
-            text.replace_range(dock_start..dock_end, &dock);
-            storage.0.insert("ui".to_owned(), text);
+            storage.0.insert("ui".to_owned(), saved.replace(saved_dock.as_str(), &dock));
+
             let restarted = eframe::get_value::<UiState>(&storage, "ui").unwrap_or_else(|| panic!("the saved state loads: {dock}"));
             assert!(restarted.dock.replaced_unreadable(), "{dock}");
             assert_eq!(restarted.dock, Dock::default(), "{dock}");

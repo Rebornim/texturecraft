@@ -65,9 +65,12 @@ impl TileImage {
     pub fn set_tile(&mut self, tx: u32, ty: u32, data: Option<TileData>) {
         let len = TILE_AREA * self.comps;
         let data = data.filter(|d| d.len() == len);
-        if let Some(i) = self.tile_index(tx, ty)
-            && let Some(slot) = Arc::make_mut(&mut self.tiles).get_mut(i)
-        {
+        let Some(i) = self.tile_index(tx, ty) else { return };
+        // Freeing a free tile changes nothing: don't copy a table that undo snapshots share.
+        if data.is_none() && self.tiles.get(i).is_some_and(Option::is_none) {
+            return;
+        }
+        if let Some(slot) = Arc::make_mut(&mut self.tiles).get_mut(i) {
             *slot = data;
         }
     }
@@ -238,6 +241,20 @@ mod tests {
         b.set_tile(999, 999, None);
         assert!(b.tile_mut(999, 999, &[0, 0]).is_none());
         assert!(a.same_tiles(&b));
+    }
+
+    /// Undo restores free the tiles a stroke allocated, including ones that are already free:
+    /// that must not copy the table every snapshot shares.
+    #[test]
+    fn freeing_a_free_tile_does_not_unshare() {
+        let mut a = TileImage::new(512, 512, 2);
+        a.set(0, 0, &[1, 2]);
+        let mut b = a.clone();
+        b.set_tile(1, 0, None);
+        assert!(a.same_tiles(&b));
+        b.set_tile(0, 0, None);
+        assert!(!a.same_tiles(&b), "freeing a used tile still un-shares");
+        assert_eq!(b.get(0, 0)[..2], [0, 0]);
     }
 
     #[test]

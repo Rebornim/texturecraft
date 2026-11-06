@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use texturecraft_compose::{BakedMaps, BelowCache, Composite, PaintTarget, PixelStore, StackKey, StrokePreview, covered_tiles, pad_tiles};
+use texturecraft_compose::{BakedMaps, BelowCache, Composite, PaintTarget, PatternCache, PixelStore, StackKey, StrokePreview, covered_tiles, pad_tiles};
 use texturecraft_core::{Channel, Layer, LayerId, LayerKind, Project, TextureSet};
 use texturecraft_geom::glam::Vec2;
 use texturecraft_geom::{Bvh, Mesh, OrbitCamera, UvGBuffer};
@@ -50,6 +50,17 @@ pub struct SetCache {
     pub below: BelowCache,
     /// Tiles per composite chunk that fit the last frame's budget (0: not measured yet).
     pub chunk: usize,
+    /// Procedural pattern values of this layout, kept across composites (bakes and stack
+    /// edits leave them valid); a new layout gets a new cache with the new `SetCache`. Shared
+    /// with background composites of this layout.
+    pub patterns: Arc<PatternCache>,
+    /// Tiles a background composite is working on (taken from `dirty` and `settle`). A
+    /// composite here takes a tile out, so a background result for it, older by then, is
+    /// dropped; one still listed when it arrives is newer than what the tile shows.
+    pub in_flight: BTreeSet<(u32, u32)>,
+    /// Sample points of each covered tile, to tell which tiles the views show (made on first
+    /// use; see [`crate::focus`]).
+    pub probes: std::sync::OnceLock<crate::focus::TileProbes>,
 }
 
 impl SetCache {
@@ -72,6 +83,9 @@ impl SetCache {
             revision: 0,
             below: BelowCache::default(),
             chunk: 0,
+            patterns: Arc::new(PatternCache::default()),
+            in_flight: BTreeSet::new(),
+            probes: std::sync::OnceLock::new(),
         }
     }
 
@@ -719,6 +733,8 @@ impl Session {
                 let tiles = next_chunk(&mut cache.dirty, chunk);
                 for t in &tiles {
                     cache.settle.remove(t);
+                    // Composited now: a background result for it would be older.
+                    cache.in_flight.remove(t);
                 }
                 let empty = BakedMaps::default();
                 let inputs = texturecraft_compose::Inputs {
@@ -732,10 +748,15 @@ impl Session {
                     preview,
                     images: &self.images,
                     bounds: self.mesh.bounds(),
+                    patterns: Some(&*cache.patterns),
                 };
                 texturecraft_compose::composite_tiles_cached(&inputs, &mut cache.composite, &tiles, Some(&mut cache.below));
                 // The composited tiles and the neighbours their padding reached change.
                 let padded = pad_tiles(&mut cache.composite, &cache.dilation, &tiles);
+                // Written here (padding included): a background result for them would be older.
+                for t in &padded {
+                    cache.in_flight.remove(t);
+                }
                 cache.upload.extend(tiles.iter().copied().chain(padded));
                 cache.revision = cache.revision.wrapping_add(1);
                 changed = true;
@@ -762,7 +783,7 @@ impl Session {
 
     /// Tiles still waiting to be composited, over every texture set (settling ones included).
     pub fn pending_tiles(&self) -> usize {
-        self.caches.iter().map(|c| c.dirty.len() + c.settle.len()).sum()
+        self.caches.iter().map(|c| c.dirty.len() + c.settle.len() + c.in_flight.len()).sum()
     }
 
     /// The layer a stroke target belongs to (an effect's owner).
@@ -821,6 +842,7 @@ impl Session {
             preview: None,
             images: &self.images,
             bounds: self.mesh.bounds(),
+            patterns: Some(&*cache.patterns),
         })
     }
 
@@ -854,7 +876,7 @@ impl Session {
     /// hot-layer caches.
     pub fn memory(&self) -> Memory {
         let composites = self.caches.iter().flat_map(|c| c.composite.channels.values()).map(texturecraft_texel::TileImage::bytes).sum();
-        Memory { pixels: self.doc.pixels.bytes(), composites, cache: self.caches.iter().map(|c| c.below.bytes()).sum() }
+        Memory { pixels: self.doc.pixels.bytes(), composites, cache: self.caches.iter().map(|c| c.below.bytes() + c.patterns.bytes()).sum() }
     }
 }
 
@@ -879,7 +901,7 @@ pub const SETTLE_BUDGET_MS: f64 = 6.0;
 
 /// Take up to `n` dirty tiles, block by block (16 × 16 tiles) so neighbourhood filters
 /// evaluate compact regions.
-fn next_chunk(dirty: &mut BTreeSet<(u32, u32)>, n: usize) -> Vec<(u32, u32)> {
+pub(crate) fn next_chunk(dirty: &mut BTreeSet<(u32, u32)>, n: usize) -> Vec<(u32, u32)> {
     if dirty.len() <= n {
         return std::mem::take(dirty).into_iter().collect();
     }

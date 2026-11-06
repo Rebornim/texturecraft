@@ -30,8 +30,8 @@ impl SetHighlight {
 
 /// The input of post.wgsl's `aces` that gives `screen`: the positive root of its rational curve solved for the input
 fn inverse_aces(screen: f32) -> f32 {
-    let (a, b, c) = (2.43 * screen - 2.51, 0.59 * screen - 0.03, 0.14 * screen);
-    let scaled = (-b - (b * b - 4.0 * a * c).max(0.0).sqrt()) / (2.0 * a);
+    let (quadratic, linear, constant) = (2.43 * screen - 2.51, 0.59 * screen - 0.03, 0.14 * screen);
+    let scaled = (-linear - (linear * linear - 4.0 * quadratic * constant).max(0.0).sqrt()) / (2.0 * quadratic);
 
     scaled / ACES_INPUT_SCALE
 }
@@ -42,8 +42,8 @@ mod tests {
 
     /// post.wgsl's `aces` with exposure `exposure_ev`
     fn tone_mapped(scene: f32, exposure_ev: f32) -> f32 {
-        let v = scene * 2f32.powf(exposure_ev) * ACES_INPUT_SCALE;
-        ((v * (2.51 * v + 0.03)) / (v * (2.43 * v + 0.59) + 0.14)).clamp(0.0, 1.0)
+        let scaled = scene * 2f32.powf(exposure_ev) * ACES_INPUT_SCALE;
+        ((scaled * (2.51 * scaled + 0.03)) / (scaled * (2.43 * scaled + 0.59) + 0.14)).clamp(0.0, 1.0)
     }
 
     #[test]

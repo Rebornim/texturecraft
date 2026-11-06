@@ -127,13 +127,13 @@ impl Session {
         texturecraft_formats::usd_bytes(&self.mesh, &self.doc.project.name, &files, format).map_err(fe)
     }
 
-    /// The texture sets of the first `materials` materials rendered with `opts` (as a tile atlas
-    /// for UV-tiled sets, or nothing for them without `tiled`).
+    /// The texture sets of the first `materials` materials rendered with `opts`: a tile atlas for UV-tiled sets, or nothing for them without `tiled`
     fn material_files(&mut self, opts: ExportOptions, tiled: bool, materials: usize) -> Result<Vec<Vec<ExportedFile>>> {
         let opts = ExportOptions { atlas: true, ..opts };
+
         (0..materials)
-            .map(|m| match self.texture_set_of_material(m) {
-                Some(ts) if tiled || self.doc.project.texture_sets.get(ts).is_some_and(|t| t.tile_grid().is_none()) => self.export_files(&[ts], &opts),
+            .map(|material| match self.texture_set_of_material(material) {
+                Some(ts) if tiled || self.doc.project.texture_sets.get(ts).is_some_and(|set| set.tile_grid().is_none()) => self.export_files(&[ts], &opts),
                 _ => Ok(Vec::new()),
             })
             .collect()

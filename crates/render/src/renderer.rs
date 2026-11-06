@@ -106,7 +106,7 @@ const HIGHLIGHT_WIDTH_PX: f32 = 1.5;
 const HIGHLIGHT_OPACITY: f32 = 0.9;
 
 /// Copies of each highlight line, shifted diagonally to the four corners of its extra width (`vs_wire_highlight`)
-const HIGHLIGHT_SHIFTS: u32 = 4;
+const HIGHLIGHT_LINE_COPIES: u32 = 4;
 
 /// How the material is shaded (from the project's display settings and the view mode).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1543,8 +1543,7 @@ impl Renderer {
         Some(v)
     }
 
-    /// Index ranges of `ranges` (first, count, material) whose texture set is visible (and is
-    /// `only`, when given), with that set.
+    /// [`drawable_ranges`] with each range's set
     fn drawable<'a>(
         &'a self,
         ranges: &'a [(u32, u32, usize)],
@@ -1875,17 +1874,17 @@ impl Renderer {
 
     /// Background, mesh and wireframe into the view's MSAA HDR target, resolved to `resolve`.
     fn scene_pass(&self, encoder: &mut wgpu::CommandEncoder, v: &ViewTargets, resolve: &wgpu::TextureView, globals_bg: &wgpu::BindGroup, frame: &Frame) {
-        let uv_ts = match frame.kind {
-            ViewKind::Scene => None,
-            ViewKind::Uv { ts, .. } => Some(ts),
+        let (pipe, wire, highlight) = match frame.kind {
+            ViewKind::Scene => (
+                &self.mesh_pipeline,
+                frame.shade.wireframe_3d.then_some(&self.wire3d_pipeline),
+                frame.shade.highlight.map(|highlight| (&self.highlight_pipeline, highlight.set)),
+            ),
+            ViewKind::Uv { .. } => (&self.uv_pipeline, frame.shade.wireframe.then_some(&self.wire_pipeline), None),
         };
-        let (pipe, wire) = match uv_ts {
-            None => (&self.mesh_pipeline, frame.shade.wireframe_3d.then_some(&self.wire3d_pipeline)),
-            Some(_) => (&self.uv_pipeline, frame.shade.wireframe.then_some(&self.wire_pipeline)),
-        };
-        // Transmissive surfaces refract what the behind pass rendered this frame.
+
+        // Transmissive surfaces refract what the behind pass rendered this frame
         let refr = v.behind.as_ref().filter(|_| frame.shade.refraction).map_or(&self.refr_black, |b| &b.bg);
-        let highlight = frame.shade.highlight.filter(|_| uv_ts.is_none()).map(|highlight| (&self.highlight_pipeline, highlight.set));
         self.draw_scene(encoder, v, resolve, globals_bg, frame, pipe, wire, highlight, refr);
     }
 
@@ -1923,19 +1922,22 @@ impl Renderer {
         pass.set_bind_group(0, globals_bg, &[]);
         pass.set_pipeline(&self.bg_pipeline);
         pass.draw(0..3, 0..1);
+
         let Some(m) = &self.mesh else { return };
+
         let uv_ts = match frame.kind {
             ViewKind::Scene => None,
             ViewKind::Uv { ts, .. } => Some(ts),
         };
         pass.set_bind_group(2, refr, &[]);
         let geo = self.geometry(m, frame);
+
         // The wireframe and the highlight draw the mesh's own edges (displaced in the vertex shader too)
         let (highlight, highlight_set) = highlight.unzip();
         let passes = [
             (Some(pipe), &geo.vb, &geo.ib, &geo.draws, uv_ts, 1),
             (wire, &m.geo.vb, &m.lines, &m.line_draws, uv_ts, 1),
-            (highlight, &m.geo.vb, &m.lines, &m.line_draws, highlight_set, HIGHLIGHT_SHIFTS),
+            (highlight, &m.geo.vb, &m.lines, &m.line_draws, highlight_set, HIGHLIGHT_LINE_COPIES),
         ];
         for (pipe, vb, ib, ranges, only, instances) in passes {
             let Some(pipe) = pipe else { continue };
@@ -1996,7 +1998,7 @@ fn drawable_ranges<'a>(
 ) -> impl Iterator<Item = (std::ops::Range<u32>, usize)> + 'a {
     ranges.iter().filter_map(move |&(start, count, material)| {
         let ts = material_sets.get(material).copied().flatten()?;
-        if only.is_some_and(|o| o != ts) || !visible.get(ts).copied().unwrap_or(true) {
+        if only.is_some_and(|only_set| only_set != ts) || !visible.get(ts).copied().unwrap_or(true) {
             return None;
         }
 

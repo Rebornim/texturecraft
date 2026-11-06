@@ -120,7 +120,7 @@ pub enum DropZone {
     Brush,
     /// The 2D view: alphas and materials.
     View2d,
-    /// The 3D view: alphas, materials (on the texture set they drop on) and textures (placed as decals where they drop).
+    /// The 3D view: alphas, materials (on the texture set they drop on) and textures (placed as decals where they drop)
     View3d,
 }
 
@@ -140,6 +140,15 @@ fn set_under_pointer(app: &TextureCraftApp, ui: &Ui, response: &egui::Response) 
     app.session.texture_set_at(Vec2::new(local_position.x, local_position.y), app.session.viewport)
 }
 
+/// Inset of the drop outline from the view's edge, in points
+const DROP_OUTLINE_INSET: f32 = 1.0;
+
+/// Corner radius of the drop outline, in points
+const DROP_OUTLINE_RADIUS: f32 = 3.0;
+
+/// Stroke width of the drop outline, in points
+const DROP_OUTLINE_WIDTH: f32 = 2.0;
+
 /// Highlight accepted shelf assets on hover and apply them on drop. In the 3D view a material goes to the texture set under the pointer, highlighted by the view itself ([`material_drop_set`])
 pub fn drop_target(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response, zone: DropZone) {
     if app.ui.mode != crate::state::Mode::Painting {
@@ -154,13 +163,15 @@ pub fn drop_target(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response
         Asset::SmartMask(_) | Asset::Filter(_) => false,
     };
     let onto_set = |asset: &Asset| zone == DropZone::View3d && asset.is_material();
+
     if response.dnd_hover_payload::<ShelfDrag>().is_some_and(|drag| accepts(&drag) && !onto_set(&drag.asset)) {
-        ui.painter().rect_stroke(response.rect.shrink(1.0), 3.0, Stroke::new(2.0, tokens.accent), egui::StrokeKind::Inside);
+        let outline = Stroke::new(DROP_OUTLINE_WIDTH, tokens.accent);
+        ui.painter().rect_stroke(response.rect.shrink(DROP_OUTLINE_INSET), DROP_OUTLINE_RADIUS, outline, egui::StrokeKind::Inside);
     }
 
-    let pointer = ui.input(|input| input.pointer.interact_pos());
     let Some(drag) = dnd_release::<ShelfDrag>(response).filter(|drag| accepts(drag)) else { return };
 
+    let pointer = ui.input(|input| input.pointer.interact_pos());
     match (&drag.asset, pointer) {
         (Asset::Texture(name), Some(position)) => {
             let (local_position, viewport_size) = (position - response.rect.min, response.rect.size());

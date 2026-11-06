@@ -659,8 +659,7 @@ fn fs_wire(i: VOut) -> @location(0) vec4<f32> {
     return vec4<f32>(0.6, 0.6, 0.6, 0.16);
 }
 
-// 3D wireframe over the shaded mesh: depth-tested, pulled slightly toward the camera so the
-// lines win against their own triangles.
+// 3D wireframe over the shaded mesh: depth-tested, pulled slightly toward the camera so the lines win against their own triangles
 fn wire3d(v: VIn) -> VOut {
     var o: VOut;
     o.wpos = v.pos;

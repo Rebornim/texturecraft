@@ -37,7 +37,7 @@ impl Session {
 
     /// The texture set that paints mesh material `material` (a [`SurfaceHit::material`])
     pub fn texture_set_of_material(&self, material: usize) -> Option<usize> {
-        self.doc.project.texture_sets.iter().position(|t| t.material == material)
+        self.doc.project.texture_sets.iter().position(|set| set.material == material)
     }
 
     /// The texture set of the surface under viewport pixel `screen`
@@ -567,20 +567,23 @@ impl Session {
         }
     }
 
-    /// Color picker: copy the material under the cursor into the tool's paint values.
+    /// Color picker: copy the material under the cursor into the tool's paint values
     pub fn color_pick(&mut self, screen: Vec2, viewport: Vec2) -> Result<BTreeMap<Channel, [f32; 3]>> {
         let hit = self.pick(screen, viewport).ok_or_else(|| EngineError::Other("nothing under the cursor".into()))?;
         let ts = self.texture_set_of_material(hit.material).unwrap_or(self.ts());
         let cache = self.caches.get(ts).ok_or_else(|| EngineError::Other("texture set not ready".into()))?;
-        let (w, h) = (cache.size.0 as f32, cache.size.1 as f32);
-        let (x, y) = ((hit.uv.x * w).clamp(0.0, w - 1.0) as u32, (hit.uv.y * h).clamp(0.0, h - 1.0) as u32);
-        let mut out = BTreeMap::new();
-        for c in cache.composite.channels.keys() {
-            let v = cache.composite.value(*c, x, y);
-            self.tool.values.insert(*c, v);
-            out.insert(*c, v);
+
+        let (width, height) = (cache.size.0 as f32, cache.size.1 as f32);
+        let (x, y) = ((hit.uv.x * width).clamp(0.0, width - 1.0) as u32, (hit.uv.y * height).clamp(0.0, height - 1.0) as u32);
+
+        let mut picked = BTreeMap::new();
+        for channel in cache.composite.channels.keys() {
+            let value = cache.composite.value(*channel, x, y);
+            self.tool.values.insert(*channel, value);
+            picked.insert(*channel, value);
         }
-        Ok(out)
+
+        Ok(picked)
     }
 
     /// The stroke canvas alpha of the active stroke (for overlays and tests).

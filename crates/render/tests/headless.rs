@@ -1,8 +1,9 @@
 use texturecraft_compose::{DisplayKind, ImageRes};
+use texturecraft_geom::glam::Vec3;
 use texturecraft_geom::{OrbitCamera, primitives};
 use texturecraft_render::headless::Headless;
 use texturecraft_render::renderer::TAA_SAMPLES;
-use texturecraft_render::{Frame, Shade, ViewKind};
+use texturecraft_render::{BakeVisualization, Frame, Shade, ViewKind};
 
 /// The UI's key light (`viewport::shade`).
 const LIGHT: [f32; 4] = [0.5, 0.8, 0.4, 2.5];
@@ -218,6 +219,60 @@ fn wireframe_3d_overlays_the_mesh() {
     let b = render(&mut h, &shaded(&frame, |s| s.wireframe_3d = true), "wire3d_on");
     assert_ne!(a.mean(200, 100, 280, 180), b.mean(200, 100, 280, 180), "edges draw over the ball");
     assert_eq!(a.at(5, 5), b.at(5, 5), "the background stays clean");
+}
+
+#[test]
+fn bake_visualization_draws_the_high_poly_and_the_cage() {
+    // A high poly inside the material ball, a cage around it, and how far a color must lead the others to count as that color
+    const HIGH_POLY_RADIUS_PER_SIZE: f32 = 0.3;
+    const CAGE_SCALE: f32 = 2.5;
+    const HIGH_POLY_ID: u64 = 7;
+    const CAGE_TOPOLOGY: u64 = 1;
+    const CAGE_EDGES: [[u32; 2]; 2] = [[0, 1], [1, 2]];
+    const COLOR_LEAD: i32 = 30;
+
+    let Some((mut h, frame)) = setup() else { return };
+    let (low_min, low_max) = primitives::material_ball().bounds();
+    let ball_center = (low_min + low_max) * 0.5;
+    let mut high = primitives::sphere((low_max - low_min).max_element() * HIGH_POLY_RADIUS_PER_SIZE, 32, 16);
+    for position in &mut high.positions {
+        *position += ball_center;
+    }
+    h.renderer.set_bake_high(&h.device, &h.queue, Some(&high), HIGH_POLY_ID);
+    let corners: Vec<Vec3> = high.indices.iter().map(|index| (high.positions[*index as usize] - ball_center) * CAGE_SCALE + ball_center).collect();
+    h.renderer.set_bake_cage(&h.device, &h.queue, 0, Some((&corners, &CAGE_EDGES)), CAGE_TOPOLOGY);
+    let bake = BakeVisualization { high_poly: false, cage: false, uv_seams: false, low_poly: true, only_set: None };
+    let center = (frame.size[0] / 2, frame.size[1] / 2);
+
+    let only = |h: &mut Headless, parts: BakeVisualization, name: &str| render(h, &shaded(&frame, |s| s.bake = Some(parts)), name);
+    let low_only = only(&mut h, bake, "bake_low_only");
+    let hidden = only(&mut h, BakeVisualization { low_poly: false, ..bake }, "bake_low_hidden");
+    let high_poly = only(&mut h, BakeVisualization { low_poly: false, high_poly: true, ..bake }, "bake_high_poly");
+    let caged = only(&mut h, BakeVisualization { cage: true, ..bake }, "bake_cage");
+    assert_same(&low_only, &render(&mut h, &frame, "bake_off"), "every part off draws only the low poly");
+    let background = render(&mut h, &Frame { visible: vec![false, false], ..frame.clone() }, "bake_background");
+    assert_same(&hidden, &background, "without the low poly only the background is left");
+    let [red, green, blue] = high_poly.at(center.0, center.1).map(i32::from);
+    assert!(blue > red + COLOR_LEAD && blue > green, "the high poly inside the low poly draws blue: {:?}", [red, green, blue]);
+    let ([low_red, low_green, low_blue], [caged_red, caged_green, caged_blue]) = (low_only.at(center.0, center.1), caged.at(center.0, center.1));
+    assert!(
+        caged_blue < low_blue && caged_red >= caged_blue && caged_green >= caged_blue,
+        "the cage tints the ball tan: {:?} → {:?}",
+        [low_red, low_green, low_blue],
+        [caged_red, caged_green, caged_blue]
+    );
+
+    // Vertices the bake's rays miss turn red
+    h.renderer.set_bake_high_missed(&h.queue, HIGH_POLY_ID, &vec![1.0; high.positions.len()]);
+    let missed = only(&mut h, BakeVisualization { low_poly: false, high_poly: true, ..bake }, "bake_high_missed");
+    let [red, green, blue] = missed.at(center.0, center.1).map(i32::from);
+    assert!(red > blue + COLOR_LEAD && red > green + COLOR_LEAD, "missed vertices draw red: {:?}", [red, green, blue]);
+
+    // A new distance with the same topology only moves the corners
+    let grown: Vec<Vec3> = corners.iter().map(|corner| (*corner - ball_center) * 2.0 + ball_center).collect();
+    h.renderer.set_bake_cage(&h.device, &h.queue, 0, Some((&grown, &CAGE_EDGES)), CAGE_TOPOLOGY);
+    let bigger = only(&mut h, BakeVisualization { cage: true, ..bake }, "bake_cage_grown");
+    assert_ne!(caged.px, bigger.px, "the cage grew");
 }
 
 #[test]

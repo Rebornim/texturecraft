@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 use texturecraft_core::BakePaintTarget;
 
+use super::{BakeCageInputs, MergedHigh};
 use crate::{BakeMesh, BakeTask};
 use serde_json::{Value, json};
 use texturecraft_bake::tracing::Tracer;
@@ -15,6 +16,7 @@ use texturecraft_bake::{BakeOutput, BakePaintMap, MAX_RAYS, Progress};
 use texturecraft_core::{
     BackfaceMode, BakeAntialiasing, BakeResolution, BakeSettings, BakedMap, CurvatureMethod, PositionMode, RayDistribution, RaySettings, SelfOcclusion,
 };
+use texturecraft_geom::Mesh;
 
 use crate::commands::{CommandSpec, always, bad, boolp, f32p, strp, u64p};
 use crate::{EngineError, Result, Session, cmd};
@@ -112,31 +114,22 @@ impl Session {
         } else {
             Arc::new(Vec::new())
         };
-        let high = if set.bake.high_poly.use_low_as_high { None } else { self.bake_meshes.merged.clone() };
-        let cage = if high.is_some() && set.bake.cage.kind == texturecraft_core::CageType::CustomFile {
-            Some(self.bake_meshes.cage.as_ref().ok_or_else(|| EngineError::Other("Custom File requires a cage mesh".into()))?.mesh.clone())
-        } else {
-            None
-        };
-        let painted = |target| high.as_ref().and(self.doc.bake_paint.get(&(ts, target))).map(|map| super::layout::paint_for_bake(map, set)).transpose();
-        let skew = painted(BakePaintTarget::Skew)?;
-        let cage_paint = painted(BakePaintTarget::Cage)?;
+
+        let high = self.bake_high(ts)?;
+        let cage = self.bake_cage(ts, high.is_some())?;
+        let skew = self.bake_paint(ts, high.is_some(), BakePaintTarget::Skew)?;
+        let cage_paint = self.bake_paint(ts, high.is_some(), BakePaintTarget::Cage)?;
+
         let grid = set.tile_grid();
         let tiles = grid.map_or((1, 1), |grid| (grid.cols, grid.rows));
         let excluded_tiles: Vec<_> = set.uv_tiles.iter().filter(|tile| set.bake_excluded_tiles.contains(tile)).filter_map(|tile| grid?.block(*tile)).collect();
         let previous_maps = if excluded_tiles.is_empty() { Default::default() } else { self.doc.baked.get(&ts).cloned().unwrap_or_default() };
+
         let tracer = GPU_TRACER.get().cloned();
         Ok(BakeTask {
             low_base_color,
             ts,
-            mesh: match grid.filter(|_| !set.tile_resolutions.is_empty()) {
-                Some(grid) => {
-                    let mut mesh = (*self.source).clone();
-                    mesh.map_material_uvs(set.material, |uv| texturecraft_geom::glam::Vec2::from_array(grid.to_atlas(uv.to_array())));
-                    Arc::new(mesh)
-                }
-                None => self.mesh.clone(),
-            },
+            mesh: self.bake_mesh(ts)?,
             bvh: self.bvh.clone(),
             material: set.material,
             settings: set.bake.clone(),
@@ -148,6 +141,61 @@ impl Session {
             excluded_tiles,
             previous_maps,
             tracer,
+        })
+    }
+
+    /// What texture set `ts`'s bake reads to place its transfer rays; `None` when the set bakes without a high poly or misses its cage file
+    pub fn bake_cage_inputs(&self, ts: usize) -> Result<Option<BakeCageInputs>> {
+        let set = self.doc.project.texture_set(ts)?;
+        let Some(high) = self.bake_high(ts)? else { return Ok(None) };
+        let Ok(cage) = self.bake_cage(ts, true) else { return Ok(None) };
+
+        Ok(Some(BakeCageInputs {
+            mesh: self.bake_mesh(ts)?,
+            bvh: self.bvh.clone(),
+            material: set.material,
+            settings: set.bake.clone(),
+            high,
+            cage,
+            skew: self.bake_paint(ts, true, BakePaintTarget::Skew)?,
+            cage_paint: self.bake_paint(ts, true, BakePaintTarget::Cage)?,
+        }))
+    }
+
+    /// The merged high polys texture set `ts` bakes from, unless it bakes from the low poly
+    fn bake_high(&self, ts: usize) -> Result<Option<MergedHigh>> {
+        let set = self.doc.project.texture_set(ts)?;
+        Ok(if set.bake.high_poly.use_low_as_high { None } else { self.bake_meshes.merged.clone() })
+    }
+
+    /// Texture set `ts`'s cage mesh when it bakes from a high poly with a Custom File cage
+    fn bake_cage(&self, ts: usize, has_high: bool) -> Result<Option<Arc<Mesh>>> {
+        let set = self.doc.project.texture_set(ts)?;
+        if !has_high || set.bake.cage.kind != texturecraft_core::CageType::CustomFile {
+            return Ok(None);
+        }
+
+        let cage = self.bake_meshes.cage.as_ref().ok_or_else(|| EngineError::Other("Custom File requires a cage mesh".into()))?;
+        Ok(Some(cage.mesh.clone()))
+    }
+
+    /// Texture set `ts`'s painted skew or cage map, used only when it bakes from a high poly
+    fn bake_paint(&self, ts: usize, has_high: bool, target: BakePaintTarget) -> Result<Option<Arc<BakePaintMap>>> {
+        let set = self.doc.project.texture_set(ts)?;
+        let paint = self.doc.bake_paint.get(&(ts, target)).filter(|_| has_high);
+        paint.map(|map| super::layout::paint_for_bake(map, set)).transpose()
+    }
+
+    /// The low poly texture set `ts` bakes: UV tiles of mixed resolutions move into its atlas
+    fn bake_mesh(&self, ts: usize) -> Result<Arc<Mesh>> {
+        let set = self.doc.project.texture_set(ts)?;
+        Ok(match set.tile_grid().filter(|_| !set.tile_resolutions.is_empty()) {
+            Some(grid) => {
+                let mut mesh = (*self.source).clone();
+                mesh.map_material_uvs(set.material, |uv| texturecraft_geom::glam::Vec2::from_array(grid.to_atlas(uv.to_array())));
+                Arc::new(mesh)
+            }
+            None => self.mesh.clone(),
         })
     }
 

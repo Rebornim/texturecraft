@@ -465,11 +465,14 @@ impl Session {
         next.log.extend(warnings);
         next.path = self.path.clone();
         next.sync_images();
-        // The high polys and the skew map stay; the cage must have the new mesh's triangles.
+        // The high polys and the skew map stay. The cage is sampled by triangle index and
+        // barycentrics, so it stays only for an identical mesh; the low poly's base colours are
+        // read again from the new mesh.
         next.bake_meshes = self.bake_meshes.clone();
-        if next.bake_meshes.cage.as_ref().is_some_and(|c| c.mesh.triangle_count() != next.mesh.triangle_count()) {
+        next.bake_meshes.low_base_color = Default::default();
+        if next.bake_meshes.cage.is_some() && *next.mesh != *self.mesh {
             next.bake_meshes.cage = None;
-            next.log.push("the cage mesh was dropped: it does not have the new mesh's triangles".into());
+            next.log.push("the cage mesh was dropped: the low-poly mesh changed".into());
         }
         if self.doc.bake_paint.keys().any(|(_, target)| *target == texturecraft_core::BakePaintTarget::Skew) && self.source.uvs != next.source.uvs {
             next.log.push("the skew map is laid over the old UV layout; check it in Bake mode".into());
@@ -743,6 +746,28 @@ mod tests {
         assert_eq!(s.mesh.triangle_count(), 1, "the new mesh is in use");
         assert_eq!(s.doc.project.mesh_file, "tri.obj");
         assert_eq!(s.doc.project.layers.len(), layers, "the layers stay");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn change_mesh_resets_base_colours_and_drops_a_cage_of_another_mesh() {
+        let dir = std::env::temp_dir().join(format!("tc_change_mesh_cage_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("a.obj");
+        std::fs::write(&a, "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n").unwrap();
+        // Same triangle count, other vertices.
+        let b = dir.join("b.obj");
+        std::fs::write(&b, "v 0 0 0\nv 2 0 0\nv 0 2 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n").unwrap();
+        let mut s = Session::from_mesh_bytes("a.obj", &std::fs::read(&a).unwrap(), 128, "a").unwrap();
+        let cage = crate::bake::BakeMesh { name: "cage".into(), bytes: Default::default(), mesh: s.mesh.clone(), base_color: Vec::new() };
+        s.bake_meshes.cage = Some(cage);
+        let _ = s.bake_meshes.low_base_color.set(Err("old".into()));
+        // The same mesh again keeps the cage but not the cached colours.
+        crate::execute(&mut s, "file.changeMesh", &json!({"path": a.display().to_string()})).unwrap();
+        assert!(s.bake_meshes.cage.is_some());
+        assert!(s.bake_meshes.low_base_color.get().is_none(), "the colours are read again");
+        crate::execute(&mut s, "file.changeMesh", &json!({"path": b.display().to_string()})).unwrap();
+        assert!(s.bake_meshes.cage.is_none(), "the cage was made for another mesh");
         std::fs::remove_dir_all(&dir).ok();
     }
 

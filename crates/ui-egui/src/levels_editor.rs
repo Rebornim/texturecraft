@@ -265,7 +265,7 @@ fn typed_value(ui: &mut Ui, rect: Rect, typing_id: Id, handle: LevelsHandle, mut
         egui::TextEdit::singleline(&mut text)
             .id(field_id)
             .font(egui::FontId::proportional(VALUE_FONT_SIZE))
-            .horizontal_align(egui::Align::Center)
+            .align(egui::Align2::CENTER_CENTER)
             .margin(vec2(2.0, 1.0)),
     );
     // The app can consume Escape before the box sees it, so read the raw event
@@ -275,7 +275,7 @@ fn typed_value(ui: &mut Ui, rect: Rect, typing_id: Id, handle: LevelsHandle, mut
         return None;
     }
 
-    ui.data_mut(|data| data.remove_temp::<(LevelsHandle, String)>(typing_id));
+    ui.data_mut(|data| data.remove::<(LevelsHandle, String)>(typing_id));
     ui.memory_mut(|memory| memory.surrender_focus(field_id));
     let typed = text.trim().parse::<f32>().ok().filter(|value| value.is_finite());
     let (false, Some(typed)) = (escape, typed) else { return None };

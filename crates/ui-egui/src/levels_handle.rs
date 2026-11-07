@@ -25,9 +25,6 @@ impl LevelsHandle {
     /// The handles above the histogram, left to right at the default levels
     pub const INPUT: [LevelsHandle; 3] = [LevelsHandle::InputLow, LevelsHandle::Gamma, LevelsHandle::InputHigh];
 
-    /// The handles under the output gradient, left to right at the default levels
-    pub const OUTPUT: [LevelsHandle; 2] = [LevelsHandle::OutputLow, LevelsHandle::OutputHigh];
-
     pub fn label(self) -> &'static str {
         match self {
             LevelsHandle::InputLow => tr("Input low"),

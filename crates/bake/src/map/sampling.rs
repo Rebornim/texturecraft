@@ -3,12 +3,12 @@ use std::ops::{Add, Mul};
 use texturecraft_geom::glam::Vec3;
 use texturecraft_geom::{Mesh, Surface};
 
-pub(super) fn interpolate<T: Copy + Mul<f32, Output = T> + Add<Output = T>>(mesh: &Mesh, v: &[T], tri: u32, [b1, b2]: [f32; 2]) -> Option<T> {
+pub(crate) fn interpolate<T: Copy + Mul<f32, Output = T> + Add<Output = T>>(mesh: &Mesh, v: &[T], tri: u32, [b1, b2]: [f32; 2]) -> Option<T> {
     let [a, b, c] = mesh.tri(tri as usize)?;
     Some(*v.get(a)? * (1.0 - b1 - b2) + *v.get(b)? * b1 + *v.get(c)? * b2)
 }
 
-pub(super) fn welded(mesh: &Mesh, diag: f32) -> (Vec<u32>, Vec<Vec3>, Vec<Vec3>) {
+pub(crate) fn welded(mesh: &Mesh, diag: f32) -> (Vec<u32>, Vec<Vec3>, Vec<Vec3>) {
     let q = diag * 1e-5;
     let mut ids: HashMap<[i64; 3], u32> = HashMap::new();
     let (mut pos, mut nrm) = (Vec::new(), Vec::<Vec3>::new());

@@ -19,6 +19,7 @@ mod transfer;
 pub(crate) use bake_context::BakeContext;
 pub(crate) use normal_curvature::curvature_from_normal;
 pub(crate) use sample::Sample;
+pub(crate) use sampling::{interpolate, welded};
 pub(crate) use texel_grid::TexelGrid;
 pub(crate) use traced::Traced;
 pub(crate) use transfer::Transfer;

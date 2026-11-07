@@ -1,8 +1,9 @@
 use texturecraft_compose::{DisplayKind, ImageRes};
+use texturecraft_geom::glam::Vec3;
 use texturecraft_geom::{OrbitCamera, primitives};
 use texturecraft_render::headless::Headless;
 use texturecraft_render::renderer::TAA_SAMPLES;
-use texturecraft_render::{Frame, Shade, ViewKind};
+use texturecraft_render::{BakeVisualization, Frame, Shade, ViewKind};
 
 /// The UI's key light (`viewport::shade`).
 const LIGHT: [f32; 4] = [0.5, 0.8, 0.4, 2.5];
@@ -218,6 +219,34 @@ fn wireframe_3d_overlays_the_mesh() {
     let b = render(&mut h, &shaded(&frame, |s| s.wireframe_3d = true), "wire3d_on");
     assert_ne!(a.mean(200, 100, 280, 180), b.mean(200, 100, 280, 180), "edges draw over the ball");
     assert_eq!(a.at(5, 5), b.at(5, 5), "the background stays clean");
+}
+
+#[test]
+fn bake_visualization_draws_the_high_poly_and_the_cage() {
+    let Some((mut h, frame)) = setup() else { return };
+    let ball = primitives::material_ball();
+    let (lo, hi) = ball.bounds();
+    let high = primitives::sphere((hi - lo).max_element() * 0.3, 32, 16);
+    h.renderer.set_bake_high(&h.device, &h.queue, Some(&high), 7);
+    let corners: Vec<Vec3> = high.indices.iter().map(|index| high.positions[*index as usize] * 1.2).collect();
+    h.renderer.set_bake_cage(&h.device, &h.queue, 0, Some((&corners, &[[0, 1], [1, 2]])), 1);
+    let bake = BakeVisualization { high_poly: false, cage: false, uv_seams: false, low_poly: true, only_set: None };
+    let center = (frame.size[0] / 2, frame.size[1] / 2);
+
+    let low_only = render(&mut h, &shaded(&frame, |s| s.bake = Some(bake)), "bake_low_only");
+    let high_poly = render(&mut h, &shaded(&frame, |s| s.bake = Some(BakeVisualization { high_poly: true, ..bake })), "bake_high_poly");
+    let caged = render(&mut h, &shaded(&frame, |s| s.bake = Some(BakeVisualization { cage: true, ..bake })), "bake_cage");
+    let hidden = render(&mut h, &shaded(&frame, |s| s.bake = Some(BakeVisualization { low_poly: false, ..bake })), "bake_low_hidden");
+    assert_same(&low_only, &render(&mut h, &frame, "bake_off"), "every part off draws only the low poly");
+    assert_ne!(low_only.at(center.0, center.1), high_poly.at(center.0, center.1), "the high poly draws in its own color");
+    assert_ne!(low_only.at(center.0, center.1), caged.at(center.0, center.1), "the cage tints what is inside it");
+    assert_eq!(hidden.at(center.0, center.1), hidden.at(5, 5), "without the low poly only the background is left");
+
+    // A new distance with the same topology only moves the corners
+    let grown: Vec<Vec3> = corners.iter().map(|corner| *corner * 2.0).collect();
+    h.renderer.set_bake_cage(&h.device, &h.queue, 0, Some((&grown, &[[0, 1], [1, 2]])), 1);
+    let bigger = render(&mut h, &shaded(&frame, |s| s.bake = Some(BakeVisualization { cage: true, ..bake })), "bake_cage_grown");
+    assert_ne!(caged.px, bigger.px, "the cage grew");
 }
 
 #[test]

@@ -11,7 +11,9 @@ use texturecraft_engine::Session;
 use texturecraft_engine::compose::{DisplayKind, ImageRes, tile_bytes};
 use texturecraft_engine::core::BakedMap;
 use texturecraft_engine::geom::Mesh;
-use texturecraft_render::{Frame, Renderer, wgpu};
+use texturecraft_render::{BakeVisualization, Frame, Renderer, wgpu};
+
+use crate::bake_scene::{BakeSceneLink, CageUpload};
 
 /// Content shown through the aux texture.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -36,6 +38,16 @@ pub struct SceneSync {
     pub env: Option<(String, Option<Arc<ImageRes>>)>,
     pub tiles: Vec<(usize, DisplayKind, u32, u32, Vec<u8>)>,
     pub aux: Vec<(usize, u32, Vec<u8>)>,
+    /// Bake mode's high poly (`None` removes it) and its identity
+    pub bake_high: Option<(Option<Arc<Mesh>>, u64)>,
+    /// Which vertices of the high poly (by identity) the bake's rays miss (1) or reach (0)
+    pub bake_high_missed: Option<(u64, Vec<f32>)>,
+    /// Changed cages: texture set, the cage or `None` to remove it, its topology
+    pub bake_cages: Vec<(usize, Option<CageUpload>, u64)>,
+    /// Texture sets left after some were removed: their cages go too
+    pub bake_cage_count: Option<usize>,
+    /// The low poly's UV seams per material, for mesh id
+    pub uv_seams: Option<(u64, Vec<Vec<(u32, u32)>>)>,
 }
 
 /// Lives in egui's callback resources.
@@ -78,6 +90,7 @@ pub struct GpuLink {
     pub adapter: String,
     /// Most tiles waiting to be composited since compositing last caught up (progress).
     composite_total: usize,
+    bake_scene: BakeSceneLink,
 }
 
 /// Compositing time per frame: a full recomposite of a large texture set spreads over frames.
@@ -124,6 +137,7 @@ pub fn init(rs: &egui_wgpu::RenderState, ctx: &egui::Context) -> GpuLink {
         aux: BTreeMap::new(),
         adapter: format!("{} ({:?})", info.name, info.backend),
         composite_total: 0,
+        bake_scene: BakeSceneLink::default(),
     }
 }
 
@@ -134,6 +148,11 @@ impl GpuLink {
     }
 
     /// Collect everything the GPU needs this frame (runs the compositor first).
+    /// Whether bake mode's visualization is still being worked out off the UI thread
+    pub fn bake_busy(&self) -> bool {
+        self.bake_scene.busy()
+    }
+
     /// Compositing progress (0..1) while tiles wait to be composited.
     pub fn composite_progress(&self, s: &Session) -> Option<f32> {
         let pending = s.pending_tiles();
@@ -141,7 +160,8 @@ impl GpuLink {
     }
 
     /// `spent_ms`: time this frame already took before the sync.
-    pub fn sync(&mut self, s: &mut Session, aux_map: Option<AuxView>, shift: u32, spent_ms: f64) -> SceneSync {
+    /// `bake`: what bake mode's 3D view draws besides the low poly, if anything.
+    pub fn sync(&mut self, s: &mut Session, aux_map: Option<AuxView>, bake: Option<BakeVisualization>, shift: u32, spent_ms: f64) -> SceneSync {
         let start = crate::now_ms();
         let mut queued = 0usize;
         let left = |queued: usize| FRAME_BUDGET_MS - spent_ms - (crate::now_ms() - start) - queued as f64 * UPLOAD_MS_PER_TILE;
@@ -153,6 +173,7 @@ impl GpuLink {
             self.mesh_id = 0;
             self.sets.clear();
             self.env = Default::default();
+            self.bake_scene.reset();
             self.reset.store(true, Ordering::Release);
         }
         if self.mesh_id != s.mesh_id {
@@ -255,6 +276,7 @@ impl GpuLink {
             }
             None => {}
         }
+        self.bake_scene.sync(s, bake, &mut out);
         out
     }
 }
@@ -307,6 +329,22 @@ impl CallbackTrait for ViewCallback {
             }
             for (ts, size, bytes) in &sync.aux {
                 gpu.renderer.upload_aux(device, queue, *ts, *size, bytes);
+            }
+            if let Some((high, id)) = &sync.bake_high {
+                gpu.renderer.set_bake_high(device, queue, high.as_deref(), *id);
+            }
+            if let Some((id, missed)) = &sync.bake_high_missed {
+                gpu.renderer.set_bake_high_missed(queue, *id, missed);
+            }
+            if let Some(count) = sync.bake_cage_count {
+                gpu.renderer.truncate_bake_cages(count);
+            }
+            for (ts, cage, topology) in &sync.bake_cages {
+                let cage = cage.as_ref().map(|upload| (upload.corners.as_slice(), upload.shell.edges.as_slice()));
+                gpu.renderer.set_bake_cage(device, queue, *ts, cage, *topology);
+            }
+            if let Some((mesh_id, seams)) = &sync.uv_seams {
+                gpu.renderer.set_uv_seams(device, queue, *mesh_id, seams);
             }
         }
         // Also installs (or rejects) full-size textures WebGPU answered for since last frame.

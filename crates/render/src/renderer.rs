@@ -30,10 +30,14 @@ use texturecraft_geom::glam::{Mat4, Vec3};
 use texturecraft_geom::{Mesh, OrbitCamera};
 use texturecraft_texel::TILE;
 
+use crate::bake_visualization::BakeVisualization;
+use crate::cage_gpu::CageGpu;
 use crate::gpu_trace::{Checked, checked};
+use crate::high_poly_gpu::HighPolyGpu;
 use crate::ibl;
 use crate::set_highlight::SetHighlight;
 use crate::subdivide::{self, Vertex};
+use crate::uv_seam_gpu::UvSeamGpu;
 
 pub const MSAA: u32 = 4;
 pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -173,6 +177,8 @@ pub struct Shade {
     /// Move the surface by the height channel (3D view): a dense copy of the mesh, displaced in
     /// the vertex shader at the height-to-normal strength.
     pub displacement: bool,
+    /// Bake mode's high poly, cage and UV seams over the 3D view
+    pub bake: Option<BakeVisualization>,
 }
 
 /// The viewport's subsurface scattering approximation: the diffuse lighting wraps around the
@@ -259,6 +265,7 @@ impl Default for Shade {
             sss_blur: None,
             refraction: false,
             displacement: false,
+            bake: None,
         }
     }
 }
@@ -530,6 +537,11 @@ pub struct Renderer {
     wire3d_pipeline: wgpu::RenderPipeline,
     /// The highlighted set's mesh edges, wider and in the highlight color
     highlight_pipeline: wgpu::RenderPipeline,
+    /// Bake mode: the high poly, the cage's faces and wireframe, the low poly's UV seams
+    bake_high_pipeline: wgpu::RenderPipeline,
+    cage_pipeline: wgpu::RenderPipeline,
+    cage_wire_pipeline: wgpu::RenderPipeline,
+    uv_seam_pipeline: wgpu::RenderPipeline,
     bg_pipeline: wgpu::RenderPipeline,
     blit_pipeline: wgpu::RenderPipeline,
     post_pipeline: wgpu::RenderPipeline,
@@ -563,6 +575,10 @@ pub struct Renderer {
     /// accumulation.
     content_rev: u64,
     mesh: Option<MeshGpu>,
+    bake_high: Option<HighPolyGpu>,
+    /// Each texture set's cage, by set index
+    cages: Vec<Option<CageGpu>>,
+    uv_seams: Option<UvSeamGpu>,
     sets: Vec<SetGpu>,
     /// Viewport texture resolution: display textures at 1/2^shift of each set's size (at least
     /// as reduced as the device's texture limit needs).
@@ -814,7 +830,8 @@ impl Renderer {
         let shader = |label: &str, source: &str| {
             device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(label), source: wgpu::ShaderSource::Wgsl(source.into()) })
         };
-        let module = shader("tc_mesh", concat!(include_str!("shaders/displace.wgsl"), include_str!("shaders/mesh.wgsl")));
+        let module =
+            shader("tc_mesh", concat!(include_str!("shaders/displace.wgsl"), include_str!("shaders/mesh.wgsl"), include_str!("shaders/bake_view.wgsl")));
         let util_module = shader("tc_util", include_str!("shaders/util.wgsl"));
         let post_module = shader("tc_post", concat!(include_str!("shaders/util.wgsl"), include_str!("shaders/post.wgsl"), include_str!("shaders/fx.wgsl")));
         let shadow_module = shader("tc_shadow", concat!(include_str!("shaders/displace.wgsl"), include_str!("shaders/shadow.wgsl")));
@@ -905,7 +922,46 @@ impl Renderer {
         let wire3d_depth = Some(depth_state(false, wgpu::CompareFunction::LessEqual));
         let wire3d_pipeline = pipeline(device, "tc_wire3d", &layout, &module, "vs_wire3d", &vb, hdr("fs_wire3d", blend), MSAA, wire3d_depth.clone());
         let highlight_pipeline =
-            pipeline(device, "tc_highlight", &layout, &module, "vs_wire_highlight", &vb, hdr("fs_wire_highlight", blend), MSAA, wire3d_depth);
+            pipeline(device, "tc_highlight", &layout, &module, "vs_wire_highlight", &vb, hdr("fs_wire_highlight", blend), MSAA, wire3d_depth.clone());
+        let [vertex_layout] = vb.clone();
+        let high_layout = [
+            vertex_layout,
+            Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<f32>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &wgpu::vertex_attr_array![4 => Float32],
+            }),
+        ];
+        let bake_high_pipeline = pipeline(
+            device,
+            "tc_bake_high",
+            &bg_layout,
+            &module,
+            "vs_bake_high",
+            &high_layout,
+            hdr("fs_bake_high", None),
+            MSAA,
+            Some(depth_state(true, wgpu::CompareFunction::Less)),
+        );
+        let corner_layout = [Some(wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<[f32; 3]>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+        })];
+        let cage_pipeline =
+            pipeline(device, "tc_cage", &bg_layout, &module, "vs_bake_cage", &corner_layout, hdr("fs_bake_cage", blend), MSAA, wire3d_depth.clone());
+        let cage_wire_pipeline = pipeline(
+            device,
+            "tc_cage_wire",
+            &bg_layout,
+            &module,
+            "vs_bake_cage_wire",
+            &corner_layout,
+            hdr("fs_wire_bake_cage", blend),
+            MSAA,
+            wire3d_depth.clone(),
+        );
+        let uv_seam_pipeline = pipeline(device, "tc_uv_seam", &layout, &module, "vs_wire3d", &vb, hdr("fs_wire_uv_seam", blend), MSAA, wire3d_depth.clone());
         let bg_pipeline = pipeline(device, "tc_bg", &bg_layout, &module, "vs_bg", &[], hdr("fs_bg", None), MSAA, always());
         let blit_pipeline = pipeline(device, "tc_blit", &blit_layout, &util_module, "vs_blit", &[], Some(("fs_blit", target_format, None)), 1, None);
         let post_pipeline = pipeline(device, "tc_post", &fx_layout, &post_module, "vs_full", &[], Some(("fs_post", COLOR_FORMAT, None)), 1, None);
@@ -1014,6 +1070,10 @@ impl Renderer {
             wire_pipeline,
             wire3d_pipeline,
             highlight_pipeline,
+            bake_high_pipeline,
+            cage_pipeline,
+            cage_wire_pipeline,
+            uv_seam_pipeline,
             bg_pipeline,
             blit_pipeline,
             post_pipeline,
@@ -1038,6 +1098,9 @@ impl Renderer {
             sh: [[0.0; 4]; 9],
             content_rev: 0,
             mesh: None,
+            bake_high: None,
+            cages: Vec::new(),
+            uv_seams: None,
             sets: Vec::new(),
             display_shift: 0,
             material_sets: Vec::new(),
@@ -1122,6 +1185,84 @@ impl Renderer {
         let geo = Geometry { vb, ib, draws, triangles };
         self.mesh = Some(MeshGpu { id, geo, coarse, dense: None, world_per_uv, lines, line_draws, center, radius });
         self.content_rev += 1;
+    }
+
+    /// Upload the high poly bake mode draws when `id` changed; `None` removes it
+    pub fn set_bake_high(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, mesh: Option<&Mesh>, id: u64) {
+        if self.bake_high.as_ref().map(|high| high.id) == mesh.map(|_| id) {
+            return;
+        }
+
+        self.bake_high = mesh.map(|mesh| HighPolyGpu {
+            id,
+            vertices: upload_buffer(device, queue, "tc_bake_high_vb", bytemuck::cast_slice(&subdivide::vertices(mesh)), wgpu::BufferUsages::VERTEX),
+            vertex_count: mesh.positions.len(),
+            indices: upload_buffer(device, queue, "tc_bake_high_ib", bytemuck::cast_slice(&mesh.indices), wgpu::BufferUsages::INDEX),
+            index_count: mesh.indices.len() as u32,
+            missed: upload_buffer(device, queue, "tc_bake_high_missed", bytemuck::cast_slice(&vec![0f32; mesh.positions.len()]), wgpu::BufferUsages::VERTEX),
+        });
+        self.content_rev += 1;
+    }
+
+    /// Which vertices of high poly `id` the bake's rays miss (1) or reach (0); ignored for another mesh or vertex count
+    pub fn set_bake_high_missed(&mut self, queue: &wgpu::Queue, id: u64, missed: &[f32]) {
+        let Some(high) = self.bake_high.as_ref().filter(|high| high.id == id && high.vertex_count == missed.len()) else { return };
+
+        queue.write_buffer(&high.missed, 0, bytemuck::cast_slice(missed));
+        self.content_rev += 1;
+    }
+
+    /// Texture set `ts`'s cage: `corners` three per triangle and `edges` as corner pairs; `None` removes it. The same `topology` as before only rewrites the corners
+    pub fn set_bake_cage(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, ts: usize, cage: Option<(&[Vec3], &[[u32; 2]])>, topology: u64) {
+        if self.cages.len() <= ts {
+            self.cages.resize_with(ts + 1, || None);
+        }
+        let Some(slot) = self.cages.get_mut(ts) else { return };
+
+        match (cage, slot.as_mut()) {
+            (None, _) => *slot = None,
+            (Some((corners, _)), Some(gpu)) if gpu.topology == topology && gpu.corner_count as usize == corners.len() => {
+                queue.write_buffer(&gpu.corners, 0, bytemuck::cast_slice(corners));
+            }
+            (Some((corners, edges)), _) => {
+                *slot = Some(CageGpu {
+                    topology,
+                    corners: upload_buffer(device, queue, "tc_cage_vb", bytemuck::cast_slice(corners), wgpu::BufferUsages::VERTEX),
+                    corner_count: corners.len() as u32,
+                    edges: upload_buffer(device, queue, "tc_cage_ib", bytemuck::cast_slice(edges), wgpu::BufferUsages::INDEX),
+                    edge_index_count: (edges.len() * 2) as u32,
+                });
+            }
+        }
+        self.content_rev += 1;
+    }
+
+    /// Forget the cages of texture sets from `count` on (sets that were removed)
+    pub fn truncate_bake_cages(&mut self, count: usize) {
+        if self.cages.len() > count {
+            self.cages.truncate(count);
+            self.content_rev += 1;
+        }
+    }
+
+    /// The low poly's UV seams as vertex pairs per material ([`Mesh::uv_seam_edges`]) for mesh `mesh_id`
+    pub fn set_uv_seams(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, mesh_id: u64, seams: &[Vec<(u32, u32)>]) {
+        let mut line_indices: Vec<u32> = Vec::new();
+        let mut line_draws = Vec::new();
+        for (material, edges) in seams.iter().enumerate() {
+            let start = line_indices.len() as u32;
+            line_indices.extend(edges.iter().flat_map(|&(from, to)| [from, to]));
+            line_draws.push((start, line_indices.len() as u32 - start, material));
+        }
+
+        let lines = upload_buffer(device, queue, "tc_uv_seams", bytemuck::cast_slice(&line_indices), wgpu::BufferUsages::INDEX);
+        self.uv_seams = Some(UvSeamGpu { mesh_id, lines, line_draws });
+        self.content_rev += 1;
+    }
+
+    /// Whether the UV seams of mesh `mesh_id` are uploaded
+    pub fn has_uv_seams(&self, mesh_id: u64) -> bool {
+        self.uv_seams.as_ref().is_some_and(|seams| seams.mesh_id == mesh_id)
     }
 
     /// Build the mesh's dense copy for displacement (once per mesh).
@@ -1932,8 +2073,11 @@ impl Renderer {
         let geo = self.geometry(m, frame);
         // The wireframe and the highlight draw the mesh's own edges (displaced in the vertex shader too)
         let (highlight, highlight_set) = highlight.unzip();
+        let bake = frame.shade.bake.filter(|_| uv_ts.is_none());
+        let low_poly = bake.is_none_or(|bake| bake.low_poly);
+        let low_poly_only = bake.and_then(|bake| bake.only_set).or(uv_ts);
         let passes = [
-            (Some(pipe), &geo.vb, &geo.ib, &geo.draws, uv_ts, 1),
+            (Some(pipe).filter(|_| low_poly), &geo.vb, &geo.ib, &geo.draws, low_poly_only, 1),
             (wire, &m.geo.vb, &m.lines, &m.line_draws, uv_ts, 1),
             (highlight, &m.geo.vb, &m.lines, &m.line_draws, highlight_set, HIGHLIGHT_SHIFTS),
         ];
@@ -1946,6 +2090,52 @@ impl Renderer {
                 pass.set_bind_group(1, &set.bind_group, &[]);
                 pass.draw_indexed(range, 0, 0..instances);
             }
+        }
+        if let Some(bake) = bake {
+            self.draw_bake(&mut pass, m, frame, bake);
+        }
+    }
+
+    /// Bake mode's high poly, UV seams and cages over the low poly
+    fn draw_bake(&self, pass: &mut wgpu::RenderPass<'_>, m: &MeshGpu, frame: &Frame, bake: BakeVisualization) {
+        if bake.high_poly
+            && let Some(high) = &self.bake_high
+        {
+            pass.set_pipeline(&self.bake_high_pipeline);
+            pass.set_vertex_buffer(0, high.vertices.slice(..));
+            pass.set_vertex_buffer(1, high.missed.slice(..));
+            pass.set_index_buffer(high.indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..high.index_count, 0, 0..1);
+        }
+
+        if bake.uv_seams
+            && let Some(seams) = self.uv_seams.as_ref().filter(|seams| seams.mesh_id == m.id)
+        {
+            pass.set_pipeline(&self.uv_seam_pipeline);
+            pass.set_vertex_buffer(0, m.geo.vb.slice(..));
+            pass.set_index_buffer(seams.lines.slice(..), wgpu::IndexFormat::Uint32);
+            for (range, set) in self.drawable(&seams.line_draws, &frame.visible, bake.only_set) {
+                pass.set_bind_group(1, &set.bind_group, &[]);
+                pass.draw_indexed(range, 0, 0..1);
+            }
+        }
+
+        if !bake.cage {
+            return;
+        }
+        let shown = |ts: usize| bake.only_set.is_none_or(|only| only == ts) && frame.visible.get(ts).copied().unwrap_or(true);
+        let cages: Vec<&CageGpu> = self.cages.iter().enumerate().filter(|(ts, _)| shown(*ts)).filter_map(|(_, cage)| cage.as_ref()).collect();
+        // The translucent faces first, then the wireframe over them
+        pass.set_pipeline(&self.cage_pipeline);
+        for cage in &cages {
+            pass.set_vertex_buffer(0, cage.corners.slice(..));
+            pass.draw(0..cage.corner_count, 0..1);
+        }
+        pass.set_pipeline(&self.cage_wire_pipeline);
+        for cage in &cages {
+            pass.set_vertex_buffer(0, cage.corners.slice(..));
+            pass.set_index_buffer(cage.edges.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..cage.edge_index_count, 0, 0..1);
         }
     }
 

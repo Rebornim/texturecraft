@@ -13,6 +13,7 @@ use texturecraft_engine::{Tool, ViewMode};
 use texturecraft_render::{Frame, SetHighlight, Shade, ViewKind};
 
 use crate::TextureCraftApp;
+use crate::decal_drop::DecalDrop;
 use crate::gpu::ViewCallback;
 use crate::i18n::{tr, trf};
 use crate::state::ViewLayout;
@@ -527,7 +528,8 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !focus_pick
         && placing.is_none()
         && touch.is_none()
-        && !decal_drag;
+        && !decal_drag
+        && !DecalDrop::waiting(ui.ctx());
     let path_tool = app.session.tool.tool == Tool::Path;
     let vp = app.session.viewport;
     let show = |app: &TextureCraftApp, p: Vec3| project(app, rect, p);
@@ -1173,7 +1175,7 @@ fn view_2d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     if bake_paint_on {
         bake_paint_input(app, ui, &resp, &to_uv);
     }
-    let painting = app.ui.mode == crate::state::Mode::Painting && !alt && !adjusting && !v_held;
+    let painting = app.ui.mode == crate::state::Mode::Painting && !alt && !adjusting && !v_held && !DecalDrop::waiting(ui.ctx());
     if painting && path_tool {
         path_input(app, ui, &resp, true, |_, p| Some(to_uv(p).extend(0.0)), show);
     } else if painting {

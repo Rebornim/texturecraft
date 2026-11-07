@@ -77,6 +77,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Apply", "Aplicar"),
     ("ArtCraft website...", "Sitio web de ArtCraft..."),
     ("Assets", "Recursos"),
+    ("Auto", "Auto"),
     ("Automatic (from the mesh UVs)", "Automático (según las UV de la malla)"),
     ("Autosave every", "Autoguardar cada"),
     (
@@ -121,6 +122,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Built-in: {mesh}", "Integrada: {mesh}"),
     ("Cage: {name}", "Jaula: {name}"),
     ("Camera", "Cámara"),
+    ("Fit the input range to the histogram", "Ajustar el rango de entrada al histograma"),
     ("Go to camera 1", "Ir a la cámara 1"),
     ("Go to camera 2", "Ir a la cámara 2"),
     ("Go to camera 3", "Ir a la cámara 3"),
@@ -671,6 +673,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Replacement color", "Color de reemplazo"),
     ("Report a bug...", "Informar de un error..."),
     ("Rescan the library folder", "Volver a examinar la carpeta de la biblioteca"),
+    ("Reset", "Restablecer"),
     ("Reset UI", "Restablecer interfaz"),
     ("Reset all", "Restablecer todo"),
     ("Reset to {shortcut}", "Restablecer a {shortcut}"),

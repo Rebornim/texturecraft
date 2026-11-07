@@ -71,6 +71,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Apply", "应用"),
     ("ArtCraft website...", "ArtCraft 网站..."),
     ("Assets", "资产"),
+    ("Auto", "自动"),
     ("Automatic (from the mesh UVs)", "自动（基于网格 UV）"),
     ("Autosave every", "自动保存间隔"),
     (
@@ -112,6 +113,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Built-in: {mesh}", "内置：{mesh}"),
     ("Cage: {name}", "笼体：{name}"),
     ("Camera", "相机"),
+    ("Fit the input range to the histogram", "使输入范围适合直方图"),
     ("Go to camera 1", "转到相机 1"),
     ("Go to camera 2", "转到相机 2"),
     ("Go to camera 3", "转到相机 3"),
@@ -614,6 +616,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Replacement color", "替换后的颜色"),
     ("Report a bug...", "报告错误..."),
     ("Rescan the library folder", "重新扫描库文件夹"),
+    ("Reset", "重置"),
     ("Reset UI", "重置界面"),
     ("Reset all", "全部重置"),
     ("Reset to {shortcut}", "重置为 {shortcut}"),

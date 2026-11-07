@@ -83,6 +83,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Apply", "適用"),
     ("ArtCraft website...", "ArtCraft ウェブサイト..."),
     ("Assets", "アセット"),
+    ("Auto", "自動"),
     ("Automatic (from the mesh UVs)", "自動 (メッシュのUVから)"),
     ("Autosave every", "自動保存の間隔"),
     (
@@ -127,6 +128,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Built-in: {mesh}", "組み込み: {mesh}"),
     ("Cage: {name}", "ケージ: {name}"),
     ("Camera", "カメラ"),
+    ("Fit the input range to the histogram", "入力範囲をヒストグラムに合わせる"),
     ("Go to camera 1", "カメラ 1 に移動"),
     ("Go to camera 2", "カメラ 2 に移動"),
     ("Go to camera 3", "カメラ 3 に移動"),
@@ -662,6 +664,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Replacement color", "置き換え後の色"),
     ("Report a bug...", "バグを報告..."),
     ("Rescan the library folder", "ライブラリフォルダーを再スキャン"),
+    ("Reset", "リセット"),
     ("Reset UI", "UIをリセット"),
     ("Reset all", "すべてリセット"),
     ("Reset to {shortcut}", "{shortcut} にリセット"),

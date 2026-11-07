@@ -77,6 +77,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Apply", "تطبيق"),
     ("ArtCraft website...", "موقع ArtCraft الإلكتروني..."),
     ("Assets", "الأصول"),
+    ("Auto", "تلقائي"),
     ("Automatic (from the mesh UVs)", "تلقائي (من إحداثيات UV للمجسم)"),
     ("Autosave every", "حفظ تلقائي كل"),
     (
@@ -121,6 +122,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Built-in: {mesh}", "مدمج: {mesh}"),
     ("Cage: {name}", "القفص (Cage): {name}"),
     ("Camera", "الكاميرا"),
+    ("Fit the input range to the histogram", "ملاءمة نطاق الإدخال مع المدرج التكراري"),
     ("Go to camera 1", "الانتقال إلى الكاميرا 1"),
     ("Go to camera 2", "الانتقال إلى الكاميرا 2"),
     ("Go to camera 3", "الانتقال إلى الكاميرا 3"),
@@ -644,6 +646,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Replacement color", "لون الاستبدال"),
     ("Report a bug...", "الإبلاغ عن خطأ..."),
     ("Rescan the library folder", "إعادة فحص مجلد المكتبة"),
+    ("Reset", "إعادة تعيين"),
     ("Reset UI", "إعادة ضبط واجهة المستخدم"),
     ("Reset all", "إعادة ضبط الكل"),
     ("Reset to {shortcut}", "إعادة الضبط إلى {shortcut}"),

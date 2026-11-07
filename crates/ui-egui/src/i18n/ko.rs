@@ -80,6 +80,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Apply", "적용"),
     ("ArtCraft website...", "ArtCraft 웹사이트..."),
     ("Assets", "에셋"),
+    ("Auto", "자동"),
     ("Automatic (from the mesh UVs)", "자동 (메시 UV 기준)"),
     ("Autosave every", "자동 저장 간격"),
     (
@@ -121,6 +122,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Built-in: {mesh}", "기본 제공: {mesh}"),
     ("Cage: {name}", "케이지: {name}"),
     ("Camera", "카메라"),
+    ("Fit the input range to the histogram", "입력 범위를 히스토그램에 맞추기"),
     ("Go to camera 1", "카메라 1 보기"),
     ("Go to camera 2", "카메라 2 보기"),
     ("Go to camera 3", "카메라 3 보기"),
@@ -653,6 +655,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Replacement color", "대체 색상"),
     ("Report a bug...", "버그 신고..."),
     ("Rescan the library folder", "라이브러리 폴더를 다시 검색합니다"),
+    ("Reset", "초기화"),
     ("Reset UI", "UI 초기화"),
     ("Reset all", "모두 초기화"),
     ("Reset to {shortcut}", "{shortcut}(으)로 초기화"),

@@ -1,11 +1,10 @@
-//! The levels editor: a histogram with draggable input handles above it, an output gradient
-//! with draggable output handles below it, and a row of number fields for exact values.
+//! The levels editor: a histogram with draggable input handles above it and an output gradient
+//! with draggable output handles below it. Double-clicking a handle types its value in.
 
-use egui::accesskit::Role;
 use egui::{Color32, CornerRadius, CursorIcon, Id, Pos2, Rect, Response, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 use texturecraft_engine::core::Levels;
 
-use crate::levels_handle::{GAMMA_RANGE, LevelsHandle};
+use crate::levels_handle::LevelsHandle;
 use crate::theme::Tokens;
 
 const HISTOGRAM_HEIGHT: f32 = 56.0;
@@ -20,8 +19,11 @@ const HANDLE_GRAB_MARGIN: f32 = 2.0;
 
 const GRADIENT_HEIGHT: f32 = 8.0;
 const GAP_BELOW_HISTOGRAM: f32 = 3.0;
-const VALUE_ROW_HEIGHT: f32 = 13.0;
+const VALUE_ROW_HEIGHT: f32 = 16.0;
 const VALUE_FONT_SIZE: f32 = 10.5;
+
+/// Width of the box a value is typed into
+const TYPED_VALUE_WIDTH: f32 = 52.0;
 
 /// Padding of the histogram well around its bars
 const WELL_PADDING: f32 = 3.0;
@@ -29,35 +31,33 @@ const WELL_PADDING: f32 = 3.0;
 /// Gray of the gamma handle, between the black input-low and white input-high handles
 const GAMMA_HANDLE_GRAY: u8 = 128;
 
-/// Edits `levels` with the handles and number fields. `counts` are the histogram buckets over
-/// 0..1 (none while it can't be computed). Returns `Some(merge)` on every frame that changes
-/// `levels`; `merge` is true for the later changes of one drag, so the edit continues the drag's
-/// first undo step
+/// Grid lines across the histogram, at these fractions of the input range
+const GRID_FRACTIONS: [f32; 3] = [0.25, 0.5, 0.75];
+
+/// Decimals of a value typed in or printed beside a handle (printed without trailing zeros)
+const VALUE_DECIMALS: usize = 3;
+
+/// Edits `levels` with the handles. `counts` are the histogram buckets over 0..1 (none while it
+/// can't be computed). Returns `Some(merge)` on every frame that changes `levels`; `merge` is
+/// true for the later changes of one drag, so the edit continues the drag's first undo step
 pub fn levels_editor(ui: &mut Ui, counts: Option<&[u32]>, levels: &mut Levels) -> Option<bool> {
     let height = VALUE_ROW_HEIGHT * 2.0 + HANDLE_HEIGHT * 2.0 + HISTOGRAM_HEIGHT + GAP_BELOW_HISTOGRAM + GRADIENT_HEIGHT;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-    let input_handles_top = rect.top() + VALUE_ROW_HEIGHT;
-    let output_handles_top = rect.bottom() - VALUE_ROW_HEIGHT - HANDLE_HEIGHT;
-    let histogram_top = input_handles_top + HANDLE_HEIGHT;
-    let gradient_top = output_handles_top - GRADIENT_HEIGHT;
+    let histogram_top = rect.top() + VALUE_ROW_HEIGHT + HANDLE_HEIGHT;
+    let gradient_top = output_handles_top(rect) - GRADIENT_HEIGHT;
     let track = track(rect);
     let id = ui.make_persistent_id("levels_editor");
 
     // Gamma goes last so it stays grabbable between input handles that close in on it
-    let handles = [
-        (LevelsHandle::InputLow, input_handles_top),
-        (LevelsHandle::InputHigh, input_handles_top),
-        (LevelsHandle::Gamma, input_handles_top),
-        (LevelsHandle::OutputLow, output_handles_top),
-        (LevelsHandle::OutputHigh, output_handles_top),
-    ];
+    let handles = [LevelsHandle::InputLow, LevelsHandle::InputHigh, LevelsHandle::Gamma, LevelsHandle::OutputLow, LevelsHandle::OutputHigh];
     let mut edit = None;
     let mut responses = Vec::with_capacity(handles.len());
-    for (handle, top) in handles {
+    for handle in handles {
         let x = track_x(&track, handle.position(levels));
+        let top = handle_top(rect, handle);
         let grab_half_width = HANDLE_HALF_WIDTH + HANDLE_GRAB_MARGIN;
         let hit = Rect::from_x_y_ranges(x - grab_half_width..=x + grab_half_width, top..=top + HANDLE_HEIGHT);
-        let response = ui.interact(hit, id.with(handle), Sense::drag()).on_hover_cursor(CursorIcon::PointingHand);
+        let response = ui.interact(hit, id.with(handle), Sense::click_and_drag()).on_hover_cursor(CursorIcon::PointingHand);
         if response.dragged()
             && let Some(pointer) = response.interact_pointer_pos()
         {
@@ -77,11 +77,26 @@ pub fn levels_editor(ui: &mut Ui, counts: Option<&[u32]>, levels: &mut Levels) -
         responses.push((handle, response));
     }
 
+    let typing_id = id.with("typing");
+    if let Some((handle, _)) = responses.iter().find(|(_, response)| response.double_clicked()) {
+        start_typing(ui, typing_id, *handle, levels);
+    }
+    let typing = ui.data(|data| data.get_temp::<(LevelsHandle, String)>(typing_id));
+
     let well = Rect::from_x_y_ranges(rect.x_range().shrink(HANDLE_HALF_WIDTH), histogram_top..=histogram_top + HISTOGRAM_HEIGHT);
     paint_histogram(ui, well, counts.unwrap_or_default(), levels);
     paint_output_gradient(ui, Rect::from_x_y_ranges(track, gradient_top..=gradient_top + GRADIENT_HEIGHT));
-    paint_handles_and_values(ui, rect, &responses, levels);
-    edit.or(number_fields(ui, levels))
+    paint_handles_and_values(ui, rect, &responses, levels, typing.as_ref().map(|(handle, _)| *handle));
+    let typed = typing.and_then(|(handle, text)| typed_value(ui, rect, typing_id, handle, text, levels));
+    edit.or(typed)
+}
+
+fn handle_top(rect: Rect, handle: LevelsHandle) -> f32 {
+    if LevelsHandle::INPUT.contains(&handle) { rect.top() + VALUE_ROW_HEIGHT } else { output_handles_top(rect) }
+}
+
+fn output_handles_top(rect: Rect) -> f32 {
+    rect.bottom() - VALUE_ROW_HEIGHT - HANDLE_HEIGHT
 }
 
 /// The x range the handles move along in the editor's `rect`, lined up with the histogram bars
@@ -103,14 +118,40 @@ fn continues_drag(ui: &Ui, id: Id) -> bool {
     ui.data_mut(|data| std::mem::replace(data.get_temp_mut_or_default::<bool>(id), true))
 }
 
-/// The histogram bars scaled to the fullest bucket in a field-colored well, the part outside the
-/// input range dimmed, accent lines at the input ends and a dim line at gamma
+/// `value` with [`VALUE_DECIMALS`] decimals, trailing zeros dropped ("1", "0.25", "0.634")
+fn shown_value(value: f32) -> String {
+    let fixed = format!("{value:.VALUE_DECIMALS$}");
+    fixed.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// Where `handle`'s value goes for a text `size`: over an input handle or under an output
+/// handle, kept inside the editor's `rect` at the ends
+fn value_rect(rect: Rect, handle: LevelsHandle, levels: &Levels, size: egui::Vec2) -> Rect {
+    let x = track_x(&track(rect), handle.position(levels));
+    let top = handle_top(rect, handle);
+    let placed = if LevelsHandle::INPUT.contains(&handle) {
+        egui::Align2::CENTER_BOTTOM.anchor_size(pos2(x, top), size)
+    } else {
+        egui::Align2::CENTER_TOP.anchor_size(pos2(x, top + HANDLE_HEIGHT), size)
+    };
+    let shift = (rect.left() - placed.left()).max(0.0) + (rect.right() - placed.right()).min(0.0);
+    placed.translate(vec2(shift, 0.0))
+}
+
+/// The histogram bars scaled to the fullest bucket in a field-colored well with faint quarter
+/// lines, the part outside the input range dimmed, accent lines at the input ends and a dim
+/// line at gamma
 fn paint_histogram(ui: &Ui, well: Rect, counts: &[u32], levels: &Levels) {
     let tokens = Tokens::get(ui.ctx());
     let painter = ui.painter_at(well);
     painter.rect(well, CornerRadius::same(tokens.radius), tokens.field, Stroke::new(1.0, tokens.field_border), egui::StrokeKind::Inside);
 
     let inner = well.shrink(WELL_PADDING);
+    let vertical_line = |x: f32, color: Color32| painter.line_segment([pos2(x, inner.top()), pos2(x, inner.bottom())], Stroke::new(1.0, color));
+    for fraction in GRID_FRACTIONS {
+        vertical_line(track_x(&inner.x_range(), fraction), tokens.field_border);
+    }
+
     let fullest = counts.iter().copied().max().unwrap_or(0).max(1) as f32;
     let bar_width = inner.width() / counts.len().max(1) as f32;
     for (index, count) in counts.iter().enumerate() {
@@ -124,12 +165,9 @@ fn paint_histogram(ui: &Ui, well: Rect, counts: &[u32], levels: &Levels) {
     let shade = tokens.field.gamma_multiply(0.7);
     painter.rect_filled(Rect::from_x_y_ranges(inner.left()..=low, inner.y_range()), 0.0, shade);
     painter.rect_filled(Rect::from_x_y_ranges(high..=inner.right(), inner.y_range()), 0.0, shade);
-    for x in [low, high] {
-        painter.line_segment([pos2(x, inner.top()), pos2(x, inner.bottom())], Stroke::new(1.0, tokens.accent));
-    }
-
-    let gamma = x_at(LevelsHandle::Gamma);
-    painter.line_segment([pos2(gamma, inner.top()), pos2(gamma, inner.bottom())], Stroke::new(1.0, tokens.text_dim.gamma_multiply(0.6)));
+    vertical_line(low, tokens.accent);
+    vertical_line(high, tokens.accent);
+    vertical_line(x_at(LevelsHandle::Gamma), tokens.text_dim.gamma_multiply(0.6));
 }
 
 /// A black-to-white strip: the output values the output handles pick from
@@ -149,11 +187,10 @@ fn paint_output_gradient(ui: &Ui, strip: Rect) {
 }
 
 /// Each handle as a pointer filled with the gray it stands for, its value printed beside it (the
-/// handle being dragged or hovered first, a value that would overlap one already printed left out)
-fn paint_handles_and_values(ui: &Ui, rect: Rect, responses: &[(LevelsHandle, Response)], levels: &Levels) {
+/// handle being dragged or hovered first, a value that would overlap one already printed left
+/// out, none for the handle whose value is being typed)
+fn paint_handles_and_values(ui: &Ui, rect: Rect, responses: &[(LevelsHandle, Response)], levels: &Levels, typing: Option<LevelsHandle>) {
     let track = track(rect);
-    let input_top = rect.top() + VALUE_ROW_HEIGHT;
-    let output_top = rect.bottom() - VALUE_ROW_HEIGHT - HANDLE_HEIGHT;
     let tokens = Tokens::get(ui.ctx());
     let painter = ui.painter();
     let font = egui::FontId::proportional(VALUE_FONT_SIZE);
@@ -162,14 +199,8 @@ fn paint_handles_and_values(ui: &Ui, rect: Rect, responses: &[(LevelsHandle, Res
     let mut by_priority: Vec<&(LevelsHandle, Response)> = responses.iter().collect();
     by_priority.sort_by_key(|(_, response)| !is_active(response));
 
-    for (handle, response) in by_priority {
+    for &(handle, ref response) in by_priority {
         let x = track_x(&track, handle.position(levels));
-        let points_down = LevelsHandle::INPUT.contains(handle);
-        let (top, value_anchor, align) = if points_down {
-            (input_top, pos2(x, input_top), egui::Align2::CENTER_BOTTOM)
-        } else {
-            (output_top, pos2(x, output_top + HANDLE_HEIGHT), egui::Align2::CENTER_TOP)
-        };
         let fill = match handle {
             LevelsHandle::InputLow => Color32::BLACK,
             LevelsHandle::Gamma => Color32::from_gray(GAMMA_HANDLE_GRAY),
@@ -183,14 +214,15 @@ fn paint_handles_and_values(ui: &Ui, rect: Rect, responses: &[(LevelsHandle, Res
         } else {
             tokens.text
         };
-        painter.add(egui::Shape::convex_polygon(handle_outline(x, top, points_down), fill, Stroke::new(1.0, outline)));
+        let points_down = LevelsHandle::INPUT.contains(&handle);
+        painter.add(egui::Shape::convex_polygon(handle_outline(x, handle_top(rect, handle), points_down), fill, Stroke::new(1.0, outline)));
+        if typing == Some(handle) {
+            continue;
+        }
 
         let color = if is_active(response) { tokens.text_strong } else { tokens.text_dim };
-        let galley = painter.layout_no_wrap(format!("{:.2}", handle.value(levels)), font.clone(), color);
-        let text_rect = align.anchor_size(value_anchor, galley.size());
-        // Values at the ends stay inside the editor
-        let shift = (rect.left() - text_rect.left()).max(0.0) + (rect.right() - text_rect.right()).min(0.0);
-        let text_rect = text_rect.translate(vec2(shift, 0.0));
+        let galley = painter.layout_no_wrap(shown_value(handle.value(levels)), font.clone(), color);
+        let text_rect = value_rect(rect, handle, levels, galley.size());
         if printed.iter().any(|other| other.expand(2.0).intersects(text_rect)) {
             continue;
         }
@@ -212,47 +244,48 @@ fn handle_outline(x: f32, top: f32, points_down: bool) -> Vec<Pos2> {
     ]
 }
 
-/// The five values as number fields: the input ones on the left, the output ones on the right
-fn number_fields(ui: &mut Ui, levels: &mut Levels) -> Option<bool> {
-    ui.horizontal(|ui| {
-        let mut edit = None;
-        for handle in LevelsHandle::INPUT {
-            edit = edit.or(number_field(ui, handle, levels));
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Right to left: the last output field comes first
-            for handle in LevelsHandle::OUTPUT.into_iter().rev() {
-                edit = edit.or(number_field(ui, handle, levels));
-            }
-        });
-        edit
-    })
-    .inner
+/// Opens the box that types `handle`'s value, focused with its current value selected
+fn start_typing(ui: &Ui, typing_id: Id, handle: LevelsHandle, levels: &Levels) {
+    let text = format!("{:.VALUE_DECIMALS$}", handle.value(levels));
+    let field_id = typing_id.with("field");
+    let mut state = egui::text_edit::TextEditState::load(ui.ctx(), field_id).unwrap_or_default();
+    state.cursor.set_char_range(Some(egui::text::CCursorRange::select_all_str(&text)));
+    state.store(ui.ctx(), field_id);
+    ui.memory_mut(|memory| memory.request_focus(field_id));
+    ui.data_mut(|data| data.insert_temp(typing_id, (handle, text)));
 }
 
-fn number_field(ui: &mut Ui, handle: LevelsHandle, levels: &mut Levels) -> Option<bool> {
-    let mut value = handle.value(levels);
-    let (range, speed) = if handle == LevelsHandle::Gamma { (GAMMA_RANGE, 0.01) } else { (0.0..=1.0, 0.005) };
-    let response = ui
-        .add(egui::DragValue::new(&mut value).range(range).speed(speed).fixed_decimals(2).clamp_existing_to_range(false).update_while_editing(false))
-        .on_hover_text(handle.label());
-    response.widget_info(|| {
-        let mut info = WidgetInfo::labeled(Role::SpinButton, true, handle.label());
-        info.value = Some(f64::from(value));
-        info
-    });
+/// The box `handle`'s value is typed into, in place of the printed value. Enter or a click
+/// elsewhere applies the text (one undo step), Escape drops it
+fn typed_value(ui: &mut Ui, rect: Rect, typing_id: Id, handle: LevelsHandle, mut text: String, levels: &mut Levels) -> Option<bool> {
+    let field_id = typing_id.with("field");
+    let field = value_rect(rect, handle, levels, vec2(TYPED_VALUE_WIDTH, VALUE_ROW_HEIGHT));
+    let response = ui.put(
+        field,
+        egui::TextEdit::singleline(&mut text)
+            .id(field_id)
+            .font(egui::FontId::proportional(VALUE_FONT_SIZE))
+            .horizontal_align(egui::Align::Center)
+            .margin(vec2(2.0, 1.0)),
+    );
+    // The app can consume Escape before the box sees it, so read the raw event
+    let escape = ui.input(|input| input.raw.events.iter().any(|event| matches!(event, egui::Event::Key { key: egui::Key::Escape, pressed: true, .. })));
+    if response.has_focus() && !escape {
+        ui.data_mut(|data| data.insert_temp(typing_id, (handle, text)));
+        return None;
+    }
 
-    let mut edit = None;
-    if response.changed() {
-        let mut next = *levels;
-        handle.set_value(&mut next, value);
-        if next != *levels {
-            *levels = next;
-            edit = Some(response.dragged() && continues_drag(ui, response.id));
-        }
+    ui.data_mut(|data| data.remove_temp::<(LevelsHandle, String)>(typing_id));
+    ui.memory_mut(|memory| memory.surrender_focus(field_id));
+    let typed = text.trim().parse::<f32>().ok().filter(|value| value.is_finite());
+    let (false, Some(typed)) = (escape, typed) else { return None };
+
+    let mut next = *levels;
+    handle.set_value(&mut next, typed);
+    if next == *levels {
+        return None;
     }
-    if response.drag_stopped() {
-        ui.data_mut(|data| data.remove_temp::<bool>(response.id));
-    }
-    edit
+
+    *levels = next;
+    Some(false)
 }

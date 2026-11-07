@@ -4,11 +4,12 @@ use texturecraft_engine::core::Levels;
 
 use crate::i18n::tr;
 
-/// Narrowest gap the handles and number fields leave between the low and high handle of a pair
-pub const MIN_HANDLE_GAP: f32 = 0.01;
+/// Narrowest gap the handles and typed values leave between the low and high handle of a pair
+const MIN_HANDLE_GAP: f32 = 0.01;
 
-/// Gamma range of the gamma handle and its number field
-pub const GAMMA_RANGE: std::ops::RangeInclusive<f32> = 0.1..=5.0;
+/// Gamma range of the handle and typed values: the engine's own, so the gamma handle reaches
+/// within a pixel of either input handle
+const GAMMA_RANGE: std::ops::RangeInclusive<f32> = 0.01..=10.0;
 
 /// One draggable value of a levels effect
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

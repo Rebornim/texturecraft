@@ -1,5 +1,6 @@
 //! The levels editor in Properties: the handles over the histogram and the output gradient, the
-//! number fields and the Reset, Auto and Invert buttons edit the effect through `effect.set`.
+//! values typed in after a double-click and the Reset, Auto and Invert buttons edit the effect
+//! through `effect.set`.
 
 use egui::accesskit::Role;
 use egui_kittest::Harness;
@@ -117,7 +118,9 @@ fn handles_stop_at_their_neighbours() {
     }
     let l = levels(&h, effect);
     assert!((l.in_low - 0.59).abs() < 1e-4, "input low stops below input high: {l:?}");
-    assert_eq!(l.gamma, 0.1, "gamma stops at its lowest value, still below input high");
+    assert_eq!(l.gamma, 0.01, "gamma stops at its lowest value");
+    let gap = handle(&h, "Input high").x - handle(&h, "Gamma").x;
+    assert!((0.0..1.0).contains(&gap), "the gamma handle reaches input high: {gap} pt apart");
     assert!((l.out_low - 0.69).abs() < 1e-4, "output low stops below output high: {l:?}");
 }
 
@@ -170,21 +173,28 @@ fn auto_fits_the_input_range_to_the_histogram() {
     assert_eq!(l.gamma, 1.5, "Auto leaves gamma");
 }
 
-#[test]
-fn a_value_typed_in_a_number_field_applies() {
-    let (mut h, effect) = harness("effect.add.levels", json!({"target": "mask"}));
-    let steps = undo_steps(&h);
-    h.get_by_role_and_label(Role::SpinButton, "Gamma").focus();
-    h.run_steps(2);
-    h.key_press(egui::Key::End);
-    for _ in 0..4 {
-        h.key_press(egui::Key::Backspace);
+/// Double-clicks `label`'s handle, then types `text` into the box that opens with the value selected
+fn type_value(h: &mut Harness<'_, TextureCraftApp>, label: &str, text: &str) {
+    let at = handle(h, label);
+    for _ in 0..2 {
+        h.event(egui::Event::PointerMoved(at));
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        }
         h.run_steps(1);
     }
-    for c in "2.5".chars() {
+    h.run_steps(1);
+    for c in text.chars() {
         h.event(egui::Event::Text(c.to_string()));
         h.run_steps(1);
     }
+}
+
+#[test]
+fn a_value_typed_after_double_clicking_a_handle_applies() {
+    let (mut h, effect) = harness("effect.add.levels", json!({"target": "mask"}));
+    let steps = undo_steps(&h);
+    type_value(&mut h, "Gamma", "2.5");
     h.key_press(egui::Key::Enter);
     h.run_steps(3);
     assert_eq!(levels(&h, effect).gamma, 2.5);
@@ -192,10 +202,23 @@ fn a_value_typed_in_a_number_field_applies() {
 }
 
 #[test]
-fn a_number_field_keeps_input_low_below_input_high() {
+fn escape_drops_a_typed_value() {
+    let (mut h, effect) = harness("effect.add.levels", json!({"target": "mask"}));
+    let steps = undo_steps(&h);
+    type_value(&mut h, "Output low", "0.4");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert_eq!(levels(&h, effect), Levels::default());
+    assert_eq!(undo_steps(&h), steps);
+    assert!(h.query_by_value("0.4").is_none(), "the box closed");
+}
+
+#[test]
+fn a_typed_value_keeps_input_low_below_input_high() {
     let (mut h, effect) = harness("effect.add.levels", json!({"target": "mask", "inHigh": 0.5}));
-    let field = h.get_by_role_and_label(Role::SpinButton, "Input low").rect().center();
-    drag(&mut h, field, field + egui::vec2(600.0, 0.0));
+    type_value(&mut h, "Input low", "0.9");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
     assert!((levels(&h, effect).in_low - 0.49).abs() < 1e-4, "{:?}", levels(&h, effect));
 }
 
@@ -204,7 +227,6 @@ fn the_levels_filter_shows_the_same_editor() {
     let (h, _) = harness("effect.add.filter", json!({"target": "mask", "filter": "levels"}));
     for label in ["Input low", "Gamma", "Input high", "Output low", "Output high"] {
         h.get_by_role_and_label(Role::Slider, label);
-        h.get_by_role_and_label(Role::SpinButton, label);
     }
     for button in ["Reset", "Auto", "Invert"] {
         h.get_by_role_and_label(Role::Button, button);

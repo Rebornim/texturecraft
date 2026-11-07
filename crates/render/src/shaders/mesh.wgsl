@@ -682,6 +682,23 @@ fn fs_wire3d(i: VOut) -> @location(0) vec4<f32> {
     return vec4<f32>(0.35, 0.35, 0.35, 0.45);
 }
 
+// See-through overlay quads (the symmetry plane): the color comes in the tangent slot
+@vertex
+fn vs_overlay(v: VIn) -> VOut {
+    var o: VOut;
+    o.wpos = v.pos;
+    o.nrm = v.nrm;
+    o.tan = v.tan;
+    o.uv = v.uv;
+    o.clip = g.view_proj * vec4<f32>(v.pos, 1.0);
+    return o;
+}
+
+@fragment
+fn fs_overlay(i: VOut) -> @location(0) vec4<f32> {
+    return i.tan;
+}
+
 // The highlighted set's edges: four copies of each line, shifted to the corners of the extra width, make it wider than one pixel
 @vertex
 fn vs_wire_highlight(v: VIn, @builtin(instance_index) copy: u32) -> VOut {

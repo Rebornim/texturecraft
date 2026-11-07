@@ -130,9 +130,15 @@ pub(crate) fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// Mirror and radial symmetry through the mesh center.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Largest symmetry offset kept from a command or a file (world units), far beyond any mesh
+const MAX_SYMMETRY_OFFSET: f32 = 1.0e6;
+
+/// Mirror and radial symmetry through the mesh center, optionally moved by `offset`
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Symmetry {
+    /// The toolbar's Symmetry toggle: off keeps the settings below but paints no copies
+    #[serde(default = "enabled")]
+    pub enabled: bool,
     pub x: bool,
     pub y: bool,
     pub z: bool,
@@ -142,21 +148,52 @@ pub struct Symmetry {
     /// Axis of radial symmetry: 0 = X, 1 = Y, 2 = Z.
     #[serde(default = "radial_axis")]
     pub axis: u8,
+    /// Where the mirror planes and the radial axis cross, relative to the mesh center (world units)
+    #[serde(default)]
+    pub offset: [f32; 3],
+    /// Degrees the radial copies spread over: a full turn spaces them evenly, less puts the first and last copy at its ends
+    #[serde(default = "full_turn")]
+    pub angle_span: f32,
+}
+
+fn enabled() -> bool {
+    true
 }
 
 fn radial_axis() -> u8 {
     1
 }
 
+fn full_turn() -> f32 {
+    FULL_TURN_DEGREES
+}
+
+/// [`Symmetry::angle_span`] of a full turn
+pub const FULL_TURN_DEGREES: f32 = 360.0;
+
 impl Default for Symmetry {
     fn default() -> Self {
-        Symmetry { x: false, y: false, z: false, radial: 0, axis: radial_axis() }
+        Symmetry { enabled: enabled(), x: false, y: false, z: false, radial: 0, axis: radial_axis(), offset: [0.0; 3], angle_span: full_turn() }
     }
 }
 
 impl Symmetry {
     pub fn any(&self) -> bool {
-        self.x || self.y || self.z || self.radial > 1
+        self.enabled && (self.x || self.y || self.z || self.radial > 1)
+    }
+
+    /// Whether radial copies are painted
+    pub fn radial_on(&self) -> bool {
+        self.enabled && self.radial > 1
+    }
+
+    /// Rotation (radians) of radial copy `k` (0 = the stroke itself) around the axis
+    pub fn radial_angle(&self, k: u8) -> f32 {
+        if self.angle_span >= FULL_TURN_DEGREES {
+            f32::from(k) * std::f32::consts::TAU / f32::from(self.radial.max(1))
+        } else {
+            f32::from(k) * self.angle_span.to_radians() / f32::from(self.radial.saturating_sub(1).max(1))
+        }
     }
 
     /// Mirror scales in stroke order, including identity, without allocating
@@ -172,21 +209,29 @@ impl Symmetry {
             Vec3::NEG_ONE,
         ]
         .into_iter()
-        .filter(|sign| (sign.x > 0.0 || self.x) && (sign.y > 0.0 || self.y) && (sign.z > 0.0 || self.z))
+        .filter(|sign| *sign == Vec3::ONE || self.enabled && (sign.x > 0.0 || self.x) && (sign.y > 0.0 || self.y) && (sign.z > 0.0 || self.z))
     }
 
-    /// Linear maps (through the mesh center) taking a point to each of its symmetry copies,
-    /// the identity first. Mirrors come first, then radial rotations of the point and its mirrors.
+    /// The point the mirror planes and the radial axis pass through, for a mesh centered at `center`
+    pub fn origin(&self, center: Vec3) -> Vec3 {
+        center + Vec3::from(self.offset)
+    }
+
+    /// Axis of radial symmetry as a unit vector
+    pub fn radial_axis(&self) -> Vec3 {
+        [Vec3::X, Vec3::Y, Vec3::Z].get(self.axis as usize).copied().unwrap_or(Vec3::Y)
+    }
+
+    /// Linear maps `m` taking a point to its copies as `origin + m * (p - origin)`: identity, mirrors, then their radial turns
     pub fn transforms(&self) -> Vec<Mat3> {
         let mut out: Vec<Mat3> = self.mirror_signs().map(Mat3::from_diagonal).collect();
 
-        if self.radial > 1 {
-            let axis = [Vec3::X, Vec3::Y, Vec3::Z].get(self.axis as usize).copied().unwrap_or(Vec3::Y);
+        if self.radial_on() {
             let base = out.clone();
             out.reserve(base.len().saturating_mul(usize::from(self.radial - 1)));
 
             for k in 1..self.radial {
-                let r = Mat3::from_axis_angle(axis, f32::from(k) * std::f32::consts::TAU / f32::from(self.radial));
+                let r = Mat3::from_axis_angle(self.radial_axis(), self.radial_angle(k));
                 out.extend(base.iter().map(|m| r * *m));
             }
         }
@@ -309,7 +354,13 @@ impl BrushSettings {
             jitter_flow: f(self.jitter_flow, 0.0, 1.0, 0.0),
             jitter_position: f(self.jitter_position, 0.0, 4.0, 0.0),
             depth: f(self.depth, 0.05, 4.0, 1.0),
-            symmetry: Symmetry { radial: self.symmetry.radial.min(32), axis: self.symmetry.axis.min(2), ..self.symmetry },
+            symmetry: Symmetry {
+                radial: self.symmetry.radial.min(32),
+                axis: self.symmetry.axis.min(2),
+                offset: self.symmetry.offset.map(|v| f(v, -MAX_SYMMETRY_OFFSET, MAX_SYMMETRY_OFFSET, 0.0)),
+                angle_span: f(self.symmetry.angle_span, 0.0, FULL_TURN_DEGREES, FULL_TURN_DEGREES),
+                ..self.symmetry
+            },
             particles: Particles {
                 enabled: self.particles.enabled,
                 count: self.particles.count.clamp(1, 16),

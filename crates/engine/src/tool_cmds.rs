@@ -6,7 +6,7 @@ use texturecraft_core::Channel;
 use texturecraft_geom::glam::Vec2;
 use texturecraft_paint::{Alignment, BrushAlpha, alphas};
 
-use crate::commands::{CommandSpec, always, bad, boolp, channel_param, color_param, f32p, strp};
+use crate::commands::{CommandSpec, always, bad, boolp, channel_param, color_param, f32p, strp, vec3};
 use crate::session::{CloneFrom, CloneSource, FillMode, Tool};
 use crate::{Result, Session, cmd};
 
@@ -34,7 +34,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Brush settings",
             [],
             None,
-            "{size?: 0..100, flow?: 0..100, opacity?: 0..100, spacing?: 1..1000, hardness?: 0..100, angle?, followPath?, alignment?: tangent|camera, lazy?, jitterSize?, jitterAngle?, jitterFlow?, jitterPosition?, alpha?: procedural name | {image: resource name} | {library: id (alpha.list)}, backfaceCulling?, symmetryX?, symmetryY?, symmetryZ?, symmetryRadial?: 0..32 copies around symmetryAxis?: x|y|z (default y), minSize?, smudgeStrength?: 0..100, cloneSource?: composite|layer (what the Clone tool copies), particles?: {enabled?, count?: 1..16, lifetime?: 1..128 steps, gravity?: 0..2}}",
+            "{size?: 0..100, flow?: 0..100, opacity?: 0..100, spacing?: 1..1000, hardness?: 0..100, angle?, followPath?, alignment?: tangent|camera, lazy?, jitterSize?, jitterAngle?, jitterFlow?, jitterPosition?, alpha?: procedural name | {image: resource name} | {library: id (alpha.list)}, backfaceCulling?, symmetryOn? (the toolbar toggle; off keeps the settings), symmetryX?, symmetryY?, symmetryZ?, symmetryRadial?: 0..32 copies around symmetryAxis?: x|y|z (default y), symmetryOffset?: [x, y, z] (world units from the mesh center, where the mirror planes and radial axis cross), symmetryAngleSpan?: 0..360 degrees the radial copies spread over, minSize?, smudgeStrength?: 0..100, cloneSource?: composite|layer (what the Clone tool copies), particles?: {enabled?, count?: 1..16, lifetime?: 1..128 steps, gravity?: 0..2}}",
             always,
             brush
         ),
@@ -162,6 +162,9 @@ fn brush(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(v) = boolp(p, "backfaceCulling") {
         b.backface_culling = v;
     }
+    if let Some(v) = boolp(p, "symmetryOn") {
+        b.symmetry.enabled = v;
+    }
     for (k, slot) in [("symmetryX", &mut b.symmetry.x), ("symmetryY", &mut b.symmetry.y), ("symmetryZ", &mut b.symmetry.z)] {
         if let Some(v) = boolp(p, k) {
             *slot = v;
@@ -177,6 +180,12 @@ fn brush(s: &mut Session, p: &Value) -> Result<Value> {
             "z" => 2,
             _ => return Err(bad("tool.brush", format!("unknown symmetry axis `{a}` (x, y or z)"))),
         };
+    }
+    if let Some(v) = f32p(p, "symmetryAngleSpan") {
+        b.symmetry.angle_span = v;
+    }
+    if p.get("symmetryOffset").is_some() {
+        b.symmetry.offset = vec3(p, "symmetryOffset").ok_or_else(|| bad("tool.brush", "`symmetryOffset` must be [x, y, z]"))?.to_array();
     }
     if let Some(v) = boolp(p, "screenSpace") {
         b.screen_space = v;
@@ -216,6 +225,7 @@ pub(crate) fn brush_json(s: &Session) -> Value {
         },
         "backfaceCulling": b.backface_culling, "symmetry": [b.symmetry.x, b.symmetry.y, b.symmetry.z],
         "radialSymmetry": { "copies": b.symmetry.radial, "axis": (["x", "y", "z"].get(b.symmetry.axis as usize)) },
+        "symmetryOffset": b.symmetry.offset, "symmetryOn": b.symmetry.enabled, "symmetryAngleSpan": b.symmetry.angle_span,
         "smudgeStrength": s.tool.smudge_strength * 100.0, "particles": b.particles,
         "cloneSource": if s.tool.clone_from == CloneFrom::Layer { "layer" } else { "composite" },
     })

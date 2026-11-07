@@ -23,7 +23,7 @@ pub mod stroke;
 pub mod text;
 pub mod visibility;
 
-pub use brush::{Alignment, BrushAlpha, BrushSettings, Particles, Shape, Symmetry, image_alpha};
+pub use brush::{Alignment, BrushAlpha, BrushSettings, FULL_TURN_DEGREES, Particles, Shape, Symmetry, image_alpha};
 pub use commit::{CommitSource, Staging, TexelFn, commit_coverage, commit_layer, commit_mask};
 pub use path::{Lasso, spline};
 pub use pickup::{Pickup, PickupMode};

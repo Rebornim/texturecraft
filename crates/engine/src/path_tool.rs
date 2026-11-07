@@ -452,8 +452,7 @@ impl Session {
         })
     }
 
-    /// Fill the inside of `poly`: viewport pixels over the visible surface, or texture
-    /// coordinates. Returns the touched tiles.
+    /// Fill the inside of `poly` (viewport pixels over the visible surface, or texture coordinates); returns the touched tiles
     fn lasso_fill(&mut self, poly: Vec<Vec2>, uv: bool, viewport: Vec2) -> Result<usize> {
         let ts = self.ts();
         let (gbuf, mut canvas) = self.fill_canvas(ts)?;
@@ -469,8 +468,9 @@ impl Session {
 
             // A visible source inside the lasso can paint each symmetry copy
             let (lo, hi) = mesh.bounds();
-            let center = (lo + hi) * 0.5;
-            let inverses: Vec<_> = self.tool.brush.sanitized().symmetry.transforms().iter().map(|m| m.inverse()).collect();
+            let symmetry = self.tool.brush.sanitized().symmetry;
+            let center = symmetry.origin((lo + hi) * 0.5);
+            let inverses: Vec<_> = symmetry.transforms().iter().map(|m| m.inverse()).collect();
 
             fill_coverage(&mut canvas, &gbuf, |i, _| {
                 let Some(s) = gbuf.surface(mesh, i) else { return 0.0 };

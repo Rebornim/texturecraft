@@ -195,29 +195,29 @@ impl Stroke {
         Stamp { center: hit.pos + offset, normal, tangent, bitangent, radius: r, flow, hardness: s.hardness, depth: s.depth, seed: n, copy: false }
     }
 
-    /// Mirror copies of a stamp for the enabled symmetry axes, then radial copies of it and
-    /// its mirrors.
+    /// Mirror copies of a stamp for the enabled symmetry axes, then radial copies of it and its mirrors
     fn mirrors(&self, s: &Stamp) -> Vec<Stamp> {
         let sym = self.settings.symmetry;
         if !sym.any() {
             return Vec::new();
         }
 
+        let origin = sym.origin(self.center);
         let mut out = Vec::new();
         for sign in sym.mirror_signs().skip(1) {
             let normal = s.normal * sign;
             let tangent = s.tangent * sign;
-            out.push(Stamp { center: self.center + (s.center - self.center) * sign, normal, tangent, bitangent: normal.cross(tangent), copy: true, ..*s });
+            out.push(Stamp { center: origin + (s.center - origin) * sign, normal, tangent, bitangent: normal.cross(tangent), copy: true, ..*s });
         }
 
-        if sym.radial > 1 {
-            let axis = [Vec3::X, Vec3::Y, Vec3::Z].get(sym.axis as usize).copied().unwrap_or(Vec3::Y);
+        if sym.radial_on() {
+            let axis = sym.radial_axis();
             let base: Vec<Stamp> = std::iter::once(*s).chain(out.iter().copied()).collect();
 
             for k in 1..sym.radial {
-                let q = Quat::from_axis_angle(axis, f32::from(k) * std::f32::consts::TAU / f32::from(sym.radial));
+                let q = Quat::from_axis_angle(axis, sym.radial_angle(k));
                 out.extend(base.iter().map(|b| Stamp {
-                    center: self.center + q * (b.center - self.center),
+                    center: origin + q * (b.center - origin),
                     normal: q * b.normal,
                     tangent: q * b.tangent,
                     bitangent: q * b.bitangent,
@@ -294,6 +294,21 @@ mod tests {
         st.symmetry.z = true;
         let mut s = Stroke::new(&st, &m);
         assert_eq!(s.add(&ctx, Vec2::new(250.0, 180.0), 1.0).len(), 8);
+    }
+
+    #[test]
+    fn symmetry_mirrors_about_the_moved_plane() {
+        let (m, b, c) = ctx_parts();
+        let ctx = PickCtx { mesh: &m, bvh: &b, camera: &c, viewport: Vec2::new(400.0, 400.0) };
+        let mut st = BrushSettings::default();
+        st.symmetry.x = true;
+        st.symmetry.offset = [0.25, 0.0, 0.0];
+        let mut s = Stroke::new(&st, &m);
+        let out = s.add(&ctx, Vec2::new(250.0, 200.0), 1.0);
+        assert_eq!(out.len(), 2);
+        // Mirrored about x = 0.25 instead of the mesh center (x = 0)
+        assert!((out[0].center.x + out[1].center.x - 0.5).abs() < 1e-4, "{} {}", out[0].center, out[1].center);
+        assert!((out[0].center.y - out[1].center.y).abs() < 1e-4 && (out[0].center.z - out[1].center.z).abs() < 1e-4);
     }
 
     #[test]

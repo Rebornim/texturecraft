@@ -176,14 +176,12 @@ fn auto_fits_the_input_range_to_the_histogram() {
 /// Double-clicks `label`'s handle, then types `text` into the box that opens with the value selected
 fn type_value(h: &mut Harness<'_, TextureCraftApp>, label: &str, text: &str) {
     let at = handle(h, label);
-    for _ in 0..2 {
-        h.event(egui::Event::PointerMoved(at));
-        for pressed in [true, false] {
-            h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
-        }
-        h.run_steps(1);
+    // Both clicks in one frame: the simulated frames are longer than the double-click delay
+    h.event(egui::Event::PointerMoved(at));
+    for pressed in [true, false, true, false] {
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
     }
-    h.run_steps(1);
+    h.run_steps(2);
     for c in text.chars() {
         h.event(egui::Event::Text(c.to_string()));
         h.run_steps(1);

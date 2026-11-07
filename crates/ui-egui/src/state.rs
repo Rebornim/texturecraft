@@ -321,6 +321,10 @@ impl UiState {
         }
 
         *bake_dock = Dock::for_baking();
+        // The default is drawn for a left-to-right interface; keep it in step with the other dock.
+        if self.docks_rtl {
+            bake_dock.mirror(crate::docking::DEFAULT_WINDOW_WIDTH);
+        }
         self.bake_layout_version = BAKE_LAYOUT_VERSION;
     }
 
@@ -489,6 +493,19 @@ mod tests {
         assert_eq!(ui.dock, Dock::default());
     }
 
+    #[test]
+    fn an_outdated_bake_dock_is_replaced_by_the_default_for_the_interface_direction() {
+        let mut ui = UiState::default();
+        ui.sync_dock_direction(true, 1600.0);
+        // A bake layout saved before the current version, in a right-to-left session
+        ui.bake_layout_version = 0;
+        ui.sync_mode_dock();
+        let mut want = Dock::for_baking();
+        want.mirror(crate::docking::DEFAULT_WINDOW_WIDTH);
+        assert_ne!(want, Dock::for_baking(), "the bake default is not symmetric");
+        assert_eq!(ui.inactive_mode_dock, want, "the replacement is mirrored like the painting dock");
+        assert_eq!(ui.bake_layout_version, BAKE_LAYOUT_VERSION);
+    }
 
     #[test]
     fn docks_follow_the_interface_direction() {

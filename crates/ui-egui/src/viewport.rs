@@ -1590,6 +1590,8 @@ fn paint_2d_input(app: &mut TextureCraftApp, ui: &Ui, resp: &egui::Response, shi
             Err(error) => app.toast(error.to_string(), true),
         }
     }
+}
+
 /// The brush outline (and its hardness ring) as screen circles around `c`, radius `r` in points.
 fn brush_cursor_2d(p: &egui::Painter, c: egui::Pos2, r: f32, hardness: f32) {
     p.circle_stroke(c, r, Stroke::new(2.5, Color32::from_black_alpha(140)));

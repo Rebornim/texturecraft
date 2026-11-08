@@ -2,7 +2,7 @@
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
-use texturecraft_engine::paint::{Alignment, BrushSettings, Particles, Symmetry};
+use texturecraft_engine::paint::{Alignment, BrushSettings, Particles};
 use texturecraft_ui_egui::TextureCraftApp;
 
 /// The default window; Properties shows only the top of the brush there, so lower headers are scrolled to
@@ -35,7 +35,7 @@ const SECTIONS: [(&str, &str, bool, SectionReset); 7] = [
             (defaults.alignment, defaults.backface_culling, defaults.angle_fade, defaults.depth)
     }),
     ("Particles", "Gravity", false, |brush, defaults| brush.particles = defaults.particles),
-    ("Lazy mouse and symmetry", "Lazy mouse distance", false, |brush, defaults| (brush.lazy, brush.symmetry) = (defaults.lazy, defaults.symmetry)),
+    ("Lazy mouse", "Lazy mouse distance", false, |brush, defaults| brush.lazy = defaults.lazy),
 ];
 
 /// A brush that differs from the defaults in every field a section shows, within the valid ranges
@@ -60,7 +60,6 @@ fn changed_brush() -> BrushSettings {
         depth: 2.0,
         particles: Particles { enabled: true, count: 8, lifetime: 12, gravity: 0.5 },
         lazy: 50.0,
-        symmetry: Symmetry { x: true, y: false, z: true, radial: 4, axis: 2 },
         ..BrushSettings::default()
     }
 }

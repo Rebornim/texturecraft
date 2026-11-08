@@ -93,6 +93,7 @@ impl ThumbSnapshot {
             preview: None,
             images: &self.images,
             bounds: self.bounds,
+            block_scales: self.project.texture_set(self.ts).map(|set| set.block_scales()).unwrap_or_default(),
         };
         thumb::render(&inp, target)
     }

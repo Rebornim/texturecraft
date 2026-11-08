@@ -1736,8 +1736,8 @@ fn material_controls(app: &mut TextureCraftApp, ui: &mut Ui) {
                         app.session.tool.values.insert(channel, value);
                     }
                 });
-                if c == Channel::BaseColor {
-                    crate::swatches::strip(app, ui, v, crate::swatches::Target::Brush, "tool");
+                if channel == Channel::BaseColor {
+                    crate::swatches::strip(app, ui, value, crate::swatches::Target::Brush, "tool");
                 }
             }
             ChannelKind::NormalMap => {

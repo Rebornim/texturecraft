@@ -210,6 +210,8 @@ fn swap_mask_value_inverts_only_while_a_mask_is_the_target() {
     s.target = effect_target(execute(&mut s, "effect.add.paint", &json!({"target": "mask"})).unwrap());
     swap(&mut s).unwrap();
     assert_eq!(s.tool.mask_value, 0.0, "a mask effect paints the mask too");
+}
+
 /// How much redder than green a texel must be to count as painted (faded edges included)
 const PAINTED_TINT: f32 = 0.05;
 

@@ -363,7 +363,7 @@ mod tests {
             hardness: 0.9,
             depth: 1.0,
             seed: 0,
-            copy: false,
+            source: None,
         };
         for z in [0.0, 10.0] {
             let ctx = RasterCtx {

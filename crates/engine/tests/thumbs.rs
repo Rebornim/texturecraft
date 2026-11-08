@@ -43,7 +43,7 @@ fn inputs<'a>(s: &'a Session, project: &'a texturecraft_engine::core::Project, g
     let none = Default::default();
     // Leaked: the oracle only lives for the test.
     let baked: &'a _ = Box::leak(Box::new(s.doc.baked.get(&0).cloned().unwrap_or(none)));
-    Inputs { project, ts: 0, mesh: &s.mesh, gbuf, pixels: &s.doc.pixels, baked, preview: None, images: &s.images, bounds: s.mesh.bounds() }
+    Inputs { project, ts: 0, mesh: &s.mesh, gbuf, pixels: &s.doc.pixels, baked, preview: None, images: &s.images, bounds: s.mesh.bounds(), block_scales: Default::default() }
 }
 
 /// The reference: the same sub-stack cut by hand and evaluated at 64 px with the ordinary CPU

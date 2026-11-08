@@ -394,6 +394,7 @@ pub fn rail(app: &mut TextureCraftApp, ui: &mut egui::Ui) {
                 (Panel::Display, ic::MONITOR, "ui.view.display"),
                 (Panel::Shader, ic::SLIDERS_HORIZONTAL, "ui.view.shader"),
                 (Panel::History, ic::CLOCK_COUNTER_CLOCKWISE, "ui.view.history"),
+                (Panel::Log, ic::FILE_TEXT, "ui.view.log"),
             ] {
                 if icon_button(ui, icon, &tip(&app.ui.keymap, tr(panel.name()), id), app.ui.dock.is_visible(panel), 26.0).clicked() {
                     app.ui.dock.toggle(panel);

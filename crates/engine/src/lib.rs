@@ -39,6 +39,7 @@ pub mod painting;
 pub mod path_tool;
 mod polygon_fill;
 mod polygon_fill_drag;
+pub mod swatch_cmds;
 // Mesh reimport reads files: native only.
 #[cfg(not(target_arch = "wasm32"))]
 mod preserve;

@@ -42,6 +42,7 @@ pub mod shelf;
 pub mod shelf_preview;
 mod soft_box;
 pub mod state;
+pub mod swatches;
 pub mod symmetry;
 pub mod theme;
 pub mod thumbs;
@@ -209,6 +210,7 @@ impl TextureCraftApp {
         let dir = craft_ui::direction::resolve(&app.ui.prefs.language, craft_ui::direction::Setting::Language);
         craft_ui::direction::apply(&cc.egui_ctx, dir);
         export_templates::load_library(&mut app, cc.storage);
+        swatches::load(&mut app);
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -524,6 +526,7 @@ impl eframe::App for TextureCraftApp {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        swatches::sync(self);
         self.ui_store.save(&self.ui, storage);
         export_templates::save_library(self, storage);
     }
@@ -551,6 +554,7 @@ impl eframe::App for TextureCraftApp {
         self.poll_bake(ctx);
         self.poll_resize(ctx);
         self.poll_link_cooks(ctx);
+        swatches::sync(self);
         // The library shelf rescans when the window comes back (MaterialCraft may have sent a material).
         let focused = ctx.input(|i| i.viewport().focused).unwrap_or(true);
         if focused && !self.focused {

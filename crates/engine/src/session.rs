@@ -372,6 +372,8 @@ pub struct Session {
     pub brush_presets: crate::brush_preset_cmds::UserBrushes,
     /// The user's project templates (kept when another project opens).
     pub templates: crate::template_cmds::UserTemplates,
+    /// The user's global colour swatches and the recent colours (kept when another project opens).
+    pub swatches: crate::swatch_cmds::SwatchBook,
 }
 
 impl Session {
@@ -422,6 +424,7 @@ impl Session {
             export_presets: Default::default(),
             brush_presets: Default::default(),
             templates: Default::default(),
+            swatches: Default::default(),
         })
     }
 
@@ -432,6 +435,7 @@ impl Session {
         next.export_presets = std::mem::take(&mut self.export_presets);
         next.brush_presets = std::mem::take(&mut self.brush_presets);
         next.templates = std::mem::take(&mut self.templates);
+        next.swatches = std::mem::take(&mut self.swatches);
         *self = next;
     }
 

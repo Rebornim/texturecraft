@@ -94,7 +94,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, invert?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, invert?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -482,7 +482,8 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
                     *source = Source::Uniform([value.clamp(0.0, 1.0); 3]);
                 }
             }
-            EffectKind::ColorSelection { tolerance, .. } | EffectKind::Compare { tolerance, .. } => {
+            EffectKind::ColorSelection { colors, tolerance } => crate::color_selection_cmds::apply_params(p, colors, tolerance)?,
+            EffectKind::Compare { tolerance, .. } => {
                 if let Some(value) = f32p(p, "tolerance") {
                     *tolerance = value.clamp(0.0, 1.0);
                 }

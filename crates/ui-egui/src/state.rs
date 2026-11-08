@@ -266,6 +266,9 @@ pub struct UiState {
     /// Whether the dock layout has been mirrored for a right-to-left interface.
     #[serde(default)]
     pub docks_rtl: bool,
+    /// The panel open against the icon rail, if any; not saved, so the app starts with the rail closed
+    #[serde(skip)]
+    pub rail_panel: Option<crate::docking::Panel>,
     #[serde(default = "Dock::for_baking")]
     pub(crate) inactive_mode_dock: Dock,
     #[serde(default)]
@@ -379,6 +382,7 @@ impl Default for UiState {
             split_ratio: default_split_ratio(),
             dock: Dock::default(),
             docks_rtl: false,
+            rail_panel: None,
             inactive_mode_dock: Dock::for_baking(),
             dock_is_baking: false,
             bake_layout_version: BAKE_LAYOUT_VERSION,

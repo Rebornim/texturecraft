@@ -547,9 +547,6 @@ impl eframe::App for TextureCraftApp {
             toolbar::status_bar(self, ui);
             toolbar::tool_shelf(self, ui);
             self.ui.sync_mode_dock();
-            if self.ui.mode != state::Mode::Baking {
-                toolbar::rail(self, ui);
-            }
         }
         let hide = self.ui.hide_ui;
         let tk = theme::Tokens::get(&ctx);

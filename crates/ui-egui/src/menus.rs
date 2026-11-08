@@ -245,7 +245,7 @@ fn menu_item(app: &mut TextureCraftApp, ctx: &egui::Context, ui: &mut egui::Ui, 
         "ui.mode.paint" => Some(app.ui.mode == Mode::Painting),
         "ui.mode.bake" => Some(app.ui.mode == Mode::Baking),
         "ui.mode.render" => Some(app.ui.mode == Mode::Rendering),
-        id => crate::docking::view_panel(id).map(|p| app.ui.dock.is_open(p)),
+        id => crate::docking::view_panel(id).map(|p| app.ui.dock.is_open(p) && !app.ui.dock.is_on_rail(p)),
     };
     if let Some(c) = checked {
         b = b.selected(c);

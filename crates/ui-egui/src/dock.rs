@@ -733,7 +733,7 @@ pub(crate) fn texture_set_settings(app: &mut TextureCraftApp, ui: &mut Ui) {
     let tk = Tokens::get(ui.ctx());
     let ts = app.session.ts();
     let Some(set) = app.session.doc.project.texture_sets.get(ts).cloned() else { return };
-    egui::ScrollArea::vertical().id_salt("tss").show(ui, |ui| {
+    crate::docking::fitting_scroll_area(ui, "tss", |ui| {
         ui.label(caption(tr("General properties")));
         egui::Grid::new("tss_grid").num_columns(2).spacing(vec2(8.0, 6.0)).show(ui, |ui| {
             ui.label(tr("Name"));

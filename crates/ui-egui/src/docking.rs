@@ -10,9 +10,12 @@
 //! that cannot close or float. The layout persists with `UiState` as a craft-ui `Workspace`;
 //! a layout that does not load or validate becomes the default.
 
-use craft_ui::docking::{Action, DockArea, DockContent, DockStyle, Layout, Location, Node, PanelLimits, PanelState, Permissions, Placement};
+use craft_ui::docking::{
+    Action, Column, DockArea, DockContent, DockStyle, Group, Layout, Location, Node, PanelLimits, PanelState, Permissions, Placement, Side,
+};
 use craft_ui::layout::{SplitAxis, SplitSize};
 use egui::{Id, Margin, RichText, Ui, vec2};
+use egui_phosphor::regular as ic;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -104,18 +107,48 @@ impl Panel {
         }
     }
 
-    /// Where the panel floats when it has never been laid out: `[x, y, width, height]`, cascaded.
-    fn float_rect(self) -> Option<[f32; 4]> {
-        let slot = match self {
-            Panel::Display => 0.0,
-            Panel::Shader => 1.0,
-            Panel::History => 2.0,
-            Panel::Log => 3.0,
-            _ => return None,
-        };
-        Some([960.0, 90.0 + 50.0 * slot, 300.0, 380.0])
+    /// The panel's icon on the rail, for the panels that live there when no other place holds them
+    fn rail_icon(self) -> Option<&'static str> {
+        RAIL_PANELS.iter().find(|(panel, _)| *panel == self).map(|(_, icon)| *icon)
+    }
+
+    /// The tallest the panel's flyout or floating window grows to fit its content
+    fn floating_height(self) -> Option<f32> {
+        match self {
+            Panel::TextureSetSettings | Panel::Display | Panel::Shader => Some(SETTINGS_FLYOUT_MAX_HEIGHT),
+            Panel::History | Panel::Log => Some(LIST_FLYOUT_HEIGHT),
+            _ => None,
+        }
     }
 }
+
+/// The rail beside the dock, top to bottom: a panel the layout has nowhere else waits there as an icon
+const RAIL_PANELS: [(Panel, &str); 5] = [
+    (Panel::TextureSetSettings, ic::STACK),
+    (Panel::Display, ic::MONITOR),
+    (Panel::Shader, ic::SLIDERS_HORIZONTAL),
+    (Panel::History, ic::CLOCK_COUNTER_CLOCKWISE),
+    (Panel::Log, ic::FILE_TEXT),
+];
+
+/// Width of a rail panel's flyout
+const RAIL_FLYOUT_WIDTH: f32 = 320.0;
+
+/// Settings panels' flyouts fit their content up to this height, then scroll
+const SETTINGS_FLYOUT_MAX_HEIGHT: f32 = 640.0;
+
+/// History and Log fill their flyout, so it has one height
+const LIST_FLYOUT_HEIGHT: f32 = 400.0;
+
+/// Where bake mode's first floating panel opens, and how far down each next one opens
+const BAKE_FLOAT_ORIGIN: egui::Pos2 = egui::pos2(960.0, 90.0);
+const BAKE_FLOAT_CASCADE_STEP: f32 = 50.0;
+
+/// Size of other floating panels
+const DEFAULT_FLOATING_SIZE: egui::Vec2 = vec2(300.0, 380.0);
+
+/// Width of the rail's icon column, as the old icon rail
+const RAIL_WIDTH: f32 = 38.0;
 
 /// The saved panel arrangement: craft-ui's workspace over TextureCraft's panels.
 pub type Workspace = craft_ui::docking::Workspace<Panel>;
@@ -133,9 +166,7 @@ fn split(axis: SplitAxis, size: SplitSize, first: Node<Panel>, second: Node<Pane
     Node::Split { axis, size, first: Box::new(first), second: Box::new(second) }
 }
 
-/// The default: assets left of the viewport; texture set list, layers (tabbed with the texture
-/// set settings) and properties down the right. Ratios match the 1600x960 window. Display,
-/// shader, history and log are closed and open as floating windows.
+/// The default: assets left of the viewport, then texture sets, layers (tabbed with texture set settings) and properties, then the rail; ratios fit 1600x960
 pub fn default_workspace() -> Workspace {
     use Panel::*;
     let column = split(
@@ -147,20 +178,7 @@ pub fn default_workspace() -> Workspace {
     let root =
         split(SplitAxis::Horizontal, SplitSize::Ratio(0.115), tabs(&[Assets]), split(SplitAxis::Horizontal, SplitSize::Ratio(0.78), tabs(&[Viewport]), column));
     let mut workspace = Workspace::new(Layout { root: Some(root), floating: Vec::new() });
-    for panel in Panel::ALL {
-        if let Some(rect) = panel.float_rect() {
-            let location = Location {
-                floating: Some(rect),
-                anchor: None,
-                placement: Placement::Tab { before: None },
-                size: None,
-                stack: None,
-                sibling: Vec::new(),
-                group: None,
-            };
-            workspace.hidden.push((panel, location));
-        }
-    }
+    return_to_rail(&mut workspace);
     for panel in [MeshMapSettings, CommonSettings, MeshMapBakers] {
         workspace.hidden.push((
             panel,
@@ -176,6 +194,60 @@ pub fn default_workspace() -> Workspace {
         ));
     }
     workspace
+}
+
+/// Where a closed panel reopens as its own floating window at `rect` (`[x, y, width, height]`)
+fn floating_location(rect: [f32; 4]) -> Location<Panel> {
+    Location { floating: Some(rect), anchor: None, placement: Placement::Tab { before: None }, size: None, stack: None, sibling: Vec::new(), group: None }
+}
+
+/// Put every rail panel the layout has nowhere into the rail, adding the rail when the layout has none
+fn return_to_rail(workspace: &mut Workspace) {
+    let missing: Vec<Panel> = RAIL_PANELS.iter().map(|(panel, _)| *panel).filter(|panel| !workspace.layout.contains(panel)).collect();
+    if missing.is_empty() {
+        return;
+    }
+
+    let groups = missing.iter().map(|panel| Group::new(vec![*panel], 0));
+    let mut next = workspace.clone();
+    match next.layout.root.as_mut().and_then(rail_column_mut) {
+        Some(column) => {
+            column.groups.extend(groups);
+            // Rail panels keep the rail's order; groups the user docked there go after them
+            column
+                .groups
+                .sort_by_key(|group| group.panels.first().and_then(|panel| RAIL_PANELS.iter().position(|(rail, _)| rail == panel)).unwrap_or(usize::MAX));
+        }
+        None => {
+            let column = Column { iconic: true, iconic_width: Some(RAIL_WIDTH), ..Column::new(groups.collect(), RAIL_FLYOUT_WIDTH) };
+            let rail = Node::Dock { side: Side::End, columns: vec![column] };
+            next.layout.root = next.layout.root.take().map(|root| split(SplitAxis::Horizontal, SplitSize::FixedSecond(RAIL_WIDTH), root, rail));
+        }
+    }
+    next.hidden.retain(|(panel, _)| !missing.contains(panel));
+
+    if validate(&next).is_ok() {
+        *workspace = next;
+    } else {
+        log::warn!("the rail panels {missing:?} could not return to the rail");
+    }
+}
+
+/// The rail: the first icon-only column of the dock along the window's end edge
+fn rail_column(node: &Node<Panel>) -> Option<&Column<Panel>> {
+    match node {
+        Node::Split { second, .. } => rail_column(second),
+        Node::Dock { side: Side::End, columns } => columns.iter().find(|column| column.iconic),
+        _ => None,
+    }
+}
+
+fn rail_column_mut(node: &mut Node<Panel>) -> Option<&mut Column<Panel>> {
+    match node {
+        Node::Split { second, .. } => rail_column_mut(second),
+        Node::Dock { side: Side::End, columns } => columns.iter_mut().find(|column| column.iconic),
+        _ => None,
+    }
 }
 
 /// craft-ui's checks plus the viewport's: a saved or hand-edited file cannot hide, float, group
@@ -294,6 +366,11 @@ impl Dock {
 
         let bake_panels = [Panel::MeshMapSettings, Panel::CommonSettings, Panel::MeshMapBakers, Panel::Log];
         workspace.hidden.retain(|(panel, _)| !bake_panels.contains(panel));
+        // Bake mode has no rail: the rail's other panels open as floating windows, cascaded
+        for (slot, panel) in [Panel::Display, Panel::Shader, Panel::History].into_iter().enumerate() {
+            let top = BAKE_FLOAT_ORIGIN.y + BAKE_FLOAT_CASCADE_STEP * slot as f32;
+            workspace.hidden.push((panel, floating_location([BAKE_FLOAT_ORIGIN.x, top, DEFAULT_FLOATING_SIZE.x, DEFAULT_FLOATING_SIZE.y])));
+        }
 
         let gutter_width = f32::from(crate::theme::GUTTER);
         let list_column = split(SplitAxis::Vertical, SplitSize::Ratio(TEXTURE_SET_LIST_SHARE), tabs(&[Panel::TextureSetList]), tabs(&[Panel::MeshMapBakers]));
@@ -319,9 +396,14 @@ impl Dock {
         self.workspace.layout.panel_state(&p) == PanelState::Front
     }
 
-    /// Hide a visible panel, otherwise bring it up.
+    /// Hide a visible panel, otherwise bring it up; a panel on the rail opens its flyout
     pub fn toggle(&mut self, p: Panel) {
-        if self.is_visible(p) { self.close(p) } else { self.focus(p) }
+        if self.is_visible(p) && !self.is_on_rail(p) { self.close(p) } else { self.focus(p) }
+    }
+
+    /// Whether `p` waits on the rail as an icon
+    pub fn is_on_rail(&self, p: Panel) -> bool {
+        self.workspace.layout.root.as_ref().and_then(rail_column).is_some_and(|column| column.groups.iter().any(|group| group.panels.contains(&p)))
     }
 
     pub fn close(&mut self, p: Panel) {
@@ -381,6 +463,11 @@ fn style(ui: &Ui, t: &Tokens) -> DockStyle {
     s.floating_stroke = egui::Stroke::new(1.0, t.button_border);
     s.font = egui::FontId::proportional(12.5);
     s.min_tab_width = 54.0;
+    s.iconic_width = RAIL_WIDTH;
+    // The rail keeps its width: no dragging its edge to widen it
+    s.iconic_max_width = RAIL_WIDTH;
+    // The rail is the only dock column and stays icons only: no bar to expand it or drag it
+    s.column_bar_height = 0.0;
     s.tab_height = 30.0;
     // Panels arrange in a split tree around the viewport; floating title bars only move windows.
     s.new_dock_zones = false;
@@ -396,11 +483,17 @@ pub fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
         }
     }
 
+    // A rail panel closed where it was docked goes back to the rail; bake mode has no rail
+    if app.ui.mode != crate::state::Mode::Baking {
+        return_to_rail(&mut app.ui.dock.workspace);
+    }
+
     let context = ui.ctx().clone();
     let tokens = Tokens::get(&context);
     let style = style(ui, &tokens);
     let layout = app.ui.dock.workspace.layout.clone();
-    let mut area = DockArea::new(area_id()).input_blocked(context.memory(|memory| memory.top_modal_layer()).is_some());
+    // The rail's flyout closes on a click outside it, as a menu does
+    let mut area = DockArea::new(area_id()).auto_collapse_iconic(true).input_blocked(context.memory(|memory| memory.top_modal_layer()).is_some());
     if let Some(panel) = app.ui.dock.raise.take() {
         area = area.raise_panel(panel);
     }
@@ -417,6 +510,15 @@ pub fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     }
     for action in output.actions {
         app.ui.dock.apply(action);
+    }
+}
+
+/// A vertical scroll area whose parent sees its whole content height, so a flyout fitted to the content grows to show all of it
+pub(crate) fn fitting_scroll_area(ui: &mut Ui, id: &str, body: impl FnOnce(&mut Ui)) {
+    let output = egui::ScrollArea::vertical().id_salt(id).auto_shrink([false, true]).show(ui, body);
+    let hidden = output.content_size.y - output.inner_rect.height();
+    if hidden > 0.0 {
+        ui.allocate_space(vec2(0.0, hidden));
     }
 }
 
@@ -445,16 +547,19 @@ impl DockContent<Panel> for Panels<'_> {
             Panel::TextureSetSettings => crate::dock::texture_set_settings(app, ui),
             Panel::Properties => crate::dock::properties(app, ui),
             // The other panels scroll their own lists.
-            Panel::Display => {
-                egui::ScrollArea::vertical().id_salt("dock-display").auto_shrink([false, false]).show(ui, |ui| crate::windows::display(app, ui)).inner
-            }
-            Panel::Shader => {
-                egui::ScrollArea::vertical().id_salt("dock-shader").auto_shrink([false, false]).show(ui, |ui| crate::windows::shader(app, ui)).inner
-            }
+            Panel::Display => fitting_scroll_area(ui, "dock-display", |ui| crate::windows::display(app, ui)),
+            Panel::Shader => fitting_scroll_area(ui, "dock-shader", |ui| crate::windows::shader(app, ui)),
             Panel::History => crate::windows::history(app, ui),
             Panel::Log => crate::windows::log(app, ui),
             Panel::Viewport => {}
         });
+    }
+
+    fn paint_icon(&mut self, painter: &egui::Painter, rect: egui::Rect, panel: &Panel, color: egui::Color32) -> bool {
+        let Some(icon) = panel.rail_icon() else { return false };
+
+        painter.text(rect.center(), egui::Align2::CENTER_CENTER, icon, egui::FontId::proportional(rect.height()), color);
+        true
     }
 
     fn logical_label(&self, panel: &Panel) -> String {
@@ -477,8 +582,8 @@ impl DockContent<Panel> for Panels<'_> {
         PanelLimits { min, ..PanelLimits::default() }
     }
 
-    fn floating_size(&self, _panel: &Panel) -> Option<egui::Vec2> {
-        Some(vec2(300.0, 380.0))
+    fn floating_size(&self, panel: &Panel) -> Option<egui::Vec2> {
+        Some(panel.floating_height().map_or(DEFAULT_FLOATING_SIZE, |height| vec2(RAIL_FLYOUT_WIDTH, height)))
     }
 }
 
@@ -497,7 +602,21 @@ mod tests {
         for panel in Panel::ALL {
             assert!(w.layout.contains(&panel) || w.hidden.iter().any(|(p, _)| *p == panel), "{panel:?} is neither shown nor hidden");
         }
-        assert_eq!(panels_of(&w), [Panel::Assets, Panel::Viewport, Panel::TextureSetList, Panel::Layers, Panel::TextureSetSettings, Panel::Properties]);
+        assert_eq!(
+            panels_of(&w),
+            [
+                Panel::Assets,
+                Panel::Viewport,
+                Panel::TextureSetList,
+                Panel::Layers,
+                Panel::TextureSetSettings,
+                Panel::Properties,
+                Panel::Display,
+                Panel::Shader,
+                Panel::History,
+                Panel::Log
+            ]
+        );
     }
 
     #[test]
@@ -569,16 +688,45 @@ mod tests {
     }
 
     #[test]
-    fn closed_panels_without_a_place_open_floating() {
+    fn rail_panels_closed_elsewhere_return_to_the_rail() {
         let mut dock = Dock::default();
-        dock.focus(Panel::Display);
-        assert!(dock.is_visible(Panel::Display));
-        assert_eq!(dock.workspace().layout.floating.len(), 1);
-        assert!(dock.workspace().layout.floating[0].contains(&Panel::Display));
-        // Hiding and showing the views one by one.
+        assert!(dock.is_on_rail(Panel::Display) && !dock.is_on_rail(Panel::TextureSetSettings));
+        // A view's toggle opens a rail panel's flyout instead of closing it
         dock.toggle(Panel::Display);
-        assert!(!dock.is_open(Panel::Display));
-        dock.toggle(Panel::TextureSetSettings);
-        assert!(dock.is_visible(Panel::TextureSetSettings) && !dock.is_visible(Panel::Layers));
+        assert!(dock.is_on_rail(Panel::Display));
+
+        dock.close(Panel::TextureSetSettings);
+        return_to_rail(&mut dock.workspace);
+        assert!(dock.is_on_rail(Panel::TextureSetSettings));
+        assert!(validate(dock.workspace()).is_ok());
+    }
+
+    #[test]
+    fn a_rail_panel_docked_elsewhere_leaves_the_rail() {
+        let mut dock = Dock::default();
+        dock.apply(Action::Move { panel: Panel::Display, anchor: Panel::Properties, placement: Placement::Tab { before: None } });
+        assert!(!dock.is_on_rail(Panel::Display) && dock.is_visible(Panel::Display));
+
+        dock.close(Panel::Display);
+        return_to_rail(&mut dock.workspace);
+        assert!(dock.is_on_rail(Panel::Display));
+    }
+
+    #[test]
+    fn a_saved_layout_without_a_rail_gets_one() {
+        let mut workspace = default_workspace();
+        let Some(Node::Split { first, .. }) = workspace.layout.root.take() else { panic!("the rail splits off the root") };
+        workspace.layout.root = Some(*first);
+        assert!(validate(&workspace).is_ok(), "a layout from before the rail");
+
+        return_to_rail(&mut workspace);
+        assert_eq!(workspace, default_workspace());
+    }
+
+    #[test]
+    fn bake_mode_opens_the_rail_panels_floating() {
+        let mut dock = Dock::for_baking();
+        dock.focus(Panel::Display);
+        assert!(dock.workspace().layout.floating.iter().any(|window| window.contains(&Panel::Display)));
     }
 }

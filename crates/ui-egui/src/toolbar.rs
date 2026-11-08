@@ -377,30 +377,20 @@ pub fn tool_shelf(app: &mut TextureCraftApp, ui: &mut egui::Ui) {
                     app.ui.dock.focus(Panel::Assets);
                 }
             });
+
+            // Export sits at the shelf's foot, apart from the tools; bake mode exports from its own panels
+            if app.ui.mode != Mode::Baking {
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| export_button(app, ui));
+            }
         });
     });
 }
 
-pub fn rail(app: &mut TextureCraftApp, ui: &mut egui::Ui) {
-    let tk = Tokens::get(ui.ctx());
-    egui::Panel::right("rail").resizable(false).exact_size(38.0).show_separator_line(false).frame(egui::Frame::NONE).show(ui, |ui| {
-        card(ui, &tk, egui::Margin { left: 0, right: GUTTER, top: GUTTER, bottom: GUTTER }, egui::Margin::symmetric(3, 6), |ui| {
-            ui.spacing_mut().item_spacing.y = 4.0;
-            if icon_button(ui, ic::EXPORT, &tip(&app.ui.keymap, tr("Export textures"), "ui.export"), app.ui.windows.export, 26.0).clicked() {
-                app.ui.windows.export = !app.ui.windows.export;
-            }
-            for (panel, icon, id) in [
-                (Panel::TextureSetSettings, ic::STACK, "ui.view.textureSetSettings"),
-                (Panel::Display, ic::MONITOR, "ui.view.display"),
-                (Panel::Shader, ic::SLIDERS_HORIZONTAL, "ui.view.shader"),
-                (Panel::History, ic::CLOCK_COUNTER_CLOCKWISE, "ui.view.history"),
-            ] {
-                if icon_button(ui, icon, &tip(&app.ui.keymap, tr(panel.name()), id), app.ui.dock.is_visible(panel), 26.0).clicked() {
-                    app.ui.dock.toggle(panel);
-                }
-            }
-        });
-    });
+/// Export textures
+fn export_button(app: &mut TextureCraftApp, ui: &mut egui::Ui) {
+    if icon_button(ui, ic::EXPORT, &tip(&app.ui.keymap, tr("Export textures"), "ui.export"), app.ui.windows.export, 28.0).clicked() {
+        app.ui.windows.export = !app.ui.windows.export;
+    }
 }
 
 pub fn status_bar(app: &mut TextureCraftApp, ui: &mut egui::Ui) {

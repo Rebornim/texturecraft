@@ -130,10 +130,14 @@ mod tests {
         for x in 0..64 {
             img.set(x, 40, &[65535, 0, 0, 65535]);
         }
-        // The same plane far away: nothing of the old surface is within reach.
+        // The same plane far away and with mirrored UVs (so the layout differs and the unchanged-layout
+        // shortcut is not taken): nothing of the old surface is within reach.
         let mut mesh = (*s.mesh).clone();
         for p in &mut mesh.positions {
             p.x += 100.0;
+        }
+        for uv in &mut mesh.uvs {
+            *uv = Vec2::new(1.0 - uv.x, uv.y);
         }
         let mut next = Session::new(s.doc.clone(), mesh, None).unwrap();
         assert_eq!(preserve_strokes(&s, &mut next), 0);

@@ -83,6 +83,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Apply", "適用"),
     ("ArtCraft website...", "ArtCraft ウェブサイト..."),
     ("Assets", "アセット"),
+    ("Auto", "自動"),
     ("Automatic (from the mesh UVs)", "自動 (メッシュのUVから)"),
     ("Autosave every", "自動保存の間隔"),
     (
@@ -323,6 +324,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Filters", "フィルター"),
     ("Fine noise", "細かいノイズ"),
     ("Fingerprints", "指紋"),
+    ("Fit the input range to the histogram", "入力範囲をヒストグラムに合わせる"),
     ("Flatten layer", "レイヤーを統合"),
     ("Flips the image's green channel, for normal maps made with Y pointing down", "画像の緑チャンネルを反転します (Y が下向きで作られたノーマルマップ用)"),
     ("Flow", "フロー"),
@@ -668,6 +670,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Replacement color", "置き換え後の色"),
     ("Report a bug...", "バグを報告..."),
     ("Rescan the library folder", "ライブラリフォルダーを再スキャン"),
+    ("Reset", "リセット"),
     ("Reset UI", "UIをリセット"),
     ("Reset all", "すべてリセット"),
     ("Reset to defaults", "デフォルトに戻す"),

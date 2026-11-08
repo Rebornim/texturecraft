@@ -1125,4 +1125,9 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Symmetry color display", "対称の表示色"),
     ("Symmetry settings", "対称の設定"),
     ("Type", "種類"),
+    ("Brush presets", "ブラシプリセット"),
+    ("Use this brush (with its size)", "このブラシを使う（サイズも）"),
+    ("Rename this brush", "このブラシの名前を変更"),
+    ("Replace with the current brush", "現在のブラシで置き換え"),
+    ("Delete this brush", "このブラシを削除"),
 ];

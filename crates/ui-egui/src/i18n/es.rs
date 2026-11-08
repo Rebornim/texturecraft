@@ -1131,4 +1131,9 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Symmetry color display", "Color de visualización de simetría"),
     ("Symmetry settings", "Ajustes de simetría"),
     ("Type", "Tipo"),
+    ("Brush presets", "Ajustes de pincel"),
+    ("Use this brush (with its size)", "Usar este pincel (con su tamaño)"),
+    ("Rename this brush", "Renombrar este pincel"),
+    ("Replace with the current brush", "Reemplazar con el pincel actual"),
+    ("Delete this brush", "Eliminar este pincel"),
 ];

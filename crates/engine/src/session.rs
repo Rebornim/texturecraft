@@ -368,6 +368,8 @@ pub struct Session {
     pub(crate) polygon_fill_drag: Option<crate::polygon_fill_drag::PolygonFillDrag>,
     /// The user's export presets (kept when another project opens).
     pub export_presets: crate::preset_cmds::UserPresets,
+    /// The user's brush presets (kept when another project opens).
+    pub brush_presets: crate::brush_preset_cmds::UserBrushes,
     /// The user's project templates (kept when another project opens).
     pub templates: crate::template_cmds::UserTemplates,
 }
@@ -418,6 +420,7 @@ impl Session {
             depth_cache: None,
             polygon_fill_drag: None,
             export_presets: Default::default(),
+            brush_presets: Default::default(),
             templates: Default::default(),
         })
     }
@@ -427,6 +430,7 @@ impl Session {
     pub fn switch_to(&mut self, mut next: Session) {
         next.viewport = self.viewport;
         next.export_presets = std::mem::take(&mut self.export_presets);
+        next.brush_presets = std::mem::take(&mut self.brush_presets);
         next.templates = std::mem::take(&mut self.templates);
         *self = next;
     }

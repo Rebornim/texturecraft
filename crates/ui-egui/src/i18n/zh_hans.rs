@@ -1059,4 +1059,9 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Symmetry color display", "对称显示颜色"),
     ("Symmetry settings", "对称设置"),
     ("Type", "类型"),
+    ("Brush presets", "笔刷预设"),
+    ("Use this brush (with its size)", "使用此笔刷（含大小）"),
+    ("Rename this brush", "重命名此笔刷"),
+    ("Replace with the current brush", "用当前笔刷替换"),
+    ("Delete this brush", "删除此笔刷"),
 ];

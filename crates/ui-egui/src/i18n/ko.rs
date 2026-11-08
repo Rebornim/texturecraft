@@ -1110,4 +1110,9 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Symmetry color display", "대칭 표시 색상"),
     ("Symmetry settings", "대칭 설정"),
     ("Type", "유형"),
+    ("Brush presets", "브러시 프리셋"),
+    ("Use this brush (with its size)", "이 브러시 사용 (크기 포함)"),
+    ("Rename this brush", "이 브러시 이름 바꾸기"),
+    ("Replace with the current brush", "현재 브러시로 바꾸기"),
+    ("Delete this brush", "이 브러시 삭제"),
 ];

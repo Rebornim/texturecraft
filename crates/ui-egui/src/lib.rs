@@ -121,6 +121,8 @@ pub struct TextureCraftApp {
     pub profiler: profile::Profiler,
     /// Where the last 3D stroke ended (viewport pixels), for Shift+click straight lines.
     pub last_paint_point: Option<texturecraft_engine::geom::glam::Vec2>,
+    /// Where the last finished 2D view stroke ended: its texture set and texture coordinates (so zoom and pan keep it), for Shift+click straight lines.
+    pub last_paint_uv: Option<(usize, texturecraft_engine::geom::glam::Vec2)>,
     /// The decal layer the next click in the 3D view places.
     pub placing_decal: Option<texturecraft_engine::core::LayerId>,
     /// The Properties popup a right click in a view opens.
@@ -146,6 +148,7 @@ pub struct TextureCraftApp {
 }
 
 impl TextureCraftApp {
+    /// The app around `session`, with the saved UI state (or defaults in the OS language) and the GPU viewport.
     pub fn new(cc: &eframe::CreationContext<'_>, session: Session) -> TextureCraftApp {
         theme::install(&cc.egui_ctx);
         // Bakes cast their rays on a GPU device of their own (created on the first bake)
@@ -160,6 +163,7 @@ impl TextureCraftApp {
             ui
         });
         let next_autosave = ui.prefs.autosave_minutes as f64 * 60.0;
+
         let mut app = TextureCraftApp {
             camera_glide: None,
             session,
@@ -181,6 +185,7 @@ impl TextureCraftApp {
             brushes: None,
             render: render_mode::RenderView::default(),
             last_paint_point: None,
+            last_paint_uv: None,
             placing_decal: None,
             properties_popup: None,
             picking_id_color: None,
@@ -197,6 +202,7 @@ impl TextureCraftApp {
         app.ui.windows.new_project = false;
         i18n::set_language(&app.ui.prefs.language);
         export_templates::load_library(&mut app, cc.storage);
+
         #[cfg(not(target_arch = "wasm32"))]
         {
             // The first window of the process fixes it; a new folder applies on restart
@@ -205,9 +211,11 @@ impl TextureCraftApp {
             if app.ui.export.dir == data_folder("").join("export").display().to_string() {
                 app.ui.export.dir = user_dir("export").display().to_string();
             }
+
             let skipped = app.session.load_templates(user_dir("templates"));
             app.session.log.extend(skipped.into_iter().map(|warning| format!("Project template skipped: {warning}")));
         }
+
         app
     }
 

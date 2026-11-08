@@ -104,18 +104,40 @@ impl Panel {
         }
     }
 
-    /// Where the panel floats when it has never been laid out: `[x, y, width, height]`, cascaded.
+    /// The cascade place of a panel that opens as a floating window, or `None` for a docked one
+    fn float_slot(self) -> Option<f32> {
+        match self {
+            Panel::Display => Some(0.0),
+            Panel::Shader => Some(1.0),
+            Panel::History => Some(2.0),
+            Panel::Log => Some(3.0),
+            _ => None,
+        }
+    }
+
+    /// Where the panel floats in the default layout: `[x, y, width, height]`, cascaded
     fn float_rect(self) -> Option<[f32; 4]> {
-        let slot = match self {
-            Panel::Display => 0.0,
-            Panel::Shader => 1.0,
-            Panel::History => 2.0,
-            Panel::Log => 3.0,
-            _ => return None,
-        };
-        Some([960.0, 90.0 + 50.0 * slot, 300.0, 380.0])
+        let slot = self.float_slot()?;
+        Some([DEFAULT_FLOAT_LEFT, DEFAULT_FLOAT_TOP + FLOAT_CASCADE_STEP * slot, FLOAT_SIZE.x, FLOAT_SIZE.y])
+    }
+
+    /// Where the panel first opens in a dock area: against its right edge, beside the icon rail, cascaded down from its top
+    fn float_rect_beside_rail(self, area: egui::Rect) -> Option<[f32; 4]> {
+        let slot = self.float_slot()?;
+        let left = (area.right() - FLOAT_SIZE.x).max(area.left());
+        Some([left, area.top() + FLOAT_CASCADE_STEP * slot, FLOAT_SIZE.x, FLOAT_SIZE.y])
     }
 }
+
+/// Size of a floating panel when it first opens
+const FLOAT_SIZE: egui::Vec2 = vec2(300.0, 380.0);
+
+/// How far each floating panel opens below the one before it
+const FLOAT_CASCADE_STEP: f32 = 50.0;
+
+/// The default layout's floating rects, kept so saved layouts still recognise a panel that was never moved
+const DEFAULT_FLOAT_LEFT: f32 = 960.0;
+const DEFAULT_FLOAT_TOP: f32 = 90.0;
 
 /// The saved panel arrangement: craft-ui's workspace over TextureCraft's panels.
 pub type Workspace = craft_ui::docking::Workspace<Panel>;
@@ -235,11 +257,13 @@ pub struct Dock {
     raise: Option<Panel>,
     /// A saved layout could not be read, so this is the painting default in its place
     replaced_unreadable: bool,
+    /// The dock area on the last frame, where floating panels first open
+    area: Option<egui::Rect>,
 }
 
 impl Default for Dock {
     fn default() -> Self {
-        Dock { workspace: default_workspace(), raise: None, replaced_unreadable: false }
+        Dock { workspace: default_workspace(), raise: None, replaced_unreadable: false, area: None }
     }
 }
 
@@ -275,7 +299,7 @@ impl Dock {
             return unreadable;
         }
 
-        Dock { workspace, raise: None, replaced_unreadable: false }
+        Dock { workspace, raise: None, replaced_unreadable: false, area: None }
     }
 
     /// Whether a saved layout could not be read and this dock is the painting default instead
@@ -303,7 +327,7 @@ impl Dock {
         let columns_width = BAKERS_COLUMN_WIDTH + gutter_width + SETTINGS_COLUMN_WIDTH;
         let root = split(SplitAxis::Horizontal, SplitSize::FixedFirst(columns_width), columns_over_log, tabs(&[Panel::Viewport]));
         workspace.layout = Layout { root: Some(root), floating: Vec::new() };
-        Dock { workspace, raise: None, replaced_unreadable: false }
+        Dock { workspace, raise: None, replaced_unreadable: false, area: None }
     }
 
     pub fn workspace(&self) -> &Workspace {
@@ -333,6 +357,7 @@ impl Dock {
     /// Open `p` (where it was when closed, else where it lives by default) and bring it to the
     /// front.
     pub fn focus(&mut self, p: Panel) {
+        self.place_beside_rail(p);
         let mut next = self.workspace.clone();
         match next.set_visible(p, true, None, permissions) {
             Ok(()) if validate(&next).is_ok() => {
@@ -341,6 +366,17 @@ impl Dock {
             }
             Ok(()) => log::warn!("panel {p:?} was not opened: it would break the viewport's rules"),
             Err(error) => log::warn!("panel {p:?} was not opened: {error}"),
+        }
+    }
+
+    /// Move a hidden panel that still has its default floating rect beside the icon rail, where it opens; a panel the user placed keeps its place
+    fn place_beside_rail(&mut self, p: Panel) {
+        let Some(area) = self.area else { return };
+        let Some(beside_rail) = p.float_rect_beside_rail(area) else { return };
+        let Some((_, location)) = self.workspace.hidden.iter_mut().find(|(panel, _)| *panel == p) else { return };
+
+        if location.floating.is_some() && location.floating == p.float_rect() {
+            location.floating = Some(beside_rail);
         }
     }
 
@@ -390,6 +426,7 @@ fn style(ui: &Ui, t: &Tokens) -> DockStyle {
 
 /// Draw the dock (viewport and panels) into `ui`.
 pub fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
+    app.ui.dock.area = Some(ui.max_rect());
     for panel in Panel::ALL {
         if !panel.available_in(app.ui.mode) && app.ui.dock.is_open(panel) {
             app.ui.dock.close(panel);

@@ -1162,4 +1162,12 @@ pub const TABLE: &[(&str, &str)] = &[
     ("GIMP palette", "Tavolozza GIMP"),
     ("Hex list", "Elenco esadecimale"),
     ("Exported {n} colors", "{n} colori esportati"),
+    ("Select the layer content", "Seleziona il contenuto del livello"),
+    ("Paint layer", "Livello di pittura"),
+    ("Fill layer", "Livello di riempimento"),
+    ("1 effect", "1 effetto"),
+    ("{count} effects", "{count} effetti"),
+    ("Mask effects", "Effetti della maschera"),
+    ("Content effects", "Effetti del contenuto"),
+    ("Fold or unfold these effects", "Comprimi o espandi questi effetti"),
 ];

@@ -1119,4 +1119,12 @@ pub const TABLE: &[(&str, &str)] = &[
     ("GIMP palette", "لوحة ألوان GIMP"),
     ("Hex list", "قائمة ست عشرية"),
     ("Exported {n} colors", "تم تصدير {n} لون"),
+    ("Select the layer content", "تحديد محتوى الطبقة"),
+    ("Paint layer", "طبقة رسم"),
+    ("Fill layer", "طبقة تعبئة"),
+    ("1 effect", "تأثير واحد"),
+    ("{count} effects", "{count} تأثيرات"),
+    ("Mask effects", "تأثيرات القناع"),
+    ("Content effects", "تأثيرات المحتوى"),
+    ("Fold or unfold these effects", "طيّ هذه التأثيرات أو فردها"),
 ];

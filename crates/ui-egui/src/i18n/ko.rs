@@ -1132,4 +1132,12 @@ pub const TABLE: &[(&str, &str)] = &[
     ("GIMP palette", "GIMP 팔레트"),
     ("Hex list", "16진수 목록"),
     ("Exported {n} colors", "색 {n}개 내보냄"),
+    ("Select the layer content", "레이어 내용 선택"),
+    ("Paint layer", "페인트 레이어"),
+    ("Fill layer", "채우기 레이어"),
+    ("1 effect", "효과 1개"),
+    ("{count} effects", "효과 {count}개"),
+    ("Mask effects", "마스크 효과"),
+    ("Content effects", "콘텐츠 효과"),
+    ("Fold or unfold these effects", "이 효과들 접기/펼치기"),
 ];

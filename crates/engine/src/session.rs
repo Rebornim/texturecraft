@@ -357,6 +357,10 @@ pub struct Session {
     pub(crate) path_cache: Option<crate::path_tool::PathCache>,
     /// Tiles painted since `render_paths` cleared it (the footprint of one path).
     pub(crate) path_tiles: std::collections::BTreeSet<(u32, u32)>,
+    /// A new path's live preview: the path becomes an undo step only when it is applied
+    pub(crate) path_draft: Option<crate::path_draft::PathDraft>,
+    /// Point changes of the path being edited: (earlier states for undo, undone states for redo)
+    pub(crate) path_steps: (Vec<crate::path_tool::PathState>, Vec<crate::path_tool::PathState>),
     pub path: Option<String>,
     pub modified: bool,
     /// Bumps on every document change.
@@ -379,8 +383,7 @@ pub struct Session {
 }
 
 impl Session {
-    /// A session for `project` on `mesh` (texture sets must reference mesh materials). The
-    /// UVs of UV-tiled sets are mapped into their tile atlas (see [`Session::source_mesh`]).
+    /// A session for `project` on `mesh` (its sets must reference mesh materials), with UV-tiled sets' UVs mapped into their atlas ([`Session::source_mesh`])
     pub fn new(doc: Document, mesh: Mesh, mesh_source: Option<(String, Vec<u8>)>) -> Result<Session> {
         mesh.validate().map_err(|e| EngineError::Other(e.to_string()))?;
         let source = Arc::new(mesh);
@@ -418,6 +421,8 @@ impl Session {
             painting_paths: false,
             path_cache: None,
             path_tiles: Default::default(),
+            path_draft: None,
+            path_steps: Default::default(),
             path: None,
             modified: false,
             revision: 1,
@@ -538,19 +543,40 @@ impl Session {
         self.record(label, before, false);
     }
 
-    /// A change from `before` to the current document: a new undo step `label`, or with
-    /// `merge` part of the previous one when it has the same label.
+    /// A change from `before`: a new undo step `label`, or with `merge` part of the previous one when it has the same label
     fn record(&mut self, label: &str, before: Document, merge: bool) {
+        self.invalidate_changed(&before);
+        self.push_step(label, before, merge);
+    }
+
+    /// [`Session::record`] for a change whose tiles the caller already marked for recompositing
+    pub(crate) fn push_step(&mut self, label: &str, before: Document, merge: bool) {
+        // Another change during a new path's preview makes the path its own step first
+        if !self.painting_paths
+            && let Some(draft) = self.path_draft.take()
+        {
+            self.undo.push((crate::path_tool::NEW_PATH_LABEL.to_string(), draft.base));
+        }
+
+        // Point changes of an edited path undo only until another step lands
+        if !self.painting_paths {
+            self.path_steps = Default::default();
+        }
         self.modified = true;
         self.revision = self.revision.wrapping_add(1);
-        self.invalidate_changed(&before);
         if !(merge && self.undo.last().is_some_and(|(l, _)| l == label)) {
             self.undo.push((label.to_string(), before));
-            if self.undo.len() > MAX_HISTORY {
-                self.undo.remove(0);
-            }
         }
+        let over = self.undo.len().saturating_sub(MAX_HISTORY);
+        self.undo.drain(..over);
         self.redo.clear();
+    }
+
+    /// A change from `other` to the current document that is not an undo step (a path preview)
+    pub(crate) fn changed_without_history(&mut self, other: &Document) {
+        self.modified = true;
+        self.revision = self.revision.wrapping_add(1);
+        self.invalidate_changed(other);
     }
 
     /// Mark dirty every texture set whose composite differs between `other` and the current
@@ -647,15 +673,21 @@ impl Session {
     }
 
     pub fn can_undo(&self) -> bool {
-        !self.undo.is_empty()
+        !self.undo.is_empty() || self.path_draft.is_some() || self.path_step_pending(true)
     }
     pub fn can_redo(&self) -> bool {
-        !self.redo.is_empty()
+        !self.redo.is_empty() || self.path_step_pending(false)
     }
     pub fn undo_label(&self) -> Option<&str> {
+        if self.path_draft.is_some() || self.path_step_pending(true) {
+            return Some(crate::path_tool::NEW_PATH_LABEL);
+        }
         self.undo.last().map(|(l, _)| l.as_str())
     }
     pub fn redo_label(&self) -> Option<&str> {
+        if self.path_step_pending(false) {
+            return Some(crate::path_tool::NEW_PATH_LABEL);
+        }
         self.redo.last().map(|(l, _)| l.as_str())
     }
     /// The undone steps, the next one to redo first.
@@ -670,6 +702,19 @@ impl Session {
         // A stroke, a box fill or an edited path under way would otherwise write over the restored document
         self.cancel_stroke();
         self.end_polygon_fill_box();
+
+        // While a path is edited, undo steps back through its point changes first
+        if self.step_path(true) {
+            return Ok(crate::path_tool::NEW_PATH_LABEL.to_string());
+        }
+
+        // A path being placed isn't a step yet: undo removes it
+        if self.path_draft.is_some() {
+            self.stop_path_edit();
+            return Ok(crate::path_tool::NEW_PATH_LABEL.to_string());
+        }
+
+        // An edited path would otherwise repaint over the restored document
         self.stop_path_edit();
 
         let (label, restored) = self.undo.pop().ok_or_else(|| EngineError::Other("nothing to undo".into()))?;
@@ -684,6 +729,12 @@ impl Session {
         // A stroke, a box fill or an edited path under way would otherwise write over the restored document
         self.cancel_stroke();
         self.end_polygon_fill_box();
+
+        if self.step_path(false) {
+            return Ok(crate::path_tool::NEW_PATH_LABEL.to_string());
+        }
+
+        // An edited path would otherwise repaint over the restored document
         self.stop_path_edit();
 
         let (label, restored) = self.redo.pop().ok_or_else(|| EngineError::Other("nothing to redo".into()))?;

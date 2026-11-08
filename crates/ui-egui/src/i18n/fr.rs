@@ -1139,4 +1139,9 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Add...", "Ajouter..."),
     ("Baked maps imported: {count}", "Cartes précalculées importées : {count}"),
     ("Not imported: {files}", "Non importés : {files}"),
+    ("Baking Visualization", "Visualisation du baking"),
+    ("Show for Selected Texture Set Only", "Afficher uniquement pour l'ensemble de textures sélectionné"),
+    ("High Definition Mesh (HP)", "Maillage haute définition (HP)"),
+    ("UV Seams", "Coutures UV"),
+    ("Project Mesh (LP)", "Maillage de projection (LP)"),
 ];

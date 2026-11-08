@@ -1094,4 +1094,9 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Add...", "추가..."),
     ("Baked maps imported: {count}", "가져온 베이크된 맵: {count}"),
     ("Not imported: {files}", "가져오지 않음: {files}"),
+    ("Baking Visualization", "베이크 시각화"),
+    ("Show for Selected Texture Set Only", "선택한 텍스처 세트만 표시"),
+    ("High Definition Mesh (HP)", "하이 폴리 메시 (HP)"),
+    ("UV Seams", "UV 심"),
+    ("Project Mesh (LP)", "투영 메시 (LP)"),
 ];

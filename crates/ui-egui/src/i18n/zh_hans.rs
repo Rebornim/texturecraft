@@ -1043,4 +1043,9 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Add...", "添加..."),
     ("Baked maps imported: {count}", "已导入的烘焙贴图：{count}"),
     ("Not imported: {files}", "未导入：{files}"),
+    ("Baking Visualization", "烘焙可视化"),
+    ("Show for Selected Texture Set Only", "仅显示所选纹理集"),
+    ("High Definition Mesh (HP)", "高模网格 (HP)"),
+    ("UV Seams", "UV 接缝"),
+    ("Project Mesh (LP)", "投射网格 (LP)"),
 ];

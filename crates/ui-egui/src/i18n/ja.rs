@@ -1109,4 +1109,9 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Add...", "追加..."),
     ("Baked maps imported: {count}", "読み込んだベイク済みマップ: {count}"),
     ("Not imported: {files}", "読み込まれなかったファイル: {files}"),
+    ("Baking Visualization", "ベイクの可視化"),
+    ("Show for Selected Texture Set Only", "選択したテクスチャセットのみ表示"),
+    ("High Definition Mesh (HP)", "ハイポリメッシュ (HP)"),
+    ("UV Seams", "UVシーム"),
+    ("Project Mesh (LP)", "投影メッシュ (LP)"),
 ];

@@ -665,7 +665,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
                         }
                         app.last_paint_point = Some(local(pointer));
                     }
-                    Err(error) => app.toast(error.to_string(), true),
+                    Err(e) => app.toast(tr(&e.to_string()).to_string(), true),
                 }
             }
             if response.clicked_by(PointerButton::Primary)
@@ -1569,7 +1569,7 @@ fn paint_2d_input(app: &mut TextureCraftApp, ui: &Ui, resp: &egui::Response, shi
                     }
                     ui.data_mut(|data| data.insert_temp(stroke_end, (set, uv)));
                 }
-                Err(error) => app.toast(error.to_string(), true),
+                Err(error) => app.toast(tr(&error.to_string()).to_string(), true),
             }
         }
     } else if resp.dragged_by(PointerButton::Primary)

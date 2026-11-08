@@ -19,6 +19,7 @@ const CORNER_GRID_STEPS: f32 = 1e5;
 impl Session {
     /// Fill the triangle / polygon / UV island / connected mesh under viewport pixel `screen`
     pub fn polygon_fill(&mut self, screen: Vec2, viewport: Vec2) -> Result<usize> {
+        self.refuse_while_baking()?;
         let hit = self.pick(screen, viewport).ok_or_else(|| EngineError::Other("nothing under the cursor".into()))?;
         if hit.material != self.fill_material()? {
             return Err(EngineError::Other("that surface belongs to another texture set".into()));
@@ -29,6 +30,7 @@ impl Session {
 
     /// Fill like [`Session::polygon_fill`] at texture coordinate `uv` (the 2D view): the triangle covering that texel's center, so slivers thinner than a texel can't be clicked
     pub fn polygon_fill_uv(&mut self, uv: Vec2) -> Result<usize> {
+        self.refuse_while_baking()?;
         let gbuf = self.caches.get(self.ts()).map(|cache| cache.gbuf.clone()).ok_or_else(|| EngineError::Other("texture set not ready".into()))?;
         let size = Vec2::new(gbuf.width as f32, gbuf.height as f32);
         let texel = (uv * size).floor();
@@ -60,12 +62,14 @@ impl Session {
 
     /// Show the fill of a box being dragged between viewport pixels `corner` and `opposite`
     pub fn drag_polygon_fill_box(&mut self, corner: Vec2, opposite: Vec2, viewport: Vec2) -> Result<usize> {
+        self.refuse_while_baking()?;
         // Whole pixels, as the visibility buffer is rendered at
         self.drag_polygon_fill(corner, opposite, Some(viewport.round().max(Vec2::ONE)))
     }
 
     /// Show the fill of a box being dragged between texture coordinates `corner` and `opposite` (the 2D view)
     pub fn drag_polygon_fill_box_uv(&mut self, corner: Vec2, opposite: Vec2) -> Result<usize> {
+        self.refuse_while_baking()?;
         self.drag_polygon_fill(corner, opposite, None)
     }
 

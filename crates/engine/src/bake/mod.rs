@@ -15,7 +15,7 @@ mod tile_command;
 pub use bake_cage_inputs::BakeCageInputs;
 pub use bake_mesh::BakeMesh;
 pub use bake_meshes::BakeMeshes;
-pub use bake_task::BakeTask;
+pub use bake_task::{BakeTask, StreamedMap};
 pub use merged_high::MergedHigh;
 pub use mesh_map_command::{install_gpu_tracer, meshes_json, settings_params};
 pub use model_patch::settings_patch;

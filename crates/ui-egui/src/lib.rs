@@ -25,6 +25,7 @@ mod preview_request;
 mod preview_worker;
 pub mod profile;
 pub mod properties_popup;
+mod rail_flyout;
 pub mod render_mode;
 pub mod shelf;
 pub mod shelf_preview;
@@ -555,7 +556,12 @@ impl eframe::App for TextureCraftApp {
         let tk = theme::Tokens::get(&ctx);
         // The dock keeps the cards' gutter from the bars and rails around it.
         let frame = if hide { egui::Frame::NONE.fill(tk.viewport) } else { egui::Frame::NONE.fill(tk.chrome).inner_margin(theme::GUTTER) };
-        egui::CentralPanel::default().frame(frame).show(ui, |ui| if hide { viewport::central(self, ui) } else { docking::show(self, ui) });
+        let central = egui::CentralPanel::default().frame(frame).show(ui, |ui| if hide { viewport::central(self, ui) } else { docking::show(self, ui) });
+        if !hide {
+            // Against the rail: the dock area without the gutter on the rail's side
+            let area = central.response.rect - egui::Margin { right: 0, ..egui::Margin::same(theme::GUTTER) };
+            rail_flyout::show(self, &ctx, area);
+        }
         windows::show(self, &ctx);
         toasts(self, &ctx);
         let end = now_ms();

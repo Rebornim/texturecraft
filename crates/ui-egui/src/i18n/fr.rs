@@ -844,6 +844,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("UV projection", "Projection UV"),
     ("UV tiles", "Tuiles UV"),
     ("UV tiles (UDIM)", "Tuiles UV (UDIM)"),
+    ("Undock", "Détacher"),
     ("Undo", "Annuler"),
     ("Uniform value", "Valeur uniforme"),
     ("Use an equirectangular .hdr or .exr image as the environment", "Utiliser une image équirectangulaire .hdr ou .exr comme environnement"),

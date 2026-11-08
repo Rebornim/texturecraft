@@ -141,7 +141,11 @@ pub fn invoke(app: &mut TextureCraftApp, ctx: &egui::Context, id: &str) {
         return;
     }
     if let Some(panel) = crate::docking::view_panel(id) {
-        app.ui.dock.toggle(panel);
+        if crate::rail_flyout::is_rail_panel(panel) {
+            crate::rail_flyout::toggle(app, panel);
+        } else {
+            app.ui.dock.toggle(panel);
+        }
         return;
     }
     match id {
@@ -245,7 +249,7 @@ fn menu_item(app: &mut TextureCraftApp, ctx: &egui::Context, ui: &mut egui::Ui, 
         "ui.mode.paint" => Some(app.ui.mode == Mode::Painting),
         "ui.mode.bake" => Some(app.ui.mode == Mode::Baking),
         "ui.mode.render" => Some(app.ui.mode == Mode::Rendering),
-        id => crate::docking::view_panel(id).map(|p| app.ui.dock.is_open(p)),
+        id => crate::docking::view_panel(id).map(|p| app.ui.dock.is_open(p) || app.ui.rail_panel == Some(p)),
     };
     if let Some(c) = checked {
         b = b.selected(c);

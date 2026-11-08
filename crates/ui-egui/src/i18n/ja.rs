@@ -817,6 +817,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("UV projection", "UV投影"),
     ("UV tiles", "UVタイル"),
     ("UV tiles (UDIM)", "UVタイル (UDIM)"),
+    ("Undock", "ドッキング解除"),
     ("Undo", "元に戻す"),
     ("Uniform value", "均一値"),
     ("Use an equirectangular .hdr or .exr image as the environment", "正距円筒図法の .hdr または .exr 画像を環境として使用"),

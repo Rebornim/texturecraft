@@ -808,6 +808,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("UV projection", "UV 투영"),
     ("UV tiles", "UV 타일"),
     ("UV tiles (UDIM)", "UV 타일 (UDIM)"),
+    ("Undock", "도킹 해제"),
     ("Undo", "실행 취소"),
     ("Uniform value", "균일 값"),
     ("Use an equirectangular .hdr or .exr image as the environment", "등장방형 .hdr 또는 .exr 이미지를 환경으로 사용합니다"),

@@ -611,6 +611,16 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !picking_id_color
         && touch.is_none()
         && decal_input(app, ui, &response, rect);
+    let symmetry_drag = !alt
+        && !s_held
+        && !v_held
+        && !focus_pick
+        && !popup
+        && placing.is_none()
+        && !picking_id_color
+        && touch.is_none()
+        && !decal_drag
+        && crate::symmetry::manipulator_input(app, ui, &response, rect);
 
     // Painting
     let painting = app.ui.mode == crate::state::Mode::Painting
@@ -624,6 +634,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !picking_id_color
         && touch.is_none()
         && !decal_drag
+        && !symmetry_drag
         && !DecalDrop::waiting(ui.ctx());
     let path_tool = app.session.tool.tool == Tool::Path;
     let viewport = app.session.viewport;
@@ -681,6 +692,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         camera: app.session.camera,
         shade: Shade { highlight: drop_highlight(app, ui, &response), bake: bake_visualization(app), ..shade(app) },
         visible: app.session.doc.project.texture_sets.iter().map(|texture_set| texture_set.visible).collect(),
+        overlay: crate::symmetry::scene_overlay(app, ui, rect),
     };
     add_callback(app, ui, rect, frame, sync);
     polygon_fill_box_overlay(ui, rect, fill_box);
@@ -689,16 +701,19 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     crate::shelf::drop_target(app, ui, &response, crate::shelf::DropZone::View3d);
 
     // Brush cursor; while a Ctrl+drag changes the brush it stays where the drag began
+    let mut symmetry_cursor = None;
     if app.ui.mode == crate::state::Mode::Painting
         && !navigating
         && response.hovered()
         && brush_tool(app.session.tool.tool)
         && app.picking_id_color.is_none()
+        && !crate::symmetry::manipulator_hovered(app, ui, rect)
         && let Some(hover_pos) = if adjusting { ui.input(|input| input.pointer.press_origin()) } else { response.hover_pos() }
         && let Some(hit) = app.session.pick(local(hover_pos), app.session.viewport)
     {
         ui.ctx().set_cursor_icon(egui::CursorIcon::None);
         brush_cursor(app, ui, rect, hit.pos, hit.nrm);
+        symmetry_cursor = Some((hit.pos, hit.nrm));
         if app.session.tool.tool == Tool::Clone
             && let Some(source) = app.session.clone_source_point(Some(hit.uv))
         {
@@ -717,6 +732,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     if app.ui.mode == crate::state::Mode::Painting && path_tool {
         path_overlay(app, ui, rect, &response, false, show);
     }
+    crate::symmetry::overlay(app, ui, rect, symmetry_cursor);
     stencil_overlay(app, ui, rect);
     decal_overlay(app, ui, rect);
     brush_readout(app, ui, &response, adjusting);
@@ -992,10 +1008,10 @@ fn stencil_overlay(app: &mut TextureCraftApp, ui: &Ui, rect: Rect) {
     painter.add(egui::Shape::dashed_line(&outline, Stroke::new(1.0, Color32::from_white_alpha(120)), 5.0, 4.0));
 }
 
-/// A world point on screen in the 3D view `rect` (None behind the camera).
-fn project(app: &TextureCraftApp, rect: Rect, p: Vec3) -> Option<Pos2> {
-    let n = app.session.camera.project(p, rect.width() / rect.height().max(1.0))?;
-    Some(pos2(rect.left() + (n.x * 0.5 + 0.5) * rect.width(), rect.top() + (0.5 - n.y * 0.5) * rect.height()))
+/// A world point on screen in the 3D view `rect` (None behind the camera)
+pub(crate) fn project(app: &TextureCraftApp, rect: Rect, point: Vec3) -> Option<Pos2> {
+    let ndc = app.session.camera.project(point, rect.width() / rect.height().max(1.0))?;
+    Some(pos2(rect.left() + (ndc.x * 0.5 + 0.5) * rect.width(), rect.top() + (0.5 - ndc.y * 0.5) * rect.height()))
 }
 
 /// Control point grab radius (points).
@@ -1271,7 +1287,7 @@ fn adjust_brush(brush: &mut texturecraft_engine::paint::BrushSettings, right: bo
     }
 }
 
-fn brush_cursor(app: &TextureCraftApp, ui: &Ui, rect: Rect, pos: Vec3, nrm: Vec3) {
+pub(crate) fn brush_cursor(app: &TextureCraftApp, ui: &Ui, rect: Rect, pos: Vec3, nrm: Vec3) {
     let (lo, hi) = app.session.mesh.bounds();
     let r = app.session.tool.brush.size * (hi - lo).length();
     let t = nrm.any_orthonormal_vector();
@@ -1443,6 +1459,7 @@ fn view_2d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         camera: app.session.camera,
         shade: shade(app),
         visible: app.session.doc.project.texture_sets.iter().map(|texture_set| texture_set.visible).collect(),
+        overlay: Vec::new(),
     };
     add_callback(app, ui, rect, frame, sync);
     polygon_fill_box_overlay(ui, rect, fill_box);

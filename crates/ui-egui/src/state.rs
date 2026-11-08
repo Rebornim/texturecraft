@@ -307,6 +307,9 @@ pub struct UiState {
     /// What bake mode's 3D view draws besides the low poly (the Baking Visualization panel)
     #[serde(default)]
     pub bake_visualization: crate::bake_mode::BakeVisualizationToggles,
+    /// How the 3D view shows symmetry
+    #[serde(default)]
+    pub symmetry: crate::symmetry::SymmetryDisplay,
 }
 
 impl UiState {
@@ -377,6 +380,7 @@ impl Default for UiState {
             keymap: Keymap::new(),
             bake_paint_brush: crate::bake_mode::BakePaintBrush::default(),
             bake_visualization: crate::bake_mode::BakeVisualizationToggles::default(),
+            symmetry: crate::symmetry::SymmetryDisplay::default(),
         }
     }
 }

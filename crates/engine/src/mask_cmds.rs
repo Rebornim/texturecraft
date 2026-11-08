@@ -2,8 +2,8 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    BlendMode, Channel, CompareOp, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask, MaskBackground, Procedural, ProceduralKind,
-    Project, Source,
+    BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask, MaskBackground,
+    Procedural, ProceduralKind, Project, Source,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
@@ -49,7 +49,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add generator",
             ["Layers", "Effects"],
             None,
-            "{layer?, name?, generator?: edgeWear|dirt|thinAreas|curvature|ambientOcclusion|position|direction, level?, softness?, noise?, invert?}",
+            "{layer?, name?, generator?: edgeWear|dirt|thinAreas|curvature|ambientOcclusion|position|direction, level?, softness?, noise?, invert?, mode?: edges|cavities|both|raw, sizes?: [7 weights 0..1, finest first] (curvature and edgeWear)}",
             has_layer,
             add_generator
         ),
@@ -94,7 +94,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, invert?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, invert?, mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -314,39 +314,69 @@ fn add_fill(s: &mut Session, p: &Value) -> Result<Value> {
     push_effect(s, p, EffectKind::Fill { source, projection }, blend)
 }
 
-fn generator_from(p: &Value, g: &mut Generator) {
-    if let Some(v) = f32p(p, "level") {
-        g.level = v.clamp(0.0, 1.0);
+/// Apply the generator parameters in `params` to `generator` (`command` names it in errors).
+fn generator_from(command: &str, params: &Value, generator: &mut Generator) -> Result<()> {
+    if let Some(level) = f32p(params, "level") {
+        generator.level = level.clamp(0.0, 1.0);
     }
-    if let Some(v) = f32p(p, "softness") {
-        g.softness = v.clamp(0.0, 1.0);
+    if let Some(softness) = f32p(params, "softness") {
+        generator.softness = softness.clamp(0.0, 1.0);
     }
-    if let Some(v) = f32p(p, "noise") {
-        g.noise_amount = v.clamp(0.0, 2.0);
+    if let Some(noise) = f32p(params, "noise") {
+        generator.noise_amount = noise.clamp(0.0, 2.0);
     }
-    if let Some(v) = f32p(p, "noiseScale") {
-        g.noise_scale = v.clamp(0.01, 1000.0);
+    if let Some(noise_scale) = f32p(params, "noiseScale") {
+        generator.noise_scale = noise_scale.clamp(0.01, 1000.0);
     }
-    if let Some(v) = u64p(p, "seed") {
-        g.seed = v as u32;
+    if let Some(seed) = u64p(params, "seed") {
+        generator.seed = seed as u32;
     }
-    if let Some(v) = boolp(p, "invert") {
-        g.invert = v;
+    if let Some(invert) = boolp(params, "invert") {
+        generator.invert = invert;
     }
-    if let Some(d) = color_param(p, "direction") {
-        g.direction = d;
+    if let Some(direction) = color_param(params, "direction") {
+        generator.direction = direction;
     }
+
+    // A mode or sizes also give a curvature generator saved before detail sizes its detail
+    let mode =
+        strp(params, "mode").map(|name| CurvatureMode::parse(name).ok_or_else(|| bad(command, format!("unknown curvature mode `{name}`")))).transpose()?;
+    let weights = params.get("sizes").map(|value| size_weights(command, value)).transpose()?;
+    if mode.is_none() && weights.is_none() {
+        return Ok(());
+    }
+    if !matches!(generator.kind, GeneratorKind::Curvature | GeneratorKind::EdgeWear) {
+        return Err(bad(command, "only curvature and edge wear generators have a mode and detail sizes"));
+    }
+
+    let detail = generator.detail.get_or_insert_with(CurvatureDetail::default);
+    if let Some(mode) = mode {
+        detail.mode = mode;
+    }
+    if let Some(weights) = weights {
+        detail.weights = weights;
+    }
+    Ok(())
 }
 
-fn add_generator(s: &mut Session, p: &Value) -> Result<Value> {
-    let kind = match strp(p, "generator") {
-        Some(k) => GeneratorKind::parse(k).ok_or_else(|| bad("effect.add.generator", format!("unknown generator `{k}`")))?,
+/// The detail size weights in `value`: one number (0..1) per size of [`CurvatureDetail::SIZES`], finest first.
+fn size_weights(command: &str, value: &Value) -> Result<[f32; CurvatureDetail::SIZES.len()]> {
+    let weights: Option<Vec<f32>> =
+        value.as_array().and_then(|items| items.iter().map(|item| item.as_f64().map(|weight| (weight as f32).clamp(0.0, 1.0))).collect());
+    weights
+        .and_then(|weights| weights.try_into().ok())
+        .ok_or_else(|| bad(command, format!("`sizes` takes {} numbers, finest first", CurvatureDetail::SIZES.len())))
+}
+
+fn add_generator(session: &mut Session, params: &Value) -> Result<Value> {
+    let kind = match strp(params, "generator") {
+        Some(name) => GeneratorKind::parse(name).ok_or_else(|| bad("effect.add.generator", format!("unknown generator `{name}`")))?,
         None => GeneratorKind::EdgeWear,
     };
-    let mut g = Generator::new(kind);
-    generator_from(p, &mut g);
-    let blend = blend_param("effect.add.generator", p, "blend")?.unwrap_or(BlendMode::Normal);
-    push_effect(s, p, EffectKind::Generator(g), blend)
+    let mut generator = Generator::new(kind);
+    generator_from("effect.add.generator", params, &mut generator)?;
+    let blend = blend_param("effect.add.generator", params, "blend")?.unwrap_or(BlendMode::Normal);
+    push_effect(session, params, EffectKind::Generator(generator), blend)
 }
 
 pub(crate) fn levels_from(p: &Value, l: &mut Levels) {
@@ -468,7 +498,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         }
 
         match &mut edited.kind {
-            EffectKind::Generator(generator) => generator_from(p, generator),
+            EffectKind::Generator(generator) => generator_from(CMD, p, generator)?,
             EffectKind::Levels(levels) => levels_from(p, levels),
             // The swapped filter was built with the parameters already
             EffectKind::Filter(_) if swaps_filter => {}

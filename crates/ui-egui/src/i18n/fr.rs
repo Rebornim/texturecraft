@@ -1128,4 +1128,10 @@ pub const TABLE: &[(&str, &str)] = &[
         "\"{layer}\" can't be filled: select a paint layer or a layer's mask",
         "« {layer} » ne peut pas être rempli : sélectionnez un calque de peinture ou un masque de calque",
     ),
+    ("Advanced settings", "Paramètres avancés"),
+    ("Import baked maps", "Importer des cartes précalculées"),
+    ("Name each file after its texture set, like Body_normal.png", "Nommez chaque fichier d'après son ensemble de textures, par ex. Body_normal.png"),
+    ("Add...", "Ajouter..."),
+    ("Baked maps imported: {count}", "Cartes précalculées importées : {count}"),
+    ("Not imported: {files}", "Non importés : {files}"),
 ];

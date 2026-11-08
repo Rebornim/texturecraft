@@ -1083,4 +1083,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ),
     ("Visible polygons only", "보이는 폴리곤만"),
     ("\"{layer}\" can't be filled: select a paint layer or a layer's mask", "\"{layer}\"은(는) 채울 수 없습니다: 페인트 레이어나 레이어 마스크를 선택하세요"),
+    ("Advanced settings", "고급 설정"),
+    ("Import baked maps", "베이크된 맵 가져오기"),
+    ("Name each file after its texture set, like Body_normal.png", "각 파일 이름을 텍스처 세트 이름으로 시작하세요(예: Body_normal.png)"),
+    ("Add...", "추가..."),
+    ("Baked maps imported: {count}", "가져온 베이크된 맵: {count}"),
+    ("Not imported: {files}", "가져오지 않음: {files}"),
 ];

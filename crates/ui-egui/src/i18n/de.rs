@@ -1116,4 +1116,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ),
     ("Visible polygons only", "Nur sichtbare Polygone"),
     ("\"{layer}\" can't be filled: select a paint layer or a layer's mask", "\"{layer}\" kann nicht gefüllt werden: Wähle eine Malebene oder eine Ebenenmaske"),
+    ("Advanced settings", "Erweiterte Einstellungen"),
+    ("Import baked maps", "Gebackene Maps importieren"),
+    ("Name each file after its texture set, like Body_normal.png", "Benennen Sie jede Datei nach ihrem Texturset, z. B. Body_normal.png"),
+    ("Add...", "Hinzufügen..."),
+    ("Baked maps imported: {count}", "Gebackene Maps importiert: {count}"),
+    ("Not imported: {files}", "Nicht importiert: {files}"),
 ];

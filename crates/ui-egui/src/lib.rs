@@ -24,6 +24,7 @@ mod mask_preview_image;
 mod material_preview_image;
 pub mod menus;
 mod orb_shape;
+pub mod new_project_advanced;
 pub mod parity;
 mod preview_image;
 mod preview_request;

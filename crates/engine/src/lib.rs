@@ -33,6 +33,8 @@ pub mod materialx_cmds;
 pub mod meshmap_cmds;
 mod orb_camera;
 pub mod orb_preview;
+mod meshmap_file_name;
+pub mod meshmap_import_cmds;
 pub mod painting;
 pub mod path_tool;
 mod polygon_fill;

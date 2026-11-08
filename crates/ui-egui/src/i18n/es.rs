@@ -1104,4 +1104,10 @@ pub const TABLE: &[(&str, &str)] = &[
         "\"{layer}\" can't be filled: select a paint layer or a layer's mask",
         "\"{layer}\" no se puede rellenar: selecciona una capa de pintura o una máscara de capa",
     ),
+    ("Advanced settings", "Ajustes avanzados"),
+    ("Import baked maps", "Importar mapas horneados"),
+    ("Name each file after its texture set, like Body_normal.png", "Nombra cada archivo según su conjunto de texturas, p. ej. Body_normal.png"),
+    ("Add...", "Añadir..."),
+    ("Baked maps imported: {count}", "Mapas horneados importados: {count}"),
+    ("Not imported: {files}", "Sin importar: {files}"),
 ];

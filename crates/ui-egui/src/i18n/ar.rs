@@ -1070,4 +1070,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ),
     ("Visible polygons only", "المضلعات المرئية فقط"),
     ("\"{layer}\" can't be filled: select a paint layer or a layer's mask", "\"{layer}\" لا يمكن تعبئتها: حدد طبقة رسم أو قناع طبقة"),
+    ("Advanced settings", "إعدادات متقدمة"),
+    ("Import baked maps", "استيراد خرائط مخبوزة"),
+    ("Name each file after its texture set, like Body_normal.png", "سمِّ كل ملف باسم مجموعة الخامات الخاصة به، مثل Body_normal.png"),
+    ("Add...", "إضافة..."),
+    ("Baked maps imported: {count}", "الخرائط المخبوزة المستوردة: {count}"),
+    ("Not imported: {files}", "لم يتم استيرادها: {files}"),
 ];

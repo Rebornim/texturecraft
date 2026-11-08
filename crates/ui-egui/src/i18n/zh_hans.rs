@@ -1032,4 +1032,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ),
     ("Visible polygons only", "仅可见多边形"),
     ("\"{layer}\" can't be filled: select a paint layer or a layer's mask", "“{layer}”无法填充：请选择绘画图层或图层遮罩"),
+    ("Advanced settings", "高级设置"),
+    ("Import baked maps", "导入已烘焙贴图"),
+    ("Name each file after its texture set, like Body_normal.png", "以纹理集名称为每个文件命名，例如 Body_normal.png"),
+    ("Add...", "添加..."),
+    ("Baked maps imported: {count}", "已导入的烘焙贴图：{count}"),
+    ("Not imported: {files}", "未导入：{files}"),
 ];

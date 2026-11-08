@@ -386,18 +386,17 @@ pub fn rail(app: &mut TextureCraftApp, ui: &mut egui::Ui) {
     egui::Panel::right("rail").resizable(false).exact_size(38.0).show_separator_line(false).frame(egui::Frame::NONE).show(ui, |ui| {
         card(ui, &tk, egui::Margin { left: 0, right: GUTTER, top: GUTTER, bottom: GUTTER }, egui::Margin::symmetric(3, 6), |ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
+            crate::rail_popup::begin_rail(ui.ctx(), ui.max_rect());
             if icon_button(ui, ic::EXPORT, &tip(&app.ui.keymap, tr("Export textures"), "ui.export"), app.ui.windows.export, 26.0).clicked() {
                 app.ui.windows.export = !app.ui.windows.export;
             }
-            for (panel, icon, id) in [
-                (Panel::TextureSetSettings, ic::STACK, "ui.view.textureSetSettings"),
-                (Panel::Display, ic::MONITOR, "ui.view.display"),
-                (Panel::Shader, ic::SLIDERS_HORIZONTAL, "ui.view.shader"),
-                (Panel::History, ic::CLOCK_COUNTER_CLOCKWISE, "ui.view.history"),
-                (Panel::Log, ic::FILE_TEXT, "ui.view.log"),
-            ] {
-                if icon_button(ui, icon, &tip(&app.ui.keymap, tr(panel.name()), id), app.ui.dock.is_visible(panel), 26.0).clicked() {
-                    app.ui.dock.toggle(panel);
+            // A panel in the dock, docked or floating, leaves the rail until it is closed there
+            let off_dock: Vec<_> = crate::rail_popup::RAIL_PANELS.into_iter().filter(|(panel, _, _)| !app.ui.dock.is_open(*panel)).collect();
+            for (panel, icon, id) in off_dock {
+                let response = icon_button(ui, icon, &tip(&app.ui.keymap, tr(panel.name()), id), app.ui.rail_panel == Some(panel), 26.0);
+                crate::rail_popup::remember_icon(ui.ctx(), panel, response.rect);
+                if response.clicked() {
+                    crate::rail_popup::toggle(app, panel);
                 }
             }
         });

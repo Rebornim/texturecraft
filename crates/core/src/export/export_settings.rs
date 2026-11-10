@@ -13,4 +13,7 @@ pub struct ExportSettings {
     pub normal_format: String,
     /// Colour space name of the colour maps; empty picks by file format
     pub color_space: String,
+    /// Also write the shader's parameters and the texture sets using it, as JSON
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub shader_parameters: bool,
 }

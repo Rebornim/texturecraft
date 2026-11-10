@@ -308,6 +308,8 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
         ui.end_row();
         export_note(ui, tr("Color maps only: normal, roughness, metallic and other data maps stay linear"));
     });
+    ui.add_space(4.0);
+    ui.checkbox(&mut settings.shader_parameters, tr("Export shader parameters"));
 
     #[cfg(not(target_arch = "wasm32"))]
     if pick_dir {

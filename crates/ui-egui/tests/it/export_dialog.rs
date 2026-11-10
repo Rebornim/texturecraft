@@ -331,3 +331,11 @@ fn global_settings_ticks_the_shader_parameters() {
     harness.run_steps(2);
     assert!(draft(&mut harness).settings.shader_parameters);
 }
+
+#[test]
+fn global_settings_ticks_the_usd_asset() {
+    let mut harness = harness(2, LAPTOP);
+    harness.get_by_label("Export USD asset").click();
+    harness.run_steps(2);
+    assert!(draft(&mut harness).settings.usd);
+}

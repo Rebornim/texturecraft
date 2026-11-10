@@ -11,6 +11,7 @@ use std::io::Write as _;
 use texturecraft_core::{Channel, NormalFormat};
 use texturecraft_geom::Mesh;
 
+use super::usd_texture_input::UsdTextureInput;
 use super::{is_black, parts};
 use crate::export::{ExportOptions, ExportPreset, ExportedFile, FileFormat, MapSpec, VirtualMap, sanitize_file_stem};
 use crate::presets::{ch, gray, rgb, virt};
@@ -163,9 +164,8 @@ fn identifier(s: &str, taken: &mut Vec<String>) -> String {
     id
 }
 
-/// The export scene: `/<name>` with the `Mesh` and `Materials`. `files[m]` are the texture
-/// file names (by slot) of material `m`.
-fn scene(mesh: &Mesh, name: &str, files: &[Vec<(usize, String)>]) -> Result<UsdLayer> {
+/// The export scene: `/<name>` with the `Mesh` and `Materials`; `files[m]` are the textures material `m` reads
+pub(crate) fn scene(mesh: &Mesh, name: &str, files: &[Vec<UsdTextureInput>]) -> Result<UsdLayer> {
     let vertex_count = mesh.positions.len();
     if vertex_count == 0 || mesh.indices.len() < 3 {
         return Err(FormatError::Invalid("the mesh is empty".into()));
@@ -249,15 +249,16 @@ fn scene(mesh: &Mesh, name: &str, files: &[Vec<(usize, String)>]) -> Result<UsdL
     Ok(UsdLayer { root })
 }
 
-/// A UsdPreviewSurface material at `path` whose slot inputs read `files` (slot, file name).
-fn material(path: &str, id: &str, files: &[(usize, String)]) -> UsdPrim {
+/// A UsdPreviewSurface material at `path` whose inputs read `files`
+fn material(path: &str, id: &str, files: &[UsdTextureInput]) -> UsdPrim {
     let mut mat = UsdPrim::new(id, "Material");
     mat.attrs.push(UsdAttr::connected("outputs:surface", "token", format!("{path}/PBR.outputs:surface")));
     let mut pbr = UsdPrim::new("PBR", "Shader");
     pbr.attrs.push(UsdAttr::new("info:id", "token", Some(UsdValue::Token("UsdPreviewSurface".into()))).uniform());
     let mut textures = Vec::new();
-    for (slot, file) in files {
-        let Some(&(stem, input, input_type, output, srgb)) = SLOTS.get(*slot) else { continue };
+    for texture in files {
+        let Some(&(stem, input, input_type, _, _)) = SLOTS.get(texture.slot) else { continue };
+        let (file, output, srgb) = (&texture.file, texture.output, texture.srgb);
         pbr.attrs.push(UsdAttr::connected(&format!("inputs:{input}"), input_type, format!("{path}/{stem}.outputs:{output}")));
         let mut tex = UsdPrim::new(stem, "Shader");
         let token = |s: &str| Some(UsdValue::Token(s.into()));
@@ -270,9 +271,10 @@ fn material(path: &str, id: &str, files: &[(usize, String)]) -> UsdPrim {
             UsdAttr::new("inputs:wrapT", "token", token("repeat")),
         ];
         if stem == "Normal" {
-            // Unpack 0..1 texels to -1..1 vectors.
-            tex.attrs.push(UsdAttr::new("inputs:scale", "float4", Some(UsdValue::Float4([2.0, 2.0, 2.0, 1.0]))));
-            tex.attrs.push(UsdAttr::new("inputs:bias", "float4", Some(UsdValue::Float4([-1.0, -1.0, -1.0, 0.0]))));
+            // Unpack 0..1 texels to -1..1 vectors (and a green-down normal's green back up)
+            let green = if texture.directx_normal { -1.0 } else { 1.0 };
+            tex.attrs.push(UsdAttr::new("inputs:scale", "float4", Some(UsdValue::Float4([2.0, 2.0 * green, 2.0, 1.0]))));
+            tex.attrs.push(UsdAttr::new("inputs:bias", "float4", Some(UsdValue::Float4([-1.0, -green, -1.0, 0.0]))));
         }
         tex.attrs.push(UsdAttr::new(&format!("outputs:{output}"), if output == "rgb" { "float3" } else { "float" }, None));
         textures.push(tex);
@@ -300,7 +302,9 @@ fn material(path: &str, id: &str, files: &[(usize, String)]) -> UsdPrim {
 pub fn usd_bytes(mesh: &Mesh, name: &str, textures: &[Vec<ExportedFile>], format: UsdFormat) -> Result<UsdExport> {
     let stem = sanitize_file_stem(name);
     let (names, files) = material_maps(mesh, &stem, textures);
-    let layer = scene(mesh, name, &names)?;
+    let inputs: Vec<Vec<UsdTextureInput>> =
+        names.into_iter().map(|slots| slots.into_iter().filter_map(|(slot, file)| UsdTextureInput::of_slot(slot, file)).collect()).collect();
+    let layer = scene(mesh, name, &inputs)?;
     Ok(match format {
         UsdFormat::Usda => UsdExport { bytes: usda(&layer).into_bytes(), textures: files },
         UsdFormat::Usdc => UsdExport { bytes: super::usdc::write(&layer)?, textures: files },

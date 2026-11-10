@@ -314,9 +314,18 @@ mod web {
         let with_shader_parameters =
             texturecraft_engine::export_settings_cmds::writes_shader_parameters(&app.session, &none, "file.exportTextures").map_err(|e| e.to_string())?;
         let exported_sets: Vec<usize> = jobs.iter().flat_map(|(sets, _)| sets.iter().copied()).collect();
+        let with_usd = texturecraft_engine::export_settings_cmds::writes_usd(&app.session, &none, "file.exportTextures").map_err(|e| e.to_string())?;
+        let mut warnings = Vec::new();
+        let usd_inputs = if with_usd { app.session.usd_asset_inputs(&jobs, &mut warnings).map_err(|e| e.to_string())? } else { Vec::new() };
+        app.session.log.extend(warnings);
         let mut files = Vec::new();
         for (sets, options) in jobs {
             files.extend(app.session.export_files(&sets, &options).map_err(|e| e.to_string())?);
+        }
+        if with_usd {
+            let layer = texturecraft_engine::formats::usd_asset(&app.session.mesh, &app.session.doc.project.name, &usd_inputs).map_err(|e| e.to_string())?;
+            let name = format!("{}.usda", sanitize_file_stem(&app.session.doc.project.name));
+            files.push(ExportedFile { name, bytes: layer.into_bytes(), width: 0, height: 0, warnings: Vec::new() });
         }
         if with_shader_parameters {
             let parameters = texturecraft_engine::shader_parameters::shader_parameters(&app.session, &exported_sets);

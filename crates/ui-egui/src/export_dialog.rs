@@ -228,7 +228,12 @@ fn export_settings_tab(app: &mut TextureCraftApp, ui: &mut Ui, presets: &[textur
                 });
             }
         }
-        None => global_settings(app, ui, &builtins, &user_presets),
+        None => {
+            egui::ScrollArea::vertical()
+                .id_salt("exp_global_settings")
+                .auto_shrink([false; 2])
+                .show(ui, |ui| global_settings(app, ui, &builtins, &user_presets));
+        }
     }
 }
 
@@ -309,6 +314,7 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
         export_note(ui, tr("Color maps only: normal, roughness, metallic and other data maps stay linear"));
     });
     ui.add_space(4.0);
+    ui.checkbox(&mut settings.usd, tr("Export USD asset"));
     ui.checkbox(&mut settings.shader_parameters, tr("Export shader parameters"));
 
     #[cfg(not(target_arch = "wasm32"))]

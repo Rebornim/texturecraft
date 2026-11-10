@@ -79,3 +79,9 @@ fn the_normal_format_follows_the_preset_visibly() {
     assert_eq!(normal_format_shown(&mut harness, document, NormalFormat::DirectX, ""), "From template / project (DirectX)");
     assert_eq!(normal_format_shown(&mut harness, unreal, NormalFormat::OpenGl, "openGl"), "OpenGL", "the override wins");
 }
+
+#[test]
+fn the_color_space_says_data_maps_stay_linear() {
+    let harness = harness(2, LAPTOP);
+    harness.get_by_label("Color maps only: normal, roughness, metallic and other data maps stay linear");
+}

@@ -133,6 +133,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Built-in: {mesh}", "مدمج: {mesh}"),
     ("Cage: {name}", "القفص (Cage): {name}"),
     ("Camera", "الكاميرا"),
+    (
+        "Color maps only: normal, roughness, metallic and other data maps stay linear",
+        "لخرائط الألوان فقط: خرائط النواظم والخشونة والمعدنية وغيرها من خرائط البيانات تبقى خطية",
+    ),
     ("Colors", "الألوان"),
     ("From template / project ({format})", "من قالب / مشروع ({format})"),
     ("Go to camera 1", "الانتقال إلى الكاميرا 1"),

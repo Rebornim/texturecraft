@@ -139,6 +139,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Built-in: {mesh}", "組み込み: {mesh}"),
     ("Cage: {name}", "ケージ: {name}"),
     ("Camera", "カメラ"),
+    (
+        "Color maps only: normal, roughness, metallic and other data maps stay linear",
+        "カラーマップのみ: ノーマル、ラフネス、メタリックなどのデータマップはリニアのままです",
+    ),
     ("Colors", "カラー"),
     ("From template / project ({format})", "テンプレート / プロジェクトから ({format})"),
     ("Go to camera 1", "カメラ 1 に移動"),

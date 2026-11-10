@@ -133,6 +133,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Built-in: {mesh}", "기본 제공: {mesh}"),
     ("Cage: {name}", "케이지: {name}"),
     ("Camera", "카메라"),
+    (
+        "Color maps only: normal, roughness, metallic and other data maps stay linear",
+        "컬러 맵에만 적용: 노멀, 러프니스, 메탈릭 등 데이터 맵은 선형으로 유지됩니다",
+    ),
     ("Colors", "색상"),
     ("From template / project ({format})", "템플릿 / 프로젝트 기준 ({format})"),
     ("Go to camera 1", "카메라 1 보기"),

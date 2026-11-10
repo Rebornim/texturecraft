@@ -121,6 +121,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Built-in: {mesh}", "内置：{mesh}"),
     ("Cage: {name}", "笼体：{name}"),
     ("Camera", "相机"),
+    ("Color maps only: normal, roughness, metallic and other data maps stay linear", "仅限颜色贴图：法线、粗糙度、金属度等数据贴图保持线性"),
     ("Colors", "颜色"),
     ("From template / project ({format})", "基于模板 / 项目 ({format})"),
     ("Go to camera 1", "转到相机 1"),

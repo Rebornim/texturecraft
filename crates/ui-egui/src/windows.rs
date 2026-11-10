@@ -1218,7 +1218,16 @@ fn export_settings_tab(app: &mut TextureCraftApp, ui: &mut Ui, presets: &[textur
             }
         });
         ui.end_row();
+        export_note(ui, tr("Color maps only: normal, roughness, metallic and other data maps stay linear"));
     });
+}
+
+/// A dim one-line note under the setting in the row above
+fn export_note(ui: &mut Ui, text: &str) {
+    let tk = Tokens::get(ui.ctx());
+    ui.label("");
+    ui.label(RichText::new(text).size(11.0).color(tk.text_dim));
+    ui.end_row();
 }
 
 /// The texture sets to export: a scrolling checkbox list with select all / none

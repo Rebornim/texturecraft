@@ -53,6 +53,15 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
                     app.ui.export.tab = i as u8;
                 }
             }
+            if app.ui.export.tab == 0 {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(tr("Include all")).clicked()
+                        && let Some(draft) = app.ui.export.settings.as_mut()
+                    {
+                        (0..draft.sets.len()).for_each(|ts| draft.set_exported(ts, true));
+                    }
+                });
+            }
         });
         ui.separator();
         ui.allocate_ui_with_layout(vec2(ui.available_width(), body_height), egui::Layout::left_to_right(egui::Align::Min), |ui| {
@@ -474,29 +483,47 @@ fn export_note(ui: &mut Ui, text: &str) {
     ui.end_row();
 }
 
-/// Global settings, then the texture sets: a tick exports a set, its name shows its settings, and * marks its overrides
+/// Global settings, then the texture sets: a tick exports a set (drag across ticks to set several), its name shows its settings, and * marks its overrides
 fn export_set_list(app: &mut TextureCraftApp, ui: &mut Ui) {
     let names: Vec<String> = app.session.doc.project.texture_sets.iter().map(|set| set.name.clone()).collect();
     let Some(draft) = app.ui.export.settings.as_mut() else { return };
 
     ui.set_width(EXPORT_SET_LIST_WIDTH);
     ui.horizontal(|ui| {
-        if ui.small_button(tr("Select all")).clicked() {
-            (0..names.len()).for_each(|ts| draft.set_exported(ts, true));
+        if ui.selectable_label(draft.selected.is_none(), RichText::new(tr("Global settings")).strong()).clicked() {
+            draft.selected = None;
         }
-        if ui.small_button(tr("Select none")).clicked() {
-            (0..names.len()).for_each(|ts| draft.set_exported(ts, false));
-        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.menu_button(ic::LIST, |ui| {
+                for (label, exported) in [(tr("Check all"), Some(true)), (tr("Uncheck all"), Some(false)), (tr("Invert all"), None)] {
+                    if ui.button(label).clicked() {
+                        for ts in 0..names.len() {
+                            draft.set_exported(ts, exported.unwrap_or(!draft.is_exported(ts)));
+                        }
+                    }
+                }
+            });
+        });
     });
-    if ui.selectable_label(draft.selected.is_none(), RichText::new(tr("Global settings")).strong()).clicked() {
-        draft.selected = None;
-    }
+
+    // The value a press on a tick set, given to every tick the pointer then passes over
+    let drag_id = egui::Id::unique("exp_sets_drag");
+    let mut drag: Option<bool> = ui.ctx().data(|data| data.get_temp(drag_id));
+    let (pointer, pressed, held) = ui.input(|input| (input.pointer.interact_pos(), input.pointer.primary_pressed(), input.pointer.primary_down()));
     egui::ScrollArea::vertical().id_salt("exp_sets").auto_shrink([false; 2]).show(ui, |ui| {
         for (ts, name) in names.into_iter().enumerate() {
             ui.horizontal(|ui| {
                 let mut exported = draft.is_exported(ts);
-                if ui.checkbox(&mut exported, "").changed() {
-                    draft.set_exported(ts, exported);
+                let tick = ui.checkbox(&mut exported, "");
+                let under_pointer = pointer.is_some_and(|at| tick.rect.contains(at));
+                if pressed && under_pointer {
+                    drag = Some(!draft.is_exported(ts));
+                }
+                match drag {
+                    Some(value) if held && under_pointer => draft.set_exported(ts, value),
+                    // Keyboard and accessibility toggles; a pointer press already set the tick
+                    None if tick.changed() => draft.set_exported(ts, exported),
+                    _ => {}
                 }
                 if ui.selectable_label(draft.selected == Some(ts), name).clicked() {
                     draft.selected = Some(ts);
@@ -505,6 +532,14 @@ fn export_set_list(app: &mut TextureCraftApp, ui: &mut Ui) {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label("*"));
                 }
             });
+        }
+    });
+    ui.ctx().data_mut(|data| match drag {
+        Some(value) if held => {
+            data.insert_temp(drag_id, value);
+        }
+        _ => {
+            data.remove_temp::<bool>(drag_id);
         }
     });
 }

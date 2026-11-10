@@ -13,6 +13,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "شقوق ومناطق محجوبة من خريطة الإطباق المحيطي: أوساخ وقذارة."),
     ("Custom", "مخصص"),
     ("Description", "الوصف"),
+    (
+        "Detail sizes blur the mesh map, so a replaced curvature input is read at its own size only.",
+        "أحجام التفاصيل تموّه خريطة الشبكة، لذا يُقرأ مدخل الانحناء البديل بحجمه فقط.",
+    ),
     ("Factor", "المعامل"),
     ("Follow Newest Map", "تتبّع أحدث خريطة"),
     ("Generators", "المولّدات"),
@@ -20,6 +24,8 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Global blur", "تمويه عام"),
     ("Global contrast", "تباين عام"),
     ("Global invert", "عكس عام"),
+    ("Image inputs", "مدخلات الصور"),
+    ("Mesh map", "خريطة الشبكة"),
     ("Occluded areas from the ambient occlusion map.", "المناطق المحجوبة من خريطة الإطباق المحيطي."),
     ("Output size", "حجم الإخراج"),
     (
@@ -27,6 +33,8 @@ pub const TABLE: &[(&str, &str)] = &[
         "الرسم متوقف مؤقتًا أثناء عرض عملية الخبز. ألغِ الخبز أو انتظر حتى ينتهي.",
     ),
     ("Parameters", "المعاملات"),
+    ("Procedural", "إجرائي"),
+    ("Read the mesh map again", "قراءة خريطة الشبكة مجددًا"),
     ("Resolution", "الدقة"),
     ("Restore defaults", "استعادة الافتراضيات"),
     ("Same as context", "مثل السياق"),

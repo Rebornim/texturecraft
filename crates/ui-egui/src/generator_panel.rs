@@ -4,15 +4,16 @@
 use egui::{RichText, Ui};
 use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
-use texturecraft_engine::core::{CurvatureDetail, CurvatureMode, Generator, GeneratorKind, OutputResolution, ResolutionMode};
+use texturecraft_engine::core::{BakedMap, CurvatureDetail, CurvatureMode, Generator, GeneratorKind, LayerId, OutputResolution, ResolutionMode, Source};
 
 use crate::TextureCraftApp;
-use crate::i18n::tr;
+use crate::dock::{anchor_label, anchors_below, image_drop, image_menu};
+use crate::i18n::{baked_map_label, tr, trf};
 use crate::theme::{Tokens, caption};
 use crate::widgets::{combo, section, slider_edit};
 
 /// The settings of generator effect `id`.
-pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, generator: &Generator) {
+pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: LayerId, id: u64, generator: &Generator) {
     let tk = Tokens::get(ui.ctx());
     ui.label(caption(tr("Generator")));
     egui::ComboBox::from_id_salt("gen_kind").selected_text(tr(generator.kind.label())).show_ui(ui, |ui| {
@@ -33,12 +34,21 @@ pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, id: u
         if matches!(generator.kind, GeneratorKind::Curvature | GeneratorKind::EdgeWear) {
             curvature_detail_properties(app, ui, id, generator.detail.as_ref());
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button(tr("Restore defaults")).clicked() {
-                app.run("effect.set", defaults_of(id, generator.kind));
-            }
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(tr("Restore defaults")).clicked() {
+                    app.run("effect.set", defaults_of(id, generator.kind));
+                }
+            });
         });
     });
+    if !generator.kind.inputs().is_empty() {
+        section(ui, "generator_inputs", tr("Image inputs"), true, |ui| {
+            for map in generator.kind.inputs() {
+                input_slot(app, ui, layer, id, *map, generator.inputs.get(map));
+            }
+        });
+    }
     if !app.session.doc.baked.contains_key(&app.session.ts()) {
         ui.label(RichText::new(format!("{} {}", ic::WARNING, tr("Bake mesh maps (F8) for curvature, AO and thickness based generators."))).color(tk.warning));
     }
@@ -233,5 +243,65 @@ fn curvature_mode_label(mode: CurvatureMode) -> &'static str {
         CurvatureMode::Cavities => tr("Cavities"),
         CurvatureMode::Both => tr("Edges and cavities"),
         CurvatureMode::Raw => tr("Raw curvature"),
+    }
+}
+
+/// One generator input: what it reads (its mesh map unless `source` replaces it), a menu to replace it, and a button to read the mesh map again.
+fn input_slot(app: &mut TextureCraftApp, ui: &mut Ui, layer: LayerId, id: u64, map: BakedMap, source: Option<&Source>) {
+    let tk = Tokens::get(ui.ctx());
+    let input = map.id();
+    let current = match source {
+        None => trf("Mesh map: {map}", &[("map", &tr(baked_map_label(map)))]),
+        Some(Source::Image { name, .. }) => trf("Image: {name}", &[("name", name)]),
+        Some(Source::Uniform(_)) => tr("Uniform value").to_string(),
+        Some(Source::Anchor { anchor, channel }) => anchor_label(app, *anchor, *channel),
+        Some(Source::Procedural { .. }) => tr("Procedural").to_string(),
+    };
+    let group = ui.group(|ui| {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr(baked_map_label(map))).strong());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if source.is_some() && ui.button(ic::X).on_hover_text(tr("Read the mesh map again")).clicked() {
+                    app.run("effect.set", json!({"effect": id, "input": input, "inputBaked": true}));
+                }
+            });
+        });
+        let anchors = anchors_below(app, layer);
+        combo(ui, tr("Source"), current, |ui| {
+            if ui.selectable_label(source.is_none(), tr("Mesh map")).clicked() {
+                app.run("effect.set", json!({"effect": id, "input": input, "inputBaked": true}));
+            }
+            if ui.selectable_label(matches!(source, Some(Source::Uniform(_))), tr("Uniform value")).clicked() {
+                app.run("effect.set", json!({"effect": id, "input": input, "inputValue": map.neutral()[0]}));
+            }
+            for (anchor, label) in &anchors {
+                if ui
+                    .selectable_label(
+                        matches!(source, Some(Source::Anchor { anchor: current, .. }) if current == anchor),
+                        trf("Anchor: {name}", &[("name", label)]),
+                    )
+                    .clicked()
+                {
+                    app.run("effect.set", json!({"effect": id, "input": input, "inputAnchor": anchor.0}));
+                }
+            }
+            if let Some(name) = image_menu(app, ui) {
+                app.run("effect.set", json!({"effect": id, "input": input, "inputImage": name}));
+            }
+        });
+        if let Some(Source::Uniform(value)) = source {
+            let mut value = value[0];
+            if let Some(merge) = slider_edit(ui, tr("Value"), &mut value, 0.0..=1.0, 2) {
+                app.run("effect.set", json!({"effect": id, "input": input, "inputValue": value, "merge": merge}));
+            }
+        }
+        if source.is_some_and(|source| !matches!(source, Source::Uniform(_))) && map == BakedMap::Curvature {
+            ui.label(
+                RichText::new(tr("Detail sizes blur the mesh map, so a replaced curvature input is read at its own size only.")).size(10.5).color(tk.text_dim),
+            );
+        }
+    });
+    if let Some(name) = image_drop(ui, &group.response) {
+        app.run("effect.set", json!({"effect": id, "input": input, "inputImage": name}));
     }
 }

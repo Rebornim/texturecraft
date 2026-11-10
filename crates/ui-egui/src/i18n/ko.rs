@@ -13,6 +13,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "앰비언트 오클루전 맵에서 얻은 틈새와 가려진 영역: 먼지와 때."),
     ("Custom", "사용자 지정"),
     ("Description", "설명"),
+    (
+        "Detail sizes blur the mesh map, so a replaced curvature input is read at its own size only.",
+        "디테일 크기는 메시 맵을 흐리게 하므로, 교체한 곡률 입력은 자체 크기로만 읽힙니다.",
+    ),
     ("Factor", "배율"),
     ("Follow Newest Map", "최신 맵 따라가기"),
     ("Generators", "생성기"),
@@ -20,6 +24,8 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Global blur", "전체 흐림"),
     ("Global contrast", "전체 대비"),
     ("Global invert", "전체 반전"),
+    ("Image inputs", "이미지 입력"),
+    ("Mesh map", "메시 맵"),
     ("Occluded areas from the ambient occlusion map.", "앰비언트 오클루전 맵에서 얻은 가려진 영역."),
     ("Output size", "출력 크기"),
     (
@@ -27,6 +33,8 @@ pub const TABLE: &[(&str, &str)] = &[
         "베이크를 표시하는 동안에는 페인팅이 일시 중지됩니다. 베이크를 취소하거나 끝날 때까지 기다리세요.",
     ),
     ("Parameters", "매개변수"),
+    ("Procedural", "절차적"),
+    ("Read the mesh map again", "메시 맵을 다시 읽기"),
     ("Resolution", "해상도"),
     ("Restore defaults", "기본값 복원"),
     ("Same as context", "컨텍스트와 동일"),

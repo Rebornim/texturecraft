@@ -1338,12 +1338,17 @@ impl<'a, 'b> Texel<'a, 'b> {
     fn generator_ramp(&mut self, generator: &Generator, curvature_sizes: Option<&CurvatureSizes>) -> f32 {
         let coords = self.coords();
         let signal = match (generator.kind, &generator.detail) {
-            (GeneratorKind::Curvature | GeneratorKind::EdgeWear, Some(detail)) => self.curvature_detail(detail, curvature_sizes),
-            (GeneratorKind::EdgeWear, None) => (self.baked(BakedMap::Curvature).unwrap_or(0.5) - 0.5) * 2.0,
-            (GeneratorKind::Curvature, None) => self.baked(BakedMap::Curvature).unwrap_or(0.5),
-            (GeneratorKind::Dirt, _) => 1.0 - self.baked(BakedMap::AmbientOcclusion).unwrap_or(1.0),
-            (GeneratorKind::AmbientOcclusion, _) => self.baked(BakedMap::AmbientOcclusion).unwrap_or(1.0),
-            (GeneratorKind::ThinAreas, _) => 1.0 - self.baked(BakedMap::Thickness).unwrap_or(1.0),
+            (GeneratorKind::Curvature | GeneratorKind::EdgeWear, Some(detail)) => {
+                // Detail sizes are blurred copies of the mesh map, so a replaced curvature input reads at its own size only
+                let sizes = if generator.inputs.contains_key(&BakedMap::Curvature) { None } else { curvature_sizes };
+                let curvature = self.generator_input(generator, BakedMap::Curvature);
+                self.curvature_detail(detail, sizes, curvature)
+            }
+            (GeneratorKind::EdgeWear, None) => (self.generator_input(generator, BakedMap::Curvature).unwrap_or(0.5) - 0.5) * 2.0,
+            (GeneratorKind::Curvature, None) => self.generator_input(generator, BakedMap::Curvature).unwrap_or(0.5),
+            (GeneratorKind::Dirt, _) => 1.0 - self.generator_input(generator, BakedMap::AmbientOcclusion).unwrap_or(1.0),
+            (GeneratorKind::AmbientOcclusion, _) => self.generator_input(generator, BakedMap::AmbientOcclusion).unwrap_or(1.0),
+            (GeneratorKind::ThinAreas, _) => 1.0 - self.generator_input(generator, BakedMap::Thickness).unwrap_or(1.0),
             (GeneratorKind::Position, _) => coords.pos.dot(Vec3::from(generator.direction).try_normalize().unwrap_or(Vec3::Y)) * 0.5 + 0.5,
             (GeneratorKind::Direction, _) => coords.nrm.dot(Vec3::from(generator.direction).try_normalize().unwrap_or(Vec3::Y)) * 0.5 + 0.5,
         };
@@ -1373,8 +1378,16 @@ impl<'a, 'b> Texel<'a, 'b> {
         finish_generator(generator, ramp)
     }
 
-    /// The curvature of `detail`'s mode at this texel: each detail size's edges and cavities, weighted and combined like a screen blend.
-    fn curvature_detail(&self, detail: &CurvatureDetail, curvature_sizes: Option<&CurvatureSizes>) -> f32 {
+    /// Generator input `map` at this texel: what replaces the mesh map in the generator's inputs, else the mesh map (None when not baked).
+    fn generator_input(&mut self, generator: &Generator, map: BakedMap) -> Option<f32> {
+        match generator.inputs.get(&map) {
+            Some(source) => Some(self.source(source, &Projection::default(), ChannelKind::Scalar)[0]),
+            None => self.baked(map),
+        }
+    }
+
+    /// The curvature of `detail`'s mode at this texel from `curvature` (None: nothing to read), with its blurred detail sizes when given.
+    fn curvature_detail(&self, detail: &CurvatureDetail, curvature_sizes: Option<&CurvatureSizes>, curvature: Option<f32>) -> f32 {
         let combine = |edges: f32, cavities: f32| match detail.mode {
             CurvatureMode::Edges => edges,
             CurvatureMode::Cavities => cavities,
@@ -1383,7 +1396,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         };
 
         // Without curvature to read the texel is flat: no edges or cavities
-        let Some(curvature) = self.baked(BakedMap::Curvature) else { return combine(0.0, 0.0) };
+        let Some(curvature) = curvature else { return combine(0.0, 0.0) };
 
         let working_size = (self.res, self.inp.gbuf.height);
         let texel_uv = [(self.x as f32 + 0.5) / working_size.0.max(1) as f32, (self.y as f32 + 0.5) / working_size.1.max(1) as f32];
@@ -2815,6 +2828,27 @@ mod tests {
         assert!(full[ridge] > 0.99 && full[beside] < 0.01, "at full resolution the ridge is one texel: {full:?}");
         assert!(eighth[ridge] < 0.5 && eighth[beside] > 0.01, "an eighth of the resolution averages it over its cell: {eighth:?}");
         assert!(eighth[far] < 0.01, "texels a few cells away stay black: {eighth:?}");
+    }
+
+    #[test]
+    fn a_generator_input_replaced_by_a_value_is_read_instead_of_the_mesh_map() {
+        let mut fixture = fixture();
+        fixture.baked = BakedMaps { resolution: 64, maps: [(BakedMap::AmbientOcclusion, Arc::new(vec![1.0; 64 * 64]))].into() };
+        let layer = fill_layer(&mut fixture.project, [1.0; 3], 1.0);
+        let value_with = |fixture: &mut Fixture, input: Option<f32>| -> f32 {
+            let mut generator = Generator { level: 0.5, softness: 0.1, noise_amount: 0.0, ..Generator::new(GeneratorKind::Dirt) };
+            if let Some(value) = input {
+                generator.inputs.insert(BakedMap::AmbientOcclusion, Source::Uniform([value; 3]));
+            }
+            let mut mask = Mask::new(MaskBackground::Black);
+            mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Generator(generator)));
+            fixture.project.layer_mut(layer).unwrap().mask = Some(mask);
+            run(fixture, None).value(Channel::BaseColor, 20, 20)[0]
+        };
+
+        // Dirt is where ambient occlusion is dark: none on the baked white map (the stack below shows), all of it on a black input
+        let (baked, black) = (value_with(&mut fixture, None), value_with(&mut fixture, Some(0.0)));
+        assert!(black > 0.99 && baked < black - 0.2, "baked {baked}, black input {black}");
     }
 
     #[test]

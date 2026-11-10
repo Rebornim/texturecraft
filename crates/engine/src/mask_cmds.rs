@@ -2,8 +2,8 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask, MaskBackground,
-    OutputResolution, Procedural, ProceduralKind, Project, ResolutionMode, Source,
+    BakedMap, BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask,
+    MaskBackground, OutputResolution, Procedural, ProceduralKind, Project, ResolutionMode, Source,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
@@ -94,7 +94,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor? (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -395,6 +395,35 @@ fn size_weights(command: &str, value: &Value) -> Result<[f32; CurvatureDetail::S
     Ok(weights)
 }
 
+/// The generator input named by `input` and what replaces it (None: its mesh map again), for a generator on layer `owner`.
+fn generator_input_param(session: &Session, owner: LayerId, params: &Value) -> Result<Option<(BakedMap, Option<Source>)>> {
+    const CMD: &str = "effect.set";
+    let Some(name) = params.get("input") else { return Ok(None) };
+    let name = name.as_str().ok_or_else(|| bad(CMD, "`input` must be a mesh map id"))?;
+    let map = BakedMap::parse(name).ok_or_else(|| bad(CMD, format!("unknown input `{name}`")))?;
+
+    let image = strp(params, "inputImage");
+    let value = f32p(params, "inputValue");
+    let anchor = u64p(params, "inputAnchor");
+    let baked = boolp(params, "inputBaked") == Some(true);
+    let source = match (image, value, anchor, baked) {
+        (Some(image), None, None, false) => {
+            if !session.doc.resources.contains_key(image) {
+                return Err(bad(CMD, format!("no image resource `{image}`")));
+            }
+            Some(Source::Image { name: image.to_string(), normal_format: Default::default() })
+        }
+        (None, Some(value), None, false) => Some(Source::Uniform([value.clamp(0.0, 1.0); 3])),
+        (None, None, Some(anchor), false) => {
+            let channel = channel_param(CMD, params, "anchorChannel")?.unwrap_or(Channel::Height);
+            Some(anchor_source(session, CMD, owner, LayerId(anchor), channel)?)
+        }
+        (None, None, None, true) => None,
+        _ => return Err(bad(CMD, "`input` takes exactly one of inputImage, inputValue, inputAnchor or inputBaked")),
+    };
+    Ok(Some((map, source)))
+}
+
 fn add_generator(session: &mut Session, params: &Value) -> Result<Value> {
     let kind = match strp(params, "generator") {
         Some(name) => GeneratorKind::parse(name).ok_or_else(|| bad("effect.add.generator", format!("unknown generator `{name}`")))?,
@@ -492,6 +521,12 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         _ => None,
     };
 
+    // `input` names a generator input that `inputImage`, `inputValue` or `inputAnchor` replaces, or `inputBaked` puts back
+    let input = match session.doc.project.effect(effect) {
+        Some((owner, Effect { kind: EffectKind::Generator(_), .. })) => generator_input_param(session, owner, params)?,
+        _ => None,
+    };
+
     // Naming the filter the effect already is edits its parameters like a plain effect.set
     let swapped = match strp(params, "filter") {
         Some(filter) if crate::filter_lib::find(filter).is_some_and(|def| current_filter_id(session, effect) == Some(def.id)) => None,
@@ -525,7 +560,18 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         }
 
         match &mut edited.kind {
-            EffectKind::Generator(generator) => generator_from(CMD, params, generator)?,
+            EffectKind::Generator(generator) => {
+                generator_from(CMD, params, generator)?;
+                if let Some((map, source)) = input.clone() {
+                    if !generator.kind.inputs().contains(&map) {
+                        return Err(bad(CMD, format!("this generator has no `{}` input", map.id())));
+                    }
+                    match source {
+                        Some(source) => generator.inputs.insert(map, source),
+                        None => generator.inputs.remove(&map),
+                    };
+                }
+            }
             EffectKind::Levels(levels) => levels_from(params, levels),
             // The swapped filter was built with the parameters already
             EffectKind::Filter(_) if swaps_filter => {}

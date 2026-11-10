@@ -13,6 +13,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "アンビエントオクルージョンマップから得た隙間や遮蔽部分: 汚れや垢。"),
     ("Custom", "カスタム"),
     ("Description", "説明"),
+    (
+        "Detail sizes blur the mesh map, so a replaced curvature input is read at its own size only.",
+        "ディテールサイズはメッシュマップをぼかすため、置き換えた曲率入力はそのサイズでのみ読まれます。",
+    ),
     ("Factor", "倍率"),
     ("Follow Newest Map", "最新のマップを追う"),
     ("Generators", "ジェネレーター"),
@@ -20,6 +24,8 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Global blur", "全体のぼかし"),
     ("Global contrast", "全体のコントラスト"),
     ("Global invert", "全体を反転"),
+    ("Image inputs", "画像入力"),
+    ("Mesh map", "メッシュマップ"),
     ("Occluded areas from the ambient occlusion map.", "アンビエントオクルージョンマップから得た遮蔽部分。"),
     ("Output size", "出力サイズ"),
     (
@@ -27,6 +33,8 @@ pub const TABLE: &[(&str, &str)] = &[
         "ベイクの表示中はペイントを一時停止しています。ベイクをキャンセルするか、終わるまでお待ちください。",
     ),
     ("Parameters", "パラメーター"),
+    ("Procedural", "プロシージャル"),
+    ("Read the mesh map again", "メッシュマップを再び読む"),
     ("Resolution", "解像度"),
     ("Restore defaults", "デフォルトに戻す"),
     ("Same as context", "コンテキストと同じ"),

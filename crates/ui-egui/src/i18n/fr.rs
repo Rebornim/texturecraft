@@ -13,6 +13,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "Crevasses et zones occultées issues de la carte d'occlusion ambiante : saleté et crasse."),
     ("Custom", "Personnalisé"),
     ("Description", "Description"),
+    (
+        "Detail sizes blur the mesh map, so a replaced curvature input is read at its own size only.",
+        "Les tailles de détail floutent la carte de maillage : une entrée de courbure remplacée n'est lue qu'à sa propre taille.",
+    ),
     ("Factor", "Facteur"),
     ("Follow Newest Map", "Suivre la dernière carte"),
     ("Generators", "Générateurs"),
@@ -20,6 +24,8 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Global blur", "Flou global"),
     ("Global contrast", "Contraste global"),
     ("Global invert", "Inversion globale"),
+    ("Image inputs", "Entrées d'image"),
+    ("Mesh map", "Carte de maillage"),
     ("Occluded areas from the ambient occlusion map.", "Zones occultées issues de la carte d'occlusion ambiante."),
     ("Output size", "Taille de sortie"),
     (
@@ -27,6 +33,8 @@ pub const TABLE: &[(&str, &str)] = &[
         "La peinture est suspendue tant qu'une cuisson est affichée. Annulez la cuisson ou attendez qu'elle se termine.",
     ),
     ("Parameters", "Paramètres"),
+    ("Procedural", "Procédural"),
+    ("Read the mesh map again", "Relire la carte de maillage"),
     ("Resolution", "Résolution"),
     ("Restore defaults", "Restaurer les valeurs par défaut"),
     ("Same as context", "Comme le contexte"),

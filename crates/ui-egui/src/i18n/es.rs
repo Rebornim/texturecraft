@@ -13,6 +13,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "Grietas y zonas ocluidas del mapa de oclusión ambiental: suciedad y mugre."),
     ("Custom", "Personalizado"),
     ("Description", "Descripción"),
+    (
+        "Detail sizes blur the mesh map, so a replaced curvature input is read at its own size only.",
+        "Los tamaños de detalle desenfocan el mapa de malla, así que una entrada de curvatura sustituida solo se lee a su propio tamaño.",
+    ),
     ("Factor", "Factor"),
     ("Follow Newest Map", "Seguir el mapa más reciente"),
     ("Generators", "Generadores"),
@@ -20,6 +24,8 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Global blur", "Desenfoque global"),
     ("Global contrast", "Contraste global"),
     ("Global invert", "Invertir global"),
+    ("Image inputs", "Entradas de imagen"),
+    ("Mesh map", "Mapa de malla"),
     ("Occluded areas from the ambient occlusion map.", "Zonas ocluidas del mapa de oclusión ambiental."),
     ("Output size", "Tamaño de salida"),
     (
@@ -27,6 +33,8 @@ pub const TABLE: &[(&str, &str)] = &[
         "La pintura está en pausa mientras se muestra un horneado. Cancela el horneado o espera a que termine.",
     ),
     ("Parameters", "Parámetros"),
+    ("Procedural", "Procedural"),
+    ("Read the mesh map again", "Volver a leer el mapa de malla"),
     ("Resolution", "Resolución"),
     ("Restore defaults", "Restablecer valores predeterminados"),
     ("Same as context", "Igual que el contexto"),

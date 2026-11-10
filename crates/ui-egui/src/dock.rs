@@ -1069,7 +1069,7 @@ pub(crate) fn texture_set_settings(app: &mut TextureCraftApp, ui: &mut Ui) {
 }
 
 /// Menu items listing the image resources, then Import...: the image picked, if any.
-fn image_menu(app: &mut TextureCraftApp, ui: &mut Ui) -> Option<String> {
+pub(crate) fn image_menu(app: &mut TextureCraftApp, ui: &mut Ui) -> Option<String> {
     ui.label(caption(tr("Images")));
     let mut picked = None;
     // Bounded, so Import... and the items after it stay on screen with many images.
@@ -1092,7 +1092,7 @@ fn image_menu(app: &mut TextureCraftApp, ui: &mut Ui) -> Option<String> {
 
 /// An image from the Assets panel dropped on `resp`, outlined while one hovers it. Other assets
 /// are left for the drop targets around it.
-fn image_drop(ui: &Ui, resp: &egui::Response) -> Option<String> {
+pub(crate) fn image_drop(ui: &Ui, resp: &egui::Response) -> Option<String> {
     if !resp.dnd_hover_payload::<ShelfDrag>().is_some_and(|d| matches!(d.asset, Asset::Texture(_))) {
         return None;
     }
@@ -1930,7 +1930,7 @@ fn with(base: &Value, extra: Value) -> Value {
 }
 
 /// Anchor points below layer `reader` in its texture set: (effect id, "layer / anchor" label).
-fn anchors_below(app: &TextureCraftApp, reader: LayerId) -> Vec<(LayerId, String)> {
+pub(crate) fn anchors_below(app: &TextureCraftApp, reader: LayerId) -> Vec<(LayerId, String)> {
     let p = &app.session.doc.project;
     let Some((ts, _, _)) = p.locate(reader) else { return Vec::new() };
     p.walk(ts)
@@ -1942,7 +1942,7 @@ fn anchors_below(app: &TextureCraftApp, reader: LayerId) -> Vec<(LayerId, String
         .collect()
 }
 
-fn anchor_label(app: &TextureCraftApp, anchor: LayerId, channel: Channel) -> String {
+pub(crate) fn anchor_label(app: &TextureCraftApp, anchor: LayerId, channel: Channel) -> String {
     let name = app.session.doc.project.effect(anchor).map(|(_, e)| e.name.clone()).unwrap_or_else(|| tr("missing").into());
     trf("Anchor: {name} ({channel})", &[("name", &name), ("channel", &tr(channel.label()))])
 }
@@ -2263,7 +2263,7 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, eid:
     ui.separator();
 
     match &effect.kind {
-        EffectKind::Generator(generator) => crate::generator_panel::generator_properties(app, ui, id, generator),
+        EffectKind::Generator(generator) => crate::generator_panel::generator_properties(app, ui, layer.id, id, generator),
         EffectKind::Levels(levels) => crate::levels_properties::levels_properties(app, ui, layer, eid, levels),
         EffectKind::Fill { source, .. } => {
             ui.label(caption(tr("Fill")));

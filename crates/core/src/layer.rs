@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BlendMode, Channel, ChannelKind, lum};
+use crate::{BakedMap, BlendMode, Channel, ChannelKind, lum};
 
 mod curvature_detail;
 mod curvature_mode;
@@ -532,6 +532,16 @@ impl GeneratorKind {
             GeneratorKind::Direction => "Light / direction",
         }
     }
+    /// The mesh maps this kind reads, each an input that an image, a uniform value or an anchor can replace.
+    pub fn inputs(self) -> &'static [BakedMap] {
+        match self {
+            GeneratorKind::EdgeWear | GeneratorKind::Curvature => &[BakedMap::Curvature],
+            GeneratorKind::Dirt | GeneratorKind::AmbientOcclusion => &[BakedMap::AmbientOcclusion],
+            GeneratorKind::ThinAreas => &[BakedMap::Thickness],
+            GeneratorKind::Position | GeneratorKind::Direction => &[],
+        }
+    }
+
     pub fn parse(s: &str) -> Option<GeneratorKind> {
         let norm = |x: &str| x.to_ascii_lowercase().replace([' ', '_', '-', ':'], "");
         GeneratorKind::ALL.into_iter().find(|k| norm(&format!("{k:?}")) == norm(s) || norm(k.label()) == norm(s))
@@ -561,6 +571,9 @@ pub struct Generator {
     /// The resolution the generator is computed at (the texture set's for generators saved before it existed).
     #[serde(default, skip_serializing_if = "OutputResolution::is_default")]
     pub resolution: OutputResolution,
+    /// What an input reads instead of its mesh map (an image, a uniform value or an anchor); inputs not listed read their mesh map.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub inputs: BTreeMap<BakedMap, Source>,
 }
 
 impl Generator {
@@ -589,6 +602,7 @@ impl Generator {
             detail,
             global: GeneratorGlobal::default(),
             resolution: OutputResolution::default(),
+            inputs: BTreeMap::new(),
         }
     }
 }

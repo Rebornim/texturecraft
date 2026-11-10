@@ -144,6 +144,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Dilation + diffusion", "Dilatación + difusión"),
     ("Disable override for all items", "Desactivar la anulación en todos los elementos"),
     ("Enable override for all items", "Activar la anulación en todos los elementos"),
+    ("Export shader parameters", "Exportar los parámetros del sombreador"),
     ("From template / project ({format})", "Desde la plantilla / el proyecto ({format})"),
     ("Global settings", "Ajustes globales"),
     ("Go to camera 1", "Ir a la cámara 1"),

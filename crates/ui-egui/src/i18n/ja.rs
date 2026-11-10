@@ -150,6 +150,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Dilation + diffusion", "ダイレーション + 拡散"),
     ("Disable override for all items", "すべての項目の上書きを無効化"),
     ("Enable override for all items", "すべての項目の上書きを有効化"),
+    ("Export shader parameters", "シェーダーパラメーターを書き出す"),
     ("From template / project ({format})", "テンプレート / プロジェクトから ({format})"),
     ("Global settings", "グローバル設定"),
     ("Go to camera 1", "カメラ 1 に移動"),

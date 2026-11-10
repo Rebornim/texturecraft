@@ -87,6 +87,19 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
     get(s, &Value::Null)
 }
 
+/// Whether an export call also writes the shader parameters: `p`'s `shaderParameters`, else the settings' (none with explicit options)
+pub fn writes_shader_parameters(s: &Session, p: &Value, cmd: &str) -> Result<bool> {
+    if let Some(asked) = crate::commands::boolp(p, "shaderParameters") {
+        return Ok(asked);
+    }
+    if has_explicit_options(p) {
+        return Ok(false);
+    }
+
+    let settings = settings_param(p, cmd)?.or_else(|| s.doc.project.export.clone()).unwrap_or_default();
+    Ok(settings.shader_parameters)
+}
+
 /// Whether `p` sets export options itself instead of using the saved settings
 pub fn has_explicit_options(p: &Value) -> bool {
     EXPLICIT_OPTIONS.iter().any(|key| p.get(key).is_some_and(|v| !v.is_null()))
@@ -277,6 +290,23 @@ mod tests {
         .unwrap();
         assert!(!everywhere.dithered_maps.contains(&height), "the template's 16-bit height stays undithered");
         assert!(everywhere.dithered_maps.contains(&0));
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn saved_settings_export_to_the_saved_folder_with_the_shader_parameters() {
+        let mut s = session();
+        let dir = std::env::temp_dir().join(format!("tc_saved_export_settings_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let settings = ExportSettings { dir: dir.display().to_string(), shader_parameters: true, ..Default::default() };
+        execute(&mut s, "export.settings.set", &json!({"settings": settings})).unwrap();
+
+        let result = execute(&mut s, "file.exportTextures", &json!({})).unwrap();
+        let json = dir.join("Material_Ball_shaders.json");
+        assert!(result["files"].as_array().unwrap().iter().any(|file| file.as_str().unwrap().ends_with("Material_Ball_shaders.json")));
+        let written: Value = serde_json::from_str(&std::fs::read_to_string(&json).unwrap()).unwrap();
+        assert_eq!(written["shaders"][0]["textureSets"], json!(["Ball", "Base"]));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

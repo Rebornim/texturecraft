@@ -310,9 +310,19 @@ mod web {
     fn export(app: &mut TextureCraftApp) -> Result<String, String> {
         let jobs =
             texturecraft_engine::export_settings_cmds::export_jobs(&app.session, &serde_json::json!({}), "file.exportTextures").map_err(|e| e.to_string())?;
+        let none = serde_json::json!({});
+        let with_shader_parameters =
+            texturecraft_engine::export_settings_cmds::writes_shader_parameters(&app.session, &none, "file.exportTextures").map_err(|e| e.to_string())?;
+        let exported_sets: Vec<usize> = jobs.iter().flat_map(|(sets, _)| sets.iter().copied()).collect();
         let mut files = Vec::new();
         for (sets, options) in jobs {
             files.extend(app.session.export_files(&sets, &options).map_err(|e| e.to_string())?);
+        }
+        if with_shader_parameters {
+            let parameters = texturecraft_engine::shader_parameters::shader_parameters(&app.session, &exported_sets);
+            let name = texturecraft_engine::shader_parameters::shader_parameters_file(&app.session.doc.project.name);
+            let bytes = serde_json::to_vec_pretty(&parameters).map_err(|e| e.to_string())?;
+            files.push(ExportedFile { name, bytes, width: 0, height: 0, warnings: Vec::new() });
         }
         app.session.log.extend(files.iter().flat_map(|f| f.warnings.iter().cloned()));
         let name = match files.as_slice() {

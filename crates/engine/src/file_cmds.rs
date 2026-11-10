@@ -42,7 +42,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Export textures",
             ["File"],
             None,
-            "{dir (optional once export settings with a directory are saved), preset?: built-in or user preset name, or a preset object {name, maps}, ts?: index|\"all\", format?: png|jpg|tga|tif|exr|..., bitDepth?, padding?: none|dilation|dilationDefault|infinite|diffusion, dilation?: px, size?: px, dithering?: bool (8-bit files are dithered against banding), normalFormat?: openGl|directX, colorSpace?: sRGB (default for 8/16-bit files)|Linear Rec.709 (default for exr, hdr)|ACEScg|ACES2065-1 (colour maps are converted, data maps never are; 8/16-bit files clamp to 0-1; a chosen space is also recorded in the colour maps: an ICC profile in PNG, JPEG, TIFF and WebP, the chromaticities in EXR; TGA, BMP and HDR can't hold one and warn), materialX?: bool (also write a .mtlx OpenPBR material per texture set; needs the \"OpenPBR (separate maps)\" preset)}",
+            "{dir (optional once export settings with a directory are saved), preset?: built-in or user preset name, or a preset object {name, maps}, ts?: index|\"all\", format?: png|jpg|tga|tif|exr|..., bitDepth?, padding?: none|dilation|dilationDefault|infinite|diffusion, dilation?: px, size?: px, dithering?: bool (8-bit files are dithered against banding), normalFormat?: openGl|directX, colorSpace?: sRGB (default for 8/16-bit files)|Linear Rec.709 (default for exr, hdr)|ACEScg|ACES2065-1 (colour maps are converted, data maps never are; 8/16-bit files clamp to 0-1; a chosen space is also recorded in the colour maps: an ICC profile in PNG, JPEG, TIFF and WebP, the chromaticities in EXR; TGA, BMP and HDR can't hold one and warn), materialX?: bool (also write a .mtlx OpenPBR material per texture set; needs the \"OpenPBR (separate maps)\" preset), shaderParameters?: bool (also write <project>_shaders.json: the shader's settings and its texture sets)}",
             always,
             export_textures
         ),
@@ -496,10 +496,12 @@ fn export_textures(s: &mut Session, p: &Value) -> Result<Value> {
         (Err(error), None) => return Err(error),
     };
     let jobs = crate::export_settings_cmds::export_jobs(s, p, CMD)?;
+    let with_shader_parameters = crate::export_settings_cmds::writes_shader_parameters(s, p, CMD)?;
     std::fs::create_dir_all(&dir).map_err(|e| bad(CMD, format!("cannot create {dir}: {e}")))?;
 
     let mut warnings = Vec::new();
     let mut written = Vec::new();
+    let exported_sets: Vec<usize> = jobs.iter().flat_map(|(sets, _)| sets.iter().copied()).collect();
     for (sets, opts) in jobs {
         let files = s.export_files(&sets, &opts)?;
         warnings.extend(files.iter().flat_map(|f| f.warnings.iter().cloned()));
@@ -507,6 +509,13 @@ fn export_textures(s: &mut Session, p: &Value) -> Result<Value> {
         if p.get("materialX").and_then(Value::as_bool).unwrap_or(false) {
             written.extend(write_materialx(s, &sets, &opts, std::path::Path::new(&dir), &mut warnings)?);
         }
+    }
+
+    if with_shader_parameters {
+        let path = std::path::Path::new(&dir).join(crate::shader_parameters::shader_parameters_file(&s.doc.project.name));
+        let text = serde_json::to_string_pretty(&crate::shader_parameters::shader_parameters(s, &exported_sets)).map_err(|e| bad(CMD, e.to_string()))?;
+        std::fs::write(&path, text).map_err(|e| bad(CMD, format!("cannot write {}: {e}", path.display())))?;
+        written.push(path);
     }
 
     s.log.push(format!("Exported {} textures to {dir}", written.len()));

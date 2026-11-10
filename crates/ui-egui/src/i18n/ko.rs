@@ -144,6 +144,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Dilation + diffusion", "확장 + 확산"),
     ("Disable override for all items", "모든 항목 재정의 해제"),
     ("Enable override for all items", "모든 항목 재정의 사용"),
+    ("Export shader parameters", "셰이더 매개변수 내보내기"),
     ("From template / project ({format})", "템플릿 / 프로젝트 기준 ({format})"),
     ("Global settings", "전역 설정"),
     ("Go to camera 1", "카메라 1 보기"),

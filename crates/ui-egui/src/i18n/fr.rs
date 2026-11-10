@@ -150,6 +150,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Dilation + diffusion", "Dilatation + diffusion"),
     ("Disable override for all items", "Désactiver le remplacement pour tous les éléments"),
     ("Enable override for all items", "Activer le remplacement pour tous les éléments"),
+    ("Export shader parameters", "Exporter les paramètres du shader"),
     ("From template / project ({format})", "Selon le modèle / projet ({format})"),
     ("Global settings", "Paramètres globaux"),
     ("Go to camera 1", "Aller à la caméra 1"),

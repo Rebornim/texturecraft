@@ -323,3 +323,11 @@ fn padding_offers_dilation_with_diffusion() {
     let distance = harness.get_all_by_role(Role::SpinButton).find(|node| (node.rect().center().y - row).abs() < 6.0).unwrap();
     assert!(!distance.accesskit_node().is_disabled(), "diffusion starts beyond a set distance");
 }
+
+#[test]
+fn global_settings_ticks_the_shader_parameters() {
+    let mut harness = harness(2, LAPTOP);
+    harness.get_by_label("Export shader parameters").click();
+    harness.run_steps(2);
+    assert!(draft(&mut harness).settings.shader_parameters);
+}

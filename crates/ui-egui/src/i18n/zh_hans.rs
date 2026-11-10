@@ -129,6 +129,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Dilation + diffusion", "扩张 + 扩散"),
     ("Disable override for all items", "为所有项目停用覆盖"),
     ("Enable override for all items", "为所有项目启用覆盖"),
+    ("Export shader parameters", "导出着色器参数"),
     ("From template / project ({format})", "基于模板 / 项目 ({format})"),
     ("Global settings", "全局设置"),
     ("Go to camera 1", "转到相机 1"),

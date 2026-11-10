@@ -198,28 +198,17 @@ impl Default for NewProject {
     }
 }
 
-/// The export dialog's settings (remembered between sessions).
+/// The export dialog's state; the settings themselves are saved in the project
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExportUi {
+    /// The last output directory used, where a project without saved settings starts
     pub dir: String,
+    /// Output templates tab: the selected template
     pub preset: String,
-    /// File extension override ("" = the preset's formats).
-    pub format: String,
-    /// Bit depth override (0 = the preset's).
-    pub bit_depth: u8,
-    /// none | dilation | dilationDefault | infinite
-    pub padding: String,
-    pub dilation: u32,
-    /// Output size override (0 = each texture set's size).
-    pub size: u32,
-    /// "" (project), openGl or directX.
-    pub normal_format: String,
-    /// "" (by file format: sRGB, or linear for float files), or a colour space name.
-    #[serde(default)]
-    pub color_space: String,
-    /// Texture sets excluded from export.
-    pub skip: Vec<usize>,
     pub tab: u8,
+    /// The open window's unsaved edits
+    #[serde(skip)]
+    pub settings: Option<crate::export_draft::ExportDraft>,
     /// Output templates tab: the selected user preset being edited (saved whenever it is valid).
     #[serde(skip)]
     pub draft: Option<texturecraft_engine::formats::ExportPreset>,
@@ -232,16 +221,9 @@ impl Default for ExportUi {
     fn default() -> Self {
         ExportUi {
             dir: default_export_dir(),
-            preset: "Document channels + Normal + AO".into(),
-            format: String::new(),
-            bit_depth: 0,
-            padding: "infinite".into(),
-            dilation: 16,
-            size: 0,
-            normal_format: String::new(),
-            color_space: String::new(),
-            skip: Vec::new(),
+            preset: texturecraft_engine::core::DEFAULT_EXPORT_PRESET.into(),
             tab: 0,
+            settings: None,
             draft: None,
             renaming: None,
         }

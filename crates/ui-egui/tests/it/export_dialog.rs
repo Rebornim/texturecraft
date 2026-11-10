@@ -5,6 +5,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable};
 use texturecraft_engine::core::NormalFormat;
 use texturecraft_ui_egui::TextureCraftApp;
+use texturecraft_ui_egui::export_draft::ExportDraft;
 
 const MANY_SETS: usize = 80;
 const LAPTOP: egui::Vec2 = egui::vec2(1280.0, 720.0);
@@ -22,6 +23,15 @@ fn harness(set_count: usize, size: egui::Vec2) -> Harness<'static, TextureCraftA
     harness.state_mut().ui.windows.export = true;
     harness.run_steps(3);
     harness
+}
+
+/// The open window's unsaved edits
+fn draft<'a>(harness: &'a mut Harness<'static, TextureCraftApp>) -> &'a mut ExportDraft {
+    harness.state_mut().ui.export.settings.as_mut().unwrap()
+}
+
+fn exported_sets(harness: &mut Harness<'static, TextureCraftApp>) -> usize {
+    draft(harness).sets.iter().filter(|set| !set.skip).count()
 }
 
 #[test]
@@ -43,10 +53,10 @@ fn the_set_list_selects_all_or_none() {
     let mut harness = harness(MANY_SETS, LAPTOP);
     harness.get_by_label("Select none").click();
     harness.run_steps(2);
-    assert_eq!(harness.state().ui.export.skip.len(), MANY_SETS, "every set is left out");
+    assert_eq!(exported_sets(&mut harness), 0, "every set is left out");
     harness.get_by_label("Select all").click();
     harness.run_steps(2);
-    assert!(harness.state().ui.export.skip.is_empty(), "every set is exported");
+    assert_eq!(exported_sets(&mut harness), MANY_SETS, "every set is exported");
 }
 
 #[test]
@@ -59,10 +69,10 @@ fn escape_closes_the_dialog() {
 
 /// The value shown in the dialog's Normal map format combo
 fn normal_format_shown(harness: &mut Harness<'static, TextureCraftApp>, preset: &str, project: NormalFormat, chosen: &str) -> String {
-    let app = harness.state_mut();
-    app.ui.export.preset = preset.into();
-    app.ui.export.normal_format = chosen.into();
-    app.session.doc.project.normal_format = project;
+    let draft = draft(harness);
+    draft.settings.parameters.preset = preset.into();
+    draft.settings.normal_format = chosen.into();
+    harness.state_mut().session.doc.project.normal_format = project;
     harness.run_steps(2);
     let row = harness.get_by_label("Normal map format").rect().center().y;
     let combo = harness.get_all_by_role(Role::ComboBox).find(|node| (node.rect().center().y - row).abs() < 4.0).unwrap();
@@ -84,4 +94,38 @@ fn the_normal_format_follows_the_preset_visibly() {
 fn the_color_space_says_data_maps_stay_linear() {
     let harness = harness(2, LAPTOP);
     harness.get_by_label("Color maps only: normal, roughness, metallic and other data maps stay linear");
+}
+
+#[test]
+fn save_settings_writes_the_project_and_cancel_drops_the_edits() {
+    let mut harness = harness(2, LAPTOP);
+    draft(&mut harness).settings.parameters.format = "tga".into();
+    harness.get_by_label("Save settings").click();
+    harness.run_steps(2);
+    let saved = harness.state().session.doc.project.export.clone().unwrap();
+    assert_eq!(saved.parameters.format, "tga");
+    assert!(harness.state().ui.windows.export, "Save settings keeps the window open");
+
+    draft(&mut harness).settings.parameters.format = "png".into();
+    harness.get_by_label("Cancel").click();
+    harness.run_steps(2);
+    assert!(harness.state().ui.export.settings.is_none(), "the edits are dropped");
+    assert_eq!(harness.state().session.doc.project.export.as_ref().unwrap().parameters.format, "tga");
+
+    harness.state_mut().ui.windows.export = true;
+    harness.run_steps(2);
+    assert_eq!(draft(&mut harness).settings.parameters.format, "tga", "the window reopens on the saved settings");
+}
+
+#[test]
+fn the_bottom_bar_counts_the_textures_to_export() {
+    let mut harness = harness(2, LAPTOP);
+    let plan = texturecraft_engine::execute(&mut harness.state_mut().session, "export.plan", &serde_json::json!({})).unwrap();
+    let all = plan.as_array().unwrap().len();
+    harness.get_by_label(&format!("{all} textures selected for export"));
+
+    draft(&mut harness).sets[1].skip = true;
+    harness.run_steps(2);
+    let one_set = plan.as_array().unwrap().iter().filter(|file| file["ts"] == 0).count();
+    harness.get_by_label(&format!("{one_set} textures selected for export"));
 }

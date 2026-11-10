@@ -301,6 +301,7 @@ fn apply(app: &mut TextureCraftApp, ctx: &egui::Context, act: ListAction) {
             let name = app.ui.export.preset.clone();
             if app.run("export.preset.remove", json!({ "name": name })).is_some() {
                 app.ui.export.preset = crate::state::ExportUi::default().preset;
+                follow_rename(app, &name, &app.ui.export.preset.clone());
                 app.toast(trf("Deleted template \"{name}\"", &[("name", &name)]), false);
             }
         }
@@ -329,6 +330,16 @@ fn rename(app: &mut TextureCraftApp, name: &str) {
         && let Some(n) = r.get("name").and_then(Value::as_str)
     {
         app.ui.export.preset = n.to_string();
+        follow_rename(app, &old, n);
+    }
+}
+
+/// The Settings tab's template choice follows a renamed or removed template (`new` is the default after a removal)
+fn follow_rename(app: &mut TextureCraftApp, old: &str, new: &str) {
+    if let Some(draft) = app.ui.export.settings.as_mut()
+        && draft.settings.parameters.preset == old
+    {
+        draft.settings.parameters.preset = new.to_string();
     }
 }
 
@@ -501,7 +512,7 @@ fn commit(app: &mut TextureCraftApp, preset: ExportPreset) {
 /// The file each map produces for the current texture set with the dialog's settings (None:
 /// the set has none of the map's sources), via `export.plan`.
 fn preview_names(app: &mut TextureCraftApp, preset: &ExportPreset) -> Result<Vec<Option<String>>, String> {
-    let mut p = crate::windows::export_params(app);
+    let mut p = crate::export_dialog::global_params(app);
     p["preset"] = serde_json::to_value(preset).map_err(|e| e.to_string())?;
     p["ts"] = json!(app.session.ts());
     let plan = texturecraft_engine::execute(&mut app.session, "export.plan", &p).map_err(|e| e.to_string())?;

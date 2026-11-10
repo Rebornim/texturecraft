@@ -3,8 +3,8 @@
 use egui::{Color32, RichText, Ui, vec2};
 use egui_phosphor::regular as ic;
 use serde_json::json;
+use texturecraft_engine::core::ToneMapping;
 use texturecraft_engine::core::project::ENV_RESOURCE_PREFIX;
-use texturecraft_engine::core::{NormalFormat, ToneMapping};
 use texturecraft_engine::geom::primitives::BUILTINS;
 use texturecraft_render::ibl::ENVIRONMENTS;
 
@@ -18,21 +18,13 @@ use crate::state::Mode;
 use crate::theme::{Accent, Brightness, Tokens, caption};
 use crate::widgets::{color_swatch, combo, icon_button, primary_button, section, slider};
 
-/// Export textures dialog: its width, its texture set column's width and its body's height
-const EXPORT_DIALOG_WIDTH: f32 = 820.0;
-const EXPORT_SET_LIST_WIDTH: f32 = 180.0;
-const EXPORT_BODY_HEIGHT: f32 = 360.0;
-/// Its title bar, tabs, button row and margins, kept on screen in a short app window
-const EXPORT_DIALOG_CHROME_HEIGHT: f32 = 160.0;
-const EXPORT_BODY_MIN_HEIGHT: f32 = 120.0;
-
 pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     start(app, ctx);
     new_project(app, ctx);
     about(app, ctx);
     settings(app, ctx);
     crate::keymap::window(app, ctx);
-    crate::windows::export(app, ctx);
+    crate::export_dialog::show(app, ctx);
     #[cfg(target_arch = "wasm32")]
     export_mesh(app, ctx);
     unsaved(app, ctx);
@@ -160,7 +152,7 @@ pub(crate) fn window<'a>(id: &str, title: &str, open: &'a mut bool) -> egui::Win
 }
 
 /// A centered dialog; `id` keeps its place across UI languages.
-fn dialog<'a>(id: &str, title: &str, open: &'a mut bool) -> egui::Window<'a> {
+pub(crate) fn dialog<'a>(id: &str, title: &str, open: &'a mut bool) -> egui::Window<'a> {
     egui::Window::new(title.to_owned())
         .id(egui::Id::unique(id))
         .open(open)
@@ -1051,283 +1043,6 @@ pub fn file_action(app: &mut TextureCraftApp, ctx: &egui::Context, id: &str) -> 
         _ => return false,
     }
     true
-}
-
-/// Texture sets ticked in the export dialog.
-fn export_selection(app: &TextureCraftApp) -> Vec<usize> {
-    (0..app.session.set_count()).filter(|i| !app.ui.export.skip.contains(i)).collect()
-}
-
-/// Export the selected texture sets; false when a command failed (its error is already shown).
-#[cfg(not(target_arch = "wasm32"))]
-fn export_sets(app: &mut TextureCraftApp) -> bool {
-    let mut written = 0usize;
-    for ts in export_selection(app) {
-        let mut p = export_params(app);
-        p["dir"] = json!(app.ui.export.dir);
-        p["ts"] = json!(ts);
-        match app.run("file.exportTextures", p) {
-            Some(r) => written += r.get("files").and_then(|f| f.as_array()).map(Vec::len).unwrap_or(0),
-            None => return false,
-        }
-    }
-    app.toast(trf("Exported {n} textures to {folder}", &[("n", &written), ("folder", &app.ui.export.dir)]), false);
-    true
-}
-
-/// In the browser the textures download (one zip for several files).
-#[cfg(target_arch = "wasm32")]
-fn export_sets(app: &mut TextureCraftApp) -> bool {
-    let sets = export_selection(app);
-    crate::web_files::export_textures(app, &export_params(app), &sets);
-    true
-}
-
-pub(crate) fn export_params(app: &TextureCraftApp) -> serde_json::Value {
-    let e = &app.ui.export;
-    let mut p = json!({"preset": e.preset, "padding": e.padding, "dilation": e.dilation});
-    if !e.format.is_empty() {
-        p["format"] = json!(e.format);
-    }
-    if e.bit_depth > 0 {
-        p["bitDepth"] = json!(e.bit_depth);
-    }
-    if e.size > 0 {
-        p["size"] = json!(e.size);
-    }
-    if !e.normal_format.is_empty() {
-        p["normalFormat"] = json!(e.normal_format);
-    }
-    if !e.color_space.is_empty() {
-        p["colorSpace"] = json!(e.color_space);
-    }
-    p
-}
-
-fn export_settings_tab(app: &mut TextureCraftApp, ui: &mut Ui, presets: &[texturecraft_engine::formats::ExportPreset]) {
-    ui.label(caption(tr("General export parameters")));
-    egui::Grid::new("exp_grid").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
-        // The browser downloads the files instead.
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            ui.label(tr("Output directory"));
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut app.ui.export.dir).desired_width(360.0));
-                if ui.button("...").clicked() {
-                    app.ask_file(FileDialog::folder().directory(app.ui.export.dir.clone()), Bound::App, |app, paths| {
-                        if let Some(d) = paths.first() {
-                            app.ui.export.dir = d.display().to_string();
-                        }
-                    });
-                }
-            });
-            ui.end_row();
-        }
-        ui.label(tr("Output template"));
-        egui::ComboBox::from_id_salt("exp_preset").width(360.0).selected_text(app.ui.export.preset.clone()).show_ui(ui, |ui| {
-            for p in presets {
-                ui.selectable_value(&mut app.ui.export.preset, p.name.clone(), &p.name);
-            }
-            if !app.session.export_presets.list.is_empty() {
-                ui.separator();
-            }
-            for p in &app.session.export_presets.list {
-                ui.selectable_value(&mut app.ui.export.preset, p.name.clone(), &p.name);
-            }
-        });
-        ui.end_row();
-        ui.label(tr("File type"));
-        ui.horizontal(|ui| {
-            let label = if app.ui.export.format.is_empty() { tr("From template").to_string() } else { app.ui.export.format.clone() };
-            egui::ComboBox::from_id_salt("exp_fmt").selected_text(label).show_ui(ui, |ui| {
-                ui.selectable_value(&mut app.ui.export.format, String::new(), tr("From template"));
-                for f in ["png", "jpeg", "tga", "tiff", "bmp", "webp", "exr", "hdr"] {
-                    ui.selectable_value(&mut app.ui.export.format, f.to_string(), f);
-                }
-            });
-            let bd = if app.ui.export.bit_depth == 0 { tr("Default").to_string() } else { trf("{n} bits", &[("n", &app.ui.export.bit_depth)]) };
-            egui::ComboBox::from_id_salt("exp_bits").selected_text(bd).show_ui(ui, |ui| {
-                for (v, l) in [
-                    (0u8, tr("Default").to_string()),
-                    (8, trf("{n} bits", &[("n", &8)])),
-                    (16, trf("{n} bits", &[("n", &16)])),
-                    (32, tr("32 bits (float)").to_string()),
-                ] {
-                    ui.selectable_value(&mut app.ui.export.bit_depth, v, l);
-                }
-            });
-        });
-        ui.end_row();
-        ui.label(tr("Size"));
-        let sz = if app.ui.export.size == 0 { tr("Based on each texture set's size").to_string() } else { format!("{0} x {0}", app.ui.export.size) };
-        egui::ComboBox::from_id_salt("exp_size").width(360.0).selected_text(sz).show_ui(ui, |ui| {
-            ui.selectable_value(&mut app.ui.export.size, 0, tr("Based on each texture set's size"));
-            for r in [256u32, 512, 1024, 2048, 4096, 8192] {
-                ui.selectable_value(&mut app.ui.export.size, r, format!("{r} x {r}"));
-            }
-        });
-        ui.end_row();
-        ui.label(tr("Padding"));
-        ui.horizontal(|ui| {
-            let label = match app.ui.export.padding.as_str() {
-                "none" => tr("No padding (passthrough)"),
-                "dilation" => tr("Dilation + transparent"),
-                "dilationDefault" => tr("Dilation + default background color"),
-                _ => tr("Dilation infinite"),
-            };
-            egui::ComboBox::from_id_salt("exp_pad").width(260.0).selected_text(label).show_ui(ui, |ui| {
-                for (v, l) in [
-                    ("infinite", tr("Dilation infinite")),
-                    ("dilation", tr("Dilation + transparent")),
-                    ("dilationDefault", tr("Dilation + default background color")),
-                    ("none", tr("No padding (passthrough)")),
-                ] {
-                    ui.selectable_value(&mut app.ui.export.padding, v.to_string(), l);
-                }
-            });
-            if app.ui.export.padding.starts_with("dilation") {
-                ui.add(egui::DragValue::new(&mut app.ui.export.dilation).range(0..=256).suffix(" px"));
-            }
-        });
-        ui.end_row();
-        ui.label(tr("Normal map format"));
-        // The preset's own convention, so picking an engine preset shows what it writes
-        let preset_format =
-            match app.session.export_preset(&app.ui.export.preset).and_then(|preset| preset.normal_format(app.session.doc.project.normal_format)) {
-                Some(NormalFormat::OpenGl) => trf("From template / project ({format})", &[("format", &"OpenGL")]),
-                Some(NormalFormat::DirectX) => trf("From template / project ({format})", &[("format", &"DirectX")]),
-                None => tr("From template / project").to_string(),
-            };
-        let shown = match app.ui.export.normal_format.as_str() {
-            "openGl" => "OpenGL".to_string(),
-            "directX" => "DirectX".to_string(),
-            _ => preset_format.clone(),
-        };
-        egui::ComboBox::from_id_salt("exp_nf").selected_text(shown).show_ui(ui, |ui| {
-            for (value, label) in [("", preset_format), ("openGl", "OpenGL".to_string()), ("directX", "DirectX".to_string())] {
-                ui.selectable_value(&mut app.ui.export.normal_format, value.to_string(), label);
-            }
-        });
-        ui.end_row();
-        ui.label(tr("Color space"));
-        let shown = if app.ui.export.color_space.is_empty() { tr("Default") } else { app.ui.export.color_space.as_str() };
-        egui::ComboBox::from_id_salt("exp_cs").selected_text(shown).show_ui(ui, |ui| {
-            ui.selectable_value(&mut app.ui.export.color_space, String::new(), tr("Default"));
-            for name in ["sRGB", "Linear Rec.709", "ACEScg", "ACES2065-1"] {
-                ui.selectable_value(&mut app.ui.export.color_space, name.to_string(), name);
-            }
-        });
-        ui.end_row();
-        export_note(ui, tr("Color maps only: normal, roughness, metallic and other data maps stay linear"));
-    });
-}
-
-/// A dim one-line note under the setting in the row above
-fn export_note(ui: &mut Ui, text: &str) {
-    let tk = Tokens::get(ui.ctx());
-    ui.label("");
-    ui.label(RichText::new(text).size(11.0).color(tk.text_dim));
-    ui.end_row();
-}
-
-/// The texture sets to export: a scrolling checkbox list with select all / none
-fn export_set_list(app: &mut TextureCraftApp, ui: &mut Ui) {
-    ui.set_width(EXPORT_SET_LIST_WIDTH);
-    ui.label(RichText::new(tr("Texture sets")).strong());
-    ui.horizontal(|ui| {
-        if ui.small_button(tr("Select all")).clicked() {
-            app.ui.export.skip.clear();
-        }
-        if ui.small_button(tr("Select none")).clicked() {
-            app.ui.export.skip = (0..app.session.set_count()).collect();
-        }
-    });
-    egui::ScrollArea::vertical().id_salt("exp_sets").auto_shrink([false; 2]).show(ui, |ui| {
-        for i in 0..app.session.set_count() {
-            let name = app.session.doc.project.texture_sets.get(i).map(|t| t.name.clone()).unwrap_or_default();
-            let mut on = !app.ui.export.skip.contains(&i);
-            if ui.checkbox(&mut on, name).changed() {
-                if on {
-                    app.ui.export.skip.retain(|x| *x != i);
-                } else {
-                    app.ui.export.skip.push(i);
-                }
-            }
-        }
-    });
-}
-
-pub fn export(app: &mut TextureCraftApp, ctx: &egui::Context) {
-    let tk = Tokens::get(ctx);
-    if !app.ui.windows.export {
-        return;
-    }
-    let mut open = true;
-    let mut do_export = false;
-    let presets = texturecraft_engine::formats::builtin_presets();
-    let body_height = (ctx.content_rect().height() - EXPORT_DIALOG_CHROME_HEIGHT).clamp(EXPORT_BODY_MIN_HEIGHT, EXPORT_BODY_HEIGHT);
-    dialog("export_textures", tr("Export textures"), &mut open).min_width(EXPORT_DIALOG_WIDTH).max_width(EXPORT_DIALOG_WIDTH).show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            for (i, t) in [tr("Settings"), tr("Output templates"), tr("List of exports")].iter().enumerate() {
-                if ui.selectable_label(app.ui.export.tab == i as u8, caption(t)).clicked() {
-                    app.ui.export.tab = i as u8;
-                }
-            }
-        });
-        ui.separator();
-        ui.allocate_ui_with_layout(vec2(ui.available_width(), body_height), egui::Layout::left_to_right(egui::Align::Min), |ui| {
-            ui.set_height(body_height);
-            if app.ui.export.tab == 1 {
-                crate::export_templates::tab(app, ui, &presets);
-                return;
-            }
-            ui.vertical(|ui| export_set_list(app, ui));
-            ui.separator();
-            ui.vertical(|ui| match app.ui.export.tab {
-                0 => export_settings_tab(app, ui, &presets),
-                _ => {
-                    let mut params = export_params(app);
-                    params["ts"] = json!("all");
-                    match texturecraft_engine::execute(&mut app.session, "export.plan", &params) {
-                        Ok(v) => {
-                            egui::ScrollArea::vertical().max_height(ui.available_height()).show(ui, |ui| {
-                                for f in v.as_array().into_iter().flatten() {
-                                    let ts = f.get("ts").and_then(|t| t.as_u64()).unwrap_or(0) as usize;
-                                    if !app.ui.export.skip.contains(&ts) {
-                                        ui.label(RichText::new(f.get("file").and_then(|x| x.as_str()).unwrap_or_default()).monospace());
-                                    }
-                                }
-                            });
-                        }
-                        Err(e) => {
-                            ui.label(RichText::new(e.to_string()).color(tk.danger));
-                        }
-                    }
-                }
-            });
-        });
-        ui.add_space(8.0);
-        ui.separator();
-        ui.horizontal(|ui| {
-            if ui.button(tr("Reset all")).clicked() {
-                app.ui.export = crate::state::ExportUi::default();
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add(primary_button(ui, tr("Export"))).clicked() {
-                    do_export = true;
-                }
-                if ui.button(tr("Cancel")).clicked() {
-                    app.ui.windows.export = false;
-                }
-            });
-        });
-    });
-    if do_export && export_sets(app) {
-        app.ui.windows.export = false;
-    }
-    if !open {
-        app.ui.windows.export = false;
-    }
 }
 
 #[cfg(test)]

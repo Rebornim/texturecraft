@@ -212,7 +212,6 @@ pub use web::{
 #[cfg(target_arch = "wasm32")]
 mod web {
     use super::*;
-    use serde_json::Value;
     use wasm_bindgen::JsCast as _;
 
     /// Whether the project has unsaved changes, for the page's `beforeunload` listener.
@@ -300,18 +299,21 @@ mod web {
         }
     }
 
-    /// Export texture sets `sets` with `file.exportTextures` params (minus `dir` and `ts`): one
-    /// file downloads as is, several as `<project>_textures.zip`.
-    pub fn export_textures(app: &mut TextureCraftApp, params: &Value, sets: &[usize]) {
-        match export(app, params, sets) {
+    /// Download the textures the project's saved export settings write: one file as is, several as `<project>_textures.zip`
+    pub fn export_textures(app: &mut TextureCraftApp) {
+        match export(app) {
             Ok(name) => app.toast(trf("Downloaded {name}", &[("name", &name)]), false),
             Err(e) => app.toast(trf("Couldn't export textures: {error}", &[("error", &e)]), true),
         }
     }
 
-    fn export(app: &mut TextureCraftApp, params: &Value, sets: &[usize]) -> Result<String, String> {
-        let opts = texturecraft_engine::file_cmds::export_options(&app.session, params, "file.exportTextures").map_err(|e| e.to_string())?;
-        let files = app.session.export_files(sets, &opts).map_err(|e| e.to_string())?;
+    fn export(app: &mut TextureCraftApp) -> Result<String, String> {
+        let jobs =
+            texturecraft_engine::export_settings_cmds::export_jobs(&app.session, &serde_json::json!({}), "file.exportTextures").map_err(|e| e.to_string())?;
+        let mut files = Vec::new();
+        for (sets, options) in jobs {
+            files.extend(app.session.export_files(&sets, &options).map_err(|e| e.to_string())?);
+        }
         app.session.log.extend(files.iter().flat_map(|f| f.warnings.iter().cloned()));
         let name = match files.as_slice() {
             [] => return Err("the preset produced no files".into()),

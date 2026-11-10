@@ -8,7 +8,7 @@ use egui::{RichText, Ui, vec2};
 use egui_phosphor::regular as ic;
 use maps_action::MapsAction;
 use serde_json::json;
-use texturecraft_engine::core::{ExportOverrides, NormalFormat, TextureSetExport};
+use texturecraft_engine::core::{ExportOverrides, ExportSettings, NormalFormat, TextureSetExport};
 use texturecraft_engine::formats::FileFormat;
 
 use crate::TextureCraftApp;
@@ -18,7 +18,7 @@ use crate::export_draft::ExportDraft;
 use crate::file_dialogs::{Bound, FileDialog};
 use crate::i18n::{tr, trf};
 use crate::theme::{Tokens, caption};
-use crate::widgets::{icon_button_without_tooltip, primary_button};
+use crate::widgets::{icon_button, icon_button_without_tooltip, primary_button};
 
 /// Width of the window and of its texture set column
 const EXPORT_DIALOG_WIDTH: f32 = 820.0;
@@ -39,6 +39,8 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     }
     if app.ui.export.settings.as_ref().is_none_or(|draft| draft.sets.len() != app.session.set_count()) {
         app.ui.export.settings = Some(ExportDraft::from_project(&app.session.doc.project, &app.ui.export.dir));
+        // The window always opens on Settings
+        app.ui.export.tab = 0;
     }
 
     let tk = Tokens::get(ctx);
@@ -123,7 +125,8 @@ fn bottom_bar(app: &mut TextureCraftApp, ui: &mut Ui) -> Option<BottomAction> {
     let mut action = None;
     let count = exported_count(app);
     ui.horizontal(|ui| {
-        if ui.button(tr("Reset all")).clicked()
+        if app.ui.export.tab == 0
+            && ui.button(tr("Reset all")).clicked()
             && let Some(draft) = app.ui.export.settings.as_mut()
         {
             draft.reset(&app.ui.export.dir);
@@ -237,11 +240,19 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
         .as_ref()
         .and_then(|draft| app.session.export_preset(&draft.settings.parameters.preset))
         .and_then(|preset| preset.normal_format(project_normal));
+    let default_dir = app.ui.export.dir.clone();
     let Some(draft) = app.ui.export.settings.as_mut() else { return };
 
     let mut pick_dir = false;
+    ui.horizontal(|ui| {
+        ui.label(caption(tr("General export parameters")));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if icon_button(ui, ic::ARROW_COUNTER_CLOCKWISE, tr("Reset the general export parameters"), false, OVERRIDE_PEN_SIZE).clicked() {
+                draft.settings = ExportSettings { dir: default_dir, ..Default::default() };
+            }
+        });
+    });
     let settings = &mut draft.settings;
-    ui.label(caption(tr("General export parameters")));
     egui::Grid::new("exp_grid").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
         // The browser downloads the files instead
         #[cfg(not(target_arch = "wasm32"))]

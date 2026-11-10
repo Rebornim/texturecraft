@@ -251,11 +251,15 @@ fn the_reset_icon_resets_the_general_parameters() {
     assert_eq!(draft(&mut harness).sets[1].overrides.size, Some(1024), "a set's overrides are its own");
 }
 
-/// The combo on the row labelled `label`, the `nth` from the left
+/// The combo on the dialog row labelled `label` (other panels have labels like Size too), the `nth` from the left
 fn combo_on_row<'a>(harness: &'a Harness<'static, TextureCraftApp>, label: &str, nth: usize) -> egui_kittest::Node<'a> {
-    let row = harness.get_by_label(label).rect().center().y;
-    let mut combos: Vec<_> = harness.get_all_by_role(Role::ComboBox).filter(|node| (node.rect().center().y - row).abs() < 6.0).collect();
-    combos.sort_by(|a, b| a.rect().min.x.total_cmp(&b.rect().min.x));
+    let on_row = |row: f32| {
+        let mut combos: Vec<_> = harness.get_all_by_role(Role::ComboBox).filter(|node| (node.rect().center().y - row).abs() < 6.0).collect();
+        combos.sort_by(|a, b| a.rect().min.x.total_cmp(&b.rect().min.x));
+        combos
+    };
+    let rows = harness.get_all_by_label(label).map(|node| node.rect().center().y);
+    let mut combos = rows.map(on_row).find(|combos| combos.len() > nth).unwrap();
     combos.remove(nth)
 }
 
@@ -275,4 +279,15 @@ fn a_file_type_offers_only_the_bit_depths_it_holds() {
     combo_on_row(&harness, "File type", 1).click();
     harness.run_steps(2);
     assert!(harness.query_by_label("16 bits").is_none(), "targa holds 8 bits only");
+}
+
+#[test]
+fn the_size_list_starts_at_128() {
+    let mut harness = harness(2, LAPTOP);
+    combo_on_row(&harness, "Size", 0).click();
+    harness.run_steps(2);
+    harness.get_by_label("Maximum size for all texture sets");
+    harness.get_by_label("128 x 128").click();
+    harness.run_steps(2);
+    assert_eq!(draft(&mut harness).settings.parameters.size, 128);
 }

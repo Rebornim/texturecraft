@@ -134,6 +134,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Cage: {name}", "케이지: {name}"),
     ("Camera", "카메라"),
     ("Colors", "색상"),
+    ("From template / project ({format})", "템플릿 / 프로젝트 기준 ({format})"),
     ("Go to camera 1", "카메라 1 보기"),
     ("Go to camera 2", "카메라 2 보기"),
     ("Go to camera 3", "카메라 3 보기"),

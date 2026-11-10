@@ -160,6 +160,22 @@ fn directx_flips_green() {
 }
 
 #[test]
+fn presets_name_the_normal_convention_they_write() {
+    let preset = |name: &str| builtin_preset(name).unwrap();
+    assert_eq!(preset("Unreal Engine (Packed)").normal_format(NormalFormat::OpenGl), Some(NormalFormat::DirectX));
+    assert_eq!(preset("glTF PBR Metal Roughness").normal_format(NormalFormat::DirectX), Some(NormalFormat::OpenGl));
+    for project in [NormalFormat::OpenGl, NormalFormat::DirectX] {
+        assert_eq!(preset("Document channels + Normal + AO").normal_format(project), Some(project), "document normals follow the project");
+    }
+
+    let mut mixed = preset("Unreal Engine (Packed)");
+    mixed.maps.extend(preset("glTF PBR Metal Roughness").maps);
+    assert_eq!(mixed.normal_format(NormalFormat::OpenGl), None);
+    mixed.maps.clear();
+    assert_eq!(mixed.normal_format(NormalFormat::OpenGl), None, "no normal output");
+}
+
+#[test]
 fn height_becomes_normal_detail() {
     let mut fx = Fx::new(&[Channel::BaseColor, Channel::Height]);
     // Height rises to the right and down the image.

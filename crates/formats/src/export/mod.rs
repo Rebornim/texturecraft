@@ -262,6 +262,19 @@ pub struct ExportPreset {
 }
 
 impl ExportPreset {
+    /// The convention all of this preset's normal outputs use (document normals follow `project`); None if it has none or mixes both
+    pub fn normal_format(&self, project: NormalFormat) -> Option<NormalFormat> {
+        let mut formats = self.maps.iter().flat_map(|map| &map.channels).filter_map(|(_, source)| match source {
+            SourceRef::Virtual { map: VirtualMap::NormalOpenGl, .. } => Some(NormalFormat::OpenGl),
+            SourceRef::Virtual { map: VirtualMap::NormalDirectX, .. } => Some(NormalFormat::DirectX),
+            SourceRef::Virtual { map: VirtualMap::HeightNormal, .. } | SourceRef::Channel { channel: Channel::Normal, .. } => Some(project),
+            _ => None,
+        });
+        let first = formats.next()?;
+
+        formats.all(|format| format == first).then_some(first)
+    }
+
     /// Structural checks for (untrusted) presets.
     pub fn validate(&self) -> Result<()> {
         let bad = |m: String| Err(FormatError::Invalid(format!("export preset \"{}\": {m}", self.name)));

@@ -543,4 +543,11 @@ fn export_dialog_snapshots() {
             save(&mut harness, &output_dir, &format!("export-{name}-{theme}"));
         }
     }
+
+    // The normal map format's choices with a preset that writes DirectX
+    harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    harness.state_mut().ui.export.preset = "Unreal Engine (Packed)".into();
+    harness.run_steps(2);
+    harness.get_all_by_role(egui::accesskit::Role::ComboBox).find(|node| node.value().as_deref() == Some("From template / project (DirectX)")).unwrap().click();
+    save(&mut harness, &output_dir, "export-normal-format-open");
 }

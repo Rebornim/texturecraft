@@ -1,8 +1,9 @@
-//! The Export textures dialog: it fits the app window with many texture sets, and Esc closes it.
+//! The Export textures dialog: it fits the app window, Esc closes it, and its notes say what each setting writes
 
 use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable};
+use texturecraft_engine::core::NormalFormat;
 use texturecraft_ui_egui::TextureCraftApp;
 
 const MANY_SETS: usize = 80;
@@ -54,4 +55,27 @@ fn escape_closes_the_dialog() {
     harness.key_press(egui::Key::Escape);
     harness.run_steps(2);
     assert!(!harness.state().ui.windows.export);
+}
+
+/// The value shown in the dialog's Normal map format combo
+fn normal_format_shown(harness: &mut Harness<'static, TextureCraftApp>, preset: &str, project: NormalFormat, chosen: &str) -> String {
+    let app = harness.state_mut();
+    app.ui.export.preset = preset.into();
+    app.ui.export.normal_format = chosen.into();
+    app.session.doc.project.normal_format = project;
+    harness.run_steps(2);
+    let row = harness.get_by_label("Normal map format").rect().center().y;
+    let combo = harness.get_all_by_role(Role::ComboBox).find(|node| (node.rect().center().y - row).abs() < 4.0).unwrap();
+    combo.value().unwrap_or_default()
+}
+
+#[test]
+fn the_normal_format_follows_the_preset_visibly() {
+    let mut harness = harness(2, LAPTOP);
+    let unreal = "Unreal Engine (Packed)";
+    let document = "Document channels + Normal + AO";
+    assert_eq!(normal_format_shown(&mut harness, unreal, NormalFormat::OpenGl, ""), "From template / project (DirectX)");
+    assert_eq!(normal_format_shown(&mut harness, document, NormalFormat::OpenGl, ""), "From template / project (OpenGL)");
+    assert_eq!(normal_format_shown(&mut harness, document, NormalFormat::DirectX, ""), "From template / project (DirectX)");
+    assert_eq!(normal_format_shown(&mut harness, unreal, NormalFormat::OpenGl, "openGl"), "OpenGL", "the override wins");
 }

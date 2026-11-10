@@ -122,6 +122,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Cage: {name}", "笼体：{name}"),
     ("Camera", "相机"),
     ("Colors", "颜色"),
+    ("From template / project ({format})", "基于模板 / 项目 ({format})"),
     ("Go to camera 1", "转到相机 1"),
     ("Go to camera 2", "转到相机 2"),
     ("Go to camera 3", "转到相机 3"),

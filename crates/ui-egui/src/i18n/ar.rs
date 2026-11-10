@@ -701,6 +701,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Search commands or keys", "البحث في الأوامر أو المفاتيح"),
     ("Seed", "البذرة العشوائية (Seed)"),
     ("Select a layer", "تحديد طبقة"),
+    ("Select a layer to paint on", "حدد طبقة للرسم عليها"),
     ("Select an output template", "تحديد قالب إخراج"),
     ("Select source", "تحديد المصدر"),
     ("Select the mask (Alt+click: show it in the viewport)", "تحديد القناع (Alt+نقر: عرضه في منفذ العرض)"),

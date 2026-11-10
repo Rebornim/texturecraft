@@ -710,6 +710,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Search commands or keys", "명령 또는 키 검색"),
     ("Seed", "시드"),
     ("Select a layer", "레이어를 선택하세요"),
+    ("Select a layer to paint on", "페인트할 레이어를 선택하세요"),
     ("Select an output template", "출력 템플릿을 선택하세요"),
     ("Select source", "소스 선택"),
     ("Select the mask (Alt+click: show it in the viewport)", "마스크를 선택합니다 (Alt+클릭: 뷰포트에 표시)"),

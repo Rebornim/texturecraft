@@ -668,6 +668,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Search commands or keys", "搜索命令或按键"),
     ("Seed", "随机种子"),
     ("Select a layer", "选择图层"),
+    ("Select a layer to paint on", "选择要绘制的图层"),
     ("Select an output template", "选择输出模板"),
     ("Select source", "选择来源"),
     ("Select the mask (Alt+click: show it in the viewport)", "选择遮罩（Alt+单击：在视口中显示）"),

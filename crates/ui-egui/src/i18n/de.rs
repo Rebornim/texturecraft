@@ -737,6 +737,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Search commands or keys", "Befehle oder Tasten suchen"),
     ("Seed", "Startwert"),
     ("Select a layer", "Ebene auswählen"),
+    ("Select a layer to paint on", "Ebene zum Malen auswählen"),
     ("Select an output template", "Ausgabevorlage auswählen"),
     ("Select source", "Quelle auswählen"),
     ("Select the mask (Alt+click: show it in the viewport)", "Maske auswählen (Alt+Klick: im Ansichtsfenster anzeigen)"),

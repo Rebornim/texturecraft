@@ -719,6 +719,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Search commands or keys", "コマンドまたはキーを検索"),
     ("Seed", "シード"),
     ("Select a layer", "レイヤーを選択"),
+    ("Select a layer to paint on", "ペイントするレイヤーを選択"),
     ("Select an output template", "出力テンプレートを選択"),
     ("Select source", "ソースを選択"),
     ("Select the mask (Alt+click: show it in the viewport)", "マスクを選択 (Alt+クリック: ビューポートに表示)"),

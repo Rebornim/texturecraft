@@ -129,3 +129,45 @@ fn the_bottom_bar_counts_the_textures_to_export() {
     let one_set = plan.as_array().unwrap().iter().filter(|file| file["ts"] == 0).count();
     harness.get_by_label(&format!("{one_set} textures selected for export"));
 }
+
+/// The pen on the row labelled `parameter` in a texture set's settings
+fn pen<'a>(harness: &'a Harness<'static, TextureCraftApp>, parameter: &str) -> egui_kittest::Node<'a> {
+    let row = harness.get_all_by_label(parameter).last().unwrap().rect().center().y;
+    harness.get_all_by_label("Override for this texture set").find(|node| (node.rect().center().y - row).abs() < 6.0).unwrap()
+}
+
+#[test]
+fn a_texture_set_overrides_a_parameter_with_its_pen() {
+    let mut harness = harness(2, LAPTOP);
+    harness.get_by_label("Base").click();
+    harness.run_steps(2);
+    assert_eq!(draft(&mut harness).selected, Some(1));
+    assert!(harness.query_by_label("Based on each texture set's size").is_none(), "a set shows its own size, not the global choice");
+    harness.get_by_label("256x256 (texture set size)");
+
+    pen(&harness, "Size").click();
+    harness.run_steps(2);
+    assert_eq!(draft(&mut harness).sets[1].overrides.size, Some(0), "the override starts from the global value");
+    assert!(harness.get_all_by_label("*").next().is_some(), "the set's row marks the override");
+
+    pen(&harness, "Size").click();
+    harness.run_steps(2);
+    assert_eq!(draft(&mut harness).sets[1].overrides.size, None, "a second click goes back to the global value");
+    assert!(harness.query_all_by_label("*").next().is_none(), "the marker goes with the override");
+}
+
+#[test]
+fn the_section_menu_overrides_every_parameter_or_none() {
+    let mut harness = harness(2, LAPTOP);
+    harness.get_by_label("Base").click();
+    harness.run_steps(2);
+    for (item, overridden) in [("Enable override for all items", true), ("Disable override for all items", false)] {
+        harness.get_by_label(egui_phosphor::regular::LIST).click();
+        harness.run_steps(2);
+        harness.get_by_label(item).click();
+        harness.run_steps(2);
+        let overrides = draft(&mut harness).sets[1].overrides.clone();
+        let all = [overrides.preset.is_some(), overrides.file_type.is_some(), overrides.size.is_some(), overrides.padding.is_some()];
+        assert_eq!(all, [overridden; 4], "{item}");
+    }
+}

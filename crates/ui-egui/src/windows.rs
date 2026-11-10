@@ -3,8 +3,8 @@
 use egui::{Color32, RichText, Ui, vec2};
 use egui_phosphor::regular as ic;
 use serde_json::json;
-use texturecraft_engine::core::ToneMapping;
 use texturecraft_engine::core::project::ENV_RESOURCE_PREFIX;
+use texturecraft_engine::core::{NormalFormat, ToneMapping};
 use texturecraft_engine::geom::primitives::BUILTINS;
 use texturecraft_render::ibl::ENVIRONMENTS;
 
@@ -1191,14 +1191,21 @@ fn export_settings_tab(app: &mut TextureCraftApp, ui: &mut Ui, presets: &[textur
         });
         ui.end_row();
         ui.label(tr("Normal map format"));
-        let nf = match app.ui.export.normal_format.as_str() {
-            "openGl" => "OpenGL",
-            "directX" => "DirectX",
-            _ => tr("From template / project"),
+        // The preset's own convention, so picking an engine preset shows what it writes
+        let preset_format =
+            match app.session.export_preset(&app.ui.export.preset).and_then(|preset| preset.normal_format(app.session.doc.project.normal_format)) {
+                Some(NormalFormat::OpenGl) => trf("From template / project ({format})", &[("format", &"OpenGL")]),
+                Some(NormalFormat::DirectX) => trf("From template / project ({format})", &[("format", &"DirectX")]),
+                None => tr("From template / project").to_string(),
+            };
+        let shown = match app.ui.export.normal_format.as_str() {
+            "openGl" => "OpenGL".to_string(),
+            "directX" => "DirectX".to_string(),
+            _ => preset_format.clone(),
         };
-        egui::ComboBox::from_id_salt("exp_nf").selected_text(nf).show_ui(ui, |ui| {
-            for (v, l) in [("", tr("From template / project")), ("openGl", "OpenGL"), ("directX", "DirectX")] {
-                ui.selectable_value(&mut app.ui.export.normal_format, v.to_string(), l);
+        egui::ComboBox::from_id_salt("exp_nf").selected_text(shown).show_ui(ui, |ui| {
+            for (value, label) in [("", preset_format), ("openGl", "OpenGL".to_string()), ("directX", "DirectX".to_string())] {
+                ui.selectable_value(&mut app.ui.export.normal_format, value.to_string(), label);
             }
         });
         ui.end_row();

@@ -4,7 +4,7 @@
 use egui::{RichText, Ui};
 use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
-use texturecraft_engine::core::{CurvatureDetail, CurvatureMode, Generator, GeneratorKind};
+use texturecraft_engine::core::{CurvatureDetail, CurvatureMode, Generator, GeneratorKind, OutputResolution, ResolutionMode};
 
 use crate::TextureCraftApp;
 use crate::i18n::tr;
@@ -26,6 +26,7 @@ pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, id: u
     });
 
     section(ui, "generator_attributes", tr("Attributes"), false, |ui| attributes(ui, generator.kind));
+    section(ui, "generator_resolution", tr("Resolution"), false, |ui| resolution(app, ui, id, generator.resolution));
     section(ui, "generator_parameters", tr("Parameters"), true, |ui| {
         global_adjustments(app, ui, id, generator);
         ramp_parameters(app, ui, id, generator);
@@ -72,6 +73,54 @@ fn attributes(ui: &mut Ui, kind: GeneratorKind) {
         ui.label(tags);
         ui.end_row();
     });
+}
+
+/// What the generator's output resolution is based on, the factor applied to it, and the size it comes to.
+fn resolution(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, resolution: OutputResolution) {
+    let tk = Tokens::get(ui.ctx());
+    combo(ui, tr("Resolution"), tr(resolution.mode.label()), |ui| {
+        for mode in ResolutionMode::ALL {
+            if ui.selectable_label(mode == resolution.mode, tr(mode.label())).clicked() {
+                app.run("effect.set", json!({"effect": id, "resolution": format!("{mode:?}")}));
+            }
+        }
+    })
+    .on_hover_text(tr("Auto and Texture set use the texture set's resolution, UV tile the UV tile's, Custom a size of its own."));
+    if resolution.mode == ResolutionMode::Custom {
+        combo(ui, tr("Size"), format!("{0} × {0}", resolution.custom), |ui| {
+            for size in OutputResolution::CUSTOM_SIZES {
+                if ui.selectable_label(size == resolution.custom, format!("{size} × {size}")).clicked() {
+                    app.run("effect.set", json!({"effect": id, "customResolution": size}));
+                }
+            }
+        });
+    }
+    combo(ui, tr("Factor"), factor_label(resolution.factor), |ui| {
+        for factor in OutputResolution::FACTORS {
+            if ui.selectable_label(factor == resolution.factor, factor_label(factor)).clicked() {
+                app.run("effect.set", json!({"effect": id, "resolutionFactor": factor}));
+            }
+        }
+    })
+    .on_hover_text(tr("Scales the base resolution: below 1 the generator is computed coarser and smoothed back up."));
+
+    let context = app.session.doc.project.texture_set(app.session.ts()).map_or(2048, |set| set.resolution);
+    let size = resolution.output_size(context);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(tr("Output size")).color(tk.text_dim));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(format!("{size} × {size}")));
+    })
+    .response
+    .on_hover_text(tr("A finer output than the texture set gives the same result as the texture set's resolution."));
+}
+
+/// "Same as context", or the fraction or multiple a resolution factor stands for.
+fn factor_label(factor: i8) -> String {
+    match factor {
+        0 => tr("Same as context").to_string(),
+        negative if negative < 0 => format!("1/{}", 1u32 << negative.unsigned_abs().min(3)),
+        positive => format!("×{}", 1u32 << positive.min(3)),
+    }
 }
 
 /// Global invert, blur, balance and contrast: what every generator applies to its finished value.
@@ -140,6 +189,9 @@ fn defaults_of(id: u64, kind: GeneratorKind) -> Value {
         "blur": defaults.global.blur,
         "balance": defaults.global.balance,
         "contrast": defaults.global.contrast,
+        "resolution": format!("{:?}", defaults.resolution.mode),
+        "customResolution": defaults.resolution.custom,
+        "resolutionFactor": defaults.resolution.factor,
     });
     if let Some(detail) = defaults.detail {
         params["mode"] = json!(format!("{:?}", detail.mode));

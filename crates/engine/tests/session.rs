@@ -459,4 +459,9 @@ fn generators_take_blur_balance_and_contrast() {
     let inspect = execute(&mut state, "project.inspect", &Value::Null).unwrap().to_string();
     assert!(inspect.contains(r#""blur":0.25"#) && inspect.contains(r#""balance":0.75"#), "{inspect}");
     assert!(inspect.contains(r#""contrast":1.0"#), "contrast is clamped to 0..1: {inspect}");
+
+    execute(&mut state, "effect.set", &json!({"effect": effect, "resolution": "custom", "customResolution": 512, "resolutionFactor": -9})).unwrap();
+    let inspect = execute(&mut state, "project.inspect", &Value::Null).unwrap().to_string();
+    assert!(inspect.contains(r#""resolution":{"custom":512,"factor":-3,"mode":"Custom"}"#), "the factor is clamped to 1/8: {inspect}");
+    assert!(execute(&mut state, "effect.set", &json!({"effect": effect, "resolution": "huge"})).is_err(), "unknown resolutions are rejected");
 }

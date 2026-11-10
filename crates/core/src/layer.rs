@@ -9,10 +9,14 @@ use crate::{BlendMode, Channel, ChannelKind, lum};
 mod curvature_detail;
 mod curvature_mode;
 mod generator_global;
+mod output_resolution;
+mod resolution_mode;
 
 pub use curvature_detail::CurvatureDetail;
 pub use curvature_mode::CurvatureMode;
 pub use generator_global::GeneratorGlobal;
+pub use output_resolution::OutputResolution;
+pub use resolution_mode::ResolutionMode;
 
 /// Id of a layer or effect (one id space per project).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -554,6 +558,9 @@ pub struct Generator {
     /// Blur, balance and contrast of the finished value (neutral for generators saved before they existed).
     #[serde(default, skip_serializing_if = "GeneratorGlobal::is_neutral")]
     pub global: GeneratorGlobal,
+    /// The resolution the generator is computed at (the texture set's for generators saved before it existed).
+    #[serde(default, skip_serializing_if = "OutputResolution::is_default")]
+    pub resolution: OutputResolution,
 }
 
 impl Generator {
@@ -581,6 +588,7 @@ impl Generator {
             invert: false,
             detail,
             global: GeneratorGlobal::default(),
+            resolution: OutputResolution::default(),
         }
     }
 }

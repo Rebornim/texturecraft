@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use texturecraft_core::{
     BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask, MaskBackground,
-    Procedural, ProceduralKind, Project, Source,
+    OutputResolution, Procedural, ProceduralKind, Project, ResolutionMode, Source,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
@@ -49,7 +49,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add generator",
             ["Layers", "Effects"],
             None,
-            "{layer?, name?, generator?: edgeWear|dirt|thinAreas|curvature|ambientOcclusion|position|direction, level?, softness?, noise?, invert?, blur?: 0..1, balance?: 0..1 (0.5 unchanged), contrast?: 0..1, mode?: edges|cavities|both|raw, sizes?: [7 weights 0..1, finest first] (curvature and edgeWear)}",
+            "{layer?, name?, generator?: edgeWear|dirt|thinAreas|curvature|ambientOcclusion|position|direction, level?, softness?, noise?, invert?, blur?: 0..1, balance?: 0..1 (0.5 unchanged), contrast?: 0..1, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3 (1/8..x8), mode?: edges|cavities|both|raw, sizes?: [7 weights 0..1, finest first] (curvature and edgeWear)}",
             has_layer,
             add_generator
         ),
@@ -94,7 +94,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, invert?, blur?, balance?, contrast? (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor? (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -345,6 +345,17 @@ fn generator_from(command: &str, params: &Value, generator: &mut Generator) -> R
     }
     if let Some(contrast) = f32p(params, "contrast") {
         generator.global.contrast = contrast.clamp(0.0, 1.0);
+    }
+    if let Some(value) = params.get("resolution") {
+        let name = value.as_str().ok_or_else(|| bad(command, "`resolution` must be a string"))?;
+        generator.resolution.mode = ResolutionMode::parse(name).ok_or_else(|| bad(command, format!("unknown resolution `{name}`")))?;
+    }
+    if let Some(custom) = u64p(params, "customResolution") {
+        generator.resolution.custom = (custom as u32).clamp(1, OutputResolution::MAX_SIZE);
+    }
+    if let Some(factor) = params.get("resolutionFactor") {
+        let factor = factor.as_i64().ok_or_else(|| bad(command, "`resolutionFactor` must be a whole number"))?;
+        generator.resolution.factor = factor.clamp(i64::from(*OutputResolution::FACTORS.start()), i64::from(*OutputResolution::FACTORS.end())) as i8;
     }
 
     // A mode or sizes also give a curvature generator saved before detail sizes its detail

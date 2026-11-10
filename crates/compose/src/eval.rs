@@ -299,7 +299,9 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
         EffectKind::Filter(Filter::Bevel { width }) => Some((index, texels(*width * 0.5), Op::Bevel)),
         EffectKind::Filter(Filter::Glow { radius, amount }) => Some((index, texels(*radius), Op::Glow(*amount))),
         EffectKind::Filter(Filter::Mosaic { size }) => Some((index, texels(*size), Op::Mosaic)),
-        EffectKind::Generator(generator) if generator.global.blur > 0.0 => Some((index, texels(generator.global.blur_radius()), Op::Generator)),
+        EffectKind::Generator(generator) if generator.global.blur > 0.0 || generator.resolution.cell(res) > 1 => {
+            Some((index, texels(generator.global.blur_radius()).max(generator.resolution.cell(res) as f32), Op::Generator))
+        }
         EffectKind::Filter(Filter::SlopeBlur { radius, scale, seed }) if *radius > 0.0 => {
             Some((index, texels(*radius), Op::Slope { scale: *scale, seed: *seed }))
         }
@@ -704,6 +706,9 @@ fn filter_region(
         let scaled_radius = neighbourhood_filters(effects, res)
             .find(|filter| filter.0 == index)
             .map_or(radius_texels, |filter| filter.1.round().clamp(1.0, radius_texels as f32) as u32);
+        if let Some((generator, blend)) = generator {
+            return generator_region(generator, blend, opacity, &orig, &cover, (rx0, ry0, w, h), res);
+        }
         if !is_box_blur(op) {
             return gather(op, &orig, &cover, comps, (rx0, ry0, w, h), scaled_radius as f32, res, opacity);
         }
@@ -712,9 +717,6 @@ fn filter_region(
         let (width, height, blur_radius) = (w as usize, h as usize, scaled_radius as usize);
         let mut weights = cover.clone();
         blur(&mut weights, width, height, blur_radius);
-        if let Some((generator, blend)) = generator {
-            return blurred_generator(generator, blend, opacity, &orig, &weights, (width, height, blur_radius));
-        }
         let mut data = orig.clone();
         for component in 0..comps {
             let mut sums: Vec<f32> = orig.par_chunks(comps).map(|pixel| pixel.get(component).copied().unwrap_or(0.0)).collect();
@@ -768,25 +770,91 @@ fn filter_region(
     Some(Field { x0: rx0, y0: ry0, w, h, comps: field_comps, data })
 }
 
-/// The mask after a blurred generator: `stack` holds (stack below, generator ramp) per texel, `weights` the blurred coverage.
-fn blurred_generator(
+/// The mask after a generator computed at its own resolution and blurred: `stack` holds (stack below, generator ramp) per texel of
+/// region `(x0, y0, width, height)`, `cover` whether the texel is on the mesh, and `res` the texels per UV tile there.
+fn generator_region(
     generator: &Generator,
     blend: BlendMode,
     opacity: f32,
     stack: &[f32],
-    weights: &[f32],
-    (width, height, radius): (usize, usize, usize),
+    cover: &[f32],
+    (x0, y0, w, h): (u32, u32, u32, u32),
+    res: u32,
 ) -> Vec<f32> {
+    let (width, height) = (w as usize, h as usize);
     let mut ramps: Vec<f32> = stack.par_chunks(2).map(|texel| texel.get(1).copied().unwrap_or(0.0)).collect();
-    blur(&mut ramps, width, height, radius);
+
+    // Cells stay within a tile so they line up across regions
+    let cell = generator.resolution.cell(res).min(TILE) as usize;
+    if cell > 1 {
+        ramps = resampled_by_cells(&ramps, cover, (x0 as usize, y0 as usize, width, height), cell);
+    }
+
+    let blur_radius = (generator.global.blur_radius() * res as f32 / 2048.0).round() as usize;
+    if blur_radius > 0 {
+        let mut weights = cover.to_vec();
+        blur(&mut weights, width, height, blur_radius);
+        let mut sums: Vec<f32> = ramps.iter().zip(cover).map(|(ramp, covered)| ramp * covered).collect();
+        blur(&mut sums, width, height, blur_radius);
+        ramps.par_iter_mut().zip(sums.par_iter().zip(weights.par_iter())).for_each(|(ramp, (sum, weight))| {
+            if *weight > 1e-6 {
+                *ramp = sum / weight;
+            }
+        });
+    }
+
     stack
         .par_chunks(2)
-        .zip(ramps.par_iter().zip(weights.par_iter()))
-        .map(|(texel, (sum, weight))| {
+        .zip(ramps.par_iter())
+        .map(|(texel, ramp)| {
             let below = texel.first().copied().unwrap_or(0.0);
-            let ramp = if *weight > 1e-6 { sum / weight } else { texel.get(1).copied().unwrap_or(0.0) };
-            let generated = finish_generator(generator, ramp);
+            let generated = finish_generator(generator, *ramp);
             below + (blend1(blend, below, generated) - below) * opacity
+        })
+        .collect()
+}
+
+/// `values` as if computed at one value per `cell` × `cell` texels (cells aligned to absolute texel positions), read back with bilinear
+/// filtering between cell centers. Each cell averages its texels on the mesh (`cover`); cells off the mesh take their neighbours' values.
+fn resampled_by_cells(values: &[f32], cover: &[f32], (x0, y0, width, height): (usize, usize, usize, usize), cell: usize) -> Vec<f32> {
+    let (first_x, first_y) = (x0 / cell, y0 / cell);
+    let (cells_x, cells_y) = ((x0 + width).div_ceil(cell) - first_x, (y0 + height).div_ceil(cell) - first_y);
+    let mut sums = vec![0.0f32; cells_x * cells_y];
+    let mut weights = vec![0.0f32; cells_x * cells_y];
+    for y in 0..height {
+        for x in 0..width {
+            let (texel, cell_index) = (y * width + x, ((y0 + y) / cell - first_y) * cells_x + (x0 + x) / cell - first_x);
+            let covered = cover.get(texel).copied().unwrap_or(0.0);
+            if let (Some(sum), Some(weight)) = (sums.get_mut(cell_index), weights.get_mut(cell_index)) {
+                *sum += values.get(texel).copied().unwrap_or(0.0) * covered;
+                *weight += covered;
+            }
+        }
+    }
+    let cell_value = |cx: isize, cy: isize| -> Option<f32> {
+        let (cx, cy) = (cx.clamp(0, cells_x as isize - 1) as usize, cy.clamp(0, cells_y as isize - 1) as usize);
+        let index = cy * cells_x + cx;
+        weights.get(index).filter(|weight| **weight > 1e-6).and_then(|weight| sums.get(index).map(|sum| sum / weight))
+    };
+
+    let size = cell as f32;
+    (0..height)
+        .into_par_iter()
+        .flat_map_iter(|y| (0..width).map(move |x| (x, y)))
+        .map(|(x, y)| {
+            // Position in cells, relative to the first cell's center
+            let fx = ((x0 + x) as f32 + 0.5) / size - 0.5 - first_x as f32;
+            let fy = ((y0 + y) as f32 + 0.5) / size - 0.5 - first_y as f32;
+            let (left, top) = (fx.floor(), fy.floor());
+            let (tx, ty) = (fx - left, fy - top);
+            let (left, top) = (left as isize, top as isize);
+            let corners =
+                [(left, top, (1.0 - tx) * (1.0 - ty)), (left + 1, top, tx * (1.0 - ty)), (left, top + 1, (1.0 - tx) * ty), (left + 1, top + 1, tx * ty)];
+            let (sum, weight) = corners.iter().fold((0.0, 0.0), |(sum, weight), &(cx, cy, w)| match cell_value(cx, cy) {
+                Some(value) => (sum + value * w, weight + w),
+                None => (sum, weight),
+            });
+            if weight > 1e-6 { sum / weight } else { values.get(y * width + x).copied().unwrap_or(0.0) }
         })
         .collect()
 }
@@ -2707,6 +2775,46 @@ mod tests {
         for texel in far {
             assert_eq!(blurred[texel], sharp[texel], "the checker below keeps its hard edges at texel {texel}");
         }
+    }
+
+    #[test]
+    fn a_lower_generator_resolution_spreads_a_ridge_over_its_cell() {
+        let mut fixture = fixture();
+        fixture.gbuf = UvGBuffer::new(&fixture.mesh, 0, 256, 256);
+        fixture.project.texture_sets[0].resolution = 256;
+        let ridge: Vec<f32> = (0..256 * 256).map(|texel| if texel % 256 == 100 { 1.0 } else { 0.5 }).collect();
+        fixture.baked = BakedMaps { resolution: 256, maps: [(BakedMap::Curvature, Arc::new(ridge))].into() };
+        let layer = fill_layer(&mut fixture.project, [1.0; 3], 1.0);
+        let row_with = |fixture: &mut Fixture, factor: i8| -> Vec<f32> {
+            let mut generator = Generator { level: 0.5, softness: 0.01, noise_amount: 0.0, ..Generator::new(GeneratorKind::EdgeWear) };
+            generator.detail = None;
+            generator.resolution.factor = factor;
+            let mut mask = Mask::new(MaskBackground::Black);
+            mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Generator(generator)));
+            fixture.project.layer_mut(layer).unwrap().mask = Some(mask);
+            let images = Default::default();
+            let inputs = Inputs {
+                project: &fixture.project,
+                ts: 0,
+                mesh: &fixture.mesh,
+                gbuf: &fixture.gbuf,
+                pixels: &fixture.pixels,
+                baked: &fixture.baked,
+                block_scales: BlockScales::default(),
+                preview: None,
+                images: &images,
+                bounds: fixture.mesh.bounds(),
+            };
+            mask_at(&inputs, layer, &(80..121).map(|x| (x, 128)).collect::<Vec<_>>()).unwrap()
+        };
+
+        // The row starts at x 80: the ridge at x 100 is texel 20; at an eighth of the resolution one value covers 8 texels
+        let (ridge, beside, far) = (20, 18, 0);
+        let full = row_with(&mut fixture, 0);
+        let eighth = row_with(&mut fixture, -3);
+        assert!(full[ridge] > 0.99 && full[beside] < 0.01, "at full resolution the ridge is one texel: {full:?}");
+        assert!(eighth[ridge] < 0.5 && eighth[beside] > 0.01, "an eighth of the resolution averages it over its cell: {eighth:?}");
+        assert!(eighth[far] < 0.01, "texels a few cells away stay black: {eighth:?}");
     }
 
     #[test]

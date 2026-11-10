@@ -310,3 +310,16 @@ fn eight_bits_can_be_dithered() {
     let file_type = draft(&mut harness).settings.parameters.file_type.clone();
     assert!(file_type.dithering && file_type.bit_depth == 8);
 }
+
+#[test]
+fn padding_offers_dilation_with_diffusion() {
+    let mut harness = harness(2, LAPTOP);
+    combo_on_row(&harness, "Padding", 0).click();
+    harness.run_steps(2);
+    harness.get_by_label("Dilation + diffusion").click();
+    harness.run_steps(2);
+    assert_eq!(draft(&mut harness).settings.parameters.padding, "diffusion");
+    let row = harness.get_all_by_label("Padding").map(|node| node.rect().center().y).find(|y| *y < 400.0).unwrap();
+    let distance = harness.get_all_by_role(Role::SpinButton).find(|node| (node.rect().center().y - row).abs() < 6.0).unwrap();
+    assert!(!distance.accesskit_node().is_disabled(), "diffusion starts beyond a set distance");
+}

@@ -339,3 +339,37 @@ fn global_settings_ticks_the_usd_asset() {
     harness.run_steps(2);
     assert!(draft(&mut harness).settings.usd);
 }
+
+fn dialog_rect(harness: &Harness<'static, TextureCraftApp>) -> egui::Rect {
+    harness.get_all_by_role(Role::Window).find(|node| node.accesskit_node().label().as_deref() == Some("Export textures")).unwrap().rect()
+}
+
+#[test]
+fn the_window_keeps_its_size_on_every_tab() {
+    for size in [LAPTOP, egui::vec2(1280.0, 480.0)] {
+        let mut harness = harness(MANY_SETS, size);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+        for tab in ["Settings", "Output templates", "List of exports"] {
+            let inside = dialog_rect(&harness);
+            harness.get_all_by_label(tab).find(|node| inside.contains_rect(node.rect())).unwrap().click();
+            harness.run_steps(5);
+            let before = dialog_rect(&harness);
+            harness.run_steps(120);
+            let after = dialog_rect(&harness);
+            assert_eq!(before, after, "{tab} in a {size:?} window: the window keeps its size");
+            let change = (after.size() - inside.size()).abs();
+            assert!(change.x < 1.0 && change.y < 1.0, "{tab}: every tab has the same window size, {:?} vs {:?}", after.size(), inside.size());
+            assert!(screen.contains_rect(after), "{tab}: {after:?} leaves the {size:?} window");
+        }
+    }
+}
+
+#[test]
+fn the_output_templates_tab_holds_still() {
+    let mut harness = harness(2, LAPTOP);
+    harness.get_by_label("Output templates").click();
+    harness.run_steps(5);
+    let before = harness.get_by_label("Input maps").rect();
+    harness.run_steps(120);
+    assert_eq!(before, harness.get_by_label("Input maps").rect(), "the columns don't creep");
+}

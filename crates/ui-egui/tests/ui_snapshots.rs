@@ -562,6 +562,19 @@ fn export_dialog_snapshots() {
     save(&mut harness, &output_dir, "export-set-override");
     harness.state_mut().ui.export.settings.as_mut().unwrap().selected = None;
 
+    // The other tabs at the window's size
+    for (tab, name) in [(1, "export-templates-tab"), (2, "export-list-tab")] {
+        harness.state_mut().ui.export.tab = tab;
+        harness.run_steps(60);
+        save(&mut harness, &output_dir, name);
+    }
+    harness.state_mut().ui.export.tab = 1;
+    harness.set_size(egui::vec2(1280.0, 720.0));
+    harness.run_steps(60);
+    save(&mut harness, &output_dir, "export-templates-tab-laptop");
+    harness.set_size(egui::vec2(1600.0, 960.0));
+    harness.state_mut().ui.export.tab = 0;
+
     // The normal map format's choices with a preset that writes DirectX
     harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
     harness.state_mut().ui.export.settings.as_mut().unwrap().settings.parameters.preset = "Unreal Engine (Packed)".into();

@@ -17,7 +17,7 @@ use crate::export_draft::ExportDraft;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::file_dialogs::{Bound, FileDialog};
 use crate::i18n::{tr, trf};
-use crate::theme::{Tokens, caption};
+use crate::theme::{Tokens, caption, semibold};
 use crate::widgets::{icon_button, icon_button_without_tooltip, primary_button};
 
 /// The window's size, made smaller to fit a smaller app window
@@ -28,6 +28,23 @@ const EXPORT_SET_LIST_WIDTH: f32 = 180.0;
 /// Room under the tabs' body for the button row
 const EXPORT_FOOTER_HEIGHT: f32 = 44.0;
 const OVERRIDE_PEN_SIZE: f32 = 20.0;
+/// Tab strip: text size, height and the open tab's underline
+const TAB_TEXT_SIZE: f32 = 12.0;
+const TAB_HEIGHT: f32 = 28.0;
+const TAB_UNDERLINE: f32 = 2.0;
+/// Bottom bar buttons are one size
+const BOTTOM_BUTTON_SIZE: egui::Vec2 = egui::vec2(120.0, 28.0);
+/// Height of a row in the texture set list
+const SET_ROW_HEIGHT: f32 = 26.0;
+const SET_ROW_PADDING: f32 = 8.0;
+/// Room for the * that marks a set with overrides
+const SET_ROW_MARKER: f32 = 12.0;
+/// Label column of the parameter grids, and the room left for the controls
+const PARAMETER_LABEL_WIDTH: f32 = 220.0;
+const PARAMETER_RIGHT_MARGIN: f32 = 32.0;
+const PARAMETER_MIN_FIELD_WIDTH: f32 = 240.0;
+const PARAMETER_GAP: f32 = 10.0;
+const BROWSE_BUTTON_WIDTH: f32 = 40.0;
 /// Width of an output map's name in a texture set's Output maps
 const MAP_NAME_WIDTH: f32 = 230.0;
 
@@ -51,11 +68,7 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     let size = EXPORT_DIALOG_SIZE.min(ctx.content_rect().size() - egui::Vec2::splat(2.0 * EXPORT_DIALOG_MARGIN)).max(egui::Vec2::ZERO);
     crate::windows::dialog("export_textures", tr("Export textures"), &mut open).fixed_size(size).show(ctx, |ui| {
         ui.horizontal(|ui| {
-            for (i, t) in [tr("Settings"), tr("Output templates"), tr("List of exports")].iter().enumerate() {
-                if ui.selectable_label(app.ui.export.tab == i as u8, caption(t)).clicked() {
-                    app.ui.export.tab = i as u8;
-                }
-            }
+            tab_strip(app, ui);
             if app.ui.export.tab == 0 {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(tr("Include all")).clicked()
@@ -125,6 +138,23 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     }
 }
 
+/// The tabs: names in capitals, the open one underlined
+fn tab_strip(app: &mut TextureCraftApp, ui: &mut Ui) {
+    let tk = Tokens::get(ui.ctx());
+    for (index, name) in [tr("Settings"), tr("Output templates"), tr("List of exports")].into_iter().enumerate() {
+        let open = app.ui.export.tab == index as u8;
+        let text = RichText::new(name.to_uppercase()).font(semibold(TAB_TEXT_SIZE)).color(if open { tk.text_strong } else { tk.text_dim });
+        let tab = ui.add(egui::Button::new(text).frame(false).min_size(vec2(0.0, TAB_HEIGHT)));
+        if open {
+            let bottom = tab.rect.bottom();
+            ui.painter().line_segment([egui::pos2(tab.rect.left(), bottom), egui::pos2(tab.rect.right(), bottom)], egui::Stroke::new(TAB_UNDERLINE, tk.accent));
+        }
+        if tab.clicked() {
+            app.ui.export.tab = index as u8;
+        }
+    }
+}
+
 /// Reset all, the count of textures, Cancel, Save settings and Export
 fn bottom_bar(app: &mut TextureCraftApp, ui: &mut Ui) -> Option<BottomAction> {
     let tk = Tokens::get(ui.ctx());
@@ -132,19 +162,19 @@ fn bottom_bar(app: &mut TextureCraftApp, ui: &mut Ui) -> Option<BottomAction> {
     let count = exported_count(app);
     ui.horizontal(|ui| {
         if app.ui.export.tab == 0
-            && ui.button(tr("Reset all")).clicked()
+            && ui.add(egui::Button::new(tr("Reset all")).min_size(BOTTOM_BUTTON_SIZE)).clicked()
             && let Some(draft) = app.ui.export.settings.as_mut()
         {
             draft.reset(&app.ui.export.dir);
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add_enabled(count > 0, primary_button(ui, tr("Export"))).clicked() {
+            if ui.add_enabled(count > 0, primary_button(ui, tr("Export")).min_size(BOTTOM_BUTTON_SIZE)).clicked() {
                 action = Some(BottomAction::Export);
             }
-            if ui.button(tr("Save settings")).clicked() {
+            if ui.add(egui::Button::new(tr("Save settings")).min_size(BOTTOM_BUTTON_SIZE)).clicked() {
                 action = Some(BottomAction::Save);
             }
-            if ui.button(tr("Cancel")).clicked() {
+            if ui.add(egui::Button::new(tr("Cancel")).min_size(BOTTOM_BUTTON_SIZE)).clicked() {
                 action = Some(BottomAction::Cancel);
             }
             ui.label(RichText::new(trf("{n} textures selected for export", &[("n", &count)])).color(tk.text_dim));
@@ -258,6 +288,7 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
     let Some(draft) = app.ui.export.settings.as_mut() else { return };
 
     let mut pick_dir = false;
+    let field = field_width(ui);
     ui.horizontal(|ui| {
         ui.label(caption(tr("General export parameters")));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -267,29 +298,30 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
         });
     });
     let settings = &mut draft.settings;
-    egui::Grid::new("exp_grid").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
+    ui.add_space(PARAMETER_GAP);
+    egui::Grid::new("exp_grid").num_columns(2).min_col_width(PARAMETER_LABEL_WIDTH).spacing(vec2(0.0, PARAMETER_GAP)).show(ui, |ui| {
         // The browser downloads the files instead
         #[cfg(not(target_arch = "wasm32"))]
         {
             ui.label(tr("Output directory"));
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut settings.dir).desired_width(360.0));
+                ui.add(egui::TextEdit::singleline(&mut settings.dir).desired_width(field - BROWSE_BUTTON_WIDTH));
                 pick_dir = ui.button("...").clicked();
             });
             ui.end_row();
         }
         let parameters = &mut settings.parameters;
         ui.label(tr("Output template"));
-        controls::template_combo(ui, "exp_preset", &mut parameters.preset, builtins, user_presets);
+        controls::template_combo(ui, "exp_preset", &mut parameters.preset, builtins, user_presets, field);
         ui.end_row();
         ui.label(tr("File type"));
-        controls::file_type_combos(ui, "exp_fmt", &mut parameters.file_type);
+        controls::file_type_combos(ui, "exp_fmt", &mut parameters.file_type, field);
         ui.end_row();
         ui.label(tr("Size"));
-        controls::size_combo(ui, "exp_size", &mut parameters.size, None);
+        controls::size_combo(ui, "exp_size", &mut parameters.size, None, field);
         ui.end_row();
         ui.label(tr("Padding"));
-        controls::padding_controls(ui, "exp_pad", &mut parameters.padding, &mut parameters.dilation);
+        controls::padding_controls(ui, "exp_pad", &mut parameters.padding, &mut parameters.dilation, field);
         ui.end_row();
         ui.label(tr("Normal map format"));
         let preset_format = match preset_normal {
@@ -302,7 +334,7 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
             "directX" => "DirectX".to_string(),
             _ => preset_format.clone(),
         };
-        egui::ComboBox::from_id_salt("exp_nf").selected_text(shown).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("exp_nf").width(field).selected_text(shown).show_ui(ui, |ui| {
             for (value, label) in [("", preset_format), ("openGl", "OpenGL".to_string()), ("directX", "DirectX".to_string())] {
                 ui.selectable_value(&mut settings.normal_format, value.to_string(), label);
             }
@@ -310,7 +342,7 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
         ui.end_row();
         ui.label(tr("Color space"));
         let shown = if settings.color_space.is_empty() { tr("Default") } else { settings.color_space.as_str() };
-        egui::ComboBox::from_id_salt("exp_cs").selected_text(shown).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("exp_cs").width(field).selected_text(shown).show_ui(ui, |ui| {
             ui.selectable_value(&mut settings.color_space, String::new(), tr("Default"));
             for name in ["sRGB", "Linear Rec.709", "ACEScg", "ACES2065-1"] {
                 ui.selectable_value(&mut settings.color_space, name.to_string(), name);
@@ -358,50 +390,52 @@ fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Optio
         });
     });
     let tk = Tokens::get(ui.ctx());
+    let field = field_width(ui) - OVERRIDE_PEN_SIZE - PARAMETER_GAP;
     let inherited = |ui: &mut Ui, text: String| ui.label(RichText::new(text).color(tk.text_dim));
-    egui::Grid::new(("exp_set_grid", ts)).num_columns(3).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
-        ui.label(tr("Output template"));
+    ui.add_space(PARAMETER_GAP);
+    egui::Grid::new(("exp_set_grid", ts)).num_columns(3).spacing(vec2(PARAMETER_GAP, PARAMETER_GAP)).show(ui, |ui| {
+        parameter_label(ui, tr("Output template"), PARAMETER_LABEL_WIDTH - OVERRIDE_PEN_SIZE - PARAMETER_GAP);
         if override_pen(ui, overrides.preset.is_some()) {
             overrides.preset = overrides.preset.take().xor(Some(global.preset.clone()));
         }
         match overrides.preset.as_mut() {
-            Some(preset) => controls::template_combo(ui, "exp_set_preset", preset, builtins, user_presets),
+            Some(preset) => controls::template_combo(ui, "exp_set_preset", preset, builtins, user_presets, field),
             None => {
                 inherited(ui, global.preset.clone());
             }
         }
         ui.end_row();
 
-        ui.label(tr("File type"));
+        parameter_label(ui, tr("File type"), PARAMETER_LABEL_WIDTH - OVERRIDE_PEN_SIZE - PARAMETER_GAP);
         if override_pen(ui, overrides.file_type.is_some()) {
             overrides.file_type = overrides.file_type.take().xor(Some(global.file_type.clone()));
         }
         match overrides.file_type.as_mut() {
-            Some(file_type) => controls::file_type_combos(ui, "exp_set_fmt", file_type),
+            Some(file_type) => controls::file_type_combos(ui, "exp_set_fmt", file_type, field),
             None => {
                 inherited(ui, controls::file_type_with_depth_text(&global.file_type));
             }
         }
         ui.end_row();
 
-        ui.label(tr("Size"));
+        parameter_label(ui, tr("Size"), PARAMETER_LABEL_WIDTH - OVERRIDE_PEN_SIZE - PARAMETER_GAP);
         if override_pen(ui, overrides.size.is_some()) {
             overrides.size = overrides.size.take().xor(Some(global.size));
         }
         match overrides.size.as_mut() {
-            Some(size) => controls::size_combo(ui, "exp_set_size", size, set_size),
+            Some(size) => controls::size_combo(ui, "exp_set_size", size, set_size, field),
             None => {
                 inherited(ui, controls::size_text(global.size, set_size));
             }
         }
         ui.end_row();
 
-        ui.label(tr("Padding"));
+        parameter_label(ui, tr("Padding"), PARAMETER_LABEL_WIDTH - OVERRIDE_PEN_SIZE - PARAMETER_GAP);
         if override_pen(ui, overrides.padding.is_some()) {
             overrides.padding = overrides.padding.take().xor(Some((global.padding.clone(), global.dilation)));
         }
         match overrides.padding.as_mut() {
-            Some((padding, dilation)) => controls::padding_controls(ui, "exp_set_pad", padding, dilation),
+            Some((padding, dilation)) => controls::padding_controls(ui, "exp_set_pad", padding, dilation, field),
             None => {
                 inherited(ui, controls::padding_text(&global.padding, global.dilation));
             }
@@ -498,6 +532,19 @@ fn set_output_maps(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, maps: &[(Str
     set.maps.retain(|_, map| !map.is_empty());
 }
 
+/// A parameter's name, left-aligned in a column `width` wide
+fn parameter_label(ui: &mut Ui, text: &str, width: f32) {
+    ui.allocate_ui_with_layout(vec2(width, ui.spacing().interact_size.y), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.set_width(width);
+        ui.label(text);
+    });
+}
+
+/// Width of a parameter's controls: what's left of the panel after the label column
+fn field_width(ui: &Ui) -> f32 {
+    (ui.available_width() - PARAMETER_LABEL_WIDTH - PARAMETER_RIGHT_MARGIN).max(PARAMETER_MIN_FIELD_WIDTH)
+}
+
 /// The pen beside a parameter, pressed while this texture set overrides it; true when clicked
 fn override_pen(ui: &mut Ui, overridden: bool) -> bool {
     icon_button_without_tooltip(ui, ic::PENCIL_SIMPLE, tr("Override for this texture set"), overridden, OVERRIDE_PEN_SIZE).clicked()
@@ -511,28 +558,52 @@ fn export_note(ui: &mut Ui, text: &str) {
     ui.end_row();
 }
 
+/// A full-width row of the set list, hover and selection painted and a line under it: `tick` adds a checkbox before the name; the row's response selects it
+fn set_row(ui: &mut Ui, name: &str, selected: bool, tick: Option<&mut dyn FnMut(&mut Ui)>) -> egui::Response {
+    let tk = Tokens::get(ui.ctx());
+    let (rect, row) = ui.allocate_exact_size(vec2(ui.available_width(), SET_ROW_HEIGHT), egui::Sense::click());
+    row.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, name));
+    if row.hovered() {
+        ui.painter().rect_filled(rect, 0.0, tk.row_hover);
+    }
+    if selected {
+        ui.painter().rect_stroke(rect.shrink(1.0), 0.0, egui::Stroke::new(1.0, tk.accent), egui::StrokeKind::Inside);
+    }
+    ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], egui::Stroke::new(1.0, tk.separator));
+
+    let mut text_left = rect.left() + SET_ROW_PADDING;
+    if let Some(tick) = tick {
+        let tick_rect = egui::Rect::from_min_size(egui::pos2(text_left, rect.top()), vec2(SET_ROW_HEIGHT, SET_ROW_HEIGHT));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(tick_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| tick(ui));
+        text_left += SET_ROW_HEIGHT;
+    }
+    let width = rect.right() - text_left - SET_ROW_PADDING * 2.0;
+    let galley = crate::widgets::elided(ui.painter(), name, 13.0, tk.text_strong, width);
+    ui.painter().galley(egui::pos2(text_left, rect.center().y - galley.size().y / 2.0), galley, tk.text_strong);
+
+    row
+}
+
 /// Global settings, then the texture sets: a tick exports a set (drag across ticks to set several), its name shows its settings, and * marks its overrides
 fn export_set_list(app: &mut TextureCraftApp, ui: &mut Ui) {
     let names: Vec<String> = app.session.doc.project.texture_sets.iter().map(|set| set.name.clone()).collect();
     let Some(draft) = app.ui.export.settings.as_mut() else { return };
 
     ui.set_width(EXPORT_SET_LIST_WIDTH);
-    ui.horizontal(|ui| {
-        if ui.selectable_label(draft.selected.is_none(), RichText::new(tr("Global settings")).strong()).clicked() {
-            draft.selected = None;
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.menu_button(ic::LIST, |ui| {
-                for (label, exported) in [(tr("Check all"), Some(true)), (tr("Uncheck all"), Some(false)), (tr("Invert all"), None)] {
-                    if ui.button(label).clicked() {
-                        for ts in 0..names.len() {
-                            draft.set_exported(ts, exported.unwrap_or(!draft.is_exported(ts)));
-                        }
+    ui.allocate_ui_with_layout(vec2(ui.available_width(), SET_ROW_HEIGHT), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.menu_button(ic::LIST, |ui| {
+            for (label, exported) in [(tr("Check all"), Some(true)), (tr("Uncheck all"), Some(false)), (tr("Invert all"), None)] {
+                if ui.button(label).clicked() {
+                    for ts in 0..names.len() {
+                        draft.set_exported(ts, exported.unwrap_or(!draft.is_exported(ts)));
                     }
                 }
-            });
+            }
         });
     });
+    if set_row(ui, tr("Global settings"), draft.selected.is_none(), None).clicked() {
+        draft.selected = None;
+    }
 
     // The value a press on a tick set, given to every tick the pointer then passes over
     let drag_id = egui::Id::unique("exp_sets_drag");
@@ -540,26 +611,32 @@ fn export_set_list(app: &mut TextureCraftApp, ui: &mut Ui) {
     let (pointer, pressed, held) = ui.input(|input| (input.pointer.interact_pos(), input.pointer.primary_pressed(), input.pointer.primary_down()));
     egui::ScrollArea::vertical().id_salt("exp_sets").auto_shrink([false; 2]).show(ui, |ui| {
         for (ts, name) in names.into_iter().enumerate() {
-            ui.horizontal(|ui| {
-                let mut exported = draft.is_exported(ts);
-                let tick = ui.checkbox(&mut exported, "");
-                let under_pointer = pointer.is_some_and(|at| tick.rect.contains(at));
-                if pressed && under_pointer {
-                    drag = Some(!draft.is_exported(ts));
-                }
-                match drag {
-                    Some(value) if held && under_pointer => draft.set_exported(ts, value),
-                    // Keyboard and accessibility toggles; a pointer press already set the tick
-                    None if tick.changed() => draft.set_exported(ts, exported),
-                    _ => {}
-                }
-                if ui.selectable_label(draft.selected == Some(ts), name).clicked() {
-                    draft.selected = Some(ts);
-                }
-                if draft.sets.get(ts).is_some_and(TextureSetExport::overrides_anything) {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label("*"));
-                }
-            });
+            let mut exported = draft.is_exported(ts);
+            let marked = draft.sets.get(ts).is_some_and(TextureSetExport::overrides_anything);
+            let mut tick = None;
+            let row = set_row(ui, &name, draft.selected == Some(ts), Some(&mut |ui: &mut Ui| tick = Some(ui.add(egui::Checkbox::without_text(&mut exported)))));
+            if marked {
+                let marker = egui::Rect::from_center_size(
+                    row.rect.right_center() - vec2(SET_ROW_PADDING + SET_ROW_MARKER / 2.0, 0.0),
+                    vec2(SET_ROW_MARKER, SET_ROW_HEIGHT),
+                );
+                ui.put(marker, egui::Label::new("*").selectable(false));
+            }
+            if row.clicked() {
+                draft.selected = Some(ts);
+            }
+            let Some(tick) = tick else { continue };
+
+            let under_pointer = pointer.is_some_and(|at| tick.rect.contains(at));
+            if pressed && under_pointer {
+                drag = Some(!draft.is_exported(ts));
+            }
+            match drag {
+                Some(value) if held && under_pointer => draft.set_exported(ts, value),
+                // Keyboard and accessibility toggles; a pointer press already set the tick
+                None if tick.changed() => draft.set_exported(ts, exported),
+                _ => {}
+            }
         }
     });
     ui.ctx().data_mut(|data| match drag {

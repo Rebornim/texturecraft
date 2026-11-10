@@ -43,39 +43,39 @@ fn tool_availability_snapshots() {
     let paint = add_layer(session, "layer.add.paint");
     select(session, paint, json!("content"));
     session.tool.tool = Tool::Paint;
-    save(&mut harness, "01-paint-layer");
+    save(&mut harness, "paint-layer");
 
     let session = &mut harness.state_mut().session;
     let fill = add_layer(session, "layer.add.fill");
     select(session, fill, json!("content"));
     session.tool.tool = Tool::PolygonFill;
-    save(&mut harness, "04-fill-content-polygon-fill");
+    save(&mut harness, "fill-content-polygon-fill");
 
     let session = &mut harness.state_mut().session;
     execute(session, "effect.add.filter", &json!({"layer": paint, "target": "content", "filter": "blur"})).unwrap();
     let filter = session.doc.project.layer(texturecraft_engine::core::LayerId(paint)).unwrap().content_effects.last().unwrap().id.0;
     select(session, paint, json!(filter));
     session.tool.tool = Tool::Paint;
-    save(&mut harness, "07-filter");
+    save(&mut harness, "filter");
 
     let session = &mut harness.state_mut().session;
     execute(session, "mask.add.black", &json!({"layer": paint})).unwrap();
     select(session, paint, json!("mask"));
     session.tool.tool = Tool::Smudge;
-    save(&mut harness, "05-mask-smudge");
+    save(&mut harness, "mask-smudge");
 
     let session = &mut harness.state_mut().session;
     let folder = add_layer(session, "layer.add.group");
     select(session, folder, json!("content"));
     session.tool.tool = Tool::Paint;
-    save(&mut harness, "09-folder");
+    save(&mut harness, "folder");
 
     select_nothing(&mut harness.state_mut().session);
-    save(&mut harness, "12-nothing-selected");
+    save(&mut harness, "nothing-selected");
 
     harness.state_mut().ui.mode = Mode::Baking;
-    save(&mut harness, "15-bake");
+    save(&mut harness, "baking");
 
     harness.state_mut().ui.mode = Mode::Rendering;
-    save(&mut harness, "16-render");
+    save(&mut harness, "rendering");
 }

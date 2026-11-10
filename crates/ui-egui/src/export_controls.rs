@@ -1,6 +1,6 @@
 //! The Export textures window's parameter controls and value texts, shared by Global settings and a texture set's overrides
 
-use egui::{RichText, Ui};
+use egui::{RichText, Ui, vec2};
 use texturecraft_engine::core::ExportFileType;
 use texturecraft_engine::formats::FileFormat;
 
@@ -17,9 +17,10 @@ const DILATION_MAX: u32 = 256;
 /// The bit depth a file type starts at when picked
 const DEFAULT_BIT_DEPTH: u8 = 8;
 const BIT_DEPTH_WIDTH: f32 = 110.0;
+const DILATION_FIELD_WIDTH: f32 = 64.0;
 
-pub fn template_combo(ui: &mut Ui, id: &str, preset: &mut String, builtins: &[String], user: &[String]) {
-    egui::ComboBox::from_id_salt(id).width(360.0).selected_text(preset.clone()).show_ui(ui, |ui| {
+pub fn template_combo(ui: &mut Ui, id: &str, preset: &mut String, builtins: &[String], user: &[String], width: f32) {
+    egui::ComboBox::from_id_salt(id).width(width).selected_text(preset.clone()).show_ui(ui, |ui| {
         for name in builtins {
             ui.selectable_value(preset, name.clone(), name);
         }
@@ -73,9 +74,9 @@ fn depth_choices(format: FileFormat) -> Vec<(u8, bool)> {
     choices
 }
 
-fn depth_combo(ui: &mut Ui, id: &str, format: FileFormat, file_type: &mut ExportFileType) {
+fn depth_combo(ui: &mut Ui, id: &str, format: FileFormat, file_type: &mut ExportFileType, width: f32) {
     let shown = bit_depth_text(file_type.bit_depth, file_type.dithering);
-    egui::ComboBox::from_id_salt((id, "bits")).width(BIT_DEPTH_WIDTH).selected_text(shown).show_ui(ui, |ui| {
+    egui::ComboBox::from_id_salt((id, "bits")).width(width).selected_text(shown).show_ui(ui, |ui| {
         for (depth, dithering) in depth_choices(format) {
             let selected = file_type.bit_depth == depth && file_type.dithering == dithering;
             if ui.selectable_label(selected, bit_depth_text(depth, dithering)).clicked() {
@@ -94,10 +95,11 @@ fn switch_format(file_type: &mut ExportFileType, format: FileFormat) {
 }
 
 /// The file type, then a bit depth it holds; the bit depth is the template's while the file type is
-pub fn file_type_combos(ui: &mut Ui, id: &str, file_type: &mut ExportFileType) {
+pub fn file_type_combos(ui: &mut Ui, id: &str, file_type: &mut ExportFileType, width: f32) {
     let chosen = FileFormat::from_extension(&file_type.format);
+    let half = (width - ui.spacing().item_spacing.x) / 2.0;
     ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt((id, "format")).selected_text(file_type_text(&file_type.format)).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt((id, "format")).width(half).selected_text(file_type_text(&file_type.format)).show_ui(ui, |ui| {
             if ui.selectable_label(chosen.is_none(), tr("Based on output template")).clicked() {
                 *file_type = ExportFileType::default();
             }
@@ -108,9 +110,9 @@ pub fn file_type_combos(ui: &mut Ui, id: &str, file_type: &mut ExportFileType) {
             }
         });
         match chosen {
-            Some(format) => depth_combo(ui, id, format, file_type),
+            Some(format) => depth_combo(ui, id, format, file_type, half),
             None => {
-                ui.add_enabled_ui(false, |ui| egui::ComboBox::from_id_salt((id, "bits")).width(BIT_DEPTH_WIDTH).selected_text("").show_ui(ui, |_| {}));
+                ui.add_enabled_ui(false, |ui| egui::ComboBox::from_id_salt((id, "bits")).width(half).selected_text("").show_ui(ui, |_| {}));
             }
         }
     });
@@ -136,7 +138,7 @@ pub fn map_file_type_combos(ui: &mut Ui, id: &str, file_type: &mut ExportFileTyp
                 }
             }
         });
-        depth_combo(ui, id, format, file_type);
+        depth_combo(ui, id, format, file_type, BIT_DEPTH_WIDTH);
     });
 }
 
@@ -149,8 +151,8 @@ pub fn size_text(size: u32, set_size: Option<(u32, u32)>) -> String {
     }
 }
 
-pub fn size_combo(ui: &mut Ui, id: &str, size: &mut u32, set_size: Option<(u32, u32)>) {
-    egui::ComboBox::from_id_salt(id).width(360.0).selected_text(size_text(*size, set_size)).show_ui(ui, |ui| {
+pub fn size_combo(ui: &mut Ui, id: &str, size: &mut u32, set_size: Option<(u32, u32)>, width: f32) {
+    egui::ComboBox::from_id_salt(id).width(width).selected_text(size_text(*size, set_size)).show_ui(ui, |ui| {
         ui.selectable_value(size, 0, size_text(0, set_size));
         ui.separator();
         ui.label(RichText::new(tr("Maximum size for all texture sets")).italics().weak());
@@ -179,13 +181,18 @@ pub fn padding_text(padding: &str, dilation: u32) -> String {
     if has_distance(padding) { format!("{} · {dilation} px", padding_label(padding)) } else { padding_label(padding).to_string() }
 }
 
-pub fn padding_controls(ui: &mut Ui, id: &str, padding: &mut String, dilation: &mut u32) {
+pub fn padding_controls(ui: &mut Ui, id: &str, padding: &mut String, dilation: &mut u32, width: f32) {
     ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt(id).width(260.0).selected_text(padding_label(padding)).show_ui(ui, |ui| {
-            for mode in PADDINGS {
-                ui.selectable_value(padding, mode.to_string(), padding_label(mode));
-            }
+        egui::ComboBox::from_id_salt(id).width(width - DILATION_FIELD_WIDTH - ui.spacing().item_spacing.x).selected_text(padding_label(padding)).show_ui(
+            ui,
+            |ui| {
+                for mode in PADDINGS {
+                    ui.selectable_value(padding, mode.to_string(), padding_label(mode));
+                }
+            },
+        );
+        ui.add_enabled_ui(has_distance(padding), |ui| {
+            ui.add_sized(vec2(DILATION_FIELD_WIDTH, ui.spacing().interact_size.y), egui::DragValue::new(dilation).range(0..=DILATION_MAX).suffix(" px"))
         });
-        ui.add_enabled(has_distance(padding), egui::DragValue::new(dilation).range(0..=DILATION_MAX).suffix(" px"));
     });
 }

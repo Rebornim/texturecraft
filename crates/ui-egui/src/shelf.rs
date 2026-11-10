@@ -12,7 +12,6 @@ use serde_json::json;
 use texturecraft_engine::formats::mcmat::MCMAT_EXT;
 use texturecraft_engine::geom::glam::Vec2;
 use texturecraft_engine::orb_preview::MAX_PREVIEW_SIZE_PX;
-use texturecraft_render::ibl::ENVIRONMENTS;
 
 use crate::TextureCraftApp;
 use crate::decal_drop::DecalDrop;
@@ -271,9 +270,6 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
         if searching || shown_tab == Tab::Brushes {
             my_brushes(app, ui, &filter);
         }
-        if searching || shown_tab == Tab::Environments {
-            environments(app, ui, &filter);
-        }
     });
     drag_preview(&ctx);
 }
@@ -422,17 +418,6 @@ fn my_brushes(app: &mut TextureCraftApp, ui: &mut Ui, filter: &str) {
 
 #[cfg(target_arch = "wasm32")]
 fn my_brushes(_: &mut TextureCraftApp, _: &mut Ui, _: &str) {}
-
-fn environments(app: &mut TextureCraftApp, ui: &mut Ui, filter: &str) {
-    let shown: Vec<&&str> = ENVIRONMENTS.iter().filter(|e| matches(filter, &[e])).collect();
-    for env in shown {
-        let on = app.session.doc.project.display.environment == **env;
-        if ui.selectable_label(on, format!("{}  {env}", ic::SUN_HORIZON)).clicked() {
-            app.run("display.set", json!({"environment": env}));
-        }
-    }
-    ui.add_space(6.0);
-}
 
 /// The Textures tab's import button, and a hint while the project has no images
 fn import_images(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, empty: bool) {

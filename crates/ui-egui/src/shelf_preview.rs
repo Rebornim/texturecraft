@@ -11,7 +11,7 @@ use texturecraft_engine::paint::alphas::LibraryAlpha;
 use texturecraft_engine::paint::presets::BrushPreset;
 use texturecraft_engine::preview;
 
-use crate::preview_image::{alpha_image, image_preview, procedural_image, sphere_image, stroke_preview};
+use crate::preview_image::{alpha_image, environment_image, image_preview, procedural_image, sphere_image, stroke_preview};
 
 /// The asset a shelf tile previews
 pub enum ShelfPreview {
@@ -31,6 +31,8 @@ pub enum ShelfPreview {
     Brush(&'static BrushPreset),
     /// An image resource by name
     Image(String, Arc<ImageRes>),
+    /// A built-in lighting environment's panorama
+    Environment(&'static str),
 }
 
 impl ShelfPreview {
@@ -53,6 +55,7 @@ impl ShelfPreview {
             ShelfPreview::Alpha(alpha) => format!("alpha:{}", alpha.id),
             ShelfPreview::Brush(preset) => format!("brush:{}", preset.id),
             ShelfPreview::Image(name, _) => format!("image:{name}"),
+            ShelfPreview::Environment(name) => format!("environment:{name}"),
         }
     }
 
@@ -67,6 +70,7 @@ impl ShelfPreview {
             ShelfPreview::Alpha(alpha) => Some(alpha_image(alpha, size)),
             ShelfPreview::Brush(preset) => Some(stroke_preview(&preset.applied(&BrushSettings::default()), size)),
             ShelfPreview::Image(_, image) => Some(image_preview(image, size)),
+            ShelfPreview::Environment(name) => Some(environment_image(name, size)),
         }
     }
 }
@@ -93,6 +97,7 @@ mod tests {
             ShelfPreview::Alpha(&alphas::library()[0]),
             ShelfPreview::Brush(&PRESETS[0]),
             ShelfPreview::Image("image".into(), Arc::new(image)),
+            ShelfPreview::Environment(texturecraft_engine::core::project::ENVIRONMENTS[0]),
         ];
         for preview in previews {
             let key = preview.key();

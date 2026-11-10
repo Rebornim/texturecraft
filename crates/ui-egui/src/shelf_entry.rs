@@ -2,6 +2,7 @@
 
 use serde_json::json;
 use texturecraft_engine::core::ProceduralKind;
+use texturecraft_engine::core::project::ENVIRONMENTS;
 use texturecraft_engine::filter_lib::{FILTERS, FilterDef};
 use texturecraft_engine::materials::{MATERIALS, SmartMaterial};
 use texturecraft_engine::paint::alphas::{self, LibraryAlpha};
@@ -22,6 +23,8 @@ pub(crate) enum ShelfEntry {
     Brush(&'static BrushPreset),
     Alpha(&'static LibraryAlpha),
     Procedural(ProceduralKind),
+    /// A built-in lighting environment, by name
+    Environment(&'static str),
     /// An image resource of the project, by name
     Image(String),
 }
@@ -36,7 +39,8 @@ impl ShelfEntry {
             .chain(FILTERS.iter().map(ShelfEntry::Filter))
             .chain(PRESETS.iter().map(ShelfEntry::Brush))
             .chain(alphas::library().iter().map(ShelfEntry::Alpha))
-            .chain(ProceduralKind::ALL.into_iter().map(ShelfEntry::Procedural));
+            .chain(ProceduralKind::ALL.into_iter().map(ShelfEntry::Procedural))
+            .chain(ENVIRONMENTS.into_iter().map(ShelfEntry::Environment));
         built_in.chain(app.session.doc.resources.keys().cloned().map(ShelfEntry::Image)).collect()
     }
 
@@ -50,6 +54,7 @@ impl ShelfEntry {
             ShelfEntry::Brush(_) => Tab::Brushes,
             ShelfEntry::Alpha(_) => Tab::Alphas,
             ShelfEntry::Procedural(_) => Tab::Procedurals,
+            ShelfEntry::Environment(_) => Tab::Environments,
             ShelfEntry::Image(_) => Tab::Textures,
         }
     }
@@ -63,6 +68,7 @@ impl ShelfEntry {
             ShelfEntry::Brush(preset) => format!("brush:{}", preset.id),
             ShelfEntry::Alpha(alpha) => format!("alpha:{}", alpha.id),
             ShelfEntry::Procedural(kind) => format!("procedural:{kind:?}"),
+            ShelfEntry::Environment(name) => format!("environment:{name}"),
             ShelfEntry::Image(name) => format!("image:{name}"),
         }
     }
@@ -76,6 +82,7 @@ impl ShelfEntry {
             ShelfEntry::Brush(preset) => preset.label,
             ShelfEntry::Alpha(alpha) => &alpha.label,
             ShelfEntry::Procedural(kind) => tr(kind.label()),
+            ShelfEntry::Environment(name) => name,
             ShelfEntry::Image(name) => name,
         }
     }
@@ -89,6 +96,7 @@ impl ShelfEntry {
             ShelfEntry::Brush(preset) => &[preset.label, preset.category, preset.id],
             ShelfEntry::Alpha(alpha) => &[&alpha.label, alpha.category, &alpha.id],
             ShelfEntry::Procedural(kind) => &[kind.label(), tr(kind.label())],
+            ShelfEntry::Environment(name) => &[name],
             ShelfEntry::Image(name) => &[name],
         };
         crate::shelf::matches(filter, texts)
@@ -103,6 +111,7 @@ impl ShelfEntry {
             ShelfEntry::Brush(preset) => app.thumbs.brush_preset(ctx, preset),
             ShelfEntry::Alpha(alpha) => app.thumbs.alpha(ctx, alpha),
             ShelfEntry::Procedural(kind) => app.thumbs.procedural(ctx, *kind),
+            ShelfEntry::Environment(name) => app.thumbs.environment(ctx, name),
             ShelfEntry::Image(name) => {
                 let image = app.session.images.get(name).cloned()?;
                 Some(app.thumbs.image(ctx, name, &image))
@@ -119,6 +128,7 @@ impl ShelfEntry {
             ShelfEntry::Brush(preset) => ShelfPreview::Brush(preset),
             ShelfEntry::Alpha(alpha) => ShelfPreview::Alpha(alpha),
             ShelfEntry::Procedural(kind) => ShelfPreview::Procedural(*kind),
+            ShelfEntry::Environment(name) => ShelfPreview::Environment(name),
             ShelfEntry::Image(name) => ShelfPreview::Image(name.clone(), app.session.images.get(name).cloned()?),
         })
     }
@@ -131,16 +141,20 @@ impl ShelfEntry {
             ShelfEntry::Filter(filter) => Some(Asset::Filter(filter.id)),
             ShelfEntry::Alpha(alpha) => Some(Asset::Alpha(&alpha.id)),
             ShelfEntry::Image(name) => Some(Asset::Texture(name.clone())),
-            ShelfEntry::Brush(_) | ShelfEntry::Procedural(_) => None,
+            ShelfEntry::Brush(_) | ShelfEntry::Procedural(_) | ShelfEntry::Environment(_) => None,
         }
     }
 
-    /// Whether the tile is outlined as in use: the brush's library alpha
+    /// Whether the tile is outlined as in use: the brush's library alpha, the shown environment
     pub(crate) fn in_use(&self, app: &TextureCraftApp) -> bool {
-        let ShelfEntry::Alpha(alpha) = self else { return false };
-
-        let brush = &app.session.tool.brush;
-        brush.alpha_image.is_none() && brush.alpha_library.as_deref() == Some(alpha.id.as_str())
+        match self {
+            ShelfEntry::Alpha(alpha) => {
+                let brush = &app.session.tool.brush;
+                brush.alpha_image.is_none() && brush.alpha_library.as_deref() == Some(alpha.id.as_str())
+            }
+            ShelfEntry::Environment(name) => app.session.doc.project.display.environment == *name,
+            _ => false,
+        }
     }
 
     /// What a click on the tile does
@@ -152,6 +166,9 @@ impl ShelfEntry {
             ShelfEntry::Procedural(kind) => {
                 app.run("layer.add.fill", json!({"name": kind.label()}));
                 app.run("layer.fill.set", json!({"channel": "baseColor", "procedural": kind.label(), "low": [0.1, 0.1, 0.1], "high": [0.9, 0.9, 0.9]}));
+            }
+            ShelfEntry::Environment(name) => {
+                app.run("display.set", json!({"environment": name}));
             }
             entry => {
                 if let Some(asset) = entry.asset() {

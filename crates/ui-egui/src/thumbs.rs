@@ -212,6 +212,11 @@ impl Thumbs {
         self.shelf(ctx, ShelfPreview::Alpha(alpha), SWATCH_PX)
     }
 
+    /// A lighting environment's panorama
+    pub fn environment(&mut self, ctx: &egui::Context, name: &'static str) -> Option<TextureHandle> {
+        self.shelf(ctx, ShelfPreview::Environment(name), SWATCH_PX)
+    }
+
     /// A brush preset's stroke along an S curve
     pub fn brush_preset(&mut self, ctx: &egui::Context, preset: &'static BrushPreset) -> Option<TextureHandle> {
         self.shelf(ctx, ShelfPreview::Brush(preset), SWATCH_PX)

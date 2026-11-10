@@ -10,7 +10,7 @@ use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute};
 
 /// A ~10 layer stack: procedural fills, generators, a blurred mask, a folder and painted layers.
-fn stack(res: u32) -> Session {
+pub(crate) fn stack(res: u32) -> Session {
     let mut s = Session::new_project("perf", primitives::sphere(1.0, 64, 32), "builtin:sphere", None, res).unwrap();
     s.viewport = Vec2::new(800.0, 800.0);
     let run = |s: &mut Session, id: &str, p: Value| execute(s, id, &p).unwrap();

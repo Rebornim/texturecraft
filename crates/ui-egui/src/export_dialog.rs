@@ -1,16 +1,18 @@
 //! The Export textures window: it edits a draft of the project's export settings, saved by Save settings or Export and dropped by Cancel
 
 use egui::{RichText, Ui, vec2};
+use egui_phosphor::regular as ic;
 use serde_json::json;
-use texturecraft_engine::core::NormalFormat;
+use texturecraft_engine::core::{ExportOverrides, NormalFormat, TextureSetExport};
 
 use crate::TextureCraftApp;
+use crate::export_controls as controls;
 use crate::export_draft::ExportDraft;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::file_dialogs::{Bound, FileDialog};
 use crate::i18n::{tr, trf};
 use crate::theme::{Tokens, caption};
-use crate::widgets::primary_button;
+use crate::widgets::{icon_button_without_tooltip, primary_button};
 
 /// Width of the window and of its texture set column
 const EXPORT_DIALOG_WIDTH: f32 = 820.0;
@@ -19,6 +21,7 @@ const EXPORT_BODY_HEIGHT: f32 = 360.0;
 /// Its title bar, tabs, button row and margins, kept on screen in a short app window
 const EXPORT_DIALOG_CHROME_HEIGHT: f32 = 160.0;
 const EXPORT_BODY_MIN_HEIGHT: f32 = 120.0;
+const OVERRIDE_PEN_SIZE: f32 = 20.0;
 
 pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     // Closed by Cancel, Esc or the title bar: the unsaved edits go
@@ -194,6 +197,22 @@ pub(crate) fn global_params(app: &TextureCraftApp) -> serde_json::Value {
 }
 
 fn export_settings_tab(app: &mut TextureCraftApp, ui: &mut Ui, presets: &[texturecraft_engine::formats::ExportPreset]) {
+    let builtins: Vec<String> = presets.iter().map(|p| p.name.clone()).collect();
+    let user_presets: Vec<String> = app.session.export_presets.list.iter().map(|p| p.name.clone()).collect();
+    let selected = app.ui.export.settings.as_ref().and_then(|draft| draft.selected);
+    match selected {
+        Some(ts) => {
+            let set_size = app.session.doc.project.texture_sets.get(ts).map(|set| set.size());
+            if let Some(draft) = app.ui.export.settings.as_mut() {
+                set_settings(ui, draft, ts, set_size, &builtins, &user_presets);
+            }
+        }
+        None => global_settings(app, ui, &builtins, &user_presets),
+    }
+}
+
+/// Global settings: the parameters every texture set starts from
+fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], user_presets: &[String]) {
     let project_normal = app.session.doc.project.normal_format;
     // The preset's own convention, so picking an engine preset shows what it writes
     let preset_normal = app
@@ -203,7 +222,6 @@ fn export_settings_tab(app: &mut TextureCraftApp, ui: &mut Ui, presets: &[textur
         .as_ref()
         .and_then(|draft| app.session.export_preset(&draft.settings.parameters.preset))
         .and_then(|preset| preset.normal_format(project_normal));
-    let user_presets: Vec<String> = app.session.export_presets.list.iter().map(|p| p.name.clone()).collect();
     let Some(draft) = app.ui.export.settings.as_mut() else { return };
 
     let mut pick_dir = false;
@@ -222,71 +240,16 @@ fn export_settings_tab(app: &mut TextureCraftApp, ui: &mut Ui, presets: &[textur
         }
         let parameters = &mut settings.parameters;
         ui.label(tr("Output template"));
-        egui::ComboBox::from_id_salt("exp_preset").width(360.0).selected_text(parameters.preset.clone()).show_ui(ui, |ui| {
-            for p in presets {
-                ui.selectable_value(&mut parameters.preset, p.name.clone(), &p.name);
-            }
-            if !user_presets.is_empty() {
-                ui.separator();
-            }
-            for name in &user_presets {
-                ui.selectable_value(&mut parameters.preset, name.clone(), name);
-            }
-        });
+        controls::template_combo(ui, "exp_preset", &mut parameters.preset, builtins, user_presets);
         ui.end_row();
         ui.label(tr("File type"));
-        ui.horizontal(|ui| {
-            let label = if parameters.format.is_empty() { tr("From template").to_string() } else { parameters.format.clone() };
-            egui::ComboBox::from_id_salt("exp_fmt").selected_text(label).show_ui(ui, |ui| {
-                ui.selectable_value(&mut parameters.format, String::new(), tr("From template"));
-                for f in ["png", "jpeg", "tga", "tiff", "bmp", "webp", "exr", "hdr"] {
-                    ui.selectable_value(&mut parameters.format, f.to_string(), f);
-                }
-            });
-            let bit_depth = if parameters.bit_depth == 0 { tr("Default").to_string() } else { trf("{n} bits", &[("n", &parameters.bit_depth)]) };
-            egui::ComboBox::from_id_salt("exp_bits").selected_text(bit_depth).show_ui(ui, |ui| {
-                for (v, l) in [
-                    (0u8, tr("Default").to_string()),
-                    (8, trf("{n} bits", &[("n", &8)])),
-                    (16, trf("{n} bits", &[("n", &16)])),
-                    (32, tr("32 bits (float)").to_string()),
-                ] {
-                    ui.selectable_value(&mut parameters.bit_depth, v, l);
-                }
-            });
-        });
+        controls::file_type_combos(ui, "exp_fmt", &mut parameters.format, &mut parameters.bit_depth);
         ui.end_row();
         ui.label(tr("Size"));
-        let size = if parameters.size == 0 { tr("Based on each texture set's size").to_string() } else { format!("{0} x {0}", parameters.size) };
-        egui::ComboBox::from_id_salt("exp_size").width(360.0).selected_text(size).show_ui(ui, |ui| {
-            ui.selectable_value(&mut parameters.size, 0, tr("Based on each texture set's size"));
-            for r in [256u32, 512, 1024, 2048, 4096, 8192] {
-                ui.selectable_value(&mut parameters.size, r, format!("{r} x {r}"));
-            }
-        });
+        controls::size_combo(ui, "exp_size", &mut parameters.size, None);
         ui.end_row();
         ui.label(tr("Padding"));
-        ui.horizontal(|ui| {
-            let label = match parameters.padding.as_str() {
-                "none" => tr("No padding (passthrough)"),
-                "dilation" => tr("Dilation + transparent"),
-                "dilationDefault" => tr("Dilation + default background color"),
-                _ => tr("Dilation infinite"),
-            };
-            egui::ComboBox::from_id_salt("exp_pad").width(260.0).selected_text(label).show_ui(ui, |ui| {
-                for (v, l) in [
-                    ("infinite", tr("Dilation infinite")),
-                    ("dilation", tr("Dilation + transparent")),
-                    ("dilationDefault", tr("Dilation + default background color")),
-                    ("none", tr("No padding (passthrough)")),
-                ] {
-                    ui.selectable_value(&mut parameters.padding, v.to_string(), l);
-                }
-            });
-            if parameters.padding.starts_with("dilation") {
-                ui.add(egui::DragValue::new(&mut parameters.dilation).range(0..=256).suffix(" px"));
-            }
-        });
+        controls::padding_controls(ui, "exp_pad", &mut parameters.padding, &mut parameters.dilation);
         ui.end_row();
         ui.label(tr("Normal map format"));
         let preset_format = match preset_normal {
@@ -328,6 +291,87 @@ fn export_settings_tab(app: &mut TextureCraftApp, ui: &mut Ui, presets: &[textur
     }
 }
 
+/// A texture set's parameters: each shows the global value until its pen overrides it for this set
+fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Option<(u32, u32)>, builtins: &[String], user_presets: &[String]) {
+    let global = draft.settings.parameters.clone();
+    let Some(overrides) = draft.sets.get_mut(ts).map(|set| &mut set.overrides) else { return };
+
+    ui.horizontal(|ui| {
+        ui.label(caption(tr("General export parameters")));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.menu_button(ic::LIST, |ui| {
+                if ui.button(tr("Enable override for all items")).clicked() {
+                    *overrides = ExportOverrides {
+                        preset: Some(global.preset.clone()),
+                        file_type: Some((global.format.clone(), global.bit_depth)),
+                        size: Some(global.size),
+                        padding: Some((global.padding.clone(), global.dilation)),
+                    };
+                }
+                if ui.button(tr("Disable override for all items")).clicked() {
+                    *overrides = ExportOverrides::default();
+                }
+            });
+        });
+    });
+    let tk = Tokens::get(ui.ctx());
+    let inherited = |ui: &mut Ui, text: String| ui.label(RichText::new(text).color(tk.text_dim));
+    egui::Grid::new(("exp_set_grid", ts)).num_columns(3).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
+        ui.label(tr("Output template"));
+        if override_pen(ui, overrides.preset.is_some()) {
+            overrides.preset = overrides.preset.take().xor(Some(global.preset.clone()));
+        }
+        match overrides.preset.as_mut() {
+            Some(preset) => controls::template_combo(ui, "exp_set_preset", preset, builtins, user_presets),
+            None => {
+                inherited(ui, global.preset.clone());
+            }
+        }
+        ui.end_row();
+
+        ui.label(tr("File type"));
+        if override_pen(ui, overrides.file_type.is_some()) {
+            overrides.file_type = overrides.file_type.take().xor(Some((global.format.clone(), global.bit_depth)));
+        }
+        match overrides.file_type.as_mut() {
+            Some((format, bit_depth)) => controls::file_type_combos(ui, "exp_set_fmt", format, bit_depth),
+            None => {
+                inherited(ui, format!("{}  {}", controls::file_type_text(&global.format), controls::bit_depth_text(global.bit_depth)));
+            }
+        }
+        ui.end_row();
+
+        ui.label(tr("Size"));
+        if override_pen(ui, overrides.size.is_some()) {
+            overrides.size = overrides.size.take().xor(Some(global.size));
+        }
+        match overrides.size.as_mut() {
+            Some(size) => controls::size_combo(ui, "exp_set_size", size, set_size),
+            None => {
+                inherited(ui, controls::size_text(global.size, set_size));
+            }
+        }
+        ui.end_row();
+
+        ui.label(tr("Padding"));
+        if override_pen(ui, overrides.padding.is_some()) {
+            overrides.padding = overrides.padding.take().xor(Some((global.padding.clone(), global.dilation)));
+        }
+        match overrides.padding.as_mut() {
+            Some((padding, dilation)) => controls::padding_controls(ui, "exp_set_pad", padding, dilation),
+            None => {
+                inherited(ui, controls::padding_text(&global.padding, global.dilation));
+            }
+        }
+        ui.end_row();
+    });
+}
+
+/// The pen beside a parameter, pressed while this texture set overrides it; true when clicked
+fn override_pen(ui: &mut Ui, overridden: bool) -> bool {
+    icon_button_without_tooltip(ui, ic::PENCIL_SIMPLE, tr("Override for this texture set"), overridden, OVERRIDE_PEN_SIZE).clicked()
+}
+
 /// A dim one-line note under the setting in the row above
 fn export_note(ui: &mut Ui, text: &str) {
     let tk = Tokens::get(ui.ctx());
@@ -336,13 +380,12 @@ fn export_note(ui: &mut Ui, text: &str) {
     ui.end_row();
 }
 
-/// The texture sets to export: a scrolling checkbox list with select all / none
+/// Global settings, then the texture sets: a tick exports a set, its name shows its settings, and * marks its overrides
 fn export_set_list(app: &mut TextureCraftApp, ui: &mut Ui) {
     let names: Vec<String> = app.session.doc.project.texture_sets.iter().map(|set| set.name.clone()).collect();
     let Some(draft) = app.ui.export.settings.as_mut() else { return };
 
     ui.set_width(EXPORT_SET_LIST_WIDTH);
-    ui.label(RichText::new(tr("Texture sets")).strong());
     ui.horizontal(|ui| {
         if ui.small_button(tr("Select all")).clicked() {
             (0..names.len()).for_each(|ts| draft.set_exported(ts, true));
@@ -351,12 +394,23 @@ fn export_set_list(app: &mut TextureCraftApp, ui: &mut Ui) {
             (0..names.len()).for_each(|ts| draft.set_exported(ts, false));
         }
     });
+    if ui.selectable_label(draft.selected.is_none(), RichText::new(tr("Global settings")).strong()).clicked() {
+        draft.selected = None;
+    }
     egui::ScrollArea::vertical().id_salt("exp_sets").auto_shrink([false; 2]).show(ui, |ui| {
         for (ts, name) in names.into_iter().enumerate() {
-            let mut exported = draft.is_exported(ts);
-            if ui.checkbox(&mut exported, name).changed() {
-                draft.set_exported(ts, exported);
-            }
+            ui.horizontal(|ui| {
+                let mut exported = draft.is_exported(ts);
+                if ui.checkbox(&mut exported, "").changed() {
+                    draft.set_exported(ts, exported);
+                }
+                if ui.selectable_label(draft.selected == Some(ts), name).clicked() {
+                    draft.selected = Some(ts);
+                }
+                if draft.sets.get(ts).is_some_and(TextureSetExport::overrides_anything) {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label("*"));
+                }
+            });
         }
     });
 }

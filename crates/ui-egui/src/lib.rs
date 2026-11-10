@@ -15,6 +15,7 @@ pub mod control;
 mod decal_drop;
 pub mod dock;
 pub mod docking;
+mod export_controls;
 mod export_dialog;
 pub mod export_draft;
 pub mod export_templates;

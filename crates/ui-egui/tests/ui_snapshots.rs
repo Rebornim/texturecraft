@@ -545,6 +545,14 @@ fn export_dialog_snapshots() {
         }
     }
 
+    // A texture set's settings, then with its size overridden
+    harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    harness.state_mut().ui.export.settings.as_mut().unwrap().selected = Some(1);
+    save(&mut harness, &output_dir, "export-set");
+    harness.state_mut().ui.export.settings.as_mut().unwrap().sets[1].overrides.size = Some(1024);
+    save(&mut harness, &output_dir, "export-set-override");
+    harness.state_mut().ui.export.settings.as_mut().unwrap().selected = None;
+
     // The normal map format's choices with a preset that writes DirectX
     harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
     harness.state_mut().ui.export.settings.as_mut().unwrap().settings.parameters.preset = "Unreal Engine (Packed)".into();

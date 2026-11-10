@@ -11,6 +11,7 @@ pub mod bake;
 pub mod blend;
 mod block_scales;
 pub mod channel;
+pub mod export;
 pub mod layer;
 pub mod project;
 
@@ -23,6 +24,7 @@ pub use bake::{
 };
 pub use blend::{BlendMode, blend1, blend3, lum, mix3};
 pub use channel::{Channel, ChannelFormat, ChannelKind};
+pub use export::{DEFAULT_EXPORT_PRESET, ExportOverrides, ExportParameters, ExportSettings, MapExportOverride, TextureSetExport};
 pub use layer::{
     ChannelBlend, CompareOp, CurvatureDetail, CurvatureMode, Decal, Effect, EffectKind, Fill, Filter, Generator, GeneratorKind, HeightMask, Layer, LayerId,
     LayerKind, Levels, LinkParam, LinkPreset, Mask, MaskBackground, MaterialLink, PathShape, Procedural, ProceduralKind, Projection, Source, gradient,

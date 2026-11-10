@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BakeSettings, BakedMap, Channel, ChannelFormat, CoreError, Effect, Layer, LayerId, LayerKind, Result};
+use crate::{BakeSettings, BakedMap, Channel, ChannelFormat, CoreError, Effect, ExportSettings, Layer, LayerId, LayerKind, Result, TextureSetExport};
 
 pub const FORMAT_VERSION: u32 = 2;
 
@@ -70,6 +70,9 @@ pub struct TextureSet {
     /// than the atlas block fills the block's top-left corner (see [`TextureSet::to_atlas`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub tile_resolutions: BTreeMap<u32, u32>,
+    /// Left out of export, or exported with its own settings
+    #[serde(default, skip_serializing_if = "TextureSetExport::is_empty")]
+    pub export: TextureSetExport,
 }
 
 /// Smallest and largest texture set (and UV tile) resolutions.
@@ -162,6 +165,7 @@ impl TextureSet {
             uv_tiles: Vec::new(),
             bake_excluded_tiles: BTreeSet::new(),
             tile_resolutions: BTreeMap::new(),
+            export: TextureSetExport::default(),
         }
     }
 
@@ -408,6 +412,9 @@ pub struct Project {
     /// Saved and imported cameras (the viewport's default camera is not in the list).
     #[serde(default)]
     pub cameras: Vec<Camera>,
+    /// The export window's settings once saved (Save settings or an export)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export: Option<ExportSettings>,
 }
 
 impl Project {
@@ -424,6 +431,7 @@ impl Project {
             next_id: 1,
             display: DisplaySettings::default(),
             cameras: Vec::new(),
+            export: None,
         }
     }
 

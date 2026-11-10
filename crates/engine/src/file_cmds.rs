@@ -42,7 +42,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Export textures",
             ["File"],
             None,
-            "{dir, preset?: built-in or user preset name, or a preset object {name, maps}, ts?: index|\"all\", format?: png|jpg|tga|tif|exr|..., bitDepth?, padding?: none|dilation|dilationDefault|infinite, dilation?: px, size?: px, normalFormat?: openGl|directX, colorSpace?: sRGB (default for 8/16-bit files)|Linear Rec.709 (default for exr, hdr)|ACEScg|ACES2065-1 (colour maps are converted, data maps never are; 8/16-bit files clamp to 0-1; a chosen space is also recorded in the colour maps: an ICC profile in PNG, JPEG, TIFF and WebP, the chromaticities in EXR; TGA, BMP and HDR can't hold one and warn), materialX?: bool (also write a .mtlx OpenPBR material per texture set; needs the \"OpenPBR (separate maps)\" preset)}",
+            "{dir (optional once export settings with a directory are saved), preset?: built-in or user preset name, or a preset object {name, maps}, ts?: index|\"all\", format?: png|jpg|tga|tif|exr|..., bitDepth?, padding?: none|dilation|dilationDefault|infinite, dilation?: px, size?: px, normalFormat?: openGl|directX, colorSpace?: sRGB (default for 8/16-bit files)|Linear Rec.709 (default for exr, hdr)|ACEScg|ACES2065-1 (colour maps are converted, data maps never are; 8/16-bit files clamp to 0-1; a chosen space is also recorded in the colour maps: an ICC profile in PNG, JPEG, TIFF and WebP, the chromaticities in EXR; TGA, BMP and HDR can't hold one and warn), materialX?: bool (also write a .mtlx OpenPBR material per texture set; needs the \"OpenPBR (separate maps)\" preset)}",
             always,
             export_textures
         ),
@@ -302,7 +302,7 @@ pub fn export_options(s: &Session, p: &Value, cmd: &str) -> Result<ExportOptions
     Ok(o)
 }
 
-fn sets_param(s: &Session, p: &Value, cmd: &str) -> Result<Vec<usize>> {
+pub(crate) fn sets_param(s: &Session, p: &Value, cmd: &str) -> Result<Vec<usize>> {
     match p.get("ts") {
         None => Ok((0..s.set_count()).collect()),
         Some(Value::String(a)) if a == "all" => Ok((0..s.set_count()).collect()),
@@ -311,14 +311,16 @@ fn sets_param(s: &Session, p: &Value, cmd: &str) -> Result<Vec<usize>> {
 }
 
 fn plan(s: &mut Session, p: &Value) -> Result<Value> {
-    let opts = export_options(s, p, "export.plan")?;
     let mesh_name = stem_of(s.doc.project.mesh.trim_start_matches("builtin:"));
     let mut names = Vec::new();
-    for ts in sets_param(s, p, "export.plan")? {
-        for f in texturecraft_formats::list_outputs(&s.doc.project, ts, &mesh_name, &opts).map_err(fe)? {
-            names.push(json!({"ts": ts, "map": f.map, "file": f.name, "format": f.format.extension(), "bitDepth": f.bit_depth, "warnings": f.warnings}));
+    for (sets, opts) in crate::export_settings_cmds::export_jobs(s, p, "export.plan")? {
+        for ts in sets {
+            for f in texturecraft_formats::list_outputs(&s.doc.project, ts, &mesh_name, &opts).map_err(fe)? {
+                names.push(json!({"ts": ts, "map": f.map, "file": f.name, "format": f.format.extension(), "bitDepth": f.bit_depth, "warnings": f.warnings}));
+            }
         }
     }
+
     Ok(json!(names))
 }
 
@@ -481,16 +483,28 @@ impl Session {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn export_textures(s: &mut Session, p: &Value) -> Result<Value> {
-    let dir = native::path_param(p, "dir", "file.exportTextures")?.to_string();
-    let opts = export_options(s, p, "file.exportTextures")?;
-    let sets = sets_param(s, p, "file.exportTextures")?;
-    std::fs::create_dir_all(&dir).map_err(|e| bad("file.exportTextures", format!("cannot create {dir}: {e}")))?;
-    let files = s.export_files(&sets, &opts)?;
-    let mut warnings: Vec<String> = files.iter().flat_map(|f| f.warnings.iter().cloned()).collect();
-    let mut written = texturecraft_formats::write_files(&files, std::path::Path::new(&dir)).map_err(fe)?;
-    if p.get("materialX").and_then(Value::as_bool).unwrap_or(false) {
-        written.extend(write_materialx(s, &sets, &opts, std::path::Path::new(&dir), &mut warnings)?);
+    const CMD: &str = "file.exportTextures";
+    // Without `dir`, the saved output directory
+    let saved_dir = s.doc.project.export.as_ref().map(|settings| settings.dir.clone()).filter(|dir| !dir.trim().is_empty());
+    let dir = match (native::path_param(p, "dir", CMD), saved_dir) {
+        (Ok(dir), _) => dir.to_string(),
+        (Err(_), Some(dir)) => dir,
+        (Err(error), None) => return Err(error),
+    };
+    let jobs = crate::export_settings_cmds::export_jobs(s, p, CMD)?;
+    std::fs::create_dir_all(&dir).map_err(|e| bad(CMD, format!("cannot create {dir}: {e}")))?;
+
+    let mut warnings = Vec::new();
+    let mut written = Vec::new();
+    for (sets, opts) in jobs {
+        let files = s.export_files(&sets, &opts)?;
+        warnings.extend(files.iter().flat_map(|f| f.warnings.iter().cloned()));
+        written.extend(texturecraft_formats::write_files(&files, std::path::Path::new(&dir)).map_err(fe)?);
+        if p.get("materialX").and_then(Value::as_bool).unwrap_or(false) {
+            written.extend(write_materialx(s, &sets, &opts, std::path::Path::new(&dir), &mut warnings)?);
+        }
     }
+
     s.log.push(format!("Exported {} textures to {dir}", written.len()));
     Ok(json!({ "files": written.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(), "warnings": warnings }))
 }

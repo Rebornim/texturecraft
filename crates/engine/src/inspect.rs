@@ -168,6 +168,7 @@ pub fn texture_set(session: &Session, index: usize) -> Value {
         "baked": crate::project_cmds::baked_json(session.doc.baked.get(&index)),
         "visible": texture_set.visible,
         "active": index == session.ts(),
+        "export": texture_set.export,
     })
 }
 
@@ -190,6 +191,7 @@ pub fn session(s: &Session) -> Value {
         "bakePreview": crate::bake_preview::preview_json(s),
         "camera": crate::view_cmds::camera_json(s),
         "display": s.doc.project.display,
+        "export": s.doc.project.export,
         "history": { "undo": s.undo_label(), "redo": s.redo_label(), "depth": s.history_labels().len() },
         "memoryBytes": s.memory().total(),
         "pendingTiles": s.pending_tiles(),

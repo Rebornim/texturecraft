@@ -16,6 +16,7 @@ pub mod color_selection_cmds;
 pub mod commands;
 pub mod decal_cmds;
 pub mod effect_clipboard;
+pub mod export_settings_cmds;
 pub mod file_cmds;
 pub mod fill_hit_test;
 pub mod fill_mode;

@@ -8,9 +8,11 @@ use crate::{BlendMode, Channel, ChannelKind, lum};
 
 mod curvature_detail;
 mod curvature_mode;
+mod generator_global;
 
 pub use curvature_detail::CurvatureDetail;
 pub use curvature_mode::CurvatureMode;
+pub use generator_global::GeneratorGlobal;
 
 /// Id of a layer or effect (one id space per project).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -549,6 +551,9 @@ pub struct Generator {
     /// Mode and detail sizes of `Curvature` / `EdgeWear` generators (None: the curvature map as baked, as before detail sizes existed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<CurvatureDetail>,
+    /// Blur, balance and contrast of the finished value (neutral for generators saved before they existed).
+    #[serde(default, skip_serializing_if = "GeneratorGlobal::is_neutral")]
+    pub global: GeneratorGlobal,
 }
 
 impl Generator {
@@ -565,7 +570,18 @@ impl Generator {
             GeneratorKind::EdgeWear => Some(CurvatureDetail { mode: CurvatureMode::Edges, weights: CurvatureDetail::EDGE_WEIGHTS }),
             _ => None,
         };
-        Generator { kind, level, softness, noise_amount, noise_scale: 8.0, seed: 7, direction: [0.0, 1.0, 0.0], invert: false, detail }
+        Generator {
+            kind,
+            level,
+            softness,
+            noise_amount,
+            noise_scale: 8.0,
+            seed: 7,
+            direction: [0.0, 1.0, 0.0],
+            invert: false,
+            detail,
+            global: GeneratorGlobal::default(),
+        }
     }
 }
 
@@ -1074,6 +1090,20 @@ mod tests {
         let loaded: Generator = serde_json::from_value(saved).unwrap();
         assert_eq!(loaded.detail, None);
         assert_eq!(Generator::new(GeneratorKind::Dirt).detail, None, "only curvature and edge wear generators have detail sizes");
+    }
+
+    #[test]
+    fn generators_saved_before_global_adjustments_load_and_save_unchanged() {
+        let saved = serde_json::to_value(Generator::new(GeneratorKind::Dirt)).unwrap();
+        assert!(saved.get("global").is_none(), "neutral adjustments are not written, so saved files stay as they were");
+
+        let loaded: Generator = serde_json::from_value(saved).unwrap();
+        assert!(loaded.global.is_neutral());
+
+        let mut blurred = Generator::new(GeneratorKind::Dirt);
+        blurred.global.blur = 0.5;
+        let round_trip: Generator = serde_json::from_value(serde_json::to_value(&blurred).unwrap()).unwrap();
+        assert_eq!(round_trip, blurred);
     }
 
     #[test]

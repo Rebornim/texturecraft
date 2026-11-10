@@ -49,7 +49,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add generator",
             ["Layers", "Effects"],
             None,
-            "{layer?, name?, generator?: edgeWear|dirt|thinAreas|curvature|ambientOcclusion|position|direction, level?, softness?, noise?, invert?, mode?: edges|cavities|both|raw, sizes?: [7 weights 0..1, finest first] (curvature and edgeWear)}",
+            "{layer?, name?, generator?: edgeWear|dirt|thinAreas|curvature|ambientOcclusion|position|direction, level?, softness?, noise?, invert?, blur?: 0..1, balance?: 0..1 (0.5 unchanged), contrast?: 0..1, mode?: edges|cavities|both|raw, sizes?: [7 weights 0..1, finest first] (curvature and edgeWear)}",
             has_layer,
             add_generator
         ),
@@ -94,7 +94,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, invert?, mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, invert?, blur?, balance?, contrast? (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -336,6 +336,15 @@ fn generator_from(command: &str, params: &Value, generator: &mut Generator) -> R
     }
     if let Some(direction) = color_param(params, "direction") {
         generator.direction = direction;
+    }
+    if let Some(blur) = f32p(params, "blur") {
+        generator.global.blur = blur.clamp(0.0, 1.0);
+    }
+    if let Some(balance) = f32p(params, "balance") {
+        generator.global.balance = balance.clamp(0.0, 1.0);
+    }
+    if let Some(contrast) = f32p(params, "contrast") {
+        generator.global.contrast = contrast.clamp(0.0, 1.0);
     }
 
     // A mode or sizes also give a curvature generator saved before detail sizes its detail

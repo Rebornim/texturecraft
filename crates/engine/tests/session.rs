@@ -446,3 +446,17 @@ fn curvature_generators_take_a_mode_and_detail_sizes() {
     assert!(dirt.is_err(), "only curvature generators have a mode");
     assert_eq!(execute(&mut state, "project.inspect", &Value::Null).unwrap().to_string(), inspect, "failed commands leave the project unchanged");
 }
+
+#[test]
+fn generators_take_blur_balance_and_contrast() {
+    let mut state = session();
+    execute(&mut state, "layer.add.fill", &json!({})).unwrap();
+    execute(&mut state, "mask.add.black", &Value::Null).unwrap();
+    let added = execute(&mut state, "effect.add.generator", &json!({"generator": "dirt", "blur": 0.25})).unwrap();
+    let effect = added["effect"].clone();
+
+    execute(&mut state, "effect.set", &json!({"effect": effect, "balance": 0.75, "contrast": 2.0})).unwrap();
+    let inspect = execute(&mut state, "project.inspect", &Value::Null).unwrap().to_string();
+    assert!(inspect.contains(r#""blur":0.25"#) && inspect.contains(r#""balance":0.75"#), "{inspect}");
+    assert!(inspect.contains(r#""contrast":1.0"#), "contrast is clamped to 0..1: {inspect}");
+}

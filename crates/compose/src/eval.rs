@@ -271,6 +271,8 @@ enum Op {
     Edge,
     /// Average downhill along a noise height field.
     Slope { scale: f32, seed: u32 },
+    /// A generator blurred on its own (box blurs), then blended over the stack below it.
+    Generator,
 }
 
 /// The last neighbourhood filter of an effect stack (see [`neighbourhood_filters`]).
@@ -297,6 +299,7 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
         EffectKind::Filter(Filter::Bevel { width }) => Some((index, texels(*width * 0.5), Op::Bevel)),
         EffectKind::Filter(Filter::Glow { radius, amount }) => Some((index, texels(*radius), Op::Glow(*amount))),
         EffectKind::Filter(Filter::Mosaic { size }) => Some((index, texels(*size), Op::Mosaic)),
+        EffectKind::Generator(generator) if generator.global.blur > 0.0 => Some((index, texels(generator.global.blur_radius()), Op::Generator)),
         EffectKind::Filter(Filter::SlopeBlur { radius, scale, seed }) if *radius > 0.0 => {
             Some((index, texels(*radius), Op::Slope { scale: *scale, seed: *seed }))
         }
@@ -416,7 +419,7 @@ fn gather(op: Op, orig: &[f32], cover: &[f32], comps: usize, (x0, y0, w, h): (u3
                     let center = |v: f32| ((v / r).floor() + 0.5) * r - 0.5;
                     sample(center(x), center(y), &mut acc);
                 }
-                Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) => {}
+                Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) | Op::Generator => {}
             }
             if acc[4] > 1e-6
                 && let Some(px) = line.get_mut(col * comps..(col + 1) * comps)
@@ -591,7 +594,7 @@ fn filter_extent(radius: f32, op: Op, longest_side: u32) -> (u32, u32) {
 
 /// Whether neighbourhood filter `op` is computed from box blurs (the others gather samples).
 fn is_box_blur(op: Op) -> bool {
-    matches!(op, Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_))
+    matches!(op, Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) | Op::Generator)
 }
 
 /// The stack up to and including neighbourhood filter `filter` over texel `region`, continued from `start` (the filter below's field) when given.
@@ -607,9 +610,17 @@ fn filter_region(
     (rx0, ry0, w, h): (u32, u32, u32, u32),
     start: Option<(usize, &Field)>,
 ) -> Option<Field> {
-    let opacity = effects.iter().filter(|effect| effect.visible).nth(index).map(|effect| effect.opacity.clamp(0.0, 1.0)).unwrap_or(1.0);
+    let filter_effect = effects.iter().filter(|effect| effect.visible).nth(index);
+    let opacity = filter_effect.map(|effect| effect.opacity.clamp(0.0, 1.0)).unwrap_or(1.0);
     let (radius_texels, _) = filter_extent(radius, op, inp.gbuf.width.max(inp.gbuf.height));
+
+    // A blurred generator also keeps its own ramp per texel, beside the stack below it
+    let generator = match (op, filter_effect.map(|effect| (&effect.kind, effect.blend))) {
+        (Op::Generator, Some((EffectKind::Generator(generator), blend))) => Some((generator, blend)),
+        _ => None,
+    };
     let comps = match job {
+        Job::Mask(_) if generator.is_some() => 2,
         Job::Mask(_) => 1,
         Job::Content(_) => 4,
     };
@@ -624,10 +635,12 @@ fn filter_region(
             let preview_tile = inp.preview.and_then(|preview| preview.alpha.tile(tx, ty));
             let mut mask = None;
             let mut nodes = Vec::new();
+            let mut generator_sizes = None;
             match job {
                 Job::Mask(layer_mask) => {
                     let Some(mut mask_stack) = mask_plan(inp, id, layer_mask, tx, ty, None) else { return Vec::new() };
 
+                    generator_sizes = mask_stack.effects.get(index).and_then(|effect| effect.curvature_sizes.clone());
                     mask_stack.effects.truncate(index);
                     mask_stack.start = start;
                     mask = Some(mask_stack);
@@ -647,7 +660,10 @@ fn filter_region(
                         texel.anchors_below(&full, id);
                     }
                     let value = match (&mask, nodes.first()) {
-                        (Some(mask_stack), _) => [texel.mask(mask_stack), 0.0, 0.0, 0.0],
+                        (Some(mask_stack), _) => {
+                            let ramp = generator.map_or(0.0, |(generator, _)| texel.generator_ramp(generator, generator_sizes.as_deref()));
+                            [texel.mask(mask_stack), ramp, 0.0, 0.0]
+                        }
                         (None, Some(node)) => match node.chans.first().and_then(|chan| texel.content(&node.content, chan)) {
                             Some((color, cov)) => [color[0] * cov, color[1] * cov, color[2] * cov, cov],
                             None => [0.0; 4],
@@ -696,6 +712,9 @@ fn filter_region(
         let (width, height, blur_radius) = (w as usize, h as usize, scaled_radius as usize);
         let mut weights = cover.clone();
         blur(&mut weights, width, height, blur_radius);
+        if let Some((generator, blend)) = generator {
+            return blurred_generator(generator, blend, opacity, &orig, &weights, (width, height, blur_radius));
+        }
         let mut data = orig.clone();
         for component in 0..comps {
             let mut sums: Vec<f32> = orig.par_chunks(comps).map(|pixel| pixel.get(component).copied().unwrap_or(0.0)).collect();
@@ -730,12 +749,14 @@ fn filter_region(
     levels.sort_by(f32::total_cmp);
     levels.dedup();
     let (first, rest) = levels.split_first().map_or((1.0, &[][..]), |(first, rest)| (*first, rest));
+    // A blurred generator's field is the mask alone
+    let field_comps = if generator.is_some() { 1 } else { comps };
     let mut data = filtered(first);
     for &scale in rest {
         let other = filtered(scale);
-        let row = w as usize * comps;
+        let row = w as usize * field_comps;
         data.par_chunks_mut(row).zip(other.par_chunks(row)).enumerate().for_each(|(y, (dst, src))| {
-            for (x, (target, source)) in dst.chunks_mut(comps).zip(src.chunks(comps)).enumerate() {
+            for (x, (target, source)) in dst.chunks_mut(field_comps).zip(src.chunks(field_comps)).enumerate() {
                 if scales.at(rx0 + x as u32, ry0 + y as u32) == scale {
                     target.copy_from_slice(source);
                 }
@@ -743,8 +764,37 @@ fn filter_region(
         });
     }
 
-    unpremultiply(&mut data, comps);
-    Some(Field { x0: rx0, y0: ry0, w, h, comps, data })
+    unpremultiply(&mut data, field_comps);
+    Some(Field { x0: rx0, y0: ry0, w, h, comps: field_comps, data })
+}
+
+/// The mask after a blurred generator: `stack` holds (stack below, generator ramp) per texel, `weights` the blurred coverage.
+fn blurred_generator(
+    generator: &Generator,
+    blend: BlendMode,
+    opacity: f32,
+    stack: &[f32],
+    weights: &[f32],
+    (width, height, radius): (usize, usize, usize),
+) -> Vec<f32> {
+    let mut ramps: Vec<f32> = stack.par_chunks(2).map(|texel| texel.get(1).copied().unwrap_or(0.0)).collect();
+    blur(&mut ramps, width, height, radius);
+    stack
+        .par_chunks(2)
+        .zip(ramps.par_iter().zip(weights.par_iter()))
+        .map(|(texel, (sum, weight))| {
+            let below = texel.first().copied().unwrap_or(0.0);
+            let ramp = if *weight > 1e-6 { sum / weight } else { texel.get(1).copied().unwrap_or(0.0) };
+            let generated = finish_generator(generator, ramp);
+            below + (blend1(blend, below, generated) - below) * opacity
+        })
+        .collect()
+}
+
+/// A generator's (possibly blurred) ramp after balance, contrast and invert.
+fn finish_generator(generator: &Generator, ramp: f32) -> f32 {
+    let value = generator.global.apply(ramp);
+    if generator.invert { 1.0 - value } else { value }
 }
 
 /// Clamp filtered masks to 0..1, and turn filtered content back into straight values.
@@ -1216,7 +1266,8 @@ impl<'a, 'b> Texel<'a, 'b> {
         }
     }
 
-    fn generator(&mut self, generator: &Generator, curvature_sizes: Option<&CurvatureSizes>) -> f32 {
+    /// The generator's ramp at this texel, before its global blur, balance, contrast and invert.
+    fn generator_ramp(&mut self, generator: &Generator, curvature_sizes: Option<&CurvatureSizes>) -> f32 {
         let coords = self.coords();
         let signal = match (generator.kind, &generator.detail) {
             (GeneratorKind::Curvature | GeneratorKind::EdgeWear, Some(detail)) => self.curvature_detail(detail, curvature_sizes),
@@ -1245,8 +1296,13 @@ impl<'a, 'b> Texel<'a, 'b> {
         let threshold = 1.0 - generator.level.clamp(0.0, 1.0);
         let softness = generator.softness.max(1e-3);
         let ramp = ((signal - (threshold - softness)) / (2.0 * softness)).clamp(0.0, 1.0);
-        let value = ramp * ramp * (3.0 - 2.0 * ramp);
-        if generator.invert { 1.0 - value } else { value }
+        ramp * ramp * (3.0 - 2.0 * ramp)
+    }
+
+    /// The generator's value at this texel: its ramp finished by balance, contrast and invert (its blur needs neighbours: see [`Op::Generator`]).
+    fn generator(&mut self, generator: &Generator, curvature_sizes: Option<&CurvatureSizes>) -> f32 {
+        let ramp = self.generator_ramp(generator, curvature_sizes);
+        finish_generator(generator, ramp)
     }
 
     /// The curvature of `detail`'s mode at this texel: each detail size's edges and cavities, weighted and combined like a screen blend.
@@ -2604,6 +2660,53 @@ mod tests {
         let largest = row_with(&mut fixture, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]);
         assert!(finest[ridge] > 0.99 && finest[five_texels_away] < 0.01, "the map itself marks only the ridge: {finest:?}");
         assert!(largest[ridge] > 0.99 && largest[five_texels_away] > 0.5, "the largest size reaches texels away from it: {largest:?}");
+    }
+
+    #[test]
+    fn generator_blur_softens_only_the_generator_not_the_stack_below() {
+        let mut fixture = fixture();
+        fixture.gbuf = UvGBuffer::new(&fixture.mesh, 0, 256, 256);
+        fixture.project.texture_sets[0].resolution = 256;
+        let ridge: Vec<f32> = (0..256 * 256).map(|texel| if texel % 256 == 100 { 1.0 } else { 0.5 }).collect();
+        fixture.baked = BakedMaps { resolution: 256, maps: [(BakedMap::Curvature, Arc::new(ridge))].into() };
+        let layer = fill_layer(&mut fixture.project, [1.0; 3], 1.0);
+        let row_with = |fixture: &mut Fixture, blur: f32| -> Vec<f32> {
+            let checker = Source::Procedural { pattern: Procedural::new(ProceduralKind::Checker), low: [0.0; 3], high: [1.0; 3] };
+            let mut generator = Generator { level: 0.5, softness: 0.01, noise_amount: 0.0, ..Generator::new(GeneratorKind::EdgeWear) };
+            generator.detail = None;
+            generator.global.blur = blur;
+            let mut mask = Mask::new(MaskBackground::Black);
+            mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Fill { source: checker, projection: Projection::default() }));
+            let mut lighten = Effect::new(fixture.project.alloc_id(), EffectKind::Generator(generator));
+            lighten.blend = BlendMode::Lighten;
+            mask.effects.push(lighten);
+            fixture.project.layer_mut(layer).unwrap().mask = Some(mask);
+            let images = Default::default();
+            let inputs = Inputs {
+                project: &fixture.project,
+                ts: 0,
+                mesh: &fixture.mesh,
+                gbuf: &fixture.gbuf,
+                pixels: &fixture.pixels,
+                baked: &fixture.baked,
+                block_scales: BlockScales::default(),
+                preview: None,
+                images: &images,
+                bounds: fixture.mesh.bounds(),
+            };
+            mask_at(&inputs, layer, &(40..111).map(|x| (x, 128)).collect::<Vec<_>>()).unwrap()
+        };
+
+        // The row starts at x 40 and crosses a checker edge at x 64; the ridge at x 100 is texel 60, five texels left of it texel 55, and texels below 30 are out of the blur's reach
+        let (ridge, five_texels_away, far) = (60, 55, 0..30);
+        let sharp = row_with(&mut fixture, 0.0);
+        let blurred = row_with(&mut fixture, 1.0);
+        assert!(sharp[ridge] > 0.99 && sharp[five_texels_away] < 0.01, "unblurred, the ridge is one texel: {sharp:?}");
+        assert!(blurred[ridge] < 0.99 && blurred[ridge] > blurred[five_texels_away], "the blur spreads the ridge: {blurred:?}");
+        assert!(blurred[five_texels_away] > 0.01, "and reaches texels away from it: {blurred:?}");
+        for texel in far {
+            assert_eq!(blurred[texel], sharp[texel], "the checker below keeps its hard edges at texel {texel}");
+        }
     }
 
     #[test]

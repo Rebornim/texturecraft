@@ -362,7 +362,7 @@ fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Optio
         match overrides.file_type.as_mut() {
             Some((format, bit_depth)) => controls::file_type_combos(ui, "exp_set_fmt", format, bit_depth),
             None => {
-                inherited(ui, format!("{}  {}", controls::file_type_text(&global.format), controls::bit_depth_text(global.bit_depth)));
+                inherited(ui, controls::file_type_with_depth_text(&global.format, global.bit_depth));
             }
         }
         ui.end_row();

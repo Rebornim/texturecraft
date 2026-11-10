@@ -250,3 +250,29 @@ fn the_reset_icon_resets_the_general_parameters() {
     assert_eq!(draft(&mut harness).settings.parameters.size, 0);
     assert_eq!(draft(&mut harness).sets[1].overrides.size, Some(1024), "a set's overrides are its own");
 }
+
+/// The combo on the row labelled `label`, the `nth` from the left
+fn combo_on_row<'a>(harness: &'a Harness<'static, TextureCraftApp>, label: &str, nth: usize) -> egui_kittest::Node<'a> {
+    let row = harness.get_by_label(label).rect().center().y;
+    let mut combos: Vec<_> = harness.get_all_by_role(Role::ComboBox).filter(|node| (node.rect().center().y - row).abs() < 6.0).collect();
+    combos.sort_by(|a, b| a.rect().min.x.total_cmp(&b.rect().min.x));
+    combos.remove(nth)
+}
+
+#[test]
+fn a_file_type_offers_only_the_bit_depths_it_holds() {
+    let mut harness = harness(2, LAPTOP);
+    assert!(combo_on_row(&harness, "File type", 1).accesskit_node().is_disabled(), "the template sets the bit depth");
+
+    combo_on_row(&harness, "File type", 0).click();
+    harness.run_steps(2);
+    harness.get_by_label("targa").click();
+    harness.run_steps(2);
+    let parameters = draft(&mut harness).settings.parameters.clone();
+    assert_eq!((parameters.format.as_str(), parameters.bit_depth), ("tga", 8));
+    assert!(!combo_on_row(&harness, "File type", 1).accesskit_node().is_disabled());
+
+    combo_on_row(&harness, "File type", 1).click();
+    harness.run_steps(2);
+    assert!(harness.query_by_label("16 bits").is_none(), "targa holds 8 bits only");
+}

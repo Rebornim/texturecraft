@@ -1,7 +1,7 @@
-//! Which tools can act on each selection
+//! Which tools can act on each selection, and that every usable tool acts there in both views
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::LayerId;
+use texturecraft_engine::core::{Effect, EffectKind, LayerId};
 use texturecraft_engine::geom::glam::{Vec2, Vec3};
 use texturecraft_engine::{Session, StackTarget, Tool, execute};
 
@@ -32,12 +32,13 @@ enum Selection {
     InstanceOfPaint,
     InstanceOfFill,
     Nothing,
+    QuickMaskOverPaint,
     QuickMaskOverFill,
     QuickMaskOverNothing,
 }
 
 impl Selection {
-    const ALL: [Selection; 21] = [
+    const ALL: [Selection; 22] = [
         Selection::PaintContent,
         Selection::FillContent,
         Selection::PaintMask,
@@ -57,6 +58,7 @@ impl Selection {
         Selection::InstanceOfPaint,
         Selection::InstanceOfFill,
         Selection::Nothing,
+        Selection::QuickMaskOverPaint,
         Selection::QuickMaskOverFill,
         Selection::QuickMaskOverNothing,
     ];
@@ -74,10 +76,18 @@ impl Selection {
                     !reads_content
                 }
                 Selection::PathSublayer => tool == Tool::Path,
-                Selection::QuickMaskOverFill | Selection::QuickMaskOverNothing => tool != Tool::Path,
+                Selection::QuickMaskOverPaint | Selection::QuickMaskOverFill | Selection::QuickMaskOverNothing => tool != Tool::Path,
                 _ => false,
             },
         }
+    }
+
+    /// Greyed in the shelf, but scripts still paint here: below the effect, or the instance's source
+    fn scripts_still_paint(self) -> bool {
+        matches!(
+            self,
+            Selection::FilterInPaint | Selection::FillEffectInPaint | Selection::FilterInMask | Selection::GeneratorInFillMask | Selection::InstanceOfPaint
+        )
     }
 }
 
@@ -218,8 +228,9 @@ fn session_with(selection: Selection) -> Session {
             select(&mut session, instance, json!("content"));
         }
         Selection::Nothing => select_nothing(&mut session),
-        Selection::QuickMaskOverFill => {
-            let layer = add_layer(&mut session, "layer.add.fill");
+        Selection::QuickMaskOverPaint | Selection::QuickMaskOverFill => {
+            let command = if selection == Selection::QuickMaskOverFill { "layer.add.fill" } else { "layer.add.paint" };
+            let layer = add_layer(&mut session, command);
             select(&mut session, layer, json!("content"));
             execute(&mut session, "viewport.quickMask", &json!({"enabled": true})).unwrap();
             execute(&mut session, "viewport.quickMask.edit", &json!({"editing": true})).unwrap();
@@ -231,6 +242,49 @@ fn session_with(selection: Selection) -> Session {
         }
     }
     session
+}
+
+/// Uses `tool` once the way the viewport does: a stroke, a click or a committed path
+fn use_tool(session: &mut Session, tool: Tool, in_2d_view: bool) -> texturecraft_engine::Result<()> {
+    session.tool.tool = tool;
+    if tool == Tool::Clone {
+        let source = screen(session, [1.2, 0.3, 0.0]);
+        execute(session, "tool.cloneSource", &json!({"x": source.x, "y": source.y}))?;
+    }
+
+    let points = [screen(session, [0.3, 0.3, 0.0]), screen(session, [0.6, 0.4, 0.0]), screen(session, [0.9, 0.5, 0.0])];
+    let uv_points = [Vec2::new(0.05, 0.95), Vec2::new(0.1, 0.92), Vec2::new(0.15, 0.9)];
+    if tool == Tool::Path {
+        let params = if in_2d_view {
+            json!({"uvPoints": uv_points.iter().map(|uv| [uv.x, uv.y]).collect::<Vec<_>>()})
+        } else {
+            json!({"points": points.iter().map(|point| [point.x, point.y]).collect::<Vec<_>>()})
+        };
+        execute(session, "tool.path", &params)?;
+        execute(session, "tool.path", &json!({"commit": true}))?;
+        return Ok(());
+    }
+
+    let single_click = matches!(tool, Tool::PolygonFill | Tool::ColorPicker | Tool::GeometryMask);
+    let viewport = session.viewport;
+    if in_2d_view {
+        session.begin_stroke_uv(uv_points[0], 1.0)?;
+    } else {
+        session.begin_stroke(points[0], viewport, 1.0)?;
+    }
+
+    if single_click {
+        return Ok(());
+    }
+
+    for (point, uv) in points.iter().zip(&uv_points).skip(1) {
+        if in_2d_view {
+            session.continue_stroke_uv(*uv, 1.0);
+        } else {
+            session.continue_stroke(*point, 1.0);
+        }
+    }
+    session.end_stroke()
 }
 
 #[test]
@@ -247,4 +301,83 @@ fn every_selection_offers_the_tools_that_can_act_on_it() {
     }
 
     assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+#[test]
+fn every_usable_tool_acts_in_both_views() {
+    let mut wrong = Vec::new();
+    for in_2d_view in [false, true] {
+        for selection in Selection::ALL {
+            for tool in Tool::ALL {
+                // The picker and the geometry mask read the 3D view only, whatever is selected
+                if in_2d_view && matches!(tool, Tool::ColorPicker | Tool::GeometryMask) {
+                    continue;
+                }
+
+                let mut session = session_with(selection);
+                let usable = session.tool_usable(tool);
+
+                let result = use_tool(&mut session, tool, in_2d_view);
+
+                let view = if in_2d_view { "2D" } else { "3D" };
+                match result {
+                    Err(error) if usable => wrong.push(format!("{view} {selection:?} {tool:?}: usable but {error}")),
+                    Ok(()) if !usable && !selection.scripts_still_paint() => wrong.push(format!("{view} {selection:?} {tool:?}: greyed but acts")),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+fn commit_path(session: &mut Session) -> texturecraft_engine::Result<Value> {
+    execute(session, "tool.path", &json!({"uvPoints": [[0.05, 0.95], [0.15, 0.9]], "commit": true}))
+}
+
+fn path_count(session: &Session, path_sublayer: LayerId) -> usize {
+    match session.doc.project.effect(path_sublayer).map(|(_, effect)| &effect.kind) {
+        Some(EffectKind::Path(paths)) => paths.len(),
+        _ => 0,
+    }
+}
+
+#[test]
+fn paths_are_refused_on_fill_layers_and_the_quick_mask_but_saved_ones_stay_editable() {
+    let mut session = session_with(Selection::FillContent);
+    let fill = session.selected_layer().unwrap();
+
+    assert!(commit_path(&mut session).is_err(), "no new paths in a fill layer");
+    assert!(session.doc.project.layer(fill).unwrap().content_effects.is_empty());
+
+    let mut session = session_with(Selection::QuickMaskOverPaint);
+    assert!(commit_path(&mut session).is_err(), "paths can't edit the quick mask");
+
+    // A project saved while paths could go into fill layers
+    let mut session = session_with(Selection::FillContent);
+    let fill = session.selected_layer().unwrap();
+    let saved_path = session.doc.project.alloc_id();
+    session.doc.project.layer_mut(fill).unwrap().content_effects.push(Effect::new(saved_path, EffectKind::Path(Vec::new())));
+    select(&mut session, fill.0, json!(saved_path.0));
+
+    assert!(session.tool_usable(Tool::Path));
+
+    commit_path(&mut session).unwrap();
+
+    assert_eq!(path_count(&session, saved_path), 1, "the saved path sublayer takes the new path");
+}
+
+#[test]
+fn quick_mask_edit_and_invert_need_the_mask_on() {
+    let mut session = base_session();
+
+    assert!(execute(&mut session, "viewport.quickMask.edit", &json!({"editing": true})).is_err());
+    assert!(execute(&mut session, "viewport.quickMask.invert", &json!({})).is_err());
+
+    execute(&mut session, "viewport.quickMask", &json!({"enabled": true})).unwrap();
+    execute(&mut session, "viewport.quickMask.edit", &json!({"editing": true})).unwrap();
+    execute(&mut session, "viewport.quickMask", &json!({"enabled": false})).unwrap();
+
+    assert!(!session.quick_mask.editing, "turning the mask off stops editing it");
 }

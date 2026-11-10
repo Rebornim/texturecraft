@@ -1,27 +1,23 @@
 //! The asset shelf (the Assets dock tab): tabs (materials, smart materials, smart
 //! masks, filters, alphas, procedurals, environments, textures), all built in and procedural.
-//! Search filters across every tab. Materials (built in and saved), smart masks, filters, alphas
+//! Each tab is one grid sorted by name; a search shows the matches of every tab in one grid.
+//! Materials (built in and saved), smart masks, filters, alphas
 //! and textures drag onto the layer stack, a layer row, the viewport or the brush properties
 //! ([`ShelfDrag`]); a texture dropped on the 3D view becomes a decal there, in the channel picked from a menu
 
 use egui::{Color32, RichText, Sense, Stroke, Ui, vec2};
 use egui_phosphor::regular as ic;
 use serde_json::json;
-use texturecraft_engine::core::ProceduralKind;
-use texturecraft_engine::filter_lib::FILTERS;
 #[cfg(not(target_arch = "wasm32"))]
 use texturecraft_engine::formats::mcmat::MCMAT_EXT;
 use texturecraft_engine::geom::glam::Vec2;
-use texturecraft_engine::materials::MATERIALS;
 use texturecraft_engine::orb_preview::MAX_PREVIEW_SIZE_PX;
-use texturecraft_engine::paint::alphas;
-use texturecraft_engine::paint::presets::{BrushPreset, PRESETS};
-use texturecraft_engine::smart_masks::SMART_MASKS;
 use texturecraft_render::ibl::ENVIRONMENTS;
 
 use crate::TextureCraftApp;
 use crate::decal_drop::DecalDrop;
 use crate::i18n::{tr, trf};
+use crate::shelf_entry::ShelfEntry;
 use crate::shelf_preview::ShelfPreview;
 use crate::theme::Tokens;
 use crate::thumbs::Thumbs;
@@ -248,28 +244,30 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
     ui.add_space(4.0);
 
     let filter = app.ui.shelf_filter.to_lowercase();
-    egui::ScrollArea::vertical().id_salt("shelf_scroll").auto_shrink([false, false]).show(ui, |ui| {
-        // Searching shows matches from every tab, each under its tab's name
-        for (i, (t, _, title)) in TABS.iter().enumerate() {
-            if filter.is_empty() && i != tab {
-                continue;
-            }
+    let shown_tab = TABS[tab].0;
+    // Searching shows matches from every tab in one grid
+    let mut entries: Vec<ShelfEntry> =
+        ShelfEntry::all(app).into_iter().filter(|entry| (searching || entry.tab() == shown_tab) && entry.matches(&filter)).collect();
+    entries.sort_by_cached_key(|entry| entry.label().to_lowercase());
 
-            let title = tr(title);
-            match t {
-                Tab::Materials => materials(app, ui, &ctx, &filter, false, title),
-                Tab::Smart => {
-                    materials(app, ui, &ctx, &filter, true, title);
-                    library(app, ui, &filter);
-                }
-                Tab::Masks => smart_masks(app, ui, &ctx, &filter, title),
-                Tab::Filters => filters(app, ui, &ctx, &filter, title),
-                Tab::Brushes => brushes(app, ui, &ctx, &filter, title),
-                Tab::Alphas => alpha_library(app, ui, &ctx, &filter, title),
-                Tab::Procedurals => procedurals(app, ui, &ctx, &filter, title),
-                Tab::Environments => environments(app, ui, &filter, title),
-                Tab::Textures => textures(app, ui, &ctx, &filter, title),
+    egui::ScrollArea::vertical().id_salt("shelf_scroll").auto_shrink([false, false]).show(ui, |ui| {
+        if !searching && shown_tab == Tab::Textures {
+            import_images(app, ui, &ctx, entries.is_empty());
+        }
+        tiles(ui, |ui| {
+            for entry in &entries {
+                entry_tile(app, ui, &ctx, entry);
             }
+        });
+
+        if searching || shown_tab == Tab::Smart {
+            library(app, ui, &filter);
+        }
+        if searching || shown_tab == Tab::Brushes {
+            my_brushes(app, ui, &filter);
+        }
+        if searching || shown_tab == Tab::Environments {
+            environments(app, ui, &filter);
         }
     });
     drag_preview(&ctx);
@@ -289,11 +287,6 @@ fn drag_preview(ctx: &egui::Context) {
 
 pub(crate) fn matches(filter: &str, texts: &[&str]) -> bool {
     filter.is_empty() || texts.iter().any(|t| t.to_lowercase().contains(filter))
-}
-
-fn title(ui: &mut Ui, text: &str) {
-    let tk = Tokens::get(ui.ctx());
-    ui.label(RichText::new(text).strong().color(tk.text_strong));
 }
 
 pub(crate) fn header(ui: &mut Ui, text: &str) {
@@ -319,29 +312,6 @@ pub(crate) fn categories<T>(items: &[T], category: impl Fn(&T) -> &'static str) 
         }
     }
     out
-}
-
-/// Built-in materials or smart materials, grouped by category
-fn materials(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, filter: &str, smart: bool, name: &str) {
-    let shown: Vec<_> =
-        MATERIALS.iter().filter(|material| material.smart == smart && matches(filter, &[material.label, material.category, material.id])).collect();
-    if shown.is_empty() {
-        return;
-    }
-
-    title(ui, name);
-    for category in categories(&shown, |material| material.category) {
-        header(ui, category);
-        tiles(ui, |ui| {
-            for material in shown.iter().filter(|material| material.category == category) {
-                let texture = app.thumbs.material(ctx, material.id);
-                let asset = Asset::Material(material.id);
-                if tile(ui, &mut app.thumbs, texture.as_ref(), || ShelfPreview::material(material.id), material.label, Some(&asset)).clicked() {
-                    apply(app, &asset);
-                }
-            }
-        });
-    }
 }
 
 /// The user's saved smart materials (desktop library folder).
@@ -392,66 +362,6 @@ fn library(app: &mut TextureCraftApp, ui: &mut Ui, filter: &str) {
 
 #[cfg(target_arch = "wasm32")]
 fn library(_: &mut TextureCraftApp, _: &mut Ui, _: &str) {}
-
-fn smart_masks(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, filter: &str, name: &str) {
-    let shown: Vec<_> = SMART_MASKS.iter().filter(|m| matches(filter, &[m.label, m.id])).collect();
-    if shown.is_empty() {
-        return;
-    }
-    title(ui, name);
-    tiles(ui, |ui| {
-        for m in shown {
-            let tex = app.thumbs.smart_mask(ctx, m.id);
-            let asset = Asset::SmartMask(m.id);
-            if tile(ui, &mut app.thumbs, tex.as_ref(), || ShelfPreview::SmartMask(m.id), m.label, Some(&asset)).clicked() {
-                apply(app, &asset);
-            }
-        }
-    });
-}
-
-/// The filter library, grouped: a click adds the filter to the selected layer's content (or its
-/// mask when the mask is selected), a drop onto a layer to that layer's content.
-fn filters(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, filter: &str, name: &str) {
-    let shown: Vec<_> = FILTERS.iter().filter(|f| matches(filter, &[f.label, f.group, f.id, tr(f.label), tr(f.group)])).collect();
-    if shown.is_empty() {
-        return;
-    }
-    title(ui, name);
-    for group in categories(&shown, |f| f.group) {
-        header(ui, tr(group));
-        tiles(ui, |ui| {
-            for f in shown.iter().filter(|f| f.group == group) {
-                let tex = app.thumbs.filter(ctx, f.id);
-                let asset = Asset::Filter(f.id);
-                if tile(ui, &mut app.thumbs, tex.as_ref(), || ShelfPreview::Filter(f.id), tr(f.label), Some(&asset)).clicked() {
-                    apply(app, &asset);
-                }
-            }
-        });
-    }
-}
-
-/// Brush presets, grouped by category, then the user's own: a click sets the brush's stroke
-/// (alpha, spacing, flow, jitters…) and keeps its size.
-fn brushes(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, filter: &str, name: &str) {
-    let shown: Vec<&BrushPreset> = PRESETS.iter().filter(|p| matches(filter, &[p.label, p.category, p.id])).collect();
-    if !shown.is_empty() {
-        title(ui, name);
-        for cat in categories(&shown, |p| p.category) {
-            header(ui, cat);
-            tiles(ui, |ui| {
-                for p in shown.iter().filter(|p| p.category == cat) {
-                    let tex = app.thumbs.brush_preset(ctx, p);
-                    if tile(ui, &mut app.thumbs, tex.as_ref(), || ShelfPreview::Brush(p), p.label, None).clicked() {
-                        app.run("brush.preset.apply", json!({"preset": p.id}));
-                    }
-                }
-            });
-        }
-    }
-    my_brushes(app, ui, filter);
-}
 
 /// The user's saved brush presets (desktop brushes folder) and saving the current brush there.
 #[cfg(not(target_arch = "wasm32"))]
@@ -508,57 +418,8 @@ fn my_brushes(app: &mut TextureCraftApp, ui: &mut Ui, filter: &str) {
 #[cfg(target_arch = "wasm32")]
 fn my_brushes(_: &mut TextureCraftApp, _: &mut Ui, _: &str) {}
 
-/// The built-in alpha library, grouped by category; the brush's alpha is outlined.
-fn alpha_library(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, filter: &str, name: &str) {
-    let tk = Tokens::get(ctx);
-    let shown: Vec<&'static alphas::LibraryAlpha> = alphas::library().iter().filter(|a| matches(filter, &[&a.label, a.category, &a.id])).collect();
-    if shown.is_empty() {
-        return;
-    }
-    title(ui, name);
-    let brush = &app.session.tool.brush;
-    let current = if brush.alpha_image.is_none() { brush.alpha_library.clone() } else { None };
-    for cat in categories(&shown, |a| a.category) {
-        header(ui, cat);
-        tiles(ui, |ui| {
-            for &a in shown.iter().filter(|a| a.category == cat) {
-                let tex = app.thumbs.alpha(ctx, a);
-                let asset = Asset::Alpha(&a.id);
-                let r = tile(ui, &mut app.thumbs, tex.as_ref(), || ShelfPreview::Alpha(a), &a.label, Some(&asset));
-                if current.as_deref() == Some(a.id.as_str()) {
-                    ui.painter().rect_stroke(r.rect, TILE_ROUNDING, Stroke::new(1.0, tk.accent), egui::StrokeKind::Inside);
-                }
-                if r.clicked() {
-                    apply(app, &asset);
-                }
-            }
-        });
-    }
-}
-
-fn procedurals(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, filter: &str, name: &str) {
-    let shown: Vec<ProceduralKind> = ProceduralKind::ALL.into_iter().filter(|k| matches(filter, &[k.label(), tr(k.label())])).collect();
-    if shown.is_empty() {
-        return;
-    }
-    title(ui, name);
-    tiles(ui, |ui| {
-        for k in shown {
-            let tex = app.thumbs.procedural(ctx, k);
-            if tile(ui, &mut app.thumbs, tex.as_ref(), || ShelfPreview::Procedural(k), tr(k.label()), None).clicked() {
-                app.run("layer.add.fill", json!({"name": k.label()}));
-                app.run("layer.fill.set", json!({"channel": "baseColor", "procedural": k.label(), "low": [0.1, 0.1, 0.1], "high": [0.9, 0.9, 0.9]}));
-            }
-        }
-    });
-}
-
-fn environments(app: &mut TextureCraftApp, ui: &mut Ui, filter: &str, name: &str) {
+fn environments(app: &mut TextureCraftApp, ui: &mut Ui, filter: &str) {
     let shown: Vec<&&str> = ENVIRONMENTS.iter().filter(|e| matches(filter, &[e])).collect();
-    if shown.is_empty() {
-        return;
-    }
-    title(ui, name);
     for env in shown {
         let on = app.session.doc.project.display.environment == **env;
         if ui.selectable_label(on, format!("{}  {env}", ic::SUN_HORIZON)).clicked() {
@@ -568,44 +429,44 @@ fn environments(app: &mut TextureCraftApp, ui: &mut Ui, filter: &str, name: &str
     ui.add_space(6.0);
 }
 
-fn textures(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, filter: &str, name: &str) {
+/// The Textures tab's import button, and a hint while the project has no images
+fn import_images(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, empty: bool) {
     let tk = Tokens::get(ctx);
-    let names: Vec<String> = app.session.doc.resources.keys().filter(|n| matches(filter, &[n])).cloned().collect();
-    if !filter.is_empty() && names.is_empty() {
-        return;
+    if ui.small_button(tr("Import...")).clicked() {
+        crate::menus::invoke(app, ctx, "resource.import");
     }
-    ui.horizontal(|ui| {
-        title(ui, name);
-        if ui.small_button(tr("Import...")).clicked() {
-            crate::menus::invoke(app, ctx, "resource.import");
-        }
-    });
-    if names.is_empty() {
+    if empty {
         ui.label(RichText::new(tr("Import images to use them in fills and masks")).size(10.0).color(tk.text_dim));
     }
-    tiles(ui, |ui| {
-        for name in names {
-            let Some(img) = app.session.images.get(&name).cloned() else { continue };
+}
 
-            let tex = app.thumbs.image(ctx, &name, &img);
-            let asset = Asset::Texture(name.clone());
-            let preview = || ShelfPreview::Image(name.clone(), img);
-            let r = tile(ui, &mut app.thumbs, Some(&tex), preview, &name, Some(&asset));
-            if r.clicked() {
-                apply(app, &asset);
+/// The tile of `entry`: a click applies it, an image resource has a context menu
+fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry: &ShelfEntry) {
+    // An image removed this frame has nothing to show
+    let (Some(preview), texture) = (entry.preview(app), entry.thumbnail(app, ctx)) else { return };
+
+    let asset = entry.asset();
+    let response = tile(ui, &mut app.thumbs, texture.as_ref(), || preview, entry.label(), asset.as_ref());
+    if entry.in_use(app) {
+        let tk = Tokens::get(ctx);
+        ui.painter().rect_stroke(response.rect, TILE_ROUNDING, Stroke::new(1.0, tk.accent), egui::StrokeKind::Inside);
+    }
+    if response.clicked() {
+        entry.activate(app);
+    }
+
+    if let ShelfEntry::Image(name) = entry {
+        response.context_menu(|ui| {
+            if ui.button(tr("Add as decal (view center)")).clicked() {
+                app.run("layer.add.decal", json!({"image": name}));
+                ui.close();
             }
-            r.context_menu(|ui| {
-                if ui.button(tr("Add as decal (view center)")).clicked() {
-                    app.run("layer.add.decal", json!({"image": name}));
-                    ui.close();
-                }
-                if ui.button(tr("Remove resource")).clicked() {
-                    app.run("resource.remove", json!({"name": name}));
-                    ui.close();
-                }
-            });
-        }
-    });
+            if ui.button(tr("Remove resource")).clicked() {
+                app.run("resource.remove", json!({"name": name}));
+                ui.close();
+            }
+        });
+    }
 }
 
 /// Asset tile with optional dragging and a larger hover preview

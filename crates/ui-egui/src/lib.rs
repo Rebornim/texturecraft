@@ -47,6 +47,7 @@ mod resource_picker;
 mod resource_picker_item;
 mod running_bake;
 pub mod shelf;
+mod shelf_entry;
 pub mod shelf_preview;
 mod soft_box;
 pub mod state;

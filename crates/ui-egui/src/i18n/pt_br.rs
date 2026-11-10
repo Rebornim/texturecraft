@@ -1,6 +1,7 @@
 //! Brazilian Portuguese UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("8 bits + dithering", "8 bits + pontilhamento"),
     ("Baking {map} ({n}/{total})", "Fazendo o bake de {map} ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "Fazendo o bake de {map} ({n}/{total}), conjunto de texturas {set} de {sets}"),
     ("Follow Newest Map", "Seguir o mapa mais recente"),

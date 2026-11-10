@@ -1,6 +1,7 @@
 //! Japanese UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("8 bits + dithering", "8 ビット + ディザリング"),
     ("Baking {map} ({n}/{total})", "{map} をベイク中 ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "{map} をベイク中 ({n}/{total})、テクスチャセット {set}/{sets}"),
     ("Follow Newest Map", "最新のマップを追う"),

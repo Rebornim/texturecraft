@@ -8,7 +8,7 @@ use egui::{RichText, Ui, vec2};
 use egui_phosphor::regular as ic;
 use maps_action::MapsAction;
 use serde_json::json;
-use texturecraft_engine::core::{ExportOverrides, ExportSettings, NormalFormat, TextureSetExport};
+use texturecraft_engine::core::{ExportFileType, ExportOverrides, ExportSettings, NormalFormat, TextureSetExport};
 use texturecraft_engine::formats::FileFormat;
 
 use crate::TextureCraftApp;
@@ -190,11 +190,14 @@ pub(crate) fn global_params(app: &TextureCraftApp) -> serde_json::Value {
     let settings = app.ui.export.settings.as_ref().map(|draft| draft.settings.clone()).or_else(|| app.session.doc.project.export.clone()).unwrap_or_default();
     let parameters = &settings.parameters;
     let mut p = json!({"preset": parameters.preset, "padding": parameters.padding, "dilation": parameters.dilation});
-    if !parameters.format.is_empty() {
-        p["format"] = json!(parameters.format);
+    if !parameters.file_type.format.is_empty() {
+        p["format"] = json!(parameters.file_type.format);
     }
-    if parameters.bit_depth > 0 {
-        p["bitDepth"] = json!(parameters.bit_depth);
+    if parameters.file_type.bit_depth > 0 {
+        p["bitDepth"] = json!(parameters.file_type.bit_depth);
+    }
+    if parameters.file_type.dithering {
+        p["dithering"] = json!(true);
     }
     if parameters.size > 0 {
         p["size"] = json!(parameters.size);
@@ -269,7 +272,7 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
         controls::template_combo(ui, "exp_preset", &mut parameters.preset, builtins, user_presets);
         ui.end_row();
         ui.label(tr("File type"));
-        controls::file_type_combos(ui, "exp_fmt", &mut parameters.format, &mut parameters.bit_depth);
+        controls::file_type_combos(ui, "exp_fmt", &mut parameters.file_type);
         ui.end_row();
         ui.label(tr("Size"));
         controls::size_combo(ui, "exp_size", &mut parameters.size, None);
@@ -329,7 +332,7 @@ fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Optio
                 if ui.button(tr("Enable override for all items")).clicked() {
                     *overrides = ExportOverrides {
                         preset: Some(global.preset.clone()),
-                        file_type: Some((global.format.clone(), global.bit_depth)),
+                        file_type: Some(global.file_type.clone()),
                         size: Some(global.size),
                         padding: Some((global.padding.clone(), global.dilation)),
                     };
@@ -357,12 +360,12 @@ fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Optio
 
         ui.label(tr("File type"));
         if override_pen(ui, overrides.file_type.is_some()) {
-            overrides.file_type = overrides.file_type.take().xor(Some((global.format.clone(), global.bit_depth)));
+            overrides.file_type = overrides.file_type.take().xor(Some(global.file_type.clone()));
         }
         match overrides.file_type.as_mut() {
-            Some((format, bit_depth)) => controls::file_type_combos(ui, "exp_set_fmt", format, bit_depth),
+            Some(file_type) => controls::file_type_combos(ui, "exp_set_fmt", file_type),
             None => {
-                inherited(ui, controls::file_type_with_depth_text(&global.format, global.bit_depth));
+                inherited(ui, controls::file_type_with_depth_text(&global.file_type));
             }
         }
         ui.end_row();
@@ -404,11 +407,13 @@ fn set_template_maps(app: &TextureCraftApp, ts: usize) -> Vec<(String, FileForma
 /// A texture set's output maps: a tick writes a map, its pen gives it its own file type
 fn set_output_maps(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, maps: &[(String, FileFormat, u8)]) {
     let parameters = draft.sets.get(ts).map(|set| set.overrides.apply(&draft.settings.parameters)).unwrap_or_default();
-    let set_format = FileFormat::from_extension(&parameters.format);
+    let set_type = parameters.file_type;
+    let set_format = FileFormat::from_extension(&set_type.format);
     // What a map writes without its own override: the set's file type, else the template's
     let inherited_type = |format: FileFormat, bit_depth: u8| {
         let format = set_format.unwrap_or(format);
-        (format, format.depth(if parameters.bit_depth > 0 { parameters.bit_depth } else { bit_depth }))
+        let bit_depth = format.depth(if set_type.bit_depth > 0 { set_type.bit_depth } else { bit_depth });
+        ExportFileType { format: format.extension().to_string(), bit_depth, dithering: set_type.dithering && bit_depth == 8 }
     };
     let Some(set) = draft.sets.get_mut(ts) else { return };
 
@@ -436,12 +441,11 @@ fn set_output_maps(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, maps: &[(Str
 
                     for (key, format, bit_depth) in maps {
                         let map = set.maps.entry(key.clone()).or_default();
-                        let (format, bit_depth) = inherited_type(*format, *bit_depth);
                         match action {
                             MapsAction::Check => map.skip = false,
                             MapsAction::Uncheck => map.skip = true,
                             MapsAction::Invert => map.skip = !map.skip,
-                            MapsAction::Override => map.file_type = Some((format.extension().to_string(), bit_depth)),
+                            MapsAction::Override => map.file_type = Some(inherited_type(*format, *bit_depth)),
                             MapsAction::Inherit => map.file_type = None,
                         }
                     }
@@ -463,14 +467,13 @@ fn set_output_maps(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, maps: &[(Str
                 });
             });
             if override_pen(ui, map.file_type.is_some()) {
-                let (format, bit_depth) = inherited_type(*format, *bit_depth);
-                map.file_type = map.file_type.take().xor(Some((format.extension().to_string(), bit_depth)));
+                map.file_type = map.file_type.take().xor(Some(inherited_type(*format, *bit_depth)));
             }
             match map.file_type.as_mut() {
-                Some((extension, bit_depth)) => controls::map_file_type_combos(ui, &format!("exp_map_{key}"), extension, bit_depth),
+                Some(file_type) => controls::map_file_type_combos(ui, &format!("exp_map_{key}"), file_type),
                 None => {
-                    let (format, bit_depth) = inherited_type(*format, *bit_depth);
-                    ui.label(RichText::new(format!("{}  {}", format.extension(), controls::bit_depth_text(bit_depth))).color(tk.text_dim));
+                    let file_type = inherited_type(*format, *bit_depth);
+                    ui.label(RichText::new(controls::file_type_with_depth_text(&file_type)).color(tk.text_dim));
                 }
             }
             ui.end_row();

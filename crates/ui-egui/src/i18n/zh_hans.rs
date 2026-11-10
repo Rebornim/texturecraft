@@ -1,6 +1,7 @@
 //! Simplified Chinese UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("8 bits + dithering", "8 位 + 抖动"),
     ("Baking {map} ({n}/{total})", "正在烘焙{map} ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "正在烘焙{map} ({n}/{total})，纹理集 {set}/{sets}"),
     ("Follow Newest Map", "跟随最新贴图"),

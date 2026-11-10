@@ -3,15 +3,15 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
-use texturecraft_core::{ExportSettings, MapExportOverride, TextureSetExport};
-use texturecraft_formats::{ExportOptions, ExportPreset, FileFormat};
+use texturecraft_core::{ExportFileType, ExportSettings, MapExportOverride, TextureSetExport};
+use texturecraft_formats::{ExportOptions, FileFormat};
 
 use crate::commands::{CommandSpec, always, bad};
 use crate::file_cmds::{export_options, sets_param};
 use crate::{Result, Session, cmd};
 
 /// Export command parameters that set options for every texture set, bypassing the saved settings
-const EXPLICIT_OPTIONS: [&str; 8] = ["preset", "format", "bitDepth", "padding", "dilation", "size", "normalFormat", "colorSpace"];
+const EXPLICIT_OPTIONS: [&str; 9] = ["preset", "format", "bitDepth", "padding", "dilation", "size", "dithering", "normalFormat", "colorSpace"];
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -29,7 +29,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Save export settings",
             [],
             None,
-            "{settings?: as export.settings.get, sets?: [{skip?, overrides?: {preset?, file_type?: [format, bitDepth], size?, padding?: [mode, px]}, maps?: {<map key: file template with $channel filled in>: {skip?, file_type?}}}] one per texture set} → the saved settings. file.exportTextures and export.plan use them when called without preset, format, bitDepth, padding, dilation, size, normalFormat or colorSpace, and also take `settings` / `sets` there to use unsaved ones",
+            "{settings?: as export.settings.get, sets?: [{skip?, overrides?: {preset?, file_type?: [format, bitDepth], size?, padding?: [mode, px]}, maps?: {<map key: file template with $channel filled in>: {skip?, file_type?}}}] one per texture set} → the saved settings. file.exportTextures and export.plan use them when called without preset, format, bitDepth, padding, dilation, size, dithering, normalFormat or colorSpace, and also take `settings` / `sets` there to use unsaved ones",
             always,
             set
         ),
@@ -136,8 +136,7 @@ pub fn set_export_options(s: &Session, settings: &ExportSettings, export: &Textu
     let mut options = export_options(s, &p, cmd)?;
 
     // File types go into the template's own maps, so a map's override wins over the set's file type
-    let set_format = file_format(&parameters.format, cmd)?;
-    apply_file_types(&mut options.preset, set_format, parameters.bit_depth, &export.maps, cmd)?;
+    apply_file_types(&mut options, &parameters.file_type, &export.maps, cmd)?;
 
     Ok(options)
 }
@@ -151,22 +150,20 @@ fn file_format(extension: &str, cmd: &str) -> Result<Option<FileFormat>> {
     FileFormat::from_extension(extension).map(Some).ok_or_else(|| bad(cmd, format!("unknown format `{extension}`")))
 }
 
-/// Drop the maps left out and write each map's file type: its own override, else the set's file type, else the template's
-fn apply_file_types(
-    preset: &mut ExportPreset,
-    set_format: Option<FileFormat>,
-    set_bit_depth: u8,
-    maps: &BTreeMap<String, MapExportOverride>,
-    cmd: &str,
-) -> Result<()> {
-    preset.maps.retain(|map| !maps.get(&map.key()).is_some_and(|map_override| map_override.skip));
-    for map in &mut preset.maps {
-        let (format, bit_depth) = match maps.get(&map.key()).and_then(|map_override| map_override.file_type.as_ref()) {
-            Some((extension, bit_depth)) => (file_format(extension, cmd)?.unwrap_or(map.format), *bit_depth),
-            None => (set_format.unwrap_or(map.format), if set_bit_depth > 0 { set_bit_depth } else { map.bit_depth }),
+/// Drop the maps left out and write each map's file type: its own override, else the set's, else the template's
+fn apply_file_types(options: &mut ExportOptions, set_type: &ExportFileType, maps: &BTreeMap<String, MapExportOverride>, cmd: &str) -> Result<()> {
+    let set_format = file_format(&set_type.format, cmd)?;
+    options.preset.maps.retain(|map| !maps.get(&map.key()).is_some_and(|map_override| map_override.skip));
+    for (index, map) in options.preset.maps.iter_mut().enumerate() {
+        let (format, bit_depth, dithering) = match maps.get(&map.key()).and_then(|map_override| map_override.file_type.as_ref()) {
+            Some(own) => (file_format(&own.format, cmd)?.unwrap_or(map.format), own.bit_depth, own.dithering),
+            None => (set_format.unwrap_or(map.format), if set_type.bit_depth > 0 { set_type.bit_depth } else { map.bit_depth }, set_type.dithering),
         };
         map.format = format;
         map.bit_depth = format.depth(bit_depth);
+        if dithering && map.bit_depth == 8 {
+            options.dithered_maps.insert(index);
+        }
     }
 
     Ok(())
@@ -215,7 +212,7 @@ mod tests {
     fn a_set_override_changes_only_that_set() {
         let mut s = session();
         let mut overridden = TextureSetExport::default();
-        overridden.overrides = ExportOverrides { file_type: Some(("tga".into(), 8)), ..Default::default() };
+        overridden.overrides = ExportOverrides { file_type: Some(ExportFileType::new("tga", 8)), ..Default::default() };
         let sets = json!([overridden, TextureSetExport::default()]);
         execute(&mut s, "export.settings.set", &json!({"sets": sets})).unwrap();
 
@@ -230,8 +227,8 @@ mod tests {
         let preset = s.export_preset("Document channels + Normal + AO").unwrap();
         let (kept, skipped) = (preset.maps[0].key(), preset.maps[1].key());
         let mut export = TextureSetExport::default();
-        export.overrides.file_type = Some(("tga".into(), 8));
-        export.maps.insert(kept.clone(), MapExportOverride { skip: false, file_type: Some(("png".into(), 16)) });
+        export.overrides.file_type = Some(ExportFileType::new("tga", 8));
+        export.maps.insert(kept.clone(), MapExportOverride { skip: false, file_type: Some(ExportFileType::new("png", 16)) });
         export.maps.insert(skipped, MapExportOverride { skip: true, file_type: None });
         execute(&mut s, "export.settings.set", &json!({"sets": [export, TextureSetExport::default()]})).unwrap();
 
@@ -244,7 +241,7 @@ mod tests {
     #[test]
     fn unsaved_settings_plan_without_changing_the_project() {
         let mut s = session();
-        let settings = ExportSettings { parameters: ExportParameters { format: "tga".into(), ..Default::default() }, ..Default::default() };
+        let settings = ExportSettings { parameters: ExportParameters { file_type: ExportFileType::new("tga", 0), ..Default::default() }, ..Default::default() };
         let plan = execute(&mut s, "export.plan", &json!({"settings": settings})).unwrap();
         assert!(plan.as_array().unwrap().iter().all(|f| f["format"] == "tga"));
         assert!(s.doc.project.export.is_none());
@@ -252,10 +249,41 @@ mod tests {
     }
 
     #[test]
+    fn dithering_reaches_the_8_bit_maps_it_was_asked_for() {
+        let s = session();
+        let preset = s.export_preset("Document channels + Normal + AO").unwrap();
+        let height = preset.maps.iter().position(|map| map.key().ends_with("height")).unwrap();
+        let mut export = TextureSetExport::default();
+        export.maps.insert(
+            preset.maps[0].key(),
+            MapExportOverride { skip: false, file_type: Some(ExportFileType { format: "png".into(), bit_depth: 8, dithering: true }) },
+        );
+        export.maps.insert(
+            preset.maps[height].key(),
+            MapExportOverride { skip: false, file_type: Some(ExportFileType { format: "png".into(), bit_depth: 16, dithering: true }) },
+        );
+
+        let options = set_export_options(&s, &ExportSettings::default(), &export, "test").unwrap();
+        assert_eq!(options.dithered_maps.into_iter().collect::<Vec<_>>(), [0], "16-bit files aren't dithered");
+        let everywhere = set_export_options(
+            &s,
+            &ExportSettings {
+                parameters: ExportParameters { file_type: ExportFileType { format: String::new(), bit_depth: 0, dithering: true }, ..Default::default() },
+                ..Default::default()
+            },
+            &TextureSetExport::default(),
+            "test",
+        )
+        .unwrap();
+        assert!(!everywhere.dithered_maps.contains(&height), "the template's 16-bit height stays undithered");
+        assert!(everywhere.dithered_maps.contains(&0));
+    }
+
+    #[test]
     fn skipped_sets_are_not_exported_and_explicit_options_ignore_the_saved_ones() {
         let mut s = session();
         let left_out = TextureSetExport { skip: true, ..Default::default() };
-        let settings = ExportSettings { parameters: ExportParameters { format: "tga".into(), ..Default::default() }, ..Default::default() };
+        let settings = ExportSettings { parameters: ExportParameters { file_type: ExportFileType::new("tga", 0), ..Default::default() }, ..Default::default() };
         execute(&mut s, "export.settings.set", &json!({"settings": settings, "sets": [left_out, TextureSetExport::default()]})).unwrap();
 
         let plan = planned(&mut s);

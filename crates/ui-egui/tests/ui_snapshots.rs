@@ -554,7 +554,10 @@ fn export_dialog_snapshots() {
         let set = &mut harness.state_mut().ui.export.settings.as_mut().unwrap().sets[1];
         set.overrides.size = Some(1024);
         set.maps.insert("$mesh_$textureSet_roughness".into(), texturecraft_engine::core::MapExportOverride { skip: true, file_type: None });
-        set.maps.insert("$mesh_$textureSet_height".into(), texturecraft_engine::core::MapExportOverride { skip: false, file_type: Some(("exr".into(), 32)) });
+        set.maps.insert(
+            "$mesh_$textureSet_height".into(),
+            texturecraft_engine::core::MapExportOverride { skip: false, file_type: Some(texturecraft_engine::core::ExportFileType::new("exr", 32)) },
+        );
     }
     save(&mut harness, &output_dir, "export-set-override");
     harness.state_mut().ui.export.settings.as_mut().unwrap().selected = None;

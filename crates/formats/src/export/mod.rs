@@ -347,6 +347,9 @@ pub struct ExportOptions {
     /// into 8/16-bit files and linear Rec.709 into float files (EXR, HDR).
     #[serde(skip)]
     pub color_space: Option<ColorSpace>,
+    /// Indices into the preset's maps whose 8-bit files are dithered against banding
+    #[serde(default)]
+    pub dithered_maps: BTreeSet<usize>,
 }
 
 impl ExportOptions {
@@ -367,6 +370,7 @@ impl ExportOptions {
             normal_format: None,
             atlas: false,
             color_space: None,
+            dithered_maps: BTreeSet::new(),
         }
     }
 }
@@ -795,7 +799,8 @@ pub fn render_maps(input: &ExportInput, opts: &ExportOptions) -> Result<Vec<Expo
             let srgb: Vec<bool> = lay.iter().map(|(d, _)| *d != Dest::A && is_color(map) && !p.format.is_float() && space == ColorSpace::Srgb).collect();
             // A colour space the user chose is written into the colour maps (data maps have none).
             let embed = (opts.color_space.is_some() && is_color(map) && rgb).then_some(space);
-            let bytes = encode(p.format, p.bit_depth, size, n, &data, &srgb, embed, &mut warnings)?;
+            let dithered = opts.dithered_maps.contains(&p.map);
+            let bytes = encode(p.format, p.bit_depth, dithered, size, n, &data, &srgb, embed, &mut warnings)?;
             Ok(ExportedFile { name: p.name, bytes, width: size.0, height: size.1, warnings })
         })
         .collect()
@@ -837,12 +842,12 @@ fn resize(data: Vec<f32>, from: (u32, u32), n: usize, to: (u32, u32)) -> Vec<f32
     out
 }
 
-/// Encode a `size` (width, height) image of `n` components (1 L, 2 LA, 3 RGB, 4 RGBA; linear
-/// values).
+/// Encode a `size` (width, height) image of `n` components (1 L, 2 LA, 3 RGB, 4 RGBA; linear values); `dithered` dithers 8-bit files
 #[allow(clippy::too_many_arguments)]
 fn encode(
     format: FileFormat,
     depth: u8,
+    dithered: bool,
     size: (u32, u32),
     n: usize,
     data: &[f32],
@@ -885,12 +890,28 @@ fn encode(
     let (bytes, color) = if depth == 16 {
         let b: Vec<u8> = encoded.iter().flat_map(|v| ((v * 65535.0 + 0.5) as u16).to_ne_bytes()).collect();
         (b, [C::L16, C::La16, C::Rgb16, C::Rgba16].get(n.wrapping_sub(1)).copied().unwrap_or(C::Rgba16))
+    } else if dithered {
+        // Stochastic rounding: exact levels stay exact, values between two levels mix them in proportion
+        let b: Vec<u8> = encoded.iter().enumerate().map(|(i, v)| (v * 255.0 + dither_offset(i)).min(255.0) as u8).collect();
+        (b, [C::L8, C::La8, C::Rgb8, C::Rgba8].get(n.wrapping_sub(1)).copied().unwrap_or(C::Rgba8))
     } else {
         let b: Vec<u8> = encoded.iter().map(|v| (v * 255.0 + 0.5) as u8).collect();
         (b, [C::L8, C::La8, C::Rgb8, C::Rgba8].get(n.wrapping_sub(1)).copied().unwrap_or(C::Rgba8))
     };
     let icc = embed.and_then(crate::icc::profile);
     write_image(format, &bytes, size, color, icc).map_err(|e| failed(&e))
+}
+
+/// A fixed pseudo-random offset in [0, 1) for component `i`, so a dithered export is the same every time
+fn dither_offset(i: usize) -> f32 {
+    // SplitMix64 finalizer
+    let mut x = (i as u64).wrapping_add(0x9E37_79B9_7F4A_7C15);
+    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^= x >> 31;
+
+    // The top 24 bits, exactly representable in an f32
+    (x >> 40) as f32 / (1u64 << 24) as f32
 }
 
 /// Pick components `pick` from every texel of an `n`-component image.

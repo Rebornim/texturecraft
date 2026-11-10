@@ -1,6 +1,7 @@
 //! Korean UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("8 bits + dithering", "8비트 + 디더링"),
     ("Baking {map} ({n}/{total})", "{map} 베이크 중 ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "{map} 베이크 중 ({n}/{total}), 텍스처 세트 {set}/{sets}"),
     ("Follow Newest Map", "최신 맵 따라가기"),

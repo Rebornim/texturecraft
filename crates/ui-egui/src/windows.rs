@@ -18,6 +18,14 @@ use crate::state::Mode;
 use crate::theme::{Accent, Brightness, Tokens, caption};
 use crate::widgets::{color_swatch, combo, icon_button, primary_button, section, slider};
 
+/// Export textures dialog: its width, its texture set column's width and its body's height
+const EXPORT_DIALOG_WIDTH: f32 = 820.0;
+const EXPORT_SET_LIST_WIDTH: f32 = 180.0;
+const EXPORT_BODY_HEIGHT: f32 = 360.0;
+/// Its title bar, tabs, button row and margins, kept on screen in a short app window
+const EXPORT_DIALOG_CHROME_HEIGHT: f32 = 160.0;
+const EXPORT_BODY_MIN_HEIGHT: f32 = 120.0;
+
 pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     start(app, ctx);
     new_project(app, ctx);
@@ -1206,6 +1214,33 @@ fn export_settings_tab(app: &mut TextureCraftApp, ui: &mut Ui, presets: &[textur
     });
 }
 
+/// The texture sets to export: a scrolling checkbox list with select all / none
+fn export_set_list(app: &mut TextureCraftApp, ui: &mut Ui) {
+    ui.set_width(EXPORT_SET_LIST_WIDTH);
+    ui.label(RichText::new(tr("Texture sets")).strong());
+    ui.horizontal(|ui| {
+        if ui.small_button(tr("Select all")).clicked() {
+            app.ui.export.skip.clear();
+        }
+        if ui.small_button(tr("Select none")).clicked() {
+            app.ui.export.skip = (0..app.session.set_count()).collect();
+        }
+    });
+    egui::ScrollArea::vertical().id_salt("exp_sets").auto_shrink([false; 2]).show(ui, |ui| {
+        for i in 0..app.session.set_count() {
+            let name = app.session.doc.project.texture_sets.get(i).map(|t| t.name.clone()).unwrap_or_default();
+            let mut on = !app.ui.export.skip.contains(&i);
+            if ui.checkbox(&mut on, name).changed() {
+                if on {
+                    app.ui.export.skip.retain(|x| *x != i);
+                } else {
+                    app.ui.export.skip.push(i);
+                }
+            }
+        }
+    });
+}
+
 pub fn export(app: &mut TextureCraftApp, ctx: &egui::Context) {
     let tk = Tokens::get(ctx);
     if !app.ui.windows.export {
@@ -1214,7 +1249,8 @@ pub fn export(app: &mut TextureCraftApp, ctx: &egui::Context) {
     let mut open = true;
     let mut do_export = false;
     let presets = texturecraft_engine::formats::builtin_presets();
-    dialog("export_textures", tr("Export textures"), &mut open).fixed_size(vec2(820.0, 430.0)).show(ctx, |ui| {
+    let body_height = (ctx.content_rect().height() - EXPORT_DIALOG_CHROME_HEIGHT).clamp(EXPORT_BODY_MIN_HEIGHT, EXPORT_BODY_HEIGHT);
+    dialog("export_textures", tr("Export textures"), &mut open).min_width(EXPORT_DIALOG_WIDTH).max_width(EXPORT_DIALOG_WIDTH).show(ctx, |ui| {
         ui.horizontal(|ui| {
             for (i, t) in [tr("Settings"), tr("Output templates"), tr("List of exports")].iter().enumerate() {
                 if ui.selectable_label(app.ui.export.tab == i as u8, caption(t)).clicked() {
@@ -1223,27 +1259,13 @@ pub fn export(app: &mut TextureCraftApp, ctx: &egui::Context) {
             }
         });
         ui.separator();
-        ui.allocate_ui_with_layout(vec2(ui.available_width(), 360.0), egui::Layout::left_to_right(egui::Align::Min), |ui| {
-            ui.set_height(360.0);
+        ui.allocate_ui_with_layout(vec2(ui.available_width(), body_height), egui::Layout::left_to_right(egui::Align::Min), |ui| {
+            ui.set_height(body_height);
             if app.ui.export.tab == 1 {
                 crate::export_templates::tab(app, ui, &presets);
                 return;
             }
-            ui.vertical(|ui| {
-                ui.set_width(180.0);
-                ui.label(RichText::new(tr("Texture sets")).strong());
-                for i in 0..app.session.set_count() {
-                    let name = app.session.doc.project.texture_sets.get(i).map(|t| t.name.clone()).unwrap_or_default();
-                    let mut on = !app.ui.export.skip.contains(&i);
-                    if ui.checkbox(&mut on, name).changed() {
-                        if on {
-                            app.ui.export.skip.retain(|x| *x != i);
-                        } else {
-                            app.ui.export.skip.push(i);
-                        }
-                    }
-                }
-            });
+            ui.vertical(|ui| export_set_list(app, ui));
             ui.separator();
             ui.vertical(|ui| match app.ui.export.tab {
                 0 => export_settings_tab(app, ui, &presets),
@@ -1252,7 +1274,7 @@ pub fn export(app: &mut TextureCraftApp, ctx: &egui::Context) {
                     params["ts"] = json!("all");
                     match texturecraft_engine::execute(&mut app.session, "export.plan", &params) {
                         Ok(v) => {
-                            egui::ScrollArea::vertical().max_height(340.0).show(ui, |ui| {
+                            egui::ScrollArea::vertical().max_height(ui.available_height()).show(ui, |ui| {
                                 for f in v.as_array().into_iter().flatten() {
                                     let ts = f.get("ts").and_then(|t| t.as_u64()).unwrap_or(0) as usize;
                                     if !app.ui.export.skip.contains(&ts) {

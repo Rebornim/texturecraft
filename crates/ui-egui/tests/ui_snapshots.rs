@@ -497,3 +497,50 @@ fn rail_window_snapshots() {
     texturecraft_ui_egui::menus::invoke(harness.state_mut(), &context, "ui.view.history");
     save(&mut harness, &output_dir, "rail-history-short");
 }
+
+#[test]
+#[ignore]
+fn export_dialog_snapshots() {
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else {
+        eprintln!("set TC_UI_SNAPSHOTS=<dir> to write the pictures");
+        return;
+    };
+
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let template = session.doc.project.texture_sets[0].clone();
+    while session.doc.project.texture_sets.len() < 80 {
+        let mut set = template.clone();
+        set.name = format!("Set {}", session.doc.project.texture_sets.len() + 1);
+        session.doc.project.texture_sets.push(set);
+    }
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 960.0)).with_pixels_per_point(1.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+
+    // The other centered dialogs, to compare against main
+    harness.state_mut().ui.windows.start = true;
+    save(&mut harness, &output_dir, "dialog-start");
+    harness.state_mut().ui.windows.start = false;
+    harness.state_mut().ui.windows.new_project = true;
+    save(&mut harness, &output_dir, "dialog-new-project");
+    harness.state_mut().ui.windows.new_project = false;
+    harness.state_mut().ui.windows.about = true;
+    save(&mut harness, &output_dir, "dialog-about");
+    harness.state_mut().ui.windows.about = false;
+    harness.state_mut().ui.windows.unsaved = Some(texturecraft_ui_egui::state::Unsaved::Quit);
+    save(&mut harness, &output_dir, "dialog-unsaved");
+    harness.state_mut().ui.windows.unsaved = None;
+
+    harness.state_mut().ui.windows.export = true;
+    for (brightness, theme) in [(Brightness::MediumDark, "medium"), (Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+        harness.state_mut().ui.prefs.brightness = brightness;
+        harness.state_mut().ui.export.preset = "Document channels + Normal + AO".into();
+        save(&mut harness, &output_dir, &format!("export-{theme}"));
+        harness.get_by_label("Set 40").scroll_to_me();
+        save(&mut harness, &output_dir, &format!("export-scrolled-{theme}"));
+        for (preset, name) in [("Unreal Engine (Packed)", "unreal"), ("Unity HDRP (Mask Map)", "hdrp")] {
+            harness.state_mut().ui.export.preset = preset.into();
+            save(&mut harness, &output_dir, &format!("export-{name}-{theme}"));
+        }
+    }
+}

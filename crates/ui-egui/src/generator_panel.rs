@@ -12,6 +12,9 @@ use crate::i18n::{baked_map_label, tr, trf};
 use crate::theme::{Tokens, caption};
 use crate::widgets::{combo, section, slider_edit};
 
+/// Width of the names in the Attributes section, so their values line up.
+const ATTRIBUTE_KEY_WIDTH: f32 = 80.0;
+
 /// The settings of generator effect `id`.
 pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: LayerId, id: u64, generator: &Generator) {
     let tk = Tokens::get(ui.ctx());
@@ -72,17 +75,13 @@ fn attributes(ui: &mut Ui, kind: GeneratorKind) {
         GeneratorKind::Position => (tr("A gradient along a world direction across the mesh."), "mask, generator, grayscale, position"),
         GeneratorKind::Direction => (tr("Surfaces facing a direction, as if lit from it."), "mask, generator, grayscale, normal"),
     };
-    egui::Grid::new("generator_attributes_grid").num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
-        ui.label(RichText::new(tr("Description")).color(tk.text_dim));
-        ui.add(egui::Label::new(description).wrap());
-        ui.end_row();
-        ui.label(RichText::new(tr("Category")).color(tk.text_dim));
-        ui.label(tr("Generators"));
-        ui.end_row();
-        ui.label(RichText::new(tr("Tags")).color(tk.text_dim));
-        ui.label(tags);
-        ui.end_row();
-    });
+    // Wrapped rows: a long line must not widen the panel past its edge
+    for (key, value) in [(tr("Description"), description), (tr("Category"), tr("Generators")), (tr("Tags"), tags)] {
+        ui.horizontal_top(|ui| {
+            ui.add_sized([ATTRIBUTE_KEY_WIDTH, 0.0], egui::Label::new(RichText::new(key).color(tk.text_dim)));
+            ui.add(egui::Label::new(value).wrap());
+        });
+    }
 }
 
 /// What the generator's output resolution is based on, the factor applied to it, and the size it comes to.

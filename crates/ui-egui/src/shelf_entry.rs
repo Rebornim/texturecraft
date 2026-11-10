@@ -1,5 +1,7 @@
 //! One asset on the shelf: its name, the tab it belongs to, and how it previews, drags and applies
 
+use std::path::PathBuf;
+
 use serde_json::json;
 use texturecraft_engine::core::ProceduralKind;
 use texturecraft_engine::core::project::ENVIRONMENTS;
@@ -14,6 +16,9 @@ use crate::i18n::tr;
 use crate::shelf::{Asset, Tab, apply};
 use crate::shelf_preview::ShelfPreview;
 
+/// The name of a saved brush whose file name isn't text
+const SAVED_BRUSH_NAME: &str = "brush";
+
 /// A shelf tile's asset
 #[derive(Clone)]
 pub(crate) enum ShelfEntry {
@@ -21,6 +26,8 @@ pub(crate) enum ShelfEntry {
     SmartMask(&'static SmartMask),
     Filter(&'static FilterDef),
     Brush(&'static BrushPreset),
+    /// A brush preset file the user saved
+    SavedBrush(PathBuf),
     Alpha(&'static LibraryAlpha),
     Procedural(ProceduralKind),
     /// A built-in lighting environment, by name
@@ -30,7 +37,7 @@ pub(crate) enum ShelfEntry {
 }
 
 impl ShelfEntry {
-    /// Every built-in asset and the project's images
+    /// Every built-in asset, the user's saved brushes and the project's images
     pub(crate) fn all(app: &TextureCraftApp) -> Vec<ShelfEntry> {
         let built_in = MATERIALS
             .iter()
@@ -41,7 +48,8 @@ impl ShelfEntry {
             .chain(alphas::library().iter().map(ShelfEntry::Alpha))
             .chain(ProceduralKind::ALL.into_iter().map(ShelfEntry::Procedural))
             .chain(ENVIRONMENTS.into_iter().map(ShelfEntry::Environment));
-        built_in.chain(app.session.doc.resources.keys().cloned().map(ShelfEntry::Image)).collect()
+        let saved = app.brushes.iter().flatten().cloned().map(ShelfEntry::SavedBrush);
+        built_in.chain(saved).chain(app.session.doc.resources.keys().cloned().map(ShelfEntry::Image)).collect()
     }
 
     /// The tab that lists the asset
@@ -51,7 +59,7 @@ impl ShelfEntry {
             ShelfEntry::Material(_) => Tab::Materials,
             ShelfEntry::SmartMask(_) => Tab::Masks,
             ShelfEntry::Filter(_) => Tab::Filters,
-            ShelfEntry::Brush(_) => Tab::Brushes,
+            ShelfEntry::Brush(_) | ShelfEntry::SavedBrush(_) => Tab::Brushes,
             ShelfEntry::Alpha(_) => Tab::Alphas,
             ShelfEntry::Procedural(_) => Tab::Procedurals,
             ShelfEntry::Environment(_) => Tab::Environments,
@@ -66,6 +74,7 @@ impl ShelfEntry {
             ShelfEntry::SmartMask(mask) => format!("mask:{}", mask.id),
             ShelfEntry::Filter(filter) => format!("filter:{}", filter.id),
             ShelfEntry::Brush(preset) => format!("brush:{}", preset.id),
+            ShelfEntry::SavedBrush(path) => format!("saved-brush:{}", path.display()),
             ShelfEntry::Alpha(alpha) => format!("alpha:{}", alpha.id),
             ShelfEntry::Procedural(kind) => format!("procedural:{kind:?}"),
             ShelfEntry::Environment(name) => format!("environment:{name}"),
@@ -77,6 +86,7 @@ impl ShelfEntry {
     pub(crate) fn label(&self) -> &str {
         match self {
             ShelfEntry::Material(material) => material.label,
+            ShelfEntry::SavedBrush(path) => path.file_stem().and_then(|stem| stem.to_str()).unwrap_or(SAVED_BRUSH_NAME),
             ShelfEntry::SmartMask(mask) => mask.label,
             ShelfEntry::Filter(filter) => tr(filter.label),
             ShelfEntry::Brush(preset) => preset.label,
@@ -91,6 +101,7 @@ impl ShelfEntry {
     pub(crate) fn matches(&self, filter: &str) -> bool {
         let texts: &[&str] = match self {
             ShelfEntry::Material(material) => &[material.label, material.category, material.id],
+            ShelfEntry::SavedBrush(_) => &[self.label()],
             ShelfEntry::SmartMask(mask) => &[mask.label, mask.id],
             ShelfEntry::Filter(filter) => &[filter.label, filter.group, filter.id, tr(filter.label), tr(filter.group)],
             ShelfEntry::Brush(preset) => &[preset.label, preset.category, preset.id],
@@ -109,6 +120,7 @@ impl ShelfEntry {
             ShelfEntry::SmartMask(mask) => app.thumbs.smart_mask(ctx, mask.id),
             ShelfEntry::Filter(filter) => app.thumbs.filter(ctx, filter.id),
             ShelfEntry::Brush(preset) => app.thumbs.brush_preset(ctx, preset),
+            ShelfEntry::SavedBrush(path) => app.thumbs.saved_brush(ctx, path),
             ShelfEntry::Alpha(alpha) => app.thumbs.alpha(ctx, alpha),
             ShelfEntry::Procedural(kind) => app.thumbs.procedural(ctx, *kind),
             ShelfEntry::Environment(name) => app.thumbs.environment(ctx, name),
@@ -126,6 +138,7 @@ impl ShelfEntry {
             ShelfEntry::SmartMask(mask) => ShelfPreview::SmartMask(mask.id),
             ShelfEntry::Filter(filter) => ShelfPreview::Filter(filter.id),
             ShelfEntry::Brush(preset) => ShelfPreview::Brush(preset),
+            ShelfEntry::SavedBrush(path) => ShelfPreview::SavedBrush(path.clone()),
             ShelfEntry::Alpha(alpha) => ShelfPreview::Alpha(alpha),
             ShelfEntry::Procedural(kind) => ShelfPreview::Procedural(*kind),
             ShelfEntry::Environment(name) => ShelfPreview::Environment(name),
@@ -141,7 +154,7 @@ impl ShelfEntry {
             ShelfEntry::Filter(filter) => Some(Asset::Filter(filter.id)),
             ShelfEntry::Alpha(alpha) => Some(Asset::Alpha(&alpha.id)),
             ShelfEntry::Image(name) => Some(Asset::Texture(name.clone())),
-            ShelfEntry::Brush(_) | ShelfEntry::Procedural(_) | ShelfEntry::Environment(_) => None,
+            ShelfEntry::Brush(_) | ShelfEntry::SavedBrush(_) | ShelfEntry::Procedural(_) | ShelfEntry::Environment(_) => None,
         }
     }
 
@@ -162,6 +175,9 @@ impl ShelfEntry {
         match self {
             ShelfEntry::Brush(preset) => {
                 app.run("brush.preset.apply", json!({"preset": preset.id}));
+            }
+            ShelfEntry::SavedBrush(path) => {
+                app.run("brush.preset.load", json!({"path": path.display().to_string()}));
             }
             ShelfEntry::Procedural(kind) => {
                 app.run("layer.add.fill", json!({"name": kind.label()}));

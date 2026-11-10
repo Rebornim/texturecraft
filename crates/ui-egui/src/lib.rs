@@ -10,6 +10,8 @@
 mod bake_job;
 pub mod bake_mode;
 mod bake_scene;
+#[cfg(not(target_arch = "wasm32"))]
+mod brush_preset_save;
 mod color_selection_editor;
 pub mod control;
 mod decal_drop;

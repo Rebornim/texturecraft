@@ -919,8 +919,6 @@ pub const TABLE: &[(&str, &str)] = &[
         "استخدام إطار وأزرار نافذة نظام التشغيل بدلاً من شريط عنوان TextureCraft الخاص",
     ),
     ("Brushes", "الفرش"),
-    ("My brushes", "فرشي"),
-    ("Use this brush (keeps its size)", "استخدام هذه الفرشاة (مع الحفاظ على حجمها)"),
     ("Brush name", "اسم الفرشاة"),
     ("Save current brush", "حفظ الفرشاة الحالية"),
     ("Start window", "نافذة البدء"),

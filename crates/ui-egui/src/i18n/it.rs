@@ -953,8 +953,6 @@ pub const TABLE: &[(&str, &str)] = &[
         "Usa la cornice e i pulsanti della finestra del sistema operativo invece della barra del titolo di TextureCraft",
     ),
     ("Brushes", "Pennelli"),
-    ("My brushes", "I miei pennelli"),
-    ("Use this brush (keeps its size)", "Usa questo pennello (mantiene la dimensione)"),
     ("Brush name", "Nome del pennello"),
     ("Save current brush", "Salva il pennello attuale"),
     ("Start window", "Finestra iniziale"),

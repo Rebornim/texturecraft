@@ -941,8 +941,6 @@ pub const TABLE: &[(&str, &str)] = &[
         "TextureCraft 独自のタイトルバーの代わりに、OS のウィンドウ枠とボタンを使います",
     ),
     ("Brushes", "ブラシ一覧"),
-    ("My brushes", "マイブラシ"),
-    ("Use this brush (keeps its size)", "このブラシを使用（サイズはそのまま）"),
     ("Brush name", "ブラシ名"),
     ("Save current brush", "現在のブラシを保存"),
     ("Start window", "スタートウィンドウ"),

@@ -884,8 +884,6 @@ pub const TABLE: &[(&str, &str)] = &[
         "使用操作系统的窗口边框和按钮，而不是 TextureCraft 自己的标题栏",
     ),
     ("Brushes", "笔刷库"),
-    ("My brushes", "我的笔刷"),
-    ("Use this brush (keeps its size)", "使用此笔刷（保留大小）"),
     ("Brush name", "笔刷名称"),
     ("Save current brush", "保存当前笔刷"),
     ("Start window", "启动窗口"),

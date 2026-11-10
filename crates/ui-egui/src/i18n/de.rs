@@ -959,8 +959,6 @@ pub const TABLE: &[(&str, &str)] = &[
         "Fensterrahmen und Fenstertasten des Betriebssystems statt der eigenen Titelleiste von TextureCraft verwenden",
     ),
     ("Brushes", "Pinsel"),
-    ("My brushes", "Meine Pinsel"),
-    ("Use this brush (keeps its size)", "Diesen Pinsel verwenden (Größe bleibt)"),
     ("Brush name", "Pinselname"),
     ("Save current brush", "Aktuellen Pinsel speichern"),
     ("Start window", "Startfenster"),

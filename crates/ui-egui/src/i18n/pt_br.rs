@@ -944,8 +944,6 @@ pub const TABLE: &[(&str, &str)] = &[
         "Usar a moldura e os botões de janela do sistema operacional em vez da barra de título própria do TextureCraft",
     ),
     ("Brushes", "Pincéis"),
-    ("My brushes", "Meus pincéis"),
-    ("Use this brush (keeps its size)", "Usar este pincel (mantém o tamanho)"),
     ("Brush name", "Nome do pincel"),
     ("Save current brush", "Salvar o pincel atual"),
     ("Start window", "Janela inicial"),

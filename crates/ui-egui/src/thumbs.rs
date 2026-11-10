@@ -217,6 +217,11 @@ impl Thumbs {
         self.shelf(ctx, ShelfPreview::Environment(name), SWATCH_PX)
     }
 
+    /// A saved brush preset's stroke along an S curve; None while it renders, empty when the file is unreadable
+    pub fn saved_brush(&mut self, ctx: &egui::Context, path: &std::path::Path) -> Option<TextureHandle> {
+        self.shelf(ctx, ShelfPreview::SavedBrush(path.to_path_buf()), SWATCH_PX)
+    }
+
     /// A brush preset's stroke along an S curve
     pub fn brush_preset(&mut self, ctx: &egui::Context, preset: &'static BrushPreset) -> Option<TextureHandle> {
         self.shelf(ctx, ShelfPreview::Brush(preset), SWATCH_PX)

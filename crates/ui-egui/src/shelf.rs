@@ -249,6 +249,7 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
 
     let filter = app.ui.shelf_filter.to_lowercase();
     let shown_tab = TABS[tab].0;
+    scan_brushes(app);
     // Searching shows matches from every tab in one grid
     let mut entries: Vec<ShelfEntry> =
         ShelfEntry::all(app).into_iter().filter(|entry| (searching || entry.tab() == shown_tab) && entry.matches(&filter)).collect();
@@ -266,9 +267,6 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
 
         if searching || shown_tab == Tab::Smart {
             library(app, ui, &filter);
-        }
-        if searching || shown_tab == Tab::Brushes {
-            my_brushes(app, ui, &filter);
         }
     });
     drag_preview(&ctx);
@@ -364,60 +362,24 @@ fn library(app: &mut TextureCraftApp, ui: &mut Ui, filter: &str) {
 #[cfg(target_arch = "wasm32")]
 fn library(_: &mut TextureCraftApp, _: &mut Ui, _: &str) {}
 
-/// The user's saved brush presets (desktop brushes folder) and saving the current brush there.
+/// Read the user's saved brush presets (desktop brushes folder) unless they are already listed
 #[cfg(not(target_arch = "wasm32"))]
-fn my_brushes(app: &mut TextureCraftApp, ui: &mut Ui, filter: &str) {
+fn scan_brushes(app: &mut TextureCraftApp) {
     use texturecraft_engine::brush_preset_cmds::BRUSH_EXT;
-    let dir = crate::user_dir("brushes");
-    if app.brushes.is_none() {
-        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
-            .map(|d| d.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == BRUSH_EXT)).collect())
-            .unwrap_or_default();
-        files.sort();
-        app.brushes = Some(files);
-    }
-    let files = app.brushes.clone().unwrap_or_default();
-    let name = |f: &std::path::PathBuf| f.file_stem().and_then(|s| s.to_str()).unwrap_or("brush").to_string();
-    let shown: Vec<_> = files.iter().filter(|f| matches(filter, &[&name(f)])).collect();
-    if !filter.is_empty() && shown.is_empty() {
+
+    if app.brushes.is_some() {
         return;
     }
-    ui.horizontal(|ui| {
-        header(ui, tr("My brushes"));
-        if ui.small_button(ic::ARROW_CLOCKWISE).on_hover_text(tr("Rescan the library folder")).clicked() {
-            app.brushes = None;
-        }
-    });
-    for f in shown {
-        if ui
-            .add(egui::Button::selectable(false, format!("{}  {}", ic::PAINT_BRUSH_BROAD, name(f))))
-            .on_hover_text(tr("Use this brush (keeps its size)"))
-            .clicked()
-        {
-            app.run("brush.preset.load", json!({"path": f.display().to_string()}));
-        }
-    }
-    ui.horizontal(|ui| {
-        let id = ui.make_persistent_id("brush_preset_name");
-        let mut new_name: String = ui.data_mut(|d| d.get_temp(id)).unwrap_or_default();
-        ui.add(egui::TextEdit::singleline(&mut new_name).hint_text(tr("Brush name")).desired_width(110.0));
-        let file = texturecraft_engine::formats::export::sanitize_file_stem(new_name.trim());
-        if ui.add_enabled(!new_name.trim().is_empty(), egui::Button::new(tr("Save current brush"))).clicked() {
-            let path = dir.join(format!("{file}.{BRUSH_EXT}"));
-            // A folder that can't be made fails the save, which reports it.
-            let _ = std::fs::create_dir_all(&dir);
-            if app.run("brush.preset.save", json!({"path": path.display().to_string()})).is_some() {
-                new_name.clear();
-                app.brushes = None;
-            }
-        }
-        ui.data_mut(|d| d.insert_temp(id, new_name));
-    });
-    ui.add_space(6.0);
+
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(crate::user_dir("brushes"))
+        .map(|dir| dir.flatten().map(|entry| entry.path()).filter(|path| path.extension().is_some_and(|extension| extension == BRUSH_EXT)).collect())
+        .unwrap_or_default();
+    files.sort();
+    app.brushes = Some(files);
 }
 
 #[cfg(target_arch = "wasm32")]
-fn my_brushes(_: &mut TextureCraftApp, _: &mut Ui, _: &str) {}
+fn scan_brushes(_: &mut TextureCraftApp) {}
 
 /// The Textures tab's import button, and a hint while the project has no images
 fn import_images(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, empty: bool) {

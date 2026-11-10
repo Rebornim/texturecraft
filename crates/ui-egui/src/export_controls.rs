@@ -1,6 +1,7 @@
 //! The Export textures window's parameter controls and value texts, shared by Global settings and a texture set's overrides
 
 use egui::{RichText, Ui};
+use texturecraft_engine::core::ExportFileType;
 use texturecraft_engine::formats::FileFormat;
 
 use crate::i18n::{tr, trf};
@@ -49,63 +50,93 @@ pub fn file_type_text(extension: &str) -> String {
     }
 }
 
-pub fn bit_depth_text(bit_depth: u8) -> String {
-    match bit_depth {
-        0 => tr("Default").to_string(),
-        32 => tr("32 bits (float)").to_string(),
-        n => trf("{n} bits", &[("n", &n)]),
+/// "8 bits", "8 bits + dithering", "32 bits (float)"
+pub fn bit_depth_text(bit_depth: u8, dithering: bool) -> String {
+    match (bit_depth, dithering) {
+        (0, _) => tr("Default").to_string(),
+        (32, _) => tr("32 bits (float)").to_string(),
+        (8, true) => tr("8 bits + dithering").to_string(),
+        (n, _) => trf("{n} bits", &[("n", &n)]),
     }
 }
 
-/// The file type, then a bit depth it holds; the bit depth is the template's while the file type is
-pub fn file_type_combos(ui: &mut Ui, id: &str, extension: &mut String, bit_depth: &mut u8) {
-    let chosen = FileFormat::from_extension(extension);
-    ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt((id, "format")).selected_text(file_type_text(extension)).show_ui(ui, |ui| {
-            if ui.selectable_label(chosen.is_none(), tr("Based on output template")).clicked() {
-                extension.clear();
-                *bit_depth = 0;
+/// The bit depths `format` holds, with 8 bits also offered dithered
+fn depth_choices(format: FileFormat) -> Vec<(u8, bool)> {
+    let mut choices = Vec::new();
+    for &depth in format.bit_depths() {
+        choices.push((depth, false));
+        if depth == 8 {
+            choices.push((depth, true));
+        }
+    }
+
+    choices
+}
+
+fn depth_combo(ui: &mut Ui, id: &str, format: FileFormat, file_type: &mut ExportFileType) {
+    let shown = bit_depth_text(file_type.bit_depth, file_type.dithering);
+    egui::ComboBox::from_id_salt((id, "bits")).width(BIT_DEPTH_WIDTH).selected_text(shown).show_ui(ui, |ui| {
+        for (depth, dithering) in depth_choices(format) {
+            let selected = file_type.bit_depth == depth && file_type.dithering == dithering;
+            if ui.selectable_label(selected, bit_depth_text(depth, dithering)).clicked() {
+                file_type.bit_depth = depth;
+                file_type.dithering = dithering;
             }
-            for format in FILE_TYPES {
-                if ui.selectable_label(chosen == Some(format), file_type_name(format)).clicked() {
-                    *extension = format.extension().to_string();
-                    *bit_depth = format.depth(if *bit_depth == 0 { DEFAULT_BIT_DEPTH } else { *bit_depth });
-                }
-            }
-        });
-        ui.add_enabled_ui(chosen.is_some(), |ui| {
-            let shown = if chosen.is_some() { bit_depth_text(*bit_depth) } else { String::new() };
-            egui::ComboBox::from_id_salt((id, "bits")).width(BIT_DEPTH_WIDTH).selected_text(shown).show_ui(ui, |ui| {
-                for &depth in chosen.map(FileFormat::bit_depths).unwrap_or_default() {
-                    ui.selectable_value(bit_depth, depth, bit_depth_text(depth));
-                }
-            });
-        });
+        }
     });
 }
 
-/// "png 8 bits", or the template's file types
-pub fn file_type_with_depth_text(extension: &str, bit_depth: u8) -> String {
-    if extension.is_empty() { file_type_text(extension) } else { format!("{}  {}", file_type_text(extension), bit_depth_text(bit_depth)) }
+/// `file_type` now writing `format`, at the nearest bit depth it holds
+fn switch_format(file_type: &mut ExportFileType, format: FileFormat) {
+    file_type.format = format.extension().to_string();
+    file_type.bit_depth = format.depth(if file_type.bit_depth == 0 { DEFAULT_BIT_DEPTH } else { file_type.bit_depth });
+    file_type.dithering &= file_type.bit_depth == 8;
+}
+
+/// The file type, then a bit depth it holds; the bit depth is the template's while the file type is
+pub fn file_type_combos(ui: &mut Ui, id: &str, file_type: &mut ExportFileType) {
+    let chosen = FileFormat::from_extension(&file_type.format);
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_id_salt((id, "format")).selected_text(file_type_text(&file_type.format)).show_ui(ui, |ui| {
+            if ui.selectable_label(chosen.is_none(), tr("Based on output template")).clicked() {
+                *file_type = ExportFileType::default();
+            }
+            for format in FILE_TYPES {
+                if ui.selectable_label(chosen == Some(format), file_type_name(format)).clicked() {
+                    switch_format(file_type, format);
+                }
+            }
+        });
+        match chosen {
+            Some(format) => depth_combo(ui, id, format, file_type),
+            None => {
+                ui.add_enabled_ui(false, |ui| egui::ComboBox::from_id_salt((id, "bits")).width(BIT_DEPTH_WIDTH).selected_text("").show_ui(ui, |_| {}));
+            }
+        }
+    });
+}
+
+/// "png  8 bits", or the template's file types
+pub fn file_type_with_depth_text(file_type: &ExportFileType) -> String {
+    if file_type.format.is_empty() {
+        return file_type_text(&file_type.format);
+    }
+
+    format!("{}  {}", file_type_text(&file_type.format), bit_depth_text(file_type.bit_depth, file_type.dithering))
 }
 
 /// One output map's own file type: a format and one of the bit depths it holds
-pub fn map_file_type_combos(ui: &mut Ui, id: &str, extension: &mut String, bit_depth: &mut u8) {
-    let format = FileFormat::from_extension(extension).unwrap_or(FileFormat::Png);
+pub fn map_file_type_combos(ui: &mut Ui, id: &str, file_type: &mut ExportFileType) {
+    let format = FileFormat::from_extension(&file_type.format).unwrap_or(FileFormat::Png);
     ui.horizontal(|ui| {
         egui::ComboBox::from_id_salt((id, "format")).width(64.0).selected_text(format.extension()).show_ui(ui, |ui| {
             for choice in FILE_TYPES {
                 if ui.selectable_label(choice == format, choice.extension()).clicked() {
-                    *extension = choice.extension().to_string();
-                    *bit_depth = choice.depth(*bit_depth);
+                    switch_format(file_type, choice);
                 }
             }
         });
-        egui::ComboBox::from_id_salt((id, "bits")).selected_text(bit_depth_text(*bit_depth)).show_ui(ui, |ui| {
-            for &depth in format.bit_depths() {
-                ui.selectable_value(bit_depth, depth, bit_depth_text(depth));
-            }
-        });
+        depth_combo(ui, id, format, file_type);
     });
 }
 

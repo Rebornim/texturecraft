@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::ExportParameters;
+use super::{ExportFileType, ExportParameters};
 
 /// A texture set's own export parameters; None keeps the global value
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -8,9 +8,8 @@ use super::ExportParameters;
 pub struct ExportOverrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preset: Option<String>,
-    /// File type and bit depth are one override
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub file_type: Option<(String, u8)>,
+    pub file_type: Option<ExportFileType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<u32>,
     /// Padding mode and dilation distance are one override
@@ -29,9 +28,8 @@ impl ExportOverrides {
         if let Some(preset) = &self.preset {
             parameters.preset.clone_from(preset);
         }
-        if let Some((format, bit_depth)) = &self.file_type {
-            parameters.format.clone_from(format);
-            parameters.bit_depth = *bit_depth;
+        if let Some(file_type) = &self.file_type {
+            parameters.file_type.clone_from(file_type);
         }
         if let Some(size) = self.size {
             parameters.size = size;

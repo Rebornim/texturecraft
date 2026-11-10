@@ -129,22 +129,22 @@ fn the_color_space_says_data_maps_stay_linear() {
 #[test]
 fn save_settings_writes_the_project_and_cancel_drops_the_edits() {
     let mut harness = harness(2, LAPTOP);
-    draft(&mut harness).settings.parameters.format = "tga".into();
+    draft(&mut harness).settings.parameters.file_type.format = "tga".into();
     harness.get_by_label("Save settings").click();
     harness.run_steps(2);
     let saved = harness.state().session.doc.project.export.clone().unwrap();
-    assert_eq!(saved.parameters.format, "tga");
+    assert_eq!(saved.parameters.file_type.format, "tga");
     assert!(harness.state().ui.windows.export, "Save settings keeps the window open");
 
-    draft(&mut harness).settings.parameters.format = "png".into();
+    draft(&mut harness).settings.parameters.file_type.format = "png".into();
     harness.get_by_label("Cancel").click();
     harness.run_steps(2);
     assert!(harness.state().ui.export.settings.is_none(), "the edits are dropped");
-    assert_eq!(harness.state().session.doc.project.export.as_ref().unwrap().parameters.format, "tga");
+    assert_eq!(harness.state().session.doc.project.export.as_ref().unwrap().parameters.file_type.format, "tga");
 
     harness.state_mut().ui.windows.export = true;
     harness.run_steps(2);
-    assert_eq!(draft(&mut harness).settings.parameters.format, "tga", "the window reopens on the saved settings");
+    assert_eq!(draft(&mut harness).settings.parameters.file_type.format, "tga", "the window reopens on the saved settings");
 }
 
 #[test]
@@ -223,7 +223,11 @@ fn a_texture_set_leaves_out_a_map_or_gives_it_its_own_file_type() {
 
     pen(&harness, key).click();
     harness.run_steps(2);
-    assert_eq!(draft(&mut harness).sets[1].maps[key].file_type, Some(("png".to_string(), 8)), "the override starts from what the map writes");
+    assert_eq!(
+        draft(&mut harness).sets[1].maps[key].file_type,
+        Some(texturecraft_engine::core::ExportFileType::new("png", 8)),
+        "the override starts from what the map writes"
+    );
 }
 
 #[test]
@@ -272,8 +276,8 @@ fn a_file_type_offers_only_the_bit_depths_it_holds() {
     harness.run_steps(2);
     harness.get_by_label("targa").click();
     harness.run_steps(2);
-    let parameters = draft(&mut harness).settings.parameters.clone();
-    assert_eq!((parameters.format.as_str(), parameters.bit_depth), ("tga", 8));
+    let file_type = draft(&mut harness).settings.parameters.file_type.clone();
+    assert_eq!((file_type.format.as_str(), file_type.bit_depth), ("tga", 8));
     assert!(!combo_on_row(&harness, "File type", 1).accesskit_node().is_disabled());
 
     combo_on_row(&harness, "File type", 1).click();
@@ -290,4 +294,19 @@ fn the_size_list_starts_at_128() {
     harness.get_by_label("128 x 128").click();
     harness.run_steps(2);
     assert_eq!(draft(&mut harness).settings.parameters.size, 128);
+}
+
+#[test]
+fn eight_bits_can_be_dithered() {
+    let mut harness = harness(2, LAPTOP);
+    combo_on_row(&harness, "File type", 0).click();
+    harness.run_steps(2);
+    harness.get_by_label("png").click();
+    harness.run_steps(2);
+    combo_on_row(&harness, "File type", 1).click();
+    harness.run_steps(2);
+    harness.get_by_label("8 bits + dithering").click();
+    harness.run_steps(2);
+    let file_type = draft(&mut harness).settings.parameters.file_type.clone();
+    assert!(file_type.dithering && file_type.bit_depth == 8);
 }

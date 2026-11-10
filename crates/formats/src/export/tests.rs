@@ -673,12 +673,12 @@ fn a_chosen_colour_space_is_embedded_as_an_icc_profile() {
             }
             for space in ColorSpace::ALL {
                 let mut warnings = Vec::new();
-                let bytes = encode(format, depth, (8, 8), 3, &data, &[false; 3], Some(space), &mut warnings).unwrap();
+                let bytes = encode(format, depth, false, (8, 8), 3, &data, &[false; 3], Some(space), &mut warnings).unwrap();
                 assert_eq!(embedded_icc(format, &bytes), crate::icc::profile(space), "{format:?} {depth}-bit {space:?}");
                 assert!(warnings.is_empty(), "{warnings:?}");
             }
             // No colour space chosen (a data map, or the default): nothing is embedded.
-            let bytes = encode(format, depth, (8, 8), 3, &data, &[false; 3], None, &mut Vec::new()).unwrap();
+            let bytes = encode(format, depth, false, (8, 8), 3, &data, &[false; 3], None, &mut Vec::new()).unwrap();
             assert_eq!(embedded_icc(format, &bytes), None, "{format:?} {depth}-bit");
         }
     }
@@ -691,9 +691,10 @@ fn exr_carries_the_chromaticities_of_the_space() {
         let meta = exr::meta::MetaData::read_from_buffered(Cursor::new(bytes), false).unwrap();
         meta.headers[0].shared_attributes.chromaticities
     };
-    assert!(read(&encode(FileFormat::Exr, 16, (4, 4), 3, &data, &[false; 3], None, &mut Vec::new()).unwrap()).is_none());
+    assert!(read(&encode(FileFormat::Exr, 16, false, (4, 4), 3, &data, &[false; 3], None, &mut Vec::new()).unwrap()).is_none());
     for space in ColorSpace::ALL {
-        let c = read(&encode(FileFormat::Exr, 32, (4, 4), 3, &data, &[false; 3], Some(space), &mut Vec::new()).unwrap()).unwrap_or_else(|| panic!("{space:?}"));
+        let c = read(&encode(FileFormat::Exr, 32, false, (4, 4), 3, &data, &[false; 3], Some(space), &mut Vec::new()).unwrap())
+            .unwrap_or_else(|| panic!("{space:?}"));
         let [r, g, b, w] = space.chromaticities();
         for (got, want) in [(c.red, r), (c.green, g), (c.blue, b), (c.white, w)] {
             assert!((f64::from(got.0) - want[0]).abs() < 1e-5 && (f64::from(got.1) - want[1]).abs() < 1e-5, "{space:?}: {got:?} vs {want:?}");
@@ -706,10 +707,31 @@ fn formats_without_a_place_for_a_colour_space_say_so() {
     let data = vec![0.25f32; 4 * 4 * 3];
     for format in [FileFormat::Tga, FileFormat::Bmp, FileFormat::Hdr] {
         let mut warnings = Vec::new();
-        encode(format, 8, (4, 4), 3, &data, &[false; 3], Some(ColorSpace::AcesCg), &mut warnings).unwrap();
+        encode(format, 8, false, (4, 4), 3, &data, &[false; 3], Some(ColorSpace::AcesCg), &mut warnings).unwrap();
         assert!(warnings.iter().any(|w| w.contains("colour space") && w.contains("ACEScg")), "{format:?}: {warnings:?}");
         let mut quiet = Vec::new();
-        encode(format, 8, (4, 4), 3, &data, &[false; 3], None, &mut quiet).unwrap();
+        encode(format, 8, false, (4, 4), 3, &data, &[false; 3], None, &mut quiet).unwrap();
         assert!(quiet.is_empty(), "{format:?}: nothing to say without a chosen space: {quiet:?}");
     }
+}
+
+#[test]
+fn dithering_keeps_exact_levels_and_mixes_the_ones_between() {
+    let (width, height) = (64u32, 64u32);
+    let between = (100.0 + 0.25) / 255.0;
+    let rows: Vec<f32> = (0..width * height).flat_map(|i| if i < width * height / 2 { [0.0, 1.0, 40.0 / 255.0] } else { [between; 3] }).collect();
+    let decode = |dithered: bool| {
+        let bytes = encode(FileFormat::Png, 8, dithered, (width, height), 3, &rows, &[false; 3], None, &mut Vec::new()).unwrap();
+        image::load_from_memory(&bytes).unwrap().to_rgb8()
+    };
+    let (plain, dithered) = (decode(false), decode(true));
+
+    let exact = dithered.pixels().take((width * height / 2) as usize);
+    assert!(exact.clone().all(|p| p.0 == [0, 255, 40]), "exact levels stay exact");
+    let mixed: Vec<u8> = dithered.pixels().skip((width * height / 2) as usize).map(|p| p.0[0]).collect();
+    assert!(mixed.iter().all(|v| matches!(v, 100 | 101)), "only the two nearest levels");
+    let mean = mixed.iter().map(|v| f32::from(*v)).sum::<f32>() / mixed.len() as f32;
+    assert!((mean - 100.25).abs() < 0.03, "the mix keeps the value on average: {mean}");
+    assert!(plain.pixels().skip((width * height / 2) as usize).all(|p| p.0[0] == 100), "without dithering the band is flat");
+    assert_eq!(dithered, decode(true), "the same every time");
 }

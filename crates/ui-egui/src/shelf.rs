@@ -633,11 +633,18 @@ pub(crate) fn tile(
     }
     let image_rect = egui::Rect::from_center_size(rect.center_top() + vec2(0.0, THUMBNAIL_CENTER_Y), vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE));
     thumbnail(painter, tex, image_rect, &tk);
-    let galley = painter.layout(label.to_string(), egui::FontId::proportional(LABEL_FONT_SIZE), tk.text, rect.width() - LABEL_MARGIN);
+    let galley = painter.layout_job(one_line(label, rect.width() - LABEL_MARGIN, tk.text));
     painter.galley(egui::pos2(rect.center().x - galley.size().x * 0.5, image_rect.bottom() + LABEL_GAP), galley, tk.text);
 
     let big = if resp.hovered() { big_preview(ui, thumbs, preview) } else { None };
     resp.on_hover_ui(|ui| hover_preview(ui, tex, big.as_ref(), label))
+}
+
+/// A tile label on one line, cut with "…" past `width` points (the hover popup shows the whole name)
+fn one_line(label: &str, width: f32, color: Color32) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::single_section(label.to_string(), egui::TextFormat::simple(egui::FontId::proportional(LABEL_FONT_SIZE), color));
+    job.wrap = egui::text::TextWrapping::truncate_at_width(width);
+    job
 }
 
 /// Start rendering during the popup delay once the pointer rests

@@ -675,6 +675,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Report a bug...", "الإبلاغ عن خطأ..."),
     ("Rescan the library folder", "إعادة فحص مجلد المكتبة"),
     ("Reset", "إعادة تعيين"),
+    ("Reset the general export parameters", "إعادة تعيين معلمات التصدير العامة"),
     ("Reset UI", "إعادة ضبط واجهة المستخدم"),
     ("Reset all", "إعادة ضبط الكل"),
     ("Reset to defaults", "إعادة الضبط إلى الإعدادات الافتراضية"),

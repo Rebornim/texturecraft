@@ -225,3 +225,28 @@ fn a_texture_set_leaves_out_a_map_or_gives_it_its_own_file_type() {
     harness.run_steps(2);
     assert_eq!(draft(&mut harness).sets[1].maps[key].file_type, Some(("png".to_string(), 8)), "the override starts from what the map writes");
 }
+
+#[test]
+fn the_window_opens_on_settings_and_reset_all_belongs_to_settings() {
+    let mut harness = harness(2, LAPTOP);
+    harness.get_by_label("Output templates").click();
+    harness.run_steps(2);
+    assert!(harness.query_by_label("Reset all").is_none(), "Reset all is a Settings button");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    harness.state_mut().ui.windows.export = true;
+    harness.run_steps(2);
+    assert_eq!(harness.state().ui.export.tab, 0);
+    harness.get_by_label("Reset all");
+}
+
+#[test]
+fn the_reset_icon_resets_the_general_parameters() {
+    let mut harness = harness(2, LAPTOP);
+    draft(&mut harness).settings.parameters.size = 512;
+    draft(&mut harness).sets[1].overrides.size = Some(1024);
+    harness.get_by_label("Reset the general export parameters").click();
+    harness.run_steps(2);
+    assert_eq!(draft(&mut harness).settings.parameters.size, 0);
+    assert_eq!(draft(&mut harness).sets[1].overrides.size, Some(1024), "a set's overrides are its own");
+}

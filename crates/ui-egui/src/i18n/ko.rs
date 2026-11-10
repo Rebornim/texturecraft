@@ -684,6 +684,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Report a bug...", "버그 신고..."),
     ("Rescan the library folder", "라이브러리 폴더를 다시 검색합니다"),
     ("Reset", "초기화"),
+    ("Reset the general export parameters", "일반 내보내기 매개변수 재설정"),
     ("Reset UI", "UI 초기화"),
     ("Reset all", "모두 초기화"),
     ("Reset to defaults", "기본값으로 초기화"),

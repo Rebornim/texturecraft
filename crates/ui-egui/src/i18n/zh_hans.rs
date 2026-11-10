@@ -639,6 +639,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Report a bug...", "报告错误..."),
     ("Rescan the library folder", "重新扫描库文件夹"),
     ("Reset", "重置"),
+    ("Reset the general export parameters", "重置常规导出参数"),
     ("Reset UI", "重置界面"),
     ("Reset all", "全部重置"),
     ("Reset to defaults", "恢复默认值"),

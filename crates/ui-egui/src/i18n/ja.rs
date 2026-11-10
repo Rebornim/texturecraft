@@ -693,6 +693,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Report a bug...", "バグを報告..."),
     ("Rescan the library folder", "ライブラリフォルダーを再スキャン"),
     ("Reset", "リセット"),
+    ("Reset the general export parameters", "一般書き出しパラメーターをリセット"),
     ("Reset UI", "UIをリセット"),
     ("Reset all", "すべてリセット"),
     ("Reset to defaults", "デフォルトに戻す"),

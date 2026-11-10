@@ -205,6 +205,7 @@ pub struct ExportUi {
     pub dir: String,
     /// Output templates tab: the selected template
     pub preset: String,
+    #[serde(skip)]
     pub tab: u8,
     /// The open window's unsaved edits
     #[serde(skip)]

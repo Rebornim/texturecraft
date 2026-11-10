@@ -1,13 +1,31 @@
 //! French UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("A gradient along a world direction across the mesh.", "Un dégradé le long d'une direction du monde sur le maillage."),
+    ("Attributes", "Attributs"),
     ("Baking {map} ({n}/{total})", "Cuisson de {map} ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "Cuisson de {map} ({n}/{total}), jeu de textures {set} sur {sets}"),
+    ("Category", "Catégorie"),
+    ("Convex edges from the curvature map, broken up by noise: worn paint and polished edges.", "Arêtes convexes issues de la carte de courbure, brisées par du bruit : peinture usée et arêtes polies."),
+    ("Convex edges, cavities or both from the curvature map, at several detail sizes.", "Arêtes convexes, cavités ou les deux issues de la carte de courbure, à plusieurs tailles de détail."),
+    ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "Crevasses et zones occultées issues de la carte d'occlusion ambiante : saleté et crasse."),
+    ("Description", "Description"),
     ("Follow Newest Map", "Suivre la dernière carte"),
+    ("Generators", "Générateurs"),
+    ("Global balance", "Équilibre global"),
+    ("Global blur", "Flou global"),
+    ("Global contrast", "Contraste global"),
+    ("Global invert", "Inversion globale"),
+    ("Occluded areas from the ambient occlusion map.", "Zones occultées issues de la carte d'occlusion ambiante."),
     (
         "Painting is paused while a bake is shown. Cancel the bake or wait for it to finish.",
         "La peinture est suspendue tant qu'une cuisson est affichée. Annulez la cuisson ou attendez qu'elle se termine.",
     ),
+    ("Parameters", "Paramètres"),
+    ("Restore defaults", "Restaurer les valeurs par défaut"),
+    ("Surfaces facing a direction, as if lit from it.", "Surfaces tournées vers une direction, comme éclairées depuis celle-ci."),
+    ("Tags", "Étiquettes"),
+    ("Thin parts of the mesh from the thickness map.", "Parties fines du maillage issues de la carte d'épaisseur."),
     (
         "What the 3D view shows while the bake runs: the newest finished map, one finished map, or the material. Maps not baked yet show a neutral value.",
         "Ce que la vue 3D affiche pendant la cuisson : la dernière carte terminée, une carte terminée au choix ou le matériau. Les cartes pas encore cuites affichent une valeur neutre.",

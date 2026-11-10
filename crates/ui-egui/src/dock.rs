@@ -6,8 +6,8 @@ use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::compose::ThumbTarget;
 use texturecraft_engine::core::{
-    BakedMap, BlendMode, Channel, CurvatureDetail, CurvatureMode, Decal, Effect, EffectKind, Fill, Filter, Generator, GeneratorKind, Layer, LayerId, LayerKind,
-    LinkParam, MaterialLink, ProceduralKind, Projection, Source,
+    BakedMap, BlendMode, Channel, Decal, Effect, EffectKind, Fill, Filter, Layer, LayerId, LayerKind, LinkParam, MaterialLink, ProceduralKind, Projection,
+    Source,
 };
 use texturecraft_engine::filter_lib::scalar_params;
 use texturecraft_engine::paint::{BrushAlpha, BrushSettings, alphas};
@@ -2263,7 +2263,7 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, eid:
     ui.separator();
 
     match &effect.kind {
-        EffectKind::Generator(generator) => generator_properties(app, ui, id, generator),
+        EffectKind::Generator(generator) => crate::generator_panel::generator_properties(app, ui, id, generator),
         EffectKind::Levels(levels) => crate::levels_properties::levels_properties(app, ui, layer, eid, levels),
         EffectKind::Fill { source, .. } => {
             ui.label(caption(tr("Fill")));
@@ -2357,78 +2357,6 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, eid:
         other => {
             ui.label(RichText::new(tr(other.name())).color(tk.text_dim));
         }
-    }
-}
-
-/// The settings of generator effect `id`.
-fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, generator: &Generator) {
-    let tk = Tokens::get(ui.ctx());
-    ui.label(caption(tr("Generator")));
-    egui::ComboBox::from_id_salt("gen_kind").selected_text(tr(generator.kind.label())).show_ui(ui, |ui| {
-        for kind in GeneratorKind::ALL {
-            if ui.selectable_label(kind == generator.kind, tr(kind.label())).clicked() {
-                // Replace the generator kind: remove and add keeps ordering simple
-                app.run("effect.remove", json!({"effect": id}));
-                app.run("effect.add.generator", json!({"generator": format!("{kind:?}")}));
-            }
-        }
-    });
-
-    let (mut level, mut softness, mut noise, mut noise_scale, mut invert) =
-        (generator.level, generator.softness, generator.noise_amount, generator.noise_scale, generator.invert);
-    let level_edit = slider_edit(ui, tr("Level"), &mut level, 0.0..=1.0, 2);
-    let softness_edit = slider_edit(ui, tr("Softness"), &mut softness, 0.0..=1.0, 2);
-    let noise_edit = slider_edit(ui, tr("Noise amount"), &mut noise, 0.0..=2.0, 2);
-    let noise_scale_edit = slider_edit(ui, tr("Noise scale"), &mut noise_scale, 0.1..=64.0, 1);
-    let invert_edit = ui.checkbox(&mut invert, tr("Invert")).changed().then_some(false);
-    if let Some(merge) = level_edit.or(softness_edit).or(noise_edit).or(noise_scale_edit).or(invert_edit) {
-        app.run(
-            "effect.set",
-            json!({"effect": id, "level": level, "softness": softness, "noise": noise, "noiseScale": noise_scale, "invert": invert, "merge": merge}),
-        );
-    }
-
-    if matches!(generator.kind, GeneratorKind::Curvature | GeneratorKind::EdgeWear) {
-        curvature_detail_properties(app, ui, id, generator.detail.as_ref());
-    }
-    if !app.session.doc.baked.contains_key(&app.session.ts()) {
-        ui.label(RichText::new(format!("{} {}", ic::WARNING, tr("Bake mesh maps (F8) for curvature, AO and thickness based generators."))).color(tk.warning));
-    }
-}
-
-/// The curvature mode and detail size weights of generator effect `id` (`detail` None: saved before detail sizes).
-fn curvature_detail_properties(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, detail: Option<&CurvatureDetail>) {
-    let tk = Tokens::get(ui.ctx());
-    let shown = detail.cloned().unwrap_or_default();
-    combo(ui, tr("Mode"), curvature_mode_label(shown.mode), |ui| {
-        for mode in CurvatureMode::ALL {
-            if ui.selectable_label(mode == shown.mode, curvature_mode_label(mode)).clicked() {
-                app.run("effect.set", json!({"effect": id, "mode": format!("{mode:?}")}));
-            }
-        }
-    });
-
-    ui.label(caption(tr("Detail sizes")));
-    let mut weights = shown.weights;
-    let mut edit = None;
-    for (weight, size) in weights.iter_mut().zip(CurvatureDetail::SIZES) {
-        edit = edit.or(slider_edit(ui, &format!("{size} px"), weight, 0.0..=1.0, 2));
-    }
-    if let Some(merge) = edit {
-        app.run("effect.set", json!({"effect": id, "sizes": weights, "merge": merge}));
-    }
-    if detail.is_none() {
-        ui.label(RichText::new(tr("Reads the curvature map as baked: changing the mode or a size turns detail sizes on.")).color(tk.text_dim));
-    }
-}
-
-/// The translated name of curvature mode `mode`.
-fn curvature_mode_label(mode: CurvatureMode) -> &'static str {
-    match mode {
-        CurvatureMode::Edges => tr("Edges"),
-        CurvatureMode::Cavities => tr("Cavities"),
-        CurvatureMode::Both => tr("Edges and cavities"),
-        CurvatureMode::Raw => tr("Raw curvature"),
     }
 }
 

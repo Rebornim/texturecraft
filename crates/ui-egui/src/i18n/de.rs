@@ -1,13 +1,31 @@
 //! German UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("A gradient along a world direction across the mesh.", "Ein Verlauf entlang einer Weltrichtung über das Mesh."),
+    ("Attributes", "Attribute"),
     ("Baking {map} ({n}/{total})", "{map} wird gebacken ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "{map} wird gebacken ({n}/{total}), Texturset {set} von {sets}"),
+    ("Category", "Kategorie"),
+    ("Convex edges from the curvature map, broken up by noise: worn paint and polished edges.", "Konvexe Kanten aus der Krümmungs-Map, durch Rauschen aufgebrochen: abgenutzte Farbe und polierte Kanten."),
+    ("Convex edges, cavities or both from the curvature map, at several detail sizes.", "Konvexe Kanten, Vertiefungen oder beides aus der Krümmungs-Map, in mehreren Detailgrößen."),
+    ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "Ritzen und verdeckte Bereiche aus der Ambient-Occlusion-Map: Schmutz und Dreck."),
+    ("Description", "Beschreibung"),
     ("Follow Newest Map", "Neueste Map verfolgen"),
+    ("Generators", "Generatoren"),
+    ("Global balance", "Globale Balance"),
+    ("Global blur", "Globale Unschärfe"),
+    ("Global contrast", "Globaler Kontrast"),
+    ("Global invert", "Global invertieren"),
+    ("Occluded areas from the ambient occlusion map.", "Verdeckte Bereiche aus der Ambient-Occlusion-Map."),
     (
         "Painting is paused while a bake is shown. Cancel the bake or wait for it to finish.",
         "Das Malen ist pausiert, solange ein Bake angezeigt wird. Brich den Bake ab oder warte, bis er fertig ist.",
     ),
+    ("Parameters", "Parameter"),
+    ("Restore defaults", "Standardwerte wiederherstellen"),
+    ("Surfaces facing a direction, as if lit from it.", "Flächen, die in eine Richtung zeigen, als würden sie von dort beleuchtet."),
+    ("Tags", "Schlagwörter"),
+    ("Thin parts of the mesh from the thickness map.", "Dünne Teile des Meshs aus der Dicken-Map."),
     (
         "What the 3D view shows while the bake runs: the newest finished map, one finished map, or the material. Maps not baked yet show a neutral value.",
         "Was die 3D-Ansicht während des Backens zeigt: die zuletzt fertige Map, eine fertige Map deiner Wahl oder das Material. Noch nicht gebackene Maps zeigen einen neutralen Wert.",

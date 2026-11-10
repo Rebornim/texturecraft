@@ -1,13 +1,31 @@
 //! Arabic UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("A gradient along a world direction across the mesh.", "تدرّج على امتداد اتجاه في العالم عبر الشبكة."),
+    ("Attributes", "السمات"),
     ("Baking {map} ({n}/{total})", "جارٍ خبز {map} ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "جارٍ خبز {map} ({n}/{total})، مجموعة الخامات {set} من {sets}"),
+    ("Category", "الفئة"),
+    ("Convex edges from the curvature map, broken up by noise: worn paint and polished edges.", "حواف محدّبة من خريطة الانحناء، تكسرها الضوضاء: طلاء متآكل وحواف مصقولة."),
+    ("Convex edges, cavities or both from the curvature map, at several detail sizes.", "حواف محدّبة أو تجاويف أو كلاهما من خريطة الانحناء، بعدة أحجام للتفاصيل."),
+    ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "شقوق ومناطق محجوبة من خريطة الإطباق المحيطي: أوساخ وقذارة."),
+    ("Description", "الوصف"),
     ("Follow Newest Map", "تتبّع أحدث خريطة"),
+    ("Generators", "المولّدات"),
+    ("Global balance", "توازن عام"),
+    ("Global blur", "تمويه عام"),
+    ("Global contrast", "تباين عام"),
+    ("Global invert", "عكس عام"),
+    ("Occluded areas from the ambient occlusion map.", "المناطق المحجوبة من خريطة الإطباق المحيطي."),
     (
         "Painting is paused while a bake is shown. Cancel the bake or wait for it to finish.",
         "الرسم متوقف مؤقتًا أثناء عرض عملية الخبز. ألغِ الخبز أو انتظر حتى ينتهي.",
     ),
+    ("Parameters", "المعاملات"),
+    ("Restore defaults", "استعادة الافتراضيات"),
+    ("Surfaces facing a direction, as if lit from it.", "الأسطح المواجهة لاتجاه ما، كأنها مضاءة منه."),
+    ("Tags", "الوسوم"),
+    ("Thin parts of the mesh from the thickness map.", "الأجزاء الرقيقة من الشبكة من خريطة السماكة."),
     (
         "What the 3D view shows while the bake runs: the newest finished map, one finished map, or the material. Maps not baked yet show a neutral value.",
         "ما يعرضه العرض ثلاثي الأبعاد أثناء الخبز: أحدث خريطة مكتملة، أو أي خريطة مكتملة تختارها، أو الخامة. الخرائط التي لم تُخبز بعد تعرض قيمة محايدة.",

@@ -1,13 +1,31 @@
 //! Japanese UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("A gradient along a world direction across the mesh.", "ワールド方向に沿ってメッシュ全体にかかるグラデーション。"),
+    ("Attributes", "属性"),
     ("Baking {map} ({n}/{total})", "{map} をベイク中 ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "{map} をベイク中 ({n}/{total})、テクスチャセット {set}/{sets}"),
+    ("Category", "カテゴリー"),
+    ("Convex edges from the curvature map, broken up by noise: worn paint and polished edges.", "曲率マップから得た凸エッジをノイズで崩したもの: 剥げた塗装や磨かれたエッジ。"),
+    ("Convex edges, cavities or both from the curvature map, at several detail sizes.", "曲率マップから得た凸エッジ、くぼみ、またはその両方 (複数のディテールサイズ)。"),
+    ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "アンビエントオクルージョンマップから得た隙間や遮蔽部分: 汚れや垢。"),
+    ("Description", "説明"),
     ("Follow Newest Map", "最新のマップを追う"),
+    ("Generators", "ジェネレーター"),
+    ("Global balance", "全体のバランス"),
+    ("Global blur", "全体のぼかし"),
+    ("Global contrast", "全体のコントラスト"),
+    ("Global invert", "全体を反転"),
+    ("Occluded areas from the ambient occlusion map.", "アンビエントオクルージョンマップから得た遮蔽部分。"),
     (
         "Painting is paused while a bake is shown. Cancel the bake or wait for it to finish.",
         "ベイクの表示中はペイントを一時停止しています。ベイクをキャンセルするか、終わるまでお待ちください。",
     ),
+    ("Parameters", "パラメーター"),
+    ("Restore defaults", "デフォルトに戻す"),
+    ("Surfaces facing a direction, as if lit from it.", "ある方向を向いた面 (その方向から照らされたように)。"),
+    ("Tags", "タグ"),
+    ("Thin parts of the mesh from the thickness map.", "厚みマップから得たメッシュの薄い部分。"),
     (
         "What the 3D view shows while the bake runs: the newest finished map, one finished map, or the material. Maps not baked yet show a neutral value.",
         "ベイク中に3Dビューが表示するもの：最後に完成したマップ、完成済みの好きなマップ、またはマテリアル。まだベイクされていないマップは中立値で表示されます。",

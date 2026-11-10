@@ -1,13 +1,31 @@
 //! Spanish UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("A gradient along a world direction across the mesh.", "Un degradado a lo largo de una dirección del mundo sobre la malla."),
+    ("Attributes", "Atributos"),
     ("Baking {map} ({n}/{total})", "Horneando {map} ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "Horneando {map} ({n}/{total}), conjunto de texturas {set} de {sets}"),
+    ("Category", "Categoría"),
+    ("Convex edges from the curvature map, broken up by noise: worn paint and polished edges.", "Bordes convexos del mapa de curvatura, rotos por ruido: pintura desgastada y bordes pulidos."),
+    ("Convex edges, cavities or both from the curvature map, at several detail sizes.", "Bordes convexos, cavidades o ambos del mapa de curvatura, en varios tamaños de detalle."),
+    ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "Grietas y zonas ocluidas del mapa de oclusión ambiental: suciedad y mugre."),
+    ("Description", "Descripción"),
     ("Follow Newest Map", "Seguir el mapa más reciente"),
+    ("Generators", "Generadores"),
+    ("Global balance", "Balance global"),
+    ("Global blur", "Desenfoque global"),
+    ("Global contrast", "Contraste global"),
+    ("Global invert", "Invertir global"),
+    ("Occluded areas from the ambient occlusion map.", "Zonas ocluidas del mapa de oclusión ambiental."),
     (
         "Painting is paused while a bake is shown. Cancel the bake or wait for it to finish.",
         "La pintura está en pausa mientras se muestra un horneado. Cancela el horneado o espera a que termine.",
     ),
+    ("Parameters", "Parámetros"),
+    ("Restore defaults", "Restablecer valores predeterminados"),
+    ("Surfaces facing a direction, as if lit from it.", "Superficies orientadas hacia una dirección, como si se iluminaran desde ella."),
+    ("Tags", "Etiquetas"),
+    ("Thin parts of the mesh from the thickness map.", "Partes delgadas de la malla del mapa de grosor."),
     (
         "What the 3D view shows while the bake runs: the newest finished map, one finished map, or the material. Maps not baked yet show a neutral value.",
         "Lo que muestra la vista 3D mientras se hornea: el último mapa terminado, un mapa terminado a elección o el material. Los mapas aún sin hornear muestran un valor neutro.",

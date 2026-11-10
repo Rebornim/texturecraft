@@ -1,10 +1,28 @@
 //! Simplified Chinese UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("A gradient along a world direction across the mesh.", "沿世界方向贯穿网格的渐变。"),
+    ("Attributes", "属性"),
     ("Baking {map} ({n}/{total})", "正在烘焙{map} ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "正在烘焙{map} ({n}/{total})，纹理集 {set}/{sets}"),
+    ("Category", "类别"),
+    ("Convex edges from the curvature map, broken up by noise: worn paint and polished edges.", "来自曲率贴图的凸边，用噪波打散：磨损的油漆和磨亮的边缘。"),
+    ("Convex edges, cavities or both from the curvature map, at several detail sizes.", "来自曲率贴图的凸边、凹陷或两者，含多种细节尺寸。"),
+    ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "来自环境光遮蔽贴图的缝隙和被遮挡区域：污垢和尘垢。"),
+    ("Description", "描述"),
     ("Follow Newest Map", "跟随最新贴图"),
+    ("Generators", "生成器"),
+    ("Global balance", "全局平衡"),
+    ("Global blur", "全局模糊"),
+    ("Global contrast", "全局对比度"),
+    ("Global invert", "全局反转"),
+    ("Occluded areas from the ambient occlusion map.", "来自环境光遮蔽贴图的被遮挡区域。"),
     ("Painting is paused while a bake is shown. Cancel the bake or wait for it to finish.", "显示烘焙时已暂停绘制。请取消烘焙，或等待其完成。"),
+    ("Parameters", "参数"),
+    ("Restore defaults", "恢复默认值"),
+    ("Surfaces facing a direction, as if lit from it.", "朝向某个方向的表面，如同从该方向照亮。"),
+    ("Tags", "标签"),
+    ("Thin parts of the mesh from the thickness map.", "来自厚度贴图的网格薄处。"),
     (
         "What the 3D view shows while the bake runs: the newest finished map, one finished map, or the material. Maps not baked yet show a neutral value.",
         "烘焙过程中 3D 视图显示的内容：最新完成的贴图、任意已完成的贴图，或材质。尚未烘焙的贴图显示中性值。",

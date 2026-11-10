@@ -1,13 +1,31 @@
 //! Italian UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("A gradient along a world direction across the mesh.", "Un gradiente lungo una direzione del mondo sulla mesh."),
+    ("Attributes", "Attributi"),
     ("Baking {map} ({n}/{total})", "Bake di {map} in corso ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "Bake di {map} in corso ({n}/{total}), set di texture {set} di {sets}"),
+    ("Category", "Categoria"),
+    ("Convex edges from the curvature map, broken up by noise: worn paint and polished edges.", "Bordi convessi dalla mappa di curvatura, spezzati dal rumore: vernice consumata e bordi lucidati."),
+    ("Convex edges, cavities or both from the curvature map, at several detail sizes.", "Bordi convessi, cavità o entrambi dalla mappa di curvatura, a più dimensioni di dettaglio."),
+    ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "Fessure e zone occluse dalla mappa di occlusione ambientale: sporco e sudiciume."),
+    ("Description", "Descrizione"),
     ("Follow Newest Map", "Segui la mappa più recente"),
+    ("Generators", "Generatori"),
+    ("Global balance", "Bilanciamento globale"),
+    ("Global blur", "Sfocatura globale"),
+    ("Global contrast", "Contrasto globale"),
+    ("Global invert", "Inverti globale"),
+    ("Occluded areas from the ambient occlusion map.", "Zone occluse dalla mappa di occlusione ambientale."),
     (
         "Painting is paused while a bake is shown. Cancel the bake or wait for it to finish.",
         "La pittura è in pausa finché viene mostrato un bake. Annulla il bake o attendi che finisca.",
     ),
+    ("Parameters", "Parametri"),
+    ("Restore defaults", "Ripristina predefiniti"),
+    ("Surfaces facing a direction, as if lit from it.", "Superfici rivolte verso una direzione, come se illuminate da essa."),
+    ("Tags", "Tag"),
+    ("Thin parts of the mesh from the thickness map.", "Parti sottili della mesh dalla mappa di spessore."),
     (
         "What the 3D view shows while the bake runs: the newest finished map, one finished map, or the material. Maps not baked yet show a neutral value.",
         "Cosa mostra la vista 3D durante il bake: l'ultima mappa completata, una mappa completata a scelta o il materiale. Le mappe non ancora create mostrano un valore neutro.",

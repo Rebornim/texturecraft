@@ -1,13 +1,31 @@
 //! Korean UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("A gradient along a world direction across the mesh.", "월드 방향을 따라 메시 전체에 걸친 그라디언트."),
+    ("Attributes", "속성"),
     ("Baking {map} ({n}/{total})", "{map} 베이크 중 ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "{map} 베이크 중 ({n}/{total}), 텍스처 세트 {set}/{sets}"),
+    ("Category", "카테고리"),
+    ("Convex edges from the curvature map, broken up by noise: worn paint and polished edges.", "곡률 맵에서 얻은 볼록한 모서리를 노이즈로 깨뜨린 것: 닳은 페인트와 닳아 반짝이는 모서리."),
+    ("Convex edges, cavities or both from the curvature map, at several detail sizes.", "곡률 맵에서 얻은 볼록한 모서리, 오목한 곳 또는 둘 다 (여러 디테일 크기)."),
+    ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "앰비언트 오클루전 맵에서 얻은 틈새와 가려진 영역: 먼지와 때."),
+    ("Description", "설명"),
     ("Follow Newest Map", "최신 맵 따라가기"),
+    ("Generators", "생성기"),
+    ("Global balance", "전체 균형"),
+    ("Global blur", "전체 흐림"),
+    ("Global contrast", "전체 대비"),
+    ("Global invert", "전체 반전"),
+    ("Occluded areas from the ambient occlusion map.", "앰비언트 오클루전 맵에서 얻은 가려진 영역."),
     (
         "Painting is paused while a bake is shown. Cancel the bake or wait for it to finish.",
         "베이크를 표시하는 동안에는 페인팅이 일시 중지됩니다. 베이크를 취소하거나 끝날 때까지 기다리세요.",
     ),
+    ("Parameters", "매개변수"),
+    ("Restore defaults", "기본값 복원"),
+    ("Surfaces facing a direction, as if lit from it.", "한 방향을 향한 면 (그 방향에서 비춘 것처럼)."),
+    ("Tags", "태그"),
+    ("Thin parts of the mesh from the thickness map.", "두께 맵에서 얻은 메시의 얇은 부분."),
     (
         "What the 3D view shows while the bake runs: the newest finished map, one finished map, or the material. Maps not baked yet show a neutral value.",
         "베이크하는 동안 3D 뷰가 보여 주는 것: 가장 최근에 완료된 맵, 완료된 맵 중 선택한 하나, 또는 머티리얼. 아직 베이크되지 않은 맵은 중립 값으로 표시됩니다.",

@@ -8,6 +8,7 @@ use texturecraft_engine::core::{BakedMap, EffectKind, Generator, GeneratorKind, 
 use texturecraft_engine::{ViewMode, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::docking::Panel;
+use texturecraft_ui_egui::theme::Brightness;
 
 /// The sample session with a fill layer whose black mask holds a curvature generator, selected in the properties panel.
 fn harness(render: bool) -> (Harness<'static, TextureCraftApp>, LayerId) {
@@ -107,7 +108,12 @@ fn generator_panel_snapshots() {
         harness.run_steps(3);
     }
     harness.run_steps(6);
-    harness.render().unwrap().save(directory.join("generator-panel-sections-open.png")).unwrap();
+    for (brightness, name) in [(Brightness::MediumDark, "medium"), (Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+        harness.state_mut().ui.prefs.brightness = brightness;
+        harness.run_steps(3);
+        harness.render().unwrap().save(directory.join(format!("generator-panel-sections-open-{name}.png"))).unwrap();
+    }
+    harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
 
     let edits = json!({"effect": effect.0, "blur": 0.3, "balance": 0.6, "contrast": 0.4, "resolutionFactor": -2});
     execute(&mut harness.state_mut().session, "effect.set", &edits).unwrap();

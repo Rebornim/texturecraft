@@ -255,6 +255,13 @@ pub struct MapSpec {
     pub channels: Vec<(Dest, SourceRef)>,
 }
 
+impl MapSpec {
+    /// The file name template with `$channel` filled in, which tells apart maps that share a template
+    pub fn key(&self) -> String {
+        self.file.replace("$channel", channel_label(self))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExportPreset {
     pub name: String,

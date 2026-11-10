@@ -27,14 +27,15 @@ use crate::theme::Tokens;
 use crate::thumbs::Thumbs;
 use crate::widgets::{dnd_release, icon_button};
 
-/// A shelf tile's size in points
-const TILE_WIDTH: f32 = 72.0;
-const TILE_HEIGHT: f32 = 86.0;
+/// A shelf tile's size and the gap between tiles in points: a 68 x 78 grid step, as in the reference
+const TILE_WIDTH: f32 = 66.0;
+const TILE_HEIGHT: f32 = 76.0;
+const TILE_GAP: f32 = 2.0;
 /// Corner radius of a tile's hover and selection highlights, in points
 const TILE_ROUNDING: f32 = 3.0;
 /// The thumbnail's size in a tile and its center below the tile's top, in points
-const THUMBNAIL_SIZE: f32 = 56.0;
-const THUMBNAIL_CENTER_Y: f32 = 32.0;
+const THUMBNAIL_SIZE: f32 = 60.0;
+const THUMBNAIL_CENTER_Y: f32 = 31.0;
 /// Loading icon size relative to the thumbnail width, and its opacity over the dim text color
 const LOADING_ICON_SCALE: f32 = 0.9;
 const LOADING_ICON_OPACITY: f32 = 0.5;
@@ -303,7 +304,7 @@ pub(crate) fn header(ui: &mut Ui, text: &str) {
 
 pub(crate) fn tiles(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+        ui.spacing_mut().item_spacing = vec2(TILE_GAP, TILE_GAP);
         body(ui);
     });
     ui.add_space(6.0);

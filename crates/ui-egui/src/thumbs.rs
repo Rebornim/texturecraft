@@ -21,7 +21,7 @@ const PER_FRAME: usize = 2;
 /// Shelf sphere and smart mask thumbnail size in pixels
 const SPHERE_PX: usize = 72;
 /// Shelf procedural swatch size in pixels
-const PROCEDURAL_PX: usize = 56;
+const PROCEDURAL_PX: usize = 64;
 /// Shelf alpha and brush stroke swatch size in pixels
 const SWATCH_PX: usize = 64;
 /// Image resource preview size in pixels

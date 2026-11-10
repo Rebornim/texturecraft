@@ -3,6 +3,8 @@
 //! material with its textures embedded) and USD (usda / usdc / usdz, see [`usd`]).
 
 pub(crate) mod usd;
+mod usd_asset;
+mod usd_texture_input;
 mod usdc;
 
 use std::collections::BTreeSet;
@@ -18,6 +20,8 @@ use crate::presets::{GLTF_BASE_COLOR, GLTF_CLEARCOAT, GLTF_EMISSIVE, GLTF_NORMAL
 use crate::{ExportOptions, ExportPreset, ExportedFile, FileFormat, FormatError, Result};
 
 pub use usd::{NamedFiles, UsdExport, UsdFormat, usd_bytes, usd_export_options};
+pub use usd_asset::{usd_asset, usd_asset_inputs};
+pub use usd_texture_input::UsdTextureInput;
 
 /// The mesh as OBJ text (UV v flipped back to OBJ's bottom-up convention).
 pub fn obj_bytes(mesh: &Mesh, name: &str) -> Vec<u8> {

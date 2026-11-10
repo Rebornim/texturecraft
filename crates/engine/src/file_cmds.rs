@@ -42,7 +42,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Export textures",
             ["File"],
             None,
-            "{dir (optional once export settings with a directory are saved), preset?: built-in or user preset name, or a preset object {name, maps}, ts?: index|\"all\", format?: png|jpg|tga|tif|exr|..., bitDepth?, padding?: none|dilation|dilationDefault|infinite|diffusion, dilation?: px, size?: px, dithering?: bool (8-bit files are dithered against banding), normalFormat?: openGl|directX, colorSpace?: sRGB (default for 8/16-bit files)|Linear Rec.709 (default for exr, hdr)|ACEScg|ACES2065-1 (colour maps are converted, data maps never are; 8/16-bit files clamp to 0-1; a chosen space is also recorded in the colour maps: an ICC profile in PNG, JPEG, TIFF and WebP, the chromaticities in EXR; TGA, BMP and HDR can't hold one and warn), materialX?: bool (also write a .mtlx OpenPBR material per texture set; needs the \"OpenPBR (separate maps)\" preset), shaderParameters?: bool (also write <project>_shaders.json: the shader's settings and its texture sets)}",
+            "{dir (optional once export settings with a directory are saved), preset?: built-in or user preset name, or a preset object {name, maps}, ts?: index|\"all\", format?: png|jpg|tga|tif|exr|..., bitDepth?, padding?: none|dilation|dilationDefault|infinite|diffusion, dilation?: px, size?: px, dithering?: bool (8-bit files are dithered against banding), normalFormat?: openGl|directX, colorSpace?: sRGB (default for 8/16-bit files)|Linear Rec.709 (default for exr, hdr)|ACEScg|ACES2065-1 (colour maps are converted, data maps never are; 8/16-bit files clamp to 0-1; a chosen space is also recorded in the colour maps: an ICC profile in PNG, JPEG, TIFF and WebP, the chromaticities in EXR; TGA, BMP and HDR can't hold one and warn), materialX?: bool (also write a .mtlx OpenPBR material per texture set; needs the \"OpenPBR (separate maps)\" preset), shaderParameters?: bool (also write <project>_shaders.json: the shader's settings and its texture sets), usd?: bool (also write <project>.usda: the mesh with a preview surface per material reading the exported textures; UV-tiled sets get no textures)}",
             always,
             export_textures
         ),
@@ -125,6 +125,33 @@ impl Session {
     pub fn mesh_usd(&mut self, format: texturecraft_formats::UsdFormat) -> Result<texturecraft_formats::UsdExport> {
         let files = self.material_files(texturecraft_formats::usd_export_options(), true, self.mesh.materials.len())?;
         texturecraft_formats::usd_bytes(&self.mesh, &self.doc.project.name, &files, format).map_err(fe)
+    }
+
+    /// Per mesh material, the preview surface inputs its texture set's exported files feed (none for a set not exported or UV-tiled)
+    pub fn usd_asset_inputs(
+        &self,
+        jobs: &[(Vec<usize>, ExportOptions)],
+        warnings: &mut Vec<String>,
+    ) -> Result<Vec<Vec<texturecraft_formats::UsdTextureInput>>> {
+        let mesh_name = stem_of(self.doc.project.mesh.trim_start_matches("builtin:"));
+        let mut inputs = Vec::new();
+        for material in 0..self.mesh.materials.len().max(1) {
+            let job = self.texture_set_of_material(material).and_then(|ts| jobs.iter().find(|(sets, _)| sets.contains(&ts)).map(|(_, opts)| (ts, opts)));
+            let Some((ts, opts)) = job else {
+                inputs.push(Vec::new());
+                continue;
+            };
+
+            let planned = texturecraft_formats::list_outputs(&self.doc.project, ts, &mesh_name, opts).map_err(fe)?;
+            if planned.iter().any(|file| file.tile.is_some()) {
+                warnings.push(format!("the USD asset leaves out the textures of UV-tiled texture set {ts}"));
+                inputs.push(Vec::new());
+                continue;
+            }
+            inputs.push(texturecraft_formats::usd_asset_inputs(&planned, opts, self.doc.project.normal_format));
+        }
+
+        Ok(inputs)
     }
 
     /// The texture sets of the first `materials` materials rendered with `opts` (as a tile atlas
@@ -497,11 +524,13 @@ fn export_textures(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let jobs = crate::export_settings_cmds::export_jobs(s, p, CMD)?;
     let with_shader_parameters = crate::export_settings_cmds::writes_shader_parameters(s, p, CMD)?;
+    let with_usd = crate::export_settings_cmds::writes_usd(s, p, CMD)?;
     std::fs::create_dir_all(&dir).map_err(|e| bad(CMD, format!("cannot create {dir}: {e}")))?;
 
     let mut warnings = Vec::new();
     let mut written = Vec::new();
     let exported_sets: Vec<usize> = jobs.iter().flat_map(|(sets, _)| sets.iter().copied()).collect();
+    let usd_inputs = if with_usd { s.usd_asset_inputs(&jobs, &mut warnings)? } else { Vec::new() };
     for (sets, opts) in jobs {
         let files = s.export_files(&sets, &opts)?;
         warnings.extend(files.iter().flat_map(|f| f.warnings.iter().cloned()));
@@ -511,6 +540,12 @@ fn export_textures(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
 
+    if with_usd {
+        let path = std::path::Path::new(&dir).join(format!("{}.usda", texturecraft_formats::export::sanitize_file_stem(&s.doc.project.name)));
+        let layer = texturecraft_formats::usd_asset(&s.mesh, &s.doc.project.name, &usd_inputs).map_err(fe)?;
+        std::fs::write(&path, layer).map_err(|e| bad(CMD, format!("cannot write {}: {e}", path.display())))?;
+        written.push(path);
+    }
     if with_shader_parameters {
         let path = std::path::Path::new(&dir).join(crate::shader_parameters::shader_parameters_file(&s.doc.project.name));
         let text = serde_json::to_string_pretty(&crate::shader_parameters::shader_parameters(s, &exported_sets)).map_err(|e| bad(CMD, e.to_string()))?;

@@ -151,6 +151,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Disable override for all items", "Désactiver le remplacement pour tous les éléments"),
     ("Enable override for all items", "Activer le remplacement pour tous les éléments"),
     ("Export shader parameters", "Exporter les paramètres du shader"),
+    ("Export USD asset", "Exporter un asset USD"),
     ("From template / project ({format})", "Selon le modèle / projet ({format})"),
     ("Global settings", "Paramètres globaux"),
     ("Go to camera 1", "Aller à la caméra 1"),

@@ -89,7 +89,16 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Whether an export call also writes the shader parameters: `p`'s `shaderParameters`, else the settings' (none with explicit options)
 pub fn writes_shader_parameters(s: &Session, p: &Value, cmd: &str) -> Result<bool> {
-    if let Some(asked) = crate::commands::boolp(p, "shaderParameters") {
+    writes_extra(s, p, cmd, "shaderParameters", |settings| settings.shader_parameters)
+}
+
+/// Whether an export call also writes a USD asset: `p`'s `usd`, else the settings' (none with explicit options)
+pub fn writes_usd(s: &Session, p: &Value, cmd: &str) -> Result<bool> {
+    writes_extra(s, p, cmd, "usd", |settings| settings.usd)
+}
+
+fn writes_extra(s: &Session, p: &Value, cmd: &str, key: &str, setting: fn(&ExportSettings) -> bool) -> Result<bool> {
+    if let Some(asked) = crate::commands::boolp(p, key) {
         return Ok(asked);
     }
     if has_explicit_options(p) {
@@ -97,7 +106,7 @@ pub fn writes_shader_parameters(s: &Session, p: &Value, cmd: &str) -> Result<boo
     }
 
     let settings = settings_param(p, cmd)?.or_else(|| s.doc.project.export.clone()).unwrap_or_default();
-    Ok(settings.shader_parameters)
+    Ok(setting(&settings))
 }
 
 /// Whether `p` sets export options itself instead of using the saved settings
@@ -306,6 +315,31 @@ mod tests {
         assert!(result["files"].as_array().unwrap().iter().any(|file| file.as_str().unwrap().ends_with("Material_Ball_shaders.json")));
         let written: Value = serde_json::from_str(&std::fs::read_to_string(&json).unwrap()).unwrap();
         assert_eq!(written["shaders"][0]["textureSets"], json!(["Ball", "Base"]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn the_usd_asset_reads_the_channels_the_template_packed() {
+        let mut s = session();
+        let dir = std::env::temp_dir().join(format!("tc_usd_asset_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let settings = ExportSettings {
+            dir: dir.display().to_string(),
+            parameters: ExportParameters { preset: "Unreal Engine (Packed)".into(), ..Default::default() },
+            usd: true,
+            ..Default::default()
+        };
+        execute(&mut s, "export.settings.set", &json!({"settings": settings})).unwrap();
+        execute(&mut s, "file.exportTextures", &json!({})).unwrap();
+
+        let layer = std::fs::read_to_string(dir.join("Material_Ball.usda")).unwrap();
+        let shader = |name: &str| layer.split(&format!("def Shader \"{name}\"")).nth(1).unwrap().split("def ").next().unwrap().to_string();
+        let roughness = shader("Roughness");
+        assert!(roughness.contains("OcclusionRoughnessMetallic.png") && roughness.contains("outputs:g"), "{roughness}");
+        assert!(shader("Metallic").contains("outputs:b"));
+        assert!(shader("BaseColor").contains("outputs:rgb") && shader("BaseColor").contains("sRGB"));
+        assert!(shader("Normal").contains("(2, -2, 2, 1)"), "the DirectX normal's green is flipped back: {}", shader("Normal"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

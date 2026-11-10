@@ -54,6 +54,19 @@ impl ShelfEntry {
         }
     }
 
+    /// The asset's identity across frames: its kind and id
+    pub(crate) fn key(&self) -> String {
+        match self {
+            ShelfEntry::Material(material) => format!("material:{}", material.id),
+            ShelfEntry::SmartMask(mask) => format!("mask:{}", mask.id),
+            ShelfEntry::Filter(filter) => format!("filter:{}", filter.id),
+            ShelfEntry::Brush(preset) => format!("brush:{}", preset.id),
+            ShelfEntry::Alpha(alpha) => format!("alpha:{}", alpha.id),
+            ShelfEntry::Procedural(kind) => format!("procedural:{kind:?}"),
+            ShelfEntry::Image(name) => format!("image:{name}"),
+        }
+    }
+
     /// The name under the tile, translated where the asset's name is
     pub(crate) fn label(&self) -> &str {
         match self {

@@ -29,6 +29,11 @@ const TILE_HEIGHT: f32 = 76.0;
 const TILE_GAP: f32 = 2.0;
 /// Corner radius of a tile's hover and selection highlights, in points
 const TILE_ROUNDING: f32 = 3.0;
+/// The last clicked or right-clicked tile's [`ShelfEntry::key`], kept in egui's memory under this id
+const SELECTED_TILE: &str = "shelf_selected_tile";
+/// The outline widths of the selected tile and of the one in use (the brush's alpha, the shown environment), in points
+const SELECTED_OUTLINE_WIDTH: f32 = 1.5;
+const IN_USE_OUTLINE_WIDTH: f32 = 1.0;
 /// The thumbnail's size in a tile and its center below the tile's top, in points
 const THUMBNAIL_SIZE: f32 = 60.0;
 const THUMBNAIL_CENTER_Y: f32 = 31.0;
@@ -447,9 +452,17 @@ fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry
 
     let asset = entry.asset();
     let response = tile(ui, &mut app.thumbs, texture.as_ref(), || preview, entry.label(), asset.as_ref());
-    if entry.in_use(app) {
+    let selected_id = egui::Id::unique(SELECTED_TILE);
+    let key = entry.key();
+    let selected = ctx.data(|data| data.get_temp::<String>(selected_id)).is_some_and(|selected| selected == key);
+    if selected || entry.in_use(app) {
         let tk = Tokens::get(ctx);
-        ui.painter().rect_stroke(response.rect, TILE_ROUNDING, Stroke::new(1.0, tk.accent), egui::StrokeKind::Inside);
+        let width = if selected { SELECTED_OUTLINE_WIDTH } else { IN_USE_OUTLINE_WIDTH };
+        ui.painter().rect_stroke(response.rect, TILE_ROUNDING, Stroke::new(width, tk.accent), egui::StrokeKind::Inside);
+    }
+
+    if response.clicked() || response.secondary_clicked() {
+        ctx.data_mut(|data| data.insert_temp(selected_id, key));
     }
     if response.clicked() {
         entry.activate(app);

@@ -126,6 +126,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Check all", "全部勾选"),
     ("Color maps only: normal, roughness, metallic and other data maps stay linear", "仅限颜色贴图：法线、粗糙度、金属度等数据贴图保持线性"),
     ("Colors", "颜色"),
+    ("Dilation + diffusion", "扩张 + 扩散"),
     ("Disable override for all items", "为所有项目停用覆盖"),
     ("Enable override for all items", "为所有项目启用覆盖"),
     ("From template / project ({format})", "基于模板 / 项目 ({format})"),

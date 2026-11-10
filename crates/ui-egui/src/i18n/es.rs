@@ -141,6 +141,7 @@ pub const TABLE: &[(&str, &str)] = &[
         "Solo mapas de color: los mapas de normales, rugosidad, metálico y demás mapas de datos siguen siendo lineales",
     ),
     ("Colors", "Colores"),
+    ("Dilation + diffusion", "Dilatación + difusión"),
     ("Disable override for all items", "Desactivar la anulación en todos los elementos"),
     ("Enable override for all items", "Activar la anulación en todos los elementos"),
     ("From template / project ({format})", "Desde la plantilla / el proyecto ({format})"),

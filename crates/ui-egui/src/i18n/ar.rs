@@ -141,6 +141,7 @@ pub const TABLE: &[(&str, &str)] = &[
         "لخرائط الألوان فقط: خرائط النواظم والخشونة والمعدنية وغيرها من خرائط البيانات تبقى خطية",
     ),
     ("Colors", "الألوان"),
+    ("Dilation + diffusion", "تمديد + انتشار"),
     ("Disable override for all items", "تعطيل التجاوز لكل العناصر"),
     ("Enable override for all items", "تفعيل التجاوز لكل العناصر"),
     ("From template / project ({format})", "من قالب / مشروع ({format})"),

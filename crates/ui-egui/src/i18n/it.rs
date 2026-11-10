@@ -144,6 +144,7 @@ pub const TABLE: &[(&str, &str)] = &[
         "Solo mappe di colore: normali, ruvidità, metallicità e le altre mappe di dati restano lineari",
     ),
     ("Colors", "Colori"),
+    ("Dilation + diffusion", "Dilatazione + diffusione"),
     ("Disable override for all items", "Disattiva la sostituzione per tutte le voci"),
     ("Enable override for all items", "Attiva la sostituzione per tutte le voci"),
     ("From template / project ({format})", "Da modello / progetto ({format})"),

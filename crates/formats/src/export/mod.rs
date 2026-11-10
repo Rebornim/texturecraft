@@ -24,6 +24,8 @@ use texturecraft_texel::{ColorSpace, DilationMap, linear_to_srgb};
 
 use crate::{FormatError, MAX_IMAGE_SIZE, Result};
 
+mod diffusion;
+
 /// Height-to-normal slope: with strength 1, a height change of 1 across 1/16 of the texture
 /// width tilts the normal 45°, at any resolution.
 const HEIGHT_SPAN: f32 = 16.0;
@@ -327,6 +329,8 @@ pub enum Padding {
     DilationDefault(u32),
     /// Every texel takes its nearest island's value.
     Infinite,
+    /// Islands are dilated this many texels; beyond, texels take a blur spreading out from the islands.
+    DilationDiffusion(u32),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -724,7 +728,9 @@ pub fn render_maps(input: &ExportInput, opts: &ExportOptions) -> Result<Vec<Expo
     // Padding stays inside each UV tile.
     let dmap = match opts.padding {
         Padding::None => None,
-        Padding::Dilation(d) | Padding::DilationDefault(d) => Some(DilationMap::in_blocks(input.coverage, res, height, Some(d), tile_res)),
+        Padding::Dilation(d) | Padding::DilationDefault(d) | Padding::DilationDiffusion(d) => {
+            Some(DilationMap::in_blocks(input.coverage, res, height, Some(d), tile_res))
+        }
         Padding::Infinite => Some(DilationMap::in_blocks(input.coverage, res, height, None, tile_res)),
     };
     let beyond_default = matches!(opts.padding, Padding::DilationDefault(_) | Padding::Infinite);
@@ -776,6 +782,13 @@ pub fn render_maps(input: &ExportInput, opts: &ExportOptions) -> Result<Vec<Expo
                     }
                 }
             });
+            if matches!(opts.padding, Padding::DilationDiffusion(_)) {
+                let valid: Vec<bool> = (y0..y0 + h)
+                    .flat_map(|y| (x0..x0 + w).map(move |x| (x, y)))
+                    .map(|(x, y)| sampler.covered(x, y) || dmap.as_ref().is_some_and(|d| d.source(x, y).is_some()))
+                    .collect();
+                diffusion::diffuse(&mut data, &valid, (w, h), n);
+            }
             // `size` is per tile: an atlas scales with it.
             let scale = |v: u32| (u64::from(v) * u64::from(opts.size.unwrap_or(tile_res)) / u64::from(tile_res)) as u32;
             let size = (scale(w), scale(h));

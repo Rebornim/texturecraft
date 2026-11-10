@@ -147,6 +147,7 @@ pub const TABLE: &[(&str, &str)] = &[
         "カラーマップのみ: ノーマル、ラフネス、メタリックなどのデータマップはリニアのままです",
     ),
     ("Colors", "カラー"),
+    ("Dilation + diffusion", "ダイレーション + 拡散"),
     ("Disable override for all items", "すべての項目の上書きを無効化"),
     ("Enable override for all items", "すべての項目の上書きを有効化"),
     ("From template / project ({format})", "テンプレート / プロジェクトから ({format})"),

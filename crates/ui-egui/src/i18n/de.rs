@@ -141,6 +141,7 @@ pub const TABLE: &[(&str, &str)] = &[
         "Nur Farb-Maps: Normal-, Rauheits-, Metallic- und andere Daten-Maps bleiben linear",
     ),
     ("Colors", "Farben"),
+    ("Dilation + diffusion", "Dilatation + Diffusion"),
     ("Disable override for all items", "Überschreiben für alle Einträge deaktivieren"),
     ("Enable override for all items", "Überschreiben für alle Einträge aktivieren"),
     ("From template / project ({format})", "Aus Vorlage / Projekt ({format})"),

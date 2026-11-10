@@ -141,6 +141,7 @@ pub const TABLE: &[(&str, &str)] = &[
         "컬러 맵에만 적용: 노멀, 러프니스, 메탈릭 등 데이터 맵은 선형으로 유지됩니다",
     ),
     ("Colors", "색상"),
+    ("Dilation + diffusion", "확장 + 확산"),
     ("Disable override for all items", "모든 항목 재정의 해제"),
     ("Enable override for all items", "모든 항목 재정의 사용"),
     ("From template / project ({format})", "템플릿 / 프로젝트 기준 ({format})"),

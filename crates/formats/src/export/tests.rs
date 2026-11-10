@@ -735,3 +735,19 @@ fn dithering_keeps_exact_levels_and_mixes_the_ones_between() {
     assert!(plain.pixels().skip((width * height / 2) as usize).all(|p| p.0[0] == 100), "without dithering the band is flat");
     assert_eq!(dithered, decode(true), "the same every time");
 }
+
+#[test]
+fn diffusion_padding_blends_the_gap_between_islands() {
+    let mut fx = Fx::new(&default_channels());
+    fx.coverage = (0..RES * RES).map(|i| i % RES < 16 || i % RES >= 48).collect();
+    fx.set_all(Channel::Roughness, |x, _| [if x < 32 { 0.0 } else { 1.0 }; 3]);
+    let mut opts = ExportOptions::new(builtin_preset("Separate maps").unwrap());
+    opts.padding = Padding::DilationDiffusion(2);
+    let rough = decode(find(&fx.render(&opts), "_roughness.png")).to_luma8();
+    let row: Vec<u8> = (0..RES).map(|x| rough.get_pixel(x, 10)[0]).collect();
+
+    assert_eq!((row[17], row[46]), (0, 255), "the dilation copies the island edge");
+    let gap = &row[19..45];
+    assert!(gap.windows(2).all(|pair| pair[0] <= pair[1]), "a smooth ramp, not a hard edge: {gap:?}");
+    assert!(gap.iter().any(|v| (64..192).contains(v)), "the middle mixes both islands: {gap:?}");
+}

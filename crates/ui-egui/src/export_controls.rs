@@ -12,7 +12,7 @@ const FILE_TYPES: [FileFormat; 8] =
 /// Output sizes offered besides each texture set's own
 const SIZES: [u32; 7] = [128, 256, 512, 1024, 2048, 4096, 8192];
 /// Padding modes in menu order
-const PADDINGS: [&str; 4] = ["infinite", "dilation", "dilationDefault", "none"];
+const PADDINGS: [&str; 5] = ["none", "infinite", "dilation", "dilationDefault", "diffusion"];
 const DILATION_MAX: u32 = 256;
 /// The bit depth a file type starts at when picked
 const DEFAULT_BIT_DEPTH: u8 = 8;
@@ -165,12 +165,18 @@ pub fn padding_label(padding: &str) -> &'static str {
         "none" => tr("No padding (passthrough)"),
         "dilation" => tr("Dilation + transparent"),
         "dilationDefault" => tr("Dilation + default background color"),
+        "diffusion" => tr("Dilation + diffusion"),
         _ => tr("Dilation infinite"),
     }
 }
 
+/// Whether `padding` dilates a set distance (and so shows it)
+fn has_distance(padding: &str) -> bool {
+    matches!(padding, "dilation" | "dilationDefault" | "diffusion")
+}
+
 pub fn padding_text(padding: &str, dilation: u32) -> String {
-    if padding.starts_with("dilation") { format!("{} · {dilation} px", padding_label(padding)) } else { padding_label(padding).to_string() }
+    if has_distance(padding) { format!("{} · {dilation} px", padding_label(padding)) } else { padding_label(padding).to_string() }
 }
 
 pub fn padding_controls(ui: &mut Ui, id: &str, padding: &mut String, dilation: &mut u32) {
@@ -180,8 +186,6 @@ pub fn padding_controls(ui: &mut Ui, id: &str, padding: &mut String, dilation: &
                 ui.selectable_value(padding, mode.to_string(), padding_label(mode));
             }
         });
-        if padding.starts_with("dilation") {
-            ui.add(egui::DragValue::new(dilation).range(0..=DILATION_MAX).suffix(" px"));
-        }
+        ui.add_enabled(has_distance(padding), egui::DragValue::new(dilation).range(0..=DILATION_MAX).suffix(" px"));
     });
 }

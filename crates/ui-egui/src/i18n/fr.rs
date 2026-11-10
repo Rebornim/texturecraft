@@ -147,6 +147,7 @@ pub const TABLE: &[(&str, &str)] = &[
         "Cartes de couleur uniquement : les cartes de normales, de rugosité, de métal et autres cartes de données restent linéaires",
     ),
     ("Colors", "Couleurs"),
+    ("Dilation + diffusion", "Dilatation + diffusion"),
     ("Disable override for all items", "Désactiver le remplacement pour tous les éléments"),
     ("Enable override for all items", "Activer le remplacement pour tous les éléments"),
     ("From template / project ({format})", "Selon le modèle / projet ({format})"),

@@ -547,9 +547,15 @@ fn export_dialog_snapshots() {
 
     // A texture set's settings, then with its size overridden
     harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    harness.state_mut().ui.export.settings.as_mut().unwrap().settings.parameters.preset = "Document channels + Normal + AO".into();
     harness.state_mut().ui.export.settings.as_mut().unwrap().selected = Some(1);
     save(&mut harness, &output_dir, "export-set");
-    harness.state_mut().ui.export.settings.as_mut().unwrap().sets[1].overrides.size = Some(1024);
+    {
+        let set = &mut harness.state_mut().ui.export.settings.as_mut().unwrap().sets[1];
+        set.overrides.size = Some(1024);
+        set.maps.insert("$mesh_$textureSet_roughness".into(), texturecraft_engine::core::MapExportOverride { skip: true, file_type: None });
+        set.maps.insert("$mesh_$textureSet_height".into(), texturecraft_engine::core::MapExportOverride { skip: false, file_type: Some(("exr".into(), 32)) });
+    }
     save(&mut harness, &output_dir, "export-set-override");
     harness.state_mut().ui.export.settings.as_mut().unwrap().selected = None;
 

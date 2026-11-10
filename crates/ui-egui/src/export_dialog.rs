@@ -1,9 +1,15 @@
 //! The Export textures window: it edits a draft of the project's export settings, saved by Save settings or Export and dropped by Cancel
 
+mod bottom_action;
+mod maps_action;
+
+use bottom_action::BottomAction;
 use egui::{RichText, Ui, vec2};
 use egui_phosphor::regular as ic;
+use maps_action::MapsAction;
 use serde_json::json;
 use texturecraft_engine::core::{ExportOverrides, NormalFormat, TextureSetExport};
+use texturecraft_engine::formats::FileFormat;
 
 use crate::TextureCraftApp;
 use crate::export_controls as controls;
@@ -22,6 +28,8 @@ const EXPORT_BODY_HEIGHT: f32 = 360.0;
 const EXPORT_DIALOG_CHROME_HEIGHT: f32 = 160.0;
 const EXPORT_BODY_MIN_HEIGHT: f32 = 120.0;
 const OVERRIDE_PEN_SIZE: f32 = 20.0;
+/// Width of an output map's name in a texture set's Output maps
+const MAP_NAME_WIDTH: f32 = 230.0;
 
 pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     // Closed by Cancel, Esc or the title bar: the unsaved edits go
@@ -98,13 +106,6 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     if !open {
         app.ui.windows.export = false;
     }
-}
-
-/// What a bottom bar button asks for
-enum BottomAction {
-    Save,
-    Export,
-    Cancel,
 }
 
 /// Reset all, the count of textures, Cancel, Save settings and Export
@@ -203,8 +204,13 @@ fn export_settings_tab(app: &mut TextureCraftApp, ui: &mut Ui, presets: &[textur
     match selected {
         Some(ts) => {
             let set_size = app.session.doc.project.texture_sets.get(ts).map(|set| set.size());
+            let maps = set_template_maps(app, ts);
             if let Some(draft) = app.ui.export.settings.as_mut() {
-                set_settings(ui, draft, ts, set_size, &builtins, &user_presets);
+                egui::ScrollArea::vertical().id_salt("exp_set_settings").auto_shrink([false; 2]).show(ui, |ui| {
+                    set_settings(ui, draft, ts, set_size, &builtins, &user_presets);
+                    ui.separator();
+                    set_output_maps(ui, draft, ts, &maps);
+                });
             }
         }
         None => global_settings(app, ui, &builtins, &user_presets),
@@ -365,6 +371,94 @@ fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Optio
         }
         ui.end_row();
     });
+}
+
+/// The output maps of texture set `ts`'s template (its own or the global one): key, format and bit depth
+fn set_template_maps(app: &TextureCraftApp, ts: usize) -> Vec<(String, FileFormat, u8)> {
+    let Some(draft) = app.ui.export.settings.as_ref() else { return Vec::new() };
+
+    let preset = draft.sets.get(ts).and_then(|set| set.overrides.preset.clone()).unwrap_or_else(|| draft.settings.parameters.preset.clone());
+    app.session.export_preset(&preset).map(|preset| preset.maps.iter().map(|map| (map.key(), map.format, map.bit_depth)).collect()).unwrap_or_default()
+}
+
+/// A texture set's output maps: a tick writes a map, its pen gives it its own file type
+fn set_output_maps(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, maps: &[(String, FileFormat, u8)]) {
+    let parameters = draft.sets.get(ts).map(|set| set.overrides.apply(&draft.settings.parameters)).unwrap_or_default();
+    let set_format = FileFormat::from_extension(&parameters.format);
+    // What a map writes without its own override: the set's file type, else the template's
+    let inherited_type = |format: FileFormat, bit_depth: u8| {
+        let format = set_format.unwrap_or(format);
+        (format, format.depth(if parameters.bit_depth > 0 { parameters.bit_depth } else { bit_depth }))
+    };
+    let Some(set) = draft.sets.get_mut(ts) else { return };
+
+    ui.horizontal(|ui| {
+        ui.label(caption(tr("Output maps")));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.push_id("exp_maps_menu", |ui| {
+                ui.menu_button(ic::LIST, |ui| {
+                    let mut action = None;
+                    for (label, choice) in [
+                        (tr("Check all"), MapsAction::Check),
+                        (tr("Uncheck all"), MapsAction::Uncheck),
+                        (tr("Invert all"), MapsAction::Invert),
+                        (tr("Enable override for all items"), MapsAction::Override),
+                        (tr("Disable override for all items"), MapsAction::Inherit),
+                    ] {
+                        if choice == MapsAction::Override {
+                            ui.separator();
+                        }
+                        if ui.button(label).clicked() {
+                            action = Some(choice);
+                        }
+                    }
+                    let Some(action) = action else { return };
+
+                    for (key, format, bit_depth) in maps {
+                        let map = set.maps.entry(key.clone()).or_default();
+                        let (format, bit_depth) = inherited_type(*format, *bit_depth);
+                        match action {
+                            MapsAction::Check => map.skip = false,
+                            MapsAction::Uncheck => map.skip = true,
+                            MapsAction::Invert => map.skip = !map.skip,
+                            MapsAction::Override => map.file_type = Some((format.extension().to_string(), bit_depth)),
+                            MapsAction::Inherit => map.file_type = None,
+                        }
+                    }
+                });
+            });
+        });
+    });
+    let tk = Tokens::get(ui.ctx());
+    egui::Grid::new(("exp_set_maps", ts)).num_columns(3).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
+        for (key, format, bit_depth) in maps {
+            let map = set.maps.entry(key.clone()).or_default();
+            ui.horizontal(|ui| {
+                let mut exported = !map.skip;
+                ui.checkbox(&mut exported, "");
+                map.skip = !exported;
+                ui.allocate_ui(vec2(MAP_NAME_WIDTH, ui.spacing().interact_size.y), |ui| {
+                    ui.set_width(MAP_NAME_WIDTH);
+                    ui.add(egui::Label::new(RichText::new(key).monospace()).truncate());
+                });
+            });
+            if override_pen(ui, map.file_type.is_some()) {
+                let (format, bit_depth) = inherited_type(*format, *bit_depth);
+                map.file_type = map.file_type.take().xor(Some((format.extension().to_string(), bit_depth)));
+            }
+            match map.file_type.as_mut() {
+                Some((extension, bit_depth)) => controls::map_file_type_combos(ui, &format!("exp_map_{key}"), extension, bit_depth),
+                None => {
+                    let (format, bit_depth) = inherited_type(*format, *bit_depth);
+                    ui.label(RichText::new(format!("{}  {}", format.extension(), controls::bit_depth_text(bit_depth))).color(tk.text_dim));
+                }
+            }
+            ui.end_row();
+        }
+    });
+
+    // Maps back at their defaults aren't kept
+    set.maps.retain(|_, map| !map.is_empty());
 }
 
 /// The pen beside a parameter, pressed while this texture set overrides it; true when clicked

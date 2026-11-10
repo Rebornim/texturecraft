@@ -162,7 +162,9 @@ fn the_section_menu_overrides_every_parameter_or_none() {
     harness.get_by_label("Base").click();
     harness.run_steps(2);
     for (item, overridden) in [("Enable override for all items", true), ("Disable override for all items", false)] {
-        harness.get_by_label(egui_phosphor::regular::LIST).click();
+        // The upper menu, on General export parameters
+        let menus = harness.get_all_by_label(egui_phosphor::regular::LIST);
+        menus.min_by(|a, b| a.rect().min.y.total_cmp(&b.rect().min.y)).unwrap().click();
         harness.run_steps(2);
         harness.get_by_label(item).click();
         harness.run_steps(2);
@@ -170,4 +172,26 @@ fn the_section_menu_overrides_every_parameter_or_none() {
         let all = [overrides.preset.is_some(), overrides.file_type.is_some(), overrides.size.is_some(), overrides.padding.is_some()];
         assert_eq!(all, [overridden; 4], "{item}");
     }
+}
+
+#[test]
+fn a_texture_set_leaves_out_a_map_or_gives_it_its_own_file_type() {
+    let mut harness = harness(2, LAPTOP);
+    let count = |harness: &mut Harness<'static, TextureCraftApp>| {
+        let params = draft(harness).params();
+        texturecraft_engine::execute(&mut harness.state_mut().session, "export.plan", &params).unwrap().as_array().unwrap().len()
+    };
+    let all = count(&mut harness);
+    harness.get_by_label("Base").click();
+    harness.run_steps(2);
+    let key = "$mesh_$textureSet_roughness";
+    let row = harness.get_by_label(key).rect().center().y;
+    harness.get_all_by_role(Role::CheckBox).find(|node| (node.rect().center().y - row).abs() < 6.0).unwrap().click();
+    harness.run_steps(2);
+    assert!(draft(&mut harness).sets[1].maps[key].skip);
+    assert_eq!(count(&mut harness), all - 1, "the map is left out of that set only");
+
+    pen(&harness, key).click();
+    harness.run_steps(2);
+    assert_eq!(draft(&mut harness).sets[1].maps[key].file_type, Some(("png".to_string(), 8)), "the override starts from what the map writes");
 }

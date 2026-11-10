@@ -183,7 +183,6 @@ pub const TABLE: &[(&str, &str)] = &[
         "Color of the light that travels under the surface (each channel goes as far as its value)",
         "Colore della luce che viaggia sotto la superficie (ogni canale arriva fino al proprio valore)",
     ),
-    ("Color picker", "Contagocce"),
     ("Color selection", "Selezione colore"),
     ("Color to replace", "Colore da sostituire"),
     (
@@ -508,6 +507,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("MatFinish Raw", "MatFinish Grezzo"),
     ("MatFinish Sanded", "MatFinish Carteggiato"),
     ("Material", "Materiale"),
+    ("Material picker", "Contagocce materiale"),
     ("Material ball", "Sfera materiale"),
     ("Material finish", "Finitura materiale"),
     ("Materials", "Materiali"),

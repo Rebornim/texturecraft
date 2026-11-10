@@ -23,17 +23,17 @@ const BAR_HEIGHT: f32 = 40.0;
 /// Padding inside the top bar card on its left and right, in points
 const BAR_PADDING: egui::Margin = egui::Margin::symmetric(8, 0);
 
-pub fn tool_icon(t: Tool) -> &'static str {
-    match t {
+pub fn tool_icon(tool: Tool) -> &'static str {
+    match tool {
         Tool::Paint => ic::PAINT_BRUSH,
         Tool::Eraser => ic::ERASER,
-        Tool::Projection => ic::PROJECTOR_SCREEN,
+        Tool::Projection => ic::CUBE_FOCUS,
         Tool::PolygonFill => ic::POLYGON,
         Tool::Smudge => ic::FINGERPRINT,
         Tool::Clone => ic::STAMP,
         Tool::ColorPicker => ic::EYEDROPPER,
-        Tool::Path => ic::PATH,
-        Tool::GeometryMask => ic::CUBE_FOCUS,
+        Tool::Path => ic::PEN_NIB_STRAIGHT,
+        Tool::GeometryMask => ic::SELECTION_SLASH,
     }
 }
 

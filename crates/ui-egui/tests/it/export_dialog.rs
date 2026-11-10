@@ -49,14 +49,44 @@ fn many_texture_sets_keep_the_dialog_inside_the_window() {
 }
 
 #[test]
-fn the_set_list_selects_all_or_none() {
+fn the_set_list_menu_checks_unchecks_or_inverts_every_set() {
     let mut harness = harness(MANY_SETS, LAPTOP);
-    harness.get_by_label("Select none").click();
+    draft(&mut harness).sets[0].skip = true;
+    for (item, exported) in [("Invert all", 1), ("Check all", MANY_SETS), ("Uncheck all", 0)] {
+        let menus = harness.get_all_by_label(egui_phosphor::regular::LIST);
+        menus.min_by(|a, b| a.rect().min.x.total_cmp(&b.rect().min.x)).unwrap().click();
+        harness.run_steps(2);
+        harness.get_by_label(item).click();
+        harness.run_steps(2);
+        assert_eq!(exported_sets(&mut harness), exported, "{item}");
+    }
+    harness.get_by_label("Include all").click();
     harness.run_steps(2);
-    assert_eq!(exported_sets(&mut harness), 0, "every set is left out");
-    harness.get_by_label("Select all").click();
+    assert_eq!(exported_sets(&mut harness), MANY_SETS, "Include all");
+}
+
+#[test]
+fn dragging_across_ticks_sets_them_all() {
+    let mut harness = harness(4, LAPTOP);
+    let ticks: Vec<egui::Pos2> = ["Ball", "Base", "Set 3"]
+        .iter()
+        .map(|name| {
+            let row = harness.get_by_label(name).rect().center().y;
+            harness.get_all_by_role(Role::CheckBox).find(|node| (node.rect().center().y - row).abs() < 6.0).unwrap().rect().center()
+        })
+        .collect();
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    harness.hover_at(ticks[0]);
+    harness.event(button(ticks[0], true));
+    harness.run_steps(1);
+    for &tick in &ticks[1..] {
+        harness.hover_at(tick);
+        harness.run_steps(1);
+    }
+    harness.event(button(ticks[2], false));
     harness.run_steps(2);
-    assert_eq!(exported_sets(&mut harness), MANY_SETS, "every set is exported");
+    let skipped: Vec<bool> = draft(&mut harness).sets.iter().map(|set| set.skip).collect();
+    assert_eq!(skipped, [true, true, true, false], "the three ticks passed over are off, the fourth untouched");
 }
 
 #[test]

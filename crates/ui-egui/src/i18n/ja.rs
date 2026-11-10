@@ -493,6 +493,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Log", "ログ"),
     ("Low", "低"),
     ("Luminosity", "輝度"),
+    ("Maximum size for all texture sets", "すべてのテクスチャセットの最大サイズ"),
     ("MMB drag / Alt + MMB", "中ドラッグ / Alt + 中ドラッグ"),
     ("Made by the ArtCraft team and community.", "ArtCraftチームとコミュニティによって制作。"),
     ("Magenta / green", "マゼンタ / グリーン"),

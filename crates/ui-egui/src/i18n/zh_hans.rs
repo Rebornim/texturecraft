@@ -448,6 +448,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Log", "日志"),
     ("Low", "低"),
     ("Luminosity", "亮度"),
+    ("Maximum size for all texture sets", "所有纹理集的最大尺寸"),
     ("MMB drag / Alt + MMB", "中键拖动 / Alt + 中键"),
     ("Made by the ArtCraft team and community.", "由 ArtCraft 团队和社区打造。"),
     ("Magenta / green", "洋红 / 绿色"),

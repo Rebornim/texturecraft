@@ -505,6 +505,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Log", "Log"),
     ("Low", "Basso"),
     ("Luminosity", "Luminosità"),
+    ("Maximum size for all texture sets", "Dimensione massima per tutti i set di texture"),
     ("MMB drag / Alt + MMB", "Trascina (tasto centrale) / Alt + tasto centrale"),
     ("Made by the ArtCraft team and community.", "Realizzato dal team e dalla community di ArtCraft."),
     ("Magenta / green", "Magenta / verde"),

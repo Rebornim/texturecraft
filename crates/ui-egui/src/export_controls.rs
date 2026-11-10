@@ -1,6 +1,6 @@
 //! The Export textures window's parameter controls and value texts, shared by Global settings and a texture set's overrides
 
-use egui::Ui;
+use egui::{RichText, Ui};
 use texturecraft_engine::formats::FileFormat;
 
 use crate::i18n::{tr, trf};
@@ -9,7 +9,7 @@ use crate::i18n::{tr, trf};
 const FILE_TYPES: [FileFormat; 8] =
     [FileFormat::Bmp, FileFormat::Jpeg, FileFormat::Png, FileFormat::Tga, FileFormat::Tiff, FileFormat::Hdr, FileFormat::Exr, FileFormat::Webp];
 /// Output sizes offered besides each texture set's own
-const SIZES: [u32; 6] = [256, 512, 1024, 2048, 4096, 8192];
+const SIZES: [u32; 7] = [128, 256, 512, 1024, 2048, 4096, 8192];
 /// Padding modes in menu order
 const PADDINGS: [&str; 4] = ["infinite", "dilation", "dilationDefault", "none"];
 const DILATION_MAX: u32 = 256;
@@ -121,6 +121,8 @@ pub fn size_text(size: u32, set_size: Option<(u32, u32)>) -> String {
 pub fn size_combo(ui: &mut Ui, id: &str, size: &mut u32, set_size: Option<(u32, u32)>) {
     egui::ComboBox::from_id_salt(id).width(360.0).selected_text(size_text(*size, set_size)).show_ui(ui, |ui| {
         ui.selectable_value(size, 0, size_text(0, set_size));
+        ui.separator();
+        ui.label(RichText::new(tr("Maximum size for all texture sets")).italics().weak());
         for pixels in SIZES {
             ui.selectable_value(size, pixels, size_text(pixels, set_size));
         }

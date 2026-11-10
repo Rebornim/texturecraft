@@ -1,6 +1,7 @@
 //! The Export textures window's parameter controls and value texts, shared by Global settings and a texture set's overrides
 
 use egui::Ui;
+use texturecraft_engine::formats::FileFormat;
 
 use crate::i18n::{tr, trf};
 
@@ -48,6 +49,26 @@ pub fn file_type_combos(ui: &mut Ui, id: &str, format: &mut String, bit_depth: &
         });
         egui::ComboBox::from_id_salt((id, "bits")).selected_text(bit_depth_text(*bit_depth)).show_ui(ui, |ui| {
             for depth in [0u8, 8, 16, 32] {
+                ui.selectable_value(bit_depth, depth, bit_depth_text(depth));
+            }
+        });
+    });
+}
+
+/// One output map's own file type: a format and one of the bit depths it holds
+pub fn map_file_type_combos(ui: &mut Ui, id: &str, extension: &mut String, bit_depth: &mut u8) {
+    let format = FileFormat::from_extension(extension).unwrap_or(FileFormat::Png);
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_id_salt((id, "format")).width(64.0).selected_text(format.extension()).show_ui(ui, |ui| {
+            for choice in FileFormat::ALL {
+                if ui.selectable_label(choice == format, choice.extension()).clicked() {
+                    *extension = choice.extension().to_string();
+                    *bit_depth = choice.depth(*bit_depth);
+                }
+            }
+        });
+        egui::ComboBox::from_id_salt((id, "bits")).selected_text(bit_depth_text(*bit_depth)).show_ui(ui, |ui| {
+            for &depth in format.bit_depths() {
                 ui.selectable_value(bit_depth, depth, bit_depth_text(depth));
             }
         });

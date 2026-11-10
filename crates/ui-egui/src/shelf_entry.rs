@@ -19,6 +19,12 @@ use crate::shelf_preview::ShelfPreview;
 /// The name of a saved brush whose file name isn't text
 const SAVED_BRUSH_NAME: &str = "brush";
 
+/// Probes per side of the grid that compares a procedural under two seeds, off the pattern's grid lines
+const SEED_PROBES: usize = 4;
+const SEED_PROBE_OFFSET: f32 = 0.13;
+/// A smaller difference between the two seeds' samples is rounding
+const SEED_TOLERANCE: f32 = 1e-4;
+
 /// A shelf tile's asset
 #[derive(Clone)]
 pub(crate) enum ShelfEntry {
@@ -170,6 +176,14 @@ impl ShelfEntry {
         }
     }
 
+    /// Whether applying the asset gives a different result per random seed (the tile's dots badge)
+    pub(crate) fn includes_randomness(&self) -> bool {
+        match self {
+            ShelfEntry::Procedural(kind) => SEEDED_PROCEDURALS.contains(kind),
+            _ => false,
+        }
+    }
+
     /// What a click on the tile does
     pub(crate) fn activate(&self, app: &mut TextureCraftApp) {
         match self {
@@ -192,5 +206,34 @@ impl ShelfEntry {
                 }
             }
         }
+    }
+}
+
+/// The procedurals whose pattern depends on the seed, worked out once
+static SEEDED_PROCEDURALS: std::sync::LazyLock<Vec<ProceduralKind>> =
+    std::sync::LazyLock::new(|| ProceduralKind::ALL.into_iter().filter(|kind| seed_changes(*kind)).collect());
+
+/// Whether procedural `kind` samples differently under two seeds
+fn seed_changes(kind: ProceduralKind) -> bool {
+    use texturecraft_engine::compose::pattern::{Coords, procedural};
+    use texturecraft_engine::core::{Procedural, Projection};
+    use texturecraft_engine::geom::glam::{Vec2, Vec3};
+
+    let sample = |seed: u32, i: usize| {
+        let uv = Vec2::new((i % SEED_PROBES) as f32 / SEED_PROBES as f32, (i / SEED_PROBES) as f32 / SEED_PROBES as f32) + SEED_PROBE_OFFSET;
+        procedural(&Procedural { seed, ..Procedural::new(kind) }, &Projection::default(), &Coords { uv, pos: Vec3::ZERO, nrm: Vec3::Y })
+    };
+    (0..SEED_PROBES * SEED_PROBES).any(|i| (sample(1, i) - sample(2, i)).abs() > SEED_TOLERANCE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_seeded_procedurals_include_randomness() {
+        let seeded = &*SEEDED_PROCEDURALS;
+        assert!(seeded.contains(&ProceduralKind::Clouds), "{seeded:?}");
+        assert!(!seeded.contains(&ProceduralKind::Checker), "{seeded:?}");
     }
 }

@@ -33,6 +33,14 @@ const SELECTED_TILE: &str = "shelf_selected_tile";
 /// The outline widths of the selected tile and of the one in use (the brush's alpha, the shown environment), in points
 const SELECTED_OUTLINE_WIDTH: f32 = 1.5;
 const IN_USE_OUTLINE_WIDTH: f32 = 1.0;
+/// The randomness badge's dot radius, dot spacing and inset from the thumbnail's corner, in points
+const BADGE_DOT_RADIUS: f32 = 1.3;
+const BADGE_DOT_SPACING: f32 = 3.6;
+const BADGE_INSET: f32 = 2.5;
+/// The randomness badge's dot colour and its rim's width (points) and colour
+const BADGE_DOT_FILL: Color32 = Color32::from_gray(205);
+const BADGE_DOT_RIM: f32 = 0.8;
+const BADGE_DOT_RIM_COLOR: Color32 = Color32::from_black_alpha(170);
 /// The thumbnail's size in a tile and its center below the tile's top, in points
 const THUMBNAIL_SIZE: f32 = 60.0;
 const THUMBNAIL_CENTER_Y: f32 = 31.0;
@@ -408,6 +416,10 @@ fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry
         ui.painter().rect_stroke(response.rect, TILE_ROUNDING, Stroke::new(width, tk.accent), egui::StrokeKind::Inside);
     }
 
+    if entry.includes_randomness() {
+        randomness_badge(ui.painter(), response.rect);
+    }
+
     if response.clicked() || response.secondary_clicked() {
         ctx.data_mut(|data| data.insert_temp(selected_id, key));
     }
@@ -452,13 +464,26 @@ pub(crate) fn tile(
     if resp.hovered() || resp.dragged() {
         painter.rect_filled(rect, TILE_ROUNDING, tk.row_hover);
     }
-    let image_rect = egui::Rect::from_center_size(rect.center_top() + vec2(0.0, THUMBNAIL_CENTER_Y), vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE));
+    let image_rect = thumbnail_rect(rect);
     thumbnail(painter, tex, image_rect, &tk);
     let galley = painter.layout_job(one_line(label, rect.width() - LABEL_MARGIN, tk.text));
     painter.galley(egui::pos2(rect.center().x - galley.size().x * 0.5, image_rect.bottom() + LABEL_GAP), galley, tk.text);
 
     let big = if resp.hovered() { big_preview(ui, thumbs, preview) } else { None };
     resp.on_hover_ui(|ui| hover_preview(ui, tex, big.as_ref(), label))
+}
+
+/// Where a tile's thumbnail goes in the tile's `rect`
+fn thumbnail_rect(rect: egui::Rect) -> egui::Rect {
+    egui::Rect::from_center_size(rect.center_top() + vec2(0.0, THUMBNAIL_CENTER_Y), vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE))
+}
+
+/// Three light, dark-rimmed dots at the thumbnail's bottom-right corner: the asset includes randomness
+fn randomness_badge(painter: &egui::Painter, tile: egui::Rect) {
+    let corner = thumbnail_rect(tile).right_bottom() - vec2(BADGE_INSET, BADGE_INSET);
+    for offset in [vec2(0.0, 0.0), vec2(-BADGE_DOT_SPACING, 0.0), vec2(-BADGE_DOT_SPACING * 0.5, -BADGE_DOT_SPACING)] {
+        painter.circle(corner + offset, BADGE_DOT_RADIUS, BADGE_DOT_FILL, Stroke::new(BADGE_DOT_RIM, BADGE_DOT_RIM_COLOR));
+    }
 }
 
 /// A tile label on one line, cut with "…" past `width` points (the hover popup shows the whole name)

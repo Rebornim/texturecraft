@@ -23,6 +23,6 @@ impl LatencyConfig {
 
     /// Tiny sizes for the smoke test: proves every bench body still runs
     pub fn smoke() -> LatencyConfig {
-        LatencyConfig { ball_resolution: 256, ball_maps_resolution: 64, stack_resolution: 256, bake_resolution: 64, samples: 2, repeats: 1 }
+        LatencyConfig { ball_resolution: 128, ball_maps_resolution: 64, stack_resolution: 128, bake_resolution: 64, samples: 2, repeats: 1 }
     }
 }

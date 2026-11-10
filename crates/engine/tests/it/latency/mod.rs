@@ -371,7 +371,7 @@ fn bench_effect_costs(config: &LatencyConfig) {
             run(&mut session, "layer.visible", json!({"layer": id.0, "visible": true}));
         }
         for (owner, effect) in effects(&session) {
-            let label = format!("{} > {}", layer_name(&session, owner), session.doc.project.effect(effect).unwrap().1.name);
+            let label = format!("{} > {} #{}", layer_name(&session, owner), session.doc.project.effect(effect).unwrap().1.name, effect.0);
             run(&mut session, "effect.set", json!({"effect": effect.0, "visible": false}));
             rows.push((baseline.saturating_sub(full_composite(&mut session, config.repeats)), format!("effect {label}")));
             run(&mut session, "effect.set", json!({"effect": effect.0, "visible": true}));

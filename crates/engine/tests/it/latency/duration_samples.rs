@@ -21,10 +21,6 @@ impl DurationSamples {
         self.0.iter().copied().max().unwrap_or_default()
     }
 
-    pub fn total(&self) -> Duration {
-        self.0.iter().sum()
-    }
-
     /// Nearest-rank percentile, `rank` in 0..=1
     pub fn percentile(&self, rank: f64) -> Duration {
         let mut sorted = self.0.clone();

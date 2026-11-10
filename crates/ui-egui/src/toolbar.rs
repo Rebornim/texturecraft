@@ -17,6 +17,12 @@ const BAR_SPACING: f32 = 10.0;
 const COMPACT_BAR_SPACING: f32 = 4.0;
 const BAR_SEPARATOR_WIDTH: f32 = 6.0;
 
+/// Height of the top bar, in points
+const BAR_HEIGHT: f32 = 40.0;
+
+/// Padding inside the top bar card on its left and right, in points
+const BAR_PADDING: egui::Margin = egui::Margin::symmetric(8, 0);
+
 pub fn tool_icon(t: Tool) -> &'static str {
     match t {
         Tool::Paint => ic::PAINT_BRUSH,
@@ -34,8 +40,8 @@ pub fn tool_icon(t: Tool) -> &'static str {
 /// Keep mode buttons visible, with painting controls scrolling as space runs out
 pub fn paint_bar(app: &mut TextureCraftApp, ui: &mut egui::Ui) {
     let tokens = Tokens::get(ui.ctx());
-    egui::Panel::top("paint_bar").exact_size(40.0).show_separator_line(false).frame(egui::Frame::NONE).show(ui, |ui| {
-        card(ui, &tokens, egui::Margin { bottom: GUTTER, ..Default::default() }, egui::Margin::symmetric(8, 0), |ui| {
+    egui::Panel::top("paint_bar").exact_size(BAR_HEIGHT).show_separator_line(false).frame(egui::Frame::NONE).show(ui, |ui| {
+        card(ui, &tokens, egui::Margin { bottom: GUTTER, ..Default::default() }, BAR_PADDING, |ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let button_size = ui.spacing().interact_size.y;
                 let mode_width = 3.0 * button_size + 2.0 * BAR_SPACING;
@@ -54,7 +60,9 @@ pub fn paint_bar(app: &mut TextureCraftApp, ui: &mut egui::Ui) {
                 ui.add(egui::Separator::default().spacing(BAR_SEPARATOR_WIDTH));
                 if !scroll_views {
                     view_buttons(app, ui);
-                    ui.add(egui::Separator::default().spacing(BAR_SEPARATOR_WIDTH));
+                    if app.session.tool_usable(app.session.tool.tool) {
+                        ui.add(egui::Separator::default().spacing(BAR_SEPARATOR_WIDTH));
+                    }
                 }
 
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -183,9 +191,15 @@ fn scrolling_tool_controls(app: &mut TextureCraftApp, ui: &mut egui::Ui, tokens:
             scroll_area.show(ui, |ui| {
                 ui.scroll_with_delta(vec2(scroll_delta, 0.0));
                 ui.horizontal_centered(|ui| {
-                    tool_controls(app, ui, tokens);
+                    // A tool that can't act on the selection leaves the bar, as the shelf greys it
+                    let tool_usable = app.session.tool_usable(app.session.tool.tool);
+                    if tool_usable {
+                        tool_controls(app, ui, tokens);
+                    }
                     if scroll_views {
-                        ui.add(egui::Separator::default().spacing(BAR_SEPARATOR_WIDTH));
+                        if tool_usable {
+                            ui.add(egui::Separator::default().spacing(BAR_SEPARATOR_WIDTH));
+                        }
                         let size = vec2(view_buttons_width(button_size, ui.spacing().item_spacing.x), ui.available_height());
                         ui.allocate_ui_with_layout(size, egui::Layout::right_to_left(egui::Align::Center), |ui| view_buttons(app, ui));
                     }

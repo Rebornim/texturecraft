@@ -23,14 +23,28 @@ struct GrungePattern {
     kind: ProceduralKind,
     repeats_per_scale: f32,
     rotation: f32,
+    /// A seeded pattern and its repeats per unit of grunge scale that varies the pattern's strength, for patterns the seed doesn't change
+    breakup: Option<(ProceduralKind, f32)>,
     mean: f32,
     spread: f32,
 }
 
 /// Fine scratches on metal edges, a woven fibre on fibreglass, blotchy grime for dirt
-const EDGE_WEAR_GRUNGE: GrungePattern = GrungePattern { kind: ProceduralKind::Scratches, repeats_per_scale: 4.0, rotation: 0.0, mean: 0.037, spread: 0.149 };
-const FIBER_GLASS_GRUNGE: GrungePattern = GrungePattern { kind: ProceduralKind::Weave, repeats_per_scale: 16.0, rotation: 45.0, mean: 0.665, spread: 0.21 };
-const DIRT_GRUNGE: GrungePattern = GrungePattern { kind: ProceduralKind::Grunge, repeats_per_scale: 4.0, rotation: 0.0, mean: 0.682, spread: 0.242 };
+const EDGE_WEAR_GRUNGE: GrungePattern =
+    GrungePattern { kind: ProceduralKind::Scratches, repeats_per_scale: 4.0, rotation: 0.0, breakup: None, mean: 0.037, spread: 0.149 };
+const FIBER_GLASS_GRUNGE: GrungePattern = GrungePattern {
+    kind: ProceduralKind::Weave,
+    repeats_per_scale: 16.0,
+    rotation: 45.0,
+    breakup: Some((ProceduralKind::Grunge, 4.0)),
+    mean: 0.539,
+    spread: 0.198,
+};
+const DIRT_GRUNGE: GrungePattern =
+    GrungePattern { kind: ProceduralKind::Grunge, repeats_per_scale: 4.0, rotation: 0.0, breakup: None, mean: 0.682, spread: 0.242 };
+/// How much a breakup pattern varies the grunge's strength (0 none, 1 down to nothing)
+const BREAKUP_DEPTH: f32 = 0.6;
+
 /// The triplanar seams' sharpness at triplanar contrast 0 and 1
 const TRIPLANAR_SHARPNESS: std::ops::RangeInclusive<f32> = 1.0..=16.0;
 
@@ -57,7 +71,12 @@ pub(crate) fn grunge(kind: GeneratorKind, wear: &WearParameters, seed: u32, coor
     } else {
         Projection::Uv { scale: [1.0, 1.0], rotation: grunge.rotation, offset: [0.0, 0.0] }
     };
-    (procedural(&pattern, &projection, coords) - grunge.mean) / grunge.spread
+    let mut value = procedural(&pattern, &projection, coords);
+    if let Some((breakup, repeats_per_scale)) = grunge.breakup {
+        let breakup = Procedural { scale: repeats_per_scale * wear.grunge_scale, seed, ..Procedural::new(breakup) };
+        value *= 1.0 - BREAKUP_DEPTH + BREAKUP_DEPTH * procedural(&breakup, &projection, coords);
+    }
+    (value - grunge.mean) / grunge.spread
 }
 
 /// The two blurred curvature levels around `sigma` and the weight of the wider one; level None is the map itself
@@ -188,6 +207,24 @@ mod tests {
             let spread = (samples.iter().map(|value| (value - mean).powi(2)).sum::<f32>() / samples.len() as f32).sqrt();
             let measured = (pattern.mean + mean * pattern.spread, spread * pattern.spread);
             assert!(mean.abs() < 0.1 && (spread - 1.0).abs() < 0.1, "{kind:?}: normalised mean {mean}, spread {spread}; the pattern's own {measured:?}");
+        }
+    }
+
+    #[test]
+    fn every_kind_s_grunge_changes_with_the_seed() {
+        for kind in [GeneratorKind::EdgeWear, GeneratorKind::FiberGlassEdgeWear, GeneratorKind::Dirt] {
+            let wear = WearParameters::defaults(kind).unwrap();
+            let sample = |seed| -> Vec<f32> {
+                (0..64 * 64)
+                    .map(|texel| {
+                        let uv = Vec2::new((texel % 64) as f32 / 64.0, (texel / 64) as f32 / 64.0);
+                        grunge(kind, &wear, seed, &Coords { uv, pos: uv.extend(0.0), nrm: Vec3::Z })
+                    })
+                    .collect()
+            };
+            let (first, second) = (sample(1), sample(2));
+            let difference = first.iter().zip(&second).map(|(a, b)| (a - b).abs()).sum::<f32>() / first.len() as f32;
+            assert!(difference > 0.2, "{kind:?}: another seed barely changes the grunge ({difference})");
         }
     }
 

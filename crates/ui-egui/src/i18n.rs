@@ -64,6 +64,17 @@ pub(crate) fn filtering_label(filtering: texturecraft_engine::core::Filtering) -
     }
 }
 
+/// Whether a fill repeats past its tile, as the UV Wrap combo names it
+pub(crate) fn wrap_label(wrap: texturecraft_engine::core::UvWrap) -> &'static str {
+    use texturecraft_engine::core::UvWrap;
+    match wrap {
+        UvWrap::None => n_("None"),
+        UvWrap::RepeatHorizontally => n_("Repeat horizontally"),
+        UvWrap::RepeatVertically => n_("Repeat vertically"),
+        UvWrap::Repeat => n_("Repeat"),
+    }
+}
+
 /// Display labels belong to the UI; the model exposes only map identities
 pub(crate) fn baked_map_label(map: texturecraft_engine::core::BakedMap) -> &'static str {
     use texturecraft_engine::core::BakedMap;

@@ -40,7 +40,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add fill",
             ["Layers", "Effects"],
             None,
-            "{layer?, target?: mask|content, name?, mask: value?: 0..1 | image?: resource name | procedural?: kind, scale?, seed?, contrast?, balance?, invert?, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3, tile?: {Tile Generator settings in camelCase, as project.inspect shows them}, tileDefaults?: true | anchor?: anchor effect id, anchorChannel?: channel (height); content: color? ([r,g,b] linear or \"#rrggbb\" sRGB), roughness?, metallic?, height?, opacity? (default: every layer channel); projection?; filtering?: bilinearHq|bilinearSharp|nearest}",
+            "{layer?, target?: mask|content, name?, mask: value?: 0..1 | image?: resource name | procedural?: kind, scale?, seed?, contrast?, balance?, invert?, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3, tile?: {Tile Generator settings in camelCase, as project.inspect shows them}, tileDefaults?: true | anchor?: anchor effect id, anchorChannel?: channel (height); content: color? ([r,g,b] linear or \"#rrggbb\" sRGB), roughness?, metallic?, height?, opacity? (default: every layer channel); projection?; filtering?: bilinearHq|bilinearSharp|nearest; wrap?: repeat|repeatHorizontally|repeatVertically|none}",
             has_layer,
             add_fill
         ),

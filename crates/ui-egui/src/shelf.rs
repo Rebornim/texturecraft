@@ -573,3 +573,24 @@ fn hover_preview(ui: &mut Ui, small: Option<&egui::TextureHandle>, big: Option<&
         ui.label(label);
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_long_label_stays_on_one_line_ending_in_an_ellipsis() {
+        let width = 60.0;
+        let mut laid_out = None;
+        let mut output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
+            laid_out = Some(ui.painter().layout_job(one_line("Steel Painted Rust Leaks Extra", width, Color32::WHITE)));
+        });
+        // The font atlas upload is not under test
+        output.textures_delta.clear();
+        let galley = laid_out.unwrap();
+
+        assert_eq!(galley.rows.len(), 1);
+        assert!(galley.size().x <= width);
+        assert_eq!(galley.rows[0].glyphs.last().map(|glyph| glyph.chr), Some('…'));
+    }
+}

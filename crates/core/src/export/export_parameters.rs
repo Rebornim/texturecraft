@@ -5,6 +5,9 @@ use super::ExportFileType;
 /// The output template a project exports with until another is picked
 pub const DEFAULT_EXPORT_PRESET: &str = "Document channels + Normal + AO";
 
+/// Dilation distance in pixels an export uses until another is picked
+pub const DEFAULT_DILATION: u32 = 16;
+
 /// The parameters a texture set can override, in the export command's terms
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -22,6 +25,12 @@ pub struct ExportParameters {
 
 impl Default for ExportParameters {
     fn default() -> Self {
-        ExportParameters { preset: DEFAULT_EXPORT_PRESET.into(), file_type: ExportFileType::default(), size: 0, padding: "infinite".into(), dilation: 16 }
+        ExportParameters {
+            preset: DEFAULT_EXPORT_PRESET.into(),
+            file_type: ExportFileType::default(),
+            size: 0,
+            padding: "infinite".into(),
+            dilation: DEFAULT_DILATION,
+        }
     }
 }

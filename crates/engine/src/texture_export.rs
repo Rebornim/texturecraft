@@ -1,6 +1,6 @@
 //! A texture export run a step at a time, so a window can show its progress and stop it between texture sets
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -18,6 +18,8 @@ pub struct TextureExport {
     usd_inputs: Option<Vec<Vec<UsdTextureInput>>>,
     shader_parameters: bool,
     exported_sets: Vec<usize>,
+    /// The .mtlx names taken so far, so a later set can't overwrite an earlier one's
+    materialx_stems: HashSet<String>,
     /// Every file written so far
     pub written: Vec<PathBuf>,
     pub warnings: Vec<String>,
@@ -40,6 +42,7 @@ impl TextureExport {
             materialx: p.get("materialX").and_then(Value::as_bool).unwrap_or(false),
             usd_inputs,
             shader_parameters,
+            materialx_stems: HashSet::new(),
             written: Vec::new(),
             warnings,
         })
@@ -49,7 +52,7 @@ impl TextureExport {
         &self.dir
     }
 
-    /// How many steps the export takes, and how many are done
+    /// How many steps are done, and how many the export takes
     pub fn progress(&self) -> (usize, usize) {
         (self.steps - self.jobs.len(), self.steps)
     }
@@ -64,13 +67,24 @@ impl TextureExport {
         let Some((sets, options)) = self.jobs.pop_front() else { return Ok(None) };
 
         let files = s.export_files(&sets, &options)?;
-        self.warnings.extend(files.iter().flat_map(|f| f.warnings.iter().cloned()));
+        let mut warnings: Vec<String> = files.iter().flat_map(|f| f.warnings.iter().cloned()).collect();
         let mut written = texturecraft_formats::write_files(&files, &self.dir).map_err(|e| EngineError::Other(e.to_string()))?;
         if self.materialx {
-            written.extend(crate::file_cmds::write_materialx(s, &sets, &options, &self.dir, &mut self.warnings)?);
+            written.extend(crate::file_cmds::write_materialx(s, &sets, &options, &self.dir, &mut self.materialx_stems, &mut warnings)?);
         }
+
+        self.add_warnings(warnings);
         self.written.extend(written.iter().cloned());
         Ok(Some(written))
+    }
+
+    /// Keep one of each warning: steps repeat the ones that don't depend on the texture set
+    fn add_warnings(&mut self, warnings: Vec<String>) {
+        for warning in warnings {
+            if !self.warnings.contains(&warning) {
+                self.warnings.push(warning);
+            }
+        }
     }
 
     /// Write the USD asset and the shader parameters, after the last step; returns what they wrote

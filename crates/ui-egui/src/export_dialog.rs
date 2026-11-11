@@ -9,11 +9,12 @@ use egui_phosphor::regular as ic;
 use maps_action::MapsAction;
 use serde_json::json;
 use texturecraft_engine::core::{ExportFileType, ExportOverrides, ExportSettings, NormalFormat, TextureSetExport};
-use texturecraft_engine::formats::FileFormat;
+use texturecraft_engine::formats::{FileFormat, MapSpec};
 
 use crate::TextureCraftApp;
 use crate::export_controls as controls;
 use crate::export_draft::ExportDraft;
+use crate::export_tab::ExportTab;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::file_dialogs::{Bound, FileDialog};
 use crate::i18n::{tr, trf};
@@ -34,6 +35,8 @@ const TAB_TEXT_SIZE: f32 = 12.5;
 const TAB_HEIGHT: f32 = 28.0;
 const TAB_PADDING: f32 = 14.0;
 const TAB_GAP: f32 = 2.0;
+/// The tab and body frame's border; the open tab's gap in it covers twice that, so no line shows through
+const TAB_STROKE: f32 = 1.0;
 /// The tabs' panel's inner margin
 const BODY_MARGIN: f32 = 8.0;
 /// Width of the Output templates tab's naming pattern combo
@@ -62,6 +65,19 @@ const PARAMETER_FIELD_WIDTH: f32 = 500.0;
 const BROWSE_BUTTON_WIDTH: f32 = 34.0;
 /// Width of an output map's name in a texture set's Output maps
 const MAP_NAME_WIDTH: f32 = 230.0;
+/// Size of the naming pattern's info icon
+const INFO_ICON_SIZE: f32 = 14.0;
+/// Spacing between the List of exports' file cells, and between the Output maps' rows
+const LIST_FILES_SPACING: egui::Vec2 = egui::vec2(0.0, 4.0);
+const SET_MAPS_SPACING: egui::Vec2 = egui::vec2(12.0, 6.0);
+/// Size of a console line
+const CONSOLE_TEXT_SIZE: f32 = 11.5;
+/// Space between the settings grid and the checkboxes under it
+const SETTINGS_CHECKBOX_GAP: f32 = 4.0;
+/// Size of a setting's note
+const NOTE_TEXT_SIZE: f32 = 11.0;
+/// Size of a texture set's name in the list
+const SET_NAME_TEXT_SIZE: f32 = 13.0;
 
 pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     // Closed by Cancel, Esc or the title bar: the unsaved edits go
@@ -78,7 +94,7 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     if app.ui.export.settings.as_ref().is_none_or(|draft| draft.sets.len() != app.session.set_count()) {
         app.ui.export.settings = Some(ExportDraft::from_project(&app.session.doc.project, &app.ui.export.dir));
         // The window always opens on Settings
-        app.ui.export.tab = 0;
+        app.ui.export.tab = ExportTab::Settings;
     }
 
     let tk = Tokens::get(ctx);
@@ -102,7 +118,7 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
         let mut open_tab = None;
         ui.horizontal(|ui| {
             open_tab = tab_strip(app, ui, exporting(app));
-            if app.ui.export.tab == 0 {
+            if app.ui.export.tab == ExportTab::Settings {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(tr("Include all")).clicked()
                         && let Some(draft) = app.ui.export.settings.as_mut()
@@ -112,7 +128,7 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
                 });
             }
             #[cfg(not(target_arch = "wasm32"))]
-            if app.ui.export.tab == 2 {
+            if app.ui.export.tab == ExportTab::ListOfExports {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(tr("Open output directory")).clicked()
                         && let Some(draft) = app.ui.export.settings.as_ref()
@@ -122,9 +138,9 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
                     }
                 });
             }
-            if app.ui.export.tab == 1 {
+            if app.ui.export.tab == ExportTab::OutputTemplates {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add(egui::Label::new(RichText::new(ic::INFO).size(14.0)).selectable(false))
+                    ui.add(egui::Label::new(RichText::new(ic::INFO).size(INFO_ICON_SIZE)).selectable(false))
                         .on_hover_text(tr("Names the input maps on this page as TextureCraft or OpenPBR calls them"));
                     let naming = |openpbr: bool| if openpbr { "OpenPBR" } else { "TextureCraft" };
                     egui::ComboBox::from_id_salt("exp_naming").width(NAMING_WIDTH).selected_text(naming(app.ui.export.openpbr_names)).show_ui(ui, |ui| {
@@ -140,15 +156,15 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
         ui.add_space(-ui.spacing().item_spacing.y);
         let body_height = (ui.available_height() - EXPORT_FOOTER_HEIGHT - 2.0 * BODY_MARGIN).max(0.0);
         let body_corners = egui::CornerRadius { nw: 0, ne: tk.radius, sw: tk.radius, se: tk.radius };
-        let border = egui::Stroke::new(1.0, tk.separator);
+        let border = egui::Stroke::new(TAB_STROKE, tk.separator);
         egui::Frame::new().fill(tk.panel).stroke(border).corner_radius(body_corners).inner_margin(BODY_MARGIN).show(ui, |ui| {
             ui.allocate_ui_with_layout(vec2(ui.available_width(), body_height), egui::Layout::left_to_right(egui::Align::Min), |ui| {
                 ui.set_height(body_height);
-                if app.ui.export.tab == 1 {
+                if app.ui.export.tab == ExportTab::OutputTemplates {
                     crate::export_templates::tab(app, ui, &presets, size.x - EXPORT_DIALOG_PADDING - 2.0 * BODY_MARGIN);
                     return;
                 }
-                if app.ui.export.tab == 2 {
+                if app.ui.export.tab == ExportTab::ListOfExports {
                     list_of_exports(app, ui);
                     return;
                 }
@@ -159,10 +175,10 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
         });
         // The body's top border stops under the open tab, so the tab opens into it
         if let Some(tab) = open_tab {
-            let gap = [tab.left_bottom() + vec2(1.0, 0.0), tab.right_bottom() - vec2(1.0, 0.0)];
-            ui.painter().line_segment(gap, egui::Stroke::new(2.0, tk.panel));
+            let gap = [tab.left_bottom() + vec2(TAB_STROKE, 0.0), tab.right_bottom() - vec2(TAB_STROKE, 0.0)];
+            ui.painter().line_segment(gap, egui::Stroke::new(2.0 * TAB_STROKE, tk.panel));
         }
-        ui.add_space(8.0);
+        ui.add_space(BODY_MARGIN);
         action = bottom_bar(app, ui);
     });
 
@@ -194,8 +210,9 @@ fn tab_strip(app: &mut TextureCraftApp, ui: &mut Ui, locked: bool) -> Option<egu
     let tk = Tokens::get(ui.ctx());
     let mut open_rect = None;
     ui.spacing_mut().item_spacing.x = TAB_GAP;
-    for (index, name) in [tr("Settings"), tr("Output templates"), tr("List of exports")].into_iter().enumerate() {
-        let open = app.ui.export.tab == index as u8;
+    for kind in ExportTab::ALL {
+        let name = kind.label();
+        let open = app.ui.export.tab == kind;
         let color = if open { tk.text_strong } else { tk.text_dim };
         let galley = ui.painter().layout_no_wrap(name.to_string(), semibold(TAB_TEXT_SIZE), color);
         let (rect, tab) = ui.allocate_exact_size(vec2(galley.size().x + 2.0 * TAB_PADDING, TAB_HEIGHT), egui::Sense::click());
@@ -210,12 +227,12 @@ fn tab_strip(app: &mut TextureCraftApp, ui: &mut Ui, locked: bool) -> Option<egu
         let corners = egui::CornerRadius { nw: tk.radius, ne: tk.radius, sw: 0, se: 0 };
         ui.painter().rect_filled(rect, corners, fill);
         if open {
-            ui.painter().rect_stroke(rect, corners, egui::Stroke::new(1.0, tk.separator), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(rect, corners, egui::Stroke::new(TAB_STROKE, tk.separator), egui::StrokeKind::Inside);
             open_rect = Some(rect);
         }
         ui.painter().galley(rect.center() - galley.size() / 2.0, galley, color);
         if tab.clicked() && !locked {
-            app.ui.export.tab = index as u8;
+            app.ui.export.tab = kind;
         }
     }
 
@@ -240,7 +257,7 @@ fn bottom_bar(app: &mut TextureCraftApp, ui: &mut Ui) -> Option<BottomAction> {
     }
     let count = exported_count(app);
     // On Output templates, a template without outputs can't be saved into the settings or exported
-    let empty_template = app.ui.export.tab == 1
+    let empty_template = app.ui.export.tab == ExportTab::OutputTemplates
         && app
             .ui
             .export
@@ -250,7 +267,7 @@ fn bottom_bar(app: &mut TextureCraftApp, ui: &mut Ui) -> Option<BottomAction> {
             .or_else(|| app.session.export_preset(&app.ui.export.preset).map(|preset| preset.maps.is_empty()))
             .unwrap_or(false);
     ui.horizontal(|ui| {
-        if app.ui.export.tab == 0
+        if app.ui.export.tab == ExportTab::Settings
             && ui.add(egui::Button::new(tr("Reset all")).min_size(BOTTOM_BUTTON_SIZE)).clicked()
             && let Some(draft) = app.ui.export.settings.as_mut()
         {
@@ -295,7 +312,7 @@ fn export_sets(app: &mut TextureCraftApp) -> bool {
     match texturecraft_engine::texture_export::TextureExport::start(&app.session, &json!({}), &dir, "file.exportTextures") {
         Ok(export) => {
             app.export_run = Some(crate::export_run::ExportRun::new(export));
-            app.ui.export.tab = 2;
+            app.ui.export.tab = ExportTab::ListOfExports;
             true
         }
         Err(error) => {
@@ -342,10 +359,7 @@ fn advance_export(app: &mut TextureCraftApp, ctx: &egui::Context) {
     }
     let step = match run.export.step(session) {
         Ok(Some(written)) => Ok(written),
-        Ok(None) => run.export.finish(session, "file.exportTextures").map(|written| {
-            run.finished = true;
-            written
-        }),
+        Ok(None) => run.export.finish(session, "file.exportTextures").inspect(|_| run.finished = true),
         Err(error) => Err(error),
     };
     match step {
@@ -407,7 +421,7 @@ fn list_of_exports(app: &mut TextureCraftApp, ui: &mut Ui) {
                             ui.add(egui::Label::new(text).truncate());
                         });
                     };
-                    egui::Grid::new(("exp_list_files", ts)).num_columns(4).spacing(vec2(0.0, 4.0)).show(ui, |ui| {
+                    egui::Grid::new(("exp_list_files", ts)).num_columns(4).spacing(LIST_FILES_SPACING).show(ui, |ui| {
                         for file in set_files {
                             cell(ui, name_width, RichText::new(file["file"].as_str().unwrap_or_default()));
                             let (width, height) = (file["size"][0].as_u64().unwrap_or(0), file["size"][1].as_u64().unwrap_or(0));
@@ -438,7 +452,7 @@ fn list_of_exports(app: &mut TextureCraftApp, ui: &mut Ui) {
             egui::ScrollArea::vertical().id_salt("exp_console").auto_shrink([false; 2]).stick_to_bottom(true).show(ui, |ui| {
                 #[cfg(not(target_arch = "wasm32"))]
                 for (line, success) in app.export_run.iter().flat_map(|run| run.log.iter()) {
-                    ui.label(RichText::new(line).size(11.5).color(if *success { tk.accent } else { tk.text }));
+                    ui.label(RichText::new(line).size(CONSOLE_TEXT_SIZE).color(if *success { tk.accent } else { tk.text }));
                 }
             });
         });
@@ -516,6 +530,7 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
     let default_dir = app.ui.export.dir.clone();
     let Some(draft) = app.ui.export.settings.as_mut() else { return };
 
+    #[cfg(not(target_arch = "wasm32"))]
     let mut pick_dir = false;
     ui.horizontal(|ui| {
         ui.label(caption(tr("General export parameters")));
@@ -579,7 +594,7 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
         ui.end_row();
         export_note(ui, tr("Color maps only: normal, roughness, metallic and other data maps stay linear"));
     });
-    ui.add_space(4.0);
+    ui.add_space(SETTINGS_CHECKBOX_GAP);
     ui.checkbox(&mut settings.usd, tr("Export USD asset"));
     ui.checkbox(&mut settings.shader_parameters, tr("Export shader parameters"));
 
@@ -671,24 +686,25 @@ fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Optio
     });
 }
 
-/// The output maps of texture set `ts`'s template (its own or the global one): key, format and bit depth
-fn set_template_maps(app: &TextureCraftApp, ts: usize) -> Vec<(String, FileFormat, u8)> {
+/// The output maps of texture set `ts`'s template (its own or the global one)
+fn set_template_maps(app: &TextureCraftApp, ts: usize) -> Vec<MapSpec> {
     let Some(draft) = app.ui.export.settings.as_ref() else { return Vec::new() };
 
     let preset = draft.sets.get(ts).and_then(|set| set.overrides.preset.clone()).unwrap_or_else(|| draft.settings.parameters.preset.clone());
-    app.session.export_preset(&preset).map(|preset| preset.maps.iter().map(|map| (map.key(), map.format, map.bit_depth)).collect()).unwrap_or_default()
+    app.session.export_preset(&preset).map(|preset| preset.maps).unwrap_or_default()
 }
 
 /// A texture set's output maps: a tick writes a map, its pen gives it its own file type
-fn set_output_maps(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, maps: &[(String, FileFormat, u8)]) {
+fn set_output_maps(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, maps: &[MapSpec]) {
     let parameters = draft.sets.get(ts).map(|set| set.overrides.apply(&draft.settings.parameters)).unwrap_or_default();
     let set_type = parameters.file_type;
     let set_format = FileFormat::from_extension(&set_type.format);
-    // What a map writes without its own override: the set's file type, else the template's
-    let inherited_type = |format: FileFormat, bit_depth: u8| {
-        let format = set_format.unwrap_or(format);
-        let bit_depth = format.depth(if set_type.bit_depth > 0 { set_type.bit_depth } else { bit_depth });
-        ExportFileType { format: format.extension().to_string(), bit_depth, dithering: set_type.dithering && bit_depth == 8 }
+    // What a map writes without its own override: the set's file type, else the template's (as the engine's apply_file_types)
+    let inherited_type = |template: &MapSpec| {
+        let format = set_format.unwrap_or(template.format);
+        let bit_depth = format.depth(if set_type.bit_depth > 0 { set_type.bit_depth } else { template.bit_depth });
+        let dithering = if set_format.is_some() { set_type.dithering } else { template.options.dithering };
+        ExportFileType { format: format.extension().to_string(), bit_depth, dithering: dithering && bit_depth == 8 }
     };
     let Some(set) = draft.sets.get_mut(ts) else { return };
 
@@ -714,13 +730,14 @@ fn set_output_maps(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, maps: &[(Str
                     }
                     let Some(action) = action else { return };
 
-                    for (key, format, bit_depth) in maps {
+                    for template in maps {
+                        let key = template.key();
                         let map = set.maps.entry(key.clone()).or_default();
                         match action {
                             MapsAction::Check => map.skip = false,
                             MapsAction::Uncheck => map.skip = true,
                             MapsAction::Invert => map.skip = !map.skip,
-                            MapsAction::Override => map.file_type = Some(inherited_type(*format, *bit_depth)),
+                            MapsAction::Override => map.file_type = Some(inherited_type(template)),
                             MapsAction::Inherit => map.file_type = None,
                         }
                     }
@@ -729,8 +746,9 @@ fn set_output_maps(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, maps: &[(Str
         });
     });
     let tk = Tokens::get(ui.ctx());
-    egui::Grid::new(("exp_set_maps", ts)).num_columns(3).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
-        for (key, format, bit_depth) in maps {
+    egui::Grid::new(("exp_set_maps", ts)).num_columns(3).spacing(SET_MAPS_SPACING).show(ui, |ui| {
+        for template in maps {
+            let key = template.key();
             let map = set.maps.entry(key.clone()).or_default();
             ui.horizontal(|ui| {
                 let mut exported = !map.skip;
@@ -738,16 +756,16 @@ fn set_output_maps(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, maps: &[(Str
                 map.skip = !exported;
                 ui.allocate_ui(vec2(MAP_NAME_WIDTH, ui.spacing().interact_size.y), |ui| {
                     ui.set_width(MAP_NAME_WIDTH);
-                    ui.add(egui::Label::new(RichText::new(key).monospace()).truncate());
+                    ui.add(egui::Label::new(RichText::new(&key).monospace()).truncate());
                 });
             });
             if override_pen(ui, map.file_type.is_some()) {
-                map.file_type = map.file_type.take().xor(Some(inherited_type(*format, *bit_depth)));
+                map.file_type = map.file_type.take().xor(Some(inherited_type(template)));
             }
             match map.file_type.as_mut() {
                 Some(file_type) => controls::map_file_type_combos(ui, &format!("exp_map_{key}"), file_type),
                 None => {
-                    let file_type = inherited_type(*format, *bit_depth);
+                    let file_type = inherited_type(template);
                     ui.label(RichText::new(controls::file_type_with_depth_text(&file_type)).color(tk.text_dim));
                 }
             }
@@ -776,7 +794,7 @@ fn override_pen(ui: &mut Ui, overridden: bool) -> bool {
 fn export_note(ui: &mut Ui, text: &str) {
     let tk = Tokens::get(ui.ctx());
     ui.label("");
-    ui.label(RichText::new(text).size(11.0).color(tk.text_dim));
+    ui.label(RichText::new(text).size(NOTE_TEXT_SIZE).color(tk.text_dim));
     ui.end_row();
 }
 
@@ -800,7 +818,7 @@ fn set_row(ui: &mut Ui, name: &str, selected: bool, tick: Option<&mut dyn FnMut(
         text_left += SET_ROW_HEIGHT;
     }
     let width = rect.right() - text_left - SET_ROW_PADDING * 2.0;
-    let galley = crate::widgets::elided(ui.painter(), name, 13.0, tk.text_strong, width);
+    let galley = crate::widgets::elided(ui.painter(), name, SET_NAME_TEXT_SIZE, tk.text_strong, width);
     ui.painter().galley(egui::pos2(text_left, rect.center().y - galley.size().y / 2.0), galley, tk.text_strong);
 
     row

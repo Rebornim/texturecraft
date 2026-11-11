@@ -286,7 +286,7 @@ fn material(path: &str, id: &str, files: &[UsdTextureInput]) -> UsdPrim {
         let mut st = UsdPrim::new("st", "Shader");
         st.attrs = vec![
             UsdAttr::new("info:id", "token", Some(UsdValue::Token("UsdPrimvarReader_float2".into()))).uniform(),
-            // A string, not a token: usdchecker's ARKit profile refuses a token here.
+            // A string, not a token: usdchecker's ARKit profile refuses a token here
             UsdAttr::new("inputs:varname", "string", Some(UsdValue::Str("st".into()))),
             UsdAttr::new("outputs:result", "float2", None),
         ];
@@ -296,9 +296,7 @@ fn material(path: &str, id: &str, files: &[UsdTextureInput]) -> UsdPrim {
     mat
 }
 
-/// The mesh as USD named `name`, with `textures[m]` (rendered with [`usd_export_options`]) on
-/// material `m`. usda / usdc reference their textures as `<name>_<material>_<slot>.png` next
-/// to the layer; usdz embeds them.
+/// The mesh as USD named `name` with `textures[m]` on material `m`: usda / usdc reference `<name>_<material>_<slot>.png` beside it, usdz embeds them
 pub fn usd_bytes(mesh: &Mesh, name: &str, textures: &[Vec<ExportedFile>], format: UsdFormat) -> Result<UsdExport> {
     let stem = sanitize_file_stem(name);
     let (names, files) = material_maps(mesh, &stem, textures);

@@ -156,3 +156,19 @@ fn the_directx_warning_comes_once_and_only_with_a_normal_map() {
     let r = export(&mut s, &dir, OPENPBR, true);
     assert!(!r["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("DirectX")), "{r}");
 }
+
+#[test]
+fn saved_settings_export_one_set_at_a_time_and_still_catch_the_name_clash_and_warn_once() {
+    let mut s = Session::new_project("t", primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+    assert!(s.set_count() >= 2);
+    execute(&mut s, "textureSet.rename", &json!({"ts": 0, "name": "a b"})).unwrap();
+    execute(&mut s, "textureSet.rename", &json!({"ts": 1, "name": "A_B"})).unwrap();
+    let dir = temp("saved");
+    let settings = json!({"parameters": {"preset": OPENPBR}, "normal_format": "directX"});
+    let r = execute(&mut s, "file.exportTextures", &json!({"dir": dir.display().to_string(), "settings": settings, "materialX": true})).unwrap();
+
+    assert_eq!(files(&r).iter().filter(|f| f.ends_with(".mtlx")).count(), s.set_count() - 1, "{r}");
+    let warnings: Vec<&str> = r["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+    assert!(warnings.iter().any(|w| w.contains("\"A_B\"")), "{r}");
+    assert_eq!(warnings.iter().filter(|w| w.contains("DirectX")).count(), 1, "{r}");
+}

@@ -9,7 +9,7 @@ mod texture_set_export;
 
 pub use export_file_type::ExportFileType;
 pub use export_overrides::ExportOverrides;
-pub use export_parameters::{DEFAULT_EXPORT_PRESET, ExportParameters};
+pub use export_parameters::{DEFAULT_DILATION, DEFAULT_EXPORT_PRESET, ExportParameters};
 pub use export_settings::ExportSettings;
 pub use map_export_override::MapExportOverride;
 pub use texture_set_export::TextureSetExport;

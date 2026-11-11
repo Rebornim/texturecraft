@@ -1,6 +1,7 @@
 //! Baking tasks, commands, settings helpers, and the mesh-map baking API
 
 mod bake_cage_inputs;
+mod bake_checks;
 mod bake_mesh;
 mod bake_meshes;
 mod bake_task;

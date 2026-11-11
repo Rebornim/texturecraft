@@ -188,7 +188,7 @@ impl Session {
     }
 
     /// The low poly texture set `texture_set` bakes: UV tiles of mixed resolutions move into its atlas
-    fn bake_mesh(&self, texture_set: usize) -> Result<Arc<Mesh>> {
+    pub(super) fn bake_mesh(&self, texture_set: usize) -> Result<Arc<Mesh>> {
         let set = self.doc.project.texture_set(texture_set)?;
         Ok(match set.tile_grid().filter(|_| !set.tile_resolutions.is_empty()) {
             Some(grid) => {

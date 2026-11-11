@@ -107,6 +107,7 @@ pub fn central(app: &mut TextureCraftApp, ui: &mut Ui) {
     }
     if mode == crate::state::Mode::Baking {
         crate::bake_mode::bake_bar(app, ui.ctx(), full);
+        crate::bake_mode::bake_warnings(app, ui.ctx(), full);
     }
 
     // Keep drawing until the 3D view finishes accumulating anti-aliasing samples

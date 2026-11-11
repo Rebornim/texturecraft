@@ -1,11 +1,13 @@
 //! Bake Mode presentation; persisted settings live in core and edits use engine commands
 
+mod bake_checks;
 mod bake_paint_brush;
 mod bake_visualization_panel;
 mod bake_visualization_toggles;
 mod breadcrumb;
 mod common_settings;
 mod section_opening;
+pub(crate) use bake_checks::bake_warnings;
 pub use bake_paint_brush::BakePaintBrush;
 pub(crate) use bake_visualization_panel::bake_visualization_panel;
 pub use bake_visualization_toggles::BakeVisualizationToggles;
@@ -229,10 +231,15 @@ fn preview_control(app: &mut TextureCraftApp, ui: &mut Ui) {
     }
 }
 
+/// The bake bar's gap from the bottom of the 3D view, in points (the pre-bake warnings sit above it)
+pub(super) const BAKE_BAR_MARGIN: f32 = 16.0;
+
 pub(crate) fn bake_bar(app: &mut TextureCraftApp, ctx: &egui::Context, viewport: egui::Rect) {
-    egui::Area::new(egui::Id::unique("bake_bar")).constrain_to(viewport).anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -16.0)).default_width(0.0).show(
-        ctx,
-        |ui| {
+    egui::Area::new(egui::Id::unique("bake_bar"))
+        .constrain_to(viewport)
+        .anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -BAKE_BAR_MARGIN))
+        .default_width(0.0)
+        .show(ctx, |ui| {
             if let Some(status) = app.bake_status() {
                 ui.vertical_centered(|ui| ui.label(egui::RichText::new(status).strong()));
             }
@@ -264,6 +271,5 @@ pub(crate) fn bake_bar(app: &mut TextureCraftApp, ctx: &egui::Context, viewport:
                     app.ui.mode = Mode::Painting;
                 }
             });
-        },
-    );
+        });
 }

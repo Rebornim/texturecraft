@@ -43,6 +43,10 @@ const RGB: [&str; 3] = ["R", "G", "B"];
 /// A channel box's side, and the greys a constant box spans
 const BOX_SIZE: f32 = 34.0;
 const BOX_RADIUS: f32 = 5.0;
+/// A palette chip's height, text size and the room either side of its name
+const CHIP_HEIGHT: f32 = 20.0;
+const CHIP_TEXT_SIZE: f32 = 11.0;
+const CHIP_PADDING: f32 = 7.0;
 /// Space above each palette group
 const PALETTE_GROUP_GAP: f32 = 6.0;
 const BOX_CONSTANT_FLOOR: f32 = 40.0;
@@ -251,9 +255,13 @@ pub fn tab(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[ExportPreset], wi
     column(ui, outputs_width, &mut |ui| outputs(app, ui));
     ui.separator();
     let openpbr = app.ui.export.openpbr_names;
-    column(ui, INPUTS_WIDTH, &mut |ui| input_maps(ui, openpbr));
+    // The maps the shown template reads, coloured like their channel boxes
+    let shown = app.ui.export.draft.clone().or_else(|| selected(app));
+    let used: Vec<SourceRef> =
+        shown.iter().flat_map(|preset| preset.maps.iter()).flat_map(|map| map.channels.iter()).map(|(_, source)| with_component(source, 0)).collect();
+    column(ui, INPUTS_WIDTH, &mut |ui| input_maps(ui, openpbr, &used));
     ui.separator();
-    column(ui, MESH_WIDTH, &mut mesh_and_converted_maps);
+    column(ui, MESH_WIDTH, &mut |ui| mesh_and_converted_maps(ui, &used));
     if let Some(a) = list_action {
         apply(app, ui.ctx(), a);
     }
@@ -811,10 +819,20 @@ fn preset_row(ui: &mut Ui, icon: &str, name: &str, selected: bool) -> egui::Resp
     row
 }
 
-/// An input map to drag onto an output channel: a chip
-fn palette_item(ui: &mut Ui, label: &str, source: &SourceRef) {
-    let item = chip(ui, label, false).interact(egui::Sense::drag());
+/// An input map to drag onto an output channel: a chip, filled with its boxes' colour when the template reads it
+fn palette_item(ui: &mut Ui, label: &str, source: &SourceRef, used: bool) {
+    let tk = Tokens::get(ui.ctx());
+    let galley = ui.painter().layout_no_wrap(label.to_string(), egui::FontId::proportional(CHIP_TEXT_SIZE), tk.text);
+    let (rect, item) = ui.allocate_exact_size(vec2(galley.size().x + 2.0 * CHIP_PADDING, CHIP_HEIGHT), egui::Sense::drag());
     item.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    let (fill, text) = match used {
+        true => (box_color(source), egui::Color32::WHITE),
+        false if item.hovered() => (tk.row_hover, tk.text),
+        false => (tk.row, tk.text_dim),
+    };
+    ui.painter().rect_filled(rect, BOX_RADIUS, fill);
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(CHIP_TEXT_SIZE), text);
+
     let item = item.on_hover_cursor(egui::CursorIcon::Grab);
     item.dnd_set_drag_payload(source.clone());
     if item.dragged()
@@ -826,7 +844,7 @@ fn palette_item(ui: &mut Ui, label: &str, source: &SourceRef) {
 }
 
 /// A palette group: its name, then its maps as chips that wrap
-fn palette_group(ui: &mut Ui, name: &str, items: &[(&str, SourceRef)]) {
+fn palette_group(ui: &mut Ui, name: &str, items: &[(&str, SourceRef)], used: &[SourceRef]) {
     let tk = Tokens::get(ui.ctx());
     ui.add_space(PALETTE_GROUP_GAP);
     if !name.is_empty() {
@@ -835,40 +853,40 @@ fn palette_group(ui: &mut Ui, name: &str, items: &[(&str, SourceRef)]) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
         for (label, source) in items {
-            palette_item(ui, label, source);
+            palette_item(ui, label, source, used.iter().any(|u| same_source(u, source)));
         }
     });
 }
 
 /// The Input maps column: texture set channels by lobe
-fn input_maps(ui: &mut Ui, openpbr: bool) {
+fn input_maps(ui: &mut Ui, openpbr: bool, used: &[SourceRef]) {
     panel_header(ui, tr("Input maps"), |_| {});
     egui::ScrollArea::vertical().id_salt("exp_inputs").auto_shrink([false; 2]).show(ui, |ui| {
         for (group, channels) in INPUT_GROUPS {
             let items: Vec<(&str, SourceRef)> =
                 channels.iter().map(|&channel| (tr(channel_name(channel, openpbr)), SourceRef::Channel { channel, component: 0 })).collect();
-            palette_group(ui, tr(group), &items);
+            palette_group(ui, tr(group), &items, used);
         }
     });
 }
 
 /// The Mesh maps column above the Converted maps (with the constants)
-fn mesh_and_converted_maps(ui: &mut Ui) {
+fn mesh_and_converted_maps(ui: &mut Ui, used: &[SourceRef]) {
     let half = ui.available_height() / 2.0;
     panel_header(ui, tr("Mesh maps"), |_| {});
     egui::ScrollArea::vertical().id_salt("exp_mesh_maps").max_height(half - ROW_HEIGHT).auto_shrink([false; 2]).show(ui, |ui| {
         let items: Vec<(&str, SourceRef)> =
             BakedMap::ALL.iter().map(|&map| (crate::i18n::baked_map_label(map), SourceRef::Baked { map, component: 0 })).collect();
-        palette_group(ui, "", &items);
+        palette_group(ui, "", &items, used);
     });
     ui.separator();
     panel_header(ui, tr("Converted maps"), |_| {});
     egui::ScrollArea::vertical().id_salt("exp_converted_maps").auto_shrink([false; 2]).show(ui, |ui| {
         let items: Vec<(&str, SourceRef)> = VirtualMap::ALL.iter().map(|&map| (tr(map.label()), SourceRef::Virtual { map, component: 0 })).collect();
-        palette_group(ui, "", &items);
+        palette_group(ui, "", &items, used);
         let constants =
             [(tr(n_("Black")), SourceRef::Constant(0.0)), (tr(n_("Gray 50%")), SourceRef::Constant(0.5)), (tr(n_("White")), SourceRef::Constant(1.0))];
-        palette_group(ui, tr("Constants"), &constants);
+        palette_group(ui, tr("Constants"), &constants, used);
     });
 }
 

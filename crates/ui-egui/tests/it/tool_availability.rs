@@ -88,6 +88,52 @@ fn shortcuts_skip_the_tools_the_shelf_greys() {
     assert_eq!(harness.state().session.tool.tool, Tool::ColorPicker);
 }
 
+/// Drag with the left button across the middle of the 3D view, as a stroke would
+fn drag_across_the_view(harness: &mut Harness<'_, TextureCraftApp>) {
+    const STEPS: usize = 4;
+    const STEP_POINTS: f32 = 15.0;
+
+    let center = harness.state().viewport_rect.center();
+    let modifiers = egui::Modifiers::NONE;
+    harness.hover_at(center);
+    harness.event(egui::Event::PointerButton { pos: center, button: egui::PointerButton::Primary, pressed: true, modifiers });
+    harness.run_steps(2);
+
+    for step in 1..=STEPS {
+        harness.hover_at(center + egui::vec2(STEP_POINTS * step as f32, 0.0));
+        harness.run_steps(1);
+    }
+
+    let end = center + egui::vec2(STEP_POINTS * STEPS as f32, 0.0);
+    harness.event(egui::Event::PointerButton { pos: end, button: egui::PointerButton::Primary, pressed: false, modifiers });
+    harness.run_steps(3);
+}
+
+#[test]
+fn a_tool_that_cant_act_ignores_the_view() {
+    let mut harness = app_harness();
+    let session = &mut harness.state_mut().session;
+    let paint = add_layer(session, "layer.add.paint");
+    select(session, paint, json!("content"));
+    harness.run_steps(4);
+
+    let steps_before = harness.state().session.history_labels().len();
+    drag_across_the_view(&mut harness);
+
+    assert!(harness.state().session.history_labels().len() > steps_before, "the drag reaches the mesh and paints a paint layer");
+
+    for tool in [Tool::Paint, Tool::PolygonFill, Tool::Path] {
+        select_fill_content(&mut harness, tool);
+        let steps_before = harness.state().session.history_labels().len();
+        drag_across_the_view(&mut harness);
+
+        let state = harness.state();
+        assert!(state.toasts.is_empty(), "{tool:?} on a fill layer: no error toast, got {:?}", state.toasts.first().map(|toast| &toast.text));
+        assert_eq!(state.session.history_labels().len(), steps_before, "{tool:?} on a fill layer changes nothing");
+        assert!(state.session.tool.path.points.is_empty(), "{tool:?} places no path points");
+    }
+}
+
 #[test]
 fn bake_painting_turns_on_the_shelf_paint_tool() {
     let mut session = texturecraft_engine::sample_session(256, 64).unwrap();

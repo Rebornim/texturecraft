@@ -48,18 +48,20 @@ fn id(ui: &mut Ui, settings: &mut IdSettings) {
             (IdColorSource::VertexColor, tr("Vertex Color")),
             (IdColorSource::MaterialColor, tr("Material Color")),
             (IdColorSource::FileId, tr("File ID")),
-            (IdColorSource::MeshId, tr("Mesh ID")),
+            (IdColorSource::MeshId, tr("Mesh ID / Polygroup")),
             (IdColorSource::Submesh, tr("Submesh")),
         ],
     );
-    if matches!(settings.source, IdColorSource::FileId | IdColorSource::MeshId | IdColorSource::Submesh) {
+    // Dependent controls show greyed, never hidden, as in the reference
+    let generates_colors = matches!(settings.source, IdColorSource::FileId | IdColorSource::MeshId | IdColorSource::Submesh);
+    ui.add_enabled_ui(generates_colors, |ui| {
         choice(
             ui,
             tr("Color Generator"),
             &mut settings.generator,
             &[(IdColorGenerator::Random, tr("Random")), (IdColorGenerator::HueShift, tr("Hue Shift")), (IdColorGenerator::Grayscale, tr("Grayscale"))],
         );
-    }
+    });
 }
 
 fn rays(ui: &mut Ui, settings: &mut RaySettings) {
@@ -101,9 +103,7 @@ fn ambient_occlusion(ui: &mut Ui, settings: &mut AmbientOcclusionSettings) {
         ],
     );
     ui.checkbox(&mut settings.ground_plane.enabled, tr("Ground Plane"));
-    if settings.ground_plane.enabled {
-        number(ui, tr("Ground Plane Offset"), &mut settings.ground_plane.offset, 0.0..=100.0, 2);
-    }
+    ui.add_enabled_ui(settings.ground_plane.enabled, |ui| number(ui, tr("Ground Plane Offset"), &mut settings.ground_plane.offset, 0.0..=100.0, 2));
 }
 
 fn curvature(ui: &mut Ui, settings: &mut CurvatureSettings) {
@@ -111,15 +111,14 @@ fn curvature(ui: &mut Ui, settings: &mut CurvatureSettings) {
         ui,
         tr("Method"),
         &mut settings.method,
-        &[(CurvatureMethod::NormalMap, tr("Generate from Normal Map")), (CurvatureMethod::Mesh, tr("Generate from Mesh"))],
+        &[(CurvatureMethod::Mesh, tr("Generate from Mesh")), (CurvatureMethod::NormalMap, tr("Generate from Normal Map"))],
     );
     match settings.method {
         CurvatureMethod::NormalMap => {
             number(ui, tr("Details"), &mut settings.normal_map.details, 0.0..=1.0, 2);
             ui.checkbox(&mut settings.normal_map.enable_seams, tr("Enable Seams"));
-            if settings.normal_map.enable_seams {
-                number(ui, tr("Seams Intensity"), &mut settings.normal_map.seams_intensity, 0.0..=1.0, 2);
-            }
+            let seams = settings.normal_map.enable_seams;
+            ui.add_enabled_ui(seams, |ui| number(ui, tr("Seams Intensity"), &mut settings.normal_map.seams_intensity, 0.0..=1.0, 2));
         }
         CurvatureMethod::Mesh => {
             let mesh = &mut settings.mesh;
@@ -129,17 +128,31 @@ fn curvature(ui: &mut Ui, settings: &mut CurvatureSettings) {
                 mesh.sampling_radius = mesh.sampling_radius.min(1.0);
             }
             occlusion(ui, tr("Self Intersection"), &mut mesh.self_intersection);
-            ui.checkbox(&mut mesh.auto_tonemapping, tr("Auto Tonemapping"));
-            if !mesh.auto_tonemapping {
+            ui.checkbox(&mut mesh.auto_tonemapping, tr("Auto Tonemapping (per UV Tile)"));
+            ui.add_enabled_ui(!mesh.auto_tonemapping, |ui| {
                 number(ui, tr("Value Bounds Min"), &mut mesh.value_min, -10.0..=10.0, 2);
                 number(ui, tr("Value Bounds Max"), &mut mesh.value_max, -10.0..=10.0, 2);
-            }
+            });
         }
     }
 }
 
 fn position(ui: &mut Ui, settings: &mut PositionSettings) {
-    choice(ui, tr("Axis"), &mut settings.axis, &[(PositionAxis::All, tr("All")), (PositionAxis::X, "X"), (PositionAxis::Y, "Y"), (PositionAxis::Z, "Z")]);
+    // The reference splits the axis into a Mode and an Axis that applies only to One Axis
+    let mut one_axis = settings.axis != PositionAxis::All;
+    choice(ui, tr("Mode"), &mut one_axis, &[(false, tr("All Axis")), (true, tr("One Axis"))]);
+    if one_axis && settings.axis == PositionAxis::All {
+        settings.axis = PositionAxis::X;
+    } else if !one_axis {
+        settings.axis = PositionAxis::All;
+    }
+    ui.add_enabled_ui(one_axis, |ui| {
+        let mut axis = if one_axis { settings.axis } else { PositionAxis::X };
+        choice(ui, tr("Axis"), &mut axis, &[(PositionAxis::X, "X"), (PositionAxis::Y, "Y"), (PositionAxis::Z, "Z")]);
+        if one_axis {
+            settings.axis = axis;
+        }
+    });
     choice(
         ui,
         tr("Normalization Type"),
@@ -163,7 +176,7 @@ fn thickness(ui: &mut Ui, settings: &mut ThicknessSettings) {
         &mut settings.normalization,
         &[
             (ThicknessNormalization::RelativeToRayDistances, tr("Relative to Ray Distances")),
-            (ThicknessNormalization::RelativeToMinMax, tr("Relative to Min/Max")),
+            (ThicknessNormalization::RelativeToMinMax, tr("Relative to Min/Max (per UV Tile)")),
             (ThicknessNormalization::None, tr("None")),
         ],
     );
@@ -176,14 +189,13 @@ fn height(ui: &mut Ui, settings: &mut HeightSettings) {
         &mut settings.normalization,
         &[
             (HeightNormalization::RelativeToRayDistances, tr("Relative to Ray Distances")),
-            (HeightNormalization::RelativeToLowMesh, tr("Relative to Low Mesh")),
-            (HeightNormalization::RelativeToMinMax, tr("Relative to Min/Max")),
+            (HeightNormalization::RelativeToLowMesh, tr("Relative to Low Mesh (per UV Tile)")),
+            (HeightNormalization::RelativeToMinMax, tr("Relative to Min/Max (per UV Tile)")),
             (HeightNormalization::Manual, tr("Manual")),
         ],
     );
-    if settings.normalization == HeightNormalization::Manual {
-        number(ui, tr("Scaling Divisor"), &mut settings.scaling_divisor, 0.00001..=100.0, 5);
-    }
+    let manual = settings.normalization == HeightNormalization::Manual;
+    ui.add_enabled_ui(manual, |ui| number(ui, tr("Scaling Divisor"), &mut settings.scaling_divisor, 0.00001..=100.0, 5));
 }
 
 fn bent_normal(ui: &mut Ui, settings: &mut BentNormalSettings) {

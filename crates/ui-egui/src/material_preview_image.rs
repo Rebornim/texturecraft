@@ -99,27 +99,14 @@ mod tests {
             image::RgbaImage::from_raw(size as u32, size as u32, rgba).unwrap().save(dir.join(name)).unwrap();
         };
         let base = ("layer.add.fill", json!({"color": [0.16, 0.3, 0.34], "roughness": 0.5, "metallic": 0.0}));
-        // Probe: where a plain planar patch lands for each scale and axis
-        for axis in [0u64, 1, 2] {
-            for scale in [0.7f64, 1.0, 1.5, 2.5] {
-                let commands = [
-                    base.clone(),
-                    ("layer.add.fill", json!({"color": [0.9, 0.52, 0.28], "roughness": 0.4, "metallic": 0.0})),
-                    ("layer.fill.projection", json!({"projection": "planar", "axis": axis, "scale": scale, "wrap": "none"})),
-                ];
-                if let Some(pixels) = orb.commands(&commands, 180) {
-                    save(format!("probe_axis{axis}_scale{scale}.png"), pixels, 180);
-                }
-            }
-        }
         // The sticker: orange patch slightly larger (smaller scale) under the checker patch
         for axis in [0u64, 1, 2] {
-            for scale in [1.5f64, 2.5] {
+            for scale in [3.0f64, 4.5] {
                 let planar = |scale: f64| json!({"projection": "planar", "axis": axis, "scale": scale, "wrap": "none"});
                 let commands = [
                     base.clone(),
                     ("layer.add.fill", json!({"color": [0.9, 0.52, 0.28], "roughness": 0.4, "metallic": 0.0})),
-                    ("layer.fill.projection", planar(scale * 0.95)),
+                    ("layer.fill.projection", planar(scale * 0.93)),
                     ("layer.add.fill", json!({"color": [0.5, 0.5, 0.5], "roughness": 0.4, "metallic": 0.0})),
                     ("layer.fill.set", json!({"channel": "baseColor", "procedural": "Checker", "scale": 2.0, "low": [0.3, 0.31, 0.33], "high": [0.8, 0.81, 0.83]})),
                     ("layer.fill.projection", planar(scale)),

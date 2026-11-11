@@ -435,7 +435,7 @@ mod tests {
         let path = PathBuf::from("changed-alpha.tcbrush");
         let settings = BrushSettings { alpha_image: Some("alpha.png".into()), ..BrushSettings::default() };
         thumbs.saved_brush_previews.insert(path.clone(), (Some(settings), None, 0));
-        let image = |value| Arc::new(ImageRes { width: 2, height: 2, rgba: vec![[value; 4]; 4], srgb: false });
+        let image = |value| Arc::new(ImageRes::new(2, 2, vec![[value; 4]; 4], false));
         let mut images: ImageStore = [("alpha.png".into(), image(0.2))].into();
 
         let old_preview = thumbs.saved_brush_preview(&path, &images);
@@ -522,8 +522,8 @@ mod tests {
         let first_path = PathBuf::from("first.tcbrush");
         let second_path = PathBuf::from("second.tcbrush");
         let settings = BrushSettings { alpha_image: Some("alpha.png".into()), ..BrushSettings::default() };
-        let old_image = Arc::new(ImageRes { width: IMAGE_SIDE, height: IMAGE_SIDE, rgba: vec![[1.0; 4]; IMAGE_TEXELS], srgb: false });
-        let other_image = Arc::new(ImageRes { width: IMAGE_SIDE, height: IMAGE_SIDE, rgba: vec![[0.5; 4]; IMAGE_TEXELS], srgb: false });
+        let old_image = Arc::new(ImageRes::new(IMAGE_SIDE, IMAGE_SIDE, vec![[1.0; 4]; IMAGE_TEXELS], false));
+        let other_image = Arc::new(ImageRes::new(IMAGE_SIDE, IMAGE_SIDE, vec![[0.5; 4]; IMAGE_TEXELS], false));
         let old_weak = Arc::downgrade(&old_image);
         let other_weak = Arc::downgrade(&other_image);
         assert!(old_image.rgba.iter().map(|pixel| std::hint::black_box(pixel[0])).sum::<f32>() > 0.0);
@@ -544,7 +544,7 @@ mod tests {
             Arc::strong_count(&images["alpha.png"])
         );
 
-        let replacement = Arc::new(ImageRes { width: IMAGE_SIDE, height: IMAGE_SIDE, rgba: vec![[0.0; 4]; IMAGE_TEXELS], srgb: false });
+        let replacement = Arc::new(ImageRes::new(IMAGE_SIDE, IMAGE_SIDE, vec![[0.0; 4]; IMAGE_TEXELS], false));
         images.insert("alpha.png".into(), replacement);
         drop(thumbs.saved_brush_preview(&first_path, &images));
         assert!(other_weak.upgrade().is_none(), "another saved brush does not retain the old project image");
@@ -558,7 +558,7 @@ mod tests {
     fn replacing_an_image_rebuilds_its_preview() {
         let context = egui::Context::default();
         let mut thumbs = Thumbs::default();
-        let image = |value| Arc::new(ImageRes { width: 2, height: 2, rgba: vec![[value; 4]; 4], srgb: false });
+        let image = |value| Arc::new(ImageRes::new(2, 2, vec![[value; 4]; 4], false));
 
         let first_image = image(0.2);
         let replacement_image = image(0.8);
@@ -575,7 +575,7 @@ mod tests {
         let mut images = ImageStore::new();
         for index in 0..3 {
             let name = format!("image-{index}");
-            images.insert(name, Arc::new(ImageRes { width: 2, height: 2, rgba: vec![[index as f32; 4]; 4], srgb: false }));
+            images.insert(name, Arc::new(ImageRes::new(2, 2, vec![[index as f32; 4]; 4], false)));
         }
 
         for (name, image) in &images {
@@ -595,7 +595,7 @@ mod tests {
         assert!(after_pixel_bytes < before_pixel_bytes);
         assert!(thumbs.images.contains_key("image-2"));
 
-        images.insert("image-3".into(), Arc::new(ImageRes { width: 2, height: 2, rgba: vec![[0.7; 4]; 4], srgb: false }));
+        images.insert("image-3".into(), Arc::new(ImageRes::new(2, 2, vec![[0.7; 4]; 4], false)));
         drop(thumbs.image(&context, "image-3", &images["image-3"]));
         thumbs.sync_images(&images, 2);
         assert_eq!(thumbs.images.len(), 2);

@@ -77,6 +77,7 @@ pub(crate) fn pattern(kind: ProceduralKind, scale: f32, seed: u32, contrast: f32
     EffectKind::Fill {
         source: Source::Procedural { pattern: Procedural { kind, scale, seed, contrast, balance: 0.0, invert: false }, low: [0.0; 3], high: [1.0; 3] },
         projection: Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3] },
+        sampling: Default::default(),
     }
 }
 

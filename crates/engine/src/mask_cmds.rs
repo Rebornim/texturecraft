@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use texturecraft_core::{
     BakedMap, BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask,
-    MaskBackground, MicroDetail, OutputResolution, Procedural, ProceduralKind, Project, ResolutionMode, Source,
+    MaskBackground, MicroDetail, OutputResolution, Procedural, ProceduralKind, Project, ResolutionMode, Sampling, Source,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
@@ -40,7 +40,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add fill",
             ["Layers", "Effects"],
             None,
-            "{layer?, target?: mask|content, name?, mask: value?: 0..1 | image?: resource name | procedural?: kind, scale?, seed? | anchor?: anchor effect id, anchorChannel?: channel (height); content: color?, roughness?, metallic?, height?, opacity? (default: every layer channel); projection?}",
+            "{layer?, target?: mask|content, name?, mask: value?: 0..1 | image?: resource name | procedural?: kind, scale?, seed? | anchor?: anchor effect id, anchorChannel?: channel (height); content: color?, roughness?, metallic?, height?, opacity? (default: every layer channel); projection?; filtering?: bilinearHq|bilinearSharp|nearest}",
             has_layer,
             add_fill
         ),
@@ -298,11 +298,13 @@ fn add_fill(session: &mut Session, params: &Value) -> Result<Value> {
     const MAX_PATTERN_SCALE: f32 = 1000.0;
 
     let projection = projection_from(params, CMD, None)?;
+    let sampling = crate::layer_cmds::sampling_from(params, CMD, Sampling::default())?;
     let blend = blend_param(CMD, params, "blend")?.unwrap_or(BlendMode::Normal);
     let layer = layer_param(session, CMD, params)?;
 
     if content_target(params, CMD)? {
         let mut fill = crate::layer_cmds::fill_from(CMD, params)?;
+        fill.sampling = sampling;
         if fill.sources.is_empty() {
             fill.sources = session.doc.project.layer(layer)?.channels.keys().map(|channel| (*channel, Source::uniform_of(*channel))).collect();
         }
@@ -315,12 +317,12 @@ fn add_fill(session: &mut Session, params: &Value) -> Result<Value> {
         let channel = channel_param(CMD, params, "anchorChannel")?.unwrap_or(Channel::Height);
         let reader = session.doc.project.mask_owner(layer);
         let source = anchor_source(session, CMD, reader, LayerId(anchor), channel)?;
-        return push_effect(session, params, EffectKind::Fill { source, projection }, blend);
+        return push_effect(session, params, EffectKind::Fill { source, projection, sampling }, blend);
     }
 
     if let Some(name) = strp(params, "image") {
         let source = image_source(session, CMD, name)?;
-        return push_effect(session, params, EffectKind::Fill { source, projection }, blend);
+        return push_effect(session, params, EffectKind::Fill { source, projection, sampling }, blend);
     }
 
     let source = match strp(params, "procedural") {
@@ -339,7 +341,7 @@ fn add_fill(session: &mut Session, params: &Value) -> Result<Value> {
         None => Source::Uniform([f32p(params, "value").unwrap_or(1.0).clamp(0.0, 1.0); 3]),
     };
 
-    push_effect(session, params, EffectKind::Fill { source, projection }, blend)
+    push_effect(session, params, EffectKind::Fill { source, projection, sampling }, blend)
 }
 
 /// Apply `params` to `generator`, using `command` in errors
@@ -686,7 +688,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
             // The swapped filter was built with the parameters already
             EffectKind::Filter(_) if swaps_filter => {}
             EffectKind::Filter(filter) => crate::filter_lib::apply(params, filter, CMD)?,
-            EffectKind::Fill { source, projection } => {
+            EffectKind::Fill { source, projection, .. } => {
                 if let Some(anchor) = anchor {
                     *source = anchor;
                 } else if let Some(image) = image {

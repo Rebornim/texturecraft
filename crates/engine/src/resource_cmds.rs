@@ -32,7 +32,7 @@ pub fn specs() -> Vec<CommandSpec> {
 pub(crate) const MAX_BYTES: usize = 512 << 20;
 
 pub(crate) fn decoded(d: texturecraft_formats::DecodedImage) -> Arc<ImageRes> {
-    Arc::new(ImageRes { width: d.width, height: d.height, rgba: d.rgba, srgb: d.srgb })
+    Arc::new(ImageRes::new(d.width, d.height, d.rgba, d.srgb))
 }
 
 impl Session {

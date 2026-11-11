@@ -427,7 +427,7 @@ mod tests {
     #[test]
     fn image_alpha_follows_the_image_and_is_zero_outside() {
         // Left half white, right half black (2×1 image, sampled at texel centers).
-        let img = ImageRes { width: 2, height: 1, rgba: vec![[1.0; 4], [0.0, 0.0, 0.0, 1.0]], srgb: true };
+        let img = ImageRes::new(2, 1, vec![[1.0; 4], [0.0, 0.0, 0.0, 1.0]], true);
         let shape = Shape { alpha: BrushAlpha::Round, image: Some(&img), library: None, level: 0 };
         assert!(shape.sample(-0.5, 0.0, 0.5, 0) > 0.99);
         assert!(shape.sample(0.5, 0.0, 0.5, 0) < 0.01);

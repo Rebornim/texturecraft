@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use texturecraft_core::{Channel, ChannelKind, LayerId};
+use texturecraft_core::{Channel, ChannelKind, Filtering, LayerId};
 use texturecraft_texel::{TileImage, from_u16, from_u16_signed};
 
 /// Painted data of one paint layer channel: premultiplied value(s) plus coverage, u16 per
@@ -66,16 +66,73 @@ pub struct ImageRes {
     pub rgba: Vec<[f32; 4]>,
     /// 8/16-bit images are sRGB-encoded; color channels linearize them.
     pub srgb: bool,
+    /// Halved copies of the image, built on first use by [`Filtering::BilinearHq`]
+    pub mips: std::sync::OnceLock<Vec<MipLevel>>,
+}
+
+/// One halved copy of an image (box-filtered, wrapping at the edges)
+#[derive(Clone, Debug, PartialEq)]
+pub struct MipLevel {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<[f32; 4]>,
 }
 
 /// Image resources by name.
 pub type ImageStore = HashMap<String, std::sync::Arc<ImageRes>>;
 
+/// Image levels below the full image at most: a 64k image halves 16 times to 1 texel
+const MAX_MIP_LEVELS: usize = 16;
+
+fn texel_of(rgba: &[[f32; 4]], width: u32, height: u32, x: i64, y: i64) -> [f32; 4] {
+    let (w, h) = (width.max(1) as i64, height.max(1) as i64);
+    let i = (y.rem_euclid(h) * w + x.rem_euclid(w)) as usize;
+    rgba.get(i).copied().unwrap_or([0.0; 4])
+}
+
+/// Bilinear sample of `rgba` with wrap-around (texture coordinates, v down).
+fn bilinear(rgba: &[[f32; 4]], width: u32, height: u32, u: f32, v: f32) -> [f32; 4] {
+    let fx = u * width as f32 - 0.5;
+    let fy = v * height as f32 - 0.5;
+    let (x0, y0) = (fx.floor() as i64, fy.floor() as i64);
+    let (tx, ty) = (fx - fx.floor(), fy - fy.floor());
+    let texel = |x, y| texel_of(rgba, width, height, x, y);
+    let (a, b, c, d) = (texel(x0, y0), texel(x0 + 1, y0), texel(x0, y0 + 1), texel(x0 + 1, y0 + 1));
+    let mut out = [0.0; 4];
+    for k in 0..4 {
+        let top = a[k] + (b[k] - a[k]) * tx;
+        let bot = c[k] + (d[k] - c[k]) * tx;
+        out[k] = top + (bot - top) * ty;
+    }
+    out
+}
+
+/// `rgba` halved: each texel averages the 2×2 texels it covers (odd sizes wrap)
+fn halve(rgba: &[[f32; 4]], width: u32, height: u32) -> MipLevel {
+    let (w, h) = ((width / 2).max(1), (height / 2).max(1));
+    let mut out = Vec::with_capacity(w as usize * h as usize);
+    for y in 0..i64::from(h) {
+        for x in 0..i64::from(w) {
+            let mut sum = [0.0f32; 4];
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let t = texel_of(rgba, width, height, x * 2 + dx, y * 2 + dy);
+                for k in 0..4 {
+                    sum[k] += t[k] * 0.25;
+                }
+            }
+            out.push(sum);
+        }
+    }
+    MipLevel { width: w, height: h, rgba: out }
+}
+
 impl ImageRes {
+    pub fn new(width: u32, height: u32, rgba: Vec<[f32; 4]>, srgb: bool) -> ImageRes {
+        ImageRes { width, height, rgba, srgb, mips: std::sync::OnceLock::new() }
+    }
+
     fn texel(&self, x: i64, y: i64) -> [f32; 4] {
-        let (w, h) = (self.width.max(1) as i64, self.height.max(1) as i64);
-        let i = (y.rem_euclid(h) * w + x.rem_euclid(w)) as usize;
-        self.rgba.get(i).copied().unwrap_or([0.0; 4])
+        texel_of(&self.rgba, self.width, self.height, x, y)
     }
 
     /// Bilinear sample with wrap-around (texture coordinates, v down).
@@ -83,17 +140,51 @@ impl ImageRes {
         if !u.is_finite() || !v.is_finite() {
             return [0.0; 4];
         }
-        let fx = u * self.width as f32 - 0.5;
-        let fy = v * self.height as f32 - 0.5;
-        let (x0, y0) = (fx.floor() as i64, fy.floor() as i64);
-        let (tx, ty) = (fx - fx.floor(), fy - fy.floor());
-        let (a, b, c, d) = (self.texel(x0, y0), self.texel(x0 + 1, y0), self.texel(x0, y0 + 1), self.texel(x0 + 1, y0 + 1));
-        let mut out = [0.0; 4];
-        for k in 0..4 {
-            let top = a[k] + (b[k] - a[k]) * tx;
-            let bot = c[k] + (d[k] - c[k]) * tx;
-            out[k] = top + (bot - top) * ty;
+        bilinear(&self.rgba, self.width, self.height, u, v)
+    }
+
+    /// The halved levels, built the first time they are asked for
+    fn mips(&self) -> &[MipLevel] {
+        self.mips.get_or_init(|| {
+            let mut levels: Vec<MipLevel> = Vec::new();
+            let (mut w, mut h) = (self.width, self.height);
+            while (w > 1 || h > 1) && levels.len() < MAX_MIP_LEVELS {
+                let next = match levels.last() {
+                    Some(l) => halve(&l.rgba, l.width, l.height),
+                    None => halve(&self.rgba, w, h),
+                };
+                (w, h) = (next.width, next.height);
+                levels.push(next);
+            }
+            levels
+        })
+    }
+
+    /// Sample at (`u`, `v`) with `filtering`; `footprint` is how many image texels one surface
+    /// texel spans (1 or less = the image is not shrunk).
+    pub fn sample_filtered(&self, u: f32, v: f32, filtering: Filtering, footprint: f32) -> [f32; 4] {
+        if !u.is_finite() || !v.is_finite() {
+            return [0.0; 4];
         }
-        out
+        match filtering {
+            Filtering::Nearest => self.texel((u * self.width as f32).floor() as i64, (v * self.height as f32).floor() as i64),
+            Filtering::BilinearSharp => self.sample(u, v),
+            Filtering::BilinearHq => {
+                let lod = if footprint.is_finite() && footprint > 1.0 { footprint.log2() } else { 0.0 };
+                let level = |i: usize| match i.checked_sub(1).and_then(|m| self.mips().get(m)) {
+                    Some(l) => bilinear(&l.rgba, l.width, l.height, u, v),
+                    None if i == 0 => self.sample(u, v),
+                    None => self.mips().last().map_or_else(|| self.sample(u, v), |l| bilinear(&l.rgba, l.width, l.height, u, v)),
+                };
+                let lo = lod.floor() as usize;
+                let t = lod - lod.floor();
+                let a = level(lo);
+                if t <= 0.0 {
+                    return a;
+                }
+                let b = level(lo + 1);
+                [0, 1, 2, 3].map(|k| a[k] + (b[k] - a[k]) * t)
+            }
+        }
     }
 }

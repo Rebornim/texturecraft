@@ -7,10 +7,13 @@ use serde_json::{Value, json};
 use texturecraft_engine::core::{BakedMap, CurvatureDetail, CurvatureMode, Generator, GeneratorKind, LayerId, OutputResolution, ResolutionMode, Source};
 
 use crate::TextureCraftApp;
-use crate::dock::{anchor_label, anchors_below, image_drop, image_menu};
+use crate::dock::{anchor_label, anchors_below, image_drop, image_menu, mesh_map_color};
 use crate::i18n::{baked_map_label, tr, trf};
 use crate::theme::{Tokens, caption};
 use crate::widgets::{combo, section, slider_edit};
+
+/// Edge of the picture beside each image input.
+const INPUT_TILE_SIZE: f32 = 32.0;
 
 /// Width of the names in the Attributes section, so their values line up.
 const ATTRIBUTE_KEY_WIDTH: f32 = 80.0;
@@ -160,20 +163,27 @@ fn ramp_parameters(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, generator: &
     seed_row(app, ui, id, generator.seed);
 }
 
-/// The seed with a button that picks a new one, and a field to type it.
+/// The seed with a button that picks a new one and a pencil that opens a field to type it, as in the reference.
 fn seed_row(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, seed: u32) {
+    let typing_id = ui.make_persistent_id(("generator_seed_typing", id));
+    let mut typing = ui.data(|data| data.get_temp::<bool>(typing_id)).unwrap_or(false);
     ui.horizontal(|ui| {
         ui.label(tr("Seed"));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let mut typed = seed;
-            if ui.add(egui::DragValue::new(&mut typed).speed(1.0)).changed() {
-                app.run("effect.set", json!({"effect": id, "seed": typed}));
+            if ui.selectable_label(typing, ic::PENCIL_SIMPLE).on_hover_text(tr("Type the seed")).clicked() {
+                typing = !typing;
             }
-            if ui.button(tr("Random")).clicked() {
+            if typing {
+                let mut typed = seed;
+                if ui.add(egui::DragValue::new(&mut typed).speed(1.0)).changed() {
+                    app.run("effect.set", json!({"effect": id, "seed": typed}));
+                }
+            } else if ui.button(tr("Random")).on_hover_text(trf("Seed {seed}", &[("seed", &seed)])).clicked() {
                 app.run("effect.set", json!({"effect": id, "seed": random_seed(seed)}));
             }
         });
     });
+    ui.data_mut(|data| data.insert_temp(typing_id, typing));
 }
 
 /// A seed different from `current`, from the clock.
@@ -258,7 +268,11 @@ fn input_slot(app: &mut TextureCraftApp, ui: &mut Ui, layer: LayerId, id: u64, m
     };
     let group = ui.group(|ui| {
         ui.horizontal(|ui| {
-            ui.label(RichText::new(tr(baked_map_label(map))).strong());
+            input_tile(app, ui, map, source);
+            ui.vertical(|ui| {
+                ui.label(RichText::new(tr(baked_map_label(map))).strong());
+                ui.label(RichText::new(&current).size(10.5).color(tk.text_dim));
+            });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if source.is_some() && ui.button(ic::X).on_hover_text(tr("Read the mesh map again")).clicked() {
                     app.run("effect.set", json!({"effect": id, "input": input, "inputBaked": true}));
@@ -266,7 +280,7 @@ fn input_slot(app: &mut TextureCraftApp, ui: &mut Ui, layer: LayerId, id: u64, m
             });
         });
         let anchors = anchors_below(app, layer);
-        combo(ui, tr("Source"), current, |ui| {
+        combo(ui, tr("Source"), current.clone(), |ui| {
             if ui.selectable_label(source.is_none(), tr("Mesh map")).clicked() {
                 app.run("effect.set", json!({"effect": id, "input": input, "inputBaked": true}));
             }
@@ -303,4 +317,35 @@ fn input_slot(app: &mut TextureCraftApp, ui: &mut Ui, layer: LayerId, id: u64, m
     if let Some(name) = image_drop(ui, &group.response) {
         app.run("effect.set", json!({"effect": id, "input": input, "inputImage": name}));
     }
+}
+
+/// The picture of what an input reads: the image itself, the uniform value's gray, or the mesh map's swatch (as in the texture set's list).
+fn input_tile(app: &mut TextureCraftApp, ui: &mut Ui, map: BakedMap, source: Option<&Source>) {
+    let tk = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(INPUT_TILE_SIZE, INPUT_TILE_SIZE), egui::Sense::hover());
+    let painter = ui.painter();
+    let whole = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+    match source {
+        Some(Source::Image { name, .. }) => match app.session.images.get(name) {
+            Some(image) => {
+                let texture = app.thumbs.image(ui.ctx(), name, image);
+                painter.image(texture.id(), rect, whole, egui::Color32::WHITE);
+            }
+            None => {
+                painter.rect_filled(rect, 2.0, tk.button);
+            }
+        },
+        Some(Source::Uniform(value)) => {
+            painter.rect_filled(rect, 2.0, egui::Color32::from_gray((value[0].clamp(0.0, 1.0) * 255.0).round() as u8));
+        }
+        Some(Source::Anchor { .. } | Source::Procedural { .. }) => {
+            painter.rect_filled(rect, 2.0, tk.button);
+            painter.text(rect.center(), egui::Align2::CENTER_CENTER, ic::ANCHOR, egui::FontId::proportional(16.0), tk.text_dim);
+        }
+        None => {
+            let baked = app.session.doc.baked.get(&app.session.ts()).is_some_and(|baked| baked.maps.contains_key(&map));
+            painter.rect_filled(rect, 2.0, if baked { mesh_map_color(map) } else { tk.button });
+        }
+    }
+    painter.rect_stroke(rect, 2.0, egui::Stroke::new(1.0, tk.button_border), egui::StrokeKind::Outside);
 }

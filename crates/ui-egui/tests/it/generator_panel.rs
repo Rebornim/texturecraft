@@ -120,4 +120,9 @@ fn generator_panel_snapshots() {
     harness.state_mut().session.update();
     harness.run_steps(12);
     harness.render().unwrap().save(directory.join("generator-panel-adjusted.png")).unwrap();
+
+    // The effect row with its blend mode and opacity, in the layer stack
+    harness.state_mut().ui.dock.focus(Panel::Layers);
+    harness.run_steps(12);
+    harness.render().unwrap().save(directory.join("generator-effect-row.png")).unwrap();
 }

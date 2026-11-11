@@ -26,6 +26,8 @@ const PROCEDURAL_PX: usize = 64;
 const SWATCH_PX: usize = 64;
 /// Image resource preview size in pixels
 const IMAGE_PX: usize = 64;
+/// The [`ShelfPreview::key`] prefix of the user's saved files
+const SAVED_FILE_KEY_PREFIX: &str = "saved-";
 /// Big hover previews kept at most (the least recently shown go first)
 const BIG_PREVIEWS_KEPT: usize = 32;
 
@@ -190,6 +192,14 @@ impl Thumbs {
             preview @ ShelfPreview::SmartMaterial(_) => self.worker_rendered(ctx, preview, SPHERE_PX, false),
             preview => self.shelf(ctx, preview, SPHERE_PX),
         }
+    }
+
+    /// Drop the thumbnails and hover previews of the user's saved files, which may have changed on disk
+    pub fn forget_saved_files(&mut self) {
+        let current = |key: &String| !key.starts_with(SAVED_FILE_KEY_PREFIX);
+        self.shelf.retain(|key, _| current(key));
+        self.rendered.retain(|key, _| current(key));
+        self.big_shown.retain(current);
     }
 
     /// Smart mask thumbnail; None until the worker returns it

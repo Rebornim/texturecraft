@@ -53,6 +53,7 @@ mod shelf_entry;
 mod shelf_folders;
 pub mod shelf_preview;
 mod shelf_tabs;
+mod shelf_toolbar;
 mod soft_box;
 pub mod state;
 pub mod symmetry;

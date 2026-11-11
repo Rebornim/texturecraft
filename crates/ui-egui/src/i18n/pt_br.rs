@@ -427,7 +427,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Import HDR...", "Importar HDR..."),
     ("Import a template (.json)", "Importar um modelo (.json)"),
     ("Import an image (File > Import resources) to project it onto the mesh.", "Importe uma imagem (Arquivo > Importar recursos) para projetá-la na malha."),
-    ("Import images to use them in fills and masks", "Importe imagens para usá-las em preenchimentos e máscaras"),
     ("Import resources...", "Importar recursos..."),
     ("Import MaterialX material...", "Importar material MaterialX..."),
     ("MaterialX materials", "Materiais MaterialX"),
@@ -1164,4 +1163,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Browse folders", "Navegar pelas pastas"),
     ("Starter assets", "Recursos incluídos"),
     ("Your assets", "Seus recursos"),
+    ("Reset query", "Redefinir consulta"),
+    ("Refresh", "Atualizar"),
 ];

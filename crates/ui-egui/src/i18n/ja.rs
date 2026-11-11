@@ -424,7 +424,6 @@ pub const TABLE: &[(&str, &str)] = &[
         "Import an image (File > Import resources) to project it onto the mesh.",
         "画像をインポートすると (ファイル > リソースをインポート)、メッシュに投影できます。",
     ),
-    ("Import images to use them in fills and masks", "画像をインポートして塗りつぶしやマスクで使用"),
     ("Import resources...", "リソースをインポート..."),
     ("Import MaterialX material...", "MaterialX マテリアルをインポート..."),
     ("MaterialX materials", "MaterialX マテリアル"),
@@ -1161,4 +1160,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Browse folders", "フォルダーを参照"),
     ("Starter assets", "付属アセット"),
     ("Your assets", "マイアセット"),
+    ("Reset query", "クエリをリセット"),
+    ("Refresh", "更新"),
 ];

@@ -25,7 +25,9 @@ pub(crate) fn row(app: &mut TextureCraftApp, ui: &mut Ui) {
             let _ = std::fs::create_dir_all(&dir);
             if app.run("brush.preset.save", json!({"path": path.display().to_string()})).is_some() {
                 new_name.clear();
+                // Saving over a preset keeps its file name, so its tile must redraw
                 app.brushes = None;
+                app.thumbs.forget_saved_files();
             }
         }
 

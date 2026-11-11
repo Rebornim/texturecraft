@@ -418,7 +418,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Import HDR...", "HDR 가져오기..."),
     ("Import a template (.json)", "템플릿을 가져옵니다 (.json)"),
     ("Import an image (File > Import resources) to project it onto the mesh.", "메시에 투영할 이미지를 가져오세요 (파일 > 리소스 가져오기)."),
-    ("Import images to use them in fills and masks", "채우기와 마스크에 사용할 이미지를 가져옵니다"),
     ("Import resources...", "리소스 가져오기..."),
     ("Import MaterialX material...", "MaterialX 머티리얼 가져오기..."),
     ("MaterialX materials", "MaterialX 머티리얼"),
@@ -1146,4 +1145,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Browse folders", "폴더 찾아보기"),
     ("Starter assets", "기본 에셋"),
     ("Your assets", "내 에셋"),
+    ("Reset query", "쿼리 초기화"),
+    ("Refresh", "새로 고침"),
 ];

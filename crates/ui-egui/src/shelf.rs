@@ -251,21 +251,26 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
     let mut entries: Vec<ShelfEntry> = matching.into_iter().filter(|entry| crate::shelf_tabs::shows(tab, entry.tab())).collect();
     entries.sort_by_cached_key(|entry| entry.label().to_lowercase());
 
-    egui::ScrollArea::vertical().id_salt("shelf_scroll").auto_shrink([false, false]).show(ui, |ui| {
-        if filter.is_empty() && shown_tab == Some(Tab::Textures) {
-            import_images(app, ui, &ctx, entries.is_empty());
-        }
-        tiles(ui, |ui| {
-            for entry in &entries {
-                entry_tile(app, ui, &ctx, entry);
+    // The toolbar has its own strip at the panel's bottom, so nothing above it can push it out
+    let area = ui.available_rect_before_wrap();
+    let toolbar_top = (area.bottom() - crate::shelf_toolbar::height(ui)).max(area.top());
+    let grid_rect = egui::Rect::from_min_max(area.min, egui::pos2(area.right(), toolbar_top));
+    let toolbar_rect = egui::Rect::from_min_max(egui::pos2(area.left(), toolbar_top), area.max);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(grid_rect), |ui| {
+        egui::ScrollArea::vertical().id_salt("shelf_scroll").auto_shrink([false, false]).max_height(grid_rect.height()).show(ui, |ui| {
+            tiles(ui, |ui| {
+                for entry in &entries {
+                    entry_tile(app, ui, &ctx, entry);
+                }
+            });
+
+            let in_user_library = folder.first().is_none_or(|library| library == crate::shelf_entry::USER);
+            if in_user_library && shown_tab.is_none_or(|shown| shown == Tab::Smart) {
+                library(app, ui, &filter);
             }
         });
-
-        let in_user_library = folder.first().is_none_or(|library| library == crate::shelf_entry::USER);
-        if in_user_library && shown_tab.is_none_or(|shown| shown == Tab::Smart) {
-            library(app, ui, &filter);
-        }
     });
+    ui.scope_builder(egui::UiBuilder::new().max_rect(toolbar_rect), |ui| crate::shelf_toolbar::show(app, ui));
     drag_preview(&ctx);
 }
 
@@ -391,17 +396,6 @@ fn scan_brushes(app: &mut TextureCraftApp) {
 
 #[cfg(target_arch = "wasm32")]
 fn scan_brushes(_: &mut TextureCraftApp) {}
-
-/// The Textures tab's import button, and a hint while the project has no images
-fn import_images(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, empty: bool) {
-    let tk = Tokens::get(ctx);
-    if ui.small_button(tr("Import...")).clicked() {
-        crate::menus::invoke(app, ctx, "resource.import");
-    }
-    if empty {
-        ui.label(RichText::new(tr("Import images to use them in fills and masks")).size(10.0).color(tk.text_dim));
-    }
-}
 
 /// The tile of `entry`: a click applies it, an image resource has a context menu
 fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry: &ShelfEntry) {

@@ -439,7 +439,6 @@ pub const TABLE: &[(&str, &str)] = &[
         "Import an image (File > Import resources) to project it onto the mesh.",
         "Ein Bild importieren (Datei > Ressourcen importieren), um es auf das Mesh zu projizieren.",
     ),
-    ("Import images to use them in fills and masks", "Bilder importieren, um sie in Füllungen und Masken zu verwenden"),
     ("Import resources...", "Ressourcen importieren..."),
     ("Import MaterialX material...", "MaterialX-Material importieren..."),
     ("MaterialX materials", "MaterialX-Materialien"),
@@ -1179,4 +1178,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Browse folders", "Ordner durchsuchen"),
     ("Starter assets", "Mitgelieferte Assets"),
     ("Your assets", "Eigene Assets"),
+    ("Reset query", "Abfrage zurücksetzen"),
+    ("Refresh", "Aktualisieren"),
 ];

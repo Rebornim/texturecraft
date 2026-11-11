@@ -382,7 +382,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Import HDR...", "导入 HDR..."),
     ("Import a template (.json)", "导入模板（.json）"),
     ("Import an image (File > Import resources) to project it onto the mesh.", "导入图像（文件 > 导入资源）以将其投影到网格上。"),
-    ("Import images to use them in fills and masks", "导入图像以在填充和遮罩中使用"),
     ("Import resources...", "导入资源..."),
     ("Import MaterialX material...", "导入 MaterialX 材质..."),
     ("MaterialX materials", "MaterialX 材质"),
@@ -1089,4 +1088,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Browse folders", "浏览文件夹"),
     ("Starter assets", "内置资源"),
     ("Your assets", "我的资源"),
+    ("Reset query", "重置查询"),
+    ("Refresh", "刷新"),
 ];

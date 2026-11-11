@@ -21,11 +21,11 @@ use crate::theme::{Tokens, caption, semibold};
 use crate::widgets::{icon_button, icon_button_without_tooltip, primary_button};
 
 /// The window's size, made smaller to fit a smaller app window
-const EXPORT_DIALOG_SIZE: egui::Vec2 = egui::vec2(1100.0, 640.0);
+const EXPORT_DIALOG_SIZE: egui::Vec2 = egui::vec2(1100.0, 775.0);
 /// Room kept around the window inside the app window, and the window's own padding around its body
 const EXPORT_DIALOG_MARGIN: f32 = 16.0;
 const EXPORT_DIALOG_PADDING: f32 = 32.0;
-const EXPORT_SET_LIST_WIDTH: f32 = 180.0;
+const EXPORT_SET_LIST_WIDTH: f32 = 250.0;
 /// Room under the tabs' body for the button row
 const EXPORT_FOOTER_HEIGHT: f32 = 44.0;
 const OVERRIDE_PEN_SIZE: f32 = 20.0;
@@ -54,15 +54,12 @@ const SET_ROW_PADDING: f32 = 8.0;
 /// Room for the * that marks a set with overrides
 const SET_ROW_MARKER: f32 = 12.0;
 /// Label column of the parameter grids, and the room left for the controls
-const PARAMETER_LABEL_WIDTH: f32 = 170.0;
+const PARAMETER_LABEL_WIDTH: f32 = 210.0;
 const PARAMETER_GAP: f32 = 10.0;
-/// Each control's width, sized to what it shows
-const DIRECTORY_FIELD_WIDTH: f32 = 420.0;
-const TEMPLATE_FIELD_WIDTH: f32 = 300.0;
-const FILE_TYPE_FIELD_WIDTH: f32 = 280.0;
-const SIZE_FIELD_WIDTH: f32 = 240.0;
-const PADDING_FIELD_WIDTH: f32 = 300.0;
-const COLOR_SPACE_FIELD_WIDTH: f32 = 180.0;
+/// Every parameter's controls end at one right edge, this far from the label column
+const PARAMETER_FIELD_WIDTH: f32 = 500.0;
+/// Room for the output directory's browse button
+const BROWSE_BUTTON_WIDTH: f32 = 34.0;
 /// Width of an output map's name in a texture set's Output maps
 const MAP_NAME_WIDTH: f32 = 230.0;
 
@@ -527,23 +524,23 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
         {
             ui.label(tr("Output directory"));
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut settings.dir).desired_width(DIRECTORY_FIELD_WIDTH));
+                ui.add(egui::TextEdit::singleline(&mut settings.dir).desired_width(PARAMETER_FIELD_WIDTH - BROWSE_BUTTON_WIDTH));
                 pick_dir = ui.button("...").clicked();
             });
             ui.end_row();
         }
         let parameters = &mut settings.parameters;
         ui.label(tr("Output template"));
-        controls::template_combo(ui, "exp_preset", &mut parameters.preset, builtins, user_presets, TEMPLATE_FIELD_WIDTH);
+        controls::template_combo(ui, "exp_preset", &mut parameters.preset, builtins, user_presets, PARAMETER_FIELD_WIDTH);
         ui.end_row();
         ui.label(tr("File type"));
-        controls::file_type_combos(ui, "exp_fmt", &mut parameters.file_type, FILE_TYPE_FIELD_WIDTH);
+        controls::file_type_combos(ui, "exp_fmt", &mut parameters.file_type, PARAMETER_FIELD_WIDTH);
         ui.end_row();
         ui.label(tr("Size"));
-        controls::size_combo(ui, "exp_size", &mut parameters.size, None, SIZE_FIELD_WIDTH);
+        controls::size_combo(ui, "exp_size", &mut parameters.size, None, PARAMETER_FIELD_WIDTH);
         ui.end_row();
         ui.label(tr("Padding"));
-        controls::padding_controls(ui, "exp_pad", &mut parameters.padding, &mut parameters.dilation, PADDING_FIELD_WIDTH);
+        controls::padding_controls(ui, "exp_pad", &mut parameters.padding, &mut parameters.dilation, PARAMETER_FIELD_WIDTH);
         ui.end_row();
         ui.label(tr("Normal map format"));
         let preset_format = match preset_normal {
@@ -556,7 +553,7 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
             "directX" => "DirectX".to_string(),
             _ => preset_format.clone(),
         };
-        egui::ComboBox::from_id_salt("exp_nf").width(SIZE_FIELD_WIDTH).selected_text(shown).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("exp_nf").width(PARAMETER_FIELD_WIDTH).selected_text(shown).show_ui(ui, |ui| {
             for (value, label) in [("", preset_format), ("openGl", "OpenGL".to_string()), ("directX", "DirectX".to_string())] {
                 ui.selectable_value(&mut settings.normal_format, value.to_string(), label);
             }
@@ -564,7 +561,7 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
         ui.end_row();
         ui.label(tr("Color space"));
         let shown = if settings.color_space.is_empty() { tr("Default") } else { settings.color_space.as_str() };
-        egui::ComboBox::from_id_salt("exp_cs").width(COLOR_SPACE_FIELD_WIDTH).selected_text(shown).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("exp_cs").width(PARAMETER_FIELD_WIDTH).selected_text(shown).show_ui(ui, |ui| {
             ui.selectable_value(&mut settings.color_space, String::new(), tr("Default"));
             for name in ["sRGB", "Linear Rec.709", "ACEScg", "ACES2065-1"] {
                 ui.selectable_value(&mut settings.color_space, name.to_string(), name);
@@ -620,7 +617,7 @@ fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Optio
             overrides.preset = overrides.preset.take().xor(Some(global.preset.clone()));
         }
         match overrides.preset.as_mut() {
-            Some(preset) => controls::template_combo(ui, "exp_set_preset", preset, builtins, user_presets, TEMPLATE_FIELD_WIDTH),
+            Some(preset) => controls::template_combo(ui, "exp_set_preset", preset, builtins, user_presets, PARAMETER_FIELD_WIDTH),
             None => {
                 inherited(ui, global.preset.clone());
             }
@@ -632,7 +629,7 @@ fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Optio
             overrides.file_type = overrides.file_type.take().xor(Some(global.file_type.clone()));
         }
         match overrides.file_type.as_mut() {
-            Some(file_type) => controls::file_type_combos(ui, "exp_set_fmt", file_type, FILE_TYPE_FIELD_WIDTH),
+            Some(file_type) => controls::file_type_combos(ui, "exp_set_fmt", file_type, PARAMETER_FIELD_WIDTH),
             None => {
                 inherited(ui, controls::file_type_with_depth_text(&global.file_type));
             }
@@ -644,7 +641,7 @@ fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Optio
             overrides.size = overrides.size.take().xor(Some(global.size));
         }
         match overrides.size.as_mut() {
-            Some(size) => controls::size_combo(ui, "exp_set_size", size, set_size, SIZE_FIELD_WIDTH),
+            Some(size) => controls::size_combo(ui, "exp_set_size", size, set_size, PARAMETER_FIELD_WIDTH),
             None => {
                 inherited(ui, controls::size_text(global.size, set_size));
             }
@@ -656,7 +653,7 @@ fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Optio
             overrides.padding = overrides.padding.take().xor(Some((global.padding.clone(), global.dilation)));
         }
         match overrides.padding.as_mut() {
-            Some((padding, dilation)) => controls::padding_controls(ui, "exp_set_pad", padding, dilation, PADDING_FIELD_WIDTH),
+            Some((padding, dilation)) => controls::padding_controls(ui, "exp_set_pad", padding, dilation, PARAMETER_FIELD_WIDTH),
             None => {
                 inherited(ui, controls::padding_text(&global.padding, global.dilation));
             }

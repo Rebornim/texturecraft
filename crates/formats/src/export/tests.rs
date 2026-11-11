@@ -228,6 +228,7 @@ fn templates_are_sanitized_and_collisions_suffixed() {
         format: FileFormat::Png,
         bit_depth: 8,
         channels: vec![(Dest::L, SourceRef::Channel { channel: Channel::Roughness, component: 0 })],
+        options: Default::default(),
     };
     let preset = ExportPreset {
         name: "t".into(),
@@ -302,6 +303,7 @@ fn every_format_encodes_and_decodes() {
         format: FileFormat::Png,
         bit_depth: 8,
         channels: vec![(Dest::L, SourceRef::Channel { channel: Channel::Roughness, component: 0 }), (Dest::A, SourceRef::Constant(0.5))],
+        options: Default::default(),
     };
     let mut preset = builtin_preset("glTF PBR Metal Roughness").unwrap();
     preset.maps.push(gray_alpha);
@@ -393,7 +395,7 @@ fn write_files_accepts_planned_name_with_max_length_stem() {
 }
 
 fn gray_map(file: &str, src: SourceRef) -> MapSpec {
-    MapSpec { file: file.into(), format: FileFormat::Png, bit_depth: 8, channels: vec![(Dest::L, src)] }
+    MapSpec { file: file.into(), format: FileFormat::Png, bit_depth: 8, channels: vec![(Dest::L, src)], options: Default::default() }
 }
 
 #[test]
@@ -435,6 +437,7 @@ fn converted_maps_invert_and_derive_normals() {
         format: FileFormat::Png,
         bit_depth: 8,
         channels: [Dest::R, Dest::G, Dest::B].into_iter().zip(0u8..).map(|(d, k)| (d, SourceRef::Virtual { map, component: k })).collect(),
+        options: Default::default(),
     };
     let preset = ExportPreset {
         name: "converted".into(),
@@ -491,6 +494,7 @@ fn uv_tiles_export_one_file_per_tile_without_padding_across() {
                 (Dest::G, SourceRef::Channel { channel: Channel::BaseColor, component: 1 }),
                 (Dest::B, SourceRef::Channel { channel: Channel::BaseColor, component: 2 }),
             ],
+            options: Default::default(),
         }],
     };
     let files = render_maps(&input, &ExportOptions::new(preset.clone())).unwrap();
@@ -520,7 +524,8 @@ fn the_udim_name_is_the_file_name_with_its_tile_number_as_placeholder() {
     project.texture_sets.push(ts);
     let udim_names = |file: String| {
         let channels = vec![(Dest::R, SourceRef::Channel { channel: Channel::BaseColor, component: 0 })];
-        let preset = ExportPreset { name: "t".into(), maps: vec![MapSpec { file, format: FileFormat::Png, bit_depth: 8, channels }] };
+        let preset =
+            ExportPreset { name: "t".into(), maps: vec![MapSpec { file, format: FileFormat::Png, bit_depth: 8, channels, options: Default::default() }] };
         list_outputs(&project, 0, "m", &ExportOptions::new(preset)).unwrap().into_iter().map(|f| f.udim_name).collect::<Vec<_>>()
     };
     let placeholder = Some("Body_<UDIM>.png".to_string());
@@ -621,6 +626,7 @@ fn colour_space_names_the_files_and_warns_when_integer_files_clamp() {
                 (Dest::G, SourceRef::Channel { channel: Channel::BaseColor, component: 1 }),
                 (Dest::B, SourceRef::Channel { channel: Channel::BaseColor, component: 2 }),
             ],
+            options: Default::default(),
         }],
     };
     let plan = |space: Option<ColorSpace>, format: Option<FileFormat>| {

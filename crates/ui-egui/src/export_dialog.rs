@@ -21,9 +21,10 @@ use crate::theme::{Tokens, caption, semibold};
 use crate::widgets::{icon_button, icon_button_without_tooltip, primary_button};
 
 /// The window's size, made smaller to fit a smaller app window
-const EXPORT_DIALOG_SIZE: egui::Vec2 = egui::vec2(1000.0, 600.0);
-/// Room kept around the window inside the app window
+const EXPORT_DIALOG_SIZE: egui::Vec2 = egui::vec2(1100.0, 640.0);
+/// Room kept around the window inside the app window, and the window's own padding around its body
 const EXPORT_DIALOG_MARGIN: f32 = 16.0;
+const EXPORT_DIALOG_PADDING: f32 = 32.0;
 const EXPORT_SET_LIST_WIDTH: f32 = 180.0;
 /// Room under the tabs' body for the button row
 const EXPORT_FOOTER_HEIGHT: f32 = 44.0;
@@ -84,7 +85,7 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
         ui.allocate_ui_with_layout(vec2(ui.available_width(), body_height), egui::Layout::left_to_right(egui::Align::Min), |ui| {
             ui.set_height(body_height);
             if app.ui.export.tab == 1 {
-                crate::export_templates::tab(app, ui, &presets);
+                crate::export_templates::tab(app, ui, &presets, size.x - EXPORT_DIALOG_PADDING);
                 return;
             }
             ui.vertical(|ui| export_set_list(app, ui));

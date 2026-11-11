@@ -25,6 +25,9 @@ use texturecraft_texel::{ColorSpace, DilationMap, linear_to_srgb};
 use crate::{FormatError, MAX_IMAGE_SIZE, Result};
 
 mod diffusion;
+mod map_options;
+
+pub use map_options::MapOptions;
 
 /// Height-to-normal slope: with strength 1, a height change of 1 across 1/16 of the texture
 /// width tilts the normal 45°, at any resolution.
@@ -255,6 +258,8 @@ pub struct MapSpec {
     pub format: FileFormat,
     pub bit_depth: u8,
     pub channels: Vec<(Dest, SourceRef)>,
+    #[serde(default, skip_serializing_if = "MapOptions::is_default")]
+    pub options: MapOptions,
 }
 
 impl MapSpec {
@@ -812,7 +817,7 @@ pub fn render_maps(input: &ExportInput, opts: &ExportOptions) -> Result<Vec<Expo
             let srgb: Vec<bool> = lay.iter().map(|(d, _)| *d != Dest::A && is_color(map) && !p.format.is_float() && space == ColorSpace::Srgb).collect();
             // A colour space the user chose is written into the colour maps (data maps have none).
             let embed = (opts.color_space.is_some() && is_color(map) && rgb).then_some(space);
-            let dithered = opts.dithered_maps.contains(&p.map);
+            let dithered = map.options.dithering || opts.dithered_maps.contains(&p.map);
             let bytes = encode(p.format, p.bit_depth, dithered, size, n, &data, &srgb, embed, &mut warnings)?;
             Ok(ExportedFile { name: p.name, bytes, width: size.0, height: size.1, warnings })
         })

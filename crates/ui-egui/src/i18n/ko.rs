@@ -1,15 +1,28 @@
 //! Korean UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
-    ("A finer output than the texture set gives the same result as the texture set's resolution.", "텍스처 세트보다 세밀한 출력은 텍스처 세트 해상도와 같은 결과를 냅니다."),
+    (
+        "A finer output than the texture set gives the same result as the texture set's resolution.",
+        "텍스처 세트보다 세밀한 출력은 텍스처 세트 해상도와 같은 결과를 냅니다.",
+    ),
     ("A gradient along a world direction across the mesh.", "월드 방향을 따라 메시 전체에 걸친 그라디언트."),
     ("Attributes", "속성"),
-    ("Auto and Texture set use the texture set's resolution, UV tile the UV tile's, Custom a size of its own.", "자동과 텍스처 세트는 텍스처 세트의 해상도를, UV 타일은 UV 타일의 해상도를, 사용자 지정은 자체 크기를 사용합니다."),
+    (
+        "Auto and Texture set use the texture set's resolution, UV tile the UV tile's, Custom a size of its own.",
+        "자동과 텍스처 세트는 텍스처 세트의 해상도를, UV 타일은 UV 타일의 해상도를, 사용자 지정은 자체 크기를 사용합니다.",
+    ),
     ("Baking {map} ({n}/{total})", "{map} 베이크 중 ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "{map} 베이크 중 ({n}/{total}), 텍스처 세트 {set}/{sets}"),
+    ("Blending mode of the effect", "효과의 블렌딩 모드"),
     ("Category", "카테고리"),
-    ("Convex edges from the curvature map, broken up by noise: worn paint and polished edges.", "곡률 맵에서 얻은 볼록한 모서리를 노이즈로 깨뜨린 것: 닳은 페인트와 닳아 반짝이는 모서리."),
-    ("Convex edges, cavities or both from the curvature map, at several detail sizes.", "곡률 맵에서 얻은 볼록한 모서리, 오목한 곳 또는 둘 다 (여러 디테일 크기)."),
+    (
+        "Convex edges from the curvature map, broken up by noise: worn paint and polished edges.",
+        "곡률 맵에서 얻은 볼록한 모서리를 노이즈로 깨뜨린 것: 닳은 페인트와 닳아 반짝이는 모서리.",
+    ),
+    (
+        "Convex edges, cavities or both from the curvature map, at several detail sizes.",
+        "곡률 맵에서 얻은 볼록한 모서리, 오목한 곳 또는 둘 다 (여러 디테일 크기).",
+    ),
     ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "앰비언트 오클루전 맵에서 얻은 틈새와 가려진 영역: 먼지와 때."),
     ("Custom", "사용자 지정"),
     ("Description", "설명"),
@@ -38,11 +51,16 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Resolution", "해상도"),
     ("Restore defaults", "기본값 복원"),
     ("Same as context", "컨텍스트와 동일"),
-    ("Scales the base resolution: below 1 the generator is computed coarser and smoothed back up.", "기본 해상도의 배율을 정합니다. 1 미만이면 생성기를 더 거칠게 계산한 뒤 부드럽게 되돌립니다."),
+    (
+        "Scales the base resolution: below 1 the generator is computed coarser and smoothed back up.",
+        "기본 해상도의 배율을 정합니다. 1 미만이면 생성기를 더 거칠게 계산한 뒤 부드럽게 되돌립니다.",
+    ),
+    ("Seed {seed}", "시드 {seed}"),
     ("Surfaces facing a direction, as if lit from it.", "한 방향을 향한 면 (그 방향에서 비춘 것처럼)."),
     ("Tags", "태그"),
     ("Texture set", "텍스처 세트"),
     ("Thin parts of the mesh from the thickness map.", "두께 맵에서 얻은 메시의 얇은 부분."),
+    ("Type the seed", "시드 입력"),
     ("UV tile", "UV 타일"),
     (
         "What the 3D view shows while the bake runs: the newest finished map, one finished map, or the material. Maps not baked yet show a neutral value.",

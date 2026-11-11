@@ -1,16 +1,32 @@
 //! German UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
-    ("A finer output than the texture set gives the same result as the texture set's resolution.", "Eine feinere Ausgabe als der Textursatz ergibt dasselbe wie die Auflösung des Textursatzes."),
+    (
+        "A finer output than the texture set gives the same result as the texture set's resolution.",
+        "Eine feinere Ausgabe als der Textursatz ergibt dasselbe wie die Auflösung des Textursatzes.",
+    ),
     ("A gradient along a world direction across the mesh.", "Ein Verlauf entlang einer Weltrichtung über das Mesh."),
     ("Attributes", "Attribute"),
-    ("Auto and Texture set use the texture set's resolution, UV tile the UV tile's, Custom a size of its own.", "Automatisch und Textursatz verwenden die Auflösung des Textursatzes, UV-Kachel die der UV-Kachel, Benutzerdefiniert eine eigene Größe."),
+    (
+        "Auto and Texture set use the texture set's resolution, UV tile the UV tile's, Custom a size of its own.",
+        "Automatisch und Textursatz verwenden die Auflösung des Textursatzes, UV-Kachel die der UV-Kachel, Benutzerdefiniert eine eigene Größe.",
+    ),
     ("Baking {map} ({n}/{total})", "{map} wird gebacken ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "{map} wird gebacken ({n}/{total}), Texturset {set} von {sets}"),
+    ("Blending mode of the effect", "Überblendmodus des Effekts"),
     ("Category", "Kategorie"),
-    ("Convex edges from the curvature map, broken up by noise: worn paint and polished edges.", "Konvexe Kanten aus der Krümmungs-Map, durch Rauschen aufgebrochen: abgenutzte Farbe und polierte Kanten."),
-    ("Convex edges, cavities or both from the curvature map, at several detail sizes.", "Konvexe Kanten, Vertiefungen oder beides aus der Krümmungs-Map, in mehreren Detailgrößen."),
-    ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "Ritzen und verdeckte Bereiche aus der Ambient-Occlusion-Map: Schmutz und Dreck."),
+    (
+        "Convex edges from the curvature map, broken up by noise: worn paint and polished edges.",
+        "Konvexe Kanten aus der Krümmungs-Map, durch Rauschen aufgebrochen: abgenutzte Farbe und polierte Kanten.",
+    ),
+    (
+        "Convex edges, cavities or both from the curvature map, at several detail sizes.",
+        "Konvexe Kanten, Vertiefungen oder beides aus der Krümmungs-Map, in mehreren Detailgrößen.",
+    ),
+    (
+        "Crevices and occluded areas from the ambient occlusion map: dirt and grime.",
+        "Ritzen und verdeckte Bereiche aus der Ambient-Occlusion-Map: Schmutz und Dreck.",
+    ),
     ("Custom", "Benutzerdefiniert"),
     ("Description", "Beschreibung"),
     (
@@ -38,11 +54,16 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Resolution", "Auflösung"),
     ("Restore defaults", "Standardwerte wiederherstellen"),
     ("Same as context", "Wie der Kontext"),
-    ("Scales the base resolution: below 1 the generator is computed coarser and smoothed back up.", "Skaliert die Basisauflösung: Unter 1 wird der Generator gröber berechnet und wieder geglättet."),
+    (
+        "Scales the base resolution: below 1 the generator is computed coarser and smoothed back up.",
+        "Skaliert die Basisauflösung: Unter 1 wird der Generator gröber berechnet und wieder geglättet.",
+    ),
+    ("Seed {seed}", "Startwert {seed}"),
     ("Surfaces facing a direction, as if lit from it.", "Flächen, die in eine Richtung zeigen, als würden sie von dort beleuchtet."),
     ("Tags", "Schlagwörter"),
     ("Texture set", "Textursatz"),
     ("Thin parts of the mesh from the thickness map.", "Dünne Teile des Meshs aus der Dicken-Map."),
+    ("Type the seed", "Startwert eingeben"),
     ("UV tile", "UV-Kachel"),
     (
         "What the 3D view shows while the bake runs: the newest finished map, one finished map, or the material. Maps not baked yet show a neutral value.",

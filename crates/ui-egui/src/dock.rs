@@ -270,6 +270,9 @@ fn row_shade(tk: &Tokens, index: usize) -> Color32 {
 const RIGHT_COLUMN: f32 = 58.0;
 /// Indent per folder level, and per level of the effect tree.
 const INDENT: f32 = 14.0;
+/// Width of the blend mode and opacity pair at the right of an effect row, and of its opacity part.
+const EFFECT_BLEND_WIDTH: f32 = 96.0;
+const EFFECT_OPACITY_WIDTH: f32 = 42.0;
 /// Height of the "Content effects" / "Mask effects" header rows.
 const GROUP_HEADER_H: f32 = 20.0;
 
@@ -553,37 +556,13 @@ fn layer_row(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, depth: usize
         p.galley(pos2(name_rect.left(), rect.center().y + 2.0), sub, tk.text_dim);
     }
     if let Some(b) = blend.filter(|_| show_blend) {
-        let br = ui.interact(blend_rect, ui.scope_id().with(("blend", layer.id.0)), Sense::click()).on_hover_text(tr("Blending mode of the displayed channel"));
-        if br.hovered() {
-            p.rect_filled(blend_rect, 2.0, tk.row_hover);
+        let id = ui.scope_id().with(("blend", layer.id.0));
+        let (mode, opacity) = blend_controls(ui, id, (blend_rect, op_rect), (b.mode, b.opacity), tr("Blending mode of the displayed channel"));
+        if let Some(mode) = mode {
+            app.run("layer.blend", json!({"layer": layer.id.0, "channel": ch.id(), "mode": format!("{mode:?}")}));
         }
-        p.text(blend_rect.right_center() - vec2(10.0, 0.0), egui::Align2::RIGHT_CENTER, b.mode.short(), egui::FontId::proportional(11.0), tk.text);
-        p.text(blend_rect.right_center(), egui::Align2::RIGHT_CENTER, ic::CARET_DOWN, egui::FontId::proportional(8.0), tk.text_dim);
-        egui::Popup::menu(&br).show(|ui| {
-            ui.set_min_width(190.0);
-            for m in BlendMode::MENU {
-                match m {
-                    Some(m) => {
-                        if ui.selectable_label(m == b.mode, tr(m.label())).clicked() {
-                            app.run("layer.blend", json!({"layer": layer.id.0, "channel": ch.id(), "mode": format!("{m:?}")}));
-                            ui.close();
-                        }
-                    }
-                    None => {
-                        ui.separator();
-                    }
-                }
-            }
-        });
-        let mut op = (b.opacity * 100.0).round();
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(op_rect).layout(egui::Layout::right_to_left(egui::Align::Center)));
-        // As tall as its slot in the row (the style's fields are taller), in the row's small print.
-        child.spacing_mut().interact_size.y = op_rect.height();
-        child.spacing_mut().button_padding = vec2(4.0, 0.0);
-        child.style_mut().override_text_style = Some(egui::TextStyle::Small);
-        let r = child.add(egui::DragValue::new(&mut op).range(0.0..=100.0).speed(0.5).max_decimals(0).suffix("%"));
-        if r.changed() {
-            app.run("layer.blend", json!({"layer": layer.id.0, "channel": ch.id(), "opacity": op / 100.0}));
+        if let Some(opacity) = opacity {
+            app.run("layer.blend", json!({"layer": layer.id.0, "channel": ch.id(), "opacity": opacity}));
         }
     } else if show_blend {
         p.text(blend_rect.right_center(), egui::Align2::RIGHT_CENTER, tr("off"), egui::FontId::proportional(11.0), tk.text_dim);
@@ -721,6 +700,51 @@ fn tree_lines(p: &egui::Painter, tk: &Tokens, rect: Rect, indent: f32, trunks: &
 /// The drag-and-drop payload of an effect row (the effect id).
 struct EffectDrag(u64);
 
+/// A stack row's blend mode menu in `mode_rect` and its opacity field (percent) in `opacity_rect`: the mode picked and the opacity
+/// (0..1) typed or dragged this frame, if any.
+fn blend_controls(
+    ui: &mut Ui,
+    id: egui::Id,
+    (mode_rect, opacity_rect): (Rect, Rect),
+    (mode, opacity): (BlendMode, f32),
+    hover: &str,
+) -> (Option<BlendMode>, Option<f32>) {
+    let tk = Tokens::get(ui.ctx());
+    let p = ui.painter().clone();
+    let mut picked = None;
+    let menu = ui.interact(mode_rect, id, Sense::click()).on_hover_text(hover);
+    if menu.hovered() {
+        p.rect_filled(mode_rect, 2.0, tk.row_hover);
+    }
+    p.text(mode_rect.right_center() - vec2(10.0, 0.0), egui::Align2::RIGHT_CENTER, mode.short(), egui::FontId::proportional(11.0), tk.text);
+    p.text(mode_rect.right_center(), egui::Align2::RIGHT_CENTER, ic::CARET_DOWN, egui::FontId::proportional(8.0), tk.text_dim);
+    egui::Popup::menu(&menu).show(|ui| {
+        ui.set_min_width(190.0);
+        for item in BlendMode::MENU {
+            match item {
+                Some(item) => {
+                    if ui.selectable_label(item == mode, tr(item.label())).clicked() {
+                        picked = Some(item);
+                        ui.close();
+                    }
+                }
+                None => {
+                    ui.separator();
+                }
+            }
+        }
+    });
+
+    let mut percent = (opacity * 100.0).round();
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(opacity_rect).layout(egui::Layout::right_to_left(egui::Align::Center)));
+    // As tall as its slot in the row (the style's fields are taller), in the row's small print.
+    child.spacing_mut().interact_size.y = opacity_rect.height();
+    child.spacing_mut().button_padding = vec2(4.0, 0.0);
+    child.style_mut().override_text_style = Some(egui::TextStyle::Small);
+    let field = child.add(egui::DragValue::new(&mut percent).range(0.0..=100.0).speed(0.5).max_decimals(0).suffix("%"));
+    (picked, field.changed().then_some(percent / 100.0))
+}
+
 /// Effect `e` of `stack` (a layer's content or, with `in_mask`, mask effects) at indent `level`.
 #[allow(clippy::too_many_arguments)]
 fn effect_row(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, stack: &[Effect], e: &Effect, level: usize, trunks: &[usize], last: bool, in_mask: bool) {
@@ -763,8 +787,25 @@ fn effect_row(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, stack: &[Ef
         p.line_segment([thumb.left_bottom(), thumb.right_top()], Stroke::new(1.5, tk.text_dim));
     }
     let name_x = thumb.right() + 8.0;
-    let galley = elided(&p, e.name.clone(), 11.5, if visible { tk.text } else { tk.text_dim }, (rect.right() - name_x - 6.0).max(20.0));
+
+    // Blend mode and opacity side by side at the right, when the name keeps room to be read
+    let controls_left = rect.right() - 4.0 - EFFECT_BLEND_WIDTH;
+    let show_blend = controls_left - 4.0 - name_x >= 20.0;
+    let name_right = if show_blend { controls_left - 4.0 } else { rect.right() - 6.0 };
+    let galley = elided(&p, e.name.clone(), 11.5, if visible { tk.text } else { tk.text_dim }, (name_right - name_x).max(20.0));
     p.galley(pos2(name_x, rect.center().y - galley.size().y * 0.5), galley, tk.text);
+    if show_blend {
+        let mode_rect = Rect::from_min_size(pos2(controls_left, rect.center().y - 8.5), vec2(EFFECT_BLEND_WIDTH - EFFECT_OPACITY_WIDTH, 17.0));
+        let opacity_rect = Rect::from_min_size(pos2(mode_rect.right(), rect.center().y - 8.5), vec2(EFFECT_OPACITY_WIDTH, 17.0));
+        let id = ui.scope_id().with(("eff_blend", eid.0));
+        let (mode, opacity) = blend_controls(ui, id, (mode_rect, opacity_rect), (e.blend, e.opacity), tr("Blending mode of the effect"));
+        if let Some(mode) = mode {
+            app.run("effect.set", json!({"effect": eid.0, "blend": format!("{mode:?}")}));
+        }
+        if let Some(opacity) = opacity {
+            app.run("effect.set", json!({"effect": eid.0, "opacity": opacity}));
+        }
+    }
     if er.clicked() {
         app.run("effect.set", json!({"effect": eid.0, "visible": !visible}));
     } else if resp.clicked() {
@@ -1103,7 +1144,7 @@ pub(crate) fn image_drop(ui: &Ui, resp: &egui::Response) -> Option<String> {
     }
 }
 
-fn mesh_map_color(map: BakedMap) -> Color32 {
+pub(crate) fn mesh_map_color(map: BakedMap) -> Color32 {
     match map {
         BakedMap::Normal => Color32::from_rgb(128, 128, 255),
         BakedMap::WorldNormal => Color32::from_rgb(120, 200, 140),
@@ -2246,21 +2287,6 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, eid:
     let Some((_, effect)) = app.session.doc.project.effect(eid).map(|(owner, effect)| (owner, effect.clone())) else { return };
 
     let id = eid.0;
-    ui.horizontal(|ui| {
-        ui.label(tr("Blending"));
-        egui::ComboBox::from_id_salt("eff_blend").selected_text(tr(effect.blend.label())).show_ui(ui, |ui| {
-            for mode in BlendMode::all() {
-                if ui.selectable_label(mode == effect.blend, tr(mode.label())).clicked() {
-                    app.run("effect.set", json!({"effect": id, "blend": format!("{mode:?}")}));
-                }
-            }
-        });
-    });
-    let mut opacity = effect.opacity;
-    if let Some(merge) = slider_edit(ui, tr("Opacity"), &mut opacity, 0.0..=1.0, 2) {
-        app.run("effect.set", json!({"effect": id, "opacity": opacity, "merge": merge}));
-    }
-    ui.separator();
 
     match &effect.kind {
         EffectKind::Generator(generator) => crate::generator_panel::generator_properties(app, ui, layer.id, id, generator),

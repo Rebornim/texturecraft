@@ -1,14 +1,24 @@
 //! Arabic UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
-    ("A finer output than the texture set gives the same result as the texture set's resolution.", "إخراج أدق من مجموعة الخامات يعطي النتيجة نفسها التي تعطيها دقة مجموعة الخامات."),
+    (
+        "A finer output than the texture set gives the same result as the texture set's resolution.",
+        "إخراج أدق من مجموعة الخامات يعطي النتيجة نفسها التي تعطيها دقة مجموعة الخامات.",
+    ),
     ("A gradient along a world direction across the mesh.", "تدرّج على امتداد اتجاه في العالم عبر الشبكة."),
     ("Attributes", "السمات"),
-    ("Auto and Texture set use the texture set's resolution, UV tile the UV tile's, Custom a size of its own.", "يستخدم \"تلقائي\" و\"مجموعة الخامات\" دقة مجموعة الخامات، و\"مربع UV\" دقة مربع UV، و\"مخصص\" حجمًا خاصًا به."),
+    (
+        "Auto and Texture set use the texture set's resolution, UV tile the UV tile's, Custom a size of its own.",
+        "يستخدم \"تلقائي\" و\"مجموعة الخامات\" دقة مجموعة الخامات، و\"مربع UV\" دقة مربع UV، و\"مخصص\" حجمًا خاصًا به.",
+    ),
     ("Baking {map} ({n}/{total})", "جارٍ خبز {map} ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "جارٍ خبز {map} ({n}/{total})، مجموعة الخامات {set} من {sets}"),
+    ("Blending mode of the effect", "وضع مزج التأثير"),
     ("Category", "الفئة"),
-    ("Convex edges from the curvature map, broken up by noise: worn paint and polished edges.", "حواف محدّبة من خريطة الانحناء، تكسرها الضوضاء: طلاء متآكل وحواف مصقولة."),
+    (
+        "Convex edges from the curvature map, broken up by noise: worn paint and polished edges.",
+        "حواف محدّبة من خريطة الانحناء، تكسرها الضوضاء: طلاء متآكل وحواف مصقولة.",
+    ),
     ("Convex edges, cavities or both from the curvature map, at several detail sizes.", "حواف محدّبة أو تجاويف أو كلاهما من خريطة الانحناء، بعدة أحجام للتفاصيل."),
     ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "شقوق ومناطق محجوبة من خريطة الإطباق المحيطي: أوساخ وقذارة."),
     ("Custom", "مخصص"),
@@ -39,10 +49,12 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Restore defaults", "استعادة الافتراضيات"),
     ("Same as context", "مثل السياق"),
     ("Scales the base resolution: below 1 the generator is computed coarser and smoothed back up.", "يغيّر الدقة الأساسية: تحت 1 يُحسب المولّد بدقة أخشن ثم يُنعَّم."),
+    ("Seed {seed}", "البذرة العشوائية {seed}"),
     ("Surfaces facing a direction, as if lit from it.", "الأسطح المواجهة لاتجاه ما، كأنها مضاءة منه."),
     ("Tags", "الوسوم"),
     ("Texture set", "مجموعة الخامات"),
     ("Thin parts of the mesh from the thickness map.", "الأجزاء الرقيقة من الشبكة من خريطة السماكة."),
+    ("Type the seed", "اكتب البذرة العشوائية"),
     ("UV tile", "مربع UV"),
     (
         "What the 3D view shows while the bake runs: the newest finished map, one finished map, or the material. Maps not baked yet show a neutral value.",

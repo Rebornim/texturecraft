@@ -1,16 +1,32 @@
 //! Italian UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
-    ("A finer output than the texture set gives the same result as the texture set's resolution.", "Un output più fine del set di texture dà lo stesso risultato della sua risoluzione."),
+    (
+        "A finer output than the texture set gives the same result as the texture set's resolution.",
+        "Un output più fine del set di texture dà lo stesso risultato della sua risoluzione.",
+    ),
     ("A gradient along a world direction across the mesh.", "Un gradiente lungo una direzione del mondo sulla mesh."),
     ("Attributes", "Attributi"),
-    ("Auto and Texture set use the texture set's resolution, UV tile the UV tile's, Custom a size of its own.", "Automatica e Set di texture usano la risoluzione del set di texture, Tile UV quella del tile UV, Personalizzata una dimensione propria."),
+    (
+        "Auto and Texture set use the texture set's resolution, UV tile the UV tile's, Custom a size of its own.",
+        "Automatica e Set di texture usano la risoluzione del set di texture, Tile UV quella del tile UV, Personalizzata una dimensione propria.",
+    ),
     ("Baking {map} ({n}/{total})", "Bake di {map} in corso ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "Bake di {map} in corso ({n}/{total}), set di texture {set} di {sets}"),
+    ("Blending mode of the effect", "Metodo di fusione dell'effetto"),
     ("Category", "Categoria"),
-    ("Convex edges from the curvature map, broken up by noise: worn paint and polished edges.", "Bordi convessi dalla mappa di curvatura, spezzati dal rumore: vernice consumata e bordi lucidati."),
-    ("Convex edges, cavities or both from the curvature map, at several detail sizes.", "Bordi convessi, cavità o entrambi dalla mappa di curvatura, a più dimensioni di dettaglio."),
-    ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "Fessure e zone occluse dalla mappa di occlusione ambientale: sporco e sudiciume."),
+    (
+        "Convex edges from the curvature map, broken up by noise: worn paint and polished edges.",
+        "Bordi convessi dalla mappa di curvatura, spezzati dal rumore: vernice consumata e bordi lucidati.",
+    ),
+    (
+        "Convex edges, cavities or both from the curvature map, at several detail sizes.",
+        "Bordi convessi, cavità o entrambi dalla mappa di curvatura, a più dimensioni di dettaglio.",
+    ),
+    (
+        "Crevices and occluded areas from the ambient occlusion map: dirt and grime.",
+        "Fessure e zone occluse dalla mappa di occlusione ambientale: sporco e sudiciume.",
+    ),
     ("Custom", "Personalizzata"),
     ("Description", "Descrizione"),
     (
@@ -38,11 +54,16 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Resolution", "Risoluzione"),
     ("Restore defaults", "Ripristina predefiniti"),
     ("Same as context", "Come il contesto"),
-    ("Scales the base resolution: below 1 the generator is computed coarser and smoothed back up.", "Scala la risoluzione di base: sotto 1 il generatore viene calcolato più grossolano e poi ammorbidito."),
+    (
+        "Scales the base resolution: below 1 the generator is computed coarser and smoothed back up.",
+        "Scala la risoluzione di base: sotto 1 il generatore viene calcolato più grossolano e poi ammorbidito.",
+    ),
+    ("Seed {seed}", "Seme {seed}"),
     ("Surfaces facing a direction, as if lit from it.", "Superfici rivolte verso una direzione, come se illuminate da essa."),
     ("Tags", "Tag"),
     ("Texture set", "Set di texture"),
     ("Thin parts of the mesh from the thickness map.", "Parti sottili della mesh dalla mappa di spessore."),
+    ("Type the seed", "Digita il seme"),
     ("UV tile", "Tile UV"),
     (
         "What the 3D view shows while the bake runs: the newest finished map, one finished map, or the material. Maps not baked yet show a neutral value.",

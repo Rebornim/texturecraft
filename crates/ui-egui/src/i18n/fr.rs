@@ -1,16 +1,32 @@
 //! French UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
-    ("A finer output than the texture set gives the same result as the texture set's resolution.", "Une sortie plus fine que l'ensemble de textures donne le même résultat que sa résolution."),
+    (
+        "A finer output than the texture set gives the same result as the texture set's resolution.",
+        "Une sortie plus fine que l'ensemble de textures donne le même résultat que sa résolution.",
+    ),
     ("A gradient along a world direction across the mesh.", "Un dégradé le long d'une direction du monde sur le maillage."),
     ("Attributes", "Attributs"),
-    ("Auto and Texture set use the texture set's resolution, UV tile the UV tile's, Custom a size of its own.", "Auto et Ensemble de textures utilisent la résolution de l'ensemble de textures, Tuile UV celle de la tuile UV, Personnalisé une taille propre."),
+    (
+        "Auto and Texture set use the texture set's resolution, UV tile the UV tile's, Custom a size of its own.",
+        "Auto et Ensemble de textures utilisent la résolution de l'ensemble de textures, Tuile UV celle de la tuile UV, Personnalisé une taille propre.",
+    ),
     ("Baking {map} ({n}/{total})", "Cuisson de {map} ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "Cuisson de {map} ({n}/{total}), jeu de textures {set} sur {sets}"),
+    ("Blending mode of the effect", "Mode de fusion de l'effet"),
     ("Category", "Catégorie"),
-    ("Convex edges from the curvature map, broken up by noise: worn paint and polished edges.", "Arêtes convexes issues de la carte de courbure, brisées par du bruit : peinture usée et arêtes polies."),
-    ("Convex edges, cavities or both from the curvature map, at several detail sizes.", "Arêtes convexes, cavités ou les deux issues de la carte de courbure, à plusieurs tailles de détail."),
-    ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "Crevasses et zones occultées issues de la carte d'occlusion ambiante : saleté et crasse."),
+    (
+        "Convex edges from the curvature map, broken up by noise: worn paint and polished edges.",
+        "Arêtes convexes issues de la carte de courbure, brisées par du bruit : peinture usée et arêtes polies.",
+    ),
+    (
+        "Convex edges, cavities or both from the curvature map, at several detail sizes.",
+        "Arêtes convexes, cavités ou les deux issues de la carte de courbure, à plusieurs tailles de détail.",
+    ),
+    (
+        "Crevices and occluded areas from the ambient occlusion map: dirt and grime.",
+        "Crevasses et zones occultées issues de la carte d'occlusion ambiante : saleté et crasse.",
+    ),
     ("Custom", "Personnalisé"),
     ("Description", "Description"),
     (
@@ -38,11 +54,16 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Resolution", "Résolution"),
     ("Restore defaults", "Restaurer les valeurs par défaut"),
     ("Same as context", "Comme le contexte"),
-    ("Scales the base resolution: below 1 the generator is computed coarser and smoothed back up.", "Met à l'échelle la résolution de base : en dessous de 1, le générateur est calculé plus grossièrement puis lissé."),
+    (
+        "Scales the base resolution: below 1 the generator is computed coarser and smoothed back up.",
+        "Met à l'échelle la résolution de base : en dessous de 1, le générateur est calculé plus grossièrement puis lissé.",
+    ),
+    ("Seed {seed}", "Graine {seed}"),
     ("Surfaces facing a direction, as if lit from it.", "Surfaces tournées vers une direction, comme éclairées depuis celle-ci."),
     ("Tags", "Étiquettes"),
     ("Texture set", "Ensemble de textures"),
     ("Thin parts of the mesh from the thickness map.", "Parties fines du maillage issues de la carte d'épaisseur."),
+    ("Type the seed", "Saisir la graine"),
     ("UV tile", "Tuile UV"),
     (
         "What the 3D view shows while the bake runs: the newest finished map, one finished map, or the material. Maps not baked yet show a neutral value.",

@@ -1,5 +1,5 @@
-//! The sliders of a selected effect (opacity, generator, levels…) apply what they were dragged
-//! or clicked to.
+//! The sliders of a selected effect (generator, levels…) apply what they were dragged or clicked
+//! to; the generator's global balance stands in for every slider with a number field.
 
 use egui::accesskit::Role;
 use egui_kittest::Harness;
@@ -27,8 +27,11 @@ fn harness() -> (Harness<'static, TextureCraftApp>, LayerId) {
     (h, effect)
 }
 
-fn opacity(h: &Harness<'_, TextureCraftApp>, effect: LayerId) -> f32 {
-    h.state().session.doc.project.effect(effect).unwrap().1.opacity
+fn balance(h: &Harness<'_, TextureCraftApp>, effect: LayerId) -> f32 {
+    match &h.state().session.doc.project.effect(effect).unwrap().1.kind {
+        EffectKind::Generator(generator) => generator.global.balance,
+        _ => panic!("a generator"),
+    }
 }
 
 /// The track under the slider labelled `label` (the row below the label).
@@ -38,17 +41,17 @@ fn track(h: &Harness<'_, TextureCraftApp>, label: &str) -> egui::Rect {
 }
 
 #[test]
-fn dragging_the_effect_opacity_applies_it() {
+fn dragging_a_slider_applies_it() {
     let (mut h, effect) = harness();
-    assert_eq!(opacity(&h, effect), 1.0);
-    let t = track(&h, "Opacity");
+    assert_eq!(balance(&h, effect), 0.5);
+    let t = track(&h, "Global balance");
     h.drag_at(egui::pos2(t.right(), t.center().y));
     h.run_steps(2);
     h.hover_at(egui::pos2(t.left() + 20.0, t.center().y));
     h.run_steps(2);
     h.drop_at(egui::pos2(t.left() + 20.0, t.center().y));
     h.run_steps(3);
-    assert!(opacity(&h, effect) < 0.5, "the dragged opacity applies: {}", opacity(&h, effect));
+    assert!(balance(&h, effect) < 0.25, "the dragged balance applies: {}", balance(&h, effect));
 }
 
 /// A generator slider applies while it is dragged (the texture follows the pointer), and the
@@ -101,14 +104,14 @@ fn content_levels_pick_the_histogram_channel() {
 }
 
 #[test]
-fn clicking_the_effect_opacity_applies_it() {
+fn clicking_a_slider_track_applies_it() {
     let (mut h, effect) = harness();
-    let t = track(&h, "Opacity");
+    let t = track(&h, "Global balance");
     let at = egui::pos2(t.left() + 20.0, t.center().y);
     h.drag_at(at);
     h.drop_at(at);
     h.run_steps(3);
-    assert!(opacity(&h, effect) < 0.5, "a click on the track applies: {}", opacity(&h, effect));
+    assert!(balance(&h, effect) < 0.25, "a click on the track applies: {}", balance(&h, effect));
 }
 
 /// The number field in the row of the slider labelled `label`.
@@ -117,16 +120,16 @@ fn number_field<'a>(h: &'a Harness<'_, TextureCraftApp>, label: &str) -> egui_ki
     h.get_all(by().role(Role::TextInput)).find(|n| (n.rect().center().y - row).abs() < 4.0).unwrap()
 }
 
-/// Focus the opacity field and press `keys`, then type `text`, one key per frame like a person.
-fn type_opacity(h: &mut Harness<'_, TextureCraftApp>, keys: &[egui::Key], text: &str) {
-    number_field(h, "Opacity").focus();
+/// Focus the balance field and press `keys`, then type `text`, one key per frame like a person.
+fn type_balance(h: &mut Harness<'_, TextureCraftApp>, keys: &[egui::Key], text: &str) {
+    number_field(h, "Global balance").focus();
     h.run_steps(2);
     for k in keys {
         h.key_press(*k);
         h.run_steps(1);
     }
     for c in text.chars() {
-        number_field(h, "Opacity").type_text(&c.to_string());
+        number_field(h, "Global balance").type_text(&c.to_string());
         h.run_steps(1);
     }
 }
@@ -135,10 +138,10 @@ fn type_opacity(h: &mut Harness<'_, TextureCraftApp>, keys: &[egui::Key], text: 
 fn a_value_typed_in_the_number_field_applies() {
     let (mut h, effect) = harness();
     let steps = h.state().session.history_labels().len();
-    type_opacity(&mut h, &[egui::Key::End, egui::Key::Backspace, egui::Key::Backspace, egui::Key::Backspace, egui::Key::Backspace], "0.25");
+    type_balance(&mut h, &[egui::Key::End, egui::Key::Backspace, egui::Key::Backspace, egui::Key::Backspace, egui::Key::Backspace], "0.25");
     h.key_press(egui::Key::Enter);
     h.run_steps(3);
-    assert_eq!(opacity(&h, effect), 0.25);
+    assert_eq!(balance(&h, effect), 0.25);
     assert_eq!(h.state().session.history_labels().len(), steps + 1);
 }
 
@@ -147,22 +150,22 @@ fn a_value_typed_in_the_number_field_applies() {
 #[test]
 fn a_track_drag_drops_text_typed_in_the_number_field() {
     let (mut h, effect) = harness();
-    type_opacity(&mut h, &[egui::Key::End, egui::Key::Backspace], "5");
-    let t = track(&h, "Opacity");
+    type_balance(&mut h, &[egui::Key::End, egui::Key::Backspace], "5");
+    let t = track(&h, "Global balance");
     h.drag_at(egui::pos2(t.right(), t.center().y));
     h.run_steps(2);
     h.hover_at(egui::pos2(t.left() + 20.0, t.center().y));
     h.run_steps(2);
     h.drop_at(egui::pos2(t.left() + 20.0, t.center().y));
     h.run_steps(2);
-    let dragged = opacity(&h, effect);
-    assert!(dragged < 0.5, "the drag applies: {dragged}");
+    let dragged = balance(&h, effect);
+    assert!(dragged < 0.25, "the drag applies: {dragged}");
     // Leave whatever has focus: a click on empty space.
     h.drag_at(egui::pos2(5.0, 1390.0));
     h.drop_at(egui::pos2(5.0, 1390.0));
     h.key_press(egui::Key::Enter);
     h.run_steps(3);
-    assert_eq!(opacity(&h, effect), dragged, "the text typed before the drag stays dropped");
+    assert_eq!(balance(&h, effect), dragged, "the text typed before the drag stays dropped");
 }
 
 /// Leaving the number field without typing, or with Escape, keeps the value (not the rounded
@@ -170,21 +173,21 @@ fn a_track_drag_drops_text_typed_in_the_number_field() {
 #[test]
 fn leaving_the_number_field_unchanged_keeps_the_value() {
     let (mut h, effect) = harness();
-    texturecraft_engine::execute(&mut h.state_mut().session, "effect.set", &json!({"effect": effect.0, "opacity": 0.333})).unwrap();
+    texturecraft_engine::execute(&mut h.state_mut().session, "effect.set", &json!({"effect": effect.0, "balance": 0.333})).unwrap();
     h.run_steps(2);
     let steps = h.state().session.history_labels().len();
-    type_opacity(&mut h, &[], "");
+    type_balance(&mut h, &[], "");
     h.key_press(egui::Key::Enter);
     h.run_steps(3);
-    assert_eq!(opacity(&h, effect), 0.333, "left without typing");
-    type_opacity(&mut h, &[egui::Key::End, egui::Key::Backspace], "9");
-    assert_eq!(number_field(&h, "Opacity").value().as_deref(), Some("0.39"));
-    assert!(number_field(&h, "Opacity").is_focused());
+    assert_eq!(balance(&h, effect), 0.333, "left without typing");
+    type_balance(&mut h, &[egui::Key::End, egui::Key::Backspace], "9");
+    assert_eq!(number_field(&h, "Global balance").value().as_deref(), Some("0.39"));
+    assert!(number_field(&h, "Global balance").is_focused());
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
-    assert_eq!(opacity(&h, effect), 0.333);
+    assert_eq!(balance(&h, effect), 0.333);
     // Typing the value it already has is no edit either.
-    type_opacity(&mut h, &[egui::Key::End, egui::Key::Backspace, egui::Key::Backspace, egui::Key::Backspace, egui::Key::Backspace], "0.333");
+    type_balance(&mut h, &[egui::Key::End, egui::Key::Backspace, egui::Key::Backspace, egui::Key::Backspace, egui::Key::Backspace], "0.333");
     h.key_press(egui::Key::Enter);
     h.run_steps(3);
     assert_eq!(h.state().session.history_labels().len(), steps);

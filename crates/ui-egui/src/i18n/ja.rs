@@ -1,15 +1,28 @@
 //! Japanese UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
-    ("A finer output than the texture set gives the same result as the texture set's resolution.", "テクスチャセットより細かい出力は、テクスチャセットの解像度と同じ結果になります。"),
+    (
+        "A finer output than the texture set gives the same result as the texture set's resolution.",
+        "テクスチャセットより細かい出力は、テクスチャセットの解像度と同じ結果になります。",
+    ),
     ("A gradient along a world direction across the mesh.", "ワールド方向に沿ってメッシュ全体にかかるグラデーション。"),
     ("Attributes", "属性"),
-    ("Auto and Texture set use the texture set's resolution, UV tile the UV tile's, Custom a size of its own.", "自動とテクスチャセットはテクスチャセットの解像度、UV タイルは UV タイルの解像度、カスタムは独自のサイズを使います。"),
+    (
+        "Auto and Texture set use the texture set's resolution, UV tile the UV tile's, Custom a size of its own.",
+        "自動とテクスチャセットはテクスチャセットの解像度、UV タイルは UV タイルの解像度、カスタムは独自のサイズを使います。",
+    ),
     ("Baking {map} ({n}/{total})", "{map} をベイク中 ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "{map} をベイク中 ({n}/{total})、テクスチャセット {set}/{sets}"),
+    ("Blending mode of the effect", "エフェクトの描画モード"),
     ("Category", "カテゴリー"),
-    ("Convex edges from the curvature map, broken up by noise: worn paint and polished edges.", "曲率マップから得た凸エッジをノイズで崩したもの: 剥げた塗装や磨かれたエッジ。"),
-    ("Convex edges, cavities or both from the curvature map, at several detail sizes.", "曲率マップから得た凸エッジ、くぼみ、またはその両方 (複数のディテールサイズ)。"),
+    (
+        "Convex edges from the curvature map, broken up by noise: worn paint and polished edges.",
+        "曲率マップから得た凸エッジをノイズで崩したもの: 剥げた塗装や磨かれたエッジ。",
+    ),
+    (
+        "Convex edges, cavities or both from the curvature map, at several detail sizes.",
+        "曲率マップから得た凸エッジ、くぼみ、またはその両方 (複数のディテールサイズ)。",
+    ),
     ("Crevices and occluded areas from the ambient occlusion map: dirt and grime.", "アンビエントオクルージョンマップから得た隙間や遮蔽部分: 汚れや垢。"),
     ("Custom", "カスタム"),
     ("Description", "説明"),
@@ -38,11 +51,16 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Resolution", "解像度"),
     ("Restore defaults", "デフォルトに戻す"),
     ("Same as context", "コンテキストと同じ"),
-    ("Scales the base resolution: below 1 the generator is computed coarser and smoothed back up.", "基準の解像度を拡大縮小します。1 未満ではジェネレーターを粗く計算してから滑らかに戻します。"),
+    (
+        "Scales the base resolution: below 1 the generator is computed coarser and smoothed back up.",
+        "基準の解像度を拡大縮小します。1 未満ではジェネレーターを粗く計算してから滑らかに戻します。",
+    ),
+    ("Seed {seed}", "シード {seed}"),
     ("Surfaces facing a direction, as if lit from it.", "ある方向を向いた面 (その方向から照らされたように)。"),
     ("Tags", "タグ"),
     ("Texture set", "テクスチャセット"),
     ("Thin parts of the mesh from the thickness map.", "厚みマップから得たメッシュの薄い部分。"),
+    ("Type the seed", "シードを入力"),
     ("UV tile", "UV タイル"),
     (
         "What the 3D view shows while the bake runs: the newest finished map, one finished map, or the material. Maps not baked yet show a neutral value.",

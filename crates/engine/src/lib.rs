@@ -51,6 +51,7 @@ pub mod quick_mask;
 pub mod resource_cmds;
 pub mod session;
 pub mod set_cmds;
+pub mod smart_mask_lib;
 pub mod smart_masks;
 pub mod template_cmds;
 pub mod text_cmds;

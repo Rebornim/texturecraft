@@ -23,6 +23,7 @@ mod perf;
 mod polygon_fill;
 mod project_recovery;
 mod sample;
+mod smart_mask_lib;
 mod thumbs;
 mod tools;
 mod udim;

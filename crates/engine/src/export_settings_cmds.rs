@@ -176,16 +176,16 @@ fn file_format(extension: &str, cmd: &str) -> Result<Option<FileFormat>> {
 fn apply_file_types(options: &mut ExportOptions, set_type: &ExportFileType, maps: &BTreeMap<String, MapExportOverride>, cmd: &str) -> Result<()> {
     let set_format = file_format(&set_type.format, cmd)?;
     options.preset.maps.retain(|map| !maps.get(&map.key()).is_some_and(|map_override| map_override.skip));
-    for (index, map) in options.preset.maps.iter_mut().enumerate() {
+    for map in &mut options.preset.maps {
         let (format, bit_depth, dithering) = match maps.get(&map.key()).and_then(|map_override| map_override.file_type.as_ref()) {
             Some(own) => (file_format(&own.format, cmd)?.unwrap_or(map.format), own.bit_depth, own.dithering),
+            // "Based on output template" keeps the template's own dithering
+            None if set_format.is_none() => (map.format, if set_type.bit_depth > 0 { set_type.bit_depth } else { map.bit_depth }, map.options.dithering),
             None => (set_format.unwrap_or(map.format), if set_type.bit_depth > 0 { set_type.bit_depth } else { map.bit_depth }, set_type.dithering),
         };
         map.format = format;
         map.bit_depth = format.depth(bit_depth);
-        if dithering && map.bit_depth == 8 {
-            options.dithered_maps.insert(index);
-        }
+        map.options.dithering = dithering && map.bit_depth == 8;
     }
 
     Ok(())
@@ -285,20 +285,16 @@ mod tests {
             MapExportOverride { skip: false, file_type: Some(ExportFileType { format: "png".into(), bit_depth: 16, dithering: true }) },
         );
 
+        let dithered = |options: &ExportOptions| options.preset.maps.iter().map(|map| map.options.dithering).collect::<Vec<_>>();
         let options = set_export_options(&s, &ExportSettings::default(), &export, "test").unwrap();
-        assert_eq!(options.dithered_maps.into_iter().collect::<Vec<_>>(), [0], "16-bit files aren't dithered");
-        let everywhere = set_export_options(
-            &s,
-            &ExportSettings {
-                parameters: ExportParameters { file_type: ExportFileType { format: String::new(), bit_depth: 0, dithering: true }, ..Default::default() },
-                ..Default::default()
-            },
-            &TextureSetExport::default(),
-            "test",
-        )
-        .unwrap();
-        assert!(!everywhere.dithered_maps.contains(&height), "the template's 16-bit height stays undithered");
-        assert!(everywhere.dithered_maps.contains(&0));
+        assert!(dithered(&options)[0] && !dithered(&options)[height], "16-bit files aren't dithered");
+
+        let png = ExportFileType { format: "png".into(), bit_depth: 8, dithering: true };
+        let settings = ExportSettings { parameters: ExportParameters { file_type: png, ..Default::default() }, ..Default::default() };
+        let everywhere = set_export_options(&s, &settings, &TextureSetExport::default(), "test").unwrap();
+        assert!(dithered(&everywhere).iter().all(|d| *d), "a set's dithered 8-bit png applies to every map");
+        let template = set_export_options(&s, &ExportSettings::default(), &TextureSetExport::default(), "test").unwrap();
+        assert!(dithered(&template).iter().all(|d| !*d), "based on the template: the template's own dithering, none here");
     }
 
     #[test]

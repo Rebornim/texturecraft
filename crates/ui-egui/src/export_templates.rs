@@ -43,6 +43,9 @@ const RGB: [&str; 3] = ["R", "G", "B"];
 /// A channel box's side, and the greys a constant box spans
 const BOX_SIZE: f32 = 34.0;
 const BOX_RADIUS: f32 = 5.0;
+/// Saturation and brightness of a map's colour (perceptual)
+const BOX_SATURATION: f32 = 0.75;
+const BOX_VALUE: f32 = 0.44;
 /// A palette chip's height, text size and the room either side of its name
 const CHIP_HEIGHT: f32 = 20.0;
 const CHIP_TEXT_SIZE: f32 = 11.0;
@@ -785,9 +788,9 @@ fn box_color(source: &SourceRef) -> egui::Color32 {
         return egui::Color32::from_gray(grey);
     }
 
-    // A hue from the map's name, at a fixed dark saturation so the white label reads on it
+    // A hue from the map's name, deep and dark in perceptual terms so it isn't pastel and the white label reads on it
     let hash = source_label(&with_component(source, 0), false).bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b)));
-    egui::ecolor::Hsva::new((hash % 360) as f32 / 360.0, 0.55, 0.45, 1.0).into()
+    egui::ecolor::HsvaGamma { h: (hash % 360) as f32 / 360.0, s: BOX_SATURATION, v: BOX_VALUE, a: 1.0 }.into()
 }
 
 /// The strip under a box's label: white for colour, the channel's own colour, grey, or black and white for alpha

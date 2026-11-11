@@ -6,7 +6,9 @@ mod bake_visualization_panel;
 mod bake_visualization_toggles;
 mod breadcrumb;
 mod common_settings;
+mod section_jump;
 mod section_opening;
+mod settings_section;
 pub(crate) use bake_checks::bake_warnings;
 pub use bake_paint_brush::BakePaintBrush;
 pub(crate) use bake_visualization_panel::bake_visualization_panel;
@@ -164,6 +166,8 @@ pub fn mesh_map_settings_panel(app: &mut TextureCraftApp, ui: &mut Ui) {
 
 /// The Common Settings panel: output, high poly, cage and skew settings
 pub fn common_settings_panel(app: &mut TextureCraftApp, ui: &mut Ui) {
+    section_jump::bar(ui);
+    ui.separator();
     edit_settings(app, ui, "bake_common_settings", json!("all"), common_settings::show);
 }
 

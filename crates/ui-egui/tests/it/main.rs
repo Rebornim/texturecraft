@@ -6,6 +6,7 @@ mod anchor_point;
 mod bake_job_mesh;
 mod bake_mode;
 mod bake_presets;
+mod bake_sync;
 mod brush_drag;
 mod brush_section_reset;
 mod camera_views;

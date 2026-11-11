@@ -29,10 +29,13 @@ const EXPORT_SET_LIST_WIDTH: f32 = 180.0;
 /// Room under the tabs' body for the button row
 const EXPORT_FOOTER_HEIGHT: f32 = 44.0;
 const OVERRIDE_PEN_SIZE: f32 = 20.0;
-/// Tab strip: text size, height and the open tab's underline
-const TAB_TEXT_SIZE: f32 = 12.0;
+/// Tabs: text size, height, the room around their names and between them
+const TAB_TEXT_SIZE: f32 = 12.5;
 const TAB_HEIGHT: f32 = 28.0;
-const TAB_UNDERLINE: f32 = 2.0;
+const TAB_PADDING: f32 = 14.0;
+const TAB_GAP: f32 = 2.0;
+/// The tabs' panel's inner margin
+const BODY_MARGIN: f32 = 8.0;
 /// Width of the Output templates tab's naming pattern combo
 const NAMING_WIDTH: f32 = 140.0;
 /// Bottom bar buttons are one size
@@ -43,11 +46,15 @@ const SET_ROW_PADDING: f32 = 8.0;
 /// Room for the * that marks a set with overrides
 const SET_ROW_MARKER: f32 = 12.0;
 /// Label column of the parameter grids, and the room left for the controls
-const PARAMETER_LABEL_WIDTH: f32 = 220.0;
-const PARAMETER_RIGHT_MARGIN: f32 = 32.0;
-const PARAMETER_MIN_FIELD_WIDTH: f32 = 240.0;
+const PARAMETER_LABEL_WIDTH: f32 = 170.0;
 const PARAMETER_GAP: f32 = 10.0;
-const BROWSE_BUTTON_WIDTH: f32 = 40.0;
+/// Each control's width, sized to what it shows
+const DIRECTORY_FIELD_WIDTH: f32 = 420.0;
+const TEMPLATE_FIELD_WIDTH: f32 = 300.0;
+const FILE_TYPE_FIELD_WIDTH: f32 = 280.0;
+const SIZE_FIELD_WIDTH: f32 = 240.0;
+const PADDING_FIELD_WIDTH: f32 = 300.0;
+const COLOR_SPACE_FIELD_WIDTH: f32 = 180.0;
 /// Width of an output map's name in a texture set's Output maps
 const MAP_NAME_WIDTH: f32 = 230.0;
 
@@ -72,8 +79,9 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     // A fixed size: the tabs fill the window, so a window that followed its content would grow every frame
     let size = EXPORT_DIALOG_SIZE.min(ctx.content_rect().size() - egui::Vec2::splat(2.0 * EXPORT_DIALOG_MARGIN)).max(egui::Vec2::ZERO);
     crate::windows::dialog("export_textures", tr("Export textures"), &mut open).fixed_size(size).show(ctx, |ui| {
+        let mut open_tab = None;
         ui.horizontal(|ui| {
-            tab_strip(app, ui);
+            open_tab = tab_strip(app, ui);
             if app.ui.export.tab == 0 {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(tr("Include all")).clicked()
@@ -85,7 +93,8 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
             }
             if app.ui.export.tab == 1 {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(RichText::new(ic::INFO).size(14.0)).on_hover_text(tr("Names the input maps on this page as TextureCraft or OpenPBR calls them"));
+                    ui.add(egui::Label::new(RichText::new(ic::INFO).size(14.0)).selectable(false))
+                        .on_hover_text(tr("Names the input maps on this page as TextureCraft or OpenPBR calls them"));
                     let naming = |openpbr: bool| if openpbr { "OpenPBR" } else { "TextureCraft" };
                     egui::ComboBox::from_id_salt("exp_naming").width(NAMING_WIDTH).selected_text(naming(app.ui.export.openpbr_names)).show_ui(ui, |ui| {
                         for openpbr in [false, true] {
@@ -96,41 +105,50 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
                 });
             }
         });
-        ui.separator();
-        let body_height = (ui.available_height() - EXPORT_FOOTER_HEIGHT).max(0.0);
-        ui.allocate_ui_with_layout(vec2(ui.available_width(), body_height), egui::Layout::left_to_right(egui::Align::Min), |ui| {
-            ui.set_height(body_height);
-            if app.ui.export.tab == 1 {
-                crate::export_templates::tab(app, ui, &presets, size.x - EXPORT_DIALOG_PADDING);
-                return;
-            }
-            ui.vertical(|ui| export_set_list(app, ui));
-            ui.separator();
-            ui.vertical(|ui| match app.ui.export.tab {
-                0 => export_settings_tab(app, ui, &presets),
-                _ => {
-                    let mut params = plan_params(app);
-                    params["ts"] = json!("all");
-                    match texturecraft_engine::execute(&mut app.session, "export.plan", &params) {
-                        Ok(v) => {
-                            egui::ScrollArea::vertical().max_height(ui.available_height()).show(ui, |ui| {
-                                for f in v.as_array().into_iter().flatten() {
-                                    let ts = f.get("ts").and_then(|t| t.as_u64()).unwrap_or(0) as usize;
-                                    if app.ui.export.settings.as_ref().is_some_and(|draft| draft.is_exported(ts)) {
-                                        ui.label(RichText::new(f.get("file").and_then(|x| x.as_str()).unwrap_or_default()).monospace());
+        // The open tab joins the panel below it
+        ui.add_space(-ui.spacing().item_spacing.y);
+        let body_height = (ui.available_height() - EXPORT_FOOTER_HEIGHT - 2.0 * BODY_MARGIN).max(0.0);
+        let body_corners = egui::CornerRadius { nw: 0, ne: tk.radius, sw: tk.radius, se: tk.radius };
+        let border = egui::Stroke::new(1.0, tk.separator);
+        egui::Frame::new().fill(tk.panel).stroke(border).corner_radius(body_corners).inner_margin(BODY_MARGIN).show(ui, |ui| {
+            ui.allocate_ui_with_layout(vec2(ui.available_width(), body_height), egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                ui.set_height(body_height);
+                if app.ui.export.tab == 1 {
+                    crate::export_templates::tab(app, ui, &presets, size.x - EXPORT_DIALOG_PADDING - 2.0 * BODY_MARGIN);
+                    return;
+                }
+                ui.vertical(|ui| export_set_list(app, ui));
+                ui.separator();
+                ui.vertical(|ui| match app.ui.export.tab {
+                    0 => export_settings_tab(app, ui, &presets),
+                    _ => {
+                        let mut params = plan_params(app);
+                        params["ts"] = json!("all");
+                        match texturecraft_engine::execute(&mut app.session, "export.plan", &params) {
+                            Ok(v) => {
+                                egui::ScrollArea::vertical().max_height(ui.available_height()).show(ui, |ui| {
+                                    for f in v.as_array().into_iter().flatten() {
+                                        let ts = f.get("ts").and_then(|t| t.as_u64()).unwrap_or(0) as usize;
+                                        if app.ui.export.settings.as_ref().is_some_and(|draft| draft.is_exported(ts)) {
+                                            ui.label(RichText::new(f.get("file").and_then(|x| x.as_str()).unwrap_or_default()).monospace());
+                                        }
                                     }
-                                }
-                            });
-                        }
-                        Err(e) => {
-                            ui.label(RichText::new(e.to_string()).color(tk.danger));
+                                });
+                            }
+                            Err(e) => {
+                                ui.label(RichText::new(e.to_string()).color(tk.danger));
+                            }
                         }
                     }
-                }
+                });
             });
         });
+        // The body's top border stops under the open tab, so the tab opens into it
+        if let Some(tab) = open_tab {
+            let gap = [tab.left_bottom() + vec2(1.0, 0.0), tab.right_bottom() - vec2(1.0, 0.0)];
+            ui.painter().line_segment(gap, egui::Stroke::new(2.0, tk.panel));
+        }
         ui.add_space(8.0);
-        ui.separator();
         action = bottom_bar(app, ui);
     });
 
@@ -151,21 +169,37 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     }
 }
 
-/// The tabs: names in capitals, the open one underlined
-fn tab_strip(app: &mut TextureCraftApp, ui: &mut Ui) {
+/// The tabs: the open one is framed and opens onto the panel below, the others sit back; returns the open tab's rect
+fn tab_strip(app: &mut TextureCraftApp, ui: &mut Ui) -> Option<egui::Rect> {
     let tk = Tokens::get(ui.ctx());
+    let mut open_rect = None;
+    ui.spacing_mut().item_spacing.x = TAB_GAP;
     for (index, name) in [tr("Settings"), tr("Output templates"), tr("List of exports")].into_iter().enumerate() {
         let open = app.ui.export.tab == index as u8;
-        let text = RichText::new(name.to_uppercase()).font(semibold(TAB_TEXT_SIZE)).color(if open { tk.text_strong } else { tk.text_dim });
-        let tab = ui.add(egui::Button::new(text).frame(false).min_size(vec2(0.0, TAB_HEIGHT)));
+        let color = if open { tk.text_strong } else { tk.text_dim };
+        let galley = ui.painter().layout_no_wrap(name.to_string(), semibold(TAB_TEXT_SIZE), color);
+        let (rect, tab) = ui.allocate_exact_size(vec2(galley.size().x + 2.0 * TAB_PADDING, TAB_HEIGHT), egui::Sense::click());
+        tab.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, open, name));
+        let fill = if open {
+            tk.panel
+        } else if tab.hovered() {
+            tk.row_hover
+        } else {
+            tk.row
+        };
+        let corners = egui::CornerRadius { nw: tk.radius, ne: tk.radius, sw: 0, se: 0 };
+        ui.painter().rect_filled(rect, corners, fill);
         if open {
-            let bottom = tab.rect.bottom();
-            ui.painter().line_segment([egui::pos2(tab.rect.left(), bottom), egui::pos2(tab.rect.right(), bottom)], egui::Stroke::new(TAB_UNDERLINE, tk.accent));
+            ui.painter().rect_stroke(rect, corners, egui::Stroke::new(1.0, tk.separator), egui::StrokeKind::Inside);
+            open_rect = Some(rect);
         }
+        ui.painter().galley(rect.center() - galley.size() / 2.0, galley, color);
         if tab.clicked() {
             app.ui.export.tab = index as u8;
         }
     }
+
+    open_rect
 }
 
 /// Reset all, the count of textures, Cancel, Save settings and Export
@@ -311,7 +345,6 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
     let Some(draft) = app.ui.export.settings.as_mut() else { return };
 
     let mut pick_dir = false;
-    let field = field_width(ui);
     ui.horizontal(|ui| {
         ui.label(caption(tr("General export parameters")));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -328,23 +361,23 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
         {
             ui.label(tr("Output directory"));
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut settings.dir).desired_width(field - BROWSE_BUTTON_WIDTH));
+                ui.add(egui::TextEdit::singleline(&mut settings.dir).desired_width(DIRECTORY_FIELD_WIDTH));
                 pick_dir = ui.button("...").clicked();
             });
             ui.end_row();
         }
         let parameters = &mut settings.parameters;
         ui.label(tr("Output template"));
-        controls::template_combo(ui, "exp_preset", &mut parameters.preset, builtins, user_presets, field);
+        controls::template_combo(ui, "exp_preset", &mut parameters.preset, builtins, user_presets, TEMPLATE_FIELD_WIDTH);
         ui.end_row();
         ui.label(tr("File type"));
-        controls::file_type_combos(ui, "exp_fmt", &mut parameters.file_type, field);
+        controls::file_type_combos(ui, "exp_fmt", &mut parameters.file_type, FILE_TYPE_FIELD_WIDTH);
         ui.end_row();
         ui.label(tr("Size"));
-        controls::size_combo(ui, "exp_size", &mut parameters.size, None, field);
+        controls::size_combo(ui, "exp_size", &mut parameters.size, None, SIZE_FIELD_WIDTH);
         ui.end_row();
         ui.label(tr("Padding"));
-        controls::padding_controls(ui, "exp_pad", &mut parameters.padding, &mut parameters.dilation, field);
+        controls::padding_controls(ui, "exp_pad", &mut parameters.padding, &mut parameters.dilation, PADDING_FIELD_WIDTH);
         ui.end_row();
         ui.label(tr("Normal map format"));
         let preset_format = match preset_normal {
@@ -357,7 +390,7 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
             "directX" => "DirectX".to_string(),
             _ => preset_format.clone(),
         };
-        egui::ComboBox::from_id_salt("exp_nf").width(field).selected_text(shown).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("exp_nf").width(SIZE_FIELD_WIDTH).selected_text(shown).show_ui(ui, |ui| {
             for (value, label) in [("", preset_format), ("openGl", "OpenGL".to_string()), ("directX", "DirectX".to_string())] {
                 ui.selectable_value(&mut settings.normal_format, value.to_string(), label);
             }
@@ -365,7 +398,7 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
         ui.end_row();
         ui.label(tr("Color space"));
         let shown = if settings.color_space.is_empty() { tr("Default") } else { settings.color_space.as_str() };
-        egui::ComboBox::from_id_salt("exp_cs").width(field).selected_text(shown).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("exp_cs").width(COLOR_SPACE_FIELD_WIDTH).selected_text(shown).show_ui(ui, |ui| {
             ui.selectable_value(&mut settings.color_space, String::new(), tr("Default"));
             for name in ["sRGB", "Linear Rec.709", "ACEScg", "ACES2065-1"] {
                 ui.selectable_value(&mut settings.color_space, name.to_string(), name);
@@ -413,7 +446,6 @@ fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Optio
         });
     });
     let tk = Tokens::get(ui.ctx());
-    let field = field_width(ui) - OVERRIDE_PEN_SIZE - PARAMETER_GAP;
     let inherited = |ui: &mut Ui, text: String| ui.label(RichText::new(text).color(tk.text_dim));
     ui.add_space(PARAMETER_GAP);
     egui::Grid::new(("exp_set_grid", ts)).num_columns(3).spacing(vec2(PARAMETER_GAP, PARAMETER_GAP)).show(ui, |ui| {
@@ -422,7 +454,7 @@ fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Optio
             overrides.preset = overrides.preset.take().xor(Some(global.preset.clone()));
         }
         match overrides.preset.as_mut() {
-            Some(preset) => controls::template_combo(ui, "exp_set_preset", preset, builtins, user_presets, field),
+            Some(preset) => controls::template_combo(ui, "exp_set_preset", preset, builtins, user_presets, TEMPLATE_FIELD_WIDTH),
             None => {
                 inherited(ui, global.preset.clone());
             }
@@ -434,7 +466,7 @@ fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Optio
             overrides.file_type = overrides.file_type.take().xor(Some(global.file_type.clone()));
         }
         match overrides.file_type.as_mut() {
-            Some(file_type) => controls::file_type_combos(ui, "exp_set_fmt", file_type, field),
+            Some(file_type) => controls::file_type_combos(ui, "exp_set_fmt", file_type, FILE_TYPE_FIELD_WIDTH),
             None => {
                 inherited(ui, controls::file_type_with_depth_text(&global.file_type));
             }
@@ -446,7 +478,7 @@ fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Optio
             overrides.size = overrides.size.take().xor(Some(global.size));
         }
         match overrides.size.as_mut() {
-            Some(size) => controls::size_combo(ui, "exp_set_size", size, set_size, field),
+            Some(size) => controls::size_combo(ui, "exp_set_size", size, set_size, SIZE_FIELD_WIDTH),
             None => {
                 inherited(ui, controls::size_text(global.size, set_size));
             }
@@ -458,7 +490,7 @@ fn set_settings(ui: &mut Ui, draft: &mut ExportDraft, ts: usize, set_size: Optio
             overrides.padding = overrides.padding.take().xor(Some((global.padding.clone(), global.dilation)));
         }
         match overrides.padding.as_mut() {
-            Some((padding, dilation)) => controls::padding_controls(ui, "exp_set_pad", padding, dilation, field),
+            Some((padding, dilation)) => controls::padding_controls(ui, "exp_set_pad", padding, dilation, PADDING_FIELD_WIDTH),
             None => {
                 inherited(ui, controls::padding_text(&global.padding, global.dilation));
             }
@@ -561,11 +593,6 @@ fn parameter_label(ui: &mut Ui, text: &str, width: f32) {
         ui.set_width(width);
         ui.label(text);
     });
-}
-
-/// Width of a parameter's controls: what's left of the panel after the label column
-fn field_width(ui: &Ui) -> f32 {
-    (ui.available_width() - PARAMETER_LABEL_WIDTH - PARAMETER_RIGHT_MARGIN).max(PARAMETER_MIN_FIELD_WIDTH)
 }
 
 /// The pen beside a parameter, pressed while this texture set overrides it; true when clicked

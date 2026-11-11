@@ -233,7 +233,7 @@ fn a_texture_set_leaves_out_a_map_or_gives_it_its_own_file_type() {
 #[test]
 fn the_window_opens_on_settings_and_reset_all_belongs_to_settings() {
     let mut harness = harness(2, LAPTOP);
-    harness.get_by_label("OUTPUT TEMPLATES").click();
+    harness.get_by_label("Output templates").click();
     harness.run_steps(2);
     assert!(harness.query_by_label("Reset all").is_none(), "Reset all is a Settings button");
     harness.key_press(egui::Key::Escape);
@@ -349,7 +349,7 @@ fn the_window_keeps_its_size_on_every_tab() {
     for size in [LAPTOP, egui::vec2(1280.0, 480.0)] {
         let mut harness = harness(MANY_SETS, size);
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
-        for tab in ["SETTINGS", "OUTPUT TEMPLATES", "LIST OF EXPORTS"] {
+        for tab in ["Settings", "Output templates", "List of exports"] {
             let inside = dialog_rect(&harness);
             harness.get_all_by_label(tab).find(|node| inside.contains_rect(node.rect())).unwrap().click();
             harness.run_steps(5);
@@ -367,7 +367,7 @@ fn the_window_keeps_its_size_on_every_tab() {
 #[test]
 fn the_output_templates_tab_holds_still() {
     let mut harness = harness(2, LAPTOP);
-    harness.get_by_label("OUTPUT TEMPLATES").click();
+    harness.get_by_label("Output templates").click();
     harness.run_steps(5);
     let before = harness.get_by_label("Input maps").rect();
     harness.run_steps(120);
@@ -377,7 +377,7 @@ fn the_output_templates_tab_holds_still() {
 #[test]
 fn the_naming_pattern_renames_the_input_maps() {
     let mut harness = harness(2, LAPTOP);
-    harness.get_by_label("OUTPUT TEMPLATES").click();
+    harness.get_by_label("Output templates").click();
     harness.run_steps(3);
     harness.get_by_label("Metallic");
     assert!(harness.query_by_label("Base metalness").is_none());
@@ -390,7 +390,7 @@ fn the_naming_pattern_renames_the_input_maps() {
 #[test]
 fn an_empty_template_cannot_be_saved_or_exported() {
     let mut harness = harness(2, LAPTOP);
-    harness.get_by_label("OUTPUT TEMPLATES").click();
+    harness.get_by_label("Output templates").click();
     harness.run_steps(2);
     let enabled = |harness: &Harness<'static, TextureCraftApp>, label: &str| {
         !harness.get_all_by_label(label).find(|node| node.accesskit_node().role() == Role::Button).unwrap().accesskit_node().is_disabled()
@@ -406,7 +406,7 @@ fn an_empty_template_cannot_be_saved_or_exported() {
 #[test]
 fn the_template_list_is_alphabetical() {
     let mut harness = harness(2, LAPTOP);
-    harness.get_by_label("OUTPUT TEMPLATES").click();
+    harness.get_by_label("Output templates").click();
     harness.run_steps(2);
     let y = |name: &str| harness.get_by_label(name).rect().top();
     assert!(y("Arnold (Standard Surface)") < y("CryEngine (Illum)") && y("CryEngine (Illum)") < y("Unity URP (Metallic)"));

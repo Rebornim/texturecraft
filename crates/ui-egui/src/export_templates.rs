@@ -20,7 +20,7 @@ use output_kind::OutputKind;
 use crate::TextureCraftApp;
 use crate::i18n::{n_, tr, trf};
 use crate::theme::{Tokens, caption};
-use crate::widgets::{chip, icon_button};
+use crate::widgets::{chip, icon_button, panel_header};
 
 const ICON: f32 = 20.0;
 /// Widths of the presets, input maps and mesh / converted maps columns; the outputs take the rest
@@ -42,6 +42,9 @@ const RENAME_ID: &str = "exp_rename";
 const RGB: [&str; 3] = ["R", "G", "B"];
 /// A channel box's side, and the greys a constant box spans
 const BOX_SIZE: f32 = 34.0;
+const BOX_RADIUS: f32 = 5.0;
+/// Space above each palette group
+const PALETTE_GROUP_GAP: f32 = 6.0;
 const BOX_CONSTANT_FLOOR: f32 = 40.0;
 const BOX_CONSTANT_RANGE: f32 = 160.0;
 /// Width of an output's file type and bit depth combos
@@ -726,7 +729,7 @@ fn channel_box(ui: &mut Ui, map: &mut MapSpec, slot: &ChannelSlot, openpbr: bool
     let (rect, response) = ui.allocate_exact_size(vec2(BOX_SIZE, BOX_SIZE), egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, format!("{}: {name}", slot.label)));
     let fill = box_color(&source);
-    ui.painter().rect_filled(rect, 2.0, fill);
+    ui.painter().rect_filled(rect, BOX_RADIUS, fill);
     ui.painter().text(rect.center_top() + vec2(0.0, 3.0), egui::Align2::CENTER_TOP, slot.label, egui::FontId::proportional(11.0), egui::Color32::WHITE);
     let bar = egui::Rect::from_min_max(rect.left_bottom() + vec2(5.0, -9.0), rect.right_bottom() + vec2(-5.0, -7.0));
     ui.painter().rect_filled(bar, 0.0, slot_bar_color(slot));
@@ -808,16 +811,11 @@ fn preset_row(ui: &mut Ui, icon: &str, name: &str, selected: bool) -> egui::Resp
     row
 }
 
-/// An input map to drag onto an output channel: a full-width row
-fn palette_item(ui: &mut Ui, label: &str, source: &SourceRef, color: egui::Color32) {
-    let tk = Tokens::get(ui.ctx());
-    let (rect, item) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), egui::Sense::drag());
+/// An input map to drag onto an output channel: a chip
+fn palette_item(ui: &mut Ui, label: &str, source: &SourceRef) {
+    let item = chip(ui, label, false).interact(egui::Sense::drag());
     item.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     let item = item.on_hover_cursor(egui::CursorIcon::Grab);
-    ui.painter().rect_filled(rect.shrink2(vec2(0.0, 1.0)), 0.0, if item.hovered() { tk.row_hover } else { tk.row });
-    let galley = crate::widgets::elided(ui.painter(), label, 12.0, color, rect.width() - 2.0 * ROW_INDENT);
-    ui.painter().galley(egui::pos2(rect.left() + ROW_INDENT, rect.center().y - galley.size().y / 2.0), galley, color);
-
     item.dnd_set_drag_payload(source.clone());
     if item.dragged()
         && let Some(at) = item.interact_pointer_pos()
@@ -827,50 +825,50 @@ fn palette_item(ui: &mut Ui, label: &str, source: &SourceRef, color: egui::Color
     }
 }
 
-/// A group name in the palettes
-fn palette_group(ui: &mut Ui, name: &str) {
+/// A palette group: its name, then its maps as chips that wrap
+fn palette_group(ui: &mut Ui, name: &str, items: &[(&str, SourceRef)]) {
     let tk = Tokens::get(ui.ctx());
-    ui.add_space(2.0);
-    ui.label(RichText::new(name).italics().size(12.0).color(tk.text));
+    ui.add_space(PALETTE_GROUP_GAP);
+    if !name.is_empty() {
+        ui.label(RichText::new(name).size(11.0).color(tk.text_dim));
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+        for (label, source) in items {
+            palette_item(ui, label, source);
+        }
+    });
 }
 
 /// The Input maps column: texture set channels by lobe
 fn input_maps(ui: &mut Ui, openpbr: bool) {
-    let tk = Tokens::get(ui.ctx());
-    ui.label(caption(tr("Input maps")));
+    panel_header(ui, tr("Input maps"), |_| {});
     egui::ScrollArea::vertical().id_salt("exp_inputs").auto_shrink([false; 2]).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
         for (group, channels) in INPUT_GROUPS {
-            palette_group(ui, tr(group));
-            for &channel in channels {
-                palette_item(ui, tr(channel_name(channel, openpbr)), &SourceRef::Channel { channel, component: 0 }, tk.text);
-            }
+            let items: Vec<(&str, SourceRef)> =
+                channels.iter().map(|&channel| (tr(channel_name(channel, openpbr)), SourceRef::Channel { channel, component: 0 })).collect();
+            palette_group(ui, tr(group), &items);
         }
     });
 }
 
 /// The Mesh maps column above the Converted maps (with the constants)
 fn mesh_and_converted_maps(ui: &mut Ui) {
-    let tk = Tokens::get(ui.ctx());
     let half = ui.available_height() / 2.0;
-    ui.label(caption(tr("Mesh maps")));
+    panel_header(ui, tr("Mesh maps"), |_| {});
     egui::ScrollArea::vertical().id_salt("exp_mesh_maps").max_height(half - ROW_HEIGHT).auto_shrink([false; 2]).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        for &map in BakedMap::ALL.iter() {
-            palette_item(ui, crate::i18n::baked_map_label(map), &SourceRef::Baked { map, component: 0 }, tk.text);
-        }
+        let items: Vec<(&str, SourceRef)> =
+            BakedMap::ALL.iter().map(|&map| (crate::i18n::baked_map_label(map), SourceRef::Baked { map, component: 0 })).collect();
+        palette_group(ui, "", &items);
     });
     ui.separator();
-    ui.label(caption(tr("Converted maps")));
+    panel_header(ui, tr("Converted maps"), |_| {});
     egui::ScrollArea::vertical().id_salt("exp_converted_maps").auto_shrink([false; 2]).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        for &map in VirtualMap::ALL.iter() {
-            palette_item(ui, tr(map.label()), &SourceRef::Virtual { map, component: 0 }, tk.warning);
-        }
-        palette_group(ui, tr("Constants"));
-        for (label, value) in [(n_("Black"), 0.0), (n_("Gray 50%"), 0.5), (n_("White"), 1.0)] {
-            palette_item(ui, tr(label), &SourceRef::Constant(value), tk.text);
-        }
+        let items: Vec<(&str, SourceRef)> = VirtualMap::ALL.iter().map(|&map| (tr(map.label()), SourceRef::Virtual { map, component: 0 })).collect();
+        palette_group(ui, "", &items);
+        let constants =
+            [(tr(n_("Black")), SourceRef::Constant(0.0)), (tr(n_("Gray 50%")), SourceRef::Constant(0.5)), (tr(n_("White")), SourceRef::Constant(1.0))];
+        palette_group(ui, tr("Constants"), &constants);
     });
 }
 

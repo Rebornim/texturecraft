@@ -402,3 +402,12 @@ fn an_empty_template_cannot_be_saved_or_exported() {
     harness.run_steps(3);
     assert!(!enabled(&harness, "Save settings") && !enabled(&harness, "Export"));
 }
+
+#[test]
+fn the_template_list_is_alphabetical() {
+    let mut harness = harness(2, LAPTOP);
+    harness.get_by_label("OUTPUT TEMPLATES").click();
+    harness.run_steps(2);
+    let y = |name: &str| harness.get_by_label(name).rect().top();
+    assert!(y("Arnold (Standard Surface)") < y("CryEngine (Illum)") && y("CryEngine (Illum)") < y("Unity URP (Metallic)"));
+}

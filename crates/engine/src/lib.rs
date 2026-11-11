@@ -56,6 +56,8 @@ pub mod shader_parameters;
 pub mod smart_masks;
 pub mod template_cmds;
 pub mod text_cmds;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod texture_export;
 pub mod thumbs;
 mod tool_availability;
 pub mod tool_cmds;

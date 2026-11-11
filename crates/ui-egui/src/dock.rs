@@ -2036,7 +2036,10 @@ fn projection_editor(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: 
 /// Width of the lock button between a pair of sliders
 const PAIR_LOCK_WIDTH: f32 = 22.0;
 
-/// Two sliders side by side after `label` (across and down), with a lock between them when
+/// Height of one slider: its value row over its track
+const PAIR_SLIDER_HEIGHT: f32 = 34.0;
+
+/// Two sliders side by side under `label` (across and down), with a lock between them when
 /// `lock` is given: while locked, the second follows the first and is greyed. Returns the pair
 /// once one is edited, with [`slider_edit`]'s `merge`.
 fn pair_sliders(
@@ -2049,35 +2052,37 @@ fn pair_sliders(
 ) -> Option<([f32; 2], bool)> {
     let mut edited = None;
     ui.label(label);
-    ui.horizontal(|ui| {
-        let lock_width = if lock.is_some() { PAIR_LOCK_WIDTH } else { 0.0 };
-        let width = ((ui.available_width() - lock_width) / 2.0 - ui.spacing().item_spacing.x).max(40.0);
-        let locked = lock.as_deref().copied().unwrap_or(false);
-        ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
-            if let Some(merge) = slider_edit(ui, "", &mut v[0], range.clone(), decimals) {
-                if locked {
-                    v[1] = v[0];
-                }
-                edited = Some(merge);
-            }
-        });
-        if let Some(lock) = lock {
-            let icon = if *lock { ic::LOCK_SIMPLE } else { ic::LOCK_SIMPLE_OPEN };
-            if icon_button(ui, icon, tr("Lock the two values together"), *lock, 14.0).clicked() {
-                *lock = !*lock;
-                if *lock && v[1] != v[0] {
-                    v[1] = v[0];
-                    edited = Some(false);
-                }
+    let locked = lock.as_deref().copied().unwrap_or(false);
+    let lock_width = if lock.is_some() { PAIR_LOCK_WIDTH } else { ui.spacing().item_spacing.x };
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), PAIR_SLIDER_HEIGHT), Sense::hover());
+    let half = ((rect.width() - lock_width) / 2.0).max(1.0);
+    let left = egui::Rect::from_min_size(rect.min, egui::vec2(half, rect.height()));
+    let right = egui::Rect::from_min_size(egui::pos2(rect.right() - half, rect.top()), egui::vec2(half, rect.height()));
+    let slot = |ui: &mut Ui, area: egui::Rect| ui.new_child(egui::UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
+
+    if let Some(merge) = slider_edit(&mut slot(ui, left), "", &mut v[0], range.clone(), decimals) {
+        if locked {
+            v[1] = v[0];
+        }
+        edited = Some(merge);
+    }
+    if let Some(lock) = lock {
+        let middle = egui::Rect::from_center_size(egui::pos2(rect.center().x, rect.bottom() - 9.0), egui::vec2(PAIR_LOCK_WIDTH, 18.0));
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(middle).layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight)));
+        let icon = if *lock { ic::LOCK_SIMPLE } else { ic::LOCK_SIMPLE_OPEN };
+        if icon_button(&mut child, icon, tr("Lock the two values together"), *lock, 14.0).clicked() {
+            *lock = !*lock;
+            if *lock && v[1] != v[0] {
+                v[1] = v[0];
+                edited = Some(false);
             }
         }
-        ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
-            ui.add_enabled_ui(!locked, |ui| {
-                if let Some(merge) = slider_edit(ui, "", &mut v[1], range.clone(), decimals) {
-                    edited = Some(merge);
-                }
-            });
-        });
+    }
+    let mut second = slot(ui, right);
+    second.add_enabled_ui(!locked, |ui| {
+        if let Some(merge) = slider_edit(ui, "", &mut v[1], range.clone(), decimals) {
+            edited = Some(merge);
+        }
     });
     edited.map(|merge| (v, merge))
 }

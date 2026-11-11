@@ -477,11 +477,11 @@ fn fill_properties_snapshots() {
     let mut harness =
         Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).with_pixels_per_point(1.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
     save(&mut harness, &output_dir, "fill-uv");
-    for (label, name) in [("Bilinear | HQ", "fill-uv-filtering-open"), ("Repeat", "fill-uv-wrap-open")] {
-        if let Some(combo) = harness.query_by_label(label) {
+    for (shown, name) in [("Bilinear | HQ", "fill-uv-filtering-open"), ("Repeat", "fill-uv-wrap-open")] {
+        if let Some(combo) = harness.query_by_value(shown) {
             combo.click();
             save(&mut harness, &output_dir, name);
-            harness.key_press(egui::Key::Escape);
+            harness.query_by_value(shown).map(|combo| combo.click());
             harness.run_steps(2);
         }
     }

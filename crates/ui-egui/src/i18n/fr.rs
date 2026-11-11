@@ -657,7 +657,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Position jitter", "Variation de position"),
     ("Posterize", "Postérisation"),
     ("Press a key...", "Appuyez sur une touche..."),
-    ("Procedurals", "Procéduraux"),
     ("Project", "Projet"),
     ("Project Configuration...", "Configuration du projet..."),
     ("Project opened", "Projet ouvert"),

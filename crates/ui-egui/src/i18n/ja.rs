@@ -633,7 +633,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Position jitter", "位置ジッター"),
     ("Posterize", "ポスタリゼーション"),
     ("Press a key...", "キーを押してください..."),
-    ("Procedurals", "プロシージャル"),
     ("Project", "プロジェクト"),
     ("Project Configuration...", "プロジェクト構成..."),
     ("Project opened", "プロジェクトを開きました"),

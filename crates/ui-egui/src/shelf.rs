@@ -1,9 +1,4 @@
-//! The asset shelf (the Assets dock tab): tabs (materials, smart materials, smart
-//! masks, filters, alphas, procedurals, environments, textures), all built in and procedural.
-//! Each tab is one grid sorted by name; a search shows the matches of every tab in one grid.
-//! Materials (built in and saved), smart masks, filters, alphas
-//! and textures drag onto the layer stack, a layer row, the viewport or the brush properties
-//! ([`ShelfDrag`]); a texture dropped on the 3D view becomes a decal there, in the channel picked from a menu
+//! The Assets panel: built-in, saved and project assets in one grid by type, library and search, dragged onto the layer stack, the views or the brush
 
 use egui::{Color32, RichText, Sense, Stroke, Ui, vec2};
 use egui_phosphor::regular as ic;
@@ -65,22 +60,21 @@ pub(crate) enum Tab {
     Filters,
     Brushes,
     Alphas,
-    Procedurals,
-    Environments,
+    /// Procedural patterns and the project's images
     Textures,
+    Environments,
 }
 
 /// The shelf tabs: icon and (English, translated where shown) name.
-pub(crate) const TABS: [(Tab, &str, &str); 9] = [
+pub(crate) const TABS: [(Tab, &str, &str); 8] = [
     (Tab::Materials, ic::SPHERE, "Materials"),
     (Tab::Smart, ic::STACK, "Smart materials"),
     (Tab::Masks, ic::CIRCLE_HALF, "Smart masks"),
     (Tab::Filters, ic::FUNNEL, "Filters"),
     (Tab::Brushes, ic::PAINT_BRUSH_BROAD, "Brushes"),
     (Tab::Alphas, ic::SHAPES, "Alphas"),
-    (Tab::Procedurals, ic::CHECKERBOARD, "Procedurals"),
-    (Tab::Environments, ic::SUN_HORIZON, "Environments"),
     (Tab::Textures, ic::IMAGE, "Textures"),
+    (Tab::Environments, ic::SUN_HORIZON, "Environments"),
 ];
 
 /// A shelf asset: built in (by id), a saved smart material (file path) or an image resource.

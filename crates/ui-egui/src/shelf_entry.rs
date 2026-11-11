@@ -67,7 +67,7 @@ impl ShelfEntry {
             ShelfEntry::Filter(_) => Tab::Filters,
             ShelfEntry::Brush(_) | ShelfEntry::SavedBrush(_) => Tab::Brushes,
             ShelfEntry::Alpha(_) => Tab::Alphas,
-            ShelfEntry::Procedural(_) => Tab::Procedurals,
+            ShelfEntry::Procedural(_) => Tab::Textures,
             ShelfEntry::Environment(_) => Tab::Environments,
             ShelfEntry::Image(_) => Tab::Textures,
         }

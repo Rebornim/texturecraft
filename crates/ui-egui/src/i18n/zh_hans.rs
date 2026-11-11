@@ -582,7 +582,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Position jitter", "位置抖动"),
     ("Posterize", "色调分离"),
     ("Press a key...", "请按下一个键..."),
-    ("Procedurals", "程序纹理"),
     ("Project", "项目"),
     ("Project Configuration...", "项目配置..."),
     ("Project opened", "项目已打开"),

@@ -84,6 +84,23 @@ mod tests {
 
     use super::*;
 
+    /// Scratch render for a design mockup: material balls at the Material tab's size, 2x
+    #[test]
+    #[ignore]
+    fn write_large_material_balls() {
+        let Some(dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(std::path::PathBuf::from) else { return };
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut orb = texturecraft_engine::orb_preview::OrbPreview::new().unwrap();
+        for id in ["steel_painted_worn", "rust", "copper", "steel", "iron"] {
+            for size in [180usize, 360] {
+                let Some(pixels) = orb.material(id, size) else { continue };
+                let image = material_preview_image(size, &pixels);
+                let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+                image::RgbaImage::from_raw(size as u32, size as u32, rgba).unwrap().save(dir.join(format!("{id}_{size}.png"))).unwrap();
+            }
+        }
+    }
+
     #[test]
     fn the_studio_lights_the_shape_from_the_upper_right() {
         let polished_metal = Sample { base: [0.9; 3], metallic: 1.0, roughness: 0.3, height: 0.0 };

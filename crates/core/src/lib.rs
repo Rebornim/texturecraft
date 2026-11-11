@@ -80,11 +80,11 @@ pub const FULL_TURN_DEGREES: f32 = 360.0;
 pub use anisotropic_kuwahara::AnisotropicKuwahara;
 pub use backface::Backface;
 pub use bake::{
-    AmbientOcclusionAttenuation, AmbientOcclusionSettings, BackfaceMode, BakeAntialiasing, BakePaintTarget, BakeResolution, BakeSettings, BakedMap,
-    BentNormalSettings, CageSettings, CageType, CommonBakeSettings, CurvatureMethod, CurvatureSettings, GroundPlaneSettings, HeightNormalization,
-    HeightSettings, HighPolySettings, IdColorGenerator, IdColorSource, IdSettings, MapSettings, MeshCurvatureSettings, MeshMapSettings, MeshMatchMode,
-    NormalMapCurvatureSettings, PositionAxis, PositionMode, PositionNormalizationScale, PositionSettings, RayDistribution, RaySettings, SelfOcclusion,
-    SkewCorrectionMethod, SkewSettings, ThicknessNormalization, ThicknessSettings,
+    AmbientOcclusionAttenuation, AmbientOcclusionSettings, BackfaceMode, BakeAntialiasing, BakePaintTarget, BakeResolution, BakeSettings, BakeSync,
+    BakeSyncGroup, BakedMap, BentNormalSettings, CageSettings, CageType, CommonBakeSettings, CurvatureMethod, CurvatureSettings, GroundPlaneSettings,
+    HeightNormalization, HeightSettings, HighPolySettings, IdColorGenerator, IdColorSource, IdSettings, MapSettings, MeshCurvatureSettings, MeshMapSettings,
+    MeshMatchMode, NormalMapCurvatureSettings, PositionAxis, PositionMode, PositionNormalizationScale, PositionSettings, RayDistribution, RaySettings,
+    SelfOcclusion, SkewCorrectionMethod, SkewSettings, ThicknessNormalization, ThicknessSettings,
 };
 pub use bevel::Bevel;
 pub use bevel_blur::BevelBlur;

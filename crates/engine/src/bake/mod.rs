@@ -14,6 +14,7 @@ mod paint_command;
 mod preserve_tiles;
 mod streamed_bake;
 mod streamed_map;
+mod sync_command;
 mod tile_command;
 
 pub use bake_cage_inputs::BakeCageInputs;
@@ -36,5 +37,6 @@ pub(crate) fn specs() -> Vec<CommandSpec> {
     let mut commands = mesh_map_command::specs();
     commands.extend(paint_command::specs());
     commands.extend(tile_command::specs());
+    commands.extend(sync_command::specs());
     commands
 }

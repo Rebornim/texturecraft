@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BakeSettings, BakedMap, Channel, ChannelFormat, ContentsOffset, CoreError, Effect, Layer, LayerId, LayerKind, Result};
+use crate::{BakeSettings, BakeSyncGroup, BakedMap, Channel, ChannelFormat, ContentsOffset, CoreError, Effect, Layer, LayerId, LayerKind, Result};
 
 pub use crate::env_alignment::EnvAlignment;
 pub use crate::shadow_mode::ShadowMode;
@@ -476,6 +476,17 @@ impl Project {
     }
     pub fn texture_set_mut(&mut self, ts: usize) -> Result<&mut TextureSet> {
         self.texture_sets.get_mut(ts).ok_or(CoreError::NoTextureSet(ts))
+    }
+
+    /// The texture sets an edit of `group` on texture set `active` reaches: every set sharing `group` with it, or `active` alone
+    pub fn bake_synced_sets(&self, active: usize, group: BakeSyncGroup) -> Vec<usize> {
+        match self.texture_sets.get(active) {
+            Some(set) if set.bake.sync.shares(group) => {
+                self.texture_sets.iter().enumerate().filter(|(_, set)| set.bake.sync.shares(group)).map(|(index, _)| index).collect()
+            }
+            Some(_) => vec![active],
+            None => Vec::new(),
+        }
     }
 
     pub fn layer(&self, id: LayerId) -> Result<&Layer> {

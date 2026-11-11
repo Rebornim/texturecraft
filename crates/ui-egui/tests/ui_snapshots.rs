@@ -497,3 +497,29 @@ fn rail_window_snapshots() {
     texturecraft_ui_egui::menus::invoke(harness.state_mut(), &context, "ui.view.history");
     save(&mut harness, &output_dir, "rail-history-short");
 }
+
+#[test]
+#[ignore]
+fn fill_properties_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1]})).unwrap()["layer"].clone();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).with_pixels_per_point(1.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    save(&mut harness, &output_dir, "fill-uv");
+    for (label, name) in [("Bilinear | HQ", "fill-uv-filtering-open"), ("Repeat", "fill-uv-wrap-open")] {
+        if let Some(combo) = harness.query_by_label(label) {
+            combo.click();
+            save(&mut harness, &output_dir, name);
+            harness.key_press(egui::Key::Escape);
+            harness.run_steps(2);
+        }
+    }
+    let session = &mut harness.state_mut().session;
+    execute(session, "layer.fill.projection", &json!({"layer": layer, "projection": "triplanar"})).unwrap();
+    save(&mut harness, &output_dir, "fill-triplanar");
+}

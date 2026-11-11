@@ -47,7 +47,8 @@ fn picking_from_the_slot_swaps_the_generator_kind() {
     harness.run_steps(3);
     assert_eq!(harness.query_all_by_label("Light").count(), 0, "the search hides generators that don't match");
 
-    harness.get_by_label("Curvature").click();
+    // The panel's Curvature input shares the name as a label; the picker's tile is a button
+    harness.get_by_role_and_label(Role::Button, "Curvature").click();
     harness.run_steps(3);
 
     assert_eq!(kind(&harness, effect), Some(GeneratorKind::Curvature));
@@ -93,8 +94,8 @@ fn generator_picker_snapshots() {
         harness.render().unwrap().save(output.join(format!("{name}.png"))).unwrap();
     }
 
-    // The Assets shelf may show a Dirt resource too: the picker draws over it, last
-    harness.query_all_by_label("Dirt").last().expect("the picker offers Dirt").hover();
+    // The picker's tile is the button named Dirt
+    harness.get_by_role_and_label(Role::Button, "Dirt").hover();
     for _ in 0..10 {
         harness.run_steps(5);
         std::thread::sleep(std::time::Duration::from_millis(300));

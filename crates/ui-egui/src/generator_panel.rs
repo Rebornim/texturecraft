@@ -3,7 +3,9 @@
 use egui::{RichText, Ui};
 use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
-use texturecraft_engine::core::{BakedMap, CurvatureDetail, CurvatureMode, Generator, GeneratorKind, LayerId, OutputResolution, ResolutionMode, Source};
+use texturecraft_engine::core::{
+    BakedMap, CurvatureDetail, CurvatureMode, Generator, GeneratorKind, LayerId, OutputResolution, ResolutionMode, Source, WearParameters,
+};
 
 use crate::TextureCraftApp;
 use crate::dock::{anchor_label, anchors_below, image_drop, image_menu, mesh_map_color};
@@ -24,6 +26,9 @@ const INPUT_TILE_SIZE: f32 = 32.0;
 const INPUT_TILE_ROUNDING: f32 = 2.0;
 const INPUT_TILE_ICON_SIZE: f32 = 16.0;
 
+/// Width of a False/True button, so the buttons line up under each other
+const TOGGLE_WIDTH: f32 = 136.0;
+
 /// Width of the names in the Attributes section, so their values line up.
 const ATTRIBUTE_KEY_WIDTH: f32 = 80.0;
 
@@ -35,10 +40,15 @@ pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer
     section(ui, "generator_attributes", tr("Attributes"), false, |ui| attributes(ui, generator.kind));
     section(ui, "generator_resolution", tr("Resolution"), false, |ui| resolution(app, ui, id, generator.resolution));
     section(ui, "generator_parameters", tr("Parameters"), true, |ui| {
-        global_adjustments(app, ui, id, generator);
-        ramp_parameters(app, ui, id, generator);
-        if matches!(generator.kind, GeneratorKind::Curvature | GeneratorKind::EdgeWear) {
-            curvature_detail_properties(app, ui, id, generator.detail.as_ref());
+        if let Some(defaults) = WearParameters::defaults(generator.kind) {
+            // A wear generator saved before its wear controls shows them at their defaults: editing one moves it onto them
+            wear_parameters(app, ui, id, generator, generator.wear.unwrap_or(defaults));
+        } else {
+            global_adjustments(app, ui, id, generator);
+            ramp_parameters(app, ui, id, generator);
+            if generator.kind == GeneratorKind::Curvature {
+                curvature_detail_properties(app, ui, id, generator.detail.as_ref());
+            }
         }
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -66,24 +76,14 @@ pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer
 fn attributes(ui: &mut Ui, kind: GeneratorKind) {
     let tokens = Tokens::get(ui.ctx());
     let (description, tags) = match kind {
-        GeneratorKind::EdgeWear => (
-            tr("Convex edges from the curvature map, broken up by noise: worn paint and polished edges."),
-            [tr("mask"), tr("generator"), tr("grayscale"), tr("curvature")],
-        ),
-        GeneratorKind::Dirt => (
-            tr("Crevices and occluded areas from the ambient occlusion map: dirt and grime."),
-            [tr("mask"), tr("generator"), tr("grayscale"), tr("ambient occlusion")],
-        ),
-        GeneratorKind::ThinAreas => (tr("Thin parts of the mesh from the thickness map."), [tr("mask"), tr("generator"), tr("grayscale"), tr("thickness")]),
-        GeneratorKind::Curvature => (
-            tr("Convex edges, cavities or both from the curvature map, at several detail sizes."),
-            [tr("mask"), tr("generator"), tr("grayscale"), tr("curvature")],
-        ),
-        GeneratorKind::AmbientOcclusion => {
-            (tr("Occluded areas from the ambient occlusion map."), [tr("mask"), tr("generator"), tr("grayscale"), tr("ambient occlusion")])
-        }
-        GeneratorKind::Position => (tr("A gradient along a world direction across the mesh."), [tr("mask"), tr("generator"), tr("grayscale"), tr("position")]),
-        GeneratorKind::Direction => (tr("Surfaces facing a direction, as if lit from it."), [tr("mask"), tr("generator"), tr("grayscale"), tr("normal")]),
+        GeneratorKind::EdgeWear => (tr("Worn metal edges, scratched."), [tr("mask"), tr("generator"), tr("grayscale"), tr("curvature")]),
+        GeneratorKind::FiberGlassEdgeWear => (tr("Worn fibreglass edges."), [tr("mask"), tr("generator"), tr("grayscale"), tr("curvature")]),
+        GeneratorKind::Dirt => (tr("Grime in cavities."), [tr("mask"), tr("generator"), tr("grayscale"), tr("ambient occlusion")]),
+        GeneratorKind::ThinAreas => (tr("Thin parts of the mesh."), [tr("mask"), tr("generator"), tr("grayscale"), tr("thickness")]),
+        GeneratorKind::Curvature => (tr("Convex edges and cavities."), [tr("mask"), tr("generator"), tr("grayscale"), tr("curvature")]),
+        GeneratorKind::AmbientOcclusion => (tr("Occluded areas."), [tr("mask"), tr("generator"), tr("grayscale"), tr("ambient occlusion")]),
+        GeneratorKind::Position => (tr("A gradient across the mesh."), [tr("mask"), tr("generator"), tr("grayscale"), tr("position")]),
+        GeneratorKind::Direction => (tr("Surfaces facing a light."), [tr("mask"), tr("generator"), tr("grayscale"), tr("normal")]),
     };
 
     // Wrapped rows: a long line must not widen the panel past its edge
@@ -163,6 +163,73 @@ fn global_adjustments(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, generator
     }
 }
 
+/// The wear controls of generator effect `id` in the reference app's order, showing `wear`
+fn wear_parameters(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, generator: &Generator, wear: WearParameters) {
+    seed_row(app, ui, id, generator.seed);
+    let mut invert = generator.invert;
+    if true_false(ui, tr("Invert"), &mut invert) {
+        app.run("effect.set", json!({"effect": id, "invert": invert}));
+    }
+
+    let dirt = generator.kind == GeneratorKind::Dirt;
+    let (level_label, contrast_label) = if dirt { (tr("Dirt level"), tr("Dirt contrast")) } else { (tr("Wear level"), tr("Wear contrast")) };
+    let mut edited = wear;
+    let mut edit = slider_edit(ui, level_label, &mut edited.level, 0.0..=1.0, 2);
+    edit = edit.or(slider_edit(ui, contrast_label, &mut edited.contrast, 0.0..=1.0, 2));
+    let triplanar_edit = true_false(ui, tr("Use triplanar"), &mut edited.triplanar).then_some(false);
+    edit = edit.or(triplanar_edit).or(slider_edit(ui, tr("Triplanar blending contrast"), &mut edited.triplanar_contrast, 0.0..=1.0, 2));
+    edit = edit.or(slider_edit(ui, tr("Grunge amount"), &mut edited.grunge_amount, 0.0..=1.0, 2));
+    if generator.kind != GeneratorKind::FiberGlassEdgeWear {
+        edit = edit.or(slider_edit(ui, tr("Grunge scale"), &mut edited.grunge_scale, WearParameters::GRUNGE_SCALE_RANGE, 0));
+    }
+    if dirt {
+        edit = edit.or(slider_edit(ui, tr("Edges masking"), &mut edited.edges_masking, 0.0..=1.0, 2));
+    } else {
+        edit = edit.or(slider_edit(ui, tr("Edges smoothness"), &mut edited.edges_smoothness, WearParameters::EDGES_SMOOTHNESS_RANGE, 2));
+        edit = edit.or(slider_edit(ui, tr("Ambient occlusion masking"), &mut edited.ao_masking, 0.0..=1.0, 2));
+        edit = edit.or(slider_edit(ui, tr("Curvature weight"), &mut edited.curvature_weight, 0.0..=1.0, 2));
+    }
+
+    if let Some(merge) = edit {
+        let mut params = wear_params(&edited);
+        params["effect"] = json!(id);
+        params["merge"] = json!(merge);
+        app.run("effect.set", params);
+    }
+}
+
+/// The `effect.set` params that set every wear control to `wear`
+fn wear_params(wear: &WearParameters) -> Value {
+    json!({
+        "wearLevel": wear.level,
+        "wearContrast": wear.contrast,
+        "grungeAmount": wear.grunge_amount,
+        "grungeScale": wear.grunge_scale,
+        "triplanar": wear.triplanar,
+        "triplanarContrast": wear.triplanar_contrast,
+        "edgesSmoothness": wear.edges_smoothness,
+        "aoMasking": wear.ao_masking,
+        "curvatureWeight": wear.curvature_weight,
+        "edgesMasking": wear.edges_masking,
+    })
+}
+
+/// An on/off control as the reference app draws it: the name, then a full-width button reading False or True; returns whether it was clicked
+fn true_false(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
+    let mut clicked = false;
+    ui.horizontal(|ui| {
+        ui.label(label);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let text = if *value { tr("True") } else { tr("False") };
+            if ui.add_sized([TOGGLE_WIDTH, ui.spacing().interact_size.y], egui::Button::new(text)).clicked() {
+                *value = !*value;
+                clicked = true;
+            }
+        });
+    });
+    clicked
+}
+
 /// Where the generator's ramp starts, how soft it is, the noise breaking it up, its offset and its seed.
 fn ramp_parameters(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, generator: &Generator) {
     let (mut level, mut softness, mut noise, mut noise_scale, mut offset) =
@@ -217,13 +284,19 @@ fn random_seed(current: u32) -> u32 {
 /// The `effect.set` params that put generator effect `id` back to the defaults of its kind.
 fn defaults_of(id: u64, kind: GeneratorKind) -> Value {
     let defaults = Generator::new(kind);
-    let mut params = json!({
+    // A wear generator restores its wear controls; level, softness, noise and offset would keep it on the earlier model
+    let mut params = match &defaults.wear {
+        Some(wear) => wear_params(wear),
+        None => json!({
+            "level": defaults.level,
+            "softness": defaults.softness,
+            "noise": defaults.noise_amount,
+            "noiseScale": defaults.noise_scale,
+            "offset": defaults.offset,
+        }),
+    };
+    let shared = json!({
         "effect": id,
-        "level": defaults.level,
-        "softness": defaults.softness,
-        "noise": defaults.noise_amount,
-        "noiseScale": defaults.noise_scale,
-        "offset": defaults.offset,
         "seed": defaults.seed,
         "direction": defaults.direction,
         "invert": defaults.invert,
@@ -234,6 +307,9 @@ fn defaults_of(id: u64, kind: GeneratorKind) -> Value {
         "customResolution": defaults.resolution.custom,
         "resolutionFactor": defaults.resolution.factor,
     });
+    if let (Some(params), Value::Object(shared)) = (params.as_object_mut(), shared) {
+        params.extend(shared);
+    }
     if let Some(detail) = defaults.detail {
         params["mode"] = json!(format!("{:?}", detail.mode));
         params["sizes"] = json!(detail.weights);
@@ -301,28 +377,31 @@ fn input_slot(app: &mut TextureCraftApp, ui: &mut Ui, (layer, id): (LayerId, u64
                 }
             });
         });
-        combo(ui, tr("Source"), current.clone(), |ui| {
-            let anchors = anchors_below(app, layer);
-            if ui.selectable_label(source.is_none(), tr("Mesh map")).clicked() {
-                app.run("effect.set", json!({"effect": id, "input": input, "inputBaked": true}));
-            }
-            if ui.selectable_label(matches!(source, Some(Source::Uniform(_))), tr("Uniform value")).clicked() {
-                app.run("effect.set", json!({"effect": id, "input": input, "inputValue": map.neutral()[0]}));
-            }
-            for (anchor, label) in &anchors {
-                if ui
-                    .selectable_label(
-                        matches!(source, Some(Source::Anchor { anchor: picked, .. }) if picked == anchor),
-                        trf("Anchor: {name}", &[("name", label)]),
-                    )
-                    .clicked()
-                {
-                    app.run("effect.set", json!({"effect": id, "input": input, "inputAnchor": anchor.0}));
+        // Each input's menu needs its own id: the dropdown's id comes from its label
+        ui.push_id(input, |ui| {
+            combo(ui, tr("Source"), current.clone(), |ui| {
+                let anchors = anchors_below(app, layer);
+                if ui.selectable_label(source.is_none(), tr("Mesh map")).clicked() {
+                    app.run("effect.set", json!({"effect": id, "input": input, "inputBaked": true}));
                 }
-            }
-            if let Some(name) = image_menu(app, ui) {
-                app.run("effect.set", json!({"effect": id, "input": input, "inputImage": name}));
-            }
+                if ui.selectable_label(matches!(source, Some(Source::Uniform(_))), tr("Uniform value")).clicked() {
+                    app.run("effect.set", json!({"effect": id, "input": input, "inputValue": map.neutral()[0]}));
+                }
+                for (anchor, label) in &anchors {
+                    if ui
+                        .selectable_label(
+                            matches!(source, Some(Source::Anchor { anchor: picked, .. }) if picked == anchor),
+                            trf("Anchor: {name}", &[("name", label)]),
+                        )
+                        .clicked()
+                    {
+                        app.run("effect.set", json!({"effect": id, "input": input, "inputAnchor": anchor.0}));
+                    }
+                }
+                if let Some(name) = image_menu(app, ui) {
+                    app.run("effect.set", json!({"effect": id, "input": input, "inputImage": name}));
+                }
+            })
         });
         if let Some(Source::Uniform(value)) = source {
             let mut value = value[0];

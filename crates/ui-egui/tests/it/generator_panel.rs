@@ -4,7 +4,7 @@ use egui::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
-use texturecraft_engine::core::{BakedMap, EffectKind, Generator, GeneratorKind, LayerId, Source};
+use texturecraft_engine::core::{BakedMap, EffectKind, Generator, GeneratorKind, LayerId, Source, WearParameters};
 use texturecraft_engine::{ViewMode, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::docking::Panel;
@@ -12,12 +12,17 @@ use texturecraft_ui_egui::theme::Brightness;
 
 /// The sample session with a fill layer whose black mask holds a curvature generator, selected in the properties panel.
 fn harness(render: bool) -> (Harness<'static, TextureCraftApp>, LayerId) {
+    harness_with(render, json!({"generator": "curvature"}))
+}
+
+/// The sample session with a fill layer whose black mask holds the generator `added` describes, selected in the properties panel
+fn harness_with(render: bool, added: serde_json::Value) -> (Harness<'static, TextureCraftApp>, LayerId) {
     let mut session = texturecraft_engine::sample_session(512, 256).unwrap();
     session.active_set = 1;
     session.camera.pitch = 0.5;
     let layer = execute(&mut session, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1]})).unwrap()["layer"].as_u64().unwrap();
     execute(&mut session, "mask.add.black", &json!({})).unwrap();
-    let effect = execute(&mut session, "effect.add.generator", &json!({"generator": "curvature"})).unwrap()["effect"].as_u64().unwrap();
+    let effect = execute(&mut session, "effect.add.generator", &added).unwrap()["effect"].as_u64().unwrap();
     session.view = ViewMode::Mask(LayerId(layer));
     session.update();
     let builder = Harness::builder().with_size(egui::vec2(1600.0, 2400.0));
@@ -77,6 +82,29 @@ fn restore_defaults_puts_the_generator_back_to_its_kind_defaults() {
 }
 
 #[test]
+fn a_wear_control_moves_an_earlier_wear_generator_onto_the_wear_controls() {
+    let (mut harness, effect) = harness_with(false, json!({"generator": "edgeWear", "level": 0.4}));
+    assert_eq!(generator(&harness, effect).wear, None, "level keeps it on the earlier model");
+
+    drag_slider(&mut harness, "Wear level");
+
+    let wear = generator(&harness, effect).wear.expect("on the wear controls now");
+    let defaults = WearParameters::defaults(GeneratorKind::EdgeWear).unwrap();
+    assert_ne!(wear.level, defaults.level, "the drag set the level");
+    assert_eq!(WearParameters { level: defaults.level, ..wear }, defaults, "the other controls start at their defaults");
+}
+
+#[test]
+fn restore_defaults_keeps_a_wear_generator_on_its_wear_controls() {
+    let (mut harness, effect) = harness_with(false, json!({"generator": "dirt", "grungeAmount": 0.9, "seed": 3}));
+    harness.get_by_label("Restore defaults").scroll_to_me();
+    harness.run_steps(2);
+    harness.get_by_label("Restore defaults").click();
+    harness.run_steps(3);
+    assert_eq!(generator(&harness, effect), Generator::new(GeneratorKind::Dirt));
+}
+
+#[test]
 fn an_input_can_read_a_uniform_value_and_the_mesh_map_again() {
     let (mut harness, effect) = harness(false);
     harness.get_all_by_role(Role::ComboBox).find(|node| node.value().as_deref() == Some("Mesh map: Curvature")).unwrap().scroll_to_me();
@@ -125,4 +153,16 @@ fn generator_panel_snapshots() {
     harness.state_mut().ui.dock.focus(Panel::Layers);
     harness.run_steps(12);
     harness.render().unwrap().save(directory.join("generator-effect-row.png")).unwrap();
+}
+
+#[test]
+#[ignore = "requires a GPU adapter and TC_UI_SNAPSHOTS"]
+fn wear_panel_snapshots() {
+    let directory = std::path::PathBuf::from(std::env::var_os("TC_UI_SNAPSHOTS").expect("set TC_UI_SNAPSHOTS"));
+    std::fs::create_dir_all(&directory).unwrap();
+    for kind in ["edgeWear", "dirt", "fiberGlassEdgeWear"] {
+        let (mut harness, _) = harness_with(true, json!({"generator": kind}));
+        harness.run_steps(12);
+        harness.render().unwrap().save(directory.join(format!("wear-panel-{kind}.png"))).unwrap();
+    }
 }

@@ -12,6 +12,7 @@ mod filter_swap;
 mod filters;
 mod generator_inputs;
 mod generator_swap;
+mod generator_wear;
 mod high_poly_missed;
 mod instances;
 mod materialcraft_link;

@@ -555,8 +555,8 @@ fn a_generator_input_reads_a_uniform_value_or_its_mesh_map_again() {
     let inspect = execute(&mut state, "project.inspect", &Value::Null).unwrap().to_string();
     assert!(inspect.contains(r#""inputs":{"ambientOcclusion":{"Uniform":[0.25,0.25,0.25]}}"#), "{inspect}");
 
-    let wrong_input = execute(&mut state, "effect.set", &json!({"effect": effect, "input": "curvature", "inputValue": 0.5}));
-    assert!(wrong_input.is_err(), "dirt reads ambient occlusion, not curvature");
+    let wrong_input = execute(&mut state, "effect.set", &json!({"effect": effect, "input": "thickness", "inputValue": 0.5}));
+    assert!(wrong_input.is_err(), "dirt reads ambient occlusion and curvature, not thickness");
     let missing_image = execute(&mut state, "effect.set", &json!({"effect": effect, "input": "ambientOcclusion", "inputImage": "nothing.png"}));
     assert!(missing_image.is_err(), "the image must be a resource of the project");
     let two_sources = execute(&mut state, "effect.set", &json!({"effect": effect, "input": "ambientOcclusion", "inputValue": 0.5, "inputBaked": true}));

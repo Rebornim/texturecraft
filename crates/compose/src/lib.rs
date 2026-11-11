@@ -16,6 +16,9 @@ pub mod eval;
 pub mod pattern;
 pub mod store;
 pub mod thumb;
+mod wear;
+mod wear_inputs;
+mod wear_scan;
 
 pub use below::{BelowCache, StackKey};
 pub use display::{DisplayKind, tile_bytes};

@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use texturecraft_core::{
     BakedMap, BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask,
-    MaskBackground, OutputResolution, Procedural, ProceduralKind, Project, ResolutionMode, Source,
+    MaskBackground, OutputResolution, Procedural, ProceduralKind, Project, ResolutionMode, Source, WearParameters,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
@@ -49,7 +49,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add generator",
             ["Layers", "Effects"],
             None,
-            "{layer?, name?, generator?: edgeWear|dirt|thinAreas|curvature|ambientOcclusion|position|direction, level?, softness?, noise?, offset?: -1..1 added to the result, invert?, blur?: 0..1, balance?: 0..1 (0.5 unchanged), contrast?: 0..1, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3 (1/8..x8), mode?: edges|cavities|both|raw, sizes?: [7 weights 0..1, finest first] (curvature and edgeWear)}",
+            "{layer?, name?, generator?: edgeWear|dirt|fiberGlassEdgeWear|thinAreas|curvature|ambientOcclusion|position|direction, wearLevel?, wearContrast?, grungeAmount?, grungeScale?: 1..16, triplanar?, triplanarContrast?, edgesSmoothness?: 0..16, aoMasking?, curvatureWeight?, edgesMasking? (wear controls: edgeWear, fiberGlassEdgeWear and dirt), level?, softness?, noise?, offset?: -1..1 added to the result (instead keep edgeWear and dirt on the earlier model), invert?, blur?: 0..1, balance?: 0..1 (0.5 unchanged), contrast?: 0..1, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3 (1/8..x8), mode?: edges|cavities|both|raw, sizes?: [7 weights 0..1, finest first] (curvature and edgeWear)}",
             has_layer,
             add_generator
         ),
@@ -94,7 +94,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), generator?: kind (a generator effect only: swaps its kind in place, starting from that kind's defaults), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), generator?: kind (a generator effect only: swaps its kind in place, starting from that kind's defaults), wear controls (see effect.add.generator), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -315,7 +315,71 @@ fn add_fill(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Apply `params` to `generator`, using `command` in errors
+/// The parameters that drive the wear generators' earlier model
+const EARLIER_WEAR_KEYS: [&str; 5] = ["level", "softness", "noise", "noiseScale", "offset"];
+
+/// The wear controls `effect.add.generator` and `effect.set` take
+const WEAR_KEYS: [&str; 10] = [
+    "wearLevel",
+    "wearContrast",
+    "grungeAmount",
+    "grungeScale",
+    "triplanar",
+    "triplanarContrast",
+    "edgesSmoothness",
+    "aoMasking",
+    "curvatureWeight",
+    "edgesMasking",
+];
+
+/// The wear controls in `params`: they move a wear generator onto them, while level, softness, noise or offset keep it on the earlier model
+fn wear_from(command: &str, params: &Value, generator: &mut Generator) -> Result<()> {
+    let given = |keys: &[&str]| keys.iter().any(|key| params.get(*key).is_some());
+    let Some(defaults) = WearParameters::defaults(generator.kind) else {
+        return if given(&WEAR_KEYS) { Err(bad(command, "only Metal Edge Wear, Fiber Glass Edge Wear and Dirt have wear controls")) } else { Ok(()) };
+    };
+
+    if given(&EARLIER_WEAR_KEYS) {
+        if given(&WEAR_KEYS) {
+            return Err(bad(command, "level, softness, noise and offset drive the earlier wear model: give them or the wear controls, not both"));
+        }
+        if generator.kind == GeneratorKind::FiberGlassEdgeWear {
+            return Err(bad(command, "Fiber Glass Edge Wear has wear controls only (wearLevel, wearContrast…), no level, softness, noise or offset"));
+        }
+        generator.wear = None;
+        return Ok(());
+    }
+    if !given(&WEAR_KEYS) {
+        return Ok(());
+    }
+
+    // The offset belongs to the earlier model: kept, it would shift the wear controls' result unseen
+    generator.offset = 0.0;
+    let wear = generator.wear.get_or_insert(defaults);
+    for (key, value) in [
+        ("wearLevel", &mut wear.level),
+        ("wearContrast", &mut wear.contrast),
+        ("grungeAmount", &mut wear.grunge_amount),
+        ("grungeScale", &mut wear.grunge_scale),
+        ("triplanarContrast", &mut wear.triplanar_contrast),
+        ("edgesSmoothness", &mut wear.edges_smoothness),
+        ("aoMasking", &mut wear.ao_masking),
+        ("curvatureWeight", &mut wear.curvature_weight),
+        ("edgesMasking", &mut wear.edges_masking),
+    ] {
+        if let Some(given) = f32p(params, key) {
+            *value = given;
+        }
+    }
+    if let Some(triplanar) = boolp(params, "triplanar") {
+        wear.triplanar = triplanar;
+    }
+    *wear = wear.clamped(generator.kind);
+    Ok(())
+}
+
 fn generator_from(command: &str, params: &Value, generator: &mut Generator) -> Result<()> {
+    wear_from(command, params, generator)?;
     if let Some(level) = f32p(params, "level") {
         generator.level = level.clamp(0.0, 1.0);
     }

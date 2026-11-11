@@ -13,7 +13,7 @@ use crate::eval::{BLUR_BOX_PASSES, Inputs, blur};
 /// The blur radius of each level in texels at 2K: the detail sizes of [`texturecraft_core::CurvatureDetail::SIZES`] after the first, then wider ones the wear generators' edges smoothness reaches
 pub const LEVEL_RADII: [f32; 8] = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0];
 
-/// The curvature map padded past its UV islands and blurred at each radius of [`LEVEL_RADII`].
+/// The curvature map padded past its UV islands and blurred at each radius of [`LEVEL_RADII`]
 pub struct CurvatureSizes {
     /// One per blurred size, built once a generator gives that size a weight above 0.
     pub levels: Vec<Option<Arc<CurvatureSizeLevel>>>,

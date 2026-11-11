@@ -528,6 +528,19 @@ fn cage_and_skew_controls_require_a_high_poly_and_grey_out_with_a_reason() {
 }
 
 #[test]
+fn output_sizes_run_from_32_to_8192_as_in_the_reference() {
+    let mut harness = harness(None);
+    harness.state_mut().ui.dock.focus(Panel::CommonSettings);
+    harness.run_steps(3);
+    harness.get_all_by_value("64").next().unwrap().click();
+    harness.run_steps(3);
+    for offered in ["32", "8192"] {
+        harness.get_by_label(offered);
+    }
+    assert!(harness.query_by_label("16").is_none());
+}
+
+#[test]
 fn a_loaded_cage_can_be_removed_while_the_cage_does_not_apply() {
     let mut harness = harness(None);
     harness.state_mut().ui.dock.focus(Panel::CommonSettings);

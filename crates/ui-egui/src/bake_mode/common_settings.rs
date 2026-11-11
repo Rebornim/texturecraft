@@ -172,6 +172,9 @@ fn skew_unavailable_reason(settings: &BakeSettings, has_high: bool) -> &'static 
     }
 }
 
+/// The smallest output size offered, as in the reference; a project saved with a smaller one keeps it
+const SMALLEST_OUTPUT_SIZE: u32 = 32;
+
 fn output_size(ui: &mut Ui, settings: &mut CommonBakeSettings) {
     ui.label(tr("Output Size"));
     ui.horizontal(|ui| {
@@ -179,7 +182,7 @@ fn output_size(ui: &mut Ui, settings: &mut CommonBakeSettings) {
         let dropdown_width = ((ui.available_width() - button_size - ui.spacing().item_spacing.x * 2.0) / 2.0).max(40.0);
         let resolution = |ui: &mut Ui, id: &str, value: &mut BakeResolution| {
             egui::ComboBox::from_id_salt(id).width(dropdown_width).selected_text(value.pixels().to_string()).show_ui(ui, |ui| {
-                for resolution in BakeResolution::ALL {
+                for resolution in BakeResolution::ALL.into_iter().filter(|resolution| resolution.pixels() >= SMALLEST_OUTPUT_SIZE) {
                     ui.selectable_value(value, resolution, resolution.pixels().to_string());
                 }
             });

@@ -21,7 +21,7 @@ use crate::theme::{Tokens, caption, semibold};
 use crate::widgets::{icon_button, icon_button_without_tooltip, primary_button};
 
 /// The window's size, made smaller to fit a smaller app window
-const EXPORT_DIALOG_SIZE: egui::Vec2 = egui::vec2(1100.0, 775.0);
+const EXPORT_DIALOG_SIZE: egui::Vec2 = egui::vec2(1040.0, 775.0);
 /// Room kept around the window inside the app window, and the window's own padding around its body
 const EXPORT_DIALOG_MARGIN: f32 = 16.0;
 const EXPORT_DIALOG_PADDING: f32 = 32.0;
@@ -89,7 +89,16 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     presets.sort_by_key(|preset| preset.name.to_lowercase());
     // A fixed size: the tabs fill the window, so a window that followed its content would grow every frame
     let size = EXPORT_DIALOG_SIZE.min(ctx.content_rect().size() - egui::Vec2::splat(2.0 * EXPORT_DIALOG_MARGIN)).max(egui::Vec2::ZERO);
-    crate::windows::dialog("export_textures", tr("Export textures"), &mut open).fixed_size(size).show(ctx, |ui| {
+    // Opens centred and moves by its title bar (the other dialogs are pinned to the centre)
+    let window = egui::Window::new(tr("Export textures"))
+        .id(egui::Id::unique("export_textures"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .fixed_size(size)
+        .pivot(egui::Align2::CENTER_CENTER)
+        .default_pos(ctx.content_rect().center());
+    window.show(ctx, |ui| {
         let mut open_tab = None;
         ui.horizontal(|ui| {
             open_tab = tab_strip(app, ui, exporting(app));

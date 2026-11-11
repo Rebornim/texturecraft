@@ -463,3 +463,22 @@ fn the_app_never_opens_with_the_export_window_open() {
     let restored: texturecraft_ui_egui::state::UiState = serde_json::from_str(&saved).unwrap();
     assert!(!restored.windows.export);
 }
+
+#[test]
+fn the_window_moves_by_its_title_bar() {
+    // An app window with room around the dialog: it is kept inside, so a move past an edge stops there
+    let mut harness = harness(2, egui::vec2(1600.0, 960.0));
+    let before = dialog_rect(&harness);
+    let grab = egui::pos2(before.center().x, before.top() + 12.0);
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    harness.hover_at(grab);
+    harness.event(button(grab, true));
+    harness.run_steps(1);
+    let to = grab + egui::vec2(-80.0, 40.0);
+    harness.hover_at(to);
+    harness.run_steps(1);
+    harness.event(button(to, false));
+    harness.run_steps(2);
+    let after = dialog_rect(&harness);
+    assert!((after.center() - before.center() - egui::vec2(-80.0, 40.0)).length() < 2.0, "{before:?} -> {after:?}");
+}

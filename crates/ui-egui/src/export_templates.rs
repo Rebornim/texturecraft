@@ -533,17 +533,15 @@ fn outputs(app: &mut TextureCraftApp, ui: &mut Ui) {
         });
     });
     ui.add_space(4.0);
+    ui.label(RichText::new(tr("Output maps")).strong().color(tk.text_strong));
     ui.horizontal(|ui| {
-        ui.label(RichText::new(tr("Output maps")).strong().color(tk.text_strong));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_enabled_ui(editable, |ui| {
-                for kind in OutputKind::ALL.into_iter().rev() {
-                    if ui.small_button(tr(kind.label())).clicked() {
-                        action = Some(MapAction::Add(kind));
-                    }
+        ui.label(RichText::new(tr("Create:")).color(tk.text_dim));
+        ui.add_enabled_ui(editable, |ui| {
+            for kind in OutputKind::ALL {
+                if ui.small_button(tr(kind.label())).clicked() {
+                    action = Some(MapAction::Add(kind));
                 }
-            });
-            ui.label(tr("Create:"));
+            }
         });
     });
     if let Err(e) = &preview {

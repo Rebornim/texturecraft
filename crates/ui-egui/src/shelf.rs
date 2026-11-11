@@ -20,6 +20,11 @@ use crate::widgets::dnd_release;
 
 /// The gap between tiles in points (their sizes are [`ShelfView`]'s)
 const TILE_GAP: f32 = 2.0;
+/// The gap after a grid or a list of rows, and the size of a hint under a header, in points
+const SECTION_GAP: f32 = 6.0;
+const HINT_SIZE: f32 = 10.0;
+/// The name of a saved material whose file name isn't text
+const SAVED_MATERIAL_NAME: &str = "material";
 /// Corner radius of a tile's hover and selection highlights, in points
 const TILE_ROUNDING: f32 = 3.0;
 /// The last clicked or right-clicked tile's [`ShelfEntry::key`], kept in egui's memory under this id
@@ -224,6 +229,7 @@ pub fn drop_target(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response
 pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     let filter = app.ui.shelf_filter.to_lowercase();
+    scan_library(app);
     scan_brushes(app);
     let all = ShelfEntry::all(app);
     let paths = crate::shelf_folders::with_every_library(crate::shelf_folders::paths(&all));
@@ -235,9 +241,19 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
 
     let folder = app.ui.shelf_path.clone();
     let picked_tab = app.ui.shelf_tab;
-    let applicable = crate::shelf_folders::paths(all.iter().filter(|entry| entry.matches(&filter) && crate::shelf_tabs::shows(picked_tab, entry.tab())));
+    let mut applicable = crate::shelf_folders::paths(all.iter().filter(|entry| entry.matches(&filter) && crate::shelf_tabs::shows(picked_tab, entry.tab())));
     let matching: Vec<ShelfEntry> = all.into_iter().filter(|entry| entry.in_folder(&folder) && entry.matches(&filter)).collect();
-    let counts: Vec<usize> = TABS.iter().map(|(tab, _, _)| matching.iter().filter(|entry| entry.tab() == *tab).count()).collect();
+    let mut counts: Vec<usize> = TABS.iter().map(|(tab, _, _)| matching.iter().filter(|entry| entry.tab() == *tab).count()).collect();
+
+    // Saved smart materials list under the grid rather than as tiles, so they count apart
+    let in_user_library = folder.len() <= 1 && folder.first().is_none_or(|library| library == crate::shelf_entry::USER);
+    let saved_materials_matching = saved_materials_matching(app, &filter);
+    if in_user_library && let Some(smart) = TABS.iter().position(|(tab, _, _)| *tab == Tab::Smart).and_then(|smart| counts.get_mut(smart)) {
+        *smart += saved_materials_matching;
+    }
+    if saved_materials_matching > 0 && crate::shelf_tabs::shows(picked_tab, Tab::Smart) {
+        applicable.push(vec![crate::shelf_entry::USER.to_string()]);
+    }
 
     crate::shelf_folders::breadcrumb(app, ui, &paths);
     search_field(app, ui);
@@ -263,7 +279,6 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
             ui.separator();
         }
         // Saved smart materials are files in the user's library, without folders of their own
-        let in_user_library = folder.len() <= 1 && folder.first().is_none_or(|library| library == crate::shelf_entry::USER);
         let saved_materials = in_user_library && shown_tab.is_none_or(|shown| shown == Tab::Smart);
         grid(app, ui, &ctx, &entries, grid_rect.height(), saved_materials, &filter);
     });
@@ -289,6 +304,11 @@ fn grid(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entries: &[
                 library(app, ui, filter);
             }
         });
+}
+
+/// How many of the user's saved smart materials match `filter` (none until the library is read)
+fn saved_materials_matching(app: &TextureCraftApp, filter: &str) -> usize {
+    app.library.iter().flatten().filter(|path| matches(filter, &[saved_material_name(path)])).count()
 }
 
 /// The search field: a live filter on names (and categories) with a clear button while it has text
@@ -332,7 +352,7 @@ pub(crate) fn tiles(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
         ui.spacing_mut().item_spacing = vec2(TILE_GAP, TILE_GAP);
         body(ui);
     });
-    ui.add_space(6.0);
+    ui.add_space(SECTION_GAP);
 }
 
 /// The distinct categories of `items`, in order of first appearance.
@@ -346,23 +366,38 @@ pub(crate) fn categories<T>(items: &[T], category: impl Fn(&T) -> &'static str) 
     out
 }
 
-/// The user's saved smart materials (desktop library folder).
+/// Read the user's saved smart materials (desktop library folder) unless they are already listed
+#[cfg(not(target_arch = "wasm32"))]
+fn scan_library(app: &mut TextureCraftApp) {
+    if app.library.is_some() {
+        return;
+    }
+
+    let saved_material = |path: &std::path::PathBuf| path.extension().is_some_and(|extension| extension == "tcmat" || extension == MCMAT_EXT);
+    let mut files: Vec<std::path::PathBuf> =
+        std::fs::read_dir(crate::library_dir()).map(|dir| dir.flatten().map(|entry| entry.path()).filter(saved_material).collect()).unwrap_or_default();
+    files.sort();
+    app.library = Some(files);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn scan_library(_: &mut TextureCraftApp) {}
+
+/// A saved smart material's name: its file name without the extension
+fn saved_material_name(path: &std::path::Path) -> &str {
+    path.file_stem().and_then(|stem| stem.to_str()).unwrap_or(SAVED_MATERIAL_NAME)
+}
+
+/// The user's saved smart materials matching `filter`, as rows under the grid
 #[cfg(not(target_arch = "wasm32"))]
 fn library(app: &mut TextureCraftApp, ui: &mut Ui, filter: &str) {
-    let tk = Tokens::get(ui.ctx());
-    if app.library.is_none() {
-        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(crate::library_dir())
-            .map(|d| d.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "tcmat" || x == MCMAT_EXT)).collect())
-            .unwrap_or_default();
-        files.sort();
-        app.library = Some(files);
-    }
+    let tokens = Tokens::get(ui.ctx());
     let files = app.library.clone().unwrap_or_default();
-    let name = |f: &std::path::PathBuf| f.file_stem().and_then(|s| s.to_str()).unwrap_or("material").to_string();
-    let shown: Vec<_> = files.iter().filter(|f| matches(filter, &[&name(f)])).collect();
+    let shown: Vec<_> = files.iter().filter(|path| matches(filter, &[saved_material_name(path)])).collect();
     if !filter.is_empty() && shown.is_empty() {
         return;
     }
+
     ui.horizontal(|ui| {
         header(ui, tr("My smart materials"));
         if ui.small_button(ic::ARROW_CLOCKWISE).on_hover_text(tr("Rescan the library folder")).clicked() {
@@ -370,26 +405,27 @@ fn library(app: &mut TextureCraftApp, ui: &mut Ui, filter: &str) {
         }
     });
     if files.is_empty() {
-        ui.label(RichText::new(tr("Right-click a layer > Create smart material")).size(10.0).color(tk.text_dim));
+        ui.label(RichText::new(tr("Right-click a layer > Create smart material")).size(HINT_SIZE).color(tokens.text_dim));
     }
-    for f in shown {
-        let (label, asset) = (name(f), Asset::Library(f.display().to_string()));
-        // MaterialCraft materials (sent from MaterialCraft) show a graph.
-        let glyph = if f.extension().is_some_and(|x| x == MCMAT_EXT) { ic::GRAPH } else { ic::SPHERE };
-        let r = ui.add(egui::Button::selectable(false, format!("{glyph}  {label}")).sense(Sense::click_and_drag())).on_hover_ui(|ui| {
+
+    for path in shown {
+        let (label, asset) = (saved_material_name(path).to_string(), Asset::Library(path.display().to_string()));
+        // MaterialCraft materials (sent from MaterialCraft) show a graph
+        let glyph = if path.extension().is_some_and(|extension| extension == MCMAT_EXT) { ic::GRAPH } else { ic::SPHERE };
+        let response = ui.add(egui::Button::selectable(false, format!("{glyph}  {label}")).sense(Sense::click_and_drag())).on_hover_ui(|ui| {
             ui.label(crate::i18n::trf(
                 "{file}: add above the selected layer (or drag it into the layer stack or onto the viewport)",
-                &[("file", &f.display())],
+                &[("file", &path.display())],
             ));
         });
-        if r.drag_started() {
-            r.dnd_set_drag_payload(ShelfDrag { asset: asset.clone(), label });
+        if response.drag_started() {
+            response.dnd_set_drag_payload(ShelfDrag { asset: asset.clone(), label });
         }
-        if r.clicked() {
+        if response.clicked() {
             apply(app, &asset);
         }
     }
-    ui.add_space(6.0);
+    ui.add_space(SECTION_GAP);
 }
 
 #[cfg(target_arch = "wasm32")]

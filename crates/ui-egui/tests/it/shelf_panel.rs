@@ -19,6 +19,8 @@ const SMART_MASKS_TYPE: usize = 2;
 const BRUSHES_TYPE: usize = 4;
 const TEXTURES_TYPE: usize = 6;
 const ENVIRONMENTS_TYPE: usize = 7;
+/// How far the saved brush's spacing differs from the current brush's, so loading it shows
+const SAVED_SPACING_CHANGE: f32 = 0.25;
 /// Tile columns the reference shows at its panel width
 const REFERENCE_COLUMNS: usize = 4;
 
@@ -215,7 +217,7 @@ fn an_environment_tile_switches_the_lighting() {
 fn a_saved_brush_is_a_tile_that_loads_the_preset() {
     let mut harness = shelf(REFERENCE_WINDOW);
     let mut saved = harness.state().session.tool.brush.clone();
-    saved.spacing = (saved.spacing + 0.25).min(1.0);
+    saved.spacing += SAVED_SPACING_CHANGE;
     let path = std::env::temp_dir().join(format!("shelf-panel-{}.tcbrush", std::process::id()));
     std::fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
     harness.state_mut().brushes = Some(vec![path.clone()]);
@@ -227,6 +229,29 @@ fn a_saved_brush_is_a_tile_that_loads_the_preset() {
     std::fs::remove_file(&path).unwrap();
 
     assert_eq!(harness.state().session.tool.brush.spacing, saved.spacing, "the click loads the saved stroke");
+}
+
+#[test]
+fn saved_smart_materials_keep_their_type_pickable_in_your_assets() {
+    let mut harness = shelf(REFERENCE_WINDOW);
+    harness.state_mut().library = Some(vec![std::path::PathBuf::from("Mine.tcmat")]);
+    harness.state_mut().ui.shelf_path = vec!["user".into()];
+    harness.state_mut().ui.shelf_tab = BRUSHES_TYPE;
+    harness.run_steps(3);
+
+    assert!(!button(&harness, "Smart materials").accesskit_node().is_disabled(), "a saved smart material is in Your assets");
+    assert!(button(&harness, "Materials").accesskit_node().is_disabled(), "no plain material is");
+}
+
+#[test]
+fn saved_smart_materials_are_read_whatever_the_type_and_after_a_refresh() {
+    let mut harness = shelf(REFERENCE_WINDOW);
+    assert!(harness.state().library.is_some(), "read on the Materials type");
+
+    button(&harness, "Refresh").click();
+    harness.run_steps(2);
+
+    assert!(harness.state().library.is_some(), "read again after a refresh");
 }
 
 #[test]

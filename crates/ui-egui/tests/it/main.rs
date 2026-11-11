@@ -3,6 +3,7 @@
 
 mod bake_job_mesh;
 mod bake_mode;
+mod bake_sync;
 mod brush_drag;
 mod brush_section_reset;
 mod close_unsaved;

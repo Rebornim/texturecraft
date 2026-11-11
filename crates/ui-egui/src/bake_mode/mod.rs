@@ -16,6 +16,8 @@ pub use bake_visualization_toggles::BakeVisualizationToggles;
 mod controls;
 mod map_settings;
 mod mesh_map_bakers;
+mod set_picker;
+mod set_picker_purpose;
 
 use egui::{Ui, vec2};
 use egui_phosphor::regular as icon;

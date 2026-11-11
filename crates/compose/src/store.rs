@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use texturecraft_core::{Channel, ChannelKind, Filtering, LayerId};
+use texturecraft_core::{Channel, ChannelKind, Filtering, LayerId, Sampling};
 use texturecraft_texel::{TileImage, from_u16, from_u16_signed};
 
 /// Painted data of one paint layer channel: premultiplied value(s) plus coverage, u16 per
@@ -84,19 +84,22 @@ pub type ImageStore = HashMap<String, std::sync::Arc<ImageRes>>;
 /// Image levels below the full image at most: a 64k image halves 16 times to 1 texel
 const MAX_MIP_LEVELS: usize = 16;
 
-fn texel_of(rgba: &[[f32; 4]], width: u32, height: u32, x: i64, y: i64) -> [f32; 4] {
+/// Texel (`x`, `y`) of `rgba`; an axis that does not `repeat` (across, down) stops at its edge
+fn texel_of(rgba: &[[f32; 4]], width: u32, height: u32, x: i64, y: i64, repeat: (bool, bool)) -> [f32; 4] {
     let (w, h) = (width.max(1) as i64, height.max(1) as i64);
-    let i = (y.rem_euclid(h) * w + x.rem_euclid(w)) as usize;
+    let x = if repeat.0 { x.rem_euclid(w) } else { x.clamp(0, w - 1) };
+    let y = if repeat.1 { y.rem_euclid(h) } else { y.clamp(0, h - 1) };
+    let i = (y * w + x) as usize;
     rgba.get(i).copied().unwrap_or([0.0; 4])
 }
 
-/// Bilinear sample of `rgba` with wrap-around (texture coordinates, v down).
-fn bilinear(rgba: &[[f32; 4]], width: u32, height: u32, u: f32, v: f32) -> [f32; 4] {
+/// Bilinear sample of `rgba` (texture coordinates, v down), wrapping around on the axes that `repeat`
+fn bilinear(rgba: &[[f32; 4]], width: u32, height: u32, u: f32, v: f32, repeat: (bool, bool)) -> [f32; 4] {
     let fx = u * width as f32 - 0.5;
     let fy = v * height as f32 - 0.5;
     let (x0, y0) = (fx.floor() as i64, fy.floor() as i64);
     let (tx, ty) = (fx - fx.floor(), fy - fy.floor());
-    let texel = |x, y| texel_of(rgba, width, height, x, y);
+    let texel = |x, y| texel_of(rgba, width, height, x, y, repeat);
     let (a, b, c, d) = (texel(x0, y0), texel(x0 + 1, y0), texel(x0, y0 + 1), texel(x0 + 1, y0 + 1));
     let mut out = [0.0; 4];
     for k in 0..4 {
@@ -115,7 +118,7 @@ fn halve(rgba: &[[f32; 4]], width: u32, height: u32) -> MipLevel {
         for x in 0..i64::from(w) {
             let mut sum = [0.0f32; 4];
             for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                let t = texel_of(rgba, width, height, x * 2 + dx, y * 2 + dy);
+                let t = texel_of(rgba, width, height, x * 2 + dx, y * 2 + dy, (true, true));
                 for k in 0..4 {
                     sum[k] += t[k] * 0.25;
                 }
@@ -131,8 +134,8 @@ impl ImageRes {
         ImageRes { width, height, rgba, srgb, mips: std::sync::OnceLock::new() }
     }
 
-    fn texel(&self, x: i64, y: i64) -> [f32; 4] {
-        texel_of(&self.rgba, self.width, self.height, x, y)
+    fn texel(&self, x: i64, y: i64, repeat: (bool, bool)) -> [f32; 4] {
+        texel_of(&self.rgba, self.width, self.height, x, y, repeat)
     }
 
     /// Bilinear sample with wrap-around (texture coordinates, v down).
@@ -140,7 +143,7 @@ impl ImageRes {
         if !u.is_finite() || !v.is_finite() {
             return [0.0; 4];
         }
-        bilinear(&self.rgba, self.width, self.height, u, v)
+        bilinear(&self.rgba, self.width, self.height, u, v, (true, true))
     }
 
     /// The halved levels, built the first time they are asked for
@@ -160,21 +163,21 @@ impl ImageRes {
         })
     }
 
-    /// Sample at (`u`, `v`) with `filtering`; `footprint` is how many image texels one surface
-    /// texel spans (1 or less = the image is not shrunk).
-    pub fn sample_filtered(&self, u: f32, v: f32, filtering: Filtering, footprint: f32) -> [f32; 4] {
+    /// Sample at (`u`, `v`) with `sampling`; `footprint` = image texels per surface texel (1 or less = not shrunk)
+    pub fn sample_filtered(&self, u: f32, v: f32, sampling: Sampling, footprint: f32) -> [f32; 4] {
         if !u.is_finite() || !v.is_finite() {
             return [0.0; 4];
         }
-        match filtering {
-            Filtering::Nearest => self.texel((u * self.width as f32).floor() as i64, (v * self.height as f32).floor() as i64),
-            Filtering::BilinearSharp => self.sample(u, v),
+        let repeat = sampling.wrap.repeats();
+        let full = |u: f32, v: f32| bilinear(&self.rgba, self.width, self.height, u, v, repeat);
+        match sampling.filtering {
+            Filtering::Nearest => self.texel((u * self.width as f32).floor() as i64, (v * self.height as f32).floor() as i64, repeat),
+            Filtering::BilinearSharp => full(u, v),
             Filtering::BilinearHq => {
                 let lod = if footprint.is_finite() && footprint > 1.0 { footprint.log2() } else { 0.0 };
-                let level = |i: usize| match i.checked_sub(1).and_then(|m| self.mips().get(m)) {
-                    Some(l) => bilinear(&l.rgba, l.width, l.height, u, v),
-                    None if i == 0 => self.sample(u, v),
-                    None => self.mips().last().map_or_else(|| self.sample(u, v), |l| bilinear(&l.rgba, l.width, l.height, u, v)),
+                let level = |i: usize| match i.checked_sub(1) {
+                    None => full(u, v),
+                    Some(m) => self.mips().get(m).or(self.mips().last()).map_or_else(|| full(u, v), |l| bilinear(&l.rgba, l.width, l.height, u, v, repeat)),
                 };
                 let lo = lod.floor() as usize;
                 let t = lod - lod.floor();

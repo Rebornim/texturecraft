@@ -1152,4 +1152,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Delete", "삭제"),
     ("Filter by path", "경로별 필터"),
     ("Hide non-applicable folders", "해당 없는 폴더 숨기기"),
+    ("Thumbnail size", "썸네일 크기"),
+    ("Small", "작게"),
+    ("Medium", "보통"),
+    ("Large", "크게"),
+    ("List", "목록"),
+    ("Procedurals", "프로시저럴"),
 ];

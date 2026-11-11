@@ -1167,4 +1167,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Delete", "削除"),
     ("Filter by path", "パスで絞り込む"),
     ("Hide non-applicable folders", "該当しないフォルダーを隠す"),
+    ("Thumbnail size", "サムネイルのサイズ"),
+    ("Small", "小"),
+    ("Medium", "中"),
+    ("Large", "大"),
+    ("List", "リスト"),
+    ("Procedurals", "プロシージャル"),
 ];

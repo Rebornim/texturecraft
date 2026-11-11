@@ -7,6 +7,7 @@ use crate::docking::Dock;
 use crate::keymap::Keymap;
 use crate::saved_search::SavedSearch;
 use crate::shelf_panes::ShelfPanes;
+use crate::shelf_view::ShelfView;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Mode {
@@ -305,6 +306,9 @@ pub struct UiState {
     /// The asset shelf's library folder: a library id, then folder names (empty: all libraries)
     #[serde(default)]
     pub shelf_path: Vec<String>,
+    /// The asset shelf's tile size, or its list
+    #[serde(default)]
+    pub shelf_view: ShelfView,
     /// The asset shelf's open side panes
     #[serde(default)]
     pub shelf_panes: ShelfPanes,
@@ -406,6 +410,7 @@ impl Default for UiState {
             shelf_filter: String::new(),
             shelf_tab: 0,
             shelf_path: Vec::new(),
+            shelf_view: ShelfView::default(),
             shelf_panes: ShelfPanes::default(),
             shelf_saved_searches: Vec::new(),
             props_tab: PropsTab::Brush,

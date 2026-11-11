@@ -1095,4 +1095,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Delete", "删除"),
     ("Filter by path", "按路径筛选"),
     ("Hide non-applicable folders", "隐藏不适用的文件夹"),
+    ("Thumbnail size", "缩略图大小"),
+    ("Small", "小"),
+    ("Medium", "中"),
+    ("Large", "大"),
+    ("List", "列表"),
+    ("Procedurals", "程序纹理"),
 ];

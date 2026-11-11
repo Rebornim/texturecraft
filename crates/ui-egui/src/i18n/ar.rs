@@ -1139,4 +1139,10 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Delete", "حذف"),
     ("Filter by path", "تصفية حسب المسار"),
     ("Hide non-applicable folders", "إخفاء المجلدات غير المطابقة"),
+    ("Thumbnail size", "حجم الصورة المصغّرة"),
+    ("Small", "صغير"),
+    ("Medium", "متوسط"),
+    ("Large", "كبير"),
+    ("List", "قائمة"),
+    ("Procedurals", "إجرائيات"),
 ];

@@ -13,13 +13,12 @@ use crate::decal_drop::DecalDrop;
 use crate::i18n::{tr, trf};
 use crate::shelf_entry::ShelfEntry;
 use crate::shelf_preview::ShelfPreview;
+use crate::shelf_view::ShelfView;
 use crate::theme::Tokens;
 use crate::thumbs::Thumbs;
 use crate::widgets::dnd_release;
 
-/// A shelf tile's size and the gap between tiles in points: a 68 x 78 grid step, as in the reference
-const TILE_WIDTH: f32 = 66.0;
-const TILE_HEIGHT: f32 = 76.0;
+/// The gap between tiles in points (their sizes are [`ShelfView`]'s)
 const TILE_GAP: f32 = 2.0;
 /// Corner radius of a tile's hover and selection highlights, in points
 const TILE_ROUNDING: f32 = 3.0;
@@ -36,9 +35,6 @@ const BADGE_INSET: f32 = 2.5;
 const BADGE_DOT_FILL: Color32 = Color32::from_gray(205);
 const BADGE_DOT_RIM: f32 = 0.8;
 const BADGE_DOT_RIM_COLOR: Color32 = Color32::from_black_alpha(170);
-/// The thumbnail's size in a tile and its center below the tile's top, in points
-const THUMBNAIL_SIZE: f32 = 60.0;
-const THUMBNAIL_CENTER_Y: f32 = 31.0;
 /// Loading icon size relative to the thumbnail width, and its opacity over the dim text color
 const LOADING_ICON_SCALE: f32 = 0.9;
 const LOADING_ICON_OPACITY: f32 = 0.5;
@@ -245,7 +241,7 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
 
     crate::shelf_folders::breadcrumb(app, ui, &paths);
     search_field(app, ui);
-    crate::shelf_tabs::row(app, ui, &counts, |_, _, _| {});
+    crate::shelf_tabs::row(app, ui, &counts, crate::shelf_view::menu);
     ui.add_space(4.0);
 
     let tab = app.ui.shelf_tab;
@@ -277,6 +273,7 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
 
 /// The tiles of `entries` in a scroll area `height` high, then the saved smart materials when `saved_materials`
 fn grid(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entries: &[ShelfEntry], height: f32, saved_materials: bool, filter: &str) {
+    let view = app.ui.shelf_view;
     egui::ScrollArea::vertical()
         .id_salt("shelf_scroll")
         .auto_shrink([false, false])
@@ -285,7 +282,7 @@ fn grid(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entries: &[
         .show(ui, |ui| {
             tiles(ui, |ui| {
                 for entry in entries {
-                    entry_tile(app, ui, ctx, entry);
+                    entry_tile(app, ui, ctx, entry, view);
                 }
             });
             if saved_materials {
@@ -418,12 +415,13 @@ fn scan_brushes(app: &mut TextureCraftApp) {
 fn scan_brushes(_: &mut TextureCraftApp) {}
 
 /// The tile of `entry`: a click applies it, an image resource has a context menu
-fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry: &ShelfEntry) {
+fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry: &ShelfEntry, view: ShelfView) {
     // An image removed this frame has nothing to show
     let (Some(preview), texture) = (entry.preview(app), entry.thumbnail(app, ctx)) else { return };
 
     let asset = entry.asset();
-    let response = tile(ui, &mut app.thumbs, texture.as_ref(), || preview, entry.label(), asset.as_ref());
+    let response = tile_in_view(ui, &mut app.thumbs, texture.as_ref(), || preview, entry.label(), asset.as_ref(), view);
+
     let selected_id = egui::Id::unique(SELECTED_TILE);
     let key = entry.key();
     let selected = ctx.data(|data| data.get_temp::<String>(selected_id)).is_some_and(|selected| selected == key);
@@ -434,7 +432,7 @@ fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry
     }
 
     if entry.includes_randomness() {
-        randomness_badge(ui.painter(), response.rect);
+        randomness_badge(ui.painter(), view.thumbnail_rect(response.rect));
     }
 
     if response.clicked() || response.secondary_clicked() {
@@ -458,46 +456,61 @@ fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry
     }
 }
 
-/// Asset tile with optional dragging and a larger hover preview
+/// Asset tile with optional dragging and a larger hover preview, at the medium size
 pub(crate) fn tile(
     ui: &mut Ui,
     thumbs: &mut Thumbs,
-    tex: Option<&egui::TextureHandle>,
+    texture: Option<&egui::TextureHandle>,
     preview: impl FnOnce() -> ShelfPreview,
     label: &str,
     drag: Option<&Asset>,
 ) -> egui::Response {
+    tile_in_view(ui, thumbs, texture, preview, label, drag, ShelfView::Medium)
+}
+
+/// [`tile`] at `view`'s size: a grid tile with the name under the thumbnail, or a list row with it beside
+fn tile_in_view(
+    ui: &mut Ui,
+    thumbs: &mut Thumbs,
+    texture: Option<&egui::TextureHandle>,
+    preview: impl FnOnce() -> ShelfPreview,
+    label: &str,
+    drag: Option<&Asset>,
+    view: ShelfView,
+) -> egui::Response {
     let tk = Tokens::get(ui.ctx());
     let sense = if drag.is_some() { Sense::click_and_drag() } else { Sense::click() };
-    let (rect, resp) = ui.allocate_exact_size(vec2(TILE_WIDTH, TILE_HEIGHT), sense);
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    let (rect, response) = ui.allocate_exact_size(view.tile_size(ui.available_width()), sense);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     if let Some(asset) = drag
-        && resp.drag_started()
+        && response.drag_started()
     {
-        resp.dnd_set_drag_payload(ShelfDrag { asset: asset.clone(), label: label.to_string() });
+        response.dnd_set_drag_payload(ShelfDrag { asset: asset.clone(), label: label.to_string() });
     }
 
     let painter = ui.painter();
-    if resp.hovered() || resp.dragged() {
+    if response.hovered() || response.dragged() {
         painter.rect_filled(rect, TILE_ROUNDING, tk.row_hover);
     }
-    let image_rect = thumbnail_rect(rect);
-    thumbnail(painter, tex, image_rect, &tk);
-    let galley = painter.layout_job(one_line(label, rect.width() - LABEL_MARGIN, tk.text));
-    painter.galley(egui::pos2(rect.center().x - galley.size().x * 0.5, image_rect.bottom() + LABEL_GAP), galley, tk.text);
 
-    let big = if resp.hovered() { big_preview(ui, thumbs, preview) } else { None };
-    resp.on_hover_ui(|ui| hover_preview(ui, tex, big.as_ref(), label))
-}
+    let image_rect = view.thumbnail_rect(rect);
+    thumbnail(painter, texture, image_rect, &tk);
+    if view.name_beside() {
+        let left = image_rect.right() + crate::shelf_view::LIST_NAME_GAP;
+        let galley = painter.layout_job(one_line(label, rect.right() - left - LABEL_MARGIN, tk.text));
+        painter.galley(egui::pos2(left, rect.center().y - galley.size().y * 0.5), galley, tk.text);
+    } else {
+        let galley = painter.layout_job(one_line(label, rect.width() - LABEL_MARGIN, tk.text));
+        painter.galley(egui::pos2(rect.center().x - galley.size().x * 0.5, image_rect.bottom() + LABEL_GAP), galley, tk.text);
+    }
 
-/// Where a tile's thumbnail goes in the tile's `rect`
-fn thumbnail_rect(rect: egui::Rect) -> egui::Rect {
-    egui::Rect::from_center_size(rect.center_top() + vec2(0.0, THUMBNAIL_CENTER_Y), vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE))
+    let big = if response.hovered() { big_preview(ui, thumbs, preview) } else { None };
+    response.on_hover_ui(|ui| hover_preview(ui, texture, big.as_ref(), label))
 }
 
 /// Three light, dark-rimmed dots at the thumbnail's bottom-right corner: the asset includes randomness
-fn randomness_badge(painter: &egui::Painter, tile: egui::Rect) {
-    let corner = thumbnail_rect(tile).right_bottom() - vec2(BADGE_INSET, BADGE_INSET);
+fn randomness_badge(painter: &egui::Painter, thumbnail: egui::Rect) {
+    let corner = thumbnail.right_bottom() - vec2(BADGE_INSET, BADGE_INSET);
     for offset in [vec2(0.0, 0.0), vec2(-BADGE_DOT_SPACING, 0.0), vec2(-BADGE_DOT_SPACING * 0.5, -BADGE_DOT_SPACING)] {
         painter.circle(corner + offset, BADGE_DOT_RADIUS, BADGE_DOT_FILL, Stroke::new(BADGE_DOT_RIM, BADGE_DOT_RIM_COLOR));
     }

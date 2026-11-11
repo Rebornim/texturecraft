@@ -66,7 +66,9 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     let tk = Tokens::get(ctx);
     let mut open = true;
     let mut action = None;
-    let presets = texturecraft_engine::formats::builtin_presets();
+    // Built-in templates in alphabetical order, as both lists show them
+    let mut presets = texturecraft_engine::formats::builtin_presets();
+    presets.sort_by_key(|preset| preset.name.to_lowercase());
     // A fixed size: the tabs fill the window, so a window that followed its content would grow every frame
     let size = EXPORT_DIALOG_SIZE.min(ctx.content_rect().size() - egui::Vec2::splat(2.0 * EXPORT_DIALOG_MARGIN)).max(egui::Vec2::ZERO);
     crate::windows::dialog("export_textures", tr("Export textures"), &mut open).fixed_size(size).show(ctx, |ui| {

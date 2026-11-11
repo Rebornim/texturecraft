@@ -340,6 +340,11 @@ impl ExportPreset {
             if !matches!(m.bit_depth, 8 | 16 | 32) {
                 return bad(format!("map \"{}\" has bit depth {} (8, 16 or 32)", m.file, m.bit_depth));
             }
+            if let Some(size) = m.options.size
+                && (!size.is_power_of_two() || size > MAX_IMAGE_SIZE)
+            {
+                return bad(format!("map \"{}\" has size {size} (a power of two up to {MAX_IMAGE_SIZE})", m.file));
+            }
             if m.channels.iter().any(|(_, s)| s.component() != s.raw_component()) {
                 return bad(format!("map \"{}\" picks a component other than 0, 1 or 2", m.file));
             }
@@ -852,7 +857,7 @@ pub fn render_maps(input: &ExportInput, opts: &ExportOptions) -> Result<Vec<Expo
                 diffusion::diffuse(&mut data, &valid, (w, h), n);
             }
             // `size` is per tile: an atlas scales with it.
-            let scale = |v: u32| (u64::from(v) * u64::from(opts.size.unwrap_or(tile_res)) / u64::from(tile_res)) as u32;
+            let scale = |v: u32| (u64::from(v) * u64::from(map.options.size.or(opts.size).unwrap_or(tile_res)) / u64::from(tile_res)) as u32;
             let size = (scale(w), scale(h));
             let data = resize(data, (w, h), n, size);
             // Colour maps leave linear Rec.709 for the chosen space. sRGB in integer files is

@@ -93,3 +93,56 @@ fn fills_saved_before_filtering_keep_their_look() {
     assert_eq!(loaded.sampling, Sampling::SAVED_BEFORE);
     assert_eq!(loaded.sampling.filtering, Filtering::BilinearSharp);
 }
+
+/// Share of the middle band's covered texels where the white fill shows over the black layer below
+fn shown(s: &mut Session) -> f32 {
+    s.update();
+    let cache = &s.caches[0];
+    let (w, h) = cache.size;
+    let (mut on, mut all) = (0usize, 0usize);
+    for y in h * 3 / 8..h * 5 / 8 {
+        for x in 0..w {
+            if cache.gbuf.tri[(y * w + x) as usize] != NO_TRI {
+                all += 1;
+                on += usize::from(cache.composite.value(Channel::BaseColor, x, y)[0] > 0.5);
+            }
+        }
+    }
+    on as f32 / all.max(1) as f32
+}
+
+/// UV Wrap on a white fill tiled 4 × 2: Repeat covers the band, None one tile, one-axis repeats in between
+#[test]
+fn uv_wrap_repeats_the_tile_or_stops_at_its_edge() {
+    let mut s = session();
+    execute(&mut s, "layer.add.fill", &json!({"color": [0.0, 0.0, 0.0]})).unwrap();
+    let layer = LayerId(execute(&mut s, "layer.add.fill", &json!({"color": [1.0, 1.0, 1.0]})).unwrap()["layer"].as_u64().unwrap());
+    let set = |s: &mut Session, p: Value| {
+        let mut p = p;
+        p["layer"] = json!(layer.0);
+        execute(s, "layer.fill.projection", &p)
+    };
+    set(&mut s, json!({"scale": [4, 2]})).unwrap();
+    let near = |got: f32, want: f32| (got - want).abs() < 0.05;
+    let repeat = shown(&mut s);
+    assert!(near(repeat, 1.0), "Repeat covers the band: {repeat}");
+    set(&mut s, json!({"wrap": "none"})).unwrap();
+    let none = shown(&mut s);
+    assert!(near(none, 0.125), "None: a quarter across, half down: {none}");
+    set(&mut s, json!({"wrap": "repeatHorizontally"})).unwrap();
+    let across = shown(&mut s);
+    assert!(near(across, 0.5), "repeating across: the whole width, half down: {across}");
+    set(&mut s, json!({"wrap": "repeatVertically"})).unwrap();
+    let down = shown(&mut s);
+    assert!(near(down, 0.25), "repeating down: a quarter across, the whole height: {down}");
+
+    let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap();
+    let row = inspect["layers"].as_array().unwrap().iter().find(|l| l["id"] == layer.0).unwrap().clone();
+    assert_eq!(row["fill"]["wrap"], json!("repeatVertically"));
+    assert!(set(&mut s, json!({"wrap": "mirror"})).is_err());
+
+    // Tri-planar has no tile: it covers whatever the wrap says
+    set(&mut s, json!({"projection": "triplanar", "wrap": "none"})).unwrap();
+    let triplanar = shown(&mut s);
+    assert!(near(triplanar, 1.0), "{triplanar}");
+}

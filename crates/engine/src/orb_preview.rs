@@ -51,7 +51,12 @@ pub struct OrbPreview {
 impl OrbPreview {
     /// Bake the orb once (previews of any size reuse it)
     pub fn new() -> Result<OrbPreview> {
-        let mut session = Session::new_project("Orb preview", primitives::preview_orb(), "builtin:preview_orb", None, TEXTURE_PX)?;
+        OrbPreview::new_with(primitives::preview_orb(), "builtin:preview_orb")
+    }
+
+    /// Scratch: the same preview on another mesh
+    pub fn new_with(mesh: texturecraft_geom::Mesh, source: &str) -> Result<OrbPreview> {
+        let mut session = Session::new_project("Orb preview", mesh, source, None, TEXTURE_PX)?;
         let set = session.doc.project.texture_set_mut(SET)?;
         set.bake.common.resolution = BakeResolution::from_pixels(TEXTURE_PX).ok_or_else(|| EngineError::Other("invalid bake resolution".into()))?;
         set.bake.high_poly.use_low_as_high = true;
@@ -145,6 +150,44 @@ impl OrbPreview {
             })
             .collect();
         Some(pixels)
+    }
+}
+
+impl OrbPreview {
+    /// Scratch: the bare shape with `commands` run on it, as `size²` material pixels
+    pub fn commands(&mut self, commands: &[(&str, serde_json::Value)], size: usize) -> Option<Vec<Option<MaterialPreviewPixel>>> {
+        (self.session.doc, self.session.selected) = self.bare.clone();
+        for (id, params) in commands {
+            if let Err(error) = crate::execute(&mut self.session, id, params) {
+                eprintln!("{id}: {error}");
+                return None;
+            }
+        }
+        self.session.undo.clear();
+        let camera = camera_for(&mut self.cameras, &self.session, size)?;
+        let values = material_at(&self.session, &camera.texels)?;
+        let sub_pixels = (SUPERSAMPLE * SUPERSAMPLE) as f32;
+        Some(
+            (0..size * size)
+                .map(|pixel| {
+                    let mut sum = Sample { base: [0.0; 3], metallic: 0.0, roughness: 0.0, height: 0.0 };
+                    let (mut normal_sum, mut hits) = (Vec3::ZERO, 0.0);
+                    for (texel, normal) in pixel_hits(camera, size, pixel) {
+                        let Some(value) = values.get(texel) else { continue };
+                        sum.base = [0, 1, 2].map(|c| sum.base[c] + value.base[c]);
+                        sum.metallic += value.metallic;
+                        sum.roughness += value.roughness;
+                        sum.height += value.height;
+                        normal_sum += normal;
+                        hits += 1.0;
+                    }
+                    (hits > 0.0).then(|| {
+                        let mean = Sample { base: sum.base.map(|c| c / hits), metallic: sum.metallic / hits, roughness: sum.roughness / hits, height: sum.height / hits };
+                        MaterialPreviewPixel { sample: mean, normal: normal_sum.normalize_or_zero(), coverage: hits / sub_pixels }
+                    })
+                })
+                .collect(),
+        )
     }
 }
 

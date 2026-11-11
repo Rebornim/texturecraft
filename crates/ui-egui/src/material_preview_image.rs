@@ -84,6 +84,38 @@ mod tests {
 
     use super::*;
 
+    /// Scratch render for a design mockup: a planar-projected checker sticker on a ball
+    #[test]
+    #[ignore]
+    fn write_planar_sticker_balls() {
+        use serde_json::json;
+        let Some(dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(std::path::PathBuf::from) else { return };
+        std::fs::create_dir_all(&dir).unwrap();
+        let shapes = [
+            ("sphere", texturecraft_engine::geom::primitives::sphere(1.0, 96, 48), "builtin:sphere"),
+            ("orb", texturecraft_engine::geom::primitives::preview_orb(), "builtin:preview_orb"),
+        ];
+        for (shape, mesh, source) in shapes {
+            let mut orb = texturecraft_engine::orb_preview::OrbPreview::new_with(mesh, source).unwrap();
+            for axis in [2u64, 0] {
+                for scale in [1.4f64, 2.4] {
+                    let commands = [
+                        ("layer.add.fill", json!({"color": [0.42, 0.43, 0.46], "roughness": 0.45, "metallic": 0.0})),
+                        ("layer.add.fill", json!({"color": [0.9, 0.5, 0.3], "roughness": 0.4, "metallic": 0.0})),
+                        ("layer.fill.set", json!({"channel": "baseColor", "procedural": "Checker", "scale": 2.0, "low": [0.16, 0.17, 0.2], "high": [0.72, 0.74, 0.78]})),
+                        ("layer.fill.projection", json!({"projection": "planar", "axis": axis, "scale": scale, "wrap": "none"})),
+                    ];
+                    for size in [180usize, 360] {
+                        let Some(pixels) = orb.commands(&commands, size) else { continue };
+                        let image = material_preview_image(size, &pixels);
+                        let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+                        image::RgbaImage::from_raw(size as u32, size as u32, rgba).unwrap().save(dir.join(format!("{shape}_axis{axis}_scale{scale}_{size}.png"))).unwrap();
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn the_studio_lights_the_shape_from_the_upper_right() {
         let polished_metal = Sample { base: [0.9; 3], metallic: 1.0, roughness: 0.3, height: 0.0 };

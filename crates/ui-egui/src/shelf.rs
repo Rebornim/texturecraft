@@ -15,7 +15,7 @@ use crate::shelf_entry::ShelfEntry;
 use crate::shelf_preview::ShelfPreview;
 use crate::theme::Tokens;
 use crate::thumbs::Thumbs;
-use crate::widgets::{dnd_release, icon_button};
+use crate::widgets::dnd_release;
 
 /// A shelf tile's size and the gap between tiles in points: a 68 x 78 grid step, as in the reference
 const TILE_WIDTH: f32 = 66.0;
@@ -65,7 +65,7 @@ pub(crate) enum Tab {
     Environments,
 }
 
-/// The shelf tabs: icon and (English, translated where shown) name.
+/// The shelf tabs: icon and (English, translated where shown) name
 pub(crate) const TABS: [(Tab, &str, &str); 8] = [
     (Tab::Materials, ic::SPHERE, "Materials"),
     (Tab::Smart, ic::STACK, "Smart materials"),
@@ -228,20 +228,12 @@ pub fn drop_target(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response
 pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     let ctx = ui.ctx().clone();
-    let mut tab = app.ui.shelf_tab.min(TABS.len() - 1);
     let searching = !app.ui.shelf_filter.is_empty();
-
-    ui.horizontal_wrapped(|ui| {
-        let button_size = ui.spacing().interact_size.y;
-        ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
-        for (i, (_, icon, label)) in TABS.iter().enumerate() {
-            if icon_button(ui, icon, tr(label), i == tab && !searching, button_size).clicked() {
-                tab = i;
-                app.ui.shelf_filter.clear();
-            }
-        }
-    });
-    app.ui.shelf_tab = tab;
+    let filter = app.ui.shelf_filter.to_lowercase();
+    scan_brushes(app);
+    let matching: Vec<ShelfEntry> = ShelfEntry::all(app).into_iter().filter(|entry| entry.matches(&filter)).collect();
+    let counts: Vec<usize> = TABS.iter().map(|(tab, _, _)| matching.iter().filter(|entry| entry.tab() == *tab).count()).collect();
+    crate::shelf_tabs::row(app, ui, &counts, |_, _, _| {});
 
     ui.horizontal(|ui| {
         ui.label(RichText::new(ic::MAGNIFYING_GLASS).color(tokens.text_dim));
@@ -249,16 +241,14 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
     });
     ui.add_space(4.0);
 
-    let filter = app.ui.shelf_filter.to_lowercase();
-    let shown_tab = TABS[tab].0;
-    scan_brushes(app);
+    let tab = app.ui.shelf_tab;
+    let shown_tab = TABS.get(tab).map(|(shown, _, _)| *shown);
     // Searching shows matches from every tab in one grid
-    let mut entries: Vec<ShelfEntry> =
-        ShelfEntry::all(app).into_iter().filter(|entry| (searching || entry.tab() == shown_tab) && entry.matches(&filter)).collect();
+    let mut entries: Vec<ShelfEntry> = matching.into_iter().filter(|entry| searching || crate::shelf_tabs::shows(tab, entry.tab())).collect();
     entries.sort_by_cached_key(|entry| entry.label().to_lowercase());
 
     egui::ScrollArea::vertical().id_salt("shelf_scroll").auto_shrink([false, false]).show(ui, |ui| {
-        if !searching && shown_tab == Tab::Textures {
+        if !searching && shown_tab == Some(Tab::Textures) {
             import_images(app, ui, &ctx, entries.is_empty());
         }
         tiles(ui, |ui| {
@@ -267,7 +257,7 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
             }
         });
 
-        if searching || shown_tab == Tab::Smart {
+        if searching || shown_tab.is_none_or(|shown| shown == Tab::Smart) {
             library(app, ui, &filter);
         }
     });

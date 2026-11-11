@@ -51,6 +51,7 @@ mod running_bake;
 pub mod shelf;
 mod shelf_entry;
 pub mod shelf_preview;
+mod shelf_tabs;
 mod soft_box;
 pub mod state;
 pub mod symmetry;

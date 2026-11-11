@@ -297,7 +297,7 @@ pub struct UiState {
     /// Channel whose blending the layer rows show.
     pub layer_channel: Channel,
     pub shelf_filter: String,
-    /// The asset shelf's open tab.
+    /// The asset shelf's picked type: an index into the shelf's types, or past them for every type
     #[serde(default)]
     pub shelf_tab: usize,
     pub props_tab: PropsTab,

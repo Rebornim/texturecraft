@@ -1157,4 +1157,5 @@ pub const TABLE: &[(&str, &str)] = &[
         "Maximum decompressed project data. Increase this limit to open larger projects.",
         "展開後のプロジェクトデータの上限です。大きなプロジェクトを開くには、この上限を引き上げてください。",
     ),
+    ("Filter by type", "種類で絞り込む"),
 ];

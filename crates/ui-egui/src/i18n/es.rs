@@ -1166,4 +1166,5 @@ pub const TABLE: &[(&str, &str)] = &[
         "Maximum decompressed project data. Increase this limit to open larger projects.",
         "Máximo de datos descomprimidos del proyecto. Aumenta este límite para abrir proyectos más grandes.",
     ),
+    ("Filter by type", "Filtrar por tipo"),
 ];

@@ -1142,4 +1142,5 @@ pub const TABLE: &[(&str, &str)] = &[
         "Maximum decompressed project data. Increase this limit to open larger projects.",
         "압축 해제된 프로젝트 데이터의 최대 크기입니다. 더 큰 프로젝트를 열려면 이 한도를 높이세요.",
     ),
+    ("Filter by type", "유형별 필터"),
 ];

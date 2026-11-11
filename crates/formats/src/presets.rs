@@ -17,7 +17,7 @@ pub(crate) fn virt(map: VirtualMap, component: u8) -> SourceRef {
     SourceRef::Virtual { map, component }
 }
 
-/// `$mesh_$textureSet_<suffix>` PNG.
+/// `$mesh_$textureSet_<suffix>` PNG
 pub(crate) fn map(suffix: &str, bit_depth: u8, channels: Vec<(Dest, SourceRef)>) -> MapSpec {
     MapSpec { file: format!("$mesh_$textureSet_{suffix}"), format: FileFormat::Png, bit_depth, channels, options: Default::default() }
 }
@@ -30,7 +30,7 @@ pub(crate) fn gray(s: SourceRef) -> Vec<(Dest, SourceRef)> {
     vec![(Dest::L, s)]
 }
 
-/// Base color RGB with opacity in alpha (alpha is dropped when the set has no opacity).
+/// Base color RGB with opacity in alpha (alpha is dropped when the set has no opacity)
 pub(crate) fn base_with_alpha() -> Vec<(Dest, SourceRef)> {
     let mut c = rgb(|k| ch(Channel::BaseColor, k));
     c.push((Dest::A, ch(Channel::Opacity, 0)));
@@ -65,8 +65,7 @@ pub(crate) const GLTF_CLEARCOAT: &str = "Clearcoat";
 /// KHR_materials_sheen: sheen color × weight (RGB) and roughness (A).
 pub(crate) const GLTF_SHEEN: &str = "Sheen";
 
-/// glTF metallic-roughness maps (8-bit PNG), plus the clear coat and sheen extension maps where
-/// the texture set has those channels; `file` turns a stem above into a file template.
+/// glTF metallic-roughness maps (8-bit PNG) plus clear coat and sheen where the set has them; `file` turns a stem into a file template
 pub(crate) fn gltf_pbr_maps(file: impl Fn(&str) -> String) -> Vec<MapSpec> {
     let spec = |stem: &str, channels| MapSpec { file: file(stem), format: FileFormat::Png, bit_depth: 8, channels, options: Default::default() };
     let mut sheen = rgb(|k| virt(VirtualMap::SheenTint, k));
@@ -83,7 +82,7 @@ pub(crate) fn gltf_pbr_maps(file: impl Fn(&str) -> String) -> Vec<MapSpec> {
 
 mod engine_presets;
 
-/// Every built-in preset, in menu order.
+/// Every built-in preset, in menu order
 pub fn builtin_presets() -> Vec<ExportPreset> {
     let preset = |name: &str, maps: Vec<MapSpec>| ExportPreset { name: name.into(), maps };
     vec![
@@ -109,7 +108,7 @@ pub fn builtin_presets() -> Vec<ExportPreset> {
                     vec![
                         (Dest::R, ch(Channel::Metallic, 0)),
                         (Dest::G, virt(VirtualMap::AoMixed, 0)),
-                        // Detail mask: none.
+                        // Detail mask: none
                         (Dest::B, SourceRef::Constant(0.0)),
                         (Dest::A, virt(VirtualMap::Glossiness, 0)),
                     ],
@@ -156,7 +155,7 @@ pub fn builtin_presets() -> Vec<ExportPreset> {
                 map("emission", 8, rgb(|k| ch(Channel::Emissive, k))),
             ],
         ),
-        // OpenPBR Surface inputs, one map each (maps of channels a set lacks are skipped).
+        // OpenPBR Surface inputs, one map each (maps of channels a set lacks are skipped)
         preset("OpenPBR (separate maps)", {
             let gray8 = |name: &str, c: Channel| map(name, 8, gray(ch(c, 0)));
             let rgb8 = |name: &str, c: Channel| map(name, 8, rgb(|k| ch(c, k)));

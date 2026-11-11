@@ -14,6 +14,10 @@ use crate::{EngineError, Result, cmd};
 
 /// export.preview's picture width when the params name none
 const DEFAULT_PREVIEW_SIDE: u32 = 128;
+/// Highest bit depth an export override accepts
+const MAX_BIT_DEPTH: u64 = 32;
+/// Widest dilation in pixels an export accepts
+const MAX_DILATION_PIXELS: u64 = 256;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -286,8 +290,7 @@ impl Session {
         Ok(out)
     }
 
-    /// A `side`-wide picture of output map `map` for the first texture set the export params `p` name (the params of
-    /// export.plan); None when that set writes no file for the map
+    /// Output map `map`, `side` texels wide, for the first texture set export.plan's params `p` name; None when it writes no file for it
     pub fn export_preview(&mut self, p: &Value, map: usize, side: u32) -> Result<Option<MapPreview>> {
         self.update();
         let Some((sets, opts)) = crate::export_settings_cmds::export_jobs(self, p, "export.preview")?.into_iter().next() else { return Ok(None) };
@@ -317,53 +320,59 @@ fn check_materials(p: &texturecraft_core::Project, mesh: &Mesh) -> Result<()> {
     Ok(())
 }
 
-/// Export options from command params; `preset` is a built-in or user preset name, or an inline
-/// preset object (validated).
-pub fn export_options(s: &Session, p: &Value, cmd: &str) -> Result<ExportOptions> {
-    let preset = match p.get("preset") {
-        None | Some(Value::Null) => s.export_preset("Document channels + Normal + AO"),
-        Some(Value::String(name)) => s.export_preset(name),
-        Some(v @ Value::Object(_)) => Some(crate::preset_cmds::preset_param(v, cmd)?),
+/// Export options from command params; `preset` is a built-in or user preset name, or an inline preset object (validated)
+pub fn export_options(session: &Session, params: &Value, cmd: &str) -> Result<ExportOptions> {
+    let preset = match params.get("preset") {
+        None | Some(Value::Null) => session.export_preset(texturecraft_core::DEFAULT_EXPORT_PRESET),
+        Some(Value::String(name)) => session.export_preset(name),
+        Some(preset_object @ Value::Object(_)) => Some(crate::preset_cmds::preset_param(preset_object, cmd)?),
         Some(_) => return Err(bad(cmd, "`preset` must be a preset name or a preset object")),
     };
-    let preset = preset.ok_or_else(|| bad(cmd, format!("unknown export preset {}", p.get("preset").unwrap_or(&Value::Null))))?;
-    let mut o = ExportOptions::new(preset);
-    if let Some(f) = strp(p, "format") {
-        o.format_override = Some(FileFormat::from_extension(f).ok_or_else(|| bad(cmd, format!("unknown format `{f}`")))?);
+    let preset = preset.ok_or_else(|| bad(cmd, format!("unknown export preset {}", params.get("preset").unwrap_or(&Value::Null))))?;
+    let mut options = ExportOptions::new(preset);
+
+    if let Some(extension) = strp(params, "format") {
+        options.format_override = Some(FileFormat::from_extension(extension).ok_or_else(|| bad(cmd, format!("unknown format `{extension}`")))?);
     }
-    if let Some(b) = u64p(p, "bitDepth") {
-        o.bit_depth_override = Some(b.min(32) as u8);
+
+    if let Some(bit_depth) = u64p(params, "bitDepth") {
+        options.bit_depth_override = Some(bit_depth.min(MAX_BIT_DEPTH) as u8);
     }
-    let px = u64p(p, "dilation").map(|v| v.min(256) as u32).unwrap_or(16);
-    if let Some(pad) = strp(p, "padding") {
-        o.padding = match pad {
+
+    let dilation_px = u64p(params, "dilation").map(|dilation| dilation.min(MAX_DILATION_PIXELS) as u32).unwrap_or(texturecraft_core::DEFAULT_DILATION);
+    if let Some(padding) = strp(params, "padding") {
+        options.padding = match padding {
             "none" => Padding::None,
-            "dilation" => Padding::Dilation(px),
-            "dilationDefault" => Padding::DilationDefault(px),
+            "dilation" => Padding::Dilation(dilation_px),
+            "dilationDefault" => Padding::DilationDefault(dilation_px),
             "infinite" => Padding::Infinite,
-            "diffusion" => Padding::DilationDiffusion(px),
+            "diffusion" => Padding::DilationDiffusion(dilation_px),
             other => return Err(bad(cmd, format!("unknown padding `{other}`"))),
         };
     }
-    if let Some(sz) = u64p(p, "size") {
-        o.size = Some(crate::session::check_resolution(u32::try_from(sz).unwrap_or(0))?);
+
+    if let Some(size) = u64p(params, "size") {
+        options.size = Some(crate::session::check_resolution(u32::try_from(size).unwrap_or(0))?);
     }
-    o.normal_format = normal_format_param(cmd, p)?;
-    if boolp(p, "dithering").unwrap_or(false) {
-        o.dithered_maps = (0..o.preset.maps.len()).collect();
+
+    options.normal_format = normal_format_param(cmd, params)?;
+    if boolp(params, "dithering").unwrap_or(false) {
+        options.dithered_maps = (0..options.preset.maps.len()).collect();
     }
-    match p.get("colorSpace") {
+
+    match params.get("colorSpace") {
         None | Some(Value::Null) => {}
         Some(Value::String(name)) => {
-            o.color_space = Some(
+            options.color_space = Some(
                 texturecraft_texel::ColorSpace::from_name(name)
                     .ok_or_else(|| bad(cmd, format!("unknown colorSpace `{name}` (sRGB, Linear Rec.709, ACEScg or ACES2065-1)")))?,
             );
         }
-        // A value of the wrong type is an error, not the format's default space.
+        // A value of the wrong type is an error, not the format's default space
         Some(other) => return Err(bad(cmd, format!("`colorSpace` is a name (sRGB, Linear Rec.709, ACEScg or ACES2065-1), not {other}"))),
     }
-    Ok(o)
+
+    Ok(options)
 }
 
 pub(crate) fn sets_param(s: &Session, p: &Value, cmd: &str) -> Result<Vec<usize>> {
@@ -585,16 +594,14 @@ fn export_textures(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "files": written.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(), "warnings": warnings }))
 }
 
-/// One `<mesh>_<set>.mtlx` per texture set, next to the textures `opts` just wrote: the
-/// OpenPBR inputs those textures feed (see `texturecraft_formats::materialx`). UDIM sets name
-/// their files with the `<UDIM>` token. Sets with no recognised map, or whose name gives the
-/// same file name as an earlier set's, are skipped with a warning.
+/// One `<mesh>_<set>.mtlx` per texture set beside the textures `opts` wrote; sets without a known map or with a name in `stems` (the export's taken names) are skipped with a warning
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn write_materialx(
     s: &Session,
     sets: &[usize],
     opts: &ExportOptions,
     dir: &std::path::Path,
+    stems: &mut std::collections::HashSet<String>,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<std::path::PathBuf>> {
     use texturecraft_formats::materialx::{self, Texture};
@@ -603,14 +610,13 @@ pub(crate) fn write_materialx(
         warnings.push("MaterialX: version 1.39 has no ACES2065-1 colour space; the colour maps are tagged lin_ap0_scene, its name in later versions, which older readers may not know".into());
     }
     let mut out = Vec::new();
-    let mut stems = std::collections::HashSet::new();
     let mut normal_map_written = false;
     for &ts in sets {
         let set = s.doc.project.texture_set(ts).map_err(|e| EngineError::Other(e.to_string()))?;
         let mut textures: Vec<Texture> = Vec::new();
         for f in texturecraft_formats::list_outputs(&s.doc.project, ts, &mesh_name, opts).map_err(fe)? {
             let Some(input) = opts.preset.maps.get(f.map).and_then(|m| materialx::input_of_template(&m.file)) else { continue };
-            // The first tile stands for all of them: its number is written as <UDIM>.
+            // The first tile stands for all of them: its number is written as <UDIM>
             let file = f.udim_name.clone().unwrap_or_else(|| f.name.clone());
             let colorspace = materialx::colorspace_name(opts.space_for(f.format));
             if !textures.iter().any(|t| t.input == input) {
@@ -623,7 +629,7 @@ pub(crate) fn write_materialx(
             continue;
         }
         let stem = texturecraft_formats::export::sanitize_file_stem(&format!("{mesh_name}_{}", set.name));
-        // Case-insensitive: Windows and macOS file systems are.
+        // Case-insensitive: Windows and macOS file systems are
         if !stems.insert(stem.to_ascii_lowercase()) {
             warnings.push(format!(
                 "MaterialX: texture set \"{}\" exports as \"{stem}\" like an earlier set, so its .mtlx was not written; rename one of them",
@@ -635,7 +641,7 @@ pub(crate) fn write_materialx(
         texturecraft_formats::write_atomic(&path, materialx::write(&format!("{mesh_name}_{}", set.name), &textures, None).as_bytes()).map_err(fe)?;
         out.push(path);
     }
-    // The normalmap node only exists in a material that has a normal map.
+    // The normalmap node only exists in a material that has a normal map
     if normal_map_written && opts.normal_format == Some(NormalFormat::DirectX) {
         warnings.push("MaterialX: the normalmap node reads OpenGL (+Y) normals; this export wrote DirectX normals, so flip the green channel".into());
     }

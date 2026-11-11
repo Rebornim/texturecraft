@@ -6,9 +6,19 @@ use egui_kittest::kittest::{NodeT as _, Queryable};
 use texturecraft_engine::core::NormalFormat;
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::export_draft::ExportDraft;
+use texturecraft_ui_egui::export_tab::ExportTab;
 
 const MANY_SETS: usize = 80;
 const LAPTOP: egui::Vec2 = egui::vec2(1280.0, 720.0);
+/// How far apart two controls' centres can be and still sit on one row
+const SAME_ROW: f32 = 6.0;
+/// How far a combo may sit from the Normal map format label and still be on its row
+const NORMAL_FORMAT_SAME_ROW: f32 = 4.0;
+/// How far below the dialog's top edge the title bar is grabbed
+const TITLE_BAR_GRAB_OFFSET: f32 = 12.0;
+/// The drag that moves the window, and how far the window may end from where that drag puts it
+const WINDOW_DRAG: egui::Vec2 = egui::vec2(-80.0, 40.0);
+const WINDOW_MOVE_TOLERANCE: f32 = 2.0;
 
 /// The sample project with `set_count` texture sets in an app window of `size`, Export textures open
 fn harness(set_count: usize, size: egui::Vec2) -> Harness<'static, TextureCraftApp> {
@@ -72,7 +82,7 @@ fn dragging_across_ticks_sets_them_all() {
         .iter()
         .map(|name| {
             let row = harness.get_by_label(name).rect().center().y;
-            harness.get_all_by_role(Role::CheckBox).find(|node| (node.rect().center().y - row).abs() < 6.0).unwrap().rect().center()
+            harness.get_all_by_role(Role::CheckBox).find(|node| (node.rect().center().y - row).abs() < SAME_ROW).unwrap().rect().center()
         })
         .collect();
     let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
@@ -105,7 +115,7 @@ fn normal_format_shown(harness: &mut Harness<'static, TextureCraftApp>, preset: 
     harness.state_mut().session.doc.project.normal_format = project;
     harness.run_steps(2);
     let row = harness.get_by_label("Normal map format").rect().center().y;
-    let combo = harness.get_all_by_role(Role::ComboBox).find(|node| (node.rect().center().y - row).abs() < 4.0).unwrap();
+    let combo = harness.get_all_by_role(Role::ComboBox).find(|node| (node.rect().center().y - row).abs() < NORMAL_FORMAT_SAME_ROW).unwrap();
     combo.value().unwrap_or_default()
 }
 
@@ -163,7 +173,7 @@ fn the_bottom_bar_counts_the_textures_to_export() {
 /// The pen on the row labelled `parameter` in a texture set's settings
 fn pen<'a>(harness: &'a Harness<'static, TextureCraftApp>, parameter: &str) -> egui_kittest::Node<'a> {
     let row = harness.get_all_by_label(parameter).last().unwrap().rect().center().y;
-    harness.get_all_by_label("Override for this texture set").find(|node| (node.rect().center().y - row).abs() < 6.0).unwrap()
+    harness.get_all_by_label("Override for this texture set").find(|node| (node.rect().center().y - row).abs() < SAME_ROW).unwrap()
 }
 
 #[test]
@@ -216,7 +226,7 @@ fn a_texture_set_leaves_out_a_map_or_gives_it_its_own_file_type() {
     harness.run_steps(2);
     let key = "$mesh_$textureSet_roughness";
     let row = harness.get_by_label(key).rect().center().y;
-    harness.get_all_by_role(Role::CheckBox).find(|node| (node.rect().center().y - row).abs() < 6.0).unwrap().click();
+    harness.get_all_by_role(Role::CheckBox).find(|node| (node.rect().center().y - row).abs() < SAME_ROW).unwrap().click();
     harness.run_steps(2);
     assert!(draft(&mut harness).sets[1].maps[key].skip);
     assert_eq!(count(&mut harness), all - 1, "the map is left out of that set only");
@@ -240,7 +250,7 @@ fn the_window_opens_on_settings_and_reset_all_belongs_to_settings() {
     harness.run_steps(2);
     harness.state_mut().ui.windows.export = true;
     harness.run_steps(2);
-    assert_eq!(harness.state().ui.export.tab, 0);
+    assert_eq!(harness.state().ui.export.tab, ExportTab::Settings);
     harness.get_by_label("Reset all");
 }
 
@@ -258,7 +268,7 @@ fn the_reset_icon_resets_the_general_parameters() {
 /// The combo on the dialog row labelled `label` (other panels have labels like Size too), the `nth` from the left
 fn combo_on_row<'a>(harness: &'a Harness<'static, TextureCraftApp>, label: &str, nth: usize) -> egui_kittest::Node<'a> {
     let on_row = |row: f32| {
-        let mut combos: Vec<_> = harness.get_all_by_role(Role::ComboBox).filter(|node| (node.rect().center().y - row).abs() < 6.0).collect();
+        let mut combos: Vec<_> = harness.get_all_by_role(Role::ComboBox).filter(|node| (node.rect().center().y - row).abs() < SAME_ROW).collect();
         combos.sort_by(|a, b| a.rect().min.x.total_cmp(&b.rect().min.x));
         combos
     };
@@ -319,8 +329,8 @@ fn padding_offers_dilation_with_diffusion() {
     harness.get_by_label("Dilation + diffusion").click();
     harness.run_steps(2);
     assert_eq!(draft(&mut harness).settings.parameters.padding, "diffusion");
-    let row = harness.get_all_by_label("Padding").map(|node| node.rect().center().y).find(|y| *y < 400.0).unwrap();
-    let distance = harness.get_all_by_role(Role::SpinButton).find(|node| (node.rect().center().y - row).abs() < 6.0).unwrap();
+    let rows: Vec<f32> = harness.get_all_by_label("Padding").map(|node| node.rect().center().y).collect();
+    let distance = harness.get_all_by_role(Role::SpinButton).find(|node| rows.iter().any(|row| (node.rect().center().y - row).abs() < SAME_ROW)).unwrap();
     assert!(!distance.accesskit_node().is_disabled(), "diffusion starts beyond a set distance");
 }
 
@@ -420,7 +430,7 @@ fn export_runs_on_the_list_of_exports_with_its_console() {
     draft(&mut harness).settings.dir = dir.display().to_string();
     harness.get_all_by_label("Export").find(|node| node.accesskit_node().role() == Role::Button).unwrap().click();
     harness.run_steps(2);
-    assert_eq!(harness.state().ui.export.tab, 2, "the export shows on List of exports");
+    assert_eq!(harness.state().ui.export.tab, ExportTab::ListOfExports, "the export shows on List of exports");
     harness.get_by_label("Cancel Export");
 
     for _ in 0..20 {
@@ -469,18 +479,18 @@ fn the_window_moves_by_its_title_bar() {
     // An app window with room around the dialog: it is kept inside, so a move past an edge stops there
     let mut harness = harness(2, egui::vec2(1600.0, 960.0));
     let before = dialog_rect(&harness);
-    let grab = egui::pos2(before.center().x, before.top() + 12.0);
+    let grab = egui::pos2(before.center().x, before.top() + TITLE_BAR_GRAB_OFFSET);
     let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
     harness.hover_at(grab);
     harness.event(button(grab, true));
     harness.run_steps(1);
-    let to = grab + egui::vec2(-80.0, 40.0);
+    let to = grab + WINDOW_DRAG;
     harness.hover_at(to);
     harness.run_steps(1);
     harness.event(button(to, false));
     harness.run_steps(2);
     let after = dialog_rect(&harness);
-    assert!((after.center() - before.center() - egui::vec2(-80.0, 40.0)).length() < 2.0, "{before:?} -> {after:?}");
+    assert!((after.center() - before.center() - WINDOW_DRAG).length() < WINDOW_MOVE_TOLERANCE, "{before:?} -> {after:?}");
 }
 
 #[test]
@@ -489,9 +499,17 @@ fn every_output_card_keeps_room_for_its_file_name() {
     harness.state_mut().ui.export.preset = "Unity HDRP (Mask Map)".into();
     harness.get_by_label("Output templates").click();
     harness.run_steps(3);
-    let names: Vec<_> = harness.get_all_by_role(Role::TextInput).filter(|node| node.value().is_some_and(|value| value.starts_with('$'))).map(|node| node.rect().width()).collect();
+    let names: Vec<_> = harness
+        .get_all_by_role(Role::TextInput)
+        .filter(|node| node.value().is_some_and(|value| value.starts_with('$')))
+        .map(|node| node.rect().width())
+        .collect();
     assert_eq!(names.len(), 3, "one name per output");
-    assert!(names.iter().all(|width| *width > 150.0 && (width - names[0]).abs() < 1.0), "the R+G+B+A card's name is as wide as the others: {names:?}");
+    let file_type = harness.get_all_by_role(Role::ComboBox).find(|node| node.value().as_deref() == Some("png")).unwrap().rect().width();
+    assert!(
+        names.iter().all(|width| *width > file_type && (width - names[0]).abs() < 1.0),
+        "every name is as wide as the others and wider than its file type: {names:?}"
+    );
 }
 
 #[test]
@@ -526,4 +544,44 @@ fn hovering_a_channel_box_shows_the_packed_file() {
     assert!(harness.query_all_by_label_contains("MaskMap.png").count() > 0);
     assert_eq!(mixed_ao(&harness), chips + 1, "the green channel's source is named");
     assert!(harness.query_by_label("256 x 256 · png 8 bits").is_some(), "the file's size and type");
+}
+
+#[test]
+fn deleting_a_template_a_texture_set_chose_keeps_the_settings_saveable() {
+    let mut harness = harness(2, LAPTOP);
+    let app = harness.state_mut();
+    let mut mine = app.session.export_preset("Unity HDRP (Mask Map)").unwrap();
+    mine.name = "mine".into();
+    texturecraft_engine::execute(&mut app.session, "export.preset.save", &serde_json::json!({"preset": mine})).unwrap();
+    draft(&mut harness).sets[0].overrides.preset = Some("mine".into());
+    harness.state_mut().ui.export.preset = "mine".into();
+    harness.get_by_label("Output templates").click();
+    harness.run_steps(3);
+
+    harness.get_by_label("Delete the selected template").click();
+    harness.run_steps(3);
+    assert_ne!(draft(&mut harness).sets[0].overrides.preset.as_deref(), Some("mine"), "the override follows the deleted template");
+    harness.get_by_label("Save settings").click();
+    harness.run_steps(3);
+    assert!(harness.state().session.doc.project.export.is_some(), "Save settings succeeds");
+}
+
+#[test]
+fn a_texture_sets_output_maps_show_the_templates_own_dithering() {
+    let mut harness = harness(2, LAPTOP);
+    let app = harness.state_mut();
+    let mut dithered = app.session.export_preset("Document channels + Normal + AO").unwrap();
+    dithered.name = "dithered".into();
+    for map in &mut dithered.maps {
+        map.options.dithering = map.bit_depth == 8;
+    }
+    let dithered_maps = dithered.maps.iter().filter(|map| map.options.dithering).count();
+    assert!(dithered_maps > 0);
+    texturecraft_engine::execute(&mut app.session, "export.preset.save", &serde_json::json!({"preset": dithered})).unwrap();
+    draft(&mut harness).settings.parameters.preset = "dithered".into();
+    harness.run_steps(2);
+    harness.get_by_label("Base").click();
+    harness.run_steps(2);
+
+    assert_eq!(harness.query_all_by_label_contains("8 bits + dithering").count(), dithered_maps);
 }

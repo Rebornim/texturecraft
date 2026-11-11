@@ -827,12 +827,13 @@ fn engine_presets_follow_their_targets_layouts() {
         let preset = builtin_preset(preset).unwrap();
         preset.maps.into_iter().find(|map| map.file.ends_with(file_end)).unwrap().channels
     };
+    let source_of = |channels: &[(Dest, SourceRef)], dest: Dest| channels.iter().find(|(channel_dest, _)| *channel_dest == dest).unwrap().1.clone();
     let ddna = channels("CryEngine (Illum)", "_ddna");
-    assert!(matches!(ddna[0].1, SourceRef::Virtual { map: VirtualMap::NormalDirectX, .. }), "CryEngine normals are DirectX");
-    assert_eq!(ddna[3], (Dest::A, SourceRef::Virtual { map: VirtualMap::Glossiness, component: 0 }), "gloss in the normal's alpha");
+    assert!(matches!(source_of(&ddna, Dest::R), SourceRef::Virtual { map: VirtualMap::NormalDirectX, .. }), "CryEngine normals are DirectX");
+    assert_eq!(source_of(&ddna, Dest::A), SourceRef::Virtual { map: VirtualMap::Glossiness, component: 0 }, "gloss in the normal's alpha");
     let mask = channels("Unity URP (Metallic)", "_MetallicSmoothness");
-    assert_eq!(mask[0].1, SourceRef::Channel { channel: Channel::Metallic, component: 0 });
-    assert_eq!(mask[3].1, SourceRef::Virtual { map: VirtualMap::Glossiness, component: 0 }, "smoothness in alpha");
+    assert_eq!(source_of(&mask, Dest::R), SourceRef::Channel { channel: Channel::Metallic, component: 0 });
+    assert_eq!(source_of(&mask, Dest::A), SourceRef::Virtual { map: VirtualMap::Glossiness, component: 0 }, "smoothness in alpha");
     let sss = channels("Unreal Engine SSS (Packed)", "_SSS");
     assert_eq!(sss, [(Dest::L, SourceRef::Channel { channel: Channel::ScatterWeight, component: 0 })]);
 }
@@ -868,7 +869,11 @@ fn the_2d_view_map_is_the_base_color_shaded_by_ambient_occlusion() {
         file: "view".into(),
         format: FileFormat::Exr,
         bit_depth: 32,
-        channels: [Dest::R, Dest::G, Dest::B].into_iter().zip(0u8..).map(|(dest, component)| (dest, SourceRef::Virtual { map: VirtualMap::View2d, component })).collect(),
+        channels: [Dest::R, Dest::G, Dest::B]
+            .into_iter()
+            .zip(0u8..)
+            .map(|(dest, component)| (dest, SourceRef::Virtual { map: VirtualMap::View2d, component }))
+            .collect(),
         options: Default::default(),
     };
     let image = decode(&fx.render(&ExportOptions::new(ExportPreset { name: "2d".into(), maps: vec![view] }))[0]).to_rgb32f();

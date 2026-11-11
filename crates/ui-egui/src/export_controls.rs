@@ -10,7 +10,7 @@ use crate::i18n::{tr, trf};
 const FILE_TYPES: [FileFormat; 8] =
     [FileFormat::Bmp, FileFormat::Jpeg, FileFormat::Png, FileFormat::Tga, FileFormat::Tiff, FileFormat::Hdr, FileFormat::Exr, FileFormat::Webp];
 /// Output sizes offered besides each texture set's own
-const SIZES: [u32; 7] = [128, 256, 512, 1024, 2048, 4096, 8192];
+pub(crate) const SIZES: [u32; 7] = [128, 256, 512, 1024, 2048, 4096, 8192];
 /// Padding modes in menu order
 const PADDINGS: [&str; 5] = ["none", "infinite", "dilation", "dilationDefault", "diffusion"];
 const DILATION_MAX: u32 = 256;
@@ -20,6 +20,8 @@ const BIT_DEPTH_WIDTH: f32 = 110.0;
 /// The file type combo's width; its bit depth combo takes the rest
 const FILE_TYPE_WIDTH: f32 = 165.0;
 const DILATION_FIELD_WIDTH: f32 = 64.0;
+/// A texture set map's own file type combo: wide enough for the longest extension
+const MAP_FORMAT_WIDTH: f32 = 64.0;
 
 pub fn template_combo(ui: &mut Ui, id: &str, preset: &mut String, builtins: &[String], user: &[String], width: f32) {
     egui::ComboBox::from_id_salt(id).width(width).selected_text(preset.clone()).show_ui(ui, |ui| {
@@ -135,7 +137,7 @@ pub fn file_type_with_depth_text(file_type: &ExportFileType) -> String {
 pub fn map_file_type_combos(ui: &mut Ui, id: &str, file_type: &mut ExportFileType) {
     let format = FileFormat::from_extension(&file_type.format).unwrap_or(FileFormat::Png);
     ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt((id, "format")).width(64.0).selected_text(format.extension()).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt((id, "format")).width(MAP_FORMAT_WIDTH).selected_text(format.extension()).show_ui(ui, |ui| {
             for choice in FILE_TYPES {
                 if ui.selectable_label(choice == format, choice.extension()).clicked() {
                     switch_format(file_type, choice);

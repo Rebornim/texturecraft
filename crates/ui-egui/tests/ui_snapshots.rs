@@ -10,6 +10,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable};
 use texturecraft_engine::core::{BakeResolution, BakedMap, CurvatureMethod, HeightNormalization};
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::docking::Panel;
+use texturecraft_ui_egui::export_tab::ExportTab;
 use texturecraft_ui_egui::state::Mode;
 use texturecraft_ui_egui::theme::Brightness;
 use texturecraft_ui_egui::titlebar::TitleBar;
@@ -563,19 +564,23 @@ fn export_dialog_snapshots() {
     harness.state_mut().ui.export.settings.as_mut().unwrap().selected = None;
 
     // The other tabs at the window's size
-    for (tab, name) in [(1, "export-templates-tab"), (2, "export-list-tab")] {
+    for (tab, name) in [(ExportTab::OutputTemplates, "export-templates-tab"), (ExportTab::ListOfExports, "export-list-tab")] {
         harness.state_mut().ui.export.tab = tab;
         harness.run_steps(60);
         save(&mut harness, &output_dir, name);
     }
-    harness.state_mut().ui.export.tab = 1;
+    harness.state_mut().ui.export.tab = ExportTab::OutputTemplates;
     harness.state_mut().ui.export.preset = "Unreal Engine (Packed)".into();
     harness.run_steps(4);
     save(&mut harness, &output_dir, "export-templates-unreal");
     harness.state_mut().ui.export.preset = "Unity HDRP (Mask Map)".into();
     harness.run_steps(4);
     save(&mut harness, &output_dir, "export-templates-unity");
-    harness.get_all_by_role(egui::accesskit::Role::Button).find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with("R: Metallic"))).unwrap().hover();
+    harness
+        .get_all_by_role(egui::accesskit::Role::Button)
+        .find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with("R: Metallic")))
+        .unwrap()
+        .hover();
     harness.run_steps(60);
     save(&mut harness, &output_dir, "export-templates-preview");
     harness.state_mut().ui.export.preset = "Document channels + Normal + AO".into();
@@ -583,7 +588,7 @@ fn export_dialog_snapshots() {
     harness.run_steps(60);
     save(&mut harness, &output_dir, "export-templates-tab-laptop");
     harness.set_size(egui::vec2(1600.0, 960.0));
-    harness.state_mut().ui.export.tab = 0;
+    harness.state_mut().ui.export.tab = ExportTab::Settings;
 
     // The normal map format's choices with a preset that writes DirectX
     harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;

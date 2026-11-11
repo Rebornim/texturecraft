@@ -20,6 +20,7 @@ mod export_dialog;
 pub mod export_draft;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod export_run;
+pub mod export_tab;
 pub mod export_templates;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_dialogs;

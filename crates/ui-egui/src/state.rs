@@ -208,7 +208,7 @@ pub struct ExportUi {
     /// Output templates tab: the selected template
     pub preset: String,
     #[serde(skip)]
-    pub tab: u8,
+    pub tab: crate::export_tab::ExportTab,
     /// Output templates tab: input maps named as OpenPBR names them instead of TextureCraft's channel names
     #[serde(default)]
     pub openpbr_names: bool,
@@ -231,7 +231,7 @@ impl Default for ExportUi {
         ExportUi {
             dir: default_export_dir(),
             preset: texturecraft_engine::core::DEFAULT_EXPORT_PRESET.into(),
-            tab: 0,
+            tab: crate::export_tab::ExportTab::Settings,
             openpbr_names: false,
             console_closed: false,
             settings: None,

@@ -39,8 +39,8 @@ pub mod presets;
 pub mod project_file;
 
 pub use export::{
-    Dest, ExportInput, ExportOptions, ExportPreset, ExportedFile, FileFormat, MAX_PREVIEW_SIDE, MapOptions, MapPreview, MapSpec, Padding, PlannedFile, SourceRef, VirtualMap,
-    list_outputs, preview_map, render_maps,
+    Dest, ExportInput, ExportOptions, ExportPreset, ExportedFile, FileFormat, MAX_PREVIEW_SIDE, MapOptions, MapPreview, MapSpec, Padding, PlannedFile,
+    SourceRef, VirtualMap, list_outputs, preview_map, render_maps,
 };
 pub use image_res::{DecodedImage, coverage_png, decode_image, decode_image_within};
 pub use mesh_export::{

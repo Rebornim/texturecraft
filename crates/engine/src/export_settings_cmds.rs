@@ -20,7 +20,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Get the export settings",
             [],
             None,
-            "{} → {saved: bool, settings: {dir, parameters: {preset, format, bit_depth, size, padding, dilation}, normal_format, color_space}, sets: [{name, export: {skip, overrides, maps}}]}",
+            "{} → {saved: bool, settings: {dir, parameters: {preset, file_type: {format (empty: the template's own), bit_depth, dithering}, size (0: each texture set's own), padding, dilation}, normal_format, color_space, usd?: bool, shader_parameters?: bool}, sets: [{name, export: {skip?, overrides?, maps?}}]}",
             always,
             get
         ),
@@ -29,7 +29,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Save export settings",
             [],
             None,
-            "{settings?: as export.settings.get, sets?: [{skip?, overrides?: {preset?, file_type?: [format, bitDepth], size?, padding?: [mode, px]}, maps?: {<map key: file template with $channel filled in>: {skip?, file_type?}}}] one per texture set} → the saved settings. file.exportTextures and export.plan use them when called without preset, format, bitDepth, padding, dilation, size, dithering, normalFormat or colorSpace, and also take `settings` / `sets` there to use unsaved ones",
+            "{settings?: as export.settings.get, sets?: [{skip?, overrides?: {preset?, file_type?: {format, bit_depth, dithering}, size?, padding?: [mode, px]}, maps?: {<map key: file template with $channel filled in>: {skip?, file_type?: {format, bit_depth, dithering}}}}] one per texture set} → the saved settings. file.exportTextures and export.plan use them when called without preset, format, bitDepth, padding, dilation, size, dithering, normalFormat or colorSpace, and also take `settings` / `sets` there to use unsaved ones",
             always,
             set
         ),

@@ -15,6 +15,7 @@
 use std::collections::BTreeSet;
 use std::io::Cursor;
 
+use image::ExtendedColorType;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use texturecraft_compose::{BakedMaps, Composite};
@@ -26,10 +27,12 @@ use crate::{FormatError, MAX_IMAGE_SIZE, Result};
 
 mod diffusion;
 mod map_options;
+mod map_preview;
 mod preview;
 
 pub use map_options::MapOptions;
-pub use preview::{MAX_PREVIEW_SIDE, MapPreview, preview_map};
+pub use map_preview::MapPreview;
+pub use preview::{MAX_PREVIEW_SIDE, preview_map};
 
 /// Height-to-normal slope: with strength 1, a height change of 1 across 1/16 of the texture
 /// width tilts the normal 45°, at any resolution.
@@ -166,17 +169,17 @@ pub enum VirtualMap {
     HeightNormal,
     /// Sheen color × sheen weight (glTF's sheen color, a color map).
     SheenTint,
-    /// Base color with metal areas black (specular/glossiness workflows).
+    /// Base color with metal areas black (specular/glossiness workflows)
     Diffuse,
-    /// Reflectance color: 0.04 grey where dielectric, the base color where metal.
+    /// Reflectance color: 0.04 grey where dielectric, the base color where metal
     SpecularColor,
-    /// White where dielectric, the base color where metal.
+    /// White where dielectric, the base color where metal
     Reflection,
-    /// 1 / IOR, the IOR running from 1.4 (dielectric) to 100 (metal) with metallic.
+    /// 1 / IOR, the IOR running from 1.4 (dielectric) to 100 (metal) with metallic
     InverseIor,
-    /// (1 − roughness)².
+    /// (1 − roughness)²
     GlossinessSquared,
-    /// What the 2D view shows: the base color lightly shaded by the ambient occlusion.
+    /// What the 2D view shows: the base color lightly shaded by the ambient occlusion
     View2d,
 }
 
@@ -334,7 +337,7 @@ impl ExportPreset {
         formats.all(|format| format == first).then_some(first)
     }
 
-    /// Structural checks for (untrusted) presets.
+    /// Structural checks for (untrusted) presets
     pub fn validate(&self) -> Result<()> {
         let bad = |m: String| Err(FormatError::Invalid(format!("export preset \"{}\": {m}", self.name)));
         if self.name.trim().is_empty() || self.name.chars().count() > MAX_PRESET_NAME || self.name.chars().any(char::is_control) {
@@ -373,37 +376,35 @@ impl ExportPreset {
     }
 }
 
-/// UV padding of exported maps (texels outside the UV islands).
+/// UV padding of exported maps (texels outside the UV islands)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Padding {
-    /// Uncovered texels are zero (transparent where there is alpha).
+    /// Uncovered texels are zero (transparent where there is alpha)
     None,
-    /// Islands are dilated this many texels; beyond, texels are zero.
+    /// Islands are dilated this many texels; beyond, texels are zero
     Dilation(u32),
-    /// Islands are dilated this many texels; beyond, texels hold the channel default.
+    /// Islands are dilated this many texels; beyond, texels hold the channel default
     DilationDefault(u32),
-    /// Every texel takes its nearest island's value.
+    /// Every texel takes its nearest island's value
     Infinite,
-    /// Islands are dilated this many texels; beyond, texels take a blur spreading out from the islands.
+    /// Islands are dilated this many texels; beyond, texels take a blur spreading out from the islands
     DilationDiffusion(u32),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExportOptions {
     pub preset: ExportPreset,
-    /// Write every map in this format instead of the preset's.
+    /// Write every map in this format instead of the preset's
     pub format_override: Option<FileFormat>,
     pub bit_depth_override: Option<u8>,
     pub padding: Padding,
-    /// Output size (power of two); None keeps the texture set resolution.
+    /// Output size (power of two); None keeps the texture set resolution
     pub size: Option<u32>,
-    /// Normal convention for every normal output instead of the project's / preset's.
+    /// Normal convention for every normal output instead of the project's / preset's
     pub normal_format: Option<NormalFormat>,
-    /// UV-tiled sets: one image of the whole tile atlas per map instead of a file per tile
-    /// (for formats without UDIM support, with the mesh's UVs in atlas space).
+    /// UV-tiled sets: one atlas image per map instead of a file per tile (formats without UDIM, the mesh's UVs in atlas space)
     pub atlas: bool,
-    /// The colour space of the colour maps (data maps are never converted); None writes sRGB
-    /// into 8/16-bit files and linear Rec.709 into float files (EXR, HDR).
+    /// The colour maps' colour space (data maps are never converted); None: sRGB in 8/16-bit files, linear Rec.709 in float ones
     #[serde(skip)]
     pub color_space: Option<ColorSpace>,
     /// Indices into the preset's maps whose 8-bit files are dithered against banding
@@ -478,9 +479,9 @@ fn normal_present(set: &TextureSet) -> bool {
     set.has_channel(Channel::Normal) || set.has_channel(Channel::Height) || set.baked.contains(&BakedMap::Normal)
 }
 
-/// A source with real data in this texture set (constants never count).
-fn source_present(set: &TextureSet, s: &SourceRef) -> bool {
-    match s {
+/// A source with real data in this texture set (constants never count)
+fn source_present(set: &TextureSet, source: &SourceRef) -> bool {
+    match source {
         SourceRef::Channel { channel: Channel::Normal, .. } => normal_present(set),
         SourceRef::Channel { channel, .. } => set.has_channel(*channel),
         SourceRef::Virtual { map: VirtualMap::NormalOpenGl | VirtualMap::NormalDirectX, .. } => normal_present(set),
@@ -517,9 +518,9 @@ fn layout<'m>(set: &TextureSet, map: &'m MapSpec) -> Vec<(Dest, &'m SourceRef)> 
 }
 
 fn is_color(map: &MapSpec) -> bool {
-    map.channels.iter().any(|(d, s)| {
-        *d != Dest::A
-            && match s {
+    map.channels.iter().any(|(dest, source)| {
+        *dest != Dest::A
+            && match source {
                 SourceRef::Channel { channel, .. } => channel.kind() == ChannelKind::Color,
                 SourceRef::Virtual { map, .. } => {
                     matches!(map, VirtualMap::SheenTint | VirtualMap::Diffuse | VirtualMap::SpecularColor | VirtualMap::Reflection | VirtualMap::View2d)
@@ -752,14 +753,14 @@ impl Sampler<'_> {
         [n.x * 0.5 + 0.5, y * 0.5 + 0.5, n.z * 0.5 + 0.5]
     }
 
-    fn sample(&self, src: &SourceRef, at: At, cache: &mut Option<Vec3>) -> f32 {
-        let k = src.component();
-        let v = match src {
-            SourceRef::Constant(v) => return *v,
+    fn sample(&self, source: &SourceRef, at: At, cache: &mut Option<Vec3>) -> f32 {
+        let component = source.component();
+        let values = match source {
+            SourceRef::Constant(value) => return *value,
             SourceRef::Channel { channel: Channel::Normal, .. } => self.normal(at, self.project_normal, cache),
             SourceRef::Channel { channel, .. } => {
-                let v = self.channel(*channel, at);
-                if channel.kind() == ChannelKind::Signed { v.map(|h| h * 0.5 + 0.5) } else { v }
+                let channel_values = self.channel(*channel, at);
+                if channel.kind() == ChannelKind::Signed { channel_values.map(|signed| signed * 0.5 + 0.5) } else { channel_values }
             }
             SourceRef::Virtual { map, .. } => match map {
                 VirtualMap::NormalOpenGl => self.normal(at, NormalFormat::OpenGl, cache),
@@ -767,18 +768,18 @@ impl Sampler<'_> {
                 VirtualMap::Glossiness => [1.0 - self.channel(Channel::Roughness, at)[0]; 3],
                 VirtualMap::F0 => [0.08 * self.channel(Channel::SpecularLevel, at)[0]; 3],
                 VirtualMap::Roughness => [1.0 - self.channel(Channel::Glossiness, at)[0]; 3],
-                VirtualMap::SheenTint => self.channel(Channel::SheenColor, at).map(|c| c * self.channel(Channel::SheenWeight, at)[0]),
+                VirtualMap::SheenTint => self.channel(Channel::SheenColor, at).map(|color| color * self.channel(Channel::SheenWeight, at)[0]),
                 VirtualMap::Diffuse => {
                     let metal = self.channel(Channel::Metallic, at)[0];
-                    self.channel(Channel::BaseColor, at).map(|c| c * (1.0 - metal))
+                    self.channel(Channel::BaseColor, at).map(|color| color * (1.0 - metal))
                 }
                 VirtualMap::SpecularColor => {
                     let metal = self.channel(Channel::Metallic, at)[0];
-                    self.channel(Channel::BaseColor, at).map(|c| DIELECTRIC_F0 + (c - DIELECTRIC_F0) * metal)
+                    self.channel(Channel::BaseColor, at).map(|color| DIELECTRIC_F0 + (color - DIELECTRIC_F0) * metal)
                 }
                 VirtualMap::Reflection => {
                     let metal = self.channel(Channel::Metallic, at)[0];
-                    self.channel(Channel::BaseColor, at).map(|c| 1.0 + (c - 1.0) * metal)
+                    self.channel(Channel::BaseColor, at).map(|color| 1.0 + (color - 1.0) * metal)
                 }
                 VirtualMap::InverseIor => {
                     let metal = self.channel(Channel::Metallic, at)[0];
@@ -788,123 +789,135 @@ impl Sampler<'_> {
                 VirtualMap::View2d => {
                     // As the 2D view's material mode draws it: AO (painted × baked) darkens the base color by up to half
                     let ao = self.channel(Channel::AmbientOcclusion, at)[0] * self.baked(BakedMap::AmbientOcclusion, at)[0];
-                    self.channel(Channel::BaseColor, at).map(|c| c * (1.0 - VIEW_2D_AO_SHARE * (1.0 - ao)))
+                    self.channel(Channel::BaseColor, at).map(|color| color * (1.0 - VIEW_2D_AO_SHARE * (1.0 - ao)))
                 }
                 VirtualMap::HeightNormal => {
-                    let n = match at {
+                    let normal = match at {
                         At::Texel(x, y) => self.height_normal(x, y),
                         At::Default => Vec3::Z,
                     };
-                    self.pack_normal(n, self.project_normal)
+                    self.pack_normal(normal, self.project_normal)
                 }
                 VirtualMap::AoMixed => {
-                    let ch = self.channel(Channel::AmbientOcclusion, at)[0];
+                    let painted = self.channel(Channel::AmbientOcclusion, at)[0];
                     let baked = self.baked(BakedMap::AmbientOcclusion, at)[0];
-                    [if self.set.ao_mixing == AoMixing::Multiply { ch * baked } else { ch }; 3]
+                    [if self.set.ao_mixing == AoMixing::Multiply { painted * baked } else { painted }; 3]
                 }
             },
             SourceRef::Baked { map, .. } => self.baked(*map, at),
         };
-        v.get(k).copied().unwrap_or(0.0)
+        values.get(component).copied().unwrap_or(0.0)
     }
 }
 
 // ---------------------------------------------------------------------------------------------
 // Rendering.
 
-/// Render every file of `opts` for `input`'s texture set.
+/// Render every file of `opts` for `input`'s texture set
 pub fn render_maps(input: &ExportInput, opts: &ExportOptions) -> Result<Vec<ExportedFile>> {
     let planned = list_outputs(input.project, input.ts, input.mesh_name, opts)?;
     let set = input.project.texture_set(input.ts)?;
-    let (res, height) = (input.composite.resolution, input.composite.height);
+    let (resolution, height) = (input.composite.resolution, input.composite.height);
     let grid = set.tile_grid();
-    let tile_res = res / grid.map_or(1, |g| g.cols.max(1));
-    if tile_res == 0 || tile_res > MAX_IMAGE_SIZE || height != tile_res * grid.map_or(1, |g| g.rows) {
-        return Err(FormatError::Invalid(format!("composite size {res}×{height} does not fit texture set \"{}\"", set.name)));
+    let tile_res = resolution / grid.map_or(1, |tile_grid| tile_grid.cols.max(1));
+    if tile_res == 0 || tile_res > MAX_IMAGE_SIZE || height != tile_res * grid.map_or(1, |tile_grid| tile_grid.rows) {
+        return Err(FormatError::Invalid(format!("composite size {resolution}×{height} does not fit texture set \"{}\"", set.name)));
     }
-    if input.coverage.len() != res as usize * height as usize {
-        return Err(FormatError::Invalid(format!("coverage has {} texels, expected {res}×{height}", input.coverage.len())));
+    if input.coverage.len() != resolution as usize * height as usize {
+        return Err(FormatError::Invalid(format!("coverage has {} texels, expected {resolution}×{height}", input.coverage.len())));
     }
-    // Padding stays inside each UV tile.
-    let dmap = match opts.padding {
+
+    // Padding stays inside each UV tile
+    let dilation_map = match opts.padding {
         Padding::None => None,
-        Padding::Dilation(d) | Padding::DilationDefault(d) | Padding::DilationDiffusion(d) => {
-            Some(DilationMap::in_blocks(input.coverage, res, height, Some(d), tile_res))
+        Padding::Dilation(distance) | Padding::DilationDefault(distance) | Padding::DilationDiffusion(distance) => {
+            Some(DilationMap::in_blocks(input.coverage, resolution, height, Some(distance), tile_res))
         }
-        Padding::Infinite => Some(DilationMap::in_blocks(input.coverage, res, height, None, tile_res)),
+        Padding::Infinite => Some(DilationMap::in_blocks(input.coverage, resolution, height, None, tile_res)),
     };
     let beyond_default = matches!(opts.padding, Padding::DilationDefault(_) | Padding::Infinite);
     let sampler = Sampler::new(input, opts, set, tile_res);
+
     planned
         .into_iter()
-        .map(|p| {
-            let map = opts.preset.maps.get(p.map).ok_or_else(|| FormatError::Invalid("planned map out of range".into()))?;
-            let lay = layout(set, map);
-            let n = lay.len();
-            // The texels written: one tile, or the whole set.
-            let (x0, y0, w, h) = match (p.tile, grid) {
-                (Some(t), Some(g)) => {
-                    let (bx, by) = g.block(t).ok_or_else(|| FormatError::Invalid(format!("UV tile {t} is not in the set's grid")))?;
-                    // A tile smaller than its block fills the block's top-left corner.
-                    let side = ((tile_res as f32 * set.tile_scale(t)).round() as u32).clamp(1, tile_res);
-                    (bx * tile_res, by * tile_res, side, side)
+        .map(|output| {
+            let map = opts.preset.maps.get(output.map).ok_or_else(|| FormatError::Invalid("planned map out of range".into()))?;
+            let channel_layout = layout(set, map);
+            let component_count = channel_layout.len();
+
+            // The texels written: one tile, or the whole set
+            let (origin_x, origin_y, written_width, written_height) = match (output.tile, grid) {
+                (Some(tile), Some(tile_grid)) => {
+                    let (block_column, block_row) =
+                        tile_grid.block(tile).ok_or_else(|| FormatError::Invalid(format!("UV tile {tile} is not in the set's grid")))?;
+
+                    // A tile smaller than its block fills the block's top-left corner
+                    let side = ((tile_res as f32 * set.tile_scale(tile)).round() as u32).clamp(1, tile_res);
+                    (block_column * tile_res, block_row * tile_res, side, side)
                 }
-                _ => (0, 0, res, height),
+                _ => (0, 0, resolution, height),
             };
-            let mut data = vec![0.0f32; w as usize * h as usize * n];
-            data.par_chunks_mut(w as usize * n).enumerate().for_each(|(row_y, row)| {
-                let y = y0 + row_y as u32;
-                for (col, x) in (x0..x0 + w).enumerate() {
+
+            let mut data = vec![0.0f32; written_width as usize * written_height as usize * component_count];
+            data.par_chunks_mut(written_width as usize * component_count).enumerate().for_each(|(row_index, row)| {
+                let y = origin_y + row_index as u32;
+                for (column, x) in (origin_x..origin_x + written_width).enumerate() {
                     let at = if sampler.covered(x, y) {
                         Some(At::Texel(x, y))
                     } else {
-                        match dmap.as_ref().and_then(|d| d.source(x, y)) {
-                            Some((sx, sy)) => Some(At::Texel(sx, sy)),
+                        match dilation_map.as_ref().and_then(|dilation| dilation.source(x, y)) {
+                            Some((source_x, source_y)) => Some(At::Texel(source_x, source_y)),
                             None => beyond_default.then_some(At::Default),
                         }
                     };
                     let Some(at) = at else { continue };
+
                     let mut cache = None;
-                    for (k, (_, src)) in lay.iter().enumerate() {
-                        if let Some(v) = row.get_mut(col * n + k) {
-                            *v = sampler.sample(src, at, &mut cache);
+                    for (component, (_, source)) in channel_layout.iter().enumerate() {
+                        if let Some(value) = row.get_mut(column * component_count + component) {
+                            *value = sampler.sample(source, at, &mut cache);
                         }
                     }
                 }
             });
+
             if matches!(opts.padding, Padding::DilationDiffusion(_)) {
-                let valid: Vec<bool> = (y0..y0 + h)
-                    .flat_map(|y| (x0..x0 + w).map(move |x| (x, y)))
-                    .map(|(x, y)| sampler.covered(x, y) || dmap.as_ref().is_some_and(|d| d.source(x, y).is_some()))
+                let valid: Vec<bool> = (origin_y..origin_y + written_height)
+                    .flat_map(|y| (origin_x..origin_x + written_width).map(move |x| (x, y)))
+                    .map(|(x, y)| sampler.covered(x, y) || dilation_map.as_ref().is_some_and(|dilation| dilation.source(x, y).is_some()))
                     .collect();
-                diffusion::diffuse(&mut data, &valid, (w, h), n);
+                diffusion::diffuse(&mut data, &valid, (written_width, written_height), component_count);
             }
-            // `size` is per tile: an atlas scales with it.
-            let scale = |v: u32| (u64::from(v) * u64::from(map.options.size.or(opts.size).unwrap_or(tile_res)) / u64::from(tile_res)) as u32;
-            let size = (scale(w), scale(h));
-            let data = resize(data, (w, h), n, size);
-            // Colour maps leave linear Rec.709 for the chosen space. sRGB in integer files is
-            // encoded by `encode`; every other case is converted here (float sRGB included).
-            let space = opts.space_for(p.format);
-            let rgb = lay.len() >= 3 && lay.iter().take(3).map(|(d, _)| *d).eq([Dest::R, Dest::G, Dest::B]);
+
+            // `size` is per tile: an atlas scales with it
+            let scale = |length: u32| (u64::from(length) * u64::from(map.options.size.or(opts.size).unwrap_or(tile_res)) / u64::from(tile_res)) as u32;
+            let size = (scale(written_width), scale(written_height));
+            let data = resize(data, (written_width, written_height), component_count, size);
+
+            // Colour maps leave linear Rec.709 here, except sRGB in integer files, which `encode` applies
+            let space = opts.space_for(output.format);
+            let is_rgb = channel_layout.len() >= 3 && channel_layout.iter().take(3).map(|(dest, _)| *dest).eq([Dest::R, Dest::G, Dest::B]);
             let mut data = data;
-            let mut warnings = p.warnings;
-            let convert = is_color(map) && (space != ColorSpace::Srgb || p.format.is_float()) && space != ColorSpace::LinearRec709;
-            if convert && rgb {
-                data.par_chunks_mut(n).for_each(|px| {
-                    if let [r, g, b, ..] = px {
-                        [*r, *g, *b] = space.from_linear_rec709([*r, *g, *b]);
+            let mut warnings = output.warnings;
+            let convert = is_color(map) && (space != ColorSpace::Srgb || output.format.is_float()) && space != ColorSpace::LinearRec709;
+            if convert && is_rgb {
+                data.par_chunks_mut(component_count).for_each(|texel| {
+                    if let [red, green, blue, ..] = texel {
+                        [*red, *green, *blue] = space.from_linear_rec709([*red, *green, *blue]);
                     }
                 });
             } else if convert {
-                warnings.push(format!("\"{}\" packs colour into one channel (L), so it is written in linear Rec.709, not {}", p.name, space.name()));
+                warnings.push(format!("\"{}\" packs colour into one channel (L), so it is written in linear Rec.709, not {}", output.name, space.name()));
             }
-            let srgb: Vec<bool> = lay.iter().map(|(d, _)| *d != Dest::A && is_color(map) && !p.format.is_float() && space == ColorSpace::Srgb).collect();
-            // A colour space the user chose is written into the colour maps (data maps have none).
-            let embed = (opts.color_space.is_some() && is_color(map) && rgb).then_some(space);
-            let dithered = map.options.dithering || opts.dithered_maps.contains(&p.map);
-            let bytes = encode(p.format, p.bit_depth, dithered, size, n, &data, &srgb, embed, &mut warnings)?;
-            Ok(ExportedFile { name: p.name, bytes, width: size.0, height: size.1, warnings })
+
+            let srgb: Vec<bool> =
+                channel_layout.iter().map(|(dest, _)| *dest != Dest::A && is_color(map) && !output.format.is_float() && space == ColorSpace::Srgb).collect();
+
+            // A colour space the user chose is written into the colour maps (data maps have none)
+            let embed = (opts.color_space.is_some() && is_color(map) && is_rgb).then_some(space);
+            let dithered = map.options.dithering || opts.dithered_maps.contains(&output.map);
+            let bytes = encode(output.format, output.bit_depth, dithered, size, component_count, &data, &srgb, embed, &mut warnings)?;
+            Ok(ExportedFile { name: output.name, bytes, width: size.0, height: size.1, warnings })
         })
         .collect()
 }
@@ -945,76 +958,100 @@ fn resize(data: Vec<f32>, from: (u32, u32), n: usize, to: (u32, u32)) -> Vec<f32
     out
 }
 
-/// Encode a `size` (width, height) image of `n` components (1 L, 2 LA, 3 RGB, 4 RGBA; linear values); `dithered` dithers 8-bit files
+/// Encode a `size` (width, height) image of `component_count` components (1 L, 2 LA, 3 RGB, 4 RGBA; linear values); `dithered` dithers 8-bit files
 #[allow(clippy::too_many_arguments)]
 fn encode(
     format: FileFormat,
     depth: u8,
     dithered: bool,
     size: (u32, u32),
-    n: usize,
+    component_count: usize,
     data: &[f32],
     srgb: &[bool],
     embed: Option<ColorSpace>,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>> {
-    let failed = |e: &dyn std::fmt::Display| FormatError::Invalid(format!("{} encoding failed: {e}", format.extension()));
-    // Where the colour space goes: an ICC profile in PNG, JPEG, TIFF and WebP, the chromaticities
-    // attribute in EXR. The other formats have no place for it.
+    let failed = |error: &dyn std::fmt::Display| FormatError::Invalid(format!("{} encoding failed: {error}", format.extension()));
+    // An ICC profile in PNG, JPEG, TIFF and WebP, the chromaticities attribute in EXR; the other formats have no place for it
     if let Some(space) = embed
         && matches!(format, FileFormat::Tga | FileFormat::Bmp | FileFormat::Hdr)
     {
         warnings.push(format!("{} files can't record a colour space; the colours are in {}", format.extension().to_ascii_uppercase(), space.name()));
     }
+
     match format {
-        FileFormat::Exr => return write_exr(size, n, data, depth == 16, embed).map_err(|e| failed(&e)),
+        FileFormat::Exr => return write_exr(size, component_count, data, depth == 16, embed).map_err(|error| failed(&error)),
         FileFormat::Hdr => {
-            if n == 2 || n == 4 {
+            if component_count == 2 || component_count == 4 {
                 warnings.push("HDR has no alpha channel; alpha was dropped".into());
             }
-            let rgb = remap(data, n, if n <= 2 { &[0, 0, 0] } else { &[0, 1, 2] });
-            let bytes: Vec<u8> = rgb.iter().flat_map(|v| v.to_ne_bytes()).collect();
-            return write_image(format, &bytes, size, image::ExtendedColorType::Rgb32F, None).map_err(|e| failed(&e));
+            let rgb = remap(data, component_count, if component_count <= 2 { &[0, 0, 0] } else { &[0, 1, 2] });
+            let bytes: Vec<u8> = rgb.iter().flat_map(|value| value.to_ne_bytes()).collect();
+            return write_image(format, &bytes, size, ExtendedColorType::Rgb32F, None).map_err(|error| failed(&error));
         }
         _ => {}
     }
-    // Integer formats: transfer function and quantization first, then fit the channel layout.
-    let encoded: Vec<f32> =
-        data.iter().enumerate().map(|(i, v)| if srgb.get(i % n).copied().unwrap_or(false) { linear_to_srgb(*v) } else { v.clamp(0.0, 1.0) }).collect();
-    let (encoded, n) = match (format, n) {
+
+    // Integer formats: transfer function and quantization first, then fit the channel layout
+    let encoded: Vec<f32> = data
+        .iter()
+        .enumerate()
+        .map(|(index, value)| if srgb.get(index % component_count).copied().unwrap_or(false) { linear_to_srgb(*value) } else { value.clamp(0.0, 1.0) })
+        .collect();
+
+    let (encoded, component_count) = match (format, component_count) {
         (FileFormat::Jpeg, 2 | 4) => {
             warnings.push("JPEG has no alpha channel; alpha was dropped".into());
-            (remap(&encoded, n, if n == 2 { &[0] } else { &[0, 1, 2] }), n - 1)
+            (remap(&encoded, component_count, if component_count == 2 { &[0] } else { &[0, 1, 2] }), component_count - 1)
         }
         (FileFormat::Tiff, 2) => (remap(&encoded, 2, &[0, 0, 0, 1]), 4),
-        _ => (encoded, n),
+        _ => (encoded, component_count),
     };
-    use image::ExtendedColorType as C;
+
     let (bytes, color) = if depth == 16 {
-        let b: Vec<u8> = encoded.iter().flat_map(|v| ((v * 65535.0 + 0.5) as u16).to_ne_bytes()).collect();
-        (b, [C::L16, C::La16, C::Rgb16, C::Rgba16].get(n.wrapping_sub(1)).copied().unwrap_or(C::Rgba16))
+        let bytes: Vec<u8> = encoded.iter().flat_map(|value| ((value * 65535.0 + 0.5) as u16).to_ne_bytes()).collect();
+        (
+            bytes,
+            [ExtendedColorType::L16, ExtendedColorType::La16, ExtendedColorType::Rgb16, ExtendedColorType::Rgba16]
+                .get(component_count.wrapping_sub(1))
+                .copied()
+                .unwrap_or(ExtendedColorType::Rgba16),
+        )
     } else if dithered {
         // Stochastic rounding: exact levels stay exact, values between two levels mix them in proportion
-        let b: Vec<u8> = encoded.iter().enumerate().map(|(i, v)| (v * 255.0 + dither_offset(i)).min(255.0) as u8).collect();
-        (b, [C::L8, C::La8, C::Rgb8, C::Rgba8].get(n.wrapping_sub(1)).copied().unwrap_or(C::Rgba8))
+        let bytes: Vec<u8> = encoded.iter().enumerate().map(|(index, value)| (value * 255.0 + dither_offset(index)).min(255.0) as u8).collect();
+        (
+            bytes,
+            [ExtendedColorType::L8, ExtendedColorType::La8, ExtendedColorType::Rgb8, ExtendedColorType::Rgba8]
+                .get(component_count.wrapping_sub(1))
+                .copied()
+                .unwrap_or(ExtendedColorType::Rgba8),
+        )
     } else {
-        let b: Vec<u8> = encoded.iter().map(|v| (v * 255.0 + 0.5) as u8).collect();
-        (b, [C::L8, C::La8, C::Rgb8, C::Rgba8].get(n.wrapping_sub(1)).copied().unwrap_or(C::Rgba8))
+        let bytes: Vec<u8> = encoded.iter().map(|value| (value * 255.0 + 0.5) as u8).collect();
+        (
+            bytes,
+            [ExtendedColorType::L8, ExtendedColorType::La8, ExtendedColorType::Rgb8, ExtendedColorType::Rgba8]
+                .get(component_count.wrapping_sub(1))
+                .copied()
+                .unwrap_or(ExtendedColorType::Rgba8),
+        )
     };
+
     let icc = embed.and_then(crate::icc::profile);
-    write_image(format, &bytes, size, color, icc).map_err(|e| failed(&e))
+    write_image(format, &bytes, size, color, icc).map_err(|error| failed(&error))
 }
 
-/// A fixed pseudo-random offset in [0, 1) for component `i`, so a dithered export is the same every time
-fn dither_offset(i: usize) -> f32 {
+/// A fixed pseudo-random offset in [0, 1) for component `component_index`, so a dithered export is the same every time
+fn dither_offset(component_index: usize) -> f32 {
     // SplitMix64 finalizer
-    let mut x = (i as u64).wrapping_add(0x9E37_79B9_7F4A_7C15);
-    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    x ^= x >> 31;
+    let mut hash = (component_index as u64).wrapping_add(0x9E37_79B9_7F4A_7C15);
+    hash = (hash ^ (hash >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    hash = (hash ^ (hash >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    hash ^= hash >> 31;
 
     // The top 24 bits, exactly representable in an f32
-    (x >> 40) as f32 / (1u64 << 24) as f32
+    (hash >> 40) as f32 / (1u64 << 24) as f32
 }
 
 /// Pick components `pick` from every texel of an `n`-component image.

@@ -38,6 +38,14 @@ const TAB_GAP: f32 = 2.0;
 const BODY_MARGIN: f32 = 8.0;
 /// Width of the Output templates tab's naming pattern combo
 const NAMING_WIDTH: f32 = 140.0;
+/// List of exports columns: size, format and bit depth, and the room a texture set's rows are indented by
+const LIST_SIZE_WIDTH: f32 = 200.0;
+const LIST_FORMAT_WIDTH: f32 = 60.0;
+const LIST_BITS_WIDTH: f32 = 70.0;
+const LIST_INDENT: f32 = 40.0;
+/// The List of exports console's width, and its show / hide button's
+const CONSOLE_WIDTH: f32 = 330.0;
+const CONSOLE_TOGGLE_WIDTH: f32 = 36.0;
 /// Bottom bar buttons are one size
 const BOTTOM_BUTTON_SIZE: egui::Vec2 = egui::vec2(120.0, 28.0);
 /// Height of a row in the texture set list
@@ -62,8 +70,14 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     // Closed by Cancel, Esc or the title bar: the unsaved edits go
     if !app.ui.windows.export {
         app.ui.export.settings = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            app.export_run = None;
+        }
         return;
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    advance_export(app, ctx);
     if app.ui.export.settings.as_ref().is_none_or(|draft| draft.sets.len() != app.session.set_count()) {
         app.ui.export.settings = Some(ExportDraft::from_project(&app.session.doc.project, &app.ui.export.dir));
         // The window always opens on Settings
@@ -81,13 +95,24 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     crate::windows::dialog("export_textures", tr("Export textures"), &mut open).fixed_size(size).show(ctx, |ui| {
         let mut open_tab = None;
         ui.horizontal(|ui| {
-            open_tab = tab_strip(app, ui);
+            open_tab = tab_strip(app, ui, exporting(app));
             if app.ui.export.tab == 0 {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(tr("Include all")).clicked()
                         && let Some(draft) = app.ui.export.settings.as_mut()
                     {
                         (0..draft.sets.len()).for_each(|ts| draft.set_exported(ts, true));
+                    }
+                });
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            if app.ui.export.tab == 2 {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(tr("Open output directory")).clicked()
+                        && let Some(draft) = app.ui.export.settings.as_ref()
+                    {
+                        let _ = std::fs::create_dir_all(&draft.settings.dir);
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(format!("file:///{}", draft.settings.dir.trim_start_matches('/'))));
                     }
                 });
             }
@@ -117,30 +142,13 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
                     crate::export_templates::tab(app, ui, &presets, size.x - EXPORT_DIALOG_PADDING - 2.0 * BODY_MARGIN);
                     return;
                 }
+                if app.ui.export.tab == 2 {
+                    list_of_exports(app, ui);
+                    return;
+                }
                 ui.vertical(|ui| export_set_list(app, ui));
                 ui.separator();
-                ui.vertical(|ui| match app.ui.export.tab {
-                    0 => export_settings_tab(app, ui, &presets),
-                    _ => {
-                        let mut params = plan_params(app);
-                        params["ts"] = json!("all");
-                        match texturecraft_engine::execute(&mut app.session, "export.plan", &params) {
-                            Ok(v) => {
-                                egui::ScrollArea::vertical().max_height(ui.available_height()).show(ui, |ui| {
-                                    for f in v.as_array().into_iter().flatten() {
-                                        let ts = f.get("ts").and_then(|t| t.as_u64()).unwrap_or(0) as usize;
-                                        if app.ui.export.settings.as_ref().is_some_and(|draft| draft.is_exported(ts)) {
-                                            ui.label(RichText::new(f.get("file").and_then(|x| x.as_str()).unwrap_or_default()).monospace());
-                                        }
-                                    }
-                                });
-                            }
-                            Err(e) => {
-                                ui.label(RichText::new(e.to_string()).color(tk.danger));
-                            }
-                        }
-                    }
-                });
+                ui.vertical(|ui| export_settings_tab(app, ui, &presets));
             });
         });
         // The body's top border stops under the open tab, so the tab opens into it
@@ -157,8 +165,14 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
             save(app);
         }
         Some(BottomAction::Export) => {
-            if save(app) && export_sets(app) {
-                app.ui.windows.export = false;
+            if save(app) {
+                export_sets(app);
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(BottomAction::CancelExport) => {
+            if let Some(run) = app.export_run.as_mut() {
+                run.cancelled = true;
             }
         }
         Some(BottomAction::Cancel) => app.ui.windows.export = false,
@@ -170,7 +184,7 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
 }
 
 /// The tabs: the open one is framed and opens onto the panel below, the others sit back; returns the open tab's rect
-fn tab_strip(app: &mut TextureCraftApp, ui: &mut Ui) -> Option<egui::Rect> {
+fn tab_strip(app: &mut TextureCraftApp, ui: &mut Ui, locked: bool) -> Option<egui::Rect> {
     let tk = Tokens::get(ui.ctx());
     let mut open_rect = None;
     ui.spacing_mut().item_spacing.x = TAB_GAP;
@@ -194,7 +208,7 @@ fn tab_strip(app: &mut TextureCraftApp, ui: &mut Ui) -> Option<egui::Rect> {
             open_rect = Some(rect);
         }
         ui.painter().galley(rect.center() - galley.size() / 2.0, galley, color);
-        if tab.clicked() {
+        if tab.clicked() && !locked {
             app.ui.export.tab = index as u8;
         }
     }
@@ -206,6 +220,18 @@ fn tab_strip(app: &mut TextureCraftApp, ui: &mut Ui) -> Option<egui::Rect> {
 fn bottom_bar(app: &mut TextureCraftApp, ui: &mut Ui) -> Option<BottomAction> {
     let tk = Tokens::get(ui.ctx());
     let mut action = None;
+    // While an export runs: its progress, and a way to stop it
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(run) = app.export_run.as_ref().filter(|run| !run.finished) {
+        ui.horizontal(|ui| {
+            let bar_width = ui.available_width() - BOTTOM_BUTTON_SIZE.x - ui.spacing().item_spacing.x;
+            ui.add(egui::ProgressBar::new(run.fraction()).show_percentage().desired_width(bar_width).desired_height(BOTTOM_BUTTON_SIZE.y));
+            if ui.add(egui::Button::new(tr("Cancel Export")).min_size(BOTTOM_BUTTON_SIZE)).clicked() {
+                action = Some(BottomAction::CancelExport);
+            }
+        });
+        return action;
+    }
     let count = exported_count(app);
     // On Output templates, a template without outputs can't be saved into the settings or exported
     let empty_template = app.ui.export.tab == 1
@@ -256,14 +282,83 @@ fn save(app: &mut TextureCraftApp) -> bool {
     app.run("export.settings.set", draft.params()).is_some()
 }
 
-/// Export with the saved settings; false when a command failed (its error is already shown)
+/// Start exporting with the saved settings: the List of exports tab shows the run
 #[cfg(not(target_arch = "wasm32"))]
 fn export_sets(app: &mut TextureCraftApp) -> bool {
-    let Some(result) = app.run("file.exportTextures", json!({})) else { return false };
+    let dir = app.session.doc.project.export.as_ref().map(|settings| settings.dir.clone()).unwrap_or_default();
+    match texturecraft_engine::texture_export::TextureExport::start(&app.session, &json!({}), &dir, "file.exportTextures") {
+        Ok(export) => {
+            app.export_run = Some(crate::export_run::ExportRun::new(export));
+            app.ui.export.tab = 2;
+            true
+        }
+        Err(error) => {
+            app.toast(error.to_string(), true);
+            false
+        }
+    }
+}
 
-    let written = result.get("files").and_then(|f| f.as_array()).map(Vec::len).unwrap_or(0);
-    app.toast(trf("Exported {n} textures to {folder}", &[("n", &written), ("folder", &app.ui.export.dir)]), false);
-    true
+/// An export is running (the tabs stay on List of exports until it ends)
+fn exporting(app: &TextureCraftApp) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        app.export_run.as_ref().is_some_and(|run| !run.finished)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = app;
+        false
+    }
+}
+
+/// One step of the running export a frame: a texture set, then the extras, logging what it writes
+#[cfg(not(target_arch = "wasm32"))]
+fn advance_export(app: &mut TextureCraftApp, ctx: &egui::Context) {
+    let names: Vec<String> = app.session.doc.project.texture_sets.iter().map(|set| set.name.clone()).collect();
+    let (Some(run), session) = (app.export_run.as_mut(), &mut app.session) else { return };
+    let frame = ctx.cumulative_frame_nr();
+    if run.finished || run.stepped_frame == Some(frame) {
+        return;
+    }
+    run.stepped_frame = Some(frame);
+    if run.cancelled {
+        run.log.push((tr("Export cancelled").to_string(), false));
+        run.finished = true;
+        return;
+    }
+
+    if let Some(sets) = run.export.next_sets() {
+        for &ts in sets {
+            let name = names.get(ts).map(String::as_str).unwrap_or_default();
+            run.log.push((trf("Exporting texture set {name}...", &[("name", &name)]), false));
+        }
+    }
+    let step = match run.export.step(session) {
+        Ok(Some(written)) => Ok(written),
+        Ok(None) => run.export.finish(session, "file.exportTextures").map(|written| {
+            run.finished = true;
+            written
+        }),
+        Err(error) => Err(error),
+    };
+    match step {
+        Ok(written) => {
+            for path in written {
+                let file = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+                run.log.push((trf("Wrote {file}", &[("file", &file)]), false));
+            }
+            if run.finished {
+                run.log.extend(run.export.warnings.iter().map(|warning| (warning.clone(), false)));
+                run.log.push((trf("Export successfully finished: {n} files", &[("n", &run.export.written.len())]), true));
+            }
+        }
+        Err(error) => {
+            run.log.push((error.to_string(), false));
+            run.finished = true;
+        }
+    }
+    ctx.request_repaint();
 }
 
 /// In the browser the textures download (one zip for several files)
@@ -271,6 +366,77 @@ fn export_sets(app: &mut TextureCraftApp) -> bool {
 fn export_sets(app: &mut TextureCraftApp) -> bool {
     crate::web_files::export_textures(app);
     true
+}
+
+/// List of exports: every file per texture set, then the export's console
+fn list_of_exports(app: &mut TextureCraftApp, ui: &mut Ui) {
+    let tk = Tokens::get(ui.ctx());
+    let names: Vec<String> = app.session.doc.project.texture_sets.iter().map(|set| set.name.clone()).collect();
+    let params = plan_params(app);
+    let plan = texturecraft_engine::execute(&mut app.session, "export.plan", &params);
+    let console_open = !app.ui.export.console_closed;
+    let tree_width = ui.available_width() - if console_open { CONSOLE_WIDTH } else { 0.0 } - CONSOLE_TOGGLE_WIDTH;
+
+    ui.vertical(|ui| {
+        ui.set_width(tree_width);
+        let files = match &plan {
+            Ok(plan) => plan.as_array().cloned().unwrap_or_default(),
+            Err(error) => {
+                ui.label(RichText::new(error.to_string()).color(tk.danger));
+                return;
+            }
+        };
+        egui::ScrollArea::vertical().id_salt("exp_list").auto_shrink([false; 2]).show(ui, |ui| {
+            for (ts, name) in names.iter().enumerate() {
+                let set_files: Vec<&serde_json::Value> = files.iter().filter(|file| file["ts"].as_u64() == Some(ts as u64)).collect();
+                if set_files.is_empty() {
+                    continue;
+                }
+                egui::CollapsingHeader::new(RichText::new(name).strong()).id_salt(("exp_list_set", ts)).default_open(true).show(ui, |ui| {
+                    // Fixed column widths, so every texture set's columns line up
+                    let name_width = (tree_width - LIST_SIZE_WIDTH - LIST_FORMAT_WIDTH - LIST_BITS_WIDTH - LIST_INDENT).max(LIST_SIZE_WIDTH);
+                    let cell = |ui: &mut Ui, width: f32, text: RichText| {
+                        ui.allocate_ui_with_layout(vec2(width, ui.spacing().interact_size.y), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            ui.set_width(width);
+                            ui.add(egui::Label::new(text).truncate());
+                        });
+                    };
+                    egui::Grid::new(("exp_list_files", ts)).num_columns(4).spacing(vec2(0.0, 4.0)).show(ui, |ui| {
+                        for file in set_files {
+                            cell(ui, name_width, RichText::new(file["file"].as_str().unwrap_or_default()));
+                            let (width, height) = (file["size"][0].as_u64().unwrap_or(0), file["size"][1].as_u64().unwrap_or(0));
+                            let size = if file["setSize"].as_bool().unwrap_or(false) {
+                                trf("{width}x{height} (texture set size)", &[("width", &width), ("height", &height)])
+                            } else {
+                                format!("{width} x {height}")
+                            };
+                            cell(ui, LIST_SIZE_WIDTH, RichText::new(size).color(tk.text_dim));
+                            cell(ui, LIST_FORMAT_WIDTH, RichText::new(file["format"].as_str().unwrap_or_default()).color(tk.text_dim));
+                            cell(ui, LIST_BITS_WIDTH, RichText::new(trf("{n} bits", &[("n", &file["bitDepth"].as_u64().unwrap_or(0))])).color(tk.text_dim));
+                            ui.end_row();
+                        }
+                    });
+                });
+            }
+        });
+    });
+
+    let toggle = if console_open { ic::CARET_DOUBLE_RIGHT } else { ic::CARET_DOUBLE_LEFT };
+    if icon_button(ui, toggle, tr("Show or hide the console"), false, OVERRIDE_PEN_SIZE).clicked() {
+        app.ui.export.console_closed = console_open;
+    }
+    if console_open {
+        ui.separator();
+        ui.vertical(|ui| {
+            ui.label(caption(tr("Console")));
+            egui::ScrollArea::vertical().id_salt("exp_console").auto_shrink([false; 2]).stick_to_bottom(true).show(ui, |ui| {
+                #[cfg(not(target_arch = "wasm32"))]
+                for (line, success) in app.export_run.iter().flat_map(|run| run.log.iter()) {
+                    ui.label(RichText::new(line).size(11.5).color(if *success { tk.accent } else { tk.text }));
+                }
+            });
+        });
+    }
 }
 
 /// export.plan parameters for the draft (the project's saved settings when the window is closed)

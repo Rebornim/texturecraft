@@ -60,7 +60,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "List export outputs",
             [],
             None,
-            "{preset?: name or preset object, ts?, format?, bitDepth?, size?, colorSpace?} → [{ts, map, file, format, bitDepth, warnings}]",
+            "{preset?: name or preset object, ts?, format?, bitDepth?, size?, colorSpace?} → [{ts, map, file, format, bitDepth, size: [w, h], setSize: true when it is the texture set's own size, warnings}]",
             always,
             plan
         ),
@@ -346,8 +346,16 @@ fn plan(s: &mut Session, p: &Value) -> Result<Value> {
     let mut names = Vec::new();
     for (sets, opts) in crate::export_settings_cmds::export_jobs(s, p, "export.plan")? {
         for ts in sets {
+            let set = s.doc.project.texture_set(ts).map_err(|e| bad("export.plan", e.to_string()))?;
             for f in texturecraft_formats::list_outputs(&s.doc.project, ts, &mesh_name, &opts).map_err(fe)? {
-                names.push(json!({"ts": ts, "map": f.map, "file": f.name, "format": f.format.extension(), "bitDepth": f.bit_depth, "warnings": f.warnings}));
+                // A map's own size, else the export's, else the texture set's (a UV tile's own)
+                let own = opts.preset.maps.get(f.map).and_then(|map| map.options.size).or(opts.size);
+                let set_size = f.tile.map_or_else(|| set.size(), |tile| (set.tile_resolution(tile), set.tile_resolution(tile)));
+                let size = own.map_or(set_size, |side| (side, side));
+                names.push(json!({
+                    "ts": ts, "map": f.map, "file": f.name, "format": f.format.extension(), "bitDepth": f.bit_depth,
+                    "size": [size.0, size.1], "setSize": own.is_none(), "warnings": f.warnings,
+                }));
             }
         }
     }
@@ -522,36 +530,10 @@ fn export_textures(s: &mut Session, p: &Value) -> Result<Value> {
         (Err(_), Some(dir)) => dir,
         (Err(error), None) => return Err(error),
     };
-    let jobs = crate::export_settings_cmds::export_jobs(s, p, CMD)?;
-    let with_shader_parameters = crate::export_settings_cmds::writes_shader_parameters(s, p, CMD)?;
-    let with_usd = crate::export_settings_cmds::writes_usd(s, p, CMD)?;
-    std::fs::create_dir_all(&dir).map_err(|e| bad(CMD, format!("cannot create {dir}: {e}")))?;
-
-    let mut warnings = Vec::new();
-    let mut written = Vec::new();
-    let exported_sets: Vec<usize> = jobs.iter().flat_map(|(sets, _)| sets.iter().copied()).collect();
-    let usd_inputs = if with_usd { s.usd_asset_inputs(&jobs, &mut warnings)? } else { Vec::new() };
-    for (sets, opts) in jobs {
-        let files = s.export_files(&sets, &opts)?;
-        warnings.extend(files.iter().flat_map(|f| f.warnings.iter().cloned()));
-        written.extend(texturecraft_formats::write_files(&files, std::path::Path::new(&dir)).map_err(fe)?);
-        if p.get("materialX").and_then(Value::as_bool).unwrap_or(false) {
-            written.extend(write_materialx(s, &sets, &opts, std::path::Path::new(&dir), &mut warnings)?);
-        }
-    }
-
-    if with_usd {
-        let path = std::path::Path::new(&dir).join(format!("{}.usda", texturecraft_formats::export::sanitize_file_stem(&s.doc.project.name)));
-        let layer = texturecraft_formats::usd_asset(&s.mesh, &s.doc.project.name, &usd_inputs).map_err(fe)?;
-        std::fs::write(&path, layer).map_err(|e| bad(CMD, format!("cannot write {}: {e}", path.display())))?;
-        written.push(path);
-    }
-    if with_shader_parameters {
-        let path = std::path::Path::new(&dir).join(crate::shader_parameters::shader_parameters_file(&s.doc.project.name));
-        let text = serde_json::to_string_pretty(&crate::shader_parameters::shader_parameters(s, &exported_sets)).map_err(|e| bad(CMD, e.to_string()))?;
-        std::fs::write(&path, text).map_err(|e| bad(CMD, format!("cannot write {}: {e}", path.display())))?;
-        written.push(path);
-    }
+    let mut export = crate::texture_export::TextureExport::start(s, p, &dir, CMD)?;
+    while export.step(s)?.is_some() {}
+    export.finish(s, CMD)?;
+    let (written, warnings) = (export.written, export.warnings);
 
     s.log.push(format!("Exported {} textures to {dir}", written.len()));
     Ok(json!({ "files": written.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(), "warnings": warnings }))
@@ -562,7 +544,13 @@ fn export_textures(s: &mut Session, p: &Value) -> Result<Value> {
 /// their files with the `<UDIM>` token. Sets with no recognised map, or whose name gives the
 /// same file name as an earlier set's, are skipped with a warning.
 #[cfg(not(target_arch = "wasm32"))]
-fn write_materialx(s: &Session, sets: &[usize], opts: &ExportOptions, dir: &std::path::Path, warnings: &mut Vec<String>) -> Result<Vec<std::path::PathBuf>> {
+pub(crate) fn write_materialx(
+    s: &Session,
+    sets: &[usize],
+    opts: &ExportOptions,
+    dir: &std::path::Path,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<std::path::PathBuf>> {
     use texturecraft_formats::materialx::{self, Texture};
     let mesh_name = stem_of(s.doc.project.mesh.trim_start_matches("builtin:"));
     if opts.color_space == Some(texturecraft_texel::ColorSpace::Aces2065) {

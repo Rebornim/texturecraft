@@ -18,6 +18,8 @@ pub mod docking;
 mod export_controls;
 mod export_dialog;
 pub mod export_draft;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod export_run;
 pub mod export_templates;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_dialogs;
@@ -118,6 +120,9 @@ pub struct Toast {
 
 pub struct TextureCraftApp {
     pub session: Session,
+    /// The Export textures window's export, while it runs and after (its console)
+    #[cfg(not(target_arch = "wasm32"))]
+    pub export_run: Option<export_run::ExportRun>,
     /// A smooth move to a saved camera in progress.
     camera_glide: Option<CameraGlide>,
     pub ui: UiState,
@@ -212,6 +217,8 @@ impl TextureCraftApp {
         let mut app = TextureCraftApp {
             camera_glide: None,
             session,
+            #[cfg(not(target_arch = "wasm32"))]
+            export_run: None,
             ui,
             ui_store,
             gpu,

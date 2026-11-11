@@ -411,3 +411,46 @@ fn the_template_list_is_alphabetical() {
     let y = |name: &str| harness.get_by_label(name).rect().top();
     assert!(y("Arnold (Standard Surface)") < y("CryEngine (Illum)") && y("CryEngine (Illum)") < y("Unity URP (Metallic)"));
 }
+
+#[test]
+fn export_runs_on_the_list_of_exports_with_its_console() {
+    let mut harness = harness(2, LAPTOP);
+    let dir = std::env::temp_dir().join(format!("tc_export_dialog_run_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    draft(&mut harness).settings.dir = dir.display().to_string();
+    harness.get_all_by_label("Export").find(|node| node.accesskit_node().role() == Role::Button).unwrap().click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().ui.export.tab, 2, "the export shows on List of exports");
+    harness.get_by_label("Cancel Export");
+
+    for _ in 0..20 {
+        harness.run_steps(1);
+        if harness.state().export_run.as_ref().is_some_and(|run| run.finished) {
+            break;
+        }
+    }
+    let run = harness.state().export_run.as_ref().unwrap();
+    assert!(run.finished && run.log.last().is_some_and(|(_, success)| *success), "{:?}", run.log);
+    assert!(std::fs::read_dir(&dir).unwrap().count() > 0, "the files are on disk");
+    harness.run_steps(2);
+    harness.get_by_label("Ball");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cancel_export_stops_between_texture_sets() {
+    let mut harness = harness(8, LAPTOP);
+    let dir = std::env::temp_dir().join(format!("tc_export_dialog_cancel_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    draft(&mut harness).settings.dir = dir.display().to_string();
+    harness.get_all_by_label("Export").find(|node| node.accesskit_node().role() == Role::Button).unwrap().click();
+    // The click starts the run; the next frame exports the first set and shows Cancel Export
+    harness.run_steps(2);
+    harness.get_by_label("Cancel Export").click();
+    harness.run_steps(3);
+    let run = harness.state().export_run.as_ref().unwrap();
+    assert!(run.finished && run.cancelled);
+    let (done, total) = run.export.progress();
+    assert!(done < total, "it stopped before the last set ({done} of {total})");
+    let _ = std::fs::remove_dir_all(&dir);
+}

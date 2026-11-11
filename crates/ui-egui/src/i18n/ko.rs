@@ -1134,4 +1134,8 @@ pub const TABLE: &[(&str, &str)] = &[
     ("\"{layer}\" can't be filled: select a paint layer or a layer's mask", "\"{layer}\"은(는) 채울 수 없습니다: 페인트 레이어나 레이어 마스크를 선택하세요"),
     ("The file dialog couldn't be shown: {error}", "파일 대화 상자를 표시할 수 없습니다: {error}"),
     ("The project changed while the dialog was open, so nothing was done", "대화 상자가 열려 있는 동안 프로젝트가 변경되어 아무 작업도 수행하지 않았습니다"),
+    ("Filtering", "필터링"),
+    ("Bilinear | HQ", "바이리니어 | HQ"),
+    ("Bilinear | Sharp", "바이리니어 | 선명"),
+    ("Nearest", "최근접"),
 ];

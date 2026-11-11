@@ -22,6 +22,7 @@ fn source_json(s: &Source) -> Value {
 fn fill_json(f: &Fill) -> Value {
     let mut v = json!({
         "projection": f.projection.label(),
+        "filtering": f.sampling.filtering.id(),
         "sources": f.sources.iter().map(|(c, s)| (c.id().to_string(), source_json(s))).collect::<serde_json::Map<_, _>>(),
     });
     if let Projection::Decal(d) = &f.projection {
@@ -54,7 +55,10 @@ fn effect_json(session: &Session, effect: &Effect, content: bool) -> Value {
         }
         EffectKind::Paint if content => out["tiles"] = json!(content_tiles()),
         EffectKind::Paint => out["tiles"] = json!(mask_tiles()),
-        EffectKind::Fill { source, .. } => out["source"] = source_json(source),
+        EffectKind::Fill { source, sampling, .. } => {
+            out["source"] = source_json(source);
+            out["filtering"] = json!(sampling.filtering.id());
+        }
         EffectKind::Material(fill) => out["fill"] = fill_json(fill),
         EffectKind::Filter(filter) => {
             out["filter"] = json!(filter);

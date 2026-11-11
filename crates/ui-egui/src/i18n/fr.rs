@@ -1182,4 +1182,8 @@ pub const TABLE: &[(&str, &str)] = &[
         "The project changed while the dialog was open, so nothing was done",
         "Le projet a changé pendant que la boîte de dialogue était ouverte ; rien n'a été fait",
     ),
+    ("Filtering", "Filtrage"),
+    ("Bilinear | HQ", "Bilinéaire | HQ"),
+    ("Bilinear | Sharp", "Bilinéaire | Net"),
+    ("Nearest", "Plus proche"),
 ];

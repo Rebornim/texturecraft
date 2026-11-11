@@ -1152,4 +1152,8 @@ pub const TABLE: &[(&str, &str)] = &[
     ),
     ("The file dialog couldn't be shown: {error}", "Não foi possível mostrar a caixa de diálogo de arquivos: {error}"),
     ("The project changed while the dialog was open, so nothing was done", "O projeto mudou enquanto a caixa de diálogo estava aberta, então nada foi feito"),
+    ("Filtering", "Filtragem"),
+    ("Bilinear | HQ", "Bilinear | HQ"),
+    ("Bilinear | Sharp", "Bilinear | Nítido"),
+    ("Nearest", "Mais próximo"),
 ];

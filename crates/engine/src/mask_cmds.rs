@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use texturecraft_core::{
     BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask, MaskBackground,
-    Procedural, ProceduralKind, Project, Source,
+    Procedural, ProceduralKind, Project, Sampling, Source,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
@@ -40,7 +40,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add fill",
             ["Layers", "Effects"],
             None,
-            "{layer?, target?: mask|content, name?, mask: value?: 0..1 | procedural?: kind, scale?, seed? | anchor?: anchor effect id, anchorChannel?: channel (height); content: color?, roughness?, metallic?, height?, opacity? (default: every layer channel); projection?}",
+            "{layer?, target?: mask|content, name?, mask: value?: 0..1 | procedural?: kind, scale?, seed? | anchor?: anchor effect id, anchorChannel?: channel (height); content: color?, roughness?, metallic?, height?, opacity? (default: every layer channel); projection?; filtering?: bilinearHq|bilinearSharp|nearest}",
             has_layer,
             add_fill
         ),
@@ -282,6 +282,7 @@ pub(crate) fn anchor_source(s: &Session, cmd: &str, reader: LayerId, anchor: Lay
 
 fn add_fill(s: &mut Session, p: &Value) -> Result<Value> {
     let projection = projection_from(p, "effect.add.fill", None)?;
+    let sampling = crate::layer_cmds::sampling_from(p, "effect.add.fill", Sampling::default())?;
     let blend = blend_param("effect.add.fill", p, "blend")?.unwrap_or(BlendMode::Normal);
     let id = layer_param(s, "effect.add.fill", p)?;
     if content_target(p, "effect.add.fill")? {
@@ -290,12 +291,13 @@ fn add_fill(s: &mut Session, p: &Value) -> Result<Value> {
             fill.sources = s.doc.project.layer(id)?.channels.keys().map(|c| (*c, Source::uniform_of(*c))).collect();
         }
         fill.projection = projection;
+        fill.sampling = sampling;
         return push_effect(s, p, EffectKind::Material(fill), blend);
     }
     if let Some(a) = u64p(p, "anchor") {
         let channel = channel_param("effect.add.fill", p, "anchorChannel")?.unwrap_or(Channel::Height);
         let source = anchor_source(s, "effect.add.fill", id, LayerId(a), channel)?;
-        return push_effect(s, p, EffectKind::Fill { source, projection }, blend);
+        return push_effect(s, p, EffectKind::Fill { source, projection, sampling }, blend);
     }
     let source = match strp(p, "procedural") {
         Some(k) => {
@@ -311,7 +313,7 @@ fn add_fill(s: &mut Session, p: &Value) -> Result<Value> {
         }
         None => Source::Uniform([f32p(p, "value").unwrap_or(1.0).clamp(0.0, 1.0); 3]),
     };
-    push_effect(s, p, EffectKind::Fill { source, projection }, blend)
+    push_effect(s, p, EffectKind::Fill { source, projection, sampling }, blend)
 }
 
 /// Apply `params` to `generator`, using `command` in errors

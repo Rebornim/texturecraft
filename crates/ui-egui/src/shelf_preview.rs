@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn every_tab_renders_a_big_preview() {
-        let image = ImageRes { width: 4, height: 2, rgba: vec![[0.8, 0.4, 0.2, 1.0]; 8], srgb: true };
+        let image = ImageRes::new(4, 2, vec![[0.8, 0.4, 0.2, 1.0]; 8], true);
         let previews = [
             ShelfPreview::Material(MATERIALS[0].id),
             ShelfPreview::Filter(FILTERS[0].id),

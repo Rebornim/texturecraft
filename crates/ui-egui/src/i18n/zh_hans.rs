@@ -11,6 +11,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Export successfully finished: {n} files", "导出成功完成：{n} 个文件"),
     ("Exporting texture set {name}...", "正在导出纹理集 {name}..."),
     ("Follow Newest Map", "跟随最新贴图"),
+    ("Global", "全局"),
     ("Open output directory", "打开输出文件夹"),
     ("Painting is paused while a bake is shown. Cancel the bake or wait for it to finish.", "显示烘焙时已暂停绘制。请取消烘焙，或等待其完成。"),
     ("Show or hide the console", "显示或隐藏控制台"),

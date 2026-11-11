@@ -11,6 +11,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Export successfully finished: {n} files", "Export erfolgreich abgeschlossen: {n} Dateien"),
     ("Exporting texture set {name}...", "Texturset {name} wird exportiert..."),
     ("Follow Newest Map", "Neueste Map verfolgen"),
+    ("Global", "Global"),
     ("Open output directory", "Ausgabeordner öffnen"),
     (
         "Painting is paused while a bake is shown. Cancel the bake or wait for it to finish.",

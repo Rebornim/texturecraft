@@ -572,6 +572,9 @@ fn export_dialog_snapshots() {
     harness.state_mut().ui.export.preset = "Unreal Engine (Packed)".into();
     harness.run_steps(4);
     save(&mut harness, &output_dir, "export-templates-unreal");
+    harness.state_mut().ui.export.preset = "Unity HDRP (Mask Map)".into();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "export-templates-unity");
     harness.state_mut().ui.export.preset = "Document channels + Normal + AO".into();
     harness.set_size(egui::vec2(1280.0, 720.0));
     harness.run_steps(60);

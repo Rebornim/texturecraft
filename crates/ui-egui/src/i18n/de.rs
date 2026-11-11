@@ -1,6 +1,7 @@
 //! German UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("1/ior", "1/IOR"),
     ("8 bits + dithering", "8 Bit + Dithering"),
     ("Baking {map} ({n}/{total})", "{map} wird gebacken ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "{map} wird gebacken ({n}/{total}), Texturset {set} von {sets}"),
@@ -146,6 +147,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Colors", "Farben"),
     ("Create:", "Erstellen:"),
     ("Current preset:", "Aktuelle Vorlage:"),
+    ("Diffuse", "Diffus"),
     ("Dilation + diffusion", "Dilatation + Diffusion"),
     ("Disable override for all items", "Überschreiben für alle Einträge deaktivieren"),
     ("Drag maps from the columns on the right onto an output's channels", "Ziehe Maps aus den Spalten rechts auf die Kanäle einer Ausgabe"),
@@ -165,6 +167,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Geometry normal", "Geometrie-Normale"),
     ("Geometry opacity", "Geometrie-Deckkraft"),
     ("Global settings", "Globale Einstellungen"),
+    ("Glossiness²", "Glanz²"),
     ("Go to camera 1", "Zu Kamera 1 wechseln"),
     ("Go to camera 2", "Zu Kamera 2 wechseln"),
     ("Go to camera 3", "Zu Kamera 3 wechseln"),
@@ -698,6 +701,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Quick mask", "Schnellmaske"),
     ("Quit", "Beenden"),
     ("Radius (texels at 2K)", "Radius (Texel bei 2K)"),
+    ("Reflection", "Reflexion"),
     ("Rename", "Umbenennen"),
     ("RENDERING", "RENDERING"),
     ("Range", "Bereich"),
@@ -820,6 +824,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Specular", "Specular"),
     ("Specular anisotropy", "Spiegel-Anisotropie"),
     ("Specular color", "Spiegelfarbe"),
+    ("Specular color from metallic", "Spiegelfarbe aus Metallic"),
     ("Specular level", "Specular-Stärke"),
     ("Specular rotation", "Spiegel-Drehung"),
     ("Specular roughness", "Spiegelrauheit"),

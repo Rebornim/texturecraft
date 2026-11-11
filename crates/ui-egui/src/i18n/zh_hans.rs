@@ -1,6 +1,7 @@
 //! Simplified Chinese UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("1/ior", "1/IOR"),
     ("8 bits + dithering", "8 位 + 抖动"),
     ("Baking {map} ({n}/{total})", "正在烘焙{map} ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "正在烘焙{map} ({n}/{total})，纹理集 {set}/{sets}"),
@@ -131,6 +132,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Colors", "颜色"),
     ("Create:", "创建："),
     ("Current preset:", "当前预设："),
+    ("Diffuse", "漫反射"),
     ("Dilation + diffusion", "扩张 + 扩散"),
     ("Disable override for all items", "为所有项目停用覆盖"),
     ("Drag maps from the columns on the right onto an output's channels", "将右侧列中的贴图拖到输出的通道上"),
@@ -150,6 +152,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Geometry normal", "几何法线"),
     ("Geometry opacity", "几何不透明度"),
     ("Global settings", "全局设置"),
+    ("Glossiness²", "光泽度²"),
     ("Go to camera 1", "转到相机 1"),
     ("Go to camera 2", "转到相机 2"),
     ("Go to camera 3", "转到相机 3"),
@@ -626,6 +629,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Quick mask", "快速遮罩"),
     ("Quit", "退出"),
     ("Radius (texels at 2K)", "半径（2K 下的纹素数）"),
+    ("Reflection", "反射"),
     ("Rename", "重命名"),
     ("RENDERING", "渲染"),
     ("Range", "范围"),
@@ -748,6 +752,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Specular", "高光"),
     ("Specular anisotropy", "镜面各向异性"),
     ("Specular color", "镜面颜色"),
+    ("Specular color from metallic", "由金属度得出的镜面颜色"),
     ("Specular level", "高光强度"),
     ("Specular rotation", "镜面旋转"),
     ("Specular roughness", "镜面粗糙度"),

@@ -1,6 +1,7 @@
 //! Arabic UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("1/ior", "1/ior"),
     ("8 bits + dithering", "8 بت + تنعيم"),
     ("Baking {map} ({n}/{total})", "جارٍ خبز {map} ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "جارٍ خبز {map} ({n}/{total})، مجموعة الخامات {set} من {sets}"),
@@ -146,6 +147,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Colors", "الألوان"),
     ("Create:", "إنشاء:"),
     ("Current preset:", "القالب الحالي:"),
+    ("Diffuse", "انتشاري"),
     ("Dilation + diffusion", "تمديد + انتشار"),
     ("Disable override for all items", "تعطيل التجاوز لكل العناصر"),
     ("Drag maps from the columns on the right onto an output's channels", "اسحب الخرائط من الأعمدة على اليمين إلى قنوات الإخراج"),
@@ -165,6 +167,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Geometry normal", "ناظم الهندسة"),
     ("Geometry opacity", "عتامة الهندسة"),
     ("Global settings", "الإعدادات العامة"),
+    ("Glossiness²", "اللمعان²"),
     ("Go to camera 1", "الانتقال إلى الكاميرا 1"),
     ("Go to camera 2", "الانتقال إلى الكاميرا 2"),
     ("Go to camera 3", "الانتقال إلى الكاميرا 3"),
@@ -662,6 +665,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Quick mask", "قناع سريع"),
     ("Quit", "إنهاء"),
     ("Radius (texels at 2K)", "نصف القطر (تكسل بدقة 2K)"),
+    ("Reflection", "الانعكاس"),
     ("Rename", "إعادة تسمية"),
     ("RENDERING", "التصيير"),
     ("Range", "النطاق"),
@@ -784,6 +788,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Specular", "اللمعان (Specular)"),
     ("Specular anisotropy", "تباين الخواص المرآوي"),
     ("Specular color", "اللون المرآوي"),
+    ("Specular color from metallic", "اللون المرآوي من المعدنية"),
     ("Specular level", "مستوى اللمعان"),
     ("Specular rotation", "الدوران المرآوي"),
     ("Specular roughness", "الخشونة المرآوية"),

@@ -757,3 +757,37 @@ fn diffusion_padding_blends_the_gap_between_islands() {
     assert!(gap.windows(2).all(|pair| pair[0] <= pair[1]), "a smooth ramp, not a hard edge: {gap:?}");
     assert!(gap.iter().any(|v| (64..192).contains(v)), "the middle mixes both islands: {gap:?}");
 }
+
+#[test]
+fn converted_maps_of_the_metallic_workflow() {
+    let fx = Fx::new(&default_channels());
+    let virt_rgb = |file: &str, map: VirtualMap| MapSpec {
+        file: file.into(),
+        format: FileFormat::Exr,
+        bit_depth: 32,
+        channels: [Dest::R, Dest::G, Dest::B].into_iter().zip(0u8..).map(|(dest, component)| (dest, SourceRef::Virtual { map, component })).collect(),
+        options: Default::default(),
+    };
+    let preset = ExportPreset {
+        name: "converted".into(),
+        maps: vec![
+            virt_rgb("diffuse", VirtualMap::Diffuse),
+            virt_rgb("specular", VirtualMap::SpecularColor),
+            virt_rgb("reflection", VirtualMap::Reflection),
+            virt_rgb("inverse_ior", VirtualMap::InverseIor),
+            virt_rgb("gloss_squared", VirtualMap::GlossinessSquared),
+        ],
+    };
+    let files = fx.render(&ExportOptions::new(preset));
+    let at = |name: &str| decode(find(&files, name)).to_rgb32f().get_pixel(10, 40).0;
+    let base = fx.comp.value(Channel::BaseColor, 10, 40);
+    let metal = fx.comp.value(Channel::Metallic, 10, 40)[0];
+    let rough = fx.comp.value(Channel::Roughness, 10, 40)[0];
+    let close = |a: [f32; 3], b: [f32; 3], what: &str| assert!(a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3), "{what}: {a:?} vs {b:?}");
+
+    close(at("diffuse.exr"), base.map(|c| c * (1.0 - metal)), "diffuse");
+    close(at("specular.exr"), base.map(|c| 0.04 + (c - 0.04) * metal), "specular");
+    close(at("reflection.exr"), base.map(|c| 1.0 + (c - 1.0) * metal), "reflection");
+    close(at("inverse_ior.exr"), [1.0 / (1.4 + 98.6 * metal); 3], "1/ior");
+    close(at("gloss_squared.exr"), [(1.0 - rough).powi(2); 3], "glossiness²");
+}

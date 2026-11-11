@@ -1,6 +1,7 @@
 //! Japanese UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("1/ior", "1/IOR"),
     ("8 bits + dithering", "8 ビット + ディザリング"),
     ("Baking {map} ({n}/{total})", "{map} をベイク中 ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "{map} をベイク中 ({n}/{total})、テクスチャセット {set}/{sets}"),
@@ -152,6 +153,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Colors", "カラー"),
     ("Create:", "作成:"),
     ("Current preset:", "現在のプリセット:"),
+    ("Diffuse", "ディフューズ"),
     ("Dilation + diffusion", "ダイレーション + 拡散"),
     ("Disable override for all items", "すべての項目の上書きを無効化"),
     ("Drag maps from the columns on the right onto an output's channels", "右の列からマップを出力のチャンネルへドラッグします"),
@@ -171,6 +173,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Geometry normal", "ジオメトリノーマル"),
     ("Geometry opacity", "ジオメトリ不透明度"),
     ("Global settings", "グローバル設定"),
+    ("Glossiness²", "グロシネス²"),
     ("Go to camera 1", "カメラ 1 に移動"),
     ("Go to camera 2", "カメラ 2 に移動"),
     ("Go to camera 3", "カメラ 3 に移動"),
@@ -677,6 +680,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Quick mask", "クイックマスク"),
     ("Quit", "終了"),
     ("Radius (texels at 2K)", "半径 (2K時のテクセル)"),
+    ("Reflection", "反射"),
     ("Rename", "名前を変更"),
     ("RENDERING", "レンダリング"),
     ("Range", "範囲"),
@@ -799,6 +803,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Specular", "スペキュラー"),
     ("Specular anisotropy", "スペキュラー異方性"),
     ("Specular color", "スペキュラーカラー"),
+    ("Specular color from metallic", "メタリックからのスペキュラーカラー"),
     ("Specular level", "スペキュラーレベル"),
     ("Specular rotation", "スペキュラー回転"),
     ("Specular roughness", "スペキュラーラフネス"),

@@ -33,6 +33,10 @@ pub use map_options::MapOptions;
 /// width tilts the normal 45°, at any resolution.
 const HEIGHT_SPAN: f32 = 16.0;
 const JPEG_QUALITY: u8 = 95;
+/// Converted maps of the metallic workflow: a dielectric's reflectance, and the IORs 1/ior runs between
+const DIELECTRIC_F0: f32 = 0.04;
+const DIELECTRIC_IOR: f32 = 1.4;
+const METAL_IOR: f32 = 100.0;
 /// Preset limits (user presets are untrusted JSON).
 const MAX_MAPS: usize = 64;
 const MAX_TEMPLATE: usize = 256;
@@ -158,17 +162,32 @@ pub enum VirtualMap {
     HeightNormal,
     /// Sheen color × sheen weight (glTF's sheen color, a color map).
     SheenTint,
+    /// Base color with metal areas black (specular/glossiness workflows).
+    Diffuse,
+    /// Reflectance color: 0.04 grey where dielectric, the base color where metal.
+    SpecularColor,
+    /// White where dielectric, the base color where metal.
+    Reflection,
+    /// 1 / IOR, the IOR running from 1.4 (dielectric) to 100 (metal) with metallic.
+    InverseIor,
+    /// (1 − roughness)².
+    GlossinessSquared,
 }
 
 impl VirtualMap {
-    pub const ALL: [VirtualMap; 8] = [
-        VirtualMap::NormalOpenGl,
-        VirtualMap::NormalDirectX,
-        VirtualMap::HeightNormal,
-        VirtualMap::Glossiness,
-        VirtualMap::Roughness,
+    pub const ALL: [VirtualMap; 13] = [
+        VirtualMap::InverseIor,
         VirtualMap::AoMixed,
+        VirtualMap::Diffuse,
         VirtualMap::F0,
+        VirtualMap::Glossiness,
+        VirtualMap::GlossinessSquared,
+        VirtualMap::NormalDirectX,
+        VirtualMap::NormalOpenGl,
+        VirtualMap::HeightNormal,
+        VirtualMap::Reflection,
+        VirtualMap::Roughness,
+        VirtualMap::SpecularColor,
         VirtualMap::SheenTint,
     ];
 
@@ -180,6 +199,11 @@ impl VirtualMap {
             VirtualMap::AoMixed => "ambientOcclusion",
             VirtualMap::F0 => "f0",
             VirtualMap::SheenTint => "sheenTint",
+            VirtualMap::Diffuse => "diffuse",
+            VirtualMap::SpecularColor => "specularColor",
+            VirtualMap::Reflection => "reflection",
+            VirtualMap::InverseIor => "inverseIor",
+            VirtualMap::GlossinessSquared => "glossinessSquared",
         }
     }
 
@@ -193,13 +217,24 @@ impl VirtualMap {
             VirtualMap::AoMixed => "Mixed AO",
             VirtualMap::F0 => "F0 from specular level",
             VirtualMap::SheenTint => "Sheen color × weight",
+            VirtualMap::Diffuse => "Diffuse",
+            VirtualMap::SpecularColor => "Specular color from metallic",
+            VirtualMap::Reflection => "Reflection",
+            VirtualMap::InverseIor => "1/ior",
+            VirtualMap::GlossinessSquared => "Glossiness²",
         }
     }
 
     /// 3 for normals and colors, 1 otherwise.
     pub fn components(self) -> usize {
         match self {
-            VirtualMap::NormalOpenGl | VirtualMap::NormalDirectX | VirtualMap::HeightNormal | VirtualMap::SheenTint => 3,
+            VirtualMap::NormalOpenGl
+            | VirtualMap::NormalDirectX
+            | VirtualMap::HeightNormal
+            | VirtualMap::SheenTint
+            | VirtualMap::Diffuse
+            | VirtualMap::SpecularColor
+            | VirtualMap::Reflection => 3,
             _ => 1,
         }
     }
@@ -440,6 +475,9 @@ fn source_present(set: &TextureSet, s: &SourceRef) -> bool {
         SourceRef::Virtual { map: VirtualMap::Roughness, .. } => set.has_channel(Channel::Glossiness),
         SourceRef::Virtual { map: VirtualMap::HeightNormal, .. } => set.has_channel(Channel::Height),
         SourceRef::Virtual { map: VirtualMap::SheenTint, .. } => set.has_channel(Channel::SheenWeight),
+        SourceRef::Virtual { map: VirtualMap::Diffuse | VirtualMap::SpecularColor | VirtualMap::Reflection, .. } => set.has_channel(Channel::BaseColor),
+        SourceRef::Virtual { map: VirtualMap::InverseIor, .. } => set.has_channel(Channel::Metallic),
+        SourceRef::Virtual { map: VirtualMap::GlossinessSquared, .. } => set.has_channel(Channel::Roughness),
         SourceRef::Baked { map, .. } => set.baked.contains(map),
         SourceRef::Constant(_) => false,
     }
@@ -466,7 +504,9 @@ fn is_color(map: &MapSpec) -> bool {
         *d != Dest::A
             && match s {
                 SourceRef::Channel { channel, .. } => channel.kind() == ChannelKind::Color,
-                SourceRef::Virtual { map, .. } => *map == VirtualMap::SheenTint,
+                SourceRef::Virtual { map, .. } => {
+                    matches!(map, VirtualMap::SheenTint | VirtualMap::Diffuse | VirtualMap::SpecularColor | VirtualMap::Reflection)
+                }
                 _ => false,
             }
     })
@@ -695,6 +735,23 @@ impl Sampler<'_> {
                 VirtualMap::F0 => [0.08 * self.channel(Channel::SpecularLevel, at)[0]; 3],
                 VirtualMap::Roughness => [1.0 - self.channel(Channel::Glossiness, at)[0]; 3],
                 VirtualMap::SheenTint => self.channel(Channel::SheenColor, at).map(|c| c * self.channel(Channel::SheenWeight, at)[0]),
+                VirtualMap::Diffuse => {
+                    let metal = self.channel(Channel::Metallic, at)[0];
+                    self.channel(Channel::BaseColor, at).map(|c| c * (1.0 - metal))
+                }
+                VirtualMap::SpecularColor => {
+                    let metal = self.channel(Channel::Metallic, at)[0];
+                    self.channel(Channel::BaseColor, at).map(|c| DIELECTRIC_F0 + (c - DIELECTRIC_F0) * metal)
+                }
+                VirtualMap::Reflection => {
+                    let metal = self.channel(Channel::Metallic, at)[0];
+                    self.channel(Channel::BaseColor, at).map(|c| 1.0 + (c - 1.0) * metal)
+                }
+                VirtualMap::InverseIor => {
+                    let metal = self.channel(Channel::Metallic, at)[0];
+                    [1.0 / (DIELECTRIC_IOR + (METAL_IOR - DIELECTRIC_IOR) * metal); 3]
+                }
+                VirtualMap::GlossinessSquared => [(1.0 - self.channel(Channel::Roughness, at)[0]).powi(2); 3],
                 VirtualMap::HeightNormal => {
                     let n = match at {
                         At::Texel(x, y) => self.height_normal(x, y),

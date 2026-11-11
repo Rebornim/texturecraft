@@ -1,6 +1,7 @@
 //! French UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("1/ior", "1/ior"),
     ("8 bits + dithering", "8 bits + tramage"),
     ("Baking {map} ({n}/{total})", "Cuisson de {map} ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "Cuisson de {map} ({n}/{total}), jeu de textures {set} sur {sets}"),
@@ -152,6 +153,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Colors", "Couleurs"),
     ("Create:", "Créer :"),
     ("Current preset:", "Modèle actuel :"),
+    ("Diffuse", "Diffus"),
     ("Dilation + diffusion", "Dilatation + diffusion"),
     ("Disable override for all items", "Désactiver le remplacement pour tous les éléments"),
     ("Drag maps from the columns on the right onto an output's channels", "Faites glisser des cartes des colonnes de droite sur les canaux d'une sortie"),
@@ -171,6 +173,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Geometry normal", "Normale de géométrie"),
     ("Geometry opacity", "Opacité de géométrie"),
     ("Global settings", "Paramètres globaux"),
+    ("Glossiness²", "Brillance²"),
     ("Go to camera 1", "Aller à la caméra 1"),
     ("Go to camera 2", "Aller à la caméra 2"),
     ("Go to camera 3", "Aller à la caméra 3"),
@@ -707,6 +710,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Quick mask", "Masque rapide"),
     ("Quit", "Quitter"),
     ("Radius (texels at 2K)", "Rayon (texels en 2K)"),
+    ("Reflection", "Réflexion"),
     ("Rename", "Renommer"),
     ("RENDERING", "RENDU"),
     ("Range", "Plage"),
@@ -832,6 +836,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Specular", "Spéculaire"),
     ("Specular anisotropy", "Anisotropie spéculaire"),
     ("Specular color", "Couleur spéculaire"),
+    ("Specular color from metallic", "Couleur spéculaire depuis le métal"),
     ("Specular level", "Niveau spéculaire"),
     ("Specular rotation", "Rotation spéculaire"),
     ("Specular roughness", "Rugosité spéculaire"),

@@ -1,6 +1,7 @@
 //! Korean UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("1/ior", "1/IOR"),
     ("8 bits + dithering", "8비트 + 디더링"),
     ("Baking {map} ({n}/{total})", "{map} 베이크 중 ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "{map} 베이크 중 ({n}/{total}), 텍스처 세트 {set}/{sets}"),
@@ -146,6 +147,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Colors", "색상"),
     ("Create:", "만들기:"),
     ("Current preset:", "현재 프리셋:"),
+    ("Diffuse", "디퓨즈"),
     ("Dilation + diffusion", "확장 + 확산"),
     ("Disable override for all items", "모든 항목 재정의 해제"),
     ("Drag maps from the columns on the right onto an output's channels", "오른쪽 열의 맵을 출력 채널로 드래그하세요"),
@@ -165,6 +167,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Geometry normal", "지오메트리 노멀"),
     ("Geometry opacity", "지오메트리 불투명도"),
     ("Global settings", "전역 설정"),
+    ("Glossiness²", "광택도²"),
     ("Go to camera 1", "카메라 1 보기"),
     ("Go to camera 2", "카메라 2 보기"),
     ("Go to camera 3", "카메라 3 보기"),
@@ -668,6 +671,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Quick mask", "퀵 마스크"),
     ("Quit", "종료"),
     ("Radius (texels at 2K)", "반경 (2K 기준 텍셀)"),
+    ("Reflection", "반사"),
     ("Rename", "이름 바꾸기"),
     ("RENDERING", "렌더링"),
     ("Range", "범위"),
@@ -790,6 +794,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Specular", "스페큘러"),
     ("Specular anisotropy", "스페큘러 이방성"),
     ("Specular color", "스페큘러 색상"),
+    ("Specular color from metallic", "메탈릭 기반 스페큘러 색상"),
     ("Specular level", "스페큘러 레벨"),
     ("Specular rotation", "스페큘러 회전"),
     ("Specular roughness", "스페큘러 러프니스"),

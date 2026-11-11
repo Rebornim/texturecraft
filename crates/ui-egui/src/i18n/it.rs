@@ -1,6 +1,7 @@
 //! Italian UI text: (English key, translation). Keys are the English strings passed to `tr`.
 
 pub const TABLE: &[(&str, &str)] = &[
+    ("1/ior", "1/ior"),
     ("8 bits + dithering", "8 bit + dithering"),
     ("Baking {map} ({n}/{total})", "Bake di {map} in corso ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "Bake di {map} in corso ({n}/{total}), set di texture {set} di {sets}"),
@@ -149,6 +150,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Colors", "Colori"),
     ("Create:", "Crea:"),
     ("Current preset:", "Modello attuale:"),
+    ("Diffuse", "Diffuso"),
     ("Dilation + diffusion", "Dilatazione + diffusione"),
     ("Disable override for all items", "Disattiva la sostituzione per tutte le voci"),
     ("Drag maps from the columns on the right onto an output's channels", "Trascina le mappe dalle colonne a destra sui canali di un output"),
@@ -168,6 +170,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Geometry normal", "Normale della geometria"),
     ("Geometry opacity", "Opacità della geometria"),
     ("Global settings", "Impostazioni globali"),
+    ("Glossiness²", "Lucentezza²"),
     ("Go to camera 1", "Vai alla camera 1"),
     ("Go to camera 2", "Vai alla camera 2"),
     ("Go to camera 3", "Vai alla camera 3"),
@@ -695,6 +698,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Quick mask", "Maschera rapida"),
     ("Quit", "Esci"),
     ("Radius (texels at 2K)", "Raggio (texel a 2K)"),
+    ("Reflection", "Riflessione"),
     ("Rename", "Rinomina"),
     ("RENDERING", "RENDERING"),
     ("Range", "Intervallo"),
@@ -817,6 +821,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Specular", "Speculare"),
     ("Specular anisotropy", "Anisotropia speculare"),
     ("Specular color", "Colore speculare"),
+    ("Specular color from metallic", "Colore speculare dalla metallicità"),
     ("Specular level", "Livello speculare"),
     ("Specular rotation", "Rotazione speculare"),
     ("Specular roughness", "Ruvidità speculare"),

@@ -91,29 +91,34 @@ mod tests {
         use serde_json::json;
         let Some(dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(std::path::PathBuf::from) else { return };
         std::fs::create_dir_all(&dir).unwrap();
-        let mesh = texturecraft_engine::geom::primitives::sphere(1.0, 96, 48);
-        let mut orb = texturecraft_engine::orb_preview::OrbPreview::new_with(mesh, "builtin:sphere").unwrap();
         let save = |name: String, pixels: Vec<Option<MaterialPreviewPixel>>, size: usize| {
             let image = material_preview_image(size, &pixels);
             let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
             image::RgbaImage::from_raw(size as u32, size as u32, rgba).unwrap().save(dir.join(name)).unwrap();
         };
-        let base = ("layer.add.fill", json!({"color": [0.16, 0.3, 0.34], "roughness": 0.5, "metallic": 0.0}));
-        // The sticker: orange patch slightly larger (smaller scale) under the checker patch
-        for axis in [0u64, 1, 2] {
-            for scale in [3.0f64, 4.5] {
-                let planar = |scale: f64| json!({"projection": "planar", "axis": axis, "scale": scale, "wrap": "none"});
-                let commands = [
-                    base.clone(),
-                    ("layer.add.fill", json!({"color": [0.9, 0.52, 0.28], "roughness": 0.4, "metallic": 0.0})),
-                    ("layer.fill.projection", planar(scale * 0.93)),
-                    ("layer.add.fill", json!({"color": [0.5, 0.5, 0.5], "roughness": 0.4, "metallic": 0.0})),
-                    ("layer.fill.set", json!({"channel": "baseColor", "procedural": "Checker", "scale": 2.0, "low": [0.3, 0.31, 0.33], "high": [0.8, 0.81, 0.83]})),
-                    ("layer.fill.projection", planar(scale)),
-                ];
-                if let Some(pixels) = orb.commands(&commands, 360) {
-                    save(format!("sticker_axis{axis}_scale{scale}.png"), pixels, 360);
-                }
+        // Wrapped projections: a grey checker over the whole shape
+        use texturecraft_engine::geom::primitives as shapes;
+        let checker = ("layer.fill.set", json!({"channel": "baseColor", "procedural": "Checker", "scale": 2.0, "low": [0.3, 0.31, 0.33], "high": [0.8, 0.81, 0.83]}));
+        let grey = ("layer.add.fill", json!({"color": [0.5, 0.5, 0.5], "roughness": 0.4, "metallic": 0.0}));
+        let cases: [(&str, texturecraft_engine::geom::Mesh, &str, serde_json::Value); 9] = [
+            ("spherical_sphere_s1", shapes::sphere(1.0, 96, 48), "builtin:sphere", json!({"projection": "spherical", "scale": 1.0})),
+            ("spherical_sphere_s0.5", shapes::sphere(1.0, 96, 48), "builtin:sphere", json!({"projection": "spherical", "scale": 0.5})),
+            ("cylindrical_sphere", shapes::sphere(1.0, 96, 48), "builtin:sphere", json!({"projection": "cylindrical", "axis": 1, "scale": 1.0})),
+            ("cylindrical_cylinder", shapes::cylinder(0.7, 1.6, 96), "builtin:cylinder", json!({"projection": "cylindrical", "axis": 1, "scale": 1.0})),
+            ("triplanar_sphere_soft", shapes::sphere(1.0, 96, 48), "builtin:sphere", json!({"projection": "triplanar", "scale": 1.0, "sharpness": 1.5})),
+            ("triplanar_sphere_hard", shapes::sphere(1.0, 96, 48), "builtin:sphere", json!({"projection": "triplanar", "scale": 1.0, "sharpness": 24.0})),
+            ("triplanar_cube", shapes::cube(1.4), "builtin:cube", json!({"projection": "triplanar", "scale": 1.0, "sharpness": 4.0})),
+            ("triplanar_orb_soft", shapes::preview_orb(), "builtin:preview_orb", json!({"projection": "triplanar", "scale": 1.0, "sharpness": 1.5})),
+            ("triplanar_orb_hard", shapes::preview_orb(), "builtin:preview_orb", json!({"projection": "triplanar", "scale": 1.0, "sharpness": 24.0})),
+        ];
+        for (name, mesh, source, projection) in cases {
+            let Ok(mut shape) = texturecraft_engine::orb_preview::OrbPreview::new_with(mesh, source) else {
+                eprintln!("{name}: no preview");
+                continue;
+            };
+            let commands = [grey.clone(), checker.clone(), ("layer.fill.projection", projection)];
+            if let Some(pixels) = shape.commands(&commands, 360) {
+                save(format!("{name}.png"), pixels, 360);
             }
         }
     }

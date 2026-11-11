@@ -277,16 +277,21 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
 
 /// The tiles of `entries` in a scroll area `height` high, then the saved smart materials when `saved_materials`
 fn grid(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entries: &[ShelfEntry], height: f32, saved_materials: bool, filter: &str) {
-    egui::ScrollArea::vertical().id_salt("shelf_scroll").auto_shrink([false, false]).max_height(height).show(ui, |ui| {
-        tiles(ui, |ui| {
-            for entry in entries {
-                entry_tile(app, ui, ctx, entry);
+    egui::ScrollArea::vertical()
+        .id_salt("shelf_scroll")
+        .auto_shrink([false, false])
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+        .max_height(height)
+        .show(ui, |ui| {
+            tiles(ui, |ui| {
+                for entry in entries {
+                    entry_tile(app, ui, ctx, entry);
+                }
+            });
+            if saved_materials {
+                library(app, ui, filter);
             }
         });
-        if saved_materials {
-            library(app, ui, filter);
-        }
-    });
 }
 
 /// The search field: a live filter on names (and categories) with a clear button while it has text

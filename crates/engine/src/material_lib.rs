@@ -44,11 +44,7 @@ pub(crate) fn images_used(project: &Project, id: LayerId, out: &mut Vec<String>,
     let Some(layer) = project.layers.get(&id) else { return };
 
     if let LayerKind::Fill(fill) = &layer.kind {
-        for source in fill.sources.values() {
-            if let Source::Image { name, .. } = source {
-                out.push(name.clone());
-            }
-        }
+        out.extend(fill.sources.values().flat_map(Source::images).map(str::to_string));
         out.extend(fill.link.as_ref().map(|link| link.package.clone()));
     }
     for effect in layer.mask.iter().flat_map(|mask| mask.effects.iter()) {

@@ -143,6 +143,7 @@ fn raw(kind: ProceduralKind, p: Vec3, seed: u32) -> f32 {
             let (g1, _, _) = noise::cellular((p * 2.7 + Vec3::splat(13.0)).to_array(), seed ^ 0x6B);
             smoothstep(0.08, 0.16, f1).min(smoothstep(0.06, 0.12, g1))
         }
+        ProceduralKind::TileGenerator => crate::tile_pattern::value(&crate::tile_pattern::DEFAULT, p.truncate(), seed),
         ProceduralKind::Chips => {
             let (f1, _, _) = noise::cellular((p * 2.0).to_array(), seed ^ 0x45);
             let n = noise::fbm(a, 5, seed, noise::perlin) + (f1 - 0.5) * 0.25;
@@ -161,23 +162,28 @@ fn shape(pr: &Procedural, v: f32) -> f32 {
     if pr.invert { 1.0 - v } else { v }
 }
 
-/// Evaluate a procedural through a projection.
+/// Evaluate a procedural through a projection, at full resolution
 pub fn procedural(pr: &Procedural, proj: &Projection, c: &Coords) -> f32 {
+    procedural_sized(pr, proj, c, None)
+}
+
+/// Evaluate a procedural through a projection, drawn as an image of `pixels` texels per side over one repeat of the projection (read back bilinearly) when its resolution asks for one: see [`pattern_pixels`]. `None` evaluates it exactly
+pub fn procedural_sized(pr: &Procedural, proj: &Projection, c: &Coords, pixels: Option<u32>) -> f32 {
     let s = pr.scale.max(1e-4);
+    let cells = pixels.map(|pixels| pixels as f32 / s);
+    let sample = |point: Vec3| plane_value(pr, point, cells);
     let v = match proj {
         Projection::Uv { scale, rotation, offset } => {
             let (sn, cs) = rotation.to_radians().sin_cos();
             let uv = Vec2::new(c.uv.x * cs - c.uv.y * sn, c.uv.x * sn + c.uv.y * cs) * Vec2::from(*scale) + Vec2::from(*offset);
             // 2D patterns sample a slice of the 3D pattern.
-            raw(pr.kind, (uv * s).extend(0.0), pr.seed)
+            sample((uv * s).extend(0.0))
         }
         Projection::Triplanar { scale, sharpness, offset } => {
             let p = c.pos * *scale * s + Vec3::from(*offset);
             let w = c.nrm.abs().powf(sharpness.max(1.0));
             let w = w / (w.x + w.y + w.z).max(1e-6);
-            raw(pr.kind, Vec3::new(p.z, p.y, 0.0), pr.seed) * w.x
-                + raw(pr.kind, Vec3::new(p.x, p.z, 0.0), pr.seed) * w.y
-                + raw(pr.kind, Vec3::new(p.x, p.y, 0.0), pr.seed) * w.z
+            sample(Vec3::new(p.z, p.y, 0.0)) * w.x + sample(Vec3::new(p.x, p.z, 0.0)) * w.y + sample(Vec3::new(p.x, p.y, 0.0)) * w.z
         }
         Projection::Planar { scale, axis, offset } => {
             let p = c.pos * *scale * s + Vec3::from(*offset);
@@ -186,13 +192,13 @@ pub fn procedural(pr: &Procedural, proj: &Projection, c: &Coords) -> f32 {
                 1 => Vec3::new(p.x, p.z, 0.0),
                 _ => Vec3::new(p.x, p.y, 0.0),
             };
-            raw(pr.kind, q, pr.seed)
+            sample(q)
         }
         Projection::Spherical { scale } => {
             let d = c.pos.try_normalize().unwrap_or(Vec3::Y);
             let u = d.z.atan2(d.x) / std::f32::consts::TAU + 0.5;
             let v = d.y.clamp(-1.0, 1.0).acos() / std::f32::consts::PI;
-            raw(pr.kind, Vec3::new(u * 4.0, v * 2.0, 0.0) * *scale * s, pr.seed)
+            sample(Vec3::new(u * 4.0, v * 2.0, 0.0) * *scale * s)
         }
         Projection::Cylindrical { scale, axis } => {
             let p = c.pos;
@@ -202,12 +208,41 @@ pub fn procedural(pr: &Procedural, proj: &Projection, c: &Coords) -> f32 {
                 _ => (p.x, p.y, p.z),
             };
             let u = b.atan2(a) / std::f32::consts::TAU + 0.5;
-            raw(pr.kind, Vec3::new(u * 4.0, h, 0.0) * *scale * s, pr.seed)
+            sample(Vec3::new(u * 4.0, h, 0.0) * *scale * s)
         }
         // `c.uv` is already in the decal's frame (see [`decal_uv`]).
-        Projection::Decal(_) => raw(pr.kind, (c.uv * s).extend(0.0), pr.seed),
+        Projection::Decal(_) => sample((c.uv * s).extend(0.0)),
     };
     shape(pr, v)
+}
+
+/// The texels per side `pattern`'s resolution draws it at for a UV tile of `uv_tile` texels per side in a texture set of `texture_set`, when that is coarser than the UV tile (a finer image changes nothing: patterns are evaluated per texel)
+pub fn pattern_pixels(pattern: &Procedural, uv_tile: u32, texture_set: u32) -> Option<u32> {
+    if !pattern.resolution.can_reduce() {
+        return None;
+    }
+    let size = pattern.resolution.output_size(uv_tile, texture_set);
+    (size < uv_tile).then_some(size)
+}
+
+/// The pattern at `point` of its plane, read from an image of `cells` texels per unit (bilinear) when given
+fn plane_value(pr: &Procedural, point: Vec3, cells: Option<f32>) -> f32 {
+    let Some(cells) = cells.filter(|cells| cells.is_finite() && *cells > 0.0) else { return pattern_value(pr, point) };
+    let grid = point.truncate() * cells - 0.5;
+    let base = grid.floor();
+    let fraction = grid - base;
+    let at = |dx: f32, dy: f32| pattern_value(pr, ((base + Vec2::new(dx, dy) + 0.5) / cells).extend(point.z));
+    let top = at(0.0, 0.0) + (at(1.0, 0.0) - at(0.0, 0.0)) * fraction.x;
+    let bottom = at(0.0, 1.0) + (at(1.0, 1.0) - at(0.0, 1.0)) * fraction.x;
+    top + (bottom - top) * fraction.y
+}
+
+/// The pattern at `point` of its plane, exactly
+fn pattern_value(pr: &Procedural, point: Vec3) -> f32 {
+    match (&pr.tile, pr.kind) {
+        (Some(tile), ProceduralKind::TileGenerator) => crate::tile_pattern::value(tile, point.truncate(), pr.seed),
+        _ => raw(pr.kind, point, pr.seed),
+    }
 }
 
 /// Texture coordinates (and blend weights) at which an image is sampled for a projection

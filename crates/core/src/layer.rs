@@ -11,12 +11,24 @@ mod curvature_mode;
 mod generator_global;
 mod output_resolution;
 mod resolution_mode;
+mod tile_blending;
+mod tile_generator;
+mod tile_input_distribution;
+mod tile_shape;
+mod tile_size_mode;
+mod tile_symmetry;
 
 pub use curvature_detail::CurvatureDetail;
 pub use curvature_mode::CurvatureMode;
 pub use generator_global::GeneratorGlobal;
 pub use output_resolution::OutputResolution;
 pub use resolution_mode::ResolutionMode;
+pub use tile_blending::TileBlending;
+pub use tile_generator::TileGenerator;
+pub use tile_input_distribution::TileInputDistribution;
+pub use tile_shape::TileShape;
+pub use tile_size_mode::TileSizeMode;
+pub use tile_symmetry::TileSymmetry;
 
 /// Id of a layer or effect (one id space per project).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -260,10 +272,12 @@ pub enum ProceduralKind {
     Pores,
     /// Sharp-edged paint chips.
     Chips,
+    /// Shapes laid out in a grid of tiles, with the settings in [`Procedural::tile`]
+    TileGenerator,
 }
 
 impl ProceduralKind {
-    pub const ALL: [ProceduralKind; 23] = [
+    pub const ALL: [ProceduralKind; 24] = [
         ProceduralKind::Clouds,
         ProceduralKind::Perlin,
         ProceduralKind::Noise,
@@ -287,6 +301,7 @@ impl ProceduralKind {
         ProceduralKind::Smudges,
         ProceduralKind::Pores,
         ProceduralKind::Chips,
+        ProceduralKind::TileGenerator,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -313,6 +328,7 @@ impl ProceduralKind {
             ProceduralKind::Smudges => "Fingerprints",
             ProceduralKind::Pores => "Pores",
             ProceduralKind::Chips => "Paint chips",
+            ProceduralKind::TileGenerator => "Tile Generator",
         }
     }
     pub fn parse(s: &str) -> Option<ProceduralKind> {
@@ -333,11 +349,33 @@ pub struct Procedural {
     /// Shifts the pattern brighter (+) or darker (−).
     pub balance: f32,
     pub invert: bool,
+    /// The Tile Generator's settings; `None` for other kinds (and reads as the defaults); loaded in range, as drawing trusts them
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "tile_in_range")]
+    pub tile: Option<Box<TileGenerator>>,
+    /// The resolution the pattern is computed at before it is sampled onto the texture set
+    #[serde(default, skip_serializing_if = "OutputResolution::is_default")]
+    pub resolution: OutputResolution,
+}
+
+/// Saved Tile Generator settings brought into range (a saved project is hostile input)
+fn tile_in_range<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Box<TileGenerator>>, D::Error> {
+    let saved: Option<Box<TileGenerator>> = Deserialize::deserialize(deserializer)?;
+    Ok(saved.map(|tile| Box::new(tile.clamped())))
 }
 
 impl Procedural {
+    /// The scales a command accepts (repeats per projection unit)
+    pub const MIN_SCALE: f32 = 0.001;
+    pub const MAX_SCALE: f32 = 1000.0;
+    /// The strongest contrast a command accepts, and the furthest balance either way
+    pub const MAX_CONTRAST: f32 = 20.0;
+    pub const MAX_BALANCE: f32 = 1.0;
+
     pub fn new(kind: ProceduralKind) -> Procedural {
-        Procedural { kind, scale: 4.0, seed: 1, contrast: 1.0, balance: 0.0, invert: false }
+        let tile = (kind == ProceduralKind::TileGenerator).then(Box::default);
+        // The Tile Generator lays its whole grid over one projection unit, as its tile counts set its frequency
+        let scale = if tile.is_some() { 1.0 } else { 4.0 };
+        Procedural { kind, scale, seed: 1, contrast: 1.0, balance: 0.0, invert: false, tile, resolution: OutputResolution::default() }
     }
 }
 
@@ -368,6 +406,15 @@ impl Source {
     /// Image resource `name` (an OpenGL normal map where a normal channel samples it).
     pub fn image(name: impl Into<String>) -> Source {
         Source::Image { name: name.into(), normal_format: crate::NormalFormat::OpenGl }
+    }
+
+    /// The image resources this source reads: its image, or the images of a Tile Generator pattern
+    pub fn images(&self) -> Vec<&str> {
+        match self {
+            Source::Image { name, .. } => vec![name.as_str()],
+            Source::Procedural { pattern, .. } => pattern.tile.iter().flat_map(|tile| tile.images()).collect(),
+            Source::Uniform(_) | Source::Anchor { .. } => Vec::new(),
+        }
     }
 
     /// The anchor point this source reads, if any.
@@ -1096,17 +1143,14 @@ impl EffectKind {
             .collect()
     }
 
-    /// The image resources this effect's sources read (a fill or a generator input).
+    /// The image resources this effect's sources read (a fill, its patterns or a generator input)
     pub fn images_read(&self) -> impl Iterator<Item = &str> {
         let sources: Vec<&Source> = match self {
             EffectKind::Fill { source, .. } => vec![source],
             EffectKind::Generator(generator) => generator.inputs.values().collect(),
             _ => Vec::new(),
         };
-        sources.into_iter().filter_map(|source| match source {
-            Source::Image { name, .. } => Some(name.as_str()),
-            _ => None,
-        })
+        sources.into_iter().flat_map(Source::images)
     }
 }
 
@@ -1141,6 +1185,36 @@ impl Effect {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn patterns_saved_before_tile_settings_keep_their_form() {
+        let saved = serde_json::json!({"kind": "Clouds", "scale": 4.0, "seed": 1, "contrast": 1.0, "balance": 0.0, "invert": false});
+        let loaded: Procedural = serde_json::from_value(saved.clone()).unwrap();
+        assert_eq!(loaded, Procedural::new(ProceduralKind::Clouds));
+        assert_eq!(serde_json::to_value(&loaded).unwrap(), saved, "a pattern at its defaults saves as before");
+
+        let tile = serde_json::to_value(Procedural::new(ProceduralKind::TileGenerator)).unwrap();
+        assert!(
+            tile.get("tile").is_some() && tile.get("resolution").is_none(),
+            "only the Tile Generator carries tile settings, and a default resolution is not saved"
+        );
+    }
+
+    #[test]
+    fn tile_settings_saved_with_missing_or_hostile_values_load_in_range() {
+        let tile = serde_json::json!({"amount": [0, 4000], "specific": 7.0, "quarter_turns": 6, "inputs": ["a", "b", "c", "d", "e", "f", "g"]});
+        let saved = serde_json::json!({"kind": "TileGenerator", "scale": 1.0, "seed": 1, "contrast": 1.0, "balance": 0.0, "invert": false, "tile": tile});
+        let loaded: Procedural = serde_json::from_value(saved).unwrap();
+        let tile = loaded.tile.unwrap();
+        assert_eq!(tile.amount, [1, 64]);
+        assert_eq!(tile.specific, 1.0);
+        assert_eq!(tile.quarter_turns, 2);
+        assert_eq!(tile.inputs.len(), TileGenerator::MAX_INPUTS);
+        assert_eq!(tile.middle_size, TileGenerator::default().middle_size, "a missing setting reads its default");
+
+        let not_finite = TileGenerator { scale: f32::NAN, rotation: f32::INFINITY, ..TileGenerator::default() }.clamped();
+        assert_eq!((not_finite.scale, not_finite.rotation), (1.0, 0.0));
+    }
 
     #[test]
     fn curvature_generators_saved_before_detail_sizes_load_without_them() {

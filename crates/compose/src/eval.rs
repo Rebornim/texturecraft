@@ -20,7 +20,7 @@ use texturecraft_texel::{DilationMap, TILE, TILE_AREA, TileImage, from_u16, nois
 
 use crate::below::{Band, BelowCache, Level};
 use crate::curvature_sizes::CurvatureSizes;
-use crate::pattern::{Coords, decal_uv, image_samples, procedural, world_noise};
+use crate::pattern::{Coords, decal_uv, image_samples, pattern_pixels, procedural_sized, world_noise};
 use crate::store::{BakedMaps, ImageStore, PixelStore, decode};
 
 const NCH: usize = Channel::ALL.len();
@@ -1330,7 +1330,13 @@ impl<'a, 'b> Texel<'a, 'b> {
             Source::Uniform(value) => *value,
             Source::Procedural { pattern, low, high } => {
                 let (coords, projection, _) = self.projected(projection);
-                let amount = procedural(pattern, projection, &coords);
+                let pixels = if pattern.resolution.can_reduce() {
+                    let texture_set = self.inp.project.texture_set(self.inp.ts).map_or(self.inp.tile_res(), |set| set.resolution);
+                    pattern_pixels(pattern, self.inp.tile_res(), texture_set)
+                } else {
+                    None
+                };
+                let amount = procedural_sized(pattern, projection, &coords, pixels);
                 mix3(*low, *high, amount)
             }
             Source::Image { name, normal_format } => {

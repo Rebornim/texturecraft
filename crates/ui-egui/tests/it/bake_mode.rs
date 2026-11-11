@@ -479,24 +479,44 @@ fn curvature_controls_follow_the_method_and_notes_visibility_rules() {
 }
 
 #[test]
-fn cage_and_skew_controls_require_a_high_poly_and_follow_cage_type() {
+fn cage_and_skew_controls_require_a_high_poly_and_grey_out_with_a_reason() {
     let mut harness = harness(None);
     harness.state_mut().ui.dock.focus(Panel::CommonSettings);
     harness.run_steps(3);
-    assert!(harness.query_by_label("Cage Type").is_none());
-    assert!(harness.query_by_label("Skew Correction").is_none());
+    // Without a high poly everything that needs one shows greyed, as in the reference
+    for needs_high in ["Match", "Max Frontal Distance", "Edge Protection"] {
+        assert!(harness.get_by_label(needs_high).accesskit_node().is_disabled(), "{needs_high} is greyed");
+    }
+    harness.get_by_label("The cage applies once a high poly mesh is loaded.");
+    harness.get_by_label("Skew Correction applies once a high poly mesh is loaded.");
+    assert!(harness.get_by_label("Remove").accesskit_node().is_disabled(), "nothing selected to remove");
 
     harness.state_mut().session.add_high_poly_bytes("High.obj", b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".to_vec()).unwrap();
     harness.run_steps(3);
-    harness.get_by_label("Max Frontal Distance");
+    assert!(!harness.get_by_label("Max Frontal Distance").accesskit_node().is_disabled());
+    assert!(harness.query_by_label("The cage applies once a high poly mesh is loaded.").is_none());
     harness.get_by_label("Skew Correction");
+    harness.state_mut().session.doc.project.texture_sets[0].bake.cage.average_normals = false;
+    harness.run_steps(3);
+    assert!(harness.get_by_label("Edge Protection").accesskit_node().is_disabled(), "the section shows greyed");
+    harness.get_by_label("Skew Correction needs Average Normals turned on in the cage settings.");
+    harness.state_mut().session.doc.project.texture_sets[0].bake.high_poly.use_low_as_high = true;
+    harness.run_steps(3);
+    harness.get_by_label("Skew Correction is not available while the low poly mesh is used as the high poly mesh.");
+    harness.get_by_label("The cage is not used while the low poly mesh is used as the high poly mesh.");
+    assert!(harness.get_by_label("Paint Cage").accesskit_node().is_disabled(), "the low poly as its own high poly has no cage to paint");
+    let settings = &mut harness.state_mut().session.doc.project.texture_sets[0].bake;
+    (settings.cage.average_normals, settings.high_poly.use_low_as_high) = (true, false);
+    harness.run_steps(3);
+    assert!(!harness.get_by_label("Edge Protection").accesskit_node().is_disabled());
 
     click(&mut harness, "Cage Type");
     click(&mut harness, "Custom File");
     assert_eq!(harness.state().session.doc.project.texture_sets[0].bake.cage.kind, CageType::CustomFile);
     harness.get_by_label("Cage Scene");
     assert!(harness.query_by_label("Max Frontal Distance").is_none());
-    assert!(harness.query_by_label("Skew Correction").is_none());
+    assert!(harness.get_by_label("Edge Protection").accesskit_node().is_disabled(), "the section shows greyed");
+    harness.get_by_label("Skew Correction needs a distance-based cage: a custom cage file sets the ray directions itself.");
 
     for button_size in [20.0, 28.0] {
         harness.ctx.all_styles_mut(|style| style.spacing.interact_size = egui::Vec2::splat(button_size));
@@ -505,6 +525,24 @@ fn cage_and_skew_controls_require_a_high_poly_and_follow_cage_type() {
             assert_eq!(harness.get_by_label(label).rect().size(), egui::Vec2::splat(button_size));
         }
     }
+}
+
+#[test]
+fn a_loaded_cage_can_be_removed_while_the_cage_does_not_apply() {
+    let mut harness = harness(None);
+    harness.state_mut().ui.dock.focus(Panel::CommonSettings);
+    let session = &mut harness.state_mut().session;
+    session.add_high_poly_bytes("High.obj", b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".to_vec()).unwrap();
+    let mesh = session.mesh.clone();
+    session.bake_meshes.cage = Some(texturecraft_engine::BakeMesh { name: "Cage.obj".into(), bytes: Default::default(), mesh, base_color: Vec::new() });
+    let settings = &mut session.doc.project.texture_sets[0].bake;
+    (settings.cage.kind, settings.high_poly.use_low_as_high) = (CageType::CustomFile, true);
+    harness.run_steps(3);
+
+    assert!(harness.get_by_label("Load Cage").accesskit_node().is_disabled(), "the cage does not apply");
+    assert!(!harness.get_by_label("Remove Cage").accesskit_node().is_disabled());
+    click(&mut harness, "Remove Cage");
+    assert!(harness.state().session.bake_meshes.cage.is_none());
 }
 
 #[test]
@@ -530,6 +568,23 @@ fn the_baking_visualization_panel_opens_like_the_reference_at_first_launch() {
         assert!(harness.query_by_label(closed).is_none(), "{closed} sits in a section that starts closed");
     }
     assert!(harness.state().ui.bake_visualization.missing_seams.shown, "missing seams are ticked in every reference capture");
+}
+
+#[test]
+fn the_high_poly_scene_is_a_list_with_add_and_remove() {
+    let mut harness = harness(None);
+    harness.state_mut().session.add_high_poly_bytes("Gunhigh.obj", b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".to_vec()).unwrap();
+    harness.state_mut().ui.dock.focus(Panel::CommonSettings);
+    harness.run_steps(3);
+    harness.get_by_label("Add High-Poly Meshes");
+    assert!(harness.get_by_label("Remove").accesskit_node().is_disabled(), "− waits for a selection");
+
+    harness.get_by_label("Gunhigh.obj").click();
+    harness.run_steps(3);
+    harness.get_by_label("Remove").click();
+    harness.run_steps(3);
+    assert!(harness.state().session.bake_meshes.high.is_empty());
+    assert!(harness.get_by_label("Remove").accesskit_node().is_disabled());
 }
 
 #[test]

@@ -182,7 +182,8 @@ impl Session {
     /// Texture set `texture_set`'s painted skew or cage map, used only when it bakes from a high poly
     fn bake_paint(&self, texture_set: usize, has_high: bool, target: BakePaintTarget) -> Result<Option<Arc<BakePaintMap>>> {
         let set = self.doc.project.texture_set(texture_set)?;
-        let paint = self.doc.bake_paint.get(&(texture_set, target)).filter(|_| has_high);
+        let steers = has_high && (target != BakePaintTarget::Skew || set.bake.skew_applies());
+        let paint = self.doc.bake_paint.get(&(texture_set, target)).filter(|_| steers);
         paint.map(|map| super::layout::paint_for_bake(map, set)).transpose()
     }
 

@@ -55,3 +55,15 @@ fn the_bake_panel_has_the_bake_paint_brush_and_dragging_paints_the_map() {
     h.run_steps(3);
     assert!(h.state().session.doc.bake_paint.is_empty());
 }
+
+#[test]
+fn turning_average_normals_off_stops_the_skew_brush() {
+    let mut h = harness();
+    h.state_mut().ui.bake_paint_brush.on = true;
+    h.run_steps(2);
+    assert!(h.state().ui.bake_paint_brush.on, "skew correction applies with the default cage");
+
+    h.state_mut().session.doc.project.texture_sets[0].bake.cage.average_normals = false;
+    h.run_steps(2);
+    assert!(!h.state().ui.bake_paint_brush.on, "the bake would leave the skew map out");
+}

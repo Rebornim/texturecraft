@@ -46,7 +46,13 @@ pub fn central(app: &mut TextureCraftApp, ui: &mut Ui) {
         && app.ui.bake_paint_brush.on
         && !app.session.bake_meshes.high.is_empty()
         && app.session.doc.project.texture_sets.get(app.session.ts()).is_some_and(|texture_set| {
-            !texture_set.bake.high_poly.use_low_as_high && texture_set.bake.cage.kind == texturecraft_engine::core::CageType::DistanceBased
+            let settings = &texture_set.bake;
+            match app.ui.bake_paint_brush.target {
+                texturecraft_engine::core::BakePaintTarget::Skew => settings.skew_applies(),
+                texturecraft_engine::core::BakePaintTarget::Cage => {
+                    !settings.high_poly.use_low_as_high && settings.cage.kind == texturecraft_engine::core::CageType::DistanceBased
+                }
+            }
         });
     app.ui.bake_paint_brush.on = bake_painting;
 

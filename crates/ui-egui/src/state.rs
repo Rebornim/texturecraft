@@ -264,7 +264,7 @@ fn default_split_ratio() -> f32 {
     0.5
 }
 /// The bake layout's version: saved bake docks from an older one load as `Dock::for_baking`
-const BAKE_LAYOUT_VERSION: u32 = 1;
+const BAKE_LAYOUT_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UiState {

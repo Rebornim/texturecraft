@@ -187,9 +187,9 @@ fn texture_set_resolution_controls_are_independent_from_bake_output() {
     let mut harness = harness(Some(BakedMap::AmbientOcclusion));
     let before = harness.state().session.doc.project.clone();
     let active_set = harness.state().session.ts();
-    harness.get_all_by_value("256 × 256").nth(1).unwrap().click();
+    harness.get_all_by_value("256x256").nth(1).unwrap().click();
     harness.run_steps(3);
-    click(&mut harness, "128 × 128");
+    click(&mut harness, "128x128");
     wait_for_resolution(&mut harness, 1, 128);
 
     let session = &harness.state().session;
@@ -226,33 +226,33 @@ fn tile_resolution_overrides_can_be_changed_and_removed_in_bake_mode() {
     harness.run_steps(4);
     let before = harness.state().session.doc.project.clone();
 
-    assert_eq!(harness.get_all_by_value("256 × 256").count(), 1);
+    assert_eq!(harness.get_all_by_value("256x256").count(), 1);
     let resolution_position = harness.get_by_label("UV tile 1002 resolution").rect().center();
     harness.hover_at(resolution_position);
     harness.run_steps(3);
-    assert_eq!(harness.get_all_by_value("256 × 256").count(), 2);
+    assert_eq!(harness.get_all_by_value("256x256").count(), 2);
     harness.hover_at(egui::pos2(900.0, 500.0));
     harness.run_steps(3);
-    assert_eq!(harness.get_all_by_value("256 × 256").count(), 1);
+    assert_eq!(harness.get_all_by_value("256x256").count(), 1);
     harness.get_by_label("UV tile 1002 resolution").click();
     harness.run_steps(3);
-    click(&mut harness, "128 × 128");
-    harness.get_by_value("128 × 128*");
+    click(&mut harness, "128x128");
+    harness.get_by_value("128x128*");
     let texture_set = &harness.state().session.doc.project.texture_sets[0];
     assert_eq!(texture_set.resolution, 256);
     assert_eq!(texture_set.tile_resolution(1001), 256);
     assert_eq!(texture_set.tile_resolution(1002), 128);
     assert_eq!(texture_set.bake, before.texture_sets[0].bake);
 
-    harness.get_by_value("128 × 128*").click();
+    harness.get_by_value("128x128*").click();
     harness.run_steps(3);
     click(&mut harness, "Remove resolution override");
     assert_eq!(harness.state().session.doc.project, before);
-    assert!(harness.query_by_value("128 × 128*").is_none());
-    assert_eq!(harness.get_all_by_value("256 × 256").count(), 1);
+    assert!(harness.query_by_value("128x128*").is_none());
+    assert_eq!(harness.get_all_by_value("256x256").count(), 1);
     harness.state_mut().session.undo().unwrap();
     harness.run_steps(3);
-    harness.get_by_value("128 × 128*");
+    harness.get_by_value("128x128*");
 
     harness.state_mut().ui.dock.focus(Panel::CommonSettings);
     harness.run_steps(3);
@@ -277,14 +277,14 @@ fn bake_texture_sets_list_uv_tiles_and_their_resolutions() {
     harness.run_steps(4);
 
     harness.get_by_label("1001");
-    harness.get_by_value("256 × 256");
+    harness.get_by_value("256x256");
     harness.get_by_label("1002");
-    harness.get_by_value("128 × 128*");
+    harness.get_by_value("128x128*");
     click_checkbox(&mut harness, "1002");
     assert!(harness.state().session.doc.project.texture_sets[0].bake_excluded_tiles.contains(&1002));
-    assert!(!harness.get_by_label("Bake Selected Textures (1)").accesskit_node().is_disabled());
+    assert!(!harness.get_by_label("Bake (7)").accesskit_node().is_disabled(), "7 checked maps on the one tile left");
     click_checkbox(&mut harness, "1001");
-    assert!(harness.get_by_label("Bake Selected Textures (0)").accesskit_node().is_disabled());
+    assert!(harness.get_by_label("Bake (0)").accesskit_node().is_disabled());
     harness.state_mut().session.undo().unwrap();
     harness.state_mut().session.undo().unwrap();
     harness.run_steps(3);
@@ -568,6 +568,20 @@ fn the_baking_visualization_panel_opens_like_the_reference_at_first_launch() {
         assert!(harness.query_by_label(closed).is_none(), "{closed} sits in a section that starts closed");
     }
     assert!(harness.state().ui.bake_visualization.missing_seams.shown, "missing seams are ticked in every reference capture");
+}
+
+#[test]
+fn texture_set_names_show_in_full_beside_their_resolution() {
+    let mut harness = harness(None);
+    harness.state_mut().session.doc.project.texture_sets[0].name = "LowerTorso".into();
+    harness.state_mut().ui.dock.focus(Panel::TextureSetList);
+    harness.run_steps(3);
+    // "LowerTorso" is about 75 points wide; cut short it collapses to an ellipsis of about 20
+    const FULL_NAME_MIN_WIDTH: f32 = 60.0;
+    // The breadcrumb names the set too; the list row is the top-most
+    let row = harness.get_all_by_label("LowerTorso").min_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).unwrap();
+    let width = row.rect().width();
+    assert!(width >= FULL_NAME_MIN_WIDTH, "the name is not cut short: {width}");
 }
 
 #[test]

@@ -146,3 +146,52 @@ fn uv_wrap_repeats_the_tile_or_stops_at_its_edge() {
     let triplanar = shown(&mut s);
     assert!(near(triplanar, 1.0), "{triplanar}");
 }
+
+/// 3D projections take UV transformations; older saves look as they did; world scale and offset stay separate
+#[test]
+fn three_d_projections_take_uv_transformations() {
+    use texturecraft_engine::core::{Projection, UvTransform};
+    let mut s = session();
+    let layer = LayerId(execute(&mut s, "layer.add.fill", &Value::Null).unwrap()["layer"].as_u64().unwrap());
+    let set = |s: &mut Session, p: Value| {
+        let mut p = p;
+        p["layer"] = json!(layer.0);
+        execute(s, "layer.fill.projection", &p)
+    };
+    execute(
+        &mut s,
+        "layer.fill.set",
+        &json!({"layer": layer.0, "channel": "baseColor", "procedural": "Checker", "scale": 4, "low": [0, 0, 0], "high": [1, 1, 1]}),
+    )
+    .unwrap();
+    set(&mut s, json!({"projection": "triplanar"})).unwrap();
+    let projection = |s: &Session| match &s.doc.project.layer(layer).unwrap().kind {
+        LayerKind::Fill(f) => f.projection.clone(),
+        _ => panic!("a fill layer"),
+    };
+    let snapshot = |s: &mut Session| {
+        s.update();
+        let cache = &s.caches[0];
+        let (w, h) = cache.size;
+        (0..w * h).map(|i| cache.composite.value(Channel::BaseColor, i % w, i / w)[0]).collect::<Vec<f32>>()
+    };
+    let plain = snapshot(&mut s);
+
+    set(&mut s, json!({"tiling": [2, 3], "rotation": 45, "uvOffset": [0.25, 0.5]})).unwrap();
+    let Projection::Triplanar { uv, scale, .. } = projection(&s) else { panic!("tri-planar") };
+    assert_eq!(uv, UvTransform { tiling: [2.0, 3.0], rotation: 45.0, offset: [0.25, 0.5] });
+    assert_eq!(scale, 1.0, "the world scale is its own param");
+    assert_ne!(snapshot(&mut s), plain, "the UV transformations move the pattern");
+
+    // A fill saved before 3D projections had UV transformations loads them as nothing
+    let mut saved = serde_json::to_value(projection(&s)).unwrap();
+    saved["Triplanar"].as_object_mut().unwrap().remove("uv");
+    let loaded: Projection = serde_json::from_value(saved).unwrap();
+    assert!(matches!(loaded, Projection::Triplanar { uv, .. } if uv == UvTransform::default()));
+    set(&mut s, json!({"tiling": 1, "rotation": 0, "uvOffset": [0, 0]})).unwrap();
+    assert_eq!(snapshot(&mut s), plain, "the identity transform changes nothing");
+
+    // On a UV projection, tiling is its scale
+    set(&mut s, json!({"projection": "uv", "tiling": [2, 4]})).unwrap();
+    assert!(matches!(projection(&s), Projection::Uv { scale, .. } if scale == [2.0, 4.0]));
+}

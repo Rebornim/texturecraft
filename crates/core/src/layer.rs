@@ -243,16 +243,51 @@ pub enum Projection {
     /// Texture coordinates of the mesh.
     Uv { scale: [f32; 2], rotation: f32, offset: [f32; 2] },
     /// World-space box projection blended by the normal.
-    Triplanar { scale: f32, sharpness: f32, offset: [f32; 3] },
+    Triplanar {
+        scale: f32,
+        sharpness: f32,
+        offset: [f32; 3],
+        #[serde(default)]
+        uv: UvTransform,
+    },
     /// World-space planar projection along an axis (0 = X, 1 = Y, 2 = Z).
-    Planar { scale: f32, axis: u8, offset: [f32; 3] },
+    Planar {
+        scale: f32,
+        axis: u8,
+        offset: [f32; 3],
+        #[serde(default)]
+        uv: UvTransform,
+    },
     /// Spherical projection around the mesh center.
-    Spherical { scale: f32 },
+    Spherical {
+        scale: f32,
+        #[serde(default)]
+        uv: UvTransform,
+    },
     /// Cylindrical projection around an axis.
-    Cylindrical { scale: f32, axis: u8 },
+    Cylindrical {
+        scale: f32,
+        axis: u8,
+        #[serde(default)]
+        uv: UvTransform,
+    },
     /// A geometry decal: the image projected from a frame placed on the surface (outside the
     /// frame, behind it or beyond its depth the fill does not cover).
     Decal(Decal),
+}
+
+/// Tiling, rotation (degrees) and offset a 3D projection lays on the surface; the default changes nothing
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UvTransform {
+    pub tiling: [f32; 2],
+    pub rotation: f32,
+    pub offset: [f32; 2],
+}
+
+impl Default for UvTransform {
+    fn default() -> Self {
+        UvTransform { tiling: [1.0, 1.0], rotation: 0.0, offset: [0.0, 0.0] }
+    }
 }
 
 /// The frame a decal projects from (world space).

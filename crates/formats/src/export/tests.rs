@@ -811,3 +811,28 @@ fn an_output_with_its_own_size_keeps_it() {
     bad.maps[0].options.size = Some(100);
     assert!(bad.validate().is_err(), "a size that isn't a power of two is refused");
 }
+
+#[test]
+fn engine_presets_follow_their_targets_layouts() {
+    let presets = builtin_presets();
+    let mut names: Vec<&str> = presets.iter().map(|p| p.name.as_str()).collect();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), presets.len(), "built-in names are unique");
+    for preset in &presets {
+        preset.validate().unwrap_or_else(|e| panic!("{}: {e}", preset.name));
+    }
+
+    let channels = |preset: &str, file_end: &str| {
+        let preset = builtin_preset(preset).unwrap();
+        preset.maps.into_iter().find(|map| map.file.ends_with(file_end)).unwrap().channels
+    };
+    let ddna = channels("CryEngine (Illum)", "_ddna");
+    assert!(matches!(ddna[0].1, SourceRef::Virtual { map: VirtualMap::NormalDirectX, .. }), "CryEngine normals are DirectX");
+    assert_eq!(ddna[3], (Dest::A, SourceRef::Virtual { map: VirtualMap::Glossiness, component: 0 }), "gloss in the normal's alpha");
+    let mask = channels("Unity URP (Metallic)", "_MetallicSmoothness");
+    assert_eq!(mask[0].1, SourceRef::Channel { channel: Channel::Metallic, component: 0 });
+    assert_eq!(mask[3].1, SourceRef::Virtual { map: VirtualMap::Glossiness, component: 0 }, "smoothness in alpha");
+    let sss = channels("Unreal Engine SSS (Packed)", "_SSS");
+    assert_eq!(sss, [(Dest::L, SourceRef::Channel { channel: Channel::ScatterWeight, component: 0 })]);
+}

@@ -21,7 +21,7 @@ use egui::{Ui, vec2};
 use egui_phosphor::regular as icon;
 use serde_json::{Value, json};
 use texturecraft_engine::bake::settings_patch;
-use texturecraft_engine::core::{BakeSettings, BakedMap};
+use texturecraft_engine::core::{BakeSettings, BakeSyncGroup, BakedMap};
 
 use crate::TextureCraftApp;
 use crate::i18n::{tr, trf};
@@ -159,7 +159,8 @@ pub fn mesh_map_settings_panel(app: &mut TextureCraftApp, ui: &mut Ui) {
     let selected = selected_map(app.ui.selected_baked_map, &texture_set.bake);
     breadcrumb::show(app, ui, selected);
     ui.separator();
-    edit_settings(app, ui, "mesh_map_settings", json!("all"), |_, ui, settings| {
+    let texture_sets = json!(app.session.doc.project.bake_synced_sets(app.session.ts(), BakeSyncGroup::Map(selected)));
+    edit_settings(app, ui, "mesh_map_settings", texture_sets, |_, ui, settings| {
         ui.push_id(selected, |ui| map_settings::show(ui, selected, &mut settings.maps)).inner
     });
 }
@@ -168,7 +169,8 @@ pub fn mesh_map_settings_panel(app: &mut TextureCraftApp, ui: &mut Ui) {
 pub fn common_settings_panel(app: &mut TextureCraftApp, ui: &mut Ui) {
     section_jump::bar(ui);
     ui.separator();
-    edit_settings(app, ui, "bake_common_settings", json!("all"), common_settings::show);
+    let texture_sets = json!(app.session.doc.project.bake_synced_sets(app.session.ts(), BakeSyncGroup::Common));
+    edit_settings(app, ui, "bake_common_settings", texture_sets, common_settings::show);
 }
 
 /// The map whose settings show: the chosen one, else the first enabled map, else Normal

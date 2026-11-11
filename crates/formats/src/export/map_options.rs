@@ -10,6 +10,9 @@ pub struct MapOptions {
     /// Dither the 8-bit file against banding
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub dithering: bool,
+    /// This map's own output size (power of two), instead of the export's
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u32>,
 }
 
 impl MapOptions {

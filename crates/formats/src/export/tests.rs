@@ -791,3 +791,23 @@ fn converted_maps_of_the_metallic_workflow() {
     close(at("inverse_ior.exr"), [1.0 / (1.4 + 98.6 * metal); 3], "1/ior");
     close(at("gloss_squared.exr"), [(1.0 - rough).powi(2); 3], "glossiness²");
 }
+
+#[test]
+fn an_output_with_its_own_size_keeps_it() {
+    let fx = Fx::new(&default_channels());
+    let mut small = gray_map("small", SourceRef::Channel { channel: Channel::Roughness, component: 0 });
+    small.options.size = Some(32);
+    let preset =
+        ExportPreset { name: "sizes".into(), maps: vec![small, gray_map("set_size", SourceRef::Channel { channel: Channel::Metallic, component: 0 })] };
+    preset.validate().unwrap();
+
+    for (export_size, other) in [(None, RES), (Some(128), 128)] {
+        let files = fx.render(&ExportOptions { size: export_size, ..ExportOptions::new(preset.clone()) });
+        assert_eq!(find(&files, "small.png").width, 32, "its own size wins over {export_size:?}");
+        assert_eq!(find(&files, "set_size.png").width, other);
+    }
+
+    let mut bad = preset.clone();
+    bad.maps[0].options.size = Some(100);
+    assert!(bad.validate().is_err(), "a size that isn't a power of two is refused");
+}

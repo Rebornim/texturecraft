@@ -100,7 +100,7 @@ fn a_rows_menu_checks_the_map_for_sets_picked_in_the_dialog() {
     harness.get_by_label("Check Height for More Texture Sets");
 
     let first = harness.state().session.doc.project.texture_sets[0].name.clone();
-    assert!(harness.query_by_label(&first).is_none(), "the active set is the source, not a target");
+    assert!(harness.query_by_role_and_label(Role::CheckBox, &first).is_none(), "the active set is the source, not a target");
     let second = second_name(&harness);
     harness.get_by_role_and_label(Role::CheckBox, &second).click();
     harness.run_steps(3);

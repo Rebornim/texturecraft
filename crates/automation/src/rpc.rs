@@ -41,6 +41,8 @@ pub const METHODS: &[&str] = &[
     "resource.import",
     "material.save",
     "material.load",
+    "mask.save",
+    "mask.load",
     "textures.export",
     "render",
 ];
@@ -99,6 +101,8 @@ impl Headless {
             "resource.import" => self.import_resource(required(p, "path")?),
             "material.save" => self.material_save(p),
             "material.load" => self.material_load(required(p, "path")?),
+            "mask.save" => self.mask_save(p),
+            "mask.load" => self.mask_load(p),
             "textures.export" => self.export(p),
             "render" => {
                 let o = RenderOptions {

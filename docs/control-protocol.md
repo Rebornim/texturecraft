@@ -198,7 +198,7 @@ available RAM; a save calculates its budget when it starts.
 - **Headless** (default): an in-process session that starts on the material ball (1024).
   Files are reachable only below the roots given at launch, as forward-slash paths relative to
   them: `--read-root <dir>` for `project_open` / `mesh_import` / `mesh_reimport` / `bake_mesh_add`,
-  `--write-root <dir>` for `project_save` / `material_save` / `textures_export` / `mesh_export`
+  `--write-root <dir>` for `project_save` / `material_save` / `mask_save` / `textures_export` / `mesh_export`
   (`--automation-read-root` / `--automation-write-root`, as in the other crafting apps, are the
   same flags). Without roots there is no file access. `..`, absolute
   paths, drive letters, device names and symlink or junction escapes are refused.
@@ -209,7 +209,7 @@ available RAM; a save calculates its budget when it starts.
 
 Through `command_run`, every `file.*` command but `file.close` and `file.removeUnused` (and
 `file.reimportMesh` without a `path`) is refused, and so is any command given a `path` or `dir`, at the top level or in
-a `files` entry (`resource.import`, `material.save`, `material.load`, `textureSet.meshMap.import`, …), in both modes: use the workspace tools below. `resource.text`
+a `files` entry (`resource.import`, `material.save`, `material.load`, `mask.smart.save`, `mask.smart.load`, `textureSet.meshMap.import`, …), in both modes: use the workspace tools below. `resource.text`
 takes a font family, not a path: it reads only the system's font folders.
 
 | Tool | Params | Notes |
@@ -228,6 +228,8 @@ takes a font family, not a path: it reads only the system's font folders.
 | `resource_import` | `{path}` | Image resource (png, jpg, tga, tif, bmp, webp, exr, hdr) → its name, for `layer.add.image` / `tool.stencil`, or as a mesh map instead of baking it: `textureSet.meshMap.set {ts?, map, image}` (`textureSet.meshMap.clear {ts?, map}` empties the slot); call it once per baked map file (the desktop app's `textureSet.meshMap.import`, which takes host paths, is refused through `command_run`) |
 | `material_save` | `{path, layer?, name?}` | A layer or folder as a `.tcmat` smart material below the write root |
 | `material_load` | `{path}` | Add a `.tcmat` smart material, a MaterialCraft `.mcmat` material or a `.mcraft` package above the selection |
+| `mask_save` | `{path, layer?, name?}` | A layer's mask as a `.tcmask` smart mask below the write root |
+| `mask_load` | `{path, layer?}` | Replace a layer's mask with a `.tcmask` smart mask |
 | `textures_export` | `{dir, preset?, ts?, format?, padding?, size?}` | Writes files below the write root |
 | `bake` | `{ts?, resolution?, maps?, cpu?}` | Mesh maps for generators and smart materials; rays on the GPU when there is one (`cpu: true`: on the CPU). Per-map ray settings (`ao`, `thickness`, `bentNormal`: rays, maxDistance, spread, distribution; AO ignoreBackface, selfOcclusion) are `bake.settings` parameters |
 | `paint_stroke` | `{points, viewport?, color?, roughness?, metallic?, height?, size?, hardness?}` | Paint tool + brush material + `tool.stroke`; points in viewport pixels |
@@ -303,6 +305,8 @@ File access follows `--read-root` / `--write-root` as for MCP.
 | `resource.import` | `{path}` |
 | `material.save` | `{path, layer?, name?}` |
 | `material.load` | `{path}` |
+| `mask.save` | `{path, layer?, name?}` |
+| `mask.load` | `{path, layer?}` |
 | `textures.export` | `{dir, preset?, ts?, format?, padding?, size?, bitDepth?, dilation?, normalFormat?}` |
 | `render` | `{view?, width?, height?, yaw?, pitch?}` → `{width, height, png}` |
 

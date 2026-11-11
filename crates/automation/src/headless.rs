@@ -247,6 +247,37 @@ impl Headless {
         Ok(json!({ "layer": self.session.add_smart_material_bytes(&bytes)?.0 }))
     }
 
+    /// Save a layer's mask (default: the selected layer) as a smart mask file (`.tcmask`).
+    pub fn mask_save(&mut self, p: &Value) -> Result<Value, AutomationError> {
+        let path = p.get("path").and_then(Value::as_str).ok_or_else(|| bad("`path` is required"))?;
+        let id = self.layer_or_selected(p)?;
+        let name = match p.get("name").and_then(Value::as_str) {
+            Some(n) => n.to_string(),
+            None => self.session.doc.project.layer(id).map(|l| l.name.clone()).map_err(|_| bad(format!("no layer {}", id.0)))?,
+        };
+        let bytes = self.session.smart_mask_bytes(id, &name)?;
+        let ext = texturecraft_engine::smart_mask_lib::SMART_MASK_EXT;
+        let path = if ext_of(path) == ext { path.to_string() } else { format!("{path}.{ext}") };
+        self.write(&path, &bytes)?;
+        Ok(json!({ "path": path }))
+    }
+
+    /// Replace a layer's mask (default: the selected layer) with a `.tcmask` smart mask file.
+    pub fn mask_load(&mut self, p: &Value) -> Result<Value, AutomationError> {
+        let path = p.get("path").and_then(Value::as_str).ok_or_else(|| bad("`path` is required"))?;
+        let id = self.layer_or_selected(p)?;
+        let bytes = self.read(path)?;
+        self.session.apply_smart_mask_bytes(id, &bytes)?;
+        Ok(json!({ "layer": id.0 }))
+    }
+
+    fn layer_or_selected(&self, p: &Value) -> Result<texturecraft_engine::core::LayerId, AutomationError> {
+        match p.get("layer").and_then(Value::as_u64) {
+            Some(i) => Ok(texturecraft_engine::core::LayerId(i)),
+            None => self.session.selected_layer().ok_or_else(|| bad("no layer selected and no `layer` given")),
+        }
+    }
+
     /// Save as `.tcraft` to `path`, or to the project's own file.
     pub fn save(&mut self, path: Option<&str>) -> Result<Value, AutomationError> {
         let target = match path.or(self.session.path.as_deref()) {

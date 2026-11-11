@@ -100,6 +100,27 @@ pub struct MaterialSaveParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MaskSaveParams {
+    /// `.tcmask` file relative to the write root (the extension is appended if missing).
+    pub path: String,
+    /// Layer id whose mask is saved (default: the selected layer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<u64>,
+    /// Smart mask name (default: the layer name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MaskLoadParams {
+    /// Forward-slash `.tcmask` path relative to the read root.
+    pub path: String,
+    /// Layer id whose mask is replaced (default: the selected layer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ImportParams {
     /// Mesh file relative to the read root: .glb, .gltf (with its .bin files and images beside it), .fbx, .dae, .usd, .usda, .usdc,
     /// .usdz, .abc, .obj, .ply, .stl.
@@ -333,7 +354,7 @@ impl TexturecraftMcp {
                     b.call("command.run", json!({"id": "file.reimportMesh", "params": {"preserveStrokes": p.get("preserveStrokes")}})).await
                 }
                 "project.save" | "project.open" | "mesh.import" | "mesh.reimport" | "mesh.export" | "bake.mesh.add" | "resource.import" | "material.save"
-                | "material.load" | "textures.export" | "command.batch" | "render" => {
+                | "material.load" | "mask.save" | "mask.load" | "textures.export" | "command.batch" | "render" => {
                     Err(bad(format!("`{method}` with paths works in headless mode only: the running app reads and writes its own files (use ui_menu_invoke)")))
                 }
                 _ => b.call(method, p).await,
@@ -391,7 +412,7 @@ impl TexturecraftMcp {
     #[tool(description = "Run an engine command by id with JSON params (see command_list). Runs with defaults, never opens a \
         dialog. Commands given host paths (file.open, file.save, resource.import, material.save, …) are disabled: use the \
         workspace tools (project_open, project_save, mesh_import, mesh_reimport, mesh_export, bake_mesh_add, resource_import, \
-        material_save, material_load, textures_export).")]
+        material_save, material_load, mask_save, mask_load, textures_export).")]
     async fn command_run(&self, Parameters(p): Parameters<RunParams>) -> Result<CallToolResult, McpError> {
         to_result(self.call("command.run", params(&p)).await)
     }
@@ -480,6 +501,17 @@ impl TexturecraftMcp {
     #[tool(description = "Add a smart material from a .tcmat file (relative to the read root) above the selection. Returns its layer.")]
     async fn material_load(&self, Parameters(p): Parameters<OpenParams>) -> Result<CallToolResult, McpError> {
         to_result(self.call("material.load", params(&p)).await)
+    }
+
+    #[tool(description = "Save a layer's mask (default: the selected layer's) as a smart mask file (.tcmask) below the write root.")]
+    async fn mask_save(&self, Parameters(p): Parameters<MaskSaveParams>) -> Result<CallToolResult, McpError> {
+        to_result(self.call("mask.save", params(&p)).await)
+    }
+
+    #[tool(description = "Replace a layer's mask (default: the selected layer's) with a .tcmask smart mask file relative to the \
+        read root. Returns the layer.")]
+    async fn mask_load(&self, Parameters(p): Parameters<MaskLoadParams>) -> Result<CallToolResult, McpError> {
+        to_result(self.call("mask.load", params(&p)).await)
     }
 
     #[tool(description = "Export textures with a preset into a folder relative to the write root. Returns the written files and \

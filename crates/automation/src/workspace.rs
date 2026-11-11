@@ -144,7 +144,7 @@ pub fn authorize_command(id: &str, params: &Value) -> Result<(), AutomationError
         Ok(())
     } else {
         Err(bad(format!(
-            "`{id}` with host paths is disabled for automation; use project_open, project_save, mesh_import, resource_import, material_save, material_load or textures_export"
+            "`{id}` with host paths is disabled for automation; use project_open, project_save, mesh_import, resource_import, material_save, material_load, mask_save, mask_load or textures_export"
         )))
     }
 }
@@ -238,7 +238,7 @@ mod tests {
         for id in ["file.open", "file.new", "file.save", "file.saveAs", "file.saveCopy", "file.exportTextures"] {
             assert!(authorize_command(id, &json!({})).is_err(), "{id}");
         }
-        for id in ["resource.import", "material.save", "material.load", "anything.new"] {
+        for id in ["resource.import", "material.save", "material.load", "mask.smart.save", "mask.smart.load", "anything.new"] {
             assert!(authorize_command(id, &json!({"path": "/etc/x"})).is_err(), "{id}");
             assert!(authorize_command(id, &json!({"dir": "/etc"})).is_err(), "{id}");
         }

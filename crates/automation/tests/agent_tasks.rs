@@ -90,6 +90,14 @@ fn top(s: &Value) -> &Value {
     &s["layers"][0]
 }
 
+/// Layer `id` anywhere in the inspected stack (Null when absent).
+fn find_layer<'a>(s: &'a Value, id: &Value) -> &'a Value {
+    fn walk<'a>(layers: &'a Value, id: &Value) -> Option<&'a Value> {
+        layers.as_array()?.iter().find_map(|l| if &l["id"] == id { Some(l) } else { walk(&l["children"], id) })
+    }
+    walk(&s["layers"], id).unwrap_or(&Value::Null)
+}
+
 /// Painted tiles of a paint layer's base color.
 fn painted(layer: &Value) -> u64 {
     layer["painted"].as_array().into_iter().flatten().filter(|p| p["channel"] == "baseColor").map(|p| p["tiles"].as_u64().unwrap()).sum()
@@ -194,6 +202,18 @@ async fn agent_completes_texturing_tasks() {
     assert_eq!(copy["name"], "My Rust", "task 12: {}", top(&s));
     assert_eq!(copy["kind"], "group", "task 12: {copy}");
 
+    // 13. Save a mask as a smart mask file and apply it to another layer.
+    let worn = run(&c, "layer.add.fill", json!({})).await["layer"].clone();
+    run(&c, "mask.smart.apply", json!({"layer": worn, "name": "edge_wear"})).await;
+    let saved = tool(&c, "mask_save", json!({"path": "lib/worn", "layer": worn})).await;
+    assert_eq!(saved["path"], "lib/worn.tcmask", "task 13: {saved}");
+    let bare = run(&c, "layer.add.fill", json!({})).await["layer"].clone();
+    tool(&c, "mask_load", json!({"path": "lib/worn.tcmask", "layer": bare})).await;
+    let s = inspect(&c).await;
+    let masks: Vec<Value> = [&worn, &bare].iter().map(|id| find_layer(&s, id)["mask"].clone()).collect();
+    assert!(masks[1]["effects"].as_array().is_some_and(|e| !e.is_empty()), "task 13: {}", masks[1]);
+    assert_eq!(masks[0]["effects"].as_array().map(Vec::len), masks[1]["effects"].as_array().map(Vec::len), "task 13");
+
     // 8. Save, reopen and compare.
     let before = inspect(&c).await;
     let saved = tool(&c, "project_save", json!({"path": "agent"})).await;
@@ -235,13 +255,15 @@ async fn agent_completes_texturing_tasks() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-const TOOLS: [&str; 22] = [
+const TOOLS: [&str; 24] = [
     "mesh_reimport",
     "mesh_export",
     "bake_mesh_add",
     "resource_import",
     "material_save",
     "material_load",
+    "mask_save",
+    "mask_load",
     "session_inspect",
     "command_list",
     "command_run",
@@ -276,6 +298,8 @@ async fn paths_outside_the_workspace_are_rejected() {
         tool_err(&c, "resource_import", json!({"path": path})).await;
         tool_err(&c, "material_load", json!({"path": path})).await;
         tool_err(&c, "material_save", json!({"path": path})).await;
+        tool_err(&c, "mask_load", json!({"path": path})).await;
+        tool_err(&c, "mask_save", json!({"path": path})).await;
         tool_err(&c, "project_save", json!({"path": path})).await;
         tool_err(&c, "mesh_export", json!({"path": path})).await;
         tool_err(&c, "mesh_reimport", json!({"path": path})).await;
@@ -291,6 +315,7 @@ async fn paths_outside_the_workspace_are_rejected() {
         ("file.exportTextures", json!({"dir": "x"})),
         ("resource.import", json!({"path": abs})),
         ("material.save", json!({"path": abs})),
+        ("mask.smart.save", json!({"path": abs})),
     ] {
         let e = tool_err(&c, "command_run", json!({"id": id, "params": p})).await;
         assert!(e.contains("disabled for automation"), "{id}: {e}");

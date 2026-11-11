@@ -1,6 +1,6 @@
 //! Procedural patterns and projections.
 
-use texturecraft_core::{Decal, Procedural, ProceduralKind, Projection};
+use texturecraft_core::{Decal, Procedural, ProceduralKind, Projection, UvTransform};
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_texel::noise;
 
@@ -200,41 +200,48 @@ fn shape(pr: &Procedural, v: f32) -> f32 {
     if pr.invert { 1.0 - v } else { v }
 }
 
+/// `q` turned by `rotation` degrees, scaled by `tiling` and moved by `offset`, as UV transformations place it
+fn place(q: Vec2, tiling: Vec2, rotation: f32, offset: Vec2) -> Vec2 {
+    let (sn, cs) = rotation.to_radians().sin_cos();
+    Vec2::new(q.x * cs - q.y * sn, q.x * sn + q.y * cs) * tiling + offset
+}
+
+fn place_uv(q: Vec2, uv: &UvTransform) -> Vec2 {
+    place(q, Vec2::from(uv.tiling), uv.rotation, Vec2::from(uv.offset))
+}
+
 /// Evaluate a procedural through a projection.
 pub fn procedural(pattern: &Procedural, projection: &Projection, coords: &Coords) -> f32 {
     let pattern_scale = pattern.scale.max(1e-4);
-    let value = match projection {
-        Projection::Uv { scale, rotation, offset } => {
-            let (sn, cs) = rotation.to_radians().sin_cos();
-            let uv = Vec2::new(coords.uv.x * cs - coords.uv.y * sn, coords.uv.x * sn + coords.uv.y * cs) * Vec2::from(*scale) + Vec2::from(*offset);
 
-            // Evaluate two-dimensional patterns on a slice of the volume
-            raw(pattern.kind, (uv * pattern_scale).extend(0.0), pattern.seed)
-        }
-        Projection::Triplanar { scale, sharpness, offset } => {
+    // Evaluate two-dimensional patterns on a slice of the volume
+    let flat = |q: Vec2| raw(pattern.kind, q.extend(0.0), pattern.seed);
+    let value = match projection {
+        Projection::Uv { scale, rotation, offset } => flat(place(coords.uv, Vec2::from(*scale), *rotation, Vec2::from(*offset)) * pattern_scale),
+        Projection::Triplanar { scale, sharpness, offset, uv } => {
             let p = coords.pos * *scale * pattern_scale + Vec3::from(*offset);
 
             // Shape scales the blend by the contrast
             let w = triplanar_weights(coords.nrm, *sharpness, pattern.contrast);
-            let planes = [(w.x, Vec3::new(p.z, p.y, 0.0)), (w.y, Vec3::new(p.x, p.z, 0.0)), (w.z, Vec3::new(p.x, p.y, 0.0))];
-            planes.into_iter().filter(|(w, _)| *w > 0.0).map(|(w, q)| raw(pattern.kind, q, pattern.seed) * w).sum()
+            let planes = [(w.x, Vec2::new(p.z, p.y)), (w.y, Vec2::new(p.x, p.z)), (w.z, Vec2::new(p.x, p.y))];
+            planes.into_iter().filter(|(w, _)| *w > 0.0).map(|(w, q)| flat(place_uv(q, uv)) * w).sum()
         }
-        Projection::Planar { scale, axis, offset } => {
+        Projection::Planar { scale, axis, offset, uv } => {
             let p = coords.pos * *scale * pattern_scale + Vec3::from(*offset);
             let q = match axis {
-                0 => Vec3::new(p.z, p.y, 0.0),
-                1 => Vec3::new(p.x, p.z, 0.0),
-                _ => Vec3::new(p.x, p.y, 0.0),
+                0 => Vec2::new(p.z, p.y),
+                1 => Vec2::new(p.x, p.z),
+                _ => Vec2::new(p.x, p.y),
             };
-            raw(pattern.kind, q, pattern.seed)
+            flat(place_uv(q, uv))
         }
-        Projection::Spherical { scale } => {
+        Projection::Spherical { scale, uv } => {
             let d = coords.pos.try_normalize().unwrap_or(Vec3::Y);
             let u = d.z.atan2(d.x) / std::f32::consts::TAU + 0.5;
             let v = d.y.clamp(-1.0, 1.0).acos() / std::f32::consts::PI;
-            raw(pattern.kind, Vec3::new(u * 4.0, v * 2.0, 0.0) * *scale * pattern_scale, pattern.seed)
+            flat(place_uv(Vec2::new(u * 4.0, v * 2.0) * *scale * pattern_scale, uv))
         }
-        Projection::Cylindrical { scale, axis } => {
+        Projection::Cylindrical { scale, axis, uv } => {
             let p = coords.pos;
             let (a, h, b) = match axis {
                 0 => (p.y, p.x, p.z),
@@ -242,10 +249,10 @@ pub fn procedural(pattern: &Procedural, projection: &Projection, coords: &Coords
                 _ => (p.x, p.y, p.z),
             };
             let u = b.atan2(a) / std::f32::consts::TAU + 0.5;
-            raw(pattern.kind, Vec3::new(u * 4.0, h, 0.0) * *scale * pattern_scale, pattern.seed)
+            flat(place_uv(Vec2::new(u * 4.0, h) * *scale * pattern_scale, uv))
         }
         // The decal already supplied coordinates in its local frame
-        Projection::Decal(_) => raw(pattern.kind, (coords.uv * pattern_scale).extend(0.0), pattern.seed),
+        Projection::Decal(_) => flat(coords.uv * pattern_scale),
     };
 
     shape(pattern, value)
@@ -256,35 +263,31 @@ pub fn procedural(pattern: &Procedural, projection: &Projection, coords: &Coords
 pub fn image_samples(projection: &Projection, coords: &Coords) -> [(Vec2, f32); 3] {
     let one = |uv: Vec2| [(uv, 1.0), (Vec2::ZERO, 0.0), (Vec2::ZERO, 0.0)];
     match projection {
-        Projection::Uv { scale, rotation, offset } => {
-            let (sn, cs) = rotation.to_radians().sin_cos();
-            let uv = Vec2::new(coords.uv.x * cs - coords.uv.y * sn, coords.uv.x * sn + coords.uv.y * cs) * Vec2::from(*scale) + Vec2::from(*offset);
-            one(uv)
-        }
-        Projection::Triplanar { scale, sharpness, offset } => {
+        Projection::Uv { scale, rotation, offset } => one(place(coords.uv, Vec2::from(*scale), *rotation, Vec2::from(*offset))),
+        Projection::Triplanar { scale, sharpness, offset, uv } => {
             let p = coords.pos * *scale + Vec3::from(*offset);
 
             // Float images can exceed 1, so even a tiny plane weight can carry visible detail
             let weights = coords.nrm.abs().powf(sharpness.max(1.0));
             let weights = weights / (weights.x + weights.y + weights.z).max(1e-6);
-            [(Vec2::new(p.z, -p.y), weights.x), (Vec2::new(p.x, p.z), weights.y), (Vec2::new(p.x, -p.y), weights.z)]
+            [(place_uv(Vec2::new(p.z, -p.y), uv), weights.x), (place_uv(Vec2::new(p.x, p.z), uv), weights.y), (place_uv(Vec2::new(p.x, -p.y), uv), weights.z)]
         }
-        Projection::Planar { scale, axis, offset } => {
+        Projection::Planar { scale, axis, offset, uv } => {
             let p = coords.pos * *scale + Vec3::from(*offset);
             let q = match axis {
                 0 => Vec2::new(p.z, -p.y),
                 1 => Vec2::new(p.x, p.z),
                 _ => Vec2::new(p.x, -p.y),
             };
-            one(q * 0.5 + Vec2::splat(0.5))
+            one(place_uv(q * 0.5 + Vec2::splat(0.5), uv))
         }
-        Projection::Spherical { scale } => {
+        Projection::Spherical { scale, uv } => {
             let d = coords.pos.try_normalize().unwrap_or(Vec3::Y);
             let u = d.z.atan2(d.x) / std::f32::consts::TAU + 0.5;
             let v = d.y.clamp(-1.0, 1.0).acos() / std::f32::consts::PI;
-            one(Vec2::new(u, v) * *scale)
+            one(place_uv(Vec2::new(u, v) * *scale, uv))
         }
-        Projection::Cylindrical { scale, axis } => {
+        Projection::Cylindrical { scale, axis, uv } => {
             let p = coords.pos;
             let (a, h, b) = match axis {
                 0 => (p.y, p.x, p.z),
@@ -292,7 +295,7 @@ pub fn image_samples(projection: &Projection, coords: &Coords) -> [(Vec2, f32); 
                 _ => (p.x, p.y, p.z),
             };
             let u = b.atan2(a) / std::f32::consts::TAU + 0.5;
-            one(Vec2::new(u, 0.5 - h * 0.5) * *scale)
+            one(place_uv(Vec2::new(u, 0.5 - h * 0.5) * *scale, uv))
         }
         Projection::Decal(_) => one(coords.uv),
     }
@@ -349,10 +352,10 @@ mod tests {
     fn every_pattern_and_projection_stays_in_range() {
         let projs = [
             Projection::default(),
-            Projection::Triplanar { scale: 1.0, sharpness: 4.0, offset: [0.0; 3] },
-            Projection::Planar { scale: 1.0, axis: 1, offset: [0.0; 3] },
-            Projection::Spherical { scale: 1.0 },
-            Projection::Cylindrical { scale: 1.0, axis: 1 },
+            Projection::Triplanar { scale: 1.0, sharpness: 4.0, offset: [0.0; 3], uv: Default::default() },
+            Projection::Planar { scale: 1.0, axis: 1, offset: [0.0; 3], uv: Default::default() },
+            Projection::Spherical { scale: 1.0, uv: Default::default() },
+            Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default() },
             Projection::Decal(Decal {
                 center: [0.0; 3],
                 normal: [0.0, 0.0, 1.0],
@@ -400,7 +403,7 @@ mod tests {
             for contrast in [1.0, 4.0, 16.0] {
                 let pattern = Procedural { contrast, ..Procedural::new(kind) };
                 for sharpness in [1.0, 4.0, 8.0, 16.0] {
-                    let projection = Projection::Triplanar { scale: 1.0, sharpness, offset: [0.0; 3] };
+                    let projection = Projection::Triplanar { scale: 1.0, sharpness, offset: [0.0; 3], uv: UvTransform::default() };
                     for index in 0..400 {
                         // Cover axis aligned and oblique normals at varied positions
                         let position = index as f32 / 400.0;
@@ -431,7 +434,7 @@ mod tests {
     fn triplanar_image_sampling_preserves_bright_float_pixels() {
         let image = crate::ImageRes::new(2, 2, vec![[0.0; 4], [0.0; 4], [0.0; 4], [100_000.0; 4]], false);
         let coords = Coords { uv: Vec2::ZERO, pos: Vec3::new(0.25, 0.25, 0.75), nrm: Vec3::new(0.2, 1.0, 0.1).normalize() };
-        let projection = Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3] };
+        let projection = Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: UvTransform::default() };
         let weights = coords.nrm.abs().powf(8.0);
         let expected = 100_000.0 * weights.x / (weights.x + weights.y + weights.z);
 

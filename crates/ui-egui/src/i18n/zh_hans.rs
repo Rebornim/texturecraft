@@ -1085,4 +1085,8 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Max project size on open", "打开项目的大小上限"),
     ("Maximum decompressed project data. Increase this limit to open larger projects.", "解压后项目数据的大小上限。提高此限制以打开更大的项目。"),
     ("Filter by type", "按类型筛选"),
+    ("All libraries", "所有库"),
+    ("Browse folders", "浏览文件夹"),
+    ("Starter assets", "内置资源"),
+    ("Your assets", "我的资源"),
 ];

@@ -1190,4 +1190,8 @@ pub const TABLE: &[(&str, &str)] = &[
         "Volume maximal des données décompressées du projet. Augmentez cette limite pour ouvrir des projets plus volumineux.",
     ),
     ("Filter by type", "Filtrer par type"),
+    ("All libraries", "Toutes les bibliothèques"),
+    ("Browse folders", "Parcourir les dossiers"),
+    ("Starter assets", "Ressources fournies"),
+    ("Your assets", "Vos ressources"),
 ];

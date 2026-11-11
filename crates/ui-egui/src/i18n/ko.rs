@@ -1142,4 +1142,8 @@ pub const TABLE: &[(&str, &str)] = &[
         "압축 해제된 프로젝트 데이터의 최대 크기입니다. 더 큰 프로젝트를 열려면 이 한도를 높이세요.",
     ),
     ("Filter by type", "유형별 필터"),
+    ("All libraries", "모든 라이브러리"),
+    ("Browse folders", "폴더 찾아보기"),
+    ("Starter assets", "기본 에셋"),
+    ("Your assets", "내 에셋"),
 ];

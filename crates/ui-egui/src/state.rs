@@ -300,6 +300,9 @@ pub struct UiState {
     /// The asset shelf's picked type: an index into the shelf's types, or past them for every type
     #[serde(default)]
     pub shelf_tab: usize,
+    /// The asset shelf's library folder: a library id, then folder names (empty: all libraries)
+    #[serde(default)]
+    pub shelf_path: Vec<String>,
     pub props_tab: PropsTab,
     #[serde(default)]
     pub text: TextUi,
@@ -390,6 +393,7 @@ impl Default for UiState {
             layer_channel: Channel::BaseColor,
             shelf_filter: String::new(),
             shelf_tab: 0,
+            shelf_path: Vec::new(),
             props_tab: PropsTab::Brush,
             text: TextUi::default(),
             rename: None,

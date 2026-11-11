@@ -229,8 +229,19 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     let filter = app.ui.shelf_filter.to_lowercase();
     scan_brushes(app);
-    let matching: Vec<ShelfEntry> = ShelfEntry::all(app).into_iter().filter(|entry| entry.matches(&filter)).collect();
+    let all = ShelfEntry::all(app);
+    let paths = crate::shelf_folders::with_every_library(crate::shelf_folders::paths(&all));
+
+    // A folder that is gone (its last image removed) shows everything again
+    if !paths.iter().any(|path| path.starts_with(&app.ui.shelf_path)) {
+        app.ui.shelf_path.clear();
+    }
+
+    let folder = app.ui.shelf_path.clone();
+    let matching: Vec<ShelfEntry> = all.into_iter().filter(|entry| entry.in_folder(&folder) && entry.matches(&filter)).collect();
     let counts: Vec<usize> = TABS.iter().map(|(tab, _, _)| matching.iter().filter(|entry| entry.tab() == *tab).count()).collect();
+
+    crate::shelf_folders::breadcrumb(app, ui, &paths);
     search_field(app, ui);
     crate::shelf_tabs::row(app, ui, &counts, |_, _, _| {});
     ui.add_space(4.0);
@@ -250,7 +261,8 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
             }
         });
 
-        if shown_tab.is_none_or(|shown| shown == Tab::Smart) {
+        let in_user_library = folder.first().is_none_or(|library| library == crate::shelf_entry::USER);
+        if in_user_library && shown_tab.is_none_or(|shown| shown == Tab::Smart) {
             library(app, ui, &filter);
         }
     });

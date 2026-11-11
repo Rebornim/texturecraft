@@ -1157,4 +1157,8 @@ pub const TABLE: &[(&str, &str)] = &[
         "展開後のプロジェクトデータの上限です。大きなプロジェクトを開くには、この上限を引き上げてください。",
     ),
     ("Filter by type", "種類で絞り込む"),
+    ("All libraries", "すべてのライブラリ"),
+    ("Browse folders", "フォルダーを参照"),
+    ("Starter assets", "付属アセット"),
+    ("Your assets", "マイアセット"),
 ];

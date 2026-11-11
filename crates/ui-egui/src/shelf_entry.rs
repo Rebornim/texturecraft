@@ -25,6 +25,13 @@ const SEED_PROBE_OFFSET: f32 = 0.13;
 /// A smaller difference between the two seeds' samples is rounding
 const SEED_TOLERANCE: f32 = 1e-4;
 
+/// The libraries' ids: the open project's images, the built-in assets, the user's saved assets
+pub(crate) const PROJECT: &str = "project";
+pub(crate) const STARTER: &str = "starter";
+pub(crate) const USER: &str = "user";
+/// The libraries in the picker's order: id and (English, translated where shown) name
+pub(crate) const LIBRARIES: [(&str, &str); 3] = [(PROJECT, "Project"), (STARTER, "Starter assets"), (USER, "Your assets")];
+
 /// A shelf tile's asset
 #[derive(Clone)]
 pub(crate) enum ShelfEntry {
@@ -86,6 +93,29 @@ impl ShelfEntry {
             ShelfEntry::Environment(name) => format!("environment:{name}"),
             ShelfEntry::Image(name) => format!("image:{name}"),
         }
+    }
+
+    /// Where the asset lives: its library id ([`LIBRARIES`]), its type's folder, then its category if it has one (names in English, shown through `tr`)
+    pub(crate) fn path(&self) -> Vec<&str> {
+        let (library, folder, category) = match self {
+            ShelfEntry::Material(material) if material.smart => (STARTER, "Smart materials", Some(material.category)),
+            ShelfEntry::Material(material) => (STARTER, "Materials", Some(material.category)),
+            ShelfEntry::SmartMask(_) => (STARTER, "Smart masks", None),
+            ShelfEntry::Filter(filter) => (STARTER, "Filters", Some(filter.group)),
+            ShelfEntry::Brush(preset) => (STARTER, "Brushes", Some(preset.category)),
+            ShelfEntry::SavedBrush(_) => (USER, "Brushes", None),
+            ShelfEntry::Alpha(alpha) => (STARTER, "Alphas", Some(alpha.category)),
+            ShelfEntry::Procedural(_) => (STARTER, "Procedurals", None),
+            ShelfEntry::Environment(_) => (STARTER, "Environments", None),
+            ShelfEntry::Image(_) => (PROJECT, "Textures", None),
+        };
+        [library, folder].into_iter().chain(category).collect()
+    }
+
+    /// Whether the asset is in folder `path` (a library id, then folder names) or below it
+    pub(crate) fn in_folder(&self, path: &[String]) -> bool {
+        let own = self.path();
+        path.len() <= own.len() && path.iter().zip(own).all(|(wanted, have)| wanted == have)
     }
 
     /// The name under the tile, translated where the asset's name is

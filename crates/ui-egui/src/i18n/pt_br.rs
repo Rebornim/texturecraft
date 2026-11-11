@@ -1160,4 +1160,8 @@ pub const TABLE: &[(&str, &str)] = &[
         "Limite de dados descompactados do projeto. Aumente este limite para abrir projetos maiores.",
     ),
     ("Filter by type", "Filtrar por tipo"),
+    ("All libraries", "Todas as bibliotecas"),
+    ("Browse folders", "Navegar pelas pastas"),
+    ("Starter assets", "Recursos incluídos"),
+    ("Your assets", "Seus recursos"),
 ];

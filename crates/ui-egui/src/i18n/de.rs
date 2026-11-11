@@ -1175,4 +1175,8 @@ pub const TABLE: &[(&str, &str)] = &[
         "Maximale entpackte Projektdaten. Erhöhen Sie diesen Grenzwert, um größere Projekte zu öffnen.",
     ),
     ("Filter by type", "Nach Typ filtern"),
+    ("All libraries", "Alle Bibliotheken"),
+    ("Browse folders", "Ordner durchsuchen"),
+    ("Starter assets", "Mitgelieferte Assets"),
+    ("Your assets", "Eigene Assets"),
 ];

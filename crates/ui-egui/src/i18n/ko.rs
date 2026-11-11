@@ -1147,4 +1147,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Your assets", "내 에셋"),
     ("Reset query", "쿼리 초기화"),
     ("Refresh", "새로 고침"),
+    ("Saved searches", "저장된 검색"),
+    ("Save the current search", "현재 검색 저장"),
+    ("Delete", "삭제"),
 ];

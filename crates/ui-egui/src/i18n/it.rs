@@ -1177,4 +1177,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Your assets", "Le tue risorse"),
     ("Reset query", "Reimposta query"),
     ("Refresh", "Aggiorna"),
+    ("Saved searches", "Ricerche salvate"),
+    ("Save the current search", "Salva la ricerca attuale"),
+    ("Delete", "Elimina"),
 ];

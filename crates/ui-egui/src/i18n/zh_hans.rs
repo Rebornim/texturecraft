@@ -1090,4 +1090,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Your assets", "我的资源"),
     ("Reset query", "重置查询"),
     ("Refresh", "刷新"),
+    ("Saved searches", "已保存的搜索"),
+    ("Save the current search", "保存当前搜索"),
+    ("Delete", "删除"),
 ];

@@ -256,22 +256,35 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
     let toolbar_top = (area.bottom() - crate::shelf_toolbar::height(ui)).max(area.top());
     let grid_rect = egui::Rect::from_min_max(area.min, egui::pos2(area.right(), toolbar_top));
     let toolbar_rect = egui::Rect::from_min_max(egui::pos2(area.left(), toolbar_top), area.max);
-    ui.scope_builder(egui::UiBuilder::new().max_rect(grid_rect), |ui| {
-        egui::ScrollArea::vertical().id_salt("shelf_scroll").auto_shrink([false, false]).max_height(grid_rect.height()).show(ui, |ui| {
-            tiles(ui, |ui| {
-                for entry in &entries {
-                    entry_tile(app, ui, &ctx, entry);
-                }
+    ui.scope_builder(egui::UiBuilder::new().max_rect(grid_rect).layout(egui::Layout::left_to_right(egui::Align::Min)), |ui| {
+        if let Some(width) = crate::shelf_panes::column_width(app, ui.available_width()) {
+            ui.allocate_ui_with_layout(vec2(width, grid_rect.height()), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_min_size(vec2(width, grid_rect.height()));
+                crate::shelf_panes::column(app, ui);
             });
-
-            let in_user_library = folder.first().is_none_or(|library| library == crate::shelf_entry::USER);
-            if in_user_library && shown_tab.is_none_or(|shown| shown == Tab::Smart) {
-                library(app, ui, &filter);
-            }
-        });
+            ui.separator();
+        }
+        // Saved smart materials are files in the user's library, without folders of their own
+        let in_user_library = folder.len() <= 1 && folder.first().is_none_or(|library| library == crate::shelf_entry::USER);
+        let saved_materials = in_user_library && shown_tab.is_none_or(|shown| shown == Tab::Smart);
+        grid(app, ui, &ctx, &entries, grid_rect.height(), saved_materials, &filter);
     });
     ui.scope_builder(egui::UiBuilder::new().max_rect(toolbar_rect), |ui| crate::shelf_toolbar::show(app, ui));
     drag_preview(&ctx);
+}
+
+/// The tiles of `entries` in a scroll area `height` high, then the saved smart materials when `saved_materials`
+fn grid(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entries: &[ShelfEntry], height: f32, saved_materials: bool, filter: &str) {
+    egui::ScrollArea::vertical().id_salt("shelf_scroll").auto_shrink([false, false]).max_height(height).show(ui, |ui| {
+        tiles(ui, |ui| {
+            for entry in entries {
+                entry_tile(app, ui, ctx, entry);
+            }
+        });
+        if saved_materials {
+            library(app, ui, filter);
+        }
+    });
 }
 
 /// The search field: a live filter on names (and categories) with a clear button while it has text

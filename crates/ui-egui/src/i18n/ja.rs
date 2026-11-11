@@ -1162,4 +1162,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Your assets", "マイアセット"),
     ("Reset query", "クエリをリセット"),
     ("Refresh", "更新"),
+    ("Saved searches", "保存した検索"),
+    ("Save the current search", "現在の検索を保存"),
+    ("Delete", "削除"),
 ];

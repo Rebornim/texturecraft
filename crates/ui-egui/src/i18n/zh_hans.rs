@@ -1093,4 +1093,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Saved searches", "已保存的搜索"),
     ("Save the current search", "保存当前搜索"),
     ("Delete", "删除"),
+    ("Filter by path", "按路径筛选"),
+    ("Hide non-applicable folders", "隐藏不适用的文件夹"),
 ];

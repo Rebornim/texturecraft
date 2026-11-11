@@ -12,8 +12,8 @@ use crate::widgets::icon_button;
 const ARROW_SCALE: f32 = 0.8;
 
 /// The folder paths of `entries`, each a library id then folder names
-pub(crate) fn paths(entries: &[ShelfEntry]) -> Vec<Vec<String>> {
-    let mut paths: Vec<Vec<String>> = entries.iter().map(|entry| entry.path().into_iter().map(str::to_string).collect()).collect();
+pub(crate) fn paths<'a>(entries: impl IntoIterator<Item = &'a ShelfEntry>) -> Vec<Vec<String>> {
+    let mut paths: Vec<Vec<String>> = entries.into_iter().map(|entry| entry.path().into_iter().map(str::to_string).collect()).collect();
     paths.sort();
     paths.dedup();
     paths

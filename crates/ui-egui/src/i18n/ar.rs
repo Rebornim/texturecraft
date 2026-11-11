@@ -1137,4 +1137,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Saved searches", "عمليات البحث المحفوظة"),
     ("Save the current search", "حفظ البحث الحالي"),
     ("Delete", "حذف"),
+    ("Filter by path", "تصفية حسب المسار"),
+    ("Hide non-applicable folders", "إخفاء المجلدات غير المطابقة"),
 ];

@@ -1150,4 +1150,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Saved searches", "저장된 검색"),
     ("Save the current search", "현재 검색 저장"),
     ("Delete", "삭제"),
+    ("Filter by path", "경로별 필터"),
+    ("Hide non-applicable folders", "해당 없는 폴더 숨기기"),
 ];

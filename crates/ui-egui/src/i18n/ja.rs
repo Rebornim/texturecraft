@@ -1165,4 +1165,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Saved searches", "保存した検索"),
     ("Save the current search", "現在の検索を保存"),
     ("Delete", "削除"),
+    ("Filter by path", "パスで絞り込む"),
+    ("Hide non-applicable folders", "該当しないフォルダーを隠す"),
 ];

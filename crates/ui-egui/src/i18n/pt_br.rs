@@ -1168,4 +1168,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Saved searches", "Pesquisas salvas"),
     ("Save the current search", "Salvar a pesquisa atual"),
     ("Delete", "Excluir"),
+    ("Filter by path", "Filtrar por caminho"),
+    ("Hide non-applicable folders", "Ocultar pastas não aplicáveis"),
 ];

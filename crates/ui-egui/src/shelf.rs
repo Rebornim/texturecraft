@@ -238,6 +238,8 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
     }
 
     let folder = app.ui.shelf_path.clone();
+    let picked_tab = app.ui.shelf_tab;
+    let applicable = crate::shelf_folders::paths(all.iter().filter(|entry| entry.matches(&filter) && crate::shelf_tabs::shows(picked_tab, entry.tab())));
     let matching: Vec<ShelfEntry> = all.into_iter().filter(|entry| entry.in_folder(&folder) && entry.matches(&filter)).collect();
     let counts: Vec<usize> = TABS.iter().map(|(tab, _, _)| matching.iter().filter(|entry| entry.tab() == *tab).count()).collect();
 
@@ -260,7 +262,7 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
         if let Some(width) = crate::shelf_panes::column_width(app, ui.available_width()) {
             ui.allocate_ui_with_layout(vec2(width, grid_rect.height()), egui::Layout::top_down(egui::Align::Min), |ui| {
                 ui.set_min_size(vec2(width, grid_rect.height()));
-                crate::shelf_panes::column(app, ui);
+                crate::shelf_panes::column(app, ui, &paths, &applicable);
             });
             ui.separator();
         }

@@ -1084,4 +1084,8 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Bilinear | HQ", "双线性 | 高质量"),
     ("Bilinear | Sharp", "双线性 | 锐利"),
     ("Nearest", "最近邻"),
+    ("UV Wrap", "UV 环绕"),
+    ("Repeat", "重复"),
+    ("Repeat horizontally", "水平重复"),
+    ("Repeat vertically", "垂直重复"),
 ];

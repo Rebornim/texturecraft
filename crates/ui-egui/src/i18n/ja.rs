@@ -1153,4 +1153,8 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Bilinear | HQ", "バイリニア | HQ"),
     ("Bilinear | Sharp", "バイリニア | シャープ"),
     ("Nearest", "ニアレスト"),
+    ("UV Wrap", "UV ラップ"),
+    ("Repeat", "繰り返し"),
+    ("Repeat horizontally", "水平方向に繰り返し"),
+    ("Repeat vertically", "垂直方向に繰り返し"),
 ];

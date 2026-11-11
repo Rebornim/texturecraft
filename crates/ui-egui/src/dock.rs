@@ -7,14 +7,14 @@ use serde_json::{Value, json};
 use texturecraft_engine::compose::ThumbTarget;
 use texturecraft_engine::core::{
     BakedMap, BlendMode, Channel, CurvatureDetail, CurvatureMode, Decal, Effect, EffectKind, Fill, Filter, Filtering, Generator, GeneratorKind, Layer, LayerId,
-    LayerKind, LinkParam, MaterialLink, ProceduralKind, Projection, Source,
+    LayerKind, LinkParam, MaterialLink, ProceduralKind, Projection, Source, UvWrap,
 };
 use texturecraft_engine::filter_lib::scalar_params;
 use texturecraft_engine::paint::{BrushAlpha, BrushSettings, alphas};
 use texturecraft_engine::{CloneFrom, StackTarget, Tool};
 
 use crate::TextureCraftApp;
-use crate::i18n::{filtering_label, n_, tr, trf};
+use crate::i18n::{filtering_label, n_, tr, trf, wrap_label};
 use crate::layer_panel::{effect_preview_size, effect_row_height, layer_preview_size, layer_row_height};
 use crate::shelf::{Asset, ShelfDrag};
 use crate::state::PropsTab;
@@ -1998,6 +1998,18 @@ fn projection_editor(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: 
             }
         }
     });
+
+    // Tri-planar has no tile to repeat
+    if !matches!(fill.projection, Projection::Triplanar { .. }) {
+        let wrap = fill.sampling.wrap;
+        combo(ui, tr("UV Wrap"), tr(wrap_label(wrap)), |ui| {
+            for w in UvWrap::ALL {
+                if ui.selectable_label(w == wrap, tr(wrap_label(w))).clicked() && w != wrap {
+                    app.run("layer.fill.projection", with(base, json!({"wrap": w.id()})));
+                }
+            }
+        });
+    }
 
     // Each edit sends only the fields it changed; the command keeps the others
     let mut edit = |fields: Value| {

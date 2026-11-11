@@ -1206,9 +1206,9 @@ impl<'a, 'b> Texel<'a, 'b> {
 
     /// How much a fill projected by `proj` covers this texel: 1, or for a decal its frame
     /// coverage times the alpha of its first image source.
-    fn cover<'s>(&mut self, mut sources: impl Iterator<Item = &'s Source>, proj: &Projection) -> f32 {
+    fn cover<'s>(&mut self, mut sources: impl Iterator<Item = &'s Source>, proj: &Projection, sampling: Sampling) -> f32 {
         if !matches!(proj, Projection::Decal(_)) {
-            return 1.0;
+            return self.tile_cover(proj, sampling);
         }
         let (c, _, w) = self.projected(proj);
         let image = sources.find_map(|s| match s {
@@ -1218,6 +1218,18 @@ impl<'a, 'b> Texel<'a, 'b> {
         w * image.map_or(1.0, |img| img.sample(c.uv.x, c.uv.y)[3].clamp(0.0, 1.0))
     }
 
+    /// 1 where a fill placed by `proj` lands inside its 0..1 tile on every axis it does not
+    /// repeat on (`sampling.wrap`), else 0. Tri-planar has no tile, so it always covers.
+    fn tile_cover(&mut self, proj: &Projection, sampling: Sampling) -> f32 {
+        let (across, down) = sampling.wrap.repeats();
+        if (across && down) || matches!(proj, Projection::Triplanar { .. }) {
+            return 1.0;
+        }
+        let coords = self.coords();
+        let [(uv, _), ..] = image_samples(proj, &coords);
+        let inside = |t: f32, repeats: bool| repeats || (0.0..1.0).contains(&t);
+        if inside(uv.x, across) && inside(uv.y, down) { 1.0 } else { 0.0 }
+    }
     /// The value `source` gives this texel through `projection`, read as a channel of `kind`
     fn source(&mut self, source: &Source, projection: &Projection, sampling: Sampling, kind: ChannelKind) -> [f32; 3] {
         match source {
@@ -1239,7 +1251,7 @@ impl<'a, 'b> Texel<'a, 'b> {
                 };
                 let mut sum = [0.0f32; 4];
                 for ((uv, weight), footprint) in samples.into_iter().zip(footprints).filter(|((_, weight), _)| *weight > 0.0) {
-                    for (total, value) in sum.iter_mut().zip(image.sample_filtered(uv.x, uv.y, sampling.filtering, footprint)) {
+                    for (total, value) in sum.iter_mut().zip(image.sample_filtered(uv.x, uv.y, sampling, footprint)) {
                         *total += value * weight;
                     }
                 }
@@ -1369,7 +1381,7 @@ impl<'a, 'b> Texel<'a, 'b> {
                 }
                 EffectKind::Fill { source, projection, sampling } => {
                     let fill = self.source(source, projection, *sampling, ChannelKind::Scalar)[0];
-                    value += (blend1(effect.blend, value, fill) - value) * opacity * self.cover(std::iter::once(source), projection);
+                    value += (blend1(effect.blend, value, fill) - value) * opacity * self.cover(std::iter::once(source), projection, *sampling);
                 }
                 EffectKind::Generator(generator) => {
                     let generated = self.generator(generator, effect.curvature_sizes.as_deref());
@@ -1581,7 +1593,7 @@ impl<'a, 'b> Texel<'a, 'b> {
                             Some(s) => self.source(s, &f.projection, f.sampling, ch.kind()),
                             None => ch.default_value(),
                         };
-                        (v, self.cover(f.sources.values(), &f.projection))
+                        (v, self.cover(f.sources.values(), &f.projection, f.sampling))
                     }
                     Content::Paint { preview } => self.painted(c.data.as_deref(), c, *preview),
                     Content::Group(_) => return None,
@@ -1662,7 +1674,7 @@ impl<'a, 'b> Texel<'a, 'b> {
             EffectKind::Material(f) => match Channel::ALL.get(c.ch).and_then(|ch| f.sources.get(ch).map(|s| (*ch, s))) {
                 Some((ch, s)) => {
                     let p = self.source(s, &f.projection, f.sampling, ch.kind());
-                    let w = o * self.cover(f.sources.values(), &f.projection);
+                    let w = o * self.cover(f.sources.values(), &f.projection, f.sampling);
                     over(c, e.blend, v, cov, p, w)
                 }
                 None => (v, cov),

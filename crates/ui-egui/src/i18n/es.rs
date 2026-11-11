@@ -1162,4 +1162,8 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Bilinear | HQ", "Bilineal | HQ"),
     ("Bilinear | Sharp", "Bilineal | Nítido"),
     ("Nearest", "Más cercano"),
+    ("UV Wrap", "Repetición UV"),
+    ("Repeat", "Repetir"),
+    ("Repeat horizontally", "Repetir horizontalmente"),
+    ("Repeat vertically", "Repetir verticalmente"),
 ];

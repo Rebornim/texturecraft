@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    BlendMode, Channel, ChannelBlend, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Sampling, Source,
+    BlendMode, Channel, ChannelBlend, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Sampling, Source, UvWrap,
 };
 
 use crate::commands::{
@@ -38,7 +38,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill projection",
             [],
             None,
-            "{layer? | effect?: content fill effect id, projection?: uv|triplanar|planar|spherical|cylindrical (default: the current one), scale?: number | [u, v] (uv), rotation?: degrees (uv), offset?: [u, v] (uv) | [x, y, z] (triplanar, planar), sharpness?: 1..64 (triplanar), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read)} — what is not given keeps its value",
+            "{layer? | effect?: content fill effect id, projection?: uv|triplanar|planar|spherical|cylindrical (default: the current one), scale?: number | [u, v] (uv), rotation?: degrees (uv), offset?: [u, v] (uv) | [x, y, z] (triplanar, planar), sharpness?: 1..64 (triplanar), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar)} — what is not given keeps its value",
             has_layer,
             fill_projection
         ),
@@ -443,11 +443,14 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
     Ok(proj)
 }
 
-/// `current` with the `filtering` param applied.
+/// `current` with the `filtering` and `wrap` params applied.
 pub(crate) fn sampling_from(p: &Value, cmd: &str, current: Sampling) -> Result<Sampling> {
     let mut sampling = current;
     if let Some(id) = strp(p, "filtering") {
         sampling.filtering = Filtering::from_id(id).ok_or_else(|| bad(cmd, format!("unknown filtering `{id}`: bilinearHq, bilinearSharp or nearest")))?;
+    }
+    if let Some(id) = strp(p, "wrap") {
+        sampling.wrap = UvWrap::from_id(id).ok_or_else(|| bad(cmd, format!("unknown wrap `{id}`: repeat, repeatHorizontally, repeatVertically or none")))?;
     }
     Ok(sampling)
 }

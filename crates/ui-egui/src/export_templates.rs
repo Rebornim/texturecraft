@@ -10,10 +10,12 @@ use texturecraft_engine::formats::export::{FILE_TOKENS, MAX_PRESET_NAME, sanitiz
 use texturecraft_engine::formats::{Dest, ExportPreset, FileFormat, MapSpec, SourceRef, VirtualMap};
 
 mod channel_slot;
+mod map_preview;
 mod moved_output;
 mod output_kind;
 
 use channel_slot::ChannelSlot;
+use map_preview::{Preview, PreviewText};
 use moved_output::MovedOutput;
 use output_kind::OutputKind;
 
@@ -40,7 +42,6 @@ const ROW_INDENT: f32 = 14.0;
 const FOOTER_HEIGHT: f32 = 52.0;
 const RENAME_ID: &str = "exp_rename";
 const RGB: [&str; 3] = ["R", "G", "B"];
-/// A channel box's side, and the greys a constant box spans
 /// A channel box's width for a one-letter channel, then for RGB and Gr
 const BOX_WIDTH: f32 = 28.0;
 const BOX_WIDE_WIDTH: f32 = 40.0;
@@ -55,6 +56,7 @@ const CHIP_TEXT_SIZE: f32 = 11.0;
 const CHIP_PADDING: f32 = 7.0;
 /// Space above each palette group
 const PALETTE_GROUP_GAP: f32 = 6.0;
+/// The greys a constant box spans
 const BOX_CONSTANT_FLOOR: f32 = 40.0;
 const BOX_CONSTANT_RANGE: f32 = 160.0;
 /// Width of an output's file type and bit depth combos
@@ -528,7 +530,8 @@ fn outputs(app: &mut TextureCraftApp, ui: &mut Ui) {
             return;
         }
     };
-    let preview = preview_names(app, &preset);
+    let params = plan_params(app, &preset);
+    let preview = params.as_ref().map_err(String::clone).and_then(|params| planned_files(app, params));
     let mut action = None;
     egui::Frame::new().fill(tk.row).inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -560,6 +563,7 @@ fn outputs(app: &mut TextureCraftApp, ui: &mut Ui) {
     let exported = preview.as_ref().map(|names| names.iter().flatten().count()).unwrap_or(0);
     let card_width = ui.available_width() - SCROLL_BAR_ROOM;
     let openpbr = app.ui.export.openpbr_names;
+    let ctx = ui.ctx().clone();
     egui::ScrollArea::vertical().id_salt("exp_outputs").max_height(ui.available_height() - FOOTER_HEIGHT).auto_shrink([false; 2]).show(ui, |ui| {
         if n == 0 {
             ui.add_space(8.0);
@@ -567,8 +571,12 @@ fn outputs(app: &mut TextureCraftApp, ui: &mut Ui) {
         }
         ui.add_enabled_ui(editable, |ui| {
             for (mi, map) in preset.maps.iter_mut().enumerate() {
-                let file = preview.as_ref().ok().and_then(|v| v.get(mi).cloned().flatten());
-                changed |= output_card(ui, card_width, mi, map, file.as_deref(), openpbr, &mut action);
+                let planned = preview.as_ref().ok().and_then(|v| v.get(mi).cloned().flatten());
+                let mut pictures = || match &params {
+                    Ok(params) => map_preview::preview(app, &ctx, params, mi),
+                    Err(_) => None,
+                };
+                changed |= output_card(ui, card_width, mi, map, planned.as_ref(), openpbr, &mut pictures, &mut action);
                 ui.add_space(4.0);
             }
         });
@@ -610,28 +618,53 @@ fn commit(app: &mut TextureCraftApp, preset: ExportPreset) {
     app.ui.export.draft = Some(preset);
 }
 
-/// The file each map produces for the current texture set with the dialog's settings (None:
-/// the set has none of the map's sources), via `export.plan`.
-fn preview_names(app: &mut TextureCraftApp, preset: &ExportPreset) -> Result<Vec<Option<String>>, String> {
+/// A file an output writes for the current texture set: its name and size
+#[derive(Clone)]
+struct PlannedFile {
+    file: String,
+    size: [u64; 2],
+}
+
+/// The export.plan / export.preview params of `preset` for the current texture set with the dialog's settings
+fn plan_params(app: &mut TextureCraftApp, preset: &ExportPreset) -> Result<Value, String> {
     let mut p = crate::export_dialog::global_params(app);
     p["preset"] = serde_json::to_value(preset).map_err(|e| e.to_string())?;
     p["ts"] = json!(app.session.ts());
-    let plan = texturecraft_engine::execute(&mut app.session, "export.plan", &p).map_err(|e| e.to_string())?;
-    let mut names = vec![None; preset.maps.len()];
+    Ok(p)
+}
+
+/// The file each output writes (None: the set has none of the output's sources), via `export.plan`
+fn planned_files(app: &mut TextureCraftApp, params: &Value) -> Result<Vec<Option<PlannedFile>>, String> {
+    let plan = texturecraft_engine::execute(&mut app.session, "export.plan", params).map_err(|e| e.to_string())?;
+    let count = params.pointer("/preset/maps").and_then(Value::as_array).map_or(0, Vec::len);
+    let mut files = vec![None; count];
     for f in plan.as_array().into_iter().flatten() {
         let map = f.get("map").and_then(Value::as_u64).and_then(|i| usize::try_from(i).ok());
-        if let (Some(slot), Some(file)) = (map.and_then(|i| names.get_mut(i)), f.get("file").and_then(Value::as_str)) {
-            *slot = Some(file.to_string());
+        let size = |k: usize| f.get("size").and_then(|size| size.get(k)).and_then(Value::as_u64).unwrap_or(0);
+        if let (Some(slot), Some(file)) = (map.and_then(|i| files.get_mut(i)), f.get("file").and_then(Value::as_str)) {
+            *slot = Some(PlannedFile { file: file.to_string(), size: [size(0), size(1)] });
         }
     }
-    Ok(names)
+    Ok(files)
 }
 
 /// One output: drag handle; the file name over its channel boxes and size; file type and bit depth with duplicate and remove.
 /// `width` is the card's outer width, the same for every card (a card sized from what the one above left would creep wider)
-fn output_card(ui: &mut Ui, width: f32, mi: usize, map: &mut MapSpec, file: Option<&str>, openpbr: bool, action: &mut Option<MapAction>) -> bool {
+#[allow(clippy::too_many_arguments)]
+fn output_card(
+    ui: &mut Ui,
+    width: f32,
+    mi: usize,
+    map: &mut MapSpec,
+    planned: Option<&PlannedFile>,
+    openpbr: bool,
+    pictures: &mut dyn FnMut() -> Preview,
+    action: &mut Option<MapAction>,
+) -> bool {
     let tk = Tokens::get(ui.ctx());
     let mut changed = false;
+    let file = planned.map(|planned| planned.file.as_str());
+    let text = preview_text(map, planned, openpbr);
     let row_height = ui.spacing().interact_size.y;
     let card = egui::Frame::new().fill(tk.row).corner_radius(tk.radius).inner_margin(CARD_MARGIN).show(ui, |ui| {
         let inner = width - 2.0 * CARD_MARGIN;
@@ -653,7 +686,7 @@ fn output_card(ui: &mut Ui, width: f32, mi: usize, map: &mut MapSpec, file: Opti
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = BOX_GAP;
                     for slot in channel_slots(map).iter() {
-                        changed |= channel_box(ui, map, slot, openpbr);
+                        changed |= channel_box(ui, map, slot, openpbr, &mut *pictures, &text);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| changed |= size_combo(ui, mi, map));
                 });
@@ -766,8 +799,27 @@ fn bit_depth_combo(ui: &mut Ui, mi: usize, map: &mut MapSpec) -> bool {
     changed
 }
 
-/// A channel box: coloured by the map it reads, a map dropped on it fills it, a click opens its menu
-fn channel_box(ui: &mut Ui, map: &mut MapSpec, slot: &ChannelSlot, openpbr: bool) -> bool {
+/// What hovering one of the output's boxes says besides the pictures
+fn preview_text(map: &MapSpec, planned: Option<&PlannedFile>, openpbr: bool) -> PreviewText {
+    let details = planned.map_or_else(String::new, |planned| {
+        let bits = crate::export_controls::bit_depth_text(map.bit_depth, map.options.dithering);
+        format!("{} x {} · {} {bits}", planned.size[0], planned.size[1], map.format.extension())
+    });
+    let sources = map.channels.iter().map(|(dest, source)| (*dest, source_name(source, openpbr))).collect();
+    PreviewText { file: planned.map(|planned| planned.file.clone()), details, sources }
+}
+
+/// A source's name for one channel: a constant with its value, a colour map with the component read
+fn source_name(source: &SourceRef, openpbr: bool) -> String {
+    match source {
+        SourceRef::Constant(v) => format!("{} {v:.2}", tr(source_label(source, openpbr))),
+        other if other.components() == 3 => format!("{} ({})", tr(source_label(other, openpbr)), RGB.get(component_of(other) as usize).copied().unwrap_or("R")),
+        other => tr(source_label(other, openpbr)).to_string(),
+    }
+}
+
+/// A channel box: coloured by the map it reads, a map dropped on it fills it, a click opens its menu, hovering shows the file
+fn channel_box(ui: &mut Ui, map: &mut MapSpec, slot: &ChannelSlot, openpbr: bool, pictures: &mut dyn FnMut() -> Preview, text: &PreviewText) -> bool {
     let tk = Tokens::get(ui.ctx());
     let source = map.channels.iter().find(|(dest, _)| slot.dests.contains(dest)).map(|(_, s)| s.clone()).unwrap_or(SourceRef::Constant(0.0));
     let name = match &source {
@@ -795,7 +847,8 @@ fn channel_box(ui: &mut Ui, map: &mut MapSpec, slot: &ChannelSlot, openpbr: bool
         drop_input(map, slot, &input);
         changed = true;
     }
-    let response = response.on_hover_text(&name);
+    // A built-in template's boxes are disabled, and its files are worth a look all the same
+    let response = response.on_hover_ui(|ui| map_preview::show(ui, &pictures(), text)).on_disabled_hover_ui(|ui| map_preview::show(ui, &pictures(), text));
     egui::Popup::menu(&response).show(|ui| {
         ui.label(RichText::new(&name).strong());
         // A single box reading a colour map can read any of its components

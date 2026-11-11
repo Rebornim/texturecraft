@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT as _, Queryable};
 use texturecraft_engine::core::{BakeResolution, BakedMap, CurvatureMethod, HeightNormalization};
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::docking::Panel;
@@ -575,6 +575,9 @@ fn export_dialog_snapshots() {
     harness.state_mut().ui.export.preset = "Unity HDRP (Mask Map)".into();
     harness.run_steps(4);
     save(&mut harness, &output_dir, "export-templates-unity");
+    harness.get_all_by_role(egui::accesskit::Role::Button).find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with("R: Metallic"))).unwrap().hover();
+    harness.run_steps(60);
+    save(&mut harness, &output_dir, "export-templates-preview");
     harness.state_mut().ui.export.preset = "Document channels + Normal + AO".into();
     harness.set_size(egui::vec2(1280.0, 720.0));
     harness.run_steps(60);

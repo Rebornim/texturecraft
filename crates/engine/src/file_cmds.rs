@@ -5,12 +5,15 @@ use serde_json::{Value, json};
 #[cfg(not(target_arch = "wasm32"))]
 use texturecraft_core::{NormalFormat, PROJECT_EXT};
 use texturecraft_core::{Project, TextureSet};
-use texturecraft_formats::{ExportInput, ExportOptions, ExportedFile, FileFormat, Padding, ProjectFile};
+use texturecraft_formats::{ExportInput, ExportOptions, ExportedFile, FileFormat, MapPreview, Padding, ProjectFile};
 use texturecraft_geom::{Mesh, primitives};
 
 use crate::commands::{CommandSpec, always, bad, boolp, normal_format_param, strp, u64p};
 use crate::session::{Document, Session};
 use crate::{EngineError, Result, cmd};
+
+/// export.preview's picture width when the params name none
+const DEFAULT_PREVIEW_SIDE: u32 = 128;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -63,6 +66,15 @@ pub fn specs() -> Vec<CommandSpec> {
             "{preset?: name or preset object, ts?, format?, bitDepth?, size?, colorSpace?} → [{ts, map, file, format, bitDepth, size: [w, h], setSize: true when it is the texture set's own size, warnings}]",
             always,
             plan
+        ),
+        cmd!(
+            "export.preview",
+            "Preview an output map",
+            [],
+            None,
+            "{map: index into the preset's maps, side?: px (default 128, at most 512), preset?, ts?, plus the params of export.plan} → {width, height, channels: [\"R\", ...], pixels: [8-bit values as the file stores them, channels interleaved, row by row]}, or null when the texture set writes no file for the map",
+            always,
+            preview
         ),
     ]
 }
@@ -273,6 +285,27 @@ impl Session {
         }
         Ok(out)
     }
+
+    /// A `side`-wide picture of output map `map` for the first texture set the export params `p` name (the params of
+    /// export.plan); None when that set writes no file for the map
+    pub fn export_preview(&mut self, p: &Value, map: usize, side: u32) -> Result<Option<MapPreview>> {
+        self.update();
+        let Some((sets, opts)) = crate::export_settings_cmds::export_jobs(self, p, "export.preview")?.into_iter().next() else { return Ok(None) };
+        let Some(&ts) = sets.first() else { return Ok(None) };
+        let mesh_name = stem_of(self.doc.project.mesh.trim_start_matches("builtin:"));
+        let cache = self.caches.get(ts).ok_or_else(|| EngineError::Other(format!("no texture set {ts}")))?;
+        let coverage = cache.gbuf.coverage_mask();
+        let empty = Default::default();
+        let input = ExportInput {
+            project: &self.doc.project,
+            ts,
+            composite: &cache.composite,
+            baked: self.doc.baked.get(&ts).unwrap_or(&empty),
+            coverage: &coverage,
+            mesh_name: &mesh_name,
+        };
+        texturecraft_formats::preview_map(&input, &opts, map, side).map_err(fe)
+    }
 }
 
 fn check_materials(p: &texturecraft_core::Project, mesh: &Mesh) -> Result<()> {
@@ -339,6 +372,19 @@ pub(crate) fn sets_param(s: &Session, p: &Value, cmd: &str) -> Result<Vec<usize>
         Some(Value::String(a)) if a == "all" => Ok((0..s.set_count()).collect()),
         Some(v) => Ok(vec![v.as_u64().map(|t| t as usize).filter(|t| *t < s.set_count()).ok_or_else(|| bad(cmd, "invalid `ts`"))?]),
     }
+}
+
+fn preview(s: &mut Session, p: &Value) -> Result<Value> {
+    let map = u64p(p, "map").and_then(|map| usize::try_from(map).ok()).ok_or_else(|| bad("export.preview", "`map` (an output map index) is required"))?;
+    let side = u64p(p, "side").map_or(DEFAULT_PREVIEW_SIDE, |side| side.clamp(1, u64::from(texturecraft_formats::MAX_PREVIEW_SIDE)) as u32);
+    Ok(match s.export_preview(p, map, side)? {
+        Some(preview) => json!({
+            "width": preview.width, "height": preview.height,
+            "channels": preview.channels.iter().map(|dest| format!("{dest:?}")).collect::<Vec<_>>(),
+            "pixels": preview.pixels,
+        }),
+        None => Value::Null,
+    })
 }
 
 fn plan(s: &mut Session, p: &Value) -> Result<Value> {

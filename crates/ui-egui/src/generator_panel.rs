@@ -191,16 +191,16 @@ fn wear_parameters(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, generator: &
     }
 
     if let Some(merge) = edit {
-        let mut params = wear_params(&edited);
+        let mut params = wear_params(generator.kind, &edited);
         params["effect"] = json!(id);
         params["merge"] = json!(merge);
         app.run("effect.set", params);
     }
 }
 
-/// The `effect.set` params that set every wear control to `wear`
-fn wear_params(wear: &WearParameters) -> Value {
-    json!({
+/// The `effect.set` params that set every wear control a generator of `kind` has to `wear`
+fn wear_params(kind: GeneratorKind, wear: &WearParameters) -> Value {
+    let mut params = json!({
         "wearLevel": wear.level,
         "wearContrast": wear.contrast,
         "grungeAmount": wear.grunge_amount,
@@ -211,7 +211,11 @@ fn wear_params(wear: &WearParameters) -> Value {
         "aoMasking": wear.ao_masking,
         "curvatureWeight": wear.curvature_weight,
         "edgesMasking": wear.edges_masking,
-    })
+    });
+    if let Some(params) = params.as_object_mut() {
+        params.retain(|key, _| texturecraft_engine::mask_cmds::wear_key_applies(kind, key));
+    }
+    params
 }
 
 /// An on/off control as the reference app draws it: the name, then a full-width button reading False or True; returns whether it was clicked
@@ -284,33 +288,34 @@ fn random_seed(current: u32) -> u32 {
 /// The `effect.set` params that put generator effect `id` back to the defaults of its kind.
 fn defaults_of(id: u64, kind: GeneratorKind) -> Value {
     let defaults = Generator::new(kind);
-    // A wear generator restores its wear controls; level, softness, noise and offset would keep it on the earlier model
-    let mut params = match &defaults.wear {
-        Some(wear) => wear_params(wear),
+    let mut params = json!({
+        "effect": id,
+        "seed": defaults.seed,
+        "invert": defaults.invert,
+        "resolution": format!("{:?}", defaults.resolution.mode),
+        "customResolution": defaults.resolution.custom,
+        "resolutionFactor": defaults.resolution.factor,
+    });
+
+    // A wear generator restores its wear controls only: the earlier model's keys would move it back onto that model
+    let own = match &defaults.wear {
+        Some(wear) => wear_params(kind, wear),
         None => json!({
             "level": defaults.level,
             "softness": defaults.softness,
             "noise": defaults.noise_amount,
             "noiseScale": defaults.noise_scale,
             "offset": defaults.offset,
+            "direction": defaults.direction,
+            "blur": defaults.global.blur,
+            "balance": defaults.global.balance,
+            "contrast": defaults.global.contrast,
         }),
     };
-    let shared = json!({
-        "effect": id,
-        "seed": defaults.seed,
-        "direction": defaults.direction,
-        "invert": defaults.invert,
-        "blur": defaults.global.blur,
-        "balance": defaults.global.balance,
-        "contrast": defaults.global.contrast,
-        "resolution": format!("{:?}", defaults.resolution.mode),
-        "customResolution": defaults.resolution.custom,
-        "resolutionFactor": defaults.resolution.factor,
-    });
-    if let (Some(params), Value::Object(shared)) = (params.as_object_mut(), shared) {
-        params.extend(shared);
+    if let (Some(params), Value::Object(own)) = (params.as_object_mut(), own) {
+        params.extend(own);
     }
-    if let Some(detail) = defaults.detail {
+    if let (None, Some(detail)) = (&defaults.wear, defaults.detail) {
         params["mode"] = json!(format!("{:?}", detail.mode));
         params["sizes"] = json!(detail.weights);
     }

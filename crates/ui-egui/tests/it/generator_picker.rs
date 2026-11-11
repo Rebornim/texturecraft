@@ -60,8 +60,9 @@ fn the_picker_leaves_thin_areas_out() {
     let (mut harness, _) = app_with_dirt();
     open_picker(&mut harness);
 
+    // The picker's tiles are the buttons named after generators
     for kind in GeneratorKind::ALL {
-        let offered = harness.query_all_by_label(kind.label()).count() > 0;
+        let offered = harness.query_all_by_role_and_label(Role::Button, kind.label()).count() > 0;
         assert_eq!(offered, kind.in_picker(), "{kind:?}");
     }
 }

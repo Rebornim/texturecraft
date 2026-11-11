@@ -576,7 +576,16 @@ impl GeneratorKind {
 
     pub fn parse(s: &str) -> Option<GeneratorKind> {
         let norm = |x: &str| x.to_ascii_lowercase().replace([' ', '_', '-', ':'], "");
-        GeneratorKind::ALL.into_iter().find(|k| norm(k.id()) == norm(s) || norm(k.label()) == norm(s))
+        // The labels before the reference app's names, which agents may still send
+        let earlier = |kind: GeneratorKind| match kind {
+            GeneratorKind::EdgeWear => Some("Mask Editor: Edge wear"),
+            GeneratorKind::Position => Some("Position gradient"),
+            GeneratorKind::Direction => Some("Light / direction"),
+            _ => None,
+        };
+        GeneratorKind::ALL
+            .into_iter()
+            .find(|k| norm(k.id()) == norm(s) || norm(k.label()) == norm(s) || earlier(*k).is_some_and(|label| norm(label) == norm(s)))
     }
 }
 
@@ -621,6 +630,11 @@ impl Generator {
     pub const MAX_NOISE_AMOUNT: f32 = 2.0;
     pub const MIN_NOISE_SCALE: f32 = 0.01;
     pub const MAX_NOISE_SCALE: f32 = 1000.0;
+
+    /// The global blur, balance and contrast the generator applies: none on the wear controls, which have no such controls
+    pub fn applied_global(&self) -> GeneratorGlobal {
+        if self.wear.is_some() || self.kind == GeneratorKind::FiberGlassEdgeWear { GeneratorGlobal::default() } else { self.global }
+    }
 
     pub fn new(kind: GeneratorKind) -> Generator {
         let (level, softness, noise_amount) = match kind {
@@ -1225,6 +1239,7 @@ mod tests {
             assert_eq!(GeneratorKind::parse(kind.label()), Some(kind));
         }
         assert!(!GeneratorKind::ThinAreas.in_picker(), "Thin areas only loads from saved projects and smart masks");
+        assert_eq!(GeneratorKind::parse("Light / direction"), Some(GeneratorKind::Direction), "earlier labels still parse");
     }
 
     #[test]

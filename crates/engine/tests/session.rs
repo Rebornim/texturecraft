@@ -530,7 +530,7 @@ fn generators_take_blur_balance_and_contrast() {
     let mut state = session();
     execute(&mut state, "layer.add.fill", &json!({})).unwrap();
     execute(&mut state, "mask.add.black", &Value::Null).unwrap();
-    let added = execute(&mut state, "effect.add.generator", &json!({"generator": "dirt", "blur": 0.25})).unwrap();
+    let added = execute(&mut state, "effect.add.generator", &json!({"generator": "ambientOcclusion", "blur": 0.25})).unwrap();
     let effect = added["effect"].clone();
 
     execute(&mut state, "effect.set", &json!({"effect": effect, "balance": 0.75, "contrast": 2.0})).unwrap();

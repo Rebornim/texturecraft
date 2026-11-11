@@ -4,13 +4,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use rayon::prelude::*;
-use texturecraft_core::{BakedMap, BlockScales, CurvatureDetail};
+use texturecraft_core::{BakedMap, BlockScales};
 use texturecraft_texel::dilate::{DilationMap, NONE};
 
 use crate::curvature_size_level::{CurvatureSizeLevel, DEVIATION_SCALE};
 use crate::eval::{BLUR_BOX_PASSES, Inputs, blur};
 
-/// The curvature map padded past its UV islands and blurred at each size of [`CurvatureDetail::SIZES`] after the first.
+/// The blur radius of each level in texels at 2K: the detail sizes of [`texturecraft_core::CurvatureDetail::SIZES`] after the first, then wider ones the wear generators' edges smoothness reaches
+pub const LEVEL_RADII: [f32; 8] = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0];
+
+/// The curvature map padded past its UV islands and blurred at each radius of [`LEVEL_RADII`].
 pub struct CurvatureSizes {
     /// One per blurred size, built once a generator gives that size a weight above 0.
     pub levels: Vec<Option<Arc<CurvatureSizeLevel>>>,
@@ -70,9 +73,8 @@ impl CurvatureSizes {
             padding.src.par_iter().map(|&source| if source == NONE { 0.0 } else { curvature.get(source as usize).copied().unwrap_or(0.5) - 0.5 }).collect();
         let (block_width, block_height) = (block.0.max(1).min(width), block.1.max(1).min(height));
 
-        let levels = CurvatureDetail::SIZES
+        let levels = LEVEL_RADII
             .iter()
-            .skip(1)
             .enumerate()
             .map(|(level, size)| {
                 if let Some(existing) = built.and_then(|sizes| sizes.levels.get(level)).and_then(Option::clone) {
@@ -247,6 +249,8 @@ fn coarsen(data: &[f32], (width, height): (u32, u32), step: u32, block: (u32, u3
 
 #[cfg(test)]
 mod tests {
+    use texturecraft_core::CurvatureDetail;
+
     use super::*;
 
     #[test]
@@ -443,5 +447,10 @@ mod tests {
                 assert!(Arc::ptr_eq(built, earlier), "sizes already built are kept, not rebuilt");
             }
         }
+    }
+
+    #[test]
+    fn the_first_levels_are_the_detail_sizes() {
+        assert_eq!(LEVEL_RADII[..CurvatureDetail::BLURRED_SIZES], CurvatureDetail::SIZES[1..]);
     }
 }

@@ -19,7 +19,7 @@ use texturecraft_geom::{Mesh, NO_TRI, UvGBuffer};
 use texturecraft_texel::{DilationMap, TILE, TILE_AREA, TileImage, from_u16, noise, to_u16, to_u16_signed};
 
 use crate::below::{Band, BelowCache, Level};
-use crate::curvature_sizes::CurvatureSizes;
+use crate::curvature_sizes::{CurvatureSizes, LEVEL_RADII};
 use crate::pattern::{Coords, decal_uv, image_samples, procedural, world_noise};
 use crate::store::{BakedMaps, ImageStore, PixelStore, decode};
 use crate::wear;
@@ -312,8 +312,8 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
         EffectKind::Filter(Filter::Glow { radius, amount }) => Some((index, texels(*radius), Op::Glow(*amount))),
         EffectKind::Filter(Filter::Mosaic { size }) => Some((index, texels(*size), Op::Mosaic)),
         // Independent of `res`, so every caller agrees on which effects are stages; the reach covers the cells, then the blur around them
-        EffectKind::Generator(generator) if generator.global.blur > 0.0 || generator.resolution.can_reduce() => {
-            Some((index, texels(generator.global.blur_radius()) + generator.resolution.largest_cell(res) as f32, Op::Blur(None)))
+        EffectKind::Generator(generator) if generator.applied_global().blur > 0.0 || generator.resolution.can_reduce() => {
+            Some((index, texels(generator.applied_global().blur_radius()) + generator.resolution.largest_cell(res) as f32, Op::Blur(None)))
         }
         EffectKind::Filter(Filter::SlopeBlur { radius, scale, seed }) if *radius > 0.0 => {
             Some((index, texels(*radius), Op::Slope { scale: *scale, seed: *seed }))
@@ -808,7 +808,7 @@ fn generator_region(
         ramps = resampled_by_cells(&ramps, cover, (region_x as usize, region_y as usize, columns, rows), cell);
     }
 
-    let blur_radius = generator.global.blur_radius_at(uv_tile).round() as usize;
+    let blur_radius = generator.applied_global().blur_radius_at(uv_tile).round() as usize;
     if blur_radius > 0 {
         let mut weights = cover.to_vec();
         blur(&mut weights, columns, rows, blur_radius);
@@ -894,7 +894,7 @@ fn resampled_by_cells(values: &[f32], cover: &[f32], (region_x, region_y, width,
 
 /// A generator's (possibly blurred) ramp after balance, contrast, invert and offset.
 fn finish_generator(generator: &Generator, ramp: f32) -> f32 {
-    let value = generator.global.apply(ramp);
+    let value = generator.applied_global().apply(ramp);
     let value = if generator.invert { 1.0 - value } else { value };
     let offset = if generator.offset.is_finite() { generator.offset } else { 0.0 };
     (value + offset).clamp(0.0, 1.0)
@@ -963,11 +963,17 @@ fn prepare_curvature_sizes(inp: &Inputs, layers: &[LayerId]) {
     prepare_mask_curvature_sizes(inp, masks);
 }
 
-/// The blurred curvature sizes `generator` reads: its detail sizes and its wear's smoothing
-fn curvature_sizes_in_use(generator: &Generator) -> [bool; CurvatureDetail::BLURRED_SIZES] {
+/// The blurred curvature levels `generator` reads: its wear's smoothing, else its detail sizes (a replaced curvature input reads none)
+fn curvature_sizes_in_use(generator: &Generator) -> [bool; LEVEL_RADII.len()] {
+    if generator.inputs.contains_key(&BakedMap::Curvature) {
+        return [false; LEVEL_RADII.len()];
+    }
+    if let Some(wear) = wear_parameters(generator) {
+        return wear::levels_in_use(generator.kind, &wear);
+    }
+
     let detail = generator.detail.as_ref().map(CurvatureDetail::blurred_sizes_in_use).unwrap_or_default();
-    let wear = wear_parameters(generator).map(|wear| wear::levels_in_use(generator.kind, &wear)).unwrap_or_default();
-    std::array::from_fn(|level| detail[level] || wear[level])
+    std::array::from_fn(|level| detail.get(level).copied().unwrap_or(false))
 }
 
 /// The wear controls `generator` computes with: its own, Fiber Glass Edge Wear's defaults when it has none (it has no earlier model), else None
@@ -977,7 +983,7 @@ fn wear_parameters(generator: &Generator) -> Option<WearParameters> {
 
 /// Build the curvature detail sizes the visible generators of `masks` read, once, before tiles composite in parallel.
 fn prepare_mask_curvature_sizes<'a>(inp: &Inputs, masks: impl Iterator<Item = &'a Mask>) {
-    let mut needed = [false; CurvatureDetail::BLURRED_SIZES];
+    let mut needed = [false; LEVEL_RADII.len()];
     for effect in masks.flat_map(|mask| &mask.effects).filter(|effect| effect.visible) {
         if let EffectKind::Generator(generator) = &effect.kind {
             for (slot, in_use) in needed.iter_mut().zip(curvature_sizes_in_use(generator)) {

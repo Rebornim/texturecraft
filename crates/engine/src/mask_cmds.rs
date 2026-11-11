@@ -316,7 +316,10 @@ fn add_fill(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Apply `params` to `generator`, using `command` in errors
 /// The parameters that drive the wear generators' earlier model
-const EARLIER_WEAR_KEYS: [&str; 5] = ["level", "softness", "noise", "noiseScale", "offset"];
+const EARLIER_WEAR_KEYS: [&str; 7] = ["level", "softness", "noise", "noiseScale", "offset", "mode", "sizes"];
+
+/// The global adjustments, which the wear kinds don't have
+const GLOBAL_KEYS: [&str; 3] = ["blur", "balance", "contrast"];
 
 /// The wear controls `effect.add.generator` and `effect.set` take
 const WEAR_KEYS: [&str; 10] = [
@@ -338,6 +341,14 @@ fn wear_from(command: &str, params: &Value, generator: &mut Generator) -> Result
     let Some(defaults) = WearParameters::defaults(generator.kind) else {
         return if given(&WEAR_KEYS) { Err(bad(command, "only Metal Edge Wear, Fiber Glass Edge Wear and Dirt have wear controls")) } else { Ok(()) };
     };
+
+    let earlier_model = given(&EARLIER_WEAR_KEYS) || (generator.wear.is_none() && !given(&WEAR_KEYS) && generator.kind != GeneratorKind::FiberGlassEdgeWear);
+    if given(&GLOBAL_KEYS) && !earlier_model {
+        return Err(bad(command, format!("{} has no global blur, balance or contrast on its wear controls", generator.kind.label())));
+    }
+    if let Some(unused) = WEAR_KEYS.iter().find(|key| params.get(**key).is_some() && !wear_key_applies(generator.kind, key)) {
+        return Err(bad(command, format!("{} has no `{unused}`", generator.kind.label())));
+    }
 
     if given(&EARLIER_WEAR_KEYS) {
         if given(&WEAR_KEYS) {
@@ -376,6 +387,16 @@ fn wear_from(command: &str, params: &Value, generator: &mut Generator) -> Result
     }
     *wear = wear.clamped(generator.kind);
     Ok(())
+}
+
+/// Whether wear control `key` changes a generator of `kind`
+pub fn wear_key_applies(kind: GeneratorKind, key: &str) -> bool {
+    match key {
+        "edgesMasking" => kind == GeneratorKind::Dirt,
+        "edgesSmoothness" | "aoMasking" | "curvatureWeight" => kind != GeneratorKind::Dirt,
+        "grungeScale" => kind != GeneratorKind::FiberGlassEdgeWear,
+        _ => true,
+    }
 }
 
 fn generator_from(command: &str, params: &Value, generator: &mut Generator) -> Result<()> {

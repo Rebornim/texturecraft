@@ -17,8 +17,21 @@ use crate::theme::{Tokens, caption};
 use crate::widgets::{chip, icon_button};
 
 const ICON: f32 = 20.0;
-const LIST_WIDTH: f32 = 190.0;
-const INPUTS_WIDTH: f32 = 170.0;
+/// Widths of the presets, input maps and mesh / converted maps columns; the outputs take the rest
+const LIST_WIDTH: f32 = 220.0;
+const INPUTS_WIDTH: f32 = 180.0;
+const MESH_WIDTH: f32 = 170.0;
+const OUTPUTS_MIN_WIDTH: f32 = 240.0;
+/// Room a column separator takes, with the spacing on both sides
+const COLUMN_GAP: f32 = 26.0;
+/// An output card's inner margin, and the room kept for the outputs' scroll bar
+const CARD_MARGIN: f32 = 6.0;
+const SCROLL_BAR_ROOM: f32 = 12.0;
+/// Height of a preset or input map row
+const ROW_HEIGHT: f32 = 21.0;
+const ROW_INDENT: f32 = 14.0;
+/// Room under the outputs for the drag hint and the count
+const FOOTER_HEIGHT: f32 = 52.0;
 const RENAME_ID: &str = "exp_rename";
 const RGB: [&str; 3] = ["R", "G", "B"];
 
@@ -74,6 +87,19 @@ static PALETTE: LazyLock<Palette> = LazyLock::new(|| {
         (n_("Constants"), vec![(n_("Black"), SourceRef::Constant(0.0)), (n_("Gray 50%"), SourceRef::Constant(0.5)), (n_("White"), SourceRef::Constant(1.0))]),
     ]
 });
+
+/// The Input maps column: the texture set channels by shading lobe
+const INPUT_GROUPS: [(&str, &[Channel]); 9] = [
+    (n_("Base"), &[Channel::BaseColor, Channel::Metallic]),
+    (n_("Specular"), &[Channel::Roughness, Channel::SpecularLevel, Channel::Specular, Channel::AnisotropyLevel, Channel::AnisotropyAngle]),
+    (n_("Transmission"), &[Channel::Transmission]),
+    (n_("Subsurface"), &[Channel::ScatterWeight]),
+    (n_("Coat"), &[Channel::CoatWeight, Channel::CoatRoughness, Channel::CoatNormal]),
+    (n_("Fuzz/Sheen"), &[Channel::SheenWeight, Channel::SheenColor, Channel::SheenRoughness]),
+    (n_("Emission"), &[Channel::Emissive]),
+    (n_("Geometry"), &[Channel::Opacity, Channel::Height, Channel::Normal, Channel::AmbientOcclusion]),
+    (n_("Miscellaneous"), &[Channel::Glossiness]),
+];
 
 fn source_label(s: &SourceRef) -> &'static str {
     match s {
@@ -174,9 +200,12 @@ enum ListAction {
     Select(String),
     New,
     Duplicate,
+    /// From a preset's right-click menu
+    DuplicateNamed(String),
     StartRename(String),
     Rename(String),
     Remove,
+    RemoveNamed(String),
     Import,
     Export,
 }
@@ -188,29 +217,28 @@ enum MapAction {
     Remove(usize),
 }
 
-/// The Output templates tab: template list, the selected template's outputs, input maps.
+/// The Output templates tab: presets, the selected preset's outputs, input maps, then mesh and converted maps
 pub fn tab(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[ExportPreset]) {
     sync_draft(app);
     let height = ui.available_height();
+    // The window has a fixed size, so sizing the outputs from it can't feed back
+    let outputs_width = (ui.available_width() - LIST_WIDTH - INPUTS_WIDTH - MESH_WIDTH - 3.0 * COLUMN_GAP).max(OUTPUTS_MIN_WIDTH);
+    let column = |ui: &mut Ui, width: f32, body: &mut dyn FnMut(&mut Ui)| {
+        ui.vertical(|ui| {
+            ui.set_width(width);
+            ui.set_height(height);
+            body(ui);
+        });
+    };
+
     let mut list_action = None;
-    ui.vertical(|ui| {
-        ui.set_width(LIST_WIDTH);
-        ui.set_height(height);
-        list_action = preset_list(app, ui, builtins);
-    });
+    column(ui, LIST_WIDTH, &mut |ui| list_action = preset_list(app, ui, builtins));
     ui.separator();
-    ui.vertical(|ui| {
-        // Leave room for the input maps column and two separators.
-        ui.set_width((ui.available_width() - INPUTS_WIDTH - 5.0 * ui.spacing().item_spacing.x - 4.0).max(200.0));
-        ui.set_height(height);
-        outputs(app, ui);
-    });
+    column(ui, outputs_width, &mut |ui| outputs(app, ui));
     ui.separator();
-    ui.vertical(|ui| {
-        ui.set_width(INPUTS_WIDTH);
-        ui.set_height(height);
-        input_maps(ui);
-    });
+    column(ui, INPUTS_WIDTH, &mut input_maps);
+    ui.separator();
+    column(ui, MESH_WIDTH, &mut mesh_and_converted_maps);
     if let Some(a) = list_action {
         apply(app, ui.ctx(), a);
     }
@@ -220,41 +248,41 @@ fn preset_list(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[ExportPreset]
     let mut act = None;
     let sel = app.ui.export.preset.clone();
     let user = app.ui.export.draft.is_some();
-    ui.label(caption(tr("Output templates")));
     ui.horizontal(|ui| {
-        let tool = |ui: &mut Ui, enabled: bool, icon: &str, tip: &str| ui.add_enabled_ui(enabled, |ui| icon_button(ui, icon, tip, false, ICON)).inner.clicked();
-        if tool(ui, true, ic::PLUS, tr("New template")) {
-            act = Some(ListAction::New);
-        }
-        if tool(ui, true, ic::COPY, tr("Duplicate the selected template")) {
-            act = Some(ListAction::Duplicate);
-        }
-        if tool(ui, user, ic::PENCIL_SIMPLE, tr("Rename the selected template")) {
-            act = Some(ListAction::StartRename(sel.clone()));
-        }
-        if tool(ui, user, ic::TRASH, tr("Delete the selected template")) {
-            act = Some(ListAction::Remove);
-        }
-        ui.separator();
-        if tool(ui, true, ic::DOWNLOAD_SIMPLE, tr("Import a template (.json)")) {
-            act = Some(ListAction::Import);
-        }
-        if tool(ui, true, ic::UPLOAD_SIMPLE, tr("Export the selected template (.json)")) {
-            act = Some(ListAction::Export);
-        }
+        ui.label(caption(tr("Presets")));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let tool =
+                |ui: &mut Ui, enabled: bool, icon: &str, tip: &str| ui.add_enabled_ui(enabled, |ui| icon_button(ui, icon, tip, false, ICON)).inner.clicked();
+            if tool(ui, true, ic::PLUS, tr("New template")) {
+                act = Some(ListAction::New);
+            }
+            if tool(ui, user, ic::MINUS, tr("Delete the selected template")) {
+                act = Some(ListAction::Remove);
+            }
+            if tool(ui, true, ic::COPY, tr("Duplicate the selected template")) {
+                act = Some(ListAction::Duplicate);
+            }
+            if tool(ui, true, ic::UPLOAD_SIMPLE, tr("Export the selected template (.json)")) {
+                act = Some(ListAction::Export);
+            }
+            if tool(ui, true, ic::DOWNLOAD_SIMPLE, tr("Import a template (.json)")) {
+                act = Some(ListAction::Import);
+            }
+        });
     });
     ui.add_space(2.0);
     let names: Vec<String> = app.session.export_presets.list.iter().map(|p| p.name.clone()).collect();
     egui::ScrollArea::vertical().id_salt("exp_presets").auto_shrink([false; 2]).show(ui, |ui| {
         for p in builtins {
-            let r =
-                ui.selectable_label(p.name == sel, format!("{}  {}", ic::LOCK_SIMPLE, p.name)).on_hover_text(tr("Built-in (read-only): duplicate it to edit"));
+            let r = preset_row(ui, ic::FILE_LOCK, &p.name, p.name == sel).on_hover_text(tr("Built-in (read-only): duplicate it to edit"));
             if r.clicked() {
                 act = Some(ListAction::Select(p.name.clone()));
             }
-        }
-        if !names.is_empty() {
-            ui.separator();
+            r.context_menu(|ui| {
+                if ui.button(tr("Duplicate")).clicked() {
+                    act = Some(ListAction::DuplicateNamed(p.name.clone()));
+                }
+            });
         }
         for name in names {
             match app.ui.export.renaming.as_mut().filter(|_| name == sel) {
@@ -265,12 +293,23 @@ fn preset_list(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[ExportPreset]
                     }
                 }
                 None => {
-                    let r = ui.selectable_label(name == sel, format!("{}  {name}", ic::USER)).on_hover_text(tr("Double-click to rename"));
+                    let r = preset_row(ui, ic::FILE_TEXT, &name, name == sel).on_hover_text(tr("Double-click to rename"));
                     if r.double_clicked() {
-                        act = Some(ListAction::StartRename(name));
+                        act = Some(ListAction::StartRename(name.clone()));
                     } else if r.clicked() {
-                        act = Some(ListAction::Select(name));
+                        act = Some(ListAction::Select(name.clone()));
                     }
+                    r.context_menu(|ui| {
+                        if ui.button(tr("Rename")).clicked() {
+                            act = Some(ListAction::StartRename(name.clone()));
+                        }
+                        if ui.button(tr("Duplicate")).clicked() {
+                            act = Some(ListAction::DuplicateNamed(name.clone()));
+                        }
+                        if ui.button(tr("Remove")).clicked() {
+                            act = Some(ListAction::RemoveNamed(name.clone()));
+                        }
+                    });
                 }
             }
         }
@@ -284,6 +323,14 @@ fn apply(app: &mut TextureCraftApp, ctx: &egui::Context, act: ListAction) {
         ListAction::Select(name) => app.ui.export.preset = name,
         ListAction::New => {
             save_new(app, &ExportPreset { name: tr("New template").into(), maps: Vec::new() });
+        }
+        ListAction::DuplicateNamed(name) => {
+            app.ui.export.preset = name;
+            apply(app, ctx, ListAction::Duplicate);
+        }
+        ListAction::RemoveNamed(name) => {
+            app.ui.export.preset = name;
+            apply(app, ctx, ListAction::Remove);
         }
         ListAction::Duplicate => {
             if let Some(p) = selected(app) {
@@ -449,12 +496,17 @@ fn outputs(app: &mut TextureCraftApp, ui: &mut Ui) {
     };
     let preview = preview_names(app, &preset);
     let mut action = None;
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(&preset.name).strong().color(tk.text_strong));
-        if !editable {
-            ui.label(RichText::new(ic::LOCK_SIMPLE).color(tk.text_dim)).on_hover_text(tr("Built-in templates are read-only: duplicate one to edit it"));
-        }
+    egui::Frame::new().fill(tk.row).inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr("Current preset:")).strong().color(tk.text_strong));
+            ui.label(&preset.name);
+            if !editable {
+                ui.label(RichText::new(ic::LOCK_SIMPLE).color(tk.text_dim)).on_hover_text(tr("Built-in templates are read-only: duplicate one to edit it"));
+            }
+        });
     });
+    ui.add_space(4.0);
     ui.add_enabled_ui(editable, |ui| {
         ui.horizontal(|ui| {
             ui.label(RichText::new(tr("Add output")).color(tk.text_dim));
@@ -470,7 +522,9 @@ fn outputs(app: &mut TextureCraftApp, ui: &mut Ui) {
     }
     let mut changed = false;
     let n = preset.maps.len();
-    egui::ScrollArea::vertical().id_salt("exp_outputs").auto_shrink([false; 2]).show(ui, |ui| {
+    let exported = preview.as_ref().map(|names| names.iter().flatten().count()).unwrap_or(0);
+    let card_width = ui.available_width() - SCROLL_BAR_ROOM;
+    egui::ScrollArea::vertical().id_salt("exp_outputs").max_height(ui.available_height() - FOOTER_HEIGHT).auto_shrink([false; 2]).show(ui, |ui| {
         if n == 0 {
             ui.add_space(8.0);
             ui.label(RichText::new(tr("No outputs yet: add one above, then drag input maps onto its channels.")).color(tk.text_dim));
@@ -478,10 +532,15 @@ fn outputs(app: &mut TextureCraftApp, ui: &mut Ui) {
         ui.add_enabled_ui(editable, |ui| {
             for (mi, map) in preset.maps.iter_mut().enumerate() {
                 let file = preview.as_ref().ok().and_then(|v| v.get(mi).cloned().flatten());
-                changed |= output_card(ui, mi, n, map, file.as_deref(), &mut action);
+                changed |= output_card(ui, card_width, mi, n, map, file.as_deref(), &mut action);
                 ui.add_space(4.0);
             }
         });
+    });
+    ui.label(RichText::new(tr("Drag maps from the columns on the right onto an output's channels")).size(11.0).color(tk.text_dim));
+    egui::Frame::new().fill(tk.row).inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(trf("{n} output maps will be exported", &[("n", &exported)]));
     });
     if !editable {
         return;
@@ -527,17 +586,23 @@ fn preview_names(app: &mut TextureCraftApp, preset: &ExportPreset) -> Result<Vec
 }
 
 /// One output file: name template, format, bit depth, layout and its channel sources.
-fn output_card(ui: &mut Ui, mi: usize, n: usize, map: &mut MapSpec, file: Option<&str>, action: &mut Option<MapAction>) -> bool {
+/// `width` is the card's outer width, the same for every card (a card sized from what the previous one left would creep wider)
+fn output_card(ui: &mut Ui, width: f32, mi: usize, n: usize, map: &mut MapSpec, file: Option<&str>, action: &mut Option<MapAction>) -> bool {
     let tk = Tokens::get(ui.ctx());
     let mut changed = false;
-    egui::Frame::new().fill(tk.row).corner_radius(tk.radius).inner_margin(6.0).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            let width = ui.available_width() - 4.0 * (ICON + ui.spacing().item_spacing.x);
-            changed |= ui
-                .add(egui::TextEdit::singleline(&mut map.file).font(egui::TextStyle::Monospace).desired_width(width))
-                .on_hover_text(tr("File name without extension; variables insert names"))
-                .changed();
+    egui::Frame::new().fill(tk.row).corner_radius(tk.radius).inner_margin(CARD_MARGIN).show(ui, |ui| {
+        ui.set_width(width - 2.0 * CARD_MARGIN);
+        // From the right: the buttons, then the file name takes what's left
+        ui.allocate_ui_with_layout(vec2(ui.available_width(), ui.spacing().interact_size.y), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if icon_button(ui, ic::TRASH, tr("Remove this output"), false, ICON).clicked() {
+                *action = Some(MapAction::Remove(mi));
+            }
+            if ui.add_enabled_ui(mi + 1 < n, |ui| icon_button(ui, ic::ARROW_DOWN, tr("Move down"), false, ICON)).inner.clicked() {
+                *action = Some(MapAction::Down(mi));
+            }
+            if ui.add_enabled_ui(mi > 0, |ui| icon_button(ui, ic::ARROW_UP, tr("Move up"), false, ICON)).inner.clicked() {
+                *action = Some(MapAction::Up(mi));
+            }
             ui.menu_button(RichText::new(ic::CURRENCY_DOLLAR).size(13.0), |ui| {
                 for (token, what) in FILE_TOKENS {
                     if ui.button(RichText::new(token).monospace()).on_hover_text(what).clicked() {
@@ -549,15 +614,10 @@ fn output_card(ui: &mut Ui, mi: usize, n: usize, map: &mut MapSpec, file: Option
             })
             .response
             .on_hover_text(tr("Insert a variable"));
-            if ui.add_enabled_ui(mi > 0, |ui| icon_button(ui, ic::ARROW_UP, tr("Move up"), false, ICON)).inner.clicked() {
-                *action = Some(MapAction::Up(mi));
-            }
-            if ui.add_enabled_ui(mi + 1 < n, |ui| icon_button(ui, ic::ARROW_DOWN, tr("Move down"), false, ICON)).inner.clicked() {
-                *action = Some(MapAction::Down(mi));
-            }
-            if icon_button(ui, ic::TRASH, tr("Remove this output"), false, ICON).clicked() {
-                *action = Some(MapAction::Remove(mi));
-            }
+            changed |= ui
+                .add(egui::TextEdit::singleline(&mut map.file).font(egui::TextStyle::Monospace).desired_width(ui.available_width()))
+                .on_hover_text(tr("File name without extension; variables insert names"))
+                .changed();
         });
         ui.horizontal(|ui| {
             egui::ComboBox::from_id_salt(("exp_map_fmt", mi)).width(56.0).selected_text(map.format.extension()).show_ui(ui, |ui| {
@@ -648,32 +708,85 @@ fn channel_slots(ui: &mut Ui, mi: usize, map: &mut MapSpec) -> bool {
     changed
 }
 
-/// Input maps to drag onto output channels.
+/// A preset in the list: its icon and name, highlighted when selected
+fn preset_row(ui: &mut Ui, icon: &str, name: &str, selected: bool) -> egui::Response {
+    let tk = Tokens::get(ui.ctx());
+    let (rect, row) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), egui::Sense::click());
+    row.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, name));
+    if row.hovered() {
+        ui.painter().rect_filled(rect, 0.0, tk.row_hover);
+    }
+    let color = if selected { tk.accent } else { tk.text };
+    let icon_at = egui::pos2(rect.left() + ROW_INDENT / 2.0, rect.center().y);
+    ui.painter().text(icon_at, egui::Align2::LEFT_CENTER, icon, egui::FontId::proportional(13.0), color);
+    let galley = crate::widgets::elided(ui.painter(), name, 12.5, color, rect.width() - 2.0 * ROW_INDENT);
+    ui.painter().galley(egui::pos2(rect.left() + 1.5 * ROW_INDENT, rect.center().y - galley.size().y / 2.0), galley, color);
+
+    row
+}
+
+/// An input map to drag onto an output channel: a full-width row
+fn palette_item(ui: &mut Ui, label: &str, source: &SourceRef, color: egui::Color32) {
+    let tk = Tokens::get(ui.ctx());
+    let (rect, item) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), egui::Sense::drag());
+    item.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    let item = item.on_hover_cursor(egui::CursorIcon::Grab);
+    ui.painter().rect_filled(rect.shrink2(vec2(0.0, 1.0)), 0.0, if item.hovered() { tk.row_hover } else { tk.row });
+    let galley = crate::widgets::elided(ui.painter(), label, 12.0, color, rect.width() - 2.0 * ROW_INDENT);
+    ui.painter().galley(egui::pos2(rect.left() + ROW_INDENT, rect.center().y - galley.size().y / 2.0), galley, color);
+
+    item.dnd_set_drag_payload(source.clone());
+    if item.dragged()
+        && let Some(at) = item.interact_pointer_pos()
+    {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        egui::Area::new(item.id.with("drag")).order(egui::Order::Tooltip).fixed_pos(at + vec2(8.0, 8.0)).show(ui.ctx(), |ui| chip(ui, label, true));
+    }
+}
+
+/// A group name in the palettes
+fn palette_group(ui: &mut Ui, name: &str) {
+    let tk = Tokens::get(ui.ctx());
+    ui.add_space(2.0);
+    ui.label(RichText::new(name).italics().size(12.0).color(tk.text));
+}
+
+/// The Input maps column: texture set channels by lobe
 fn input_maps(ui: &mut Ui) {
     let tk = Tokens::get(ui.ctx());
     ui.label(caption(tr("Input maps")));
-    ui.label(RichText::new(tr("Drag onto an output channel")).size(11.0).color(tk.text_dim));
     egui::ScrollArea::vertical().id_salt("exp_inputs").auto_shrink([false; 2]).show(ui, |ui| {
-        for (gi, (group, inputs)) in PALETTE.iter().enumerate() {
-            ui.add_space(4.0);
-            ui.label(RichText::new(tr(group)).strong().size(11.0));
-            ui.horizontal_wrapped(|ui| {
-                for (k, (label, s)) in inputs.iter().enumerate() {
-                    let label = tr(label);
-                    // Not `dnd_drag_source`: its scope doesn't wrap inside `horizontal_wrapped`.
-                    let r = chip(ui, label, false).interact(egui::Sense::drag()).on_hover_cursor(egui::CursorIcon::Grab);
-                    r.dnd_set_drag_payload(s.clone());
-                    if r.dragged()
-                        && let Some(at) = r.interact_pointer_pos()
-                    {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                        egui::Area::new(egui::Id::unique(("exp_input_drag", gi, k)))
-                            .order(egui::Order::Tooltip)
-                            .fixed_pos(at + vec2(8.0, 8.0))
-                            .show(ui.ctx(), |ui| chip(ui, label, true));
-                    }
-                }
-            });
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for (group, channels) in INPUT_GROUPS {
+            palette_group(ui, tr(group));
+            for &channel in channels {
+                palette_item(ui, tr(channel.label()), &SourceRef::Channel { channel, component: 0 }, tk.text);
+            }
+        }
+    });
+}
+
+/// The Mesh maps column above the Converted maps (with the constants)
+fn mesh_and_converted_maps(ui: &mut Ui) {
+    let tk = Tokens::get(ui.ctx());
+    let half = ui.available_height() / 2.0;
+    ui.label(caption(tr("Mesh maps")));
+    egui::ScrollArea::vertical().id_salt("exp_mesh_maps").max_height(half - ROW_HEIGHT).auto_shrink([false; 2]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for &map in BakedMap::ALL.iter() {
+            palette_item(ui, crate::i18n::baked_map_label(map), &SourceRef::Baked { map, component: 0 }, tk.text);
+        }
+    });
+    ui.separator();
+    ui.label(caption(tr("Converted maps")));
+    egui::ScrollArea::vertical().id_salt("exp_converted_maps").auto_shrink([false; 2]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for &map in VirtualMap::ALL.iter() {
+            palette_item(ui, tr(map.label()), &SourceRef::Virtual { map, component: 0 }, tk.warning);
+        }
+        palette_group(ui, tr("Constants"));
+        for (label, value) in [(n_("Black"), 0.0), (n_("Gray 50%"), 0.5), (n_("White"), 1.0)] {
+            palette_item(ui, tr(label), &SourceRef::Constant(value), tk.text);
         }
     });
 }

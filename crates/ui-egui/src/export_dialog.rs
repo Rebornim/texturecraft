@@ -84,11 +84,7 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
         ui.allocate_ui_with_layout(vec2(ui.available_width(), body_height), egui::Layout::left_to_right(egui::Align::Min), |ui| {
             ui.set_height(body_height);
             if app.ui.export.tab == 1 {
-                // Its columns can want more than the window's width: they scroll instead of widening the window
-                egui::ScrollArea::horizontal()
-                    .id_salt("exp_templates_tab")
-                    .auto_shrink([false; 2])
-                    .show(ui, |ui| crate::export_templates::tab(app, ui, &presets));
+                crate::export_templates::tab(app, ui, &presets);
                 return;
             }
             ui.vertical(|ui| export_set_list(app, ui));

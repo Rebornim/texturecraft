@@ -14,6 +14,7 @@ pub mod curvature_sizes;
 pub mod display;
 pub mod eval;
 pub mod pattern;
+mod pattern_context;
 pub mod store;
 pub mod thumb;
 mod tile_pattern;
@@ -25,5 +26,6 @@ pub use eval::{
     Composite, Inputs, PaintTarget, Stencil, StrokePreview, all_tiles, composite_tiles, composite_tiles_cached, covered_tiles, effect_histogram, flatten_layer,
     mask_at, mask_image, pad_tiles,
 };
+pub use pattern_context::PatternContext;
 pub use store::{BakedMaps, ImageRes, ImageStore, PixelStore};
 pub use thumb::{THUMB_TEXELS, ThumbImage, ThumbTarget};

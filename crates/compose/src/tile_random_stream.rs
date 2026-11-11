@@ -18,6 +18,7 @@ pub(crate) enum TileRandomStream {
     SizeY,
     IntersticeX,
     IntersticeY,
+    Input,
 }
 
 /// Odd multipliers spreading the seed, the stream and the index over the hash, and its start (the golden ratio's and xxHash32's primes)

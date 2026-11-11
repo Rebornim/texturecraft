@@ -185,3 +185,36 @@ fn removing_unused_resources_keeps_the_images_a_tile_generator_reads() {
     assert!(session.doc.resources.contains_key(&background), "the background image is still read");
     assert!(!session.doc.resources.contains_key(&unused));
 }
+
+/// The composited base color of every texel of the texture set
+fn base_colors(session: &mut Session) -> Vec<f32> {
+    session.update();
+    let composite = &session.caches[0].composite;
+    let size = composite.resolution;
+    (0..size * size).map(|texel| composite.value(Channel::BaseColor, texel % size, texel / size)[0]).collect()
+}
+
+#[test]
+fn the_compositor_draws_a_tile_generators_image_input() {
+    let mut session = session();
+    let input = import_gray(&mut session, "plate.png");
+    tile_fill(&mut session);
+    // One tile with no gap: the image covers the whole texture
+    execute(&mut session, "layer.fill.set", &json!({"channel": "baseColor", "tile": {"shape": "Image", "inputs": [input], "amount": [1, 1]}})).unwrap();
+
+    let colors = base_colors(&mut session);
+    let mid_gray = colors.iter().filter(|value| (**value - 0.5).abs() < 0.05).count();
+    assert!(mid_gray > colors.len() / 2, "the image's gray reaches the texture, not an empty shape: {mid_gray} of {}", colors.len());
+}
+
+#[test]
+fn a_coarser_pattern_resolution_changes_the_composite() {
+    let mut session = session();
+    tile_fill(&mut session);
+    let exact = base_colors(&mut session);
+
+    execute(&mut session, "layer.fill.set", &json!({"channel": "baseColor", "resolutionFactor": -3})).unwrap();
+    let coarse = base_colors(&mut session);
+    let changed = exact.iter().zip(&coarse).filter(|(exact, coarse)| (**exact - **coarse).abs() > 0.05).count();
+    assert!(changed > 0, "an eighth of the resolution blurs the bricks' bevels");
+}

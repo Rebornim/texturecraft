@@ -2,9 +2,10 @@
 
 use std::sync::LazyLock;
 
-use texturecraft_core::{TileBlending, TileGenerator, TileShape, TileSizeMode, TileSymmetry};
+use texturecraft_core::{TileBlending, TileGenerator, TileInputDistribution, TileShape, TileSizeMode, TileSymmetry};
 use texturecraft_geom::glam::Vec2;
 
+use crate::store::{ImageRes, ImageStore};
 use crate::tile_random_stream::TileRandomStream;
 
 /// The settings a Tile Generator pattern saved without its own reads
@@ -27,8 +28,6 @@ const WAVES_BASE_CYCLES: f32 = 1.5;
 const WAVES_SPECIFIC_CYCLES: f32 = 6.0;
 /// Narrower than this, a size or a bevel is none
 const EPSILON: f32 = 1e-6;
-/// Tiles a texel looks at, at most, along each axis (bounds the work of huge or far-moved shapes)
-const MAX_REACH: i32 = 16;
 
 fn smoothstep(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
@@ -82,7 +81,7 @@ fn shape(kind: TileShape, u: f32, v: f32, specific: f32) -> f32 {
             let distance = (u.abs() - half_length).max(0.0).hypot(v);
             (1.0 - (distance / CAPSULE_RADIUS).powi(2)).clamp(0.0, 1.0)
         }
-        // The image shape reads the pattern's input images, which the plane alone cannot: nothing until they are given
+        // The image shape draws an input image instead (see `pattern`): without one it is empty
         TileShape::Image => 0.0,
     }
 }
@@ -96,12 +95,11 @@ fn unrotate(point: Vec2, turns: f32) -> Vec2 {
     Vec2::new(cos * point.x + sin * point.y, -sin * point.x + cos * point.y)
 }
 
-/// The pattern section: tile-local (u, v) through the shape's tiling, angle, scale, size and 45° turn, then the shape
-fn pattern(tile: &TileGenerator, local: Vec2) -> f32 {
+/// The pattern section: tile-local (u, v) through the shape's tiling, angle, scale, size and 45° turn, then the shape (`input` for the image shape)
+fn pattern(tile: &TileGenerator, mut local: Vec2, input: Option<&ImageRes>) -> f32 {
     if local.x.abs() > 1.0 || local.y.abs() > 1.0 {
         return 0.0;
     }
-    let mut local = local;
     if tile.shape_tiling > 1 {
         // The shape repeats tiling × tiling times, but one copy shows: the one at index ceil(tiling / 2) − 1 from the top left
         let count = tile.shape_tiling as f32;
@@ -121,8 +119,26 @@ fn pattern(tile: &TileGenerator, local: Vec2) -> f32 {
     if tile.shape_diagonal {
         local = unrotate(local, 0.125) * std::f32::consts::SQRT_2;
     }
+    if tile.shape == TileShape::Image {
+        return input.map_or(0.0, |image| image_shape(image, local));
+    }
+
     let samples = Vec2::new(tile.shape_resolution[0] as f32, tile.shape_resolution[1] as f32);
     sampled_shape(tile, local, samples)
+}
+
+/// An input image over the shape's square, as gray (the average of its color)
+fn image_shape(image: &ImageRes, local: Vec2) -> f32 {
+    if local.x.abs() > 1.0 || local.y.abs() > 1.0 {
+        return 0.0;
+    }
+    let at = (local + 1.0) * 0.5;
+    gray(image.sample(at.x, at.y))
+}
+
+/// The gray of an image texel: the average of its color
+fn gray([red, green, blue, _]: [f32; 4]) -> f32 {
+    ((red + green + blue) / 3.0).clamp(0.0, 1.0)
 }
 
 /// The shape read from an image of `samples` texels over its square, bilinearly, as the shape is drawn at its own resolution
@@ -150,8 +166,14 @@ fn wrap(delta: f32, span: f32) -> f32 {
     delta - (delta / span).round() * span
 }
 
-/// What one tile gives a texel (its shape times its luminance), or None when it is hidden or does not reach it
-fn tile_value(tile: &TileGenerator, seed: u32, (column, row): (i32, i32), (columns, rows): (i32, i32), point: Vec2) -> Option<f32> {
+/// What one tile gives a texel (its shape times its luminance), or None when hidden or out of reach; `inputs` are its input images
+fn tile_value(
+    tile: &TileGenerator,
+    seed: u32,
+    (column, row): (i32, i32),
+    (columns, rows): (i32, i32),
+    (point, inputs): (Vec2, &[Option<&ImageRes>]),
+) -> Option<f32> {
     let total = columns * rows;
     let number = column * rows + row;
     let index = (if tile.reverse_order { total - 1 - number } else { number }) as u32;
@@ -192,7 +214,12 @@ fn tile_value(tile: &TileGenerator, seed: u32, (column, row): (i32, i32), (colum
         local.y = -local.y;
     }
 
-    let value = pattern(tile, local);
+    let input = match tile.input_distribution {
+        _ if inputs.is_empty() => None,
+        TileInputDistribution::Random => inputs.get((TileRandomStream::Input.draw(seed, index) * inputs.len() as f32) as usize).copied().flatten(),
+        TileInputDistribution::ByNumber => inputs.get(number as usize % inputs.len()).copied().flatten(),
+    };
+    let value = pattern(tile, local, input);
     if value <= 0.0 {
         return None;
     }
@@ -268,13 +295,12 @@ fn reach(tile: &TileGenerator, counts: Vec2) -> Vec2 {
 
 /// The cells along an axis of `count` whose centers can be within `reach` of `position` (in cells): each once, at most `count`
 fn near(position: f32, reach: f32, count: i32) -> impl Iterator<Item = i32> {
-    let first = (position - reach - 0.5).floor() as i32;
-    let last = (position + reach - 0.5).ceil() as i32;
-    let span = last - first + 1;
-    let kept = span.clamp(1, count.min(MAX_REACH * 2 + 1));
-    // A capped span keeps the cells nearest the texel
-    let first = first + (span - kept) / 2;
-    (first..first + kept).map(move |index| index.rem_euclid(count))
+    let first = (position - reach - 0.5).floor();
+    let last = (position + reach - 0.5).ceil();
+    // A reach past the whole grid visits each cell once; float math keeps a hostile reach from overflowing
+    let span = (last - first + 1.0).min(count as f32).max(1.0) as i32;
+    let first = first as i32;
+    (first..first.saturating_add(span)).map(move |index| index.rem_euclid(count))
 }
 
 /// The shift along its line of line `line` (a row, or a column with a vertical offset), in cells
@@ -282,14 +308,25 @@ fn line_shift(tile: &TileGenerator, line: i32) -> f32 {
     tile.offset * line as f32 + tile.offset_random * TileRandomStream::Offset.draw(tile.offset_random_seed, line as u32)
 }
 
-/// The pattern's value at `point` of its plane (one unit = the whole grid, repeating)
-pub(crate) fn value(tile: &TileGenerator, point: Vec2, seed: u32) -> f32 {
-    let tile = tile.clamped_without_images();
-    let (columns, rows) = (tile.amount[0] as i32, tile.amount[1] as i32);
+/// The pattern's value at `point` of its plane (one unit = the whole grid, repeating); `images` holds the images its inputs name
+pub(crate) fn value(tile: &TileGenerator, point: Vec2, seed: u32, images: Option<&ImageStore>) -> f32 {
+    let image = |name: &str| images.and_then(|images| images.get(name)).map(|image| &**image);
+    let mut slots: [Option<&ImageRes>; TileGenerator::MAX_INPUTS] = [None; TileGenerator::MAX_INPUTS];
+    let count = tile.inputs.len().min(TileGenerator::MAX_INPUTS);
+    if tile.shape == TileShape::Image {
+        for (slot, name) in slots.iter_mut().zip(&tile.inputs) {
+            *slot = image(name);
+        }
+    }
+    let inputs = &slots[..count];
+    let background = tile.background_image.as_deref().and_then(image);
+
+    // Commands and saved projects keep the settings in range; the counts are guarded as they size the loops
+    let (columns, rows) = (tile.amount[0].clamp(1, *TileGenerator::AMOUNT.end()) as i32, tile.amount[1].clamp(1, *TileGenerator::AMOUNT.end()) as i32);
     let counts = Vec2::new(columns as f32, rows as f32);
     let point = Vec2::new(point.x.rem_euclid(1.0), point.y.rem_euclid(1.0));
     let cell = (point - Vec2::from(tile.global_offset)) * counts;
-    let reach = reach(&tile, counts);
+    let reach = reach(tile, counts);
 
     let mut sum = 0.0f32;
     let mut colored = 0.0f32;
@@ -311,30 +348,33 @@ pub(crate) fn value(tile: &TileGenerator, point: Vec2, seed: u32) -> f32 {
     // Lines (rows, or columns with a vertical offset) shift their tiles along them, so the tiles near the texel are found per line
     if tile.vertical_offset {
         for column in near(cell.x, reach.x, columns) {
-            for row in near(cell.y - line_shift(&tile, column), reach.y, rows) {
-                if let Some(value) = tile_value(&tile, seed, (column, row), (columns, rows), point) {
+            for row in near(cell.y - line_shift(tile, column), reach.y, rows) {
+                if let Some(value) = tile_value(tile, seed, (column, row), (columns, rows), (point, inputs)) {
                     add(value);
                 }
             }
         }
     } else {
         for row in near(cell.y, reach.y, rows) {
-            for column in near(cell.x - line_shift(&tile, row), reach.x, columns) {
-                if let Some(value) = tile_value(&tile, seed, (column, row), (columns, rows), point) {
+            for column in near(cell.x - line_shift(tile, row), reach.x, columns) {
+                if let Some(value) = tile_value(tile, seed, (column, row), (columns, rows), (point, inputs)) {
                     add(value);
                 }
             }
         }
     }
-    finish(&tile, sum, colored)
+    let background = background.map_or(tile.background, |image| gray(image.sample(point.x, point.y)));
+    finish(tile, sum, colored, background)
 }
 
-/// The combined tiles over the background, through the pattern's opacity and its position/contrast window
-fn finish(tile: &TileGenerator, sum: f32, colored: f32) -> f32 {
+/// The combined tiles over `background`, through the pattern's opacity and its position/contrast window
+fn finish(tile: &TileGenerator, sum: f32, colored: f32, background: f32) -> f32 {
     let alpha = sum.clamp(0.0, 1.0) * tile.opacity;
     let color = colored.clamp(0.0, 1.0) * tile.opacity;
-    let value = (tile.background * (1.0 - alpha) + color).clamp(0.0, 1.0);
-    window(value, tile.position, tile.contrast)
+    let value = (background * (1.0 - alpha) + color).clamp(0.0, 1.0);
+    let windowed = window(value, tile.position, tile.contrast);
+    // Out-of-range settings drawn as they are must not leave a non-number in the texture
+    if windowed.is_finite() { windowed } else { 0.0 }
 }
 
 /// The position/contrast window: position picks the input range stretched to 0..1 (0.5 keeps it), contrast narrows it around its middle
@@ -354,7 +394,7 @@ mod tests {
     use super::*;
 
     fn at(tile: &TileGenerator, x: f32, y: f32) -> f32 {
-        value(tile, Vec2::new(x, y), 1)
+        value(tile, Vec2::new(x, y), 1, None)
     }
 
     /// Bell shapes peak only at their tile's center, so the brightest texel of a cell shows where its tile is
@@ -425,6 +465,47 @@ mod tests {
                 assert_eq!(shape(shape_kind, 1.2, 0.0, specific), 0.0);
             }
         }
+    }
+
+    /// An image `size` texels wide whose left half is `left` and right half `right`
+    fn halves(left: f32, right: f32) -> std::sync::Arc<ImageRes> {
+        let size = 8;
+        let rgba = (0..size * size).map(|texel| if texel % size < size / 2 { [left, left, left, 1.0] } else { [right, right, right, 1.0] }).collect();
+        std::sync::Arc::new(ImageRes { width: size as u32, height: size as u32, rgba, srgb: false })
+    }
+
+    #[test]
+    fn the_image_shape_draws_its_inputs_in_turn_by_pattern_number() {
+        let images: ImageStore = [("dark".to_string(), halves(0.2, 0.2)), ("bright".to_string(), halves(0.9, 0.9))].into();
+        let tile = TileGenerator {
+            shape: TileShape::Image,
+            amount: [2, 1],
+            inputs: vec!["dark".into(), "bright".into()],
+            input_distribution: TileInputDistribution::ByNumber,
+            ..TileGenerator::default()
+        };
+        // Tile 0 (left) draws the first input, tile 1 the second
+        let left = value(&tile, Vec2::new(0.25, 0.5), 1, Some(&images));
+        let right = value(&tile, Vec2::new(0.75, 0.5), 1, Some(&images));
+        assert!((left - 0.2).abs() < 0.01 && (right - 0.9).abs() < 0.01, "{left} {right}");
+        assert_eq!(value(&tile, Vec2::new(0.25, 0.5), 1, None), 0.0, "missing images draw nothing");
+    }
+
+    #[test]
+    fn an_image_input_keeps_its_orientation_in_the_tile() {
+        let images: ImageStore = [("halves".to_string(), halves(0.0, 1.0))].into();
+        let tile = TileGenerator { shape: TileShape::Image, amount: [1, 1], inputs: vec!["halves".into()], ..TileGenerator::default() };
+        assert!(value(&tile, Vec2::new(0.3, 0.5), 1, Some(&images)) < 0.05, "the image's left half is on the tile's left");
+        assert!(value(&tile, Vec2::new(0.7, 0.5), 1, Some(&images)) > 0.95);
+    }
+
+    #[test]
+    fn the_background_image_shows_between_the_shapes() {
+        let images: ImageStore = [("ground".to_string(), halves(0.4, 0.4))].into();
+        let tile = TileGenerator { background_image: Some("ground".into()), interstice: [0.5, 0.5], ..bells([2, 2]) };
+        // Between the bells only the background is left
+        assert!((value(&tile, Vec2::new(0.0, 0.0), 1, Some(&images)) - 0.4).abs() < 0.01);
+        assert_eq!(value(&tile, Vec2::new(0.0, 0.0), 1, None), 0.0, "without the image the background value stays");
     }
 
     #[test]

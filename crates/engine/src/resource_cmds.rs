@@ -42,7 +42,7 @@ pub(crate) const MAX_BYTES: usize = 512 << 20;
 pub(crate) const EXR_SIGNATURE: &[u8] = &[0x76, 0x2f, 0x31, 0x01];
 
 pub(crate) fn decoded(d: texturecraft_formats::DecodedImage) -> Arc<ImageRes> {
-    Arc::new(ImageRes { width: d.width, height: d.height, rgba: d.rgba, srgb: d.srgb })
+    Arc::new(ImageRes::new(d.width, d.height, d.rgba, d.srgb))
 }
 
 impl Session {

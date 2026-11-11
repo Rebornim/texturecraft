@@ -211,7 +211,7 @@ impl Builder<'_> {
         let id = self.p.alloc_id();
         let enabled: Vec<Channel> = sources.iter().map(|(c, _)| *c).filter(|c| self.channels.contains(c)).collect();
         let projection = Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3] };
-        Layer::new(id, name, LayerKind::Fill(Fill { sources: sources.into_iter().collect(), projection, link: None }), &enabled)
+        Layer::new(id, name, LayerKind::Fill(Fill { sources: sources.into_iter().collect(), projection, link: None, sampling: Default::default() }), &enabled)
     }
 
     /// A fill masked by smart mask preset `mask` (inverted: present where the preset is not).
@@ -783,7 +783,12 @@ pub fn brush_values(id: &str) -> Option<Vec<(Channel, [f32; 3])>> {
 pub(crate) fn brush_fill(id: LayerId, sources: Vec<(Channel, Source)>, scale: f32) -> Layer {
     let channels: Vec<Channel> = sources.iter().map(|(channel, _)| *channel).collect();
     let projection = Projection::Triplanar { scale, sharpness: 8.0, offset: [0.0; 3] };
-    Layer::new(id, "Brush material", LayerKind::Fill(Fill { sources: sources.into_iter().collect(), projection, link: None }), &channels)
+    Layer::new(
+        id,
+        "Brush material",
+        LayerKind::Fill(Fill { sources: sources.into_iter().collect(), projection, sampling: Default::default(), link: None }),
+        &channels,
+    )
 }
 
 /// Where [`apply_at`] puts a material.

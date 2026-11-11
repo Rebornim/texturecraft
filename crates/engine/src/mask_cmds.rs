@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use texturecraft_core::{
     BakedMap, BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask,
-    MaskBackground, MicroDetail, Procedural, ProceduralKind, Project, Source,
+    MaskBackground, MicroDetail, Procedural, ProceduralKind, Project, Sampling, Source,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
@@ -40,7 +40,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add fill",
             ["Layers", "Effects"],
             None,
-            "{layer?, target?: mask|content, name?, mask: value?: 0..1 | image?: resource name | procedural?: kind, scale?, seed?, contrast?, balance?, invert?, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3, tile?: {Tile Generator settings in camelCase, as project.inspect shows them}, tileDefaults?: true | anchor?: anchor effect id, anchorChannel?: channel (height); content: color? ([r,g,b] linear or \"#rrggbb\" sRGB), roughness?, metallic?, height?, opacity? (default: every layer channel); projection?}",
+            "{layer?, target?: mask|content, name?, mask: value?: 0..1 | image?: resource name | procedural?: kind, scale?, seed?, contrast?, balance?, invert?, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3, tile?: {Tile Generator settings in camelCase, as project.inspect shows them}, tileDefaults?: true | anchor?: anchor effect id, anchorChannel?: channel (height); content: color? ([r,g,b] linear or \"#rrggbb\" sRGB), roughness?, metallic?, height?, opacity? (default: every layer channel); projection?; filtering?: bilinearHq|bilinearSharp|nearest}",
             has_layer,
             add_fill
         ),
@@ -295,11 +295,13 @@ fn image_source(session: &Session, command: &str, name: &str) -> Result<Source> 
 
 fn add_fill(session: &mut Session, params: &Value) -> Result<Value> {
     const CMD: &str = "effect.add.fill";
+    let sampling = crate::layer_cmds::sampling_from(params, CMD, Sampling::default())?;
     let blend = blend_param(CMD, params, "blend")?.unwrap_or(BlendMode::Normal);
     let layer = layer_param(session, CMD, params)?;
 
     if content_target(params, CMD)? {
         let mut fill = crate::layer_cmds::fill_from(CMD, params)?;
+        fill.sampling = sampling;
         if fill.sources.is_empty() {
             fill.sources = session.doc.project.layer(layer)?.channels.keys().map(|channel| (*channel, Source::uniform_of(*channel))).collect();
         }
@@ -329,7 +331,7 @@ fn add_fill(session: &mut Session, params: &Value) -> Result<Value> {
     let pattern_scale = matches!(source, Source::Procedural { .. }) && params.get("scale").is_some_and(Value::is_number);
     let projection = projection_from_fields(params, CMD, None, !pattern_scale)?;
 
-    push_effect(session, params, EffectKind::Fill { source, projection }, blend)
+    push_effect(session, params, EffectKind::Fill { source, projection, sampling }, blend)
 }
 
 /// Apply `params` to `generator`, using `command` in errors
@@ -667,7 +669,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
             // The swapped filter was built with the parameters already
             EffectKind::Filter(_) if swaps_filter => {}
             EffectKind::Filter(filter) => crate::filter_lib::apply(params, filter, CMD)?,
-            EffectKind::Fill { source, projection } => {
+            EffectKind::Fill { source, projection, .. } => {
                 // `uniform` picks the source, so it outranks settings that would edit the current pattern
                 let uniform = f32p(params, "uniform").filter(|_| strp(params, "procedural").is_none());
                 if let Some(anchor) = anchor {

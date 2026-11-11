@@ -11,6 +11,7 @@ mod closed_session;
 mod color_selection;
 mod content_effects;
 mod export_colour_space;
+mod fill_sampling;
 mod filter_swap;
 mod filters;
 mod frame_selection;

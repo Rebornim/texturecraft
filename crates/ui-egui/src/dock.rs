@@ -6,8 +6,8 @@ use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::compose::ThumbTarget;
 use texturecraft_engine::core::{
-    BakedMap, BlendMode, Channel, ChannelBlend, ChannelKind, Decal, DecalFlip, Effect, EffectKind, Fill, Filter, Layer, LayerId, LayerKind, LinkParam,
-    MaterialLink, Projection, Source,
+    BakedMap, BlendMode, Channel, ChannelBlend, ChannelKind, Decal, DecalFlip, Effect, EffectKind, Fill, Filter, Filtering, Layer, LayerId, LayerKind,
+    LinkParam, MaterialLink, Projection, Sampling, Source,
 };
 use texturecraft_engine::filter_lib::scalar_params;
 use texturecraft_engine::paint::alpha_params::MAX_ALPHA_CONTRAST;
@@ -16,7 +16,7 @@ use texturecraft_engine::{CloneFrom, StackTarget, Tool};
 
 use crate::TextureCraftApp;
 use crate::filter_slot::SLOT_HEIGHT;
-use crate::i18n::{n_, tr, trf};
+use crate::i18n::{filtering_label, n_, tr, trf};
 use crate::layer_panel::{effect_preview_size, effect_row_height, layer_preview_size, layer_row_height};
 use crate::shelf::{Asset, ShelfDrag};
 use crate::state::PropsTab;
@@ -1696,7 +1696,7 @@ mod image_menu_tests {
         // The menu reads decoded images; fixture bytes are never imported or decoded
         for index in 0..image_count {
             let name = format!("image-{index:04}.png");
-            let image = ImageRes { width: 32, height: 32, rgba: vec![[index as f32 / image_count as f32, 0.5, 0.25, 1.0]; 32 * 32], srgb: false };
+            let image = ImageRes::new(32, 32, vec![[index as f32 / image_count as f32, 0.5, 0.25, 1.0]; 32 * 32], false);
             session.doc.resources.insert(name.clone(), Arc::new(vec![0]));
             session.images.insert(name, Arc::new(image));
         }
@@ -2791,7 +2791,7 @@ fn fill_editor(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: &Value
     if let Projection::Decal(decal) = &fill.projection {
         decal_editor(app, ui, decal, base, reader);
     } else {
-        projection_editor(app, ui, &fill.projection, "layer.fill.projection", base, &salt);
+        projection_editor(app, ui, &fill.projection, Some(fill.sampling), "layer.fill.projection", base, &salt);
     }
 
     ui.add_space(FILL_MATERIAL_GAP);
@@ -2826,7 +2826,8 @@ const FILL_ROTATION_DEGREES_RANGE: std::ops::RangeInclusive<f32> = 0.0..=360.0;
 const TRIPLANAR_HARDNESS_RANGE: std::ops::RangeInclusive<f32> = 1.0..=64.0;
 
 /// A fill's projection kind, axis and hardness, then its collapsible UV transformations
-fn projection_editor(app: &mut TextureCraftApp, ui: &mut Ui, projection: &Projection, command: &str, base: &Value, salt: &str) {
+/// `sampling` is the layer fill's image sampling (None: a mask fill effect, which has no Filtering row yet)
+fn projection_editor(app: &mut TextureCraftApp, ui: &mut Ui, projection: &Projection, sampling: Option<Sampling>, command: &str, base: &Value, salt: &str) {
     let projection_label = projection.label();
     combo(ui, tr("Projection"), tr(projection_label), |ui| {
         for (id, label) in [
@@ -2841,6 +2842,17 @@ fn projection_editor(app: &mut TextureCraftApp, ui: &mut Ui, projection: &Projec
             }
         }
     });
+
+    if let Some(sampling) = sampling {
+        let filtering = sampling.filtering;
+        combo(ui, tr("Filtering"), tr(filtering_label(filtering)), |ui| {
+            for f in Filtering::ALL {
+                if ui.selectable_label(f == filtering, tr(filtering_label(f))).clicked() && f != filtering {
+                    app.run(command, with(base, json!({"filtering": f.id()})));
+                }
+            }
+        });
+    }
 
     // Each edit sends only the fields it changed; the command keeps the others
     let mut edit = |fields: Value| {
@@ -3167,7 +3179,7 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, effe
     match &effect.kind {
         EffectKind::Generator(generator) => crate::generator_panel::generator_properties(app, ui, layer.id, id, generator),
         EffectKind::Levels(levels) => crate::levels_properties::levels_properties(app, ui, layer, effect_id, levels),
-        EffectKind::Fill { source, projection } => {
+        EffectKind::Fill { source, projection, .. } => {
             ui.label(caption(tr("Fill")));
             let anchors = effect_anchors_below(app, layer.id, effect_id);
             let target = crate::fill_source_target::FillSourceTarget::Mask { effect: id };
@@ -3208,7 +3220,7 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, effe
                     if let Projection::Decal(decal) = projection {
                         decal_editor(app, ui, decal, &json!({"effect": id}), layer.id);
                     } else {
-                        projection_editor(app, ui, projection, "effect.set", &json!({"effect": id}), &format!("maskfill{id}"));
+                        projection_editor(app, ui, projection, None, "effect.set", &json!({"effect": id}), &format!("maskfill{id}"));
                     }
                 }
             }

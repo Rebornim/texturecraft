@@ -5,6 +5,7 @@ mod bake_visualization_panel;
 mod bake_visualization_toggles;
 mod breadcrumb;
 mod common_settings;
+mod section_opening;
 pub use bake_paint_brush::BakePaintBrush;
 pub(crate) use bake_visualization_panel::bake_visualization_panel;
 pub use bake_visualization_toggles::BakeVisualizationToggles;

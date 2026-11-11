@@ -506,3 +506,63 @@ fn cage_and_skew_controls_require_a_high_poly_and_follow_cage_type() {
         }
     }
 }
+
+#[test]
+fn the_view_menu_picks_the_neutral_or_the_painted_material_in_bake_mode() {
+    let mut harness = harness(None);
+    assert!(harness.state().ui.bake_visualization.neutral_shown, "bake mode starts on the neutral material");
+    harness.get_by_value("Neutral Material").click();
+    harness.run_steps(3);
+    assert!(harness.query_by_label("UV checker").is_none(), "bake mode lists lighting and mesh maps only");
+    harness.get_by_label("Material").click();
+    harness.run_steps(3);
+    assert!(!harness.state().ui.bake_visualization.neutral_shown);
+    harness.get_by_value("Material");
+}
+
+#[test]
+fn the_baking_visualization_panel_opens_like_the_reference_at_first_launch() {
+    let harness = harness(None);
+    for shown in ["Show for Selected Texture Set Only", "Mesh", "Matching Error", "Cage Surface", "Cage Wireframe Opacity"] {
+        harness.get_by_label(shown);
+    }
+    for closed in ["Missing Seams on Hard Edges", "Project Mesh", "Roughness"] {
+        assert!(harness.query_by_label(closed).is_none(), "{closed} sits in a section that starts closed");
+    }
+    assert!(harness.state().ui.bake_visualization.missing_seams.shown, "missing seams are ticked in every reference capture");
+}
+
+#[test]
+fn the_eye_greys_the_baking_meshes_and_holds_the_project_mesh() {
+    let mut harness = harness(None);
+    assert!(!harness.get_by_label("Mesh").accesskit_node().is_disabled(), "the eye starts off");
+    harness.get_by_label("Hide Baking Meshes").click();
+    harness.run_steps(3);
+
+    for greyed in ["Mesh", "Matching Error", "Cage Surface", "Cage Wireframe Opacity"] {
+        assert!(harness.get_by_label(greyed).accesskit_node().is_disabled(), "{greyed} is greyed");
+    }
+    assert!(harness.state().ui.bake_visualization.project_mesh.shown);
+    // The header, not its "Reset Project Mesh (LP)" button further right
+    let header = harness.get_all_by_label_contains("Project Mesh (LP)").min_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap();
+    header.click();
+    harness.run_steps(3);
+    assert!(harness.get_by_label("Project Mesh").accesskit_node().is_disabled(), "the project mesh stays on");
+    assert!(!harness.get_by_label("Roughness").accesskit_node().is_disabled(), "the neutral material stays editable");
+}
+
+#[test]
+fn picking_material_while_painting_keeps_bake_modes_neutral_material() {
+    let mut harness = harness(None);
+    harness.state_mut().ui.mode = Mode::Painting;
+    harness.run_steps(3);
+    // Painting mode shows the 3D and 2D views, each with a view menu; the 3D view's comes first
+    harness.get_all_by_value("Material").next().unwrap().click();
+    harness.run_steps(3);
+    // The menu entry, not the dropdown that shows the same word
+    let entry = harness.get_all_by_label("Material").find(|node| node.accesskit_node().role() != Role::ComboBox).unwrap();
+    entry.click();
+    harness.run_steps(3);
+
+    assert!(harness.state().ui.bake_visualization.neutral_shown, "bake mode still opens on the neutral material");
+}

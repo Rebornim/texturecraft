@@ -386,3 +386,19 @@ fn the_naming_pattern_renames_the_input_maps() {
     harness.get_by_label("Base metalness");
     harness.get_by_label("Naming pattern");
 }
+
+#[test]
+fn an_empty_template_cannot_be_saved_or_exported() {
+    let mut harness = harness(2, LAPTOP);
+    harness.get_by_label("OUTPUT TEMPLATES").click();
+    harness.run_steps(2);
+    let enabled = |harness: &Harness<'static, TextureCraftApp>, label: &str| {
+        !harness.get_all_by_label(label).find(|node| node.accesskit_node().role() == Role::Button).unwrap().accesskit_node().is_disabled()
+    };
+    assert!(enabled(&harness, "Save settings") && enabled(&harness, "Export"));
+    let app = harness.state_mut();
+    texturecraft_engine::execute(&mut app.session, "export.preset.save", &serde_json::json!({"preset": {"name": "empty", "maps": []}})).unwrap();
+    app.ui.export.preset = "empty".into();
+    harness.run_steps(3);
+    assert!(!enabled(&harness, "Save settings") && !enabled(&harness, "Export"));
+}

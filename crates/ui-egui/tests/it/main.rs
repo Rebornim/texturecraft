@@ -38,3 +38,4 @@ mod start_window;
 mod toolbar;
 
 mod symmetry;
+mod tile_generator_panel;

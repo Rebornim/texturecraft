@@ -8,24 +8,14 @@ use texturecraft_engine::core::{BakedMap, CurvatureDetail, CurvatureMode, Genera
 use crate::TextureCraftApp;
 use crate::dock::{anchor_label, anchors_below, image_drop, image_menu, mesh_map_color};
 use crate::i18n::{baked_map_label, tr, trf};
+use crate::resource_panel::{ATTRIBUTE_KEY_WIDTH, NOTE_FONT_SIZE, factor_label, random_seed};
 use crate::theme::{Tokens, caption};
 use crate::widgets::{combo, section, slider_edit};
-
-/// Random seeds stay below this, short enough to read and type.
-const SEED_RANGE: u32 = 10_000;
-/// Knuth's multiplicative hash constant: spreads the clock's nanoseconds over the seed range.
-const SEED_MIX: u32 = 2_654_435_761;
-
-/// Font size of the notes under a control.
-const NOTE_FONT_SIZE: f32 = 10.5;
 
 /// Edge of the picture beside each image input, its corner rounding and the size of an icon drawn in it.
 const INPUT_TILE_SIZE: f32 = 32.0;
 const INPUT_TILE_ROUNDING: f32 = 2.0;
 const INPUT_TILE_ICON_SIZE: f32 = 16.0;
-
-/// Width of the names in the Attributes section, so their values line up.
-const ATTRIBUTE_KEY_WIDTH: f32 = 80.0;
 
 /// The settings of generator effect `id`.
 pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: LayerId, id: u64, generator: &Generator) {
@@ -145,18 +135,6 @@ fn resolution(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, resolution: Outpu
     .on_hover_text(tr("A finer output than the texture set gives the same result as the texture set's resolution."));
 }
 
-/// The most powers of two a resolution factor scales by, either way.
-const LARGEST_FACTOR_STEPS: u8 = OutputResolution::FACTORS.end().unsigned_abs();
-
-/// "Same as context", or the fraction or multiple a resolution factor stands for.
-fn factor_label(factor: i8) -> String {
-    match factor {
-        0 => tr("Same as context").to_string(),
-        negative if negative < 0 => format!("1/{}", 1u32 << negative.unsigned_abs().min(LARGEST_FACTOR_STEPS)),
-        positive => format!("×{}", 1u32 << positive.unsigned_abs().min(LARGEST_FACTOR_STEPS)),
-    }
-}
-
 /// Global invert, blur, balance and contrast: what every generator applies to its finished value.
 fn global_adjustments(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, generator: &Generator) {
     let (mut invert, mut global) = (generator.invert, generator.global);
@@ -209,13 +187,6 @@ fn seed_row(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, seed: u32) {
         });
     });
     ui.data_mut(|data| data.insert_temp(typing_id, typing));
-}
-
-/// A seed different from `current`, from the clock.
-fn random_seed(current: u32) -> u32 {
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.subsec_nanos());
-    let mixed = nanos.wrapping_mul(SEED_MIX) % SEED_RANGE;
-    if mixed == current { (mixed + 1) % SEED_RANGE } else { mixed }
 }
 
 /// The `effect.set` params that put generator effect `id` back to the defaults of its kind.

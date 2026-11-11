@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod angle_dial;
 mod bake_job;
 pub mod bake_mode;
 mod bake_scene;
@@ -18,10 +19,13 @@ pub mod docking;
 pub mod export_templates;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_dialogs;
+mod fill_source_slot;
+mod fill_source_target;
 mod filter_slot;
 pub mod fonts;
 mod generator_panel;
 pub mod gpu;
+mod gray_slider;
 pub mod i18n;
 pub mod id_color_pick;
 pub mod keymap;
@@ -37,6 +41,8 @@ mod orb_shape;
 pub mod parity;
 mod path_hit;
 mod path_surface_cache;
+mod pattern_panel;
+mod pattern_target;
 mod preview_image;
 mod preview_request;
 mod preview_worker;
@@ -44,8 +50,13 @@ pub mod profile;
 pub mod properties_popup;
 mod rail_popup;
 pub mod render_mode;
+mod resource_panel;
 mod resource_picker;
+mod resource_picker_anchor;
+mod resource_picker_choice;
 mod resource_picker_item;
+mod resource_picker_tab;
+mod resource_picker_tile;
 mod running_bake;
 pub mod shelf;
 pub mod shelf_preview;
@@ -54,6 +65,7 @@ pub mod state;
 pub mod symmetry;
 pub mod theme;
 pub mod thumbs;
+mod tile_edits;
 pub mod titlebar;
 pub mod toolbar;
 pub mod ui_state_store;

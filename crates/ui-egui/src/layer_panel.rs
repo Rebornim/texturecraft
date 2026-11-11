@@ -44,6 +44,9 @@ pub struct LayerPanel {
     pub(crate) folded: HashSet<(u64, bool)>,
 }
 
+/// How soon to look again for pictures still rendering (milliseconds)
+const POLL_INTERVAL_MS: u64 = 40;
+
 impl LayerPanel {
     /// Start drawing the panel for this frame.
     pub(crate) fn begin(&mut self, session: &Session, now: f64) {
@@ -72,14 +75,19 @@ impl LayerPanel {
         Some(id)
     }
 
-    /// Finish the frame: collect pictures and ask for another frame while work is outstanding.
+    /// Finish the frame: collect pictures and ask for another frame while work is outstanding
     pub(crate) fn end(&mut self, ctx: &Context, session: &Session) {
-        if self.service.poll(session) {
-            ctx.request_repaint_after(Duration::from_millis(40));
-        }
+        self.poll(ctx, session);
         if self.textures.len() > CACHE_ENTRIES * 2 {
             let frame = self.frame;
             self.textures.retain(|_, (_, _, used)| *used + 1 >= frame);
+        }
+    }
+
+    /// Collect finished pictures, asking for another frame while work is outstanding: for pictures shown outside the panel (a source picker's anchor points), which need them while the panel is hidden
+    pub(crate) fn poll(&mut self, ctx: &Context, session: &Session) {
+        if self.service.poll(session) {
+            ctx.request_repaint_after(Duration::from_millis(POLL_INTERVAL_MS));
         }
     }
 

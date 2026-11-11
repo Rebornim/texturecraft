@@ -168,7 +168,9 @@ mod tests {
     /// The labels of the menu catalog, panels, shortcuts, shelf tabs and engine enums that are
     /// translated where they are shown.
     fn catalog_keys() -> Vec<&'static str> {
-        use texturecraft_engine::core::{BlendMode, Channel, EffectKind, GeneratorKind, ProceduralKind};
+        use texturecraft_engine::core::{
+            BlendMode, Channel, EffectKind, GeneratorKind, ProceduralKind, TileBlending, TileInputDistribution, TileShape, TileSizeMode, TileSymmetry,
+        };
         use texturecraft_engine::filter_lib::{FILTERS, build, scalar_params};
         let mut k: Vec<&'static str> = Vec::new();
         k.extend(crate::menus::TOP);
@@ -188,6 +190,11 @@ mod tests {
         k.extend(texturecraft_engine::Tool::ALL.iter().map(|t| t.label()));
         k.extend(ProceduralKind::ALL.iter().map(|p| p.label()));
         k.extend(GeneratorKind::ALL.iter().map(|g| g.label()));
+        k.extend(TileShape::ALL.iter().map(|shape| shape.label()));
+        k.extend(TileSizeMode::ALL.iter().map(|mode| mode.label()));
+        k.extend(TileInputDistribution::ALL.iter().map(|distribution| distribution.label()));
+        k.extend(TileSymmetry::ALL.iter().map(|symmetry| symmetry.label()));
+        k.extend(TileBlending::ALL.iter().map(|blending| blending.label()));
         k.extend(texturecraft_engine::paint::BrushAlpha::ALL.iter().map(|a| a.label()));
         k.extend(texturecraft_engine::geom::primitives::BUILTINS.iter().map(|(_, l)| *l));
         for f in FILTERS {

@@ -731,7 +731,7 @@ mod tests {
 
     #[test]
     fn triplanar_image_sampling_preserves_bright_float_pixels() {
-        let image = crate::ImageRes { width: 2, height: 2, rgba: vec![[0.0; 4], [0.0; 4], [0.0; 4], [100_000.0; 4]], srgb: false };
+        let image = crate::ImageRes::new(2, 2, vec![[0.0; 4], [0.0; 4], [0.0; 4], [100_000.0; 4]], false);
         let coords = Coords { uv: Vec2::ZERO, pos: Vec3::new(0.25, 0.25, 0.75), nrm: Vec3::new(0.2, 1.0, 0.1).normalize() };
         let projection = Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3] };
         let weights = coords.nrm.abs().powf(8.0);

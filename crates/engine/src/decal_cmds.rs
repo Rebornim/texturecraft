@@ -197,7 +197,10 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
             let effect_id = s.doc.project.alloc_id();
             let mut layer = Layer::new(id, name, LayerKind::Fill(Fill::default()), &set_channels);
             let mut mask = Mask::new(MaskBackground::Black);
-            mask.effects.push(Effect::new(effect_id, EffectKind::Fill { source: Source::image(image.clone()), projection: Projection::Decal(decal) }));
+            mask.effects.push(Effect::new(
+                effect_id,
+                EffectKind::Fill { source: Source::image(image.clone()), projection: Projection::Decal(decal), sampling: Default::default() },
+            ));
             layer.mask = Some(mask);
             crate::layer_cmds::insert_selected(s, layer)?;
             s.target = StackTarget::Effect(effect_id);
@@ -320,7 +323,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
 
     session.edit("Edit decal", |session| {
         if let Some(effect) = effect {
-            if let Some(EffectKind::Fill { source, projection }) = session.doc.project.effect_mut(effect).map(|effect| &mut effect.kind) {
+            if let Some(EffectKind::Fill { source, projection, .. }) = session.doc.project.effect_mut(effect).map(|effect| &mut effect.kind) {
                 *projection = Projection::Decal(decal);
                 if let Some(image) = image {
                     *source = Source::image(image);

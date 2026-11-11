@@ -10,9 +10,9 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 use texturecraft_core::{
-    BakedMap, BlendMode, BlockScales, Channel, ChannelKind, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter, Generator,
-    GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, MicroDetail, NormalFormat, Project, Projection, Source, TextureSet, TileGrid,
-    blend1, blend3, lum, mix3, per_unit,
+    BakedMap, BlendMode, BlockScales, Channel, ChannelKind, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter, Filtering, Generator,
+    GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, MicroDetail, NormalFormat, Project, Projection, Sampling, Source, TextureSet,
+    TileGrid, blend1, blend3, lum, mix3, per_unit,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, UvGBuffer};
@@ -23,7 +23,7 @@ use crate::curvature_sizes::CurvatureSizes;
 use crate::held_fields::HeldFields;
 use crate::pattern::{Coords, decal_uv_symmetric, image_samples, pattern_pixels, procedural_in, world_noise};
 use crate::pattern_context::PatternContext;
-use crate::store::{BakedMaps, ImageStore, PixelStore, decode};
+use crate::store::{BakedMaps, ImageRes, ImageStore, PixelStore, decode};
 
 const NCH: usize = Channel::ALL.len();
 
@@ -1388,6 +1388,46 @@ impl<'a, 'b> Texel<'a, 'b> {
         c
     }
 
+    /// The coordinates of texel (`x`, `y`) through `proj`, uncached (None when uncovered or outside a decal)
+    fn projected_at(&self, proj: &Projection, x: u32, y: u32) -> Option<Coords> {
+        let g = self.inp.gbuf;
+        if x >= g.width || y >= g.height {
+            return None;
+        }
+        let s = g.surface(self.inp.mesh, (y * g.width + x) as usize)?;
+        let (lo, hi) = self.inp.bounds;
+        let center = (lo + hi) * 0.5;
+        let r = ((hi - lo).length() * 0.5).max(1e-4);
+        let mut c = Coords { uv: s.uv, pos: (s.pos - center) / r, nrm: s.nrm };
+        if let Ok(set) = self.inp.project.texture_set(self.inp.ts)
+            && let Some(grid) = set.tile_grid()
+        {
+            c.uv = Vec2::from(set.from_atlas(&grid, c.uv.to_array()));
+        }
+        match proj {
+            Projection::Decal(d) => decal_uv_symmetric(d, s.pos, s.nrm, center).map(|(uv, _)| Coords { uv, ..c }),
+            _ => Some(c),
+        }
+    }
+
+    /// Image texels one surface texel spans at each of `samples`, from the next texel across and down (1 at a seam)
+    fn footprints(&self, proj: &Projection, samples: &[(Vec2, f32); 3], image: &ImageRes) -> [f32; 3] {
+        let size = Vec2::new(image.width as f32, image.height as f32);
+        let mut out = [1.0f32; 3];
+        let sampled = |c: &Coords| image_samples(if matches!(proj, Projection::Decal(_)) { &DECAL_UV } else { proj }, c);
+        for (dx, dy) in [(1, 0), (0, 1)] {
+            let Some(next) = self.projected_at(proj, self.x + dx, self.y + dy) else { continue };
+            for ((footprint, (uv, _)), (next_uv, _)) in out.iter_mut().zip(samples).zip(sampled(&next)) {
+                let span = ((next_uv - *uv) * size).length();
+                // A jump of more than a quarter of the image is a UV seam, not the texel's size
+                if span.is_finite() && span < size.max_element() * 0.25 {
+                    *footprint = footprint.max(span);
+                }
+            }
+        }
+        out
+    }
+
     /// World position of this texel (None when uncovered).
     fn world(&self) -> Option<Vec3> {
         let i = (self.y * self.inp.gbuf.width + self.x) as usize;
@@ -1444,7 +1484,7 @@ impl<'a, 'b> Texel<'a, 'b> {
     }
 
     /// The value `source` gives this texel through `projection`, read as a channel of `kind`
-    fn source(&mut self, source: &Source, projection: &Projection, kind: ChannelKind) -> [f32; 3] {
+    fn source(&mut self, source: &Source, projection: &Projection, sampling: Sampling, kind: ChannelKind) -> [f32; 3] {
         match source {
             Source::Uniform(value) => *value,
 
@@ -1476,10 +1516,16 @@ impl<'a, 'b> Texel<'a, 'b> {
             Source::Image { name, normal_format } => {
                 let Some(image) = self.inp.images.get(name) else { return [0.5; 3] };
 
+                let original = projection;
                 let (coords, projection, _) = self.projected(projection);
+                let samples = image_samples(projection, &coords);
+                let footprints = match sampling.filtering {
+                    Filtering::BilinearHq => self.footprints(original, &samples, image),
+                    Filtering::BilinearSharp | Filtering::Nearest => [1.0; 3],
+                };
                 let mut sum = [0.0f32; 4];
-                for (uv, weight) in image_samples(projection, &coords).into_iter().filter(|(_, weight)| *weight > 0.0) {
-                    for (total, value) in sum.iter_mut().zip(image.sample(uv.x, uv.y)) {
+                for ((uv, weight), footprint) in samples.into_iter().zip(footprints).filter(|((_, weight), _)| *weight > 0.0) {
+                    for (total, value) in sum.iter_mut().zip(image.sample_filtered(uv.x, uv.y, sampling.filtering, footprint)) {
                         *total += value * weight;
                     }
                 }
@@ -1575,7 +1621,7 @@ impl<'a, 'b> Texel<'a, 'b> {
     /// Generator input `map` at this texel: what replaces the mesh map in the generator's inputs, else the mesh map (None when not baked).
     fn generator_input(&mut self, generator: &Generator, map: BakedMap) -> Option<f32> {
         match generator.inputs.get(&map) {
-            Some(source) => Some(self.source(source, &Projection::default(), ChannelKind::Scalar)[0]),
+            Some(source) => Some(self.source(source, &Projection::default(), Sampling::default(), ChannelKind::Scalar)[0]),
             None => self.baked(map),
         }
     }
@@ -1672,8 +1718,8 @@ impl<'a, 'b> Texel<'a, 'b> {
                         value += (blend1(effect.blend, value, layer_value) - value) * coverage * opacity;
                     }
                 }
-                EffectKind::Fill { source, projection } => {
-                    let fill = self.source(source, projection, ChannelKind::Scalar)[0];
+                EffectKind::Fill { source, projection, sampling } => {
+                    let fill = self.source(source, projection, *sampling, ChannelKind::Scalar)[0];
                     value += (blend1(effect.blend, value, fill) - value) * opacity * self.cover(std::iter::once(source), projection);
                 }
                 EffectKind::Generator(generator) => {
@@ -1889,7 +1935,7 @@ impl<'a, 'b> Texel<'a, 'b> {
                         let ch = Channel::ALL.get(c.ch).copied()?;
                         // A channel without a source fills with its default (no clone per texel).
                         let v = match f.sources.get(&ch) {
-                            Some(s) => self.source(s, &f.projection, ch.kind()),
+                            Some(s) => self.source(s, &f.projection, f.sampling, ch.kind()),
                             None => ch.default_value(),
                         };
                         (v, self.cover(f.sources.values(), &f.projection))
@@ -1972,7 +2018,7 @@ impl<'a, 'b> Texel<'a, 'b> {
             }
             EffectKind::Material(f) => match Channel::ALL.get(c.ch).and_then(|ch| f.sources.get(ch).map(|s| (*ch, s))) {
                 Some((ch, s)) => {
-                    let p = self.source(s, &f.projection, ch.kind());
+                    let p = self.source(s, &f.projection, f.sampling, ch.kind());
                     let w = o * self.cover(f.sources.values(), &f.projection);
                     over(c, e.blend, v, cov, p, w)
                 }
@@ -3026,7 +3072,11 @@ mod tests {
         let pattern = Procedural::new(ProceduralKind::Checker);
         mask.effects.push(Effect::new(
             eid,
-            EffectKind::Fill { source: Source::Procedural { pattern, low: [0.0; 3], high: [1.0; 3], ramp: Vec::new() }, projection: Projection::default() },
+            EffectKind::Fill {
+                source: Source::Procedural { pattern, low: [0.0; 3], high: [1.0; 3], ramp: Vec::new() },
+                projection: Projection::default(),
+                sampling: Default::default(),
+            },
         ));
         f.project.layer_mut(id).unwrap().mask = Some(mask);
         let out = run(&f, None);
@@ -3076,7 +3126,11 @@ mod tests {
         let pattern = Procedural::new(ProceduralKind::Checker);
         mask.effects.push(Effect::new(
             effect,
-            EffectKind::Fill { source: Source::Procedural { pattern, low: [0.0; 3], high: [1.0; 3], ramp: Vec::new() }, projection: Projection::default() },
+            EffectKind::Fill {
+                source: Source::Procedural { pattern, low: [0.0; 3], high: [1.0; 3], ramp: Vec::new() },
+                projection: Projection::default(),
+                sampling: Default::default(),
+            },
         ));
         fixture.project.layer_mut(layer).unwrap().mask = Some(mask);
 
@@ -3106,6 +3160,7 @@ mod tests {
             EffectKind::Fill {
                 source: Source::Procedural { pattern: Procedural::new(ProceduralKind::Checker), low: [0.0; 3], high: [1.0; 3], ramp: Vec::new() },
                 projection: Projection::default(),
+                sampling: Default::default(),
             },
         ));
         fixture.project.layer_mut(layer).unwrap().mask = Some(mask);
@@ -3172,7 +3227,11 @@ mod tests {
         let mut mask = Mask::new(MaskBackground::Black);
         mask.effects.push(Effect::new(
             fixture.project.alloc_id(),
-            EffectKind::Fill { source: Source::Anchor { anchor, channel: Channel::BaseColor, ramp: Vec::new() }, projection: Projection::default() },
+            EffectKind::Fill {
+                source: Source::Anchor { anchor, channel: Channel::BaseColor, ramp: Vec::new() },
+                projection: Projection::default(),
+                sampling: Default::default(),
+            },
         ));
         fixture.project.layer_mut(upper).unwrap().mask = Some(mask.clone());
         let texels: Vec<_> = (0..128).map(|x| (x, 63)).collect();
@@ -3199,7 +3258,10 @@ mod tests {
         let texels: Vec<_> = (0..128).map(|x| (x, 63)).collect();
         let mut masked = |filters: &[Filter]| {
             let mut mask = Mask::new(MaskBackground::Black);
-            mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Fill { source: checker.clone(), projection: Projection::default() }));
+            mask.effects.push(Effect::new(
+                fixture.project.alloc_id(),
+                EffectKind::Fill { source: checker.clone(), projection: Projection::default(), sampling: Default::default() },
+            ));
             for filter in filters {
                 mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Filter(filter.clone())));
             }
@@ -3318,7 +3380,8 @@ mod tests {
         let (mut fixture, layer) = ridge_fixture(100);
         let mut row_with = |blur: f32| {
             let checker = Source::Procedural { pattern: Procedural::new(ProceduralKind::Checker), low: [0.0; 3], high: [1.0; 3], ramp: Vec::new() };
-            let below = Effect::new(fixture.project.alloc_id(), EffectKind::Fill { source: checker, projection: Projection::default() });
+            let below =
+                Effect::new(fixture.project.alloc_id(), EffectKind::Fill { source: checker, projection: Projection::default(), sampling: Default::default() });
             let mut generator = ridge_generator();
             generator.global.blur = blur;
             let mut lighten = generator_effect(&mut fixture, generator);
@@ -3451,7 +3514,11 @@ mod tests {
         let (e1, e2) = (f.project.alloc_id(), f.project.alloc_id());
         mask.effects.push(Effect::new(
             e1,
-            EffectKind::Fill { source: Source::Procedural { pattern, low: [0.0; 3], high: [1.0; 3], ramp: Vec::new() }, projection: Projection::default() },
+            EffectKind::Fill {
+                source: Source::Procedural { pattern, low: [0.0; 3], high: [1.0; 3], ramp: Vec::new() },
+                projection: Projection::default(),
+                sampling: Default::default(),
+            },
         ));
         f.project.layer_mut(id).unwrap().mask = Some(mask.clone());
         let hard: Vec<f32> = (0..64).map(|x| run(&f, None).value(Channel::BaseColor, x, 20)[0]).collect();
@@ -3742,7 +3809,7 @@ soft {soft:?}"
         let top = fill_layer(&mut f.project, [1.0; 3], 0.5);
         let mut mask = Mask::new(MaskBackground::Black);
         let source = Source::Anchor { anchor, channel: Channel::Height, ramp: Vec::new() };
-        mask.effects.push(Effect::new(f.project.alloc_id(), EffectKind::Fill { source, projection: Projection::default() }));
+        mask.effects.push(Effect::new(f.project.alloc_id(), EffectKind::Fill { source, projection: Projection::default(), sampling: Default::default() }));
         f.project.layer_mut(top).unwrap().mask = Some(mask.clone());
         assert!(close(run(&f, None).value(Channel::BaseColor, 5, 5), [0.7; 3]));
 
@@ -3761,7 +3828,8 @@ soft {soft:?}"
         let top = fill_layer(&mut fixture.project, [1.0; 3], 0.5);
         let mut mask = Mask::new(MaskBackground::Black);
         let source = Source::Anchor { anchor, channel: Channel::Roughness, ramp: Vec::new() };
-        mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Fill { source, projection: Projection::default() }));
+        mask.effects
+            .push(Effect::new(fixture.project.alloc_id(), EffectKind::Fill { source, projection: Projection::default(), sampling: Default::default() }));
         fixture.project.layer_mut(top).unwrap().mask = Some(mask);
         top
     }
@@ -3772,9 +3840,11 @@ soft {soft:?}"
         let low = fill_layer(&mut fixture.project, [0.0; 3], 0.5);
         let (gray, anchor, full) = (fixture.project.alloc_id(), fixture.project.alloc_id(), fixture.project.alloc_id());
         let mut mask = Mask::new(MaskBackground::Black);
-        mask.effects.push(Effect::new(gray, EffectKind::Fill { source: Source::Uniform([0.4; 3]), projection: Projection::default() }));
+        mask.effects
+            .push(Effect::new(gray, EffectKind::Fill { source: Source::Uniform([0.4; 3]), projection: Projection::default(), sampling: Default::default() }));
         mask.effects.push(Effect::new(anchor, EffectKind::Anchor));
-        mask.effects.push(Effect::new(full, EffectKind::Fill { source: Source::Uniform([1.0; 3]), projection: Projection::default() }));
+        mask.effects
+            .push(Effect::new(full, EffectKind::Fill { source: Source::Uniform([1.0; 3]), projection: Projection::default(), sampling: Default::default() }));
         fixture.project.layer_mut(low).unwrap().mask = Some(mask.clone());
         anchor_reader(&mut fixture, anchor);
 
@@ -3802,7 +3872,10 @@ soft {soft:?}"
         let anchor = fixture.project.alloc_id();
         let mut mask = Mask::new(MaskBackground::Black);
         let checker = Source::Procedural { pattern: Procedural::new(ProceduralKind::Checker), low: [0.0; 3], high: [1.0; 3], ramp: Vec::new() };
-        mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Fill { source: checker, projection: Projection::default() }));
+        mask.effects.push(Effect::new(
+            fixture.project.alloc_id(),
+            EffectKind::Fill { source: checker, projection: Projection::default(), sampling: Default::default() },
+        ));
         mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Filter(Filter::Blur { radius: 64.0 })));
         mask.effects.push(Effect::new(anchor, EffectKind::Anchor));
         fixture.project.layer_mut(lower).unwrap().mask = Some(mask.clone());
@@ -3921,7 +3994,7 @@ soft {soft:?}"
         fill.sources.insert(Channel::BaseColor, Source::image("decal"));
         f.project.insert_layer(0, Layer::new(id, "Decal", LayerKind::Fill(fill), &[Channel::BaseColor]), None, false).unwrap();
         let composite = |alpha: f32| {
-            let img = crate::store::ImageRes { width: 2, height: 2, rgba: vec![[1.0, 0.0, 0.0, alpha]; 4], srgb: false };
+            let img = crate::store::ImageRes::new(2, 2, vec![[1.0, 0.0, 0.0, alpha]; 4], false);
             let images: ImageStore = [("decal".to_string(), std::sync::Arc::new(img))].into_iter().collect();
             let inp = Inputs {
                 project: &f.project,
@@ -3960,12 +4033,7 @@ soft {soft:?}"
         project.insert_layer(0, Layer::new(id, "Decal", LayerKind::Fill(fill), &[Channel::BaseColor]), None, false).unwrap();
 
         // Top left red, top right blue, bottom left green, bottom right yellow
-        let img = crate::store::ImageRes {
-            width: 2,
-            height: 2,
-            rgba: vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], [0.0, 1.0, 0.0, 1.0], [1.0, 1.0, 0.0, 1.0]],
-            srgb: false,
-        };
+        let img = crate::store::ImageRes::new(2, 2, vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], [0.0, 1.0, 0.0, 1.0], [1.0, 1.0, 0.0, 1.0]], false);
         let images: ImageStore = [("decal".to_string(), std::sync::Arc::new(img.clone()))].into_iter().collect();
         let pixels = PixelStore::default();
         let baked = BakedMaps::default();
@@ -4136,7 +4204,7 @@ soft {soft:?}"
         f.project.insert_layer(0, Layer::new(id, "Decal", LayerKind::Fill(fill), &[Channel::BaseColor]), None, false).unwrap();
 
         // Left half red, right half blue
-        let img = crate::store::ImageRes { width: 2, height: 1, rgba: vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]], srgb: false };
+        let img = crate::store::ImageRes::new(2, 1, vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]], false);
         let images: ImageStore = [("decal".to_string(), std::sync::Arc::new(img))].into_iter().collect();
         let texel = |f: &Fixture, flip: [bool; 2]| {
             let mut project = f.project.clone();
@@ -4230,8 +4298,10 @@ soft {soft:?}"
                 let low = fill_layer(&mut f.project, [0.0; 3], 0.5);
                 let anchor = f.project.alloc_id();
                 let mut mask = Mask::new(MaskBackground::Black);
-                mask.effects
-                    .push(Effect::new(f.project.alloc_id(), EffectKind::Fill { source: Source::Uniform([gray; 3]), projection: Projection::default() }));
+                mask.effects.push(Effect::new(
+                    f.project.alloc_id(),
+                    EffectKind::Fill { source: Source::Uniform([gray; 3]), projection: Projection::default(), sampling: Default::default() },
+                ));
                 mask.effects.push(Effect::new(anchor, EffectKind::Anchor));
                 f.project.layer_mut(low).unwrap().mask = Some(mask);
                 let id = f.project.alloc_id();

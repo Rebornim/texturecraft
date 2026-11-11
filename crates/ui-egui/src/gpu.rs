@@ -640,7 +640,7 @@ mod tests {
         assert!(gpu.sync(&mut s, None, None, 0, 0.0).image_aux.is_empty());
         assert!(gpu.aux_image.is_none());
 
-        let replacement = Arc::new(ImageRes { width: 1, height: 1, rgba: vec![[1.0, 0.0, 0.0, 1.0]], srgb: true });
+        let replacement = Arc::new(ImageRes::new(1, 1, vec![[1.0, 0.0, 0.0, 1.0]], true));
         s.images.insert(name.clone(), replacement);
         execute(&mut s, "viewport.view", &json!({"mode": "image", "image": name})).unwrap();
         let updated = gpu.sync(&mut s, Some(AuxView::Image), None, 0, 0.0);

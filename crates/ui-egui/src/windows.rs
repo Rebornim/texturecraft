@@ -152,7 +152,7 @@ pub(crate) fn window<'a>(id: &str, title: &str, open: &'a mut bool) -> egui::Win
 }
 
 /// A centered dialog; `id` keeps its place across UI languages.
-pub(crate) fn dialog<'a>(id: &str, title: &str, open: &'a mut bool) -> egui::Window<'a> {
+fn dialog<'a>(id: &str, title: &str, open: &'a mut bool) -> egui::Window<'a> {
     egui::Window::new(title.to_owned())
         .id(egui::Id::unique(id))
         .open(open)

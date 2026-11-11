@@ -64,6 +64,8 @@ pub enum PropsTab {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct Windows {
+    /// Not remembered: the app never opens with Export textures already open
+    #[serde(skip)]
     pub export: bool,
     pub new_project: bool,
     pub about: bool,

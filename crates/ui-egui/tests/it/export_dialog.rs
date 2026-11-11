@@ -454,3 +454,12 @@ fn cancel_export_stops_between_texture_sets() {
     assert!(done < total, "it stopped before the last set ({done} of {total})");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_app_never_opens_with_the_export_window_open() {
+    let mut state = texturecraft_ui_egui::state::UiState::default();
+    state.windows.export = true;
+    let saved = serde_json::to_string(&state).unwrap();
+    let restored: texturecraft_ui_egui::state::UiState = serde_json::from_str(&saved).unwrap();
+    assert!(!restored.windows.export);
+}

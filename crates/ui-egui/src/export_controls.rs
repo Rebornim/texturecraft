@@ -17,6 +17,8 @@ const DILATION_MAX: u32 = 256;
 /// The bit depth a file type starts at when picked
 const DEFAULT_BIT_DEPTH: u8 = 8;
 const BIT_DEPTH_WIDTH: f32 = 110.0;
+/// The file type combo's width; its bit depth combo takes the rest
+const FILE_TYPE_WIDTH: f32 = 165.0;
 const DILATION_FIELD_WIDTH: f32 = 64.0;
 
 pub fn template_combo(ui: &mut Ui, id: &str, preset: &mut String, builtins: &[String], user: &[String], width: f32) {
@@ -97,9 +99,11 @@ fn switch_format(file_type: &mut ExportFileType, format: FileFormat) {
 /// The file type, then a bit depth it holds; the bit depth is the template's while the file type is
 pub fn file_type_combos(ui: &mut Ui, id: &str, file_type: &mut ExportFileType, width: f32) {
     let chosen = FileFormat::from_extension(&file_type.format);
-    let half = (width - ui.spacing().item_spacing.x) / 2.0;
+    // The bit depth takes the rest of `width`; each combo adds room for its arrow and padding, so one combo's comes off
+    let arrow = ui.spacing().icon_width + ui.spacing().icon_spacing + ui.spacing().button_padding.x;
+    let rest = width - FILE_TYPE_WIDTH - ui.spacing().item_spacing.x - arrow;
     ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt((id, "format")).width(half).selected_text(file_type_text(&file_type.format)).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt((id, "format")).width(FILE_TYPE_WIDTH).selected_text(file_type_text(&file_type.format)).show_ui(ui, |ui| {
             if ui.selectable_label(chosen.is_none(), tr("Based on output template")).clicked() {
                 *file_type = ExportFileType::default();
             }
@@ -110,9 +114,9 @@ pub fn file_type_combos(ui: &mut Ui, id: &str, file_type: &mut ExportFileType, w
             }
         });
         match chosen {
-            Some(format) => depth_combo(ui, id, format, file_type, half),
+            Some(format) => depth_combo(ui, id, format, file_type, rest),
             None => {
-                ui.add_enabled_ui(false, |ui| egui::ComboBox::from_id_salt((id, "bits")).width(half).selected_text("").show_ui(ui, |_| {}));
+                ui.add_enabled_ui(false, |ui| egui::ComboBox::from_id_salt((id, "bits")).width(rest).selected_text("").show_ui(ui, |_| {}));
             }
         }
     });

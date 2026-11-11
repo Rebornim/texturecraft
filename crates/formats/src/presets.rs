@@ -18,7 +18,7 @@ pub(crate) fn virt(map: VirtualMap, component: u8) -> SourceRef {
 }
 
 /// `$mesh_$textureSet_<suffix>` PNG.
-fn map(suffix: &str, bit_depth: u8, channels: Vec<(Dest, SourceRef)>) -> MapSpec {
+pub(crate) fn map(suffix: &str, bit_depth: u8, channels: Vec<(Dest, SourceRef)>) -> MapSpec {
     MapSpec { file: format!("$mesh_$textureSet_{suffix}"), format: FileFormat::Png, bit_depth, channels, options: Default::default() }
 }
 
@@ -31,13 +31,13 @@ pub(crate) fn gray(s: SourceRef) -> Vec<(Dest, SourceRef)> {
 }
 
 /// Base color RGB with opacity in alpha (alpha is dropped when the set has no opacity).
-fn base_with_alpha() -> Vec<(Dest, SourceRef)> {
+pub(crate) fn base_with_alpha() -> Vec<(Dest, SourceRef)> {
     let mut c = rgb(|k| ch(Channel::BaseColor, k));
     c.push((Dest::A, ch(Channel::Opacity, 0)));
     c
 }
 
-fn normal(map_kind: VirtualMap) -> Vec<(Dest, SourceRef)> {
+pub(crate) fn normal(map_kind: VirtualMap) -> Vec<(Dest, SourceRef)> {
     rgb(|k| virt(map_kind, k))
 }
 
@@ -51,7 +51,7 @@ fn channel_map(c: Channel) -> MapSpec {
     map("$channel", depth, channels)
 }
 
-fn orm() -> Vec<(Dest, SourceRef)> {
+pub(crate) fn orm() -> Vec<(Dest, SourceRef)> {
     vec![(Dest::R, virt(VirtualMap::AoMixed, 0)), (Dest::G, ch(Channel::Roughness, 0)), (Dest::B, ch(Channel::Metallic, 0))]
 }
 
@@ -80,6 +80,8 @@ pub(crate) fn gltf_pbr_maps(file: impl Fn(&str) -> String) -> Vec<MapSpec> {
         spec(GLTF_SHEEN, sheen),
     ]
 }
+
+mod engine_presets;
 
 /// Every built-in preset, in menu order.
 pub fn builtin_presets() -> Vec<ExportPreset> {
@@ -188,6 +190,9 @@ pub fn builtin_presets() -> Vec<ExportPreset> {
                 .collect(),
         ),
     ]
+    .into_iter()
+    .chain(engine_presets::engine_presets())
+    .collect()
 }
 
 /// A built-in preset by name (case-insensitive).

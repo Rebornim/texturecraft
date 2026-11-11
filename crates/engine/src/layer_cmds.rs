@@ -2,7 +2,9 @@
 //! per-channel blending and fill sources.
 
 use serde_json::{Value, json};
-use texturecraft_core::{BlendMode, Channel, ChannelBlend, EffectKind, Fill, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Source};
+use texturecraft_core::{
+    BlendMode, Channel, ChannelBlend, EffectKind, Fill, Layer, LayerId, LayerKind, NormalFormat, Procedural, ProceduralKind, Projection, Source,
+};
 
 use crate::commands::{
     CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, content_param, f32p, has_layer, layer_param, normal_format_param, strp, u64p,
@@ -27,7 +29,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill source",
             [],
             None,
-            "{layer? | effect?: content fill effect id, channel, color?|value?|procedural?: kind, scale?, seed?, contrast?, balance?, invert?, low?, high?|image?, normalFormat?: openGl|directX (the image's normal map convention; alone, it changes the channel's image)|anchor?: anchor effect id, anchorChannel?, enabled?, solo?: true (this channel on, every other one off)}",
+            "{layer? | effect?: content fill effect id, channel, color?|value?|procedural?: kind, scale?, seed?, contrast?, balance?, invert?, low?, high?, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3, tile?: {Tile Generator settings in camelCase, as project.inspect shows them}, tileDefaults?: true (alone, they edit the channel's pattern)|image?, normalFormat?: openGl|directX (the image's normal map convention; alone, it changes the channel's image)|anchor?: anchor effect id, anchorChannel?, enabled?, solo?: true (this channel on, every other one off)}",
             has_layer,
             fill_set
         ),
@@ -309,91 +311,118 @@ fn fill_mut(s: &mut Session, target: FillTarget) -> Result<&mut Fill> {
     }
 }
 
-fn fill_set(s: &mut Session, p: &Value) -> Result<Value> {
-    let target = fill_target(s, p, "layer.fill.set")?;
-    let ch = channel_param("layer.fill.set", p, "channel")?.ok_or_else(|| bad("layer.fill.set", "`channel` is required"))?;
-    // `solo`: this channel on, every other one off.
-    let solo = boolp(p, "solo") == Some(true);
-    let enabled = if solo { Some(true) } else { boolp(p, "enabled") };
-    let normal_format = normal_format_param("layer.fill.set", p)?;
-    let source = if let Some(kind) = strp(p, "procedural") {
-        let kind = ProceduralKind::parse(kind).ok_or_else(|| bad("layer.fill.set", format!("unknown procedural `{kind}`")))?;
-        let mut pr = Procedural::new(kind);
-        if let Some(v) = f32p(p, "scale") {
-            pr.scale = v.clamp(0.001, 1000.0);
-        }
-        if let Some(v) = u64p(p, "seed") {
-            pr.seed = v as u32;
-        }
-        if let Some(v) = f32p(p, "contrast") {
-            pr.contrast = v.clamp(0.0, 20.0);
-        }
-        if let Some(v) = f32p(p, "balance") {
-            pr.balance = v.clamp(-1.0, 1.0);
-        }
-        pr.invert = boolp(p, "invert").unwrap_or(false);
-        Some(Source::Procedural { pattern: pr, low: color_param(p, "low").unwrap_or([0.0; 3]), high: color_param(p, "high").unwrap_or([1.0; 3]) })
-    } else if let Some(c) = color_param(p, "color").or_else(|| color_param(p, "value")) {
-        Some(Source::Uniform(c))
-    } else if let Some(name) = strp(p, "image") {
-        Some(Source::Image { name: name.to_string(), normal_format: normal_format.unwrap_or_default() })
-    } else if let Some(a) = u64p(p, "anchor") {
-        let reader = match target {
-            FillTarget::Layer(id) => Some(id),
-            FillTarget::Effect(e) => s.doc.project.effect(e).map(|(owner, _)| owner),
-        };
-        let reader = reader.ok_or_else(|| bad("layer.fill.set", "the fill is not in a layer"))?;
-        let anchor_channel = channel_param("layer.fill.set", p, "anchorChannel")?.unwrap_or(ch);
-        Some(crate::mask_cmds::anchor_source(s, "layer.fill.set", reader, LayerId(a), anchor_channel)?)
-    } else if enabled.is_some() || normal_format.is_some() {
-        None
-    } else {
-        return Err(bad("layer.fill.set", "give `color`, `value`, `procedural`, `image`, `anchor`, `normalFormat`, `enabled` or `solo`"));
-    };
-    if normal_format.is_some() && source.as_ref().is_some_and(|src| !matches!(src, Source::Image { .. })) {
-        return Err(bad("layer.fill.set", "`normalFormat` goes with `image` or alone"));
+fn fill_set(session: &mut Session, params: &Value) -> Result<Value> {
+    const CMD: &str = "layer.fill.set";
+    let target = fill_target(session, params, CMD)?;
+    let channel = channel_param(CMD, params, "channel")?.ok_or_else(|| bad(CMD, "`channel` is required"))?;
+    // `solo`: this channel on, every other one off
+    let solo = boolp(params, "solo") == Some(true);
+    let enabled = if solo { Some(true) } else { boolp(params, "enabled") };
+    let normal_format = normal_format_param(CMD, params)?;
+    let source = fill_source_from(session, params, (target, channel), normal_format)?;
+    if source.is_none() && enabled.is_none() && normal_format.is_none() {
+        return Err(bad(
+            CMD,
+            "give `color`, `value`, `procedural`, `image`, `anchor`, pattern settings (`tile`, `resolution`…), `normalFormat`, `enabled` or `solo`",
+        ));
     }
-    // A format-only edit leaves the channel on or off.
+    if normal_format.is_some() && source.as_ref().is_some_and(|source| !matches!(source, Source::Image { .. })) {
+        return Err(bad(CMD, "`normalFormat` goes with `image` or alone"));
+    }
+
+    // A format-only edit leaves the channel on or off
     let touches_channel = source.is_some() || enabled.is_some();
-    s.edit("Set fill", |s| {
-        let f = fill_mut(s, target)?;
-        // `normalFormat` alone: the convention of the channel's image.
-        if let (None, Some(nf)) = (&source, normal_format) {
-            match f.sources.get_mut(&ch) {
-                Some(Source::Image { normal_format, .. }) => *normal_format = nf,
-                _ => return Err(bad("layer.fill.set", "`normalFormat` needs an image on the channel")),
+    session.edit("Set fill", |session| {
+        let fill = fill_mut(session, target)?;
+        // `normalFormat` alone: the convention of the channel's image
+        if let (None, Some(format)) = (&source, normal_format) {
+            match fill.sources.get_mut(&channel) {
+                Some(Source::Image { normal_format, .. }) => *normal_format = format,
+                _ => return Err(bad(CMD, "`normalFormat` needs an image on the channel")),
             }
         }
         match target {
-            // A fill effect's channel is on while it has a source.
+            // A fill effect's channel is on while it has a source
             FillTarget::Effect(_) if enabled == Some(false) => {
-                f.sources.remove(&ch);
+                fill.sources.remove(&channel);
             }
             FillTarget::Effect(_) => {
-                let src = source.unwrap_or_else(|| f.source(ch));
-                f.sources.insert(ch, src);
+                let source = source.unwrap_or_else(|| fill.source(channel));
+                fill.sources.insert(channel, source);
                 if solo {
-                    f.sources.retain(|c, _| *c == ch);
+                    fill.sources.retain(|kept, _| *kept == channel);
                 }
             }
             FillTarget::Layer(id) => {
-                if let Some(src) = source {
-                    f.sources.insert(ch, src);
+                if let Some(source) = source {
+                    fill.sources.insert(channel, source);
                 }
-                let l = s.doc.project.layer_mut(id)?;
+                let layer = session.doc.project.layer_mut(id)?;
                 if enabled == Some(false) {
-                    l.channels.remove(&ch);
+                    layer.channels.remove(&channel);
                 } else if touches_channel {
-                    l.channels.entry(ch).or_default();
+                    layer.channels.entry(channel).or_default();
                 }
                 if solo {
-                    l.channels.retain(|c, _| *c == ch);
+                    layer.channels.retain(|kept, _| *kept == channel);
                 }
             }
         }
         Ok(())
     })?;
     Ok(Value::Null)
+}
+
+/// The source `params` give fill channel `channel` of `target`, or None when they only switch it or set its image's normal format
+fn fill_source_from(
+    session: &mut Session,
+    params: &Value,
+    (target, channel): (FillTarget, Channel),
+    normal_format: Option<NormalFormat>,
+) -> Result<Option<Source>> {
+    const CMD: &str = "layer.fill.set";
+    let current = fill_mut(session, target).map(|fill| fill.source(channel)).ok();
+    if let Some(name) = strp(params, "procedural") {
+        let kind = ProceduralKind::parse(name).ok_or_else(|| bad(CMD, format!("unknown procedural `{name}`")))?;
+        let mut pattern = Procedural::new(kind);
+        crate::procedural_params::pattern_basics_from(params, &mut pattern);
+        // A pattern of the kind the channel already has keeps its resolution and Tile Generator settings
+        if let Some(Source::Procedural { pattern: current, .. }) = current
+            && current.kind == kind
+        {
+            pattern.resolution = current.resolution;
+            pattern.tile = current.tile;
+        }
+        crate::procedural_params::pattern_settings_from(CMD, params, &mut pattern)?;
+        let (low, high) = (color_param(params, "low").unwrap_or([0.0; 3]), color_param(params, "high").unwrap_or([1.0; 3]));
+        return Ok(Some(Source::Procedural { pattern, low, high }));
+    }
+    if let Some(color) = color_param(params, "color").or_else(|| color_param(params, "value")) {
+        return Ok(Some(Source::Uniform(color)));
+    }
+    if let Some(name) = strp(params, "image") {
+        return Ok(Some(Source::Image { name: name.to_string(), normal_format: normal_format.unwrap_or_default() }));
+    }
+    if let Some(anchor) = u64p(params, "anchor") {
+        let reader = match target {
+            FillTarget::Layer(id) => Some(id),
+            FillTarget::Effect(effect) => session.doc.project.effect(effect).map(|(owner, _)| owner),
+        };
+        let reader = reader.ok_or_else(|| bad(CMD, "the fill is not in a layer"))?;
+        let anchor_channel = channel_param(CMD, params, "anchorChannel")?.unwrap_or(channel);
+        return Ok(Some(crate::mask_cmds::anchor_source(session, CMD, reader, LayerId(anchor), anchor_channel)?));
+    }
+    if !crate::procedural_params::has_pattern_settings(params) {
+        return Ok(None);
+    }
+
+    // Pattern settings alone edit the channel's current pattern
+    let Some(Source::Procedural { mut pattern, low, high }) = current else {
+        return Err(bad(CMD, "the channel has no pattern: give `procedural` with its settings"));
+    };
+
+    crate::procedural_params::pattern_settings_from(CMD, params, &mut pattern)?;
+    Ok(Some(Source::Procedural { pattern, low, high }))
 }
 
 /// The projection `p` asks for. Fields it does not give keep their values from `current` when

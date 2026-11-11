@@ -166,6 +166,7 @@ fn rgb(c: [f32; 3]) -> Source {
     Source::Uniform(c)
 }
 
+/// A pattern between colors `low` and `high` (short: the material catalog calls it on almost every line)
 fn pat(kind: ProceduralKind, scale: f32, seed: u32, contrast: f32, low: [f32; 3], high: [f32; 3]) -> Source {
     Source::Procedural { pattern: Procedural { scale, seed, contrast, ..Procedural::new(kind) }, low, high }
 }

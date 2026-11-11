@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use texturecraft_core::{
     BakedMap, BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask,
-    MaskBackground, OutputResolution, Procedural, ProceduralKind, Project, ResolutionMode, Source,
+    MaskBackground, Procedural, ProceduralKind, Project, Source,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
@@ -40,7 +40,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add fill",
             ["Layers", "Effects"],
             None,
-            "{layer?, target?: mask|content, name?, mask: value?: 0..1 | procedural?: kind, scale?, seed? | anchor?: anchor effect id, anchorChannel?: channel (height); content: color?, roughness?, metallic?, height?, opacity? (default: every layer channel); projection?}",
+            "{layer?, target?: mask|content, name?, mask: value?: 0..1 | procedural?: kind, scale?, seed?, contrast?, balance?, invert?, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3, tile?: {Tile Generator settings in camelCase, as project.inspect shows them}, tileDefaults?: true | anchor?: anchor effect id, anchorChannel?: channel (height); content: color?, roughness?, metallic?, height?, opacity? (default: every layer channel); projection?}",
             has_layer,
             add_fill
         ),
@@ -94,7 +94,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, value?, uniform?: 0..1 (a mask fill reads that value, whatever its source), procedural?: kind (a mask fill) with scale?, seed?, contrast?, balance?, invert?, resolution?, tile?, tileDefaults? (alone, they edit its pattern), anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -280,38 +280,36 @@ pub(crate) fn anchor_source(s: &Session, cmd: &str, reader: LayerId, anchor: Lay
     }
 }
 
-fn add_fill(s: &mut Session, p: &Value) -> Result<Value> {
-    let projection = projection_from(p, "effect.add.fill", None)?;
-    let blend = blend_param("effect.add.fill", p, "blend")?.unwrap_or(BlendMode::Normal);
-    let id = layer_param(s, "effect.add.fill", p)?;
-    if content_target(p, "effect.add.fill")? {
-        let mut fill = crate::layer_cmds::fill_from(p);
+fn add_fill(session: &mut Session, params: &Value) -> Result<Value> {
+    const CMD: &str = "effect.add.fill";
+    let projection = projection_from(params, CMD, None)?;
+    let blend = blend_param(CMD, params, "blend")?.unwrap_or(BlendMode::Normal);
+    let layer = layer_param(session, CMD, params)?;
+    if content_target(params, CMD)? {
+        let mut fill = crate::layer_cmds::fill_from(params);
         if fill.sources.is_empty() {
-            fill.sources = s.doc.project.layer(id)?.channels.keys().map(|c| (*c, Source::uniform_of(*c))).collect();
+            fill.sources = session.doc.project.layer(layer)?.channels.keys().map(|channel| (*channel, Source::uniform_of(*channel))).collect();
         }
         fill.projection = projection;
-        return push_effect(s, p, EffectKind::Material(fill), blend);
+        return push_effect(session, params, EffectKind::Material(fill), blend);
     }
-    if let Some(a) = u64p(p, "anchor") {
-        let channel = channel_param("effect.add.fill", p, "anchorChannel")?.unwrap_or(Channel::Height);
-        let source = anchor_source(s, "effect.add.fill", id, LayerId(a), channel)?;
-        return push_effect(s, p, EffectKind::Fill { source, projection }, blend);
+    if let Some(anchor) = u64p(params, "anchor") {
+        let channel = channel_param(CMD, params, "anchorChannel")?.unwrap_or(Channel::Height);
+        let source = anchor_source(session, CMD, layer, LayerId(anchor), channel)?;
+        return push_effect(session, params, EffectKind::Fill { source, projection }, blend);
     }
-    let source = match strp(p, "procedural") {
-        Some(k) => {
-            let kind = ProceduralKind::parse(k).ok_or_else(|| bad("effect.add.fill", format!("unknown procedural `{k}`")))?;
-            let mut pr = Procedural::new(kind);
-            if let Some(v) = f32p(p, "scale") {
-                pr.scale = v.clamp(0.001, 1000.0);
-            }
-            if let Some(v) = u64p(p, "seed") {
-                pr.seed = v as u32;
-            }
-            Source::Procedural { pattern: pr, low: [0.0; 3], high: [1.0; 3] }
+
+    let source = match strp(params, "procedural") {
+        Some(name) => {
+            let kind = ProceduralKind::parse(name).ok_or_else(|| bad(CMD, format!("unknown procedural `{name}`")))?;
+            let mut pattern = Procedural::new(kind);
+            crate::procedural_params::pattern_basics_from(params, &mut pattern);
+            crate::procedural_params::pattern_settings_from(CMD, params, &mut pattern)?;
+            Source::Procedural { pattern, low: [0.0; 3], high: [1.0; 3] }
         }
-        None => Source::Uniform([f32p(p, "value").unwrap_or(1.0).clamp(0.0, 1.0); 3]),
+        None => Source::Uniform([f32p(params, "value").unwrap_or(1.0).clamp(0.0, 1.0); 3]),
     };
-    push_effect(s, p, EffectKind::Fill { source, projection }, blend)
+    push_effect(session, params, EffectKind::Fill { source, projection }, blend)
 }
 
 /// Apply `params` to `generator`, using `command` in errors
@@ -346,17 +344,7 @@ fn generator_from(command: &str, params: &Value, generator: &mut Generator) -> R
     if let Some(contrast) = f32p(params, "contrast") {
         generator.global.contrast = contrast.clamp(0.0, 1.0);
     }
-    if let Some(value) = params.get("resolution") {
-        let name = value.as_str().ok_or_else(|| bad(command, "`resolution` must be a string"))?;
-        generator.resolution.mode = ResolutionMode::parse(name).ok_or_else(|| bad(command, format!("unknown resolution `{name}`")))?;
-    }
-    if let Some(custom) = u64p(params, "customResolution") {
-        generator.resolution.custom = custom.clamp(1, u64::from(OutputResolution::MAX_SIZE)) as u32;
-    }
-    if let Some(factor) = params.get("resolutionFactor") {
-        let factor = factor.as_i64().ok_or_else(|| bad(command, "`resolutionFactor` must be a whole number"))?;
-        generator.resolution.factor = factor.clamp(i64::from(*OutputResolution::FACTORS.start()), i64::from(*OutputResolution::FACTORS.end())) as i8;
-    }
+    crate::procedural_params::resolution_from(command, params, &mut generator.resolution)?;
 
     // A mode or sizes also give a curvature generator saved before detail sizes its detail
     let mode = params
@@ -579,6 +567,10 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
             EffectKind::Fill { source, .. } => {
                 if let Some(anchor) = anchor {
                     *source = anchor;
+                } else if let Some(pattern) = fill_pattern(CMD, params, source)? {
+                    *source = pattern;
+                } else if let Some(value) = f32p(params, "uniform") {
+                    *source = Source::Uniform([value.clamp(0.0, 1.0); 3]);
                 } else if let Some(value) = f32p(params, "value")
                     && matches!(source, Source::Uniform(_) | Source::Anchor { .. })
                 {
@@ -596,6 +588,35 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         Ok(())
     })?;
     Ok(Value::Null)
+}
+
+/// The pattern a mask fill reads after `params`: `procedural` picks one (a pattern of the kind it already reads keeps its settings), pattern settings alone edit the current one
+fn fill_pattern(command: &str, params: &Value, current: &Source) -> Result<Option<Source>> {
+    let (current, range) = match current {
+        Source::Procedural { pattern, low, high } => (Some(pattern), (*low, *high)),
+        _ => (None, ([0.0; 3], [1.0; 3])),
+    };
+    let mut pattern = match strp(params, "procedural") {
+        Some(name) => {
+            let kind = ProceduralKind::parse(name).ok_or_else(|| bad(command, format!("unknown procedural `{name}`")))?;
+            current.filter(|pattern| pattern.kind == kind).cloned().unwrap_or_else(|| Procedural::new(kind))
+        }
+        None => {
+            let edits_pattern = ["scale", "seed", "contrast", "balance", "invert"].iter().any(|key| params.get(key).is_some())
+                || crate::procedural_params::has_pattern_settings(params);
+            match current {
+                Some(pattern) if edits_pattern => pattern.clone(),
+                None if crate::procedural_params::has_pattern_settings(params) => {
+                    return Err(bad(command, "the mask fill reads no pattern: give `procedural` with its settings"));
+                }
+                _ => return Ok(None),
+            }
+        }
+    };
+
+    crate::procedural_params::pattern_basics_from(params, &mut pattern);
+    crate::procedural_params::pattern_settings_from(command, params, &mut pattern)?;
+    Ok(Some(Source::Procedural { pattern, low: range.0, high: range.1 }))
 }
 
 /// The library id of the filter effect `effect` is, if it is one

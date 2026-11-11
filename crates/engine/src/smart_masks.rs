@@ -72,7 +72,7 @@ pub(crate) fn directional(kind: GeneratorKind, direction: [f32; 3], level: f32, 
     EffectKind::Generator(Generator { level, softness, noise_amount: noise, direction, invert, detail: None, ..Generator::new(kind) })
 }
 
-/// A triplanar grayscale pattern fill.
+/// A triplanar grayscale pattern fill
 pub(crate) fn pattern(kind: ProceduralKind, scale: f32, seed: u32, contrast: f32) -> EffectKind {
     EffectKind::Fill {
         source: Source::Procedural { pattern: Procedural { scale, seed, contrast, ..Procedural::new(kind) }, low: [0.0; 3], high: [1.0; 3] },

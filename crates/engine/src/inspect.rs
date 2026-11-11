@@ -7,12 +7,22 @@ use texturecraft_core::{Effect, EffectKind, Fill, Filter, Generator, Layer, Laye
 use crate::Session;
 use crate::session::StackTarget;
 
-fn source_json(s: &Source) -> Value {
-    match s {
-        Source::Uniform(v) => json!({ "uniform": v }),
-        Source::Procedural { pattern, low, high } => json!({
-            "procedural": pattern.kind.label(), "scale": pattern.scale, "seed": pattern.seed, "contrast": pattern.contrast, "low": low, "high": high
-        }),
+fn source_json(source: &Source) -> Value {
+    match source {
+        Source::Uniform(value) => json!({ "uniform": value }),
+        Source::Procedural { pattern, low, high } => {
+            let mut out = json!({
+                "procedural": pattern.kind.label(), "scale": pattern.scale, "seed": pattern.seed, "contrast": pattern.contrast, "low": low, "high": high
+            });
+            if !pattern.resolution.is_default() {
+                out["resolution"] =
+                    json!({ "mode": format!("{:?}", pattern.resolution.mode), "custom": pattern.resolution.custom, "factor": pattern.resolution.factor });
+            }
+            if let Some(tile) = &pattern.tile {
+                out["tile"] = crate::procedural_params::tile_report(tile);
+            }
+            out
+        }
         Source::Image { name, normal_format: NormalFormat::OpenGl } => json!({ "image": name }),
         Source::Image { name, normal_format: NormalFormat::DirectX } => json!({ "image": name, "normalFormat": "directX" }),
         Source::Anchor { anchor, channel } => json!({ "anchor": anchor.0, "channel": channel.id() }),

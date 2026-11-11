@@ -46,6 +46,7 @@ mod polygon_fill_drag;
 mod preserve;
 pub mod preset_cmds;
 pub mod preview;
+mod procedural_params;
 pub mod project_cmds;
 pub mod quick_mask;
 pub mod resource_cmds;

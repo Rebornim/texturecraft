@@ -93,22 +93,39 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let mesh = texturecraft_engine::geom::primitives::sphere(1.0, 96, 48);
         let mut orb = texturecraft_engine::orb_preview::OrbPreview::new_with(mesh, "builtin:sphere").unwrap();
-        for axis in [2u64, 0] {
-            for scale in [1.4f64, 2.0] {
+        let save = |name: String, pixels: Vec<Option<MaterialPreviewPixel>>, size: usize| {
+            let image = material_preview_image(size, &pixels);
+            let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+            image::RgbaImage::from_raw(size as u32, size as u32, rgba).unwrap().save(dir.join(name)).unwrap();
+        };
+        let base = ("layer.add.fill", json!({"color": [0.16, 0.3, 0.34], "roughness": 0.5, "metallic": 0.0}));
+        // Probe: where a plain planar patch lands for each scale and axis
+        for axis in [0u64, 1, 2] {
+            for scale in [0.7f64, 1.0, 1.5, 2.5] {
+                let commands = [
+                    base.clone(),
+                    ("layer.add.fill", json!({"color": [0.9, 0.52, 0.28], "roughness": 0.4, "metallic": 0.0})),
+                    ("layer.fill.projection", json!({"projection": "planar", "axis": axis, "scale": scale, "wrap": "none"})),
+                ];
+                if let Some(pixels) = orb.commands(&commands, 180) {
+                    save(format!("probe_axis{axis}_scale{scale}.png"), pixels, 180);
+                }
+            }
+        }
+        // The sticker: orange patch slightly larger (smaller scale) under the checker patch
+        for axis in [0u64, 1, 2] {
+            for scale in [1.5f64, 2.5] {
                 let planar = |scale: f64| json!({"projection": "planar", "axis": axis, "scale": scale, "wrap": "none"});
                 let commands = [
-                    ("layer.add.fill", json!({"color": [0.16, 0.3, 0.34], "roughness": 0.5, "metallic": 0.0})),
+                    base.clone(),
                     ("layer.add.fill", json!({"color": [0.9, 0.52, 0.28], "roughness": 0.4, "metallic": 0.0})),
-                    ("layer.fill.projection", planar(scale * 1.05)),
+                    ("layer.fill.projection", planar(scale * 0.95)),
                     ("layer.add.fill", json!({"color": [0.5, 0.5, 0.5], "roughness": 0.4, "metallic": 0.0})),
                     ("layer.fill.set", json!({"channel": "baseColor", "procedural": "Checker", "scale": 2.0, "low": [0.3, 0.31, 0.33], "high": [0.8, 0.81, 0.83]})),
                     ("layer.fill.projection", planar(scale)),
                 ];
-                for size in [180usize, 360] {
-                    let Some(pixels) = orb.commands(&commands, size) else { continue };
-                    let image = material_preview_image(size, &pixels);
-                    let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
-                    image::RgbaImage::from_raw(size as u32, size as u32, rgba).unwrap().save(dir.join(format!("sticker_axis{axis}_scale{scale}_{size}.png"))).unwrap();
+                if let Some(pixels) = orb.commands(&commands, 360) {
+                    save(format!("sticker_axis{axis}_scale{scale}.png"), pixels, 360);
                 }
             }
         }

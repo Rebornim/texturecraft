@@ -41,13 +41,13 @@ fn environment_cache_retains_source_identity_until_replaced() {
     let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut app = egui_kittest::Harness::builder().build_eframe(|context| crate::TextureCraftApp::new(context, session())).into_state();
     app.session.doc.project.display.environment = "resource:environment".into();
-    let source = Arc::new(ImageRes { width: 2, height: 1, rgba: vec![[1.0, 0.0, 0.0, 1.0]; 2], srgb: false });
+    let source = Arc::new(ImageRes::new(2, 1, vec![[1.0, 0.0, 0.0, 1.0]; 2], false));
     let original_source = Arc::downgrade(&source);
     app.session.images.insert("environment".into(), source);
     let first = super::trace_scene(&app).env;
     assert!(Arc::ptr_eq(&first, &super::trace_scene(&app).env), "unchanged images reuse the decoded environment");
 
-    let replacement = Arc::new(ImageRes { width: 2, height: 1, rgba: vec![[0.0, 1.0, 0.0, 1.0]; 2], srgb: false });
+    let replacement = Arc::new(ImageRes::new(2, 1, vec![[0.0, 1.0, 0.0, 1.0]; 2], false));
     app.session.images.insert("environment".into(), replacement.clone());
 
     assert!(original_source.upgrade().is_some(), "the cache must retain its source so its address cannot be reused");

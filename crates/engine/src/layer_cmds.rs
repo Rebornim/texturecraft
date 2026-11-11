@@ -2,7 +2,9 @@
 //! per-channel blending and fill sources.
 
 use serde_json::{Value, json};
-use texturecraft_core::{BlendMode, Channel, ChannelBlend, EffectKind, Fill, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Source};
+use texturecraft_core::{
+    BlendMode, Channel, ChannelBlend, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Sampling, Source,
+};
 
 use crate::commands::{
     CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, content_param, f32p, has_layer, layer_param, normal_format_param, strp, u64p,
@@ -36,7 +38,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill projection",
             [],
             None,
-            "{layer? | effect?: content fill effect id, projection?: uv|triplanar|planar|spherical|cylindrical (default: the current one), scale?: number | [u, v] (uv), rotation?: degrees (uv), offset?: [u, v] (uv) | [x, y, z] (triplanar, planar), sharpness?: 1..64 (triplanar), axis?: 0|1|2 (planar, cylindrical)} — what is not given keeps its value",
+            "{layer? | effect?: content fill effect id, projection?: uv|triplanar|planar|spherical|cylindrical (default: the current one), scale?: number | [u, v] (uv), rotation?: degrees (uv), offset?: [u, v] (uv) | [x, y, z] (triplanar, planar), sharpness?: 1..64 (triplanar), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read)} — what is not given keeps its value",
             has_layer,
             fill_projection
         ),
@@ -445,6 +447,15 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
     Ok(proj)
 }
 
+/// `current` with the `filtering` param applied.
+pub(crate) fn sampling_from(p: &Value, cmd: &str, current: Sampling) -> Result<Sampling> {
+    let mut sampling = current;
+    if let Some(id) = strp(p, "filtering") {
+        sampling.filtering = Filtering::from_id(id).ok_or_else(|| bad(cmd, format!("unknown filtering `{id}`: bilinearHq, bilinearSharp or nearest")))?;
+    }
+    Ok(sampling)
+}
+
 /// `key` as `N` finite numbers clamped to `lo..=hi`: an array of `N`, or one number for all.
 fn floats<const N: usize>(p: &Value, key: &str, lo: f32, hi: f32) -> Option<[f32; N]> {
     let one = |x: &Value| x.as_f64().map(|f| f as f32).filter(|f| f.is_finite()).map(|f| f.clamp(lo, hi));
@@ -465,6 +476,7 @@ fn fill_projection(s: &mut Session, p: &Value) -> Result<Value> {
     s.edit("Fill projection", |s| {
         let fill = fill_mut(s, target)?;
         fill.projection = projection_from(p, "layer.fill.projection", Some(&fill.projection))?;
+        fill.sampling = sampling_from(p, "layer.fill.projection", fill.sampling)?;
         Ok(())
     })?;
     Ok(Value::Null)

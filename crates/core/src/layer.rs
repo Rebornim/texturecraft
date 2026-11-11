@@ -149,6 +149,53 @@ impl Layer {
     }
 }
 
+/// How a fill reads its image sources between texels
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum Filtering {
+    /// Bilinear on the image level that matches the texel's footprint: smooth when the image is shrunk
+    #[default]
+    BilinearHq,
+    /// Bilinear on the full image: sharp, but may shimmer where the image is shrunk
+    BilinearSharp,
+    /// The nearest image texel
+    Nearest,
+}
+
+impl Filtering {
+    pub const ALL: [Filtering; 3] = [Filtering::BilinearHq, Filtering::BilinearSharp, Filtering::Nearest];
+
+    /// Command id
+    pub fn id(self) -> &'static str {
+        match self {
+            Filtering::BilinearHq => "bilinearHq",
+            Filtering::BilinearSharp => "bilinearSharp",
+            Filtering::Nearest => "nearest",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Filtering> {
+        Filtering::ALL.into_iter().find(|f| f.id() == id)
+    }
+}
+
+/// How a fill samples its images. Fills saved before these choices existed read their images
+/// with [`Sampling::SAVED_BEFORE`], so they keep their look.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Sampling {
+    #[serde(default)]
+    pub filtering: Filtering,
+}
+
+impl Sampling {
+    /// What fills saved before the sampling choices existed did: plain bilinear
+    pub const SAVED_BEFORE: Sampling = Sampling { filtering: Filtering::BilinearSharp };
+
+    /// Serde default for fills saved before the field existed.
+    pub fn saved_before() -> Sampling {
+        Sampling::SAVED_BEFORE
+    }
+}
+
 /// Where a texture or procedural is sampled from on the surface.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Projection {
@@ -378,6 +425,8 @@ impl Source {
 pub struct Fill {
     pub sources: BTreeMap<Channel, Source>,
     pub projection: Projection,
+    #[serde(default = "Sampling::saved_before")]
+    pub sampling: Sampling,
     /// Set when the sources are maps cooked from a MaterialCraft material.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<Box<MaterialLink>>,
@@ -962,6 +1011,8 @@ pub enum EffectKind {
     Fill {
         source: Source,
         projection: Projection,
+        #[serde(default = "Sampling::saved_before")]
+        sampling: Sampling,
     },
     Generator(Generator),
     Levels(Levels),
@@ -1187,7 +1238,7 @@ mod tests {
         assert!(!l.reads_anchor());
         let source = Source::Anchor { anchor: LayerId(9), channel: Channel::Height };
         l.mask = Some(Mask {
-            effects: vec![Effect::new(LayerId(2), EffectKind::Fill { source, projection: Projection::default() })],
+            effects: vec![Effect::new(LayerId(2), EffectKind::Fill { source, projection: Projection::default(), sampling: Default::default() })],
             ..Mask::new(MaskBackground::Black)
         });
         assert!(l.reads_anchor());

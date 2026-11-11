@@ -54,6 +54,16 @@ pub static LANGUAGES: [Language; COUNT] = [
 
 static CURRENT: AtomicUsize = AtomicUsize::new(0);
 
+/// How a fill reads its images, as the Filtering combo names it
+pub(crate) fn filtering_label(filtering: texturecraft_engine::core::Filtering) -> &'static str {
+    use texturecraft_engine::core::Filtering;
+    match filtering {
+        Filtering::BilinearHq => n_("Bilinear | HQ"),
+        Filtering::BilinearSharp => n_("Bilinear | Sharp"),
+        Filtering::Nearest => n_("Nearest"),
+    }
+}
+
 /// Display labels belong to the UI; the model exposes only map identities
 pub(crate) fn baked_map_label(map: texturecraft_engine::core::BakedMap) -> &'static str {
     use texturecraft_engine::core::BakedMap;

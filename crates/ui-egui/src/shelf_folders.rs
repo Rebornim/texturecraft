@@ -53,7 +53,7 @@ pub(crate) fn name(level: usize, segment: &str) -> &str {
 
 /// "› All libraries › …": each arrow lists the folders at its level, the names are plain text, a last arrow lists the folders inside
 pub(crate) fn breadcrumb(app: &mut TextureCraftApp, ui: &mut Ui, paths: &[Vec<String>]) {
-    let tk = Tokens::get(ui.ctx());
+    let tokens = Tokens::get(ui.ctx());
     let size = ui.spacing().interact_size.y * ARROW_SCALE;
     let mut picked: Option<Vec<String>> = None;
     ui.horizontal(|ui| {
@@ -83,7 +83,7 @@ pub(crate) fn breadcrumb(app: &mut TextureCraftApp, ui: &mut Ui, paths: &[Vec<St
                 None if level == 0 => tr("All libraries"),
                 None => continue,
             };
-            ui.label(RichText::new(shown).strong().color(tk.text_strong));
+            ui.label(RichText::new(shown).strong().color(tokens.text_strong));
         }
     });
     if let Some(path) = picked {

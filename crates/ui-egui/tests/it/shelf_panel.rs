@@ -13,7 +13,7 @@ use texturecraft_ui_egui::shelf_view::ShelfView;
 const REFERENCE_WINDOW: egui::Vec2 = egui::vec2(1920.0, 1032.0);
 /// A window whose default Assets panel is too narrow for the full type row
 const NARROW_WINDOW: egui::Vec2 = egui::vec2(1100.0, 1032.0);
-/// The shelf's Materials and Smart masks types
+/// The types' positions in the shelf's type row (its table is crate-private)
 const MATERIALS_TYPE: usize = 0;
 const SMART_MASKS_TYPE: usize = 2;
 const BRUSHES_TYPE: usize = 4;

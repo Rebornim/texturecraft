@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use serde_json::json;
+use texturecraft_engine::Session;
 use texturecraft_engine::core::ProceduralKind;
 use texturecraft_engine::core::project::ENVIRONMENTS;
 use texturecraft_engine::filter_lib::{FILTERS, FilterDef};
@@ -33,7 +34,6 @@ pub(crate) const USER: &str = "user";
 pub(crate) const LIBRARIES: [(&str, &str); 3] = [(PROJECT, "Project"), (STARTER, "Starter assets"), (USER, "Your assets")];
 
 /// A shelf tile's asset
-#[derive(Clone)]
 pub(crate) enum ShelfEntry {
     Material(&'static SmartMaterial),
     SmartMask(&'static SmartMask),
@@ -81,17 +81,17 @@ impl ShelfEntry {
     }
 
     /// The asset's identity across frames: its kind and id
-    pub(crate) fn key(&self) -> String {
+    pub(crate) fn identity(&self) -> (&'static str, &str) {
         match self {
-            ShelfEntry::Material(material) => format!("material:{}", material.id),
-            ShelfEntry::SmartMask(mask) => format!("mask:{}", mask.id),
-            ShelfEntry::Filter(filter) => format!("filter:{}", filter.id),
-            ShelfEntry::Brush(preset) => format!("brush:{}", preset.id),
-            ShelfEntry::SavedBrush(path) => format!("saved-brush:{}", path.display()),
-            ShelfEntry::Alpha(alpha) => format!("alpha:{}", alpha.id),
-            ShelfEntry::Procedural(kind) => format!("procedural:{kind:?}"),
-            ShelfEntry::Environment(name) => format!("environment:{name}"),
-            ShelfEntry::Image(name) => format!("image:{name}"),
+            ShelfEntry::Material(material) => ("material", material.id),
+            ShelfEntry::SmartMask(mask) => ("mask", mask.id),
+            ShelfEntry::Filter(filter) => ("filter", filter.id),
+            ShelfEntry::Brush(preset) => ("brush", preset.id),
+            ShelfEntry::SavedBrush(path) => ("saved-brush", path.to_str().unwrap_or_default()),
+            ShelfEntry::Alpha(alpha) => ("alpha", &alpha.id),
+            ShelfEntry::Procedural(kind) => ("procedural", kind.label()),
+            ShelfEntry::Environment(name) => ("environment", name),
+            ShelfEntry::Image(name) => ("image", name),
         }
     }
 
@@ -168,7 +168,7 @@ impl ShelfEntry {
     }
 
     /// What the hover popup renders; None for an image that is gone
-    pub(crate) fn preview(&self, app: &TextureCraftApp) -> Option<ShelfPreview> {
+    pub(crate) fn preview(&self, session: &Session) -> Option<ShelfPreview> {
         Some(match self {
             ShelfEntry::Material(material) => ShelfPreview::material(material.id),
             ShelfEntry::SmartMask(mask) => ShelfPreview::SmartMask(mask.id),
@@ -178,7 +178,7 @@ impl ShelfEntry {
             ShelfEntry::Alpha(alpha) => ShelfPreview::Alpha(alpha),
             ShelfEntry::Procedural(kind) => ShelfPreview::Procedural(*kind),
             ShelfEntry::Environment(name) => ShelfPreview::Environment(name),
-            ShelfEntry::Image(name) => ShelfPreview::Image(name.clone(), app.session.images.get(name).cloned()?),
+            ShelfEntry::Image(name) => ShelfPreview::Image(name.clone(), session.images.get(name).cloned()?),
         })
     }
 

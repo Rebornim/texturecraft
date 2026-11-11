@@ -110,9 +110,9 @@ fn folders(ui: &mut Ui, paths: &[Vec<String>], prefix: &[String], current: &[Str
 
 /// A pane's caption with a button at its right
 fn header(ui: &mut Ui, title: &str, button: impl FnOnce(&mut Ui)) {
-    let tk = Tokens::get(ui.ctx());
+    let tokens = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
-        ui.label(RichText::new(title.to_uppercase()).size(HEADER_SIZE).color(tk.text_dim));
+        ui.label(RichText::new(title.to_uppercase()).size(HEADER_SIZE).color(tokens.text_dim));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), button);
     });
 }
@@ -131,6 +131,7 @@ fn saved_searches(app: &mut TextureCraftApp, ui: &mut Ui) {
     if ui.selectable_label(everything, tr("All")).clicked() {
         crate::shelf_toolbar::reset_query(app);
     }
+
     let mut deleted = None;
     for (i, saved) in app.ui.shelf_saved_searches.iter().enumerate() {
         let same = saved.filter == current.filter && saved.tab == current.tab && saved.path == current.path;

@@ -49,9 +49,9 @@ fn collapsed(ui: &mut Ui, picked: &mut usize, counts: &[usize], size: f32) {
     let response = icon_dropdown_button(ui, egui_phosphor::regular::FUNNEL_SIMPLE, tr("Filter by type"), filtering, size);
     let response = response.on_hover_text(tr("Filter by type"));
     if filtering {
-        let tk = crate::theme::Tokens::get(ui.ctx());
+        let tokens = crate::theme::Tokens::get(ui.ctx());
         let dot = response.rect.left_top() + vec2(size - FILTER_DOT_RADIUS, FILTER_DOT_RADIUS);
-        ui.painter().circle_filled(dot, FILTER_DOT_RADIUS, tk.accent);
+        ui.painter().circle_filled(dot, FILTER_DOT_RADIUS, tokens.accent);
     }
 
     egui::Popup::menu(&response).show(|ui| {

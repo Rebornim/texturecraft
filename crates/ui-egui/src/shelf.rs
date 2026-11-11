@@ -27,7 +27,7 @@ const HINT_SIZE: f32 = 10.0;
 const SAVED_MATERIAL_NAME: &str = "material";
 /// Corner radius of a tile's hover and selection highlights, in points
 const TILE_ROUNDING: f32 = 3.0;
-/// The last clicked or right-clicked tile's [`ShelfEntry::key`], kept in egui's memory under this id
+/// The last clicked or right-clicked tile's [`ShelfEntry::identity`], kept in egui's memory under this id
 const SELECTED_TILE: &str = "shelf_selected_tile";
 /// The outline widths of the selected tile and of the one in use (the brush's alpha, the shown environment), in points
 const SELECTED_OUTLINE_WIDTH: f32 = 1.5;
@@ -241,8 +241,9 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
 
     let folder = app.ui.shelf_path.clone();
     let picked_tab = app.ui.shelf_tab;
-    let mut applicable = crate::shelf_folders::paths(all.iter().filter(|entry| entry.matches(&filter) && crate::shelf_tabs::shows(picked_tab, entry.tab())));
-    let matching: Vec<ShelfEntry> = all.into_iter().filter(|entry| entry.in_folder(&folder) && entry.matches(&filter)).collect();
+    let searched: Vec<ShelfEntry> = all.into_iter().filter(|entry| entry.matches(&filter)).collect();
+    let mut applicable = crate::shelf_folders::paths(searched.iter().filter(|entry| crate::shelf_tabs::shows(picked_tab, entry.tab())));
+    let matching: Vec<ShelfEntry> = searched.into_iter().filter(|entry| entry.in_folder(&folder)).collect();
     let mut counts: Vec<usize> = TABS.iter().map(|(tab, _, _)| matching.iter().filter(|entry| entry.tab() == *tab).count()).collect();
 
     // Saved smart materials list under the grid rather than as tiles, so they count apart
@@ -289,6 +290,7 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
 /// The tiles of `entries` in a scroll area `height` high, then the saved smart materials when `saved_materials`
 fn grid(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entries: &[ShelfEntry], height: f32, saved_materials: bool, filter: &str) {
     let view = app.ui.shelf_view;
+    let selected: Option<(String, String)> = ctx.data(|data| data.get_temp(egui::Id::unique(SELECTED_TILE)));
     egui::ScrollArea::vertical()
         .id_salt("shelf_scroll")
         .auto_shrink([false, false])
@@ -297,7 +299,8 @@ fn grid(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entries: &[
         .show(ui, |ui| {
             tiles(ui, |ui| {
                 for entry in entries {
-                    entry_tile(app, ui, ctx, entry, view);
+                    let is_selected = selected.as_ref().is_some_and(|(kind, id)| entry.identity() == (kind.as_str(), id.as_str()));
+                    entry_tile(app, ui, ctx, entry, view, is_selected);
                 }
             });
             if saved_materials {
@@ -313,9 +316,9 @@ fn saved_materials_matching(app: &TextureCraftApp, filter: &str) -> usize {
 
 /// The search field: a live filter on names (and categories) with a clear button while it has text
 fn search_field(app: &mut TextureCraftApp, ui: &mut Ui) {
-    let tk = Tokens::get(ui.ctx());
+    let tokens = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
-        ui.label(RichText::new(ic::MAGNIFYING_GLASS).color(tk.text_dim));
+        ui.label(RichText::new(ic::MAGNIFYING_GLASS).color(tokens.text_dim));
         let clear_width = if app.ui.shelf_filter.is_empty() { 0.0 } else { ui.spacing().interact_size.y + ui.spacing().item_spacing.x };
         let field = egui::TextEdit::singleline(&mut app.ui.shelf_filter).hint_text(tr("Search")).desired_width(ui.available_width() - clear_width);
         ui.add(field);
@@ -450,21 +453,24 @@ fn scan_brushes(app: &mut TextureCraftApp) {
 #[cfg(target_arch = "wasm32")]
 fn scan_brushes(_: &mut TextureCraftApp) {}
 
-/// The tile of `entry`: a click applies it, an image resource has a context menu
-fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry: &ShelfEntry, view: ShelfView) {
+/// The tile of `entry`, outlined when `selected`: a click applies it, an image resource has a context menu
+fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry: &ShelfEntry, view: ShelfView, selected: bool) {
     // An image removed this frame has nothing to show
-    let (Some(preview), texture) = (entry.preview(app), entry.thumbnail(app, ctx)) else { return };
+    if let ShelfEntry::Image(name) = entry
+        && !app.session.images.contains_key(name)
+    {
+        return;
+    }
 
+    let texture = entry.thumbnail(app, ctx);
     let asset = entry.asset();
-    let response = tile_in_view(ui, &mut app.thumbs, texture.as_ref(), || preview, entry.label(), asset.as_ref(), view);
+    let session = &app.session;
+    let response = tile_in_view(ui, &mut app.thumbs, texture.as_ref(), || entry.preview(session), entry.label(), asset.as_ref(), view);
 
-    let selected_id = egui::Id::unique(SELECTED_TILE);
-    let key = entry.key();
-    let selected = ctx.data(|data| data.get_temp::<String>(selected_id)).is_some_and(|selected| selected == key);
     if selected || entry.in_use(app) {
-        let tk = Tokens::get(ctx);
+        let tokens = Tokens::get(ctx);
         let width = if selected { SELECTED_OUTLINE_WIDTH } else { IN_USE_OUTLINE_WIDTH };
-        ui.painter().rect_stroke(response.rect, TILE_ROUNDING, Stroke::new(width, tk.accent), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(response.rect, TILE_ROUNDING, Stroke::new(width, tokens.accent), egui::StrokeKind::Inside);
     }
 
     if entry.includes_randomness() {
@@ -472,7 +478,8 @@ fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry
     }
 
     if response.clicked() || response.secondary_clicked() {
-        ctx.data_mut(|data| data.insert_temp(selected_id, key));
+        let (kind, id) = entry.identity();
+        ctx.data_mut(|data| data.insert_temp(egui::Id::unique(SELECTED_TILE), (kind.to_string(), id.to_string())));
     }
     if response.clicked() {
         entry.activate(app);
@@ -501,20 +508,20 @@ pub(crate) fn tile(
     label: &str,
     drag: Option<&Asset>,
 ) -> egui::Response {
-    tile_in_view(ui, thumbs, texture, preview, label, drag, ShelfView::Medium)
+    tile_in_view(ui, thumbs, texture, || Some(preview()), label, drag, ShelfView::Medium)
 }
 
-/// [`tile`] at `view`'s size: a grid tile with the name under the thumbnail, or a list row with it beside
+/// [`tile`] at `view`'s size: a grid tile with the name under the thumbnail, or a list row with it beside; `preview` runs on hover
 fn tile_in_view(
     ui: &mut Ui,
     thumbs: &mut Thumbs,
     texture: Option<&egui::TextureHandle>,
-    preview: impl FnOnce() -> ShelfPreview,
+    preview: impl FnOnce() -> Option<ShelfPreview>,
     label: &str,
     drag: Option<&Asset>,
     view: ShelfView,
 ) -> egui::Response {
-    let tk = Tokens::get(ui.ctx());
+    let tokens = Tokens::get(ui.ctx());
     let sense = if drag.is_some() { Sense::click_and_drag() } else { Sense::click() };
     let (rect, response) = ui.allocate_exact_size(view.tile_size(ui.available_width()), sense);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
@@ -526,21 +533,21 @@ fn tile_in_view(
 
     let painter = ui.painter();
     if response.hovered() || response.dragged() {
-        painter.rect_filled(rect, TILE_ROUNDING, tk.row_hover);
+        painter.rect_filled(rect, TILE_ROUNDING, tokens.row_hover);
     }
 
     let image_rect = view.thumbnail_rect(rect);
-    thumbnail(painter, texture, image_rect, &tk);
+    thumbnail(painter, texture, image_rect, &tokens);
     if view.name_beside() {
         let left = image_rect.right() + crate::shelf_view::LIST_NAME_GAP;
-        let galley = painter.layout_job(one_line(label, rect.right() - left - LABEL_MARGIN, tk.text));
-        painter.galley(egui::pos2(left, rect.center().y - galley.size().y * 0.5), galley, tk.text);
+        let galley = painter.layout_job(one_line(label, rect.right() - left - LABEL_MARGIN, tokens.text));
+        painter.galley(egui::pos2(left, rect.center().y - galley.size().y * 0.5), galley, tokens.text);
     } else {
-        let galley = painter.layout_job(one_line(label, rect.width() - LABEL_MARGIN, tk.text));
-        painter.galley(egui::pos2(rect.center().x - galley.size().x * 0.5, image_rect.bottom() + LABEL_GAP), galley, tk.text);
+        let galley = painter.layout_job(one_line(label, rect.width() - LABEL_MARGIN, tokens.text));
+        painter.galley(egui::pos2(rect.center().x - galley.size().x * 0.5, image_rect.bottom() + LABEL_GAP), galley, tokens.text);
     }
 
-    let big = if response.hovered() { big_preview(ui, thumbs, preview) } else { None };
+    let big = if response.hovered() { preview().and_then(|preview| big_preview(ui, thumbs, || preview)) } else { None };
     response.on_hover_ui(|ui| hover_preview(ui, texture, big.as_ref(), label))
 }
 

@@ -482,3 +482,32 @@ fn the_window_moves_by_its_title_bar() {
     let after = dialog_rect(&harness);
     assert!((after.center() - before.center() - egui::vec2(-80.0, 40.0)).length() < 2.0, "{before:?} -> {after:?}");
 }
+
+#[test]
+fn every_output_card_keeps_room_for_its_file_name() {
+    let mut harness = harness(2, LAPTOP);
+    harness.state_mut().ui.export.preset = "Unity HDRP (Mask Map)".into();
+    harness.get_by_label("Output templates").click();
+    harness.run_steps(3);
+    let names: Vec<_> = harness.get_all_by_role(Role::TextInput).filter(|node| node.value().is_some_and(|value| value.starts_with('$'))).map(|node| node.rect().width()).collect();
+    assert_eq!(names.len(), 3, "one name per output");
+    assert!(names.iter().all(|width| *width > 150.0 && (width - names[0]).abs() < 1.0), "the R+G+B+A card's name is as wide as the others: {names:?}");
+}
+
+#[test]
+fn an_output_map_gets_its_own_size() {
+    let mut harness = harness(2, LAPTOP);
+    let app = harness.state_mut();
+    let mut mine = app.session.export_preset("Unity HDRP (Mask Map)").unwrap();
+    mine.name = "mine".into();
+    texturecraft_engine::execute(&mut app.session, "export.preset.save", &serde_json::json!({"preset": mine})).unwrap();
+    app.ui.export.preset = "mine".into();
+    harness.get_by_label("Output templates").click();
+    harness.run_steps(3);
+    harness.get_all_by_role(Role::ComboBox).find(|node| node.value().as_deref() == Some("Global")).unwrap().click();
+    harness.run_steps(2);
+    harness.get_by_label("512").click();
+    harness.run_steps(3);
+    let saved = harness.state().session.export_preset("mine").unwrap();
+    assert_eq!(saved.maps.iter().map(|map| map.options.size).collect::<Vec<_>>(), [Some(512), None, None], "only the first map has its own size");
+}

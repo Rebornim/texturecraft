@@ -41,7 +41,10 @@ const FOOTER_HEIGHT: f32 = 52.0;
 const RENAME_ID: &str = "exp_rename";
 const RGB: [&str; 3] = ["R", "G", "B"];
 /// A channel box's side, and the greys a constant box spans
-const BOX_SIZE: f32 = 34.0;
+/// A channel box's width for a one-letter channel, then for RGB and Gr
+const BOX_WIDTH: f32 = 28.0;
+const BOX_WIDE_WIDTH: f32 = 40.0;
+const BOX_GAP: f32 = 4.0;
 const BOX_RADIUS: f32 = 5.0;
 /// Saturation and brightness of a map's colour (perceptual)
 const BOX_SATURATION: f32 = 0.75;
@@ -56,6 +59,11 @@ const BOX_CONSTANT_FLOOR: f32 = 40.0;
 const BOX_CONSTANT_RANGE: f32 = 160.0;
 /// Width of an output's file type and bit depth combos
 const FILE_TYPE_WIDTH: f32 = 96.0;
+const SIZE_WIDTH: f32 = 46.0;
+/// Room at the name field's right end for the $ button
+const NAME_DOLLAR_ROOM: f32 = 26.0;
+/// Sizes an output map can have of its own
+const MAP_SIZES: [u32; 7] = [128, 256, 512, 1024, 2048, 4096, 8192];
 const FILE_TYPE_STACK_WIDTH: f32 = FILE_TYPE_WIDTH + ICON + 12.0;
 
 /// The Input maps column: the texture set channels by shading lobe
@@ -619,14 +627,15 @@ fn preview_names(app: &mut TextureCraftApp, preset: &ExportPreset) -> Result<Vec
     Ok(names)
 }
 
-/// One output file: name template, format, bit depth, layout and its channel sources.
-/// One output: drag handle, file name, its channel boxes, then file type and bit depth with duplicate and remove.
+/// One output: drag handle; the file name over its channel boxes and size; file type and bit depth with duplicate and remove.
 /// `width` is the card's outer width, the same for every card (a card sized from what the one above left would creep wider)
 fn output_card(ui: &mut Ui, width: f32, mi: usize, map: &mut MapSpec, file: Option<&str>, openpbr: bool, action: &mut Option<MapAction>) -> bool {
     let tk = Tokens::get(ui.ctx());
     let mut changed = false;
+    let row_height = ui.spacing().interact_size.y;
     let card = egui::Frame::new().fill(tk.row).corner_radius(tk.radius).inner_margin(CARD_MARGIN).show(ui, |ui| {
-        ui.set_width(width - 2.0 * CARD_MARGIN);
+        let inner = width - 2.0 * CARD_MARGIN;
+        ui.set_width(inner);
         ui.horizontal(|ui| {
             let handle = ui.add(egui::Label::new(RichText::new(ic::DOTS_SIX_VERTICAL).size(16.0).color(tk.text_dim)).sense(egui::Sense::drag()));
             handle.dnd_set_drag_payload(MovedOutput(mi));
@@ -635,46 +644,34 @@ fn output_card(ui: &mut Ui, width: f32, mi: usize, map: &mut MapSpec, file: Opti
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             }
 
-            // From the right: file type and bit depth, the boxes, then the file name takes what's left
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // A fixed-width stack: a top-down group here would start its rows at the card's left edge
-                let row_height = ui.spacing().interact_size.y;
-                ui.allocate_ui_with_layout(vec2(FILE_TYPE_STACK_WIDTH, 2.0 * row_height), egui::Layout::top_down(egui::Align::Max), |ui| {
-                    ui.allocate_ui_with_layout(vec2(FILE_TYPE_STACK_WIDTH, row_height), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if icon_button(ui, ic::COPY, tr("Duplicate this output"), false, ICON).clicked() {
-                            *action = Some(MapAction::Duplicate(mi));
-                        }
-                        changed |= format_combo(ui, mi, map);
-                    });
-                    ui.allocate_ui_with_layout(vec2(FILE_TYPE_STACK_WIDTH, row_height), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if icon_button(ui, ic::X, tr("Remove this output"), false, ICON).clicked() {
-                            *action = Some(MapAction::Remove(mi));
-                        }
-                        changed |= bit_depth_combo(ui, mi, map);
-                    });
-                });
-                for slot in channel_slots(map).iter().rev() {
-                    changed |= channel_box(ui, map, slot, openpbr);
-                }
-                ui.menu_button(RichText::new(ic::CURRENCY_DOLLAR).size(13.0), |ui| {
-                    for (token, what) in FILE_TOKENS {
-                        if ui.button(RichText::new(token).monospace()).on_hover_text(what).clicked() {
-                            map.file.push_str(token);
-                            changed = true;
-                            ui.close();
-                        }
+            // The name and the channels take what the file type stack leaves, so every card's columns line up
+            let spacing = ui.spacing().item_spacing.x;
+            let main_width = inner - handle.rect.width() - FILE_TYPE_STACK_WIDTH - 2.0 * spacing;
+            ui.allocate_ui_with_layout(vec2(main_width, 2.0 * row_height + ui.spacing().item_spacing.y), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_width(main_width);
+                changed |= name_field(ui, map, file, main_width);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = BOX_GAP;
+                    for slot in channel_slots(map).iter() {
+                        changed |= channel_box(ui, map, slot, openpbr);
                     }
-                })
-                .response
-                .on_hover_text(tr("Insert a variable"));
-                let writes = match file {
-                    Some(file) => trf("Writes {file}", &[("file", &file)]),
-                    None => tr("Not exported: no source in this texture set").to_string(),
-                };
-                changed |= ui
-                    .add(egui::TextEdit::singleline(&mut map.file).font(egui::TextStyle::Monospace).desired_width(ui.available_width()))
-                    .on_hover_text(writes)
-                    .changed();
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| changed |= size_combo(ui, mi, map));
+                });
+            });
+
+            ui.allocate_ui_with_layout(vec2(FILE_TYPE_STACK_WIDTH, 2.0 * row_height), egui::Layout::top_down(egui::Align::Max), |ui| {
+                ui.allocate_ui_with_layout(vec2(FILE_TYPE_STACK_WIDTH, row_height), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if icon_button(ui, ic::COPY, tr("Duplicate this output"), false, ICON).clicked() {
+                        *action = Some(MapAction::Duplicate(mi));
+                    }
+                    changed |= format_combo(ui, mi, map);
+                });
+                ui.allocate_ui_with_layout(vec2(FILE_TYPE_STACK_WIDTH, row_height), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if icon_button(ui, ic::X, tr("Remove this output"), false, ICON).clicked() {
+                        *action = Some(MapAction::Remove(mi));
+                    }
+                    changed |= bit_depth_combo(ui, mi, map);
+                });
             });
         });
     });
@@ -686,6 +683,52 @@ fn output_card(ui: &mut Ui, width: f32, mi: usize, map: &mut MapSpec, file: Opti
     if card.response.dnd_hover_payload::<MovedOutput>().is_some() {
         ui.painter().rect_stroke(card.response.rect, tk.radius, egui::Stroke::new(1.5, tk.accent), egui::StrokeKind::Outside);
     }
+    changed
+}
+
+/// The file name template across the card, with the variable menu's $ inside its right end
+fn name_field(ui: &mut Ui, map: &mut MapSpec, file: Option<&str>, width: f32) -> bool {
+    let mut changed = false;
+    let writes = match file {
+        Some(file) => trf("Writes {file}", &[("file", &file)]),
+        None => tr("Not exported: no source in this texture set").to_string(),
+    };
+    let margin = egui::Margin { left: 4, right: NAME_DOLLAR_ROOM as i8, top: 2, bottom: 2 };
+    let field = ui.add(egui::TextEdit::singleline(&mut map.file).font(egui::TextStyle::Monospace).margin(margin).vertical_align(egui::Align::Center).desired_width(width));
+    changed |= field.changed();
+    let field = field.on_hover_text(writes);
+
+    let dollar_rect = egui::Rect::from_min_max(
+        egui::pos2(field.rect.right() - NAME_DOLLAR_ROOM + 2.0, field.rect.top() + 3.0),
+        egui::pos2(field.rect.right() - 3.0, field.rect.bottom() - 3.0),
+    );
+    let dollar = ui.put(dollar_rect, egui::Button::new(RichText::new(ic::CURRENCY_DOLLAR).size(12.0)).small()).on_hover_text(tr("Insert a variable"));
+    egui::Popup::menu(&dollar).show(|ui| {
+        for (token, what) in FILE_TOKENS {
+            if ui.button(RichText::new(token).monospace()).on_hover_text(what).clicked() {
+                map.file.push_str(token);
+                changed = true;
+                ui.close();
+            }
+        }
+    });
+    changed
+}
+
+/// The map's own output size, or Global: the export's size from Settings
+fn size_combo(ui: &mut Ui, mi: usize, map: &mut MapSpec) -> bool {
+    let tk = Tokens::get(ui.ctx());
+    let mut changed = false;
+    let shown = match map.options.size {
+        Some(size) => RichText::new(size.to_string()),
+        None => RichText::new(tr("Global")).color(tk.text_dim),
+    };
+    egui::ComboBox::from_id_salt(("exp_map_size", mi)).width(SIZE_WIDTH).selected_text(shown).show_ui(ui, |ui| {
+        changed |= ui.selectable_value(&mut map.options.size, None, tr("Global")).changed();
+        for size in MAP_SIZES {
+            changed |= ui.selectable_value(&mut map.options.size, Some(size), size.to_string()).changed();
+        }
+    });
     changed
 }
 
@@ -735,12 +778,13 @@ fn channel_box(ui: &mut Ui, map: &mut MapSpec, slot: &ChannelSlot, openpbr: bool
         other => tr(source_label(other, openpbr)).to_string(),
     };
 
-    let (rect, response) = ui.allocate_exact_size(vec2(BOX_SIZE, BOX_SIZE), egui::Sense::click());
+    let box_width = if slot.label.len() > 1 { BOX_WIDE_WIDTH } else { BOX_WIDTH };
+    let (rect, response) = ui.allocate_exact_size(vec2(box_width, ui.spacing().interact_size.y), egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, format!("{}: {name}", slot.label)));
     let fill = box_color(&source);
     ui.painter().rect_filled(rect, BOX_RADIUS, fill);
-    ui.painter().text(rect.center_top() + vec2(0.0, 3.0), egui::Align2::CENTER_TOP, slot.label, egui::FontId::proportional(11.0), egui::Color32::WHITE);
-    let bar = egui::Rect::from_min_max(rect.left_bottom() + vec2(5.0, -9.0), rect.right_bottom() + vec2(-5.0, -7.0));
+    ui.painter().text(rect.center() - vec2(0.0, 1.5), egui::Align2::CENTER_CENTER, slot.label, egui::FontId::proportional(11.0), egui::Color32::WHITE);
+    let bar = egui::Rect::from_min_max(rect.left_bottom() + vec2(6.0, -4.0), rect.right_bottom() + vec2(-6.0, -2.0));
     ui.painter().rect_filled(bar, 0.0, slot_bar_color(slot));
     if response.dnd_hover_payload::<SourceRef>().is_some() {
         ui.painter().rect_stroke(rect.expand(2.0), 3.0, egui::Stroke::new(1.5, tk.accent), egui::StrokeKind::Outside);

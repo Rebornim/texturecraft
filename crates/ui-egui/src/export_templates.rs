@@ -61,9 +61,40 @@ const INPUT_GROUPS: [(&str, &[Channel]); 9] = [
     (n_("Miscellaneous"), &[Channel::Glossiness]),
 ];
 
-fn source_label(s: &SourceRef) -> &'static str {
+/// OpenPBR's names for the texture set channels (the Naming pattern's other choice)
+const OPENPBR_NAMES: [(Channel, &str); 21] = [
+    (Channel::BaseColor, n_("Base color")),
+    (Channel::Metallic, n_("Base metalness")),
+    (Channel::Roughness, n_("Specular roughness")),
+    (Channel::SpecularLevel, n_("Specular weight")),
+    (Channel::Specular, n_("Specular color")),
+    (Channel::AnisotropyLevel, n_("Specular anisotropy")),
+    (Channel::AnisotropyAngle, n_("Specular rotation")),
+    (Channel::Transmission, n_("Transmission weight")),
+    (Channel::ScatterWeight, n_("Subsurface weight")),
+    (Channel::CoatWeight, n_("Coat weight")),
+    (Channel::CoatRoughness, n_("Coat roughness")),
+    (Channel::CoatNormal, n_("Coat normal")),
+    (Channel::SheenWeight, n_("Fuzz weight")),
+    (Channel::SheenColor, n_("Fuzz color")),
+    (Channel::SheenRoughness, n_("Fuzz roughness")),
+    (Channel::Emissive, n_("Emission color")),
+    (Channel::Opacity, n_("Geometry opacity")),
+    (Channel::Height, n_("Height")),
+    (Channel::Normal, n_("Geometry normal")),
+    (Channel::AmbientOcclusion, n_("Ambient occlusion")),
+    (Channel::Glossiness, n_("Glossiness")),
+];
+
+/// A channel's name: TextureCraft's, or OpenPBR's when the Naming pattern asks for it
+fn channel_name(channel: Channel, openpbr: bool) -> &'static str {
+    let openpbr_name = openpbr.then(|| OPENPBR_NAMES.iter().find(|(c, _)| *c == channel).map(|(_, name)| *name)).flatten();
+    openpbr_name.unwrap_or_else(|| channel.label())
+}
+
+fn source_label(s: &SourceRef, openpbr: bool) -> &'static str {
     match s {
-        SourceRef::Channel { channel, .. } => channel.label(),
+        SourceRef::Channel { channel, .. } => channel_name(*channel, openpbr),
         SourceRef::Virtual { map, .. } => map.label(),
         SourceRef::Baked { map, .. } => crate::i18n::baked_map_label(*map),
         SourceRef::Constant(_) => n_("Constant"),
@@ -216,7 +247,8 @@ pub fn tab(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[ExportPreset], wi
     ui.separator();
     column(ui, outputs_width, &mut |ui| outputs(app, ui));
     ui.separator();
-    column(ui, INPUTS_WIDTH, &mut input_maps);
+    let openpbr = app.ui.export.openpbr_names;
+    column(ui, INPUTS_WIDTH, &mut |ui| input_maps(ui, openpbr));
     ui.separator();
     column(ui, MESH_WIDTH, &mut mesh_and_converted_maps);
     if let Some(a) = list_action {
@@ -507,6 +539,7 @@ fn outputs(app: &mut TextureCraftApp, ui: &mut Ui) {
     let n = preset.maps.len();
     let exported = preview.as_ref().map(|names| names.iter().flatten().count()).unwrap_or(0);
     let card_width = ui.available_width() - SCROLL_BAR_ROOM;
+    let openpbr = app.ui.export.openpbr_names;
     egui::ScrollArea::vertical().id_salt("exp_outputs").max_height(ui.available_height() - FOOTER_HEIGHT).auto_shrink([false; 2]).show(ui, |ui| {
         if n == 0 {
             ui.add_space(8.0);
@@ -515,7 +548,7 @@ fn outputs(app: &mut TextureCraftApp, ui: &mut Ui) {
         ui.add_enabled_ui(editable, |ui| {
             for (mi, map) in preset.maps.iter_mut().enumerate() {
                 let file = preview.as_ref().ok().and_then(|v| v.get(mi).cloned().flatten());
-                changed |= output_card(ui, card_width, mi, map, file.as_deref(), &mut action);
+                changed |= output_card(ui, card_width, mi, map, file.as_deref(), openpbr, &mut action);
                 ui.add_space(4.0);
             }
         });
@@ -577,7 +610,7 @@ fn preview_names(app: &mut TextureCraftApp, preset: &ExportPreset) -> Result<Vec
 /// One output file: name template, format, bit depth, layout and its channel sources.
 /// One output: drag handle, file name, its channel boxes, then file type and bit depth with duplicate and remove.
 /// `width` is the card's outer width, the same for every card (a card sized from what the one above left would creep wider)
-fn output_card(ui: &mut Ui, width: f32, mi: usize, map: &mut MapSpec, file: Option<&str>, action: &mut Option<MapAction>) -> bool {
+fn output_card(ui: &mut Ui, width: f32, mi: usize, map: &mut MapSpec, file: Option<&str>, openpbr: bool, action: &mut Option<MapAction>) -> bool {
     let tk = Tokens::get(ui.ctx());
     let mut changed = false;
     let card = egui::Frame::new().fill(tk.row).corner_radius(tk.radius).inner_margin(CARD_MARGIN).show(ui, |ui| {
@@ -609,7 +642,7 @@ fn output_card(ui: &mut Ui, width: f32, mi: usize, map: &mut MapSpec, file: Opti
                     });
                 });
                 for slot in channel_slots(map).iter().rev() {
-                    changed |= channel_box(ui, map, slot);
+                    changed |= channel_box(ui, map, slot, openpbr);
                 }
                 ui.menu_button(RichText::new(ic::CURRENCY_DOLLAR).size(13.0), |ui| {
                     for (token, what) in FILE_TOKENS {
@@ -679,15 +712,15 @@ fn bit_depth_combo(ui: &mut Ui, mi: usize, map: &mut MapSpec) -> bool {
 }
 
 /// A channel box: coloured by the map it reads, a map dropped on it fills it, a click opens its menu
-fn channel_box(ui: &mut Ui, map: &mut MapSpec, slot: &ChannelSlot) -> bool {
+fn channel_box(ui: &mut Ui, map: &mut MapSpec, slot: &ChannelSlot, openpbr: bool) -> bool {
     let tk = Tokens::get(ui.ctx());
     let source = map.channels.iter().find(|(dest, _)| slot.dests.contains(dest)).map(|(_, s)| s.clone()).unwrap_or(SourceRef::Constant(0.0));
     let name = match &source {
-        SourceRef::Constant(v) => format!("{} {v:.2}", tr(source_label(&source))),
+        SourceRef::Constant(v) => format!("{} {v:.2}", tr(source_label(&source, openpbr))),
         other if other.components() == 3 && slot.dests.len() == 1 => {
-            format!("{} ({})", tr(source_label(other)), RGB.get(component_of(other) as usize).copied().unwrap_or("R"))
+            format!("{} ({})", tr(source_label(other, openpbr)), RGB.get(component_of(other) as usize).copied().unwrap_or("R"))
         }
-        other => tr(source_label(other)).to_string(),
+        other => tr(source_label(other, openpbr)).to_string(),
     };
 
     let (rect, response) = ui.allocate_exact_size(vec2(BOX_SIZE, BOX_SIZE), egui::Sense::click());
@@ -742,7 +775,7 @@ fn box_color(source: &SourceRef) -> egui::Color32 {
     }
 
     // A hue from the map's name, at a fixed dark saturation so the white label reads on it
-    let hash = source_label(&with_component(source, 0)).bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b)));
+    let hash = source_label(&with_component(source, 0), false).bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b)));
     egui::ecolor::Hsva::new((hash % 360) as f32 / 360.0, 0.55, 0.45, 1.0).into()
 }
 
@@ -802,7 +835,7 @@ fn palette_group(ui: &mut Ui, name: &str) {
 }
 
 /// The Input maps column: texture set channels by lobe
-fn input_maps(ui: &mut Ui) {
+fn input_maps(ui: &mut Ui, openpbr: bool) {
     let tk = Tokens::get(ui.ctx());
     ui.label(caption(tr("Input maps")));
     egui::ScrollArea::vertical().id_salt("exp_inputs").auto_shrink([false; 2]).show(ui, |ui| {
@@ -810,7 +843,7 @@ fn input_maps(ui: &mut Ui) {
         for (group, channels) in INPUT_GROUPS {
             palette_group(ui, tr(group));
             for &channel in channels {
-                palette_item(ui, tr(channel.label()), &SourceRef::Channel { channel, component: 0 }, tk.text);
+                palette_item(ui, tr(channel_name(channel, openpbr)), &SourceRef::Channel { channel, component: 0 }, tk.text);
             }
         }
     });

@@ -33,6 +33,8 @@ const OVERRIDE_PEN_SIZE: f32 = 20.0;
 const TAB_TEXT_SIZE: f32 = 12.0;
 const TAB_HEIGHT: f32 = 28.0;
 const TAB_UNDERLINE: f32 = 2.0;
+/// Width of the Output templates tab's naming pattern combo
+const NAMING_WIDTH: f32 = 140.0;
 /// Bottom bar buttons are one size
 const BOTTOM_BUTTON_SIZE: egui::Vec2 = egui::vec2(120.0, 28.0);
 /// Height of a row in the texture set list
@@ -77,6 +79,18 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
                     {
                         (0..draft.sets.len()).for_each(|ts| draft.set_exported(ts, true));
                     }
+                });
+            }
+            if app.ui.export.tab == 1 {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(RichText::new(ic::INFO).size(14.0)).on_hover_text(tr("Names the input maps on this page as TextureCraft or OpenPBR calls them"));
+                    let naming = |openpbr: bool| if openpbr { "OpenPBR" } else { "TextureCraft" };
+                    egui::ComboBox::from_id_salt("exp_naming").width(NAMING_WIDTH).selected_text(naming(app.ui.export.openpbr_names)).show_ui(ui, |ui| {
+                        for openpbr in [false, true] {
+                            ui.selectable_value(&mut app.ui.export.openpbr_names, openpbr, naming(openpbr));
+                        }
+                    });
+                    ui.label(tr("Naming pattern"));
                 });
             }
         });

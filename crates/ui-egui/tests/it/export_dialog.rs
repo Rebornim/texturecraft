@@ -373,3 +373,16 @@ fn the_output_templates_tab_holds_still() {
     harness.run_steps(120);
     assert_eq!(before, harness.get_by_label("Input maps").rect(), "the columns don't creep");
 }
+
+#[test]
+fn the_naming_pattern_renames_the_input_maps() {
+    let mut harness = harness(2, LAPTOP);
+    harness.get_by_label("OUTPUT TEMPLATES").click();
+    harness.run_steps(3);
+    harness.get_by_label("Metallic");
+    assert!(harness.query_by_label("Base metalness").is_none());
+    harness.state_mut().ui.export.openpbr_names = true;
+    harness.run_steps(3);
+    harness.get_by_label("Base metalness");
+    harness.get_by_label("Naming pattern");
+}

@@ -39,6 +39,8 @@ const JPEG_QUALITY: u8 = 95;
 const DIELECTRIC_F0: f32 = 0.04;
 const DIELECTRIC_IOR: f32 = 1.4;
 const METAL_IOR: f32 = 100.0;
+/// How much of the light the 2D view's material mode lets the ambient occlusion take away
+const VIEW_2D_AO_SHARE: f32 = 0.5;
 /// Preset limits (user presets are untrusted JSON).
 const MAX_MAPS: usize = 64;
 const MAX_TEMPLATE: usize = 256;
@@ -174,10 +176,12 @@ pub enum VirtualMap {
     InverseIor,
     /// (1 − roughness)².
     GlossinessSquared,
+    /// What the 2D view shows: the base color lightly shaded by the ambient occlusion.
+    View2d,
 }
 
 impl VirtualMap {
-    pub const ALL: [VirtualMap; 13] = [
+    pub const ALL: [VirtualMap; 14] = [
         VirtualMap::InverseIor,
         VirtualMap::AoMixed,
         VirtualMap::Diffuse,
@@ -191,6 +195,7 @@ impl VirtualMap {
         VirtualMap::Roughness,
         VirtualMap::SpecularColor,
         VirtualMap::SheenTint,
+        VirtualMap::View2d,
     ];
 
     pub fn id(self) -> &'static str {
@@ -206,6 +211,7 @@ impl VirtualMap {
             VirtualMap::Reflection => "reflection",
             VirtualMap::InverseIor => "inverseIor",
             VirtualMap::GlossinessSquared => "glossinessSquared",
+            VirtualMap::View2d => "view2D",
         }
     }
 
@@ -224,6 +230,7 @@ impl VirtualMap {
             VirtualMap::Reflection => "Reflection",
             VirtualMap::InverseIor => "1/ior",
             VirtualMap::GlossinessSquared => "Glossiness²",
+            VirtualMap::View2d => "2D View",
         }
     }
 
@@ -236,7 +243,8 @@ impl VirtualMap {
             | VirtualMap::SheenTint
             | VirtualMap::Diffuse
             | VirtualMap::SpecularColor
-            | VirtualMap::Reflection => 3,
+            | VirtualMap::Reflection
+            | VirtualMap::View2d => 3,
             _ => 1,
         }
     }
@@ -482,7 +490,9 @@ fn source_present(set: &TextureSet, s: &SourceRef) -> bool {
         SourceRef::Virtual { map: VirtualMap::Roughness, .. } => set.has_channel(Channel::Glossiness),
         SourceRef::Virtual { map: VirtualMap::HeightNormal, .. } => set.has_channel(Channel::Height),
         SourceRef::Virtual { map: VirtualMap::SheenTint, .. } => set.has_channel(Channel::SheenWeight),
-        SourceRef::Virtual { map: VirtualMap::Diffuse | VirtualMap::SpecularColor | VirtualMap::Reflection, .. } => set.has_channel(Channel::BaseColor),
+        SourceRef::Virtual { map: VirtualMap::Diffuse | VirtualMap::SpecularColor | VirtualMap::Reflection | VirtualMap::View2d, .. } => {
+            set.has_channel(Channel::BaseColor)
+        }
         SourceRef::Virtual { map: VirtualMap::InverseIor, .. } => set.has_channel(Channel::Metallic),
         SourceRef::Virtual { map: VirtualMap::GlossinessSquared, .. } => set.has_channel(Channel::Roughness),
         SourceRef::Baked { map, .. } => set.baked.contains(map),
@@ -512,7 +522,7 @@ fn is_color(map: &MapSpec) -> bool {
             && match s {
                 SourceRef::Channel { channel, .. } => channel.kind() == ChannelKind::Color,
                 SourceRef::Virtual { map, .. } => {
-                    matches!(map, VirtualMap::SheenTint | VirtualMap::Diffuse | VirtualMap::SpecularColor | VirtualMap::Reflection)
+                    matches!(map, VirtualMap::SheenTint | VirtualMap::Diffuse | VirtualMap::SpecularColor | VirtualMap::Reflection | VirtualMap::View2d)
                 }
                 _ => false,
             }
@@ -775,6 +785,11 @@ impl Sampler<'_> {
                     [1.0 / (DIELECTRIC_IOR + (METAL_IOR - DIELECTRIC_IOR) * metal); 3]
                 }
                 VirtualMap::GlossinessSquared => [(1.0 - self.channel(Channel::Roughness, at)[0]).powi(2); 3],
+                VirtualMap::View2d => {
+                    // As the 2D view's material mode draws it: AO (painted × baked) darkens the base color by up to half
+                    let ao = self.channel(Channel::AmbientOcclusion, at)[0] * self.baked(BakedMap::AmbientOcclusion, at)[0];
+                    self.channel(Channel::BaseColor, at).map(|c| c * (1.0 - VIEW_2D_AO_SHARE * (1.0 - ao)))
+                }
                 VirtualMap::HeightNormal => {
                     let n = match at {
                         At::Texel(x, y) => self.height_normal(x, y),

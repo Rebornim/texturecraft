@@ -857,3 +857,25 @@ fn a_map_preview_holds_the_values_its_file_stores() {
     assert_eq!((small.width, small.height, small.pixels.len()), (8, 8, 8 * 8 * 4), "a smaller preview samples the same map");
     assert!(preview_map(&fx.input(), &opts, opts.preset.maps.len(), 8).is_err(), "a map the template doesn't have is an error");
 }
+
+#[test]
+fn the_2d_view_map_is_the_base_color_shaded_by_ambient_occlusion() {
+    let mut channels = default_channels();
+    channels.push(Channel::AmbientOcclusion);
+    let mut fx = Fx::new(&channels);
+    fx.set_all(Channel::AmbientOcclusion, |x, _| [x as f32 / 63.0; 3]);
+    let view = MapSpec {
+        file: "view".into(),
+        format: FileFormat::Exr,
+        bit_depth: 32,
+        channels: [Dest::R, Dest::G, Dest::B].into_iter().zip(0u8..).map(|(dest, component)| (dest, SourceRef::Virtual { map: VirtualMap::View2d, component })).collect(),
+        options: Default::default(),
+    };
+    let image = decode(&fx.render(&ExportOptions::new(ExportPreset { name: "2d".into(), maps: vec![view] }))[0]).to_rgb32f();
+    for (x, y) in [(0, 40), (63, 40), (32, 10)] {
+        let (base, ao) = (fx.comp.value(Channel::BaseColor, x, y), fx.comp.value(Channel::AmbientOcclusion, x, y)[0]);
+        let want = base.map(|c| c * (0.5 + 0.5 * ao));
+        let got = image.get_pixel(x, y).0;
+        assert!(got.iter().zip(want).all(|(g, w)| (g - w).abs() < 1e-3), "({x}, {y}): {got:?} vs {want:?}");
+    }
+}

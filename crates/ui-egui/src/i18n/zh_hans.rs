@@ -2,6 +2,7 @@
 
 pub const TABLE: &[(&str, &str)] = &[
     ("1/ior", "1/IOR"),
+    ("2D View", "2D 视图"),
     ("8 bits + dithering", "8 位 + 抖动"),
     ("Baking {map} ({n}/{total})", "正在烘焙{map} ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "正在烘焙{map} ({n}/{total})，纹理集 {set}/{sets}"),

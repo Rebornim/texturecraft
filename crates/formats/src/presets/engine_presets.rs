@@ -184,6 +184,97 @@ pub(super) fn engine_presets() -> Vec<ExportPreset> {
                 height("height"),
             ],
         ),
+        // Khronos' specular-glossiness layout: diffuse with opacity, specular color with glossiness in alpha
+        preset(
+            "PBR Specular Glossiness",
+            vec![
+                map("Diffuse", 8, rgb(|k| virt(VirtualMap::Diffuse, k)).into_iter().chain([(Dest::A, ch(Channel::Opacity, 0))]).collect()),
+                map(
+                    "SpecularGlossiness",
+                    8,
+                    rgb(|k| virt(VirtualMap::SpecularColor, k)).into_iter().chain([(Dest::A, virt(VirtualMap::Glossiness, 0))]).collect(),
+                ),
+                map("Normal", 8, normal(VirtualMap::NormalOpenGl)),
+                map("Occlusion", 8, gray(virt(VirtualMap::AoMixed, 0))),
+                rgb8("Emissive", Channel::Emissive),
+            ],
+        ),
+        // Corona Physical Material in its default roughness mode
+        preset(
+            "Corona (Physical)",
+            vec![
+                rgb8("basecolor", Channel::BaseColor),
+                gray8("metalness", Channel::Metallic),
+                gray8("roughness", Channel::Roughness),
+                project_normal("normal"),
+                gray8("opacity", Channel::Opacity),
+                height("height"),
+            ],
+        ),
+        // KeyShot's classic maps: diffuse, specular, a normal map loaded as bump, opacity
+        preset(
+            "KeyShot",
+            vec![
+                converted8("diffuse", VirtualMap::Diffuse),
+                converted8("specular", VirtualMap::SpecularColor),
+                project_normal("normal"),
+                gray8("opacity", Channel::Opacity),
+            ],
+        ),
+        // KeyShot's Generic material (metallic workflow)
+        preset(
+            "KeyShot (Generic)",
+            vec![
+                rgb8("basecolor", Channel::BaseColor),
+                gray8("metallic", Channel::Metallic),
+                gray8("roughness", Channel::Roughness),
+                project_normal("normal"),
+                gray8("opacity", Channel::Opacity),
+            ],
+        ),
+        // Redshift Standard Material; Redshift reads OpenGL normal maps
+        preset(
+            "Redshift (Standard)",
+            vec![
+                rgb8("basecolor", Channel::BaseColor),
+                gray8("metalness", Channel::Metallic),
+                gray8("roughness", Channel::Roughness),
+                map("normal", 8, normal(VirtualMap::NormalOpenGl)),
+                rgb8("emissive", Channel::Emissive),
+                gray8("opacity", Channel::Opacity),
+                gray8("sss", Channel::ScatterWeight),
+                gray8("coat", Channel::CoatWeight),
+                gray8("sheen", Channel::SheenWeight),
+            ],
+        ),
+        // RenderMan PxrDisney inputs
+        preset(
+            "RenderMan (PxrDisney)",
+            vec![
+                rgb8("baseColor", Channel::BaseColor),
+                gray8("metallic", Channel::Metallic),
+                gray8("roughness", Channel::Roughness),
+                gray8("specular", Channel::SpecularLevel),
+                gray8("subsurface", Channel::ScatterWeight),
+                gray8("sheen", Channel::SheenWeight),
+                gray8("clearcoat", Channel::CoatWeight),
+                rgb8("emitColor", Channel::Emissive),
+                gray8("presence", Channel::Opacity),
+                project_normal("normal"),
+            ],
+        ),
+        // RenderMan PxrSurface through its metallic workflow node
+        preset(
+            "RenderMan (PxrSurface)",
+            vec![
+                rgb8("baseColor", Channel::BaseColor),
+                gray8("metallic", Channel::Metallic),
+                gray8("specularRoughness", Channel::Roughness),
+                gray8("presence", Channel::Opacity),
+                rgb8("glowColor", Channel::Emissive),
+                project_normal("normal"),
+            ],
+        ),
         // USD preview surface inputs, one map each
         preset(
             "USDZ (AR)",

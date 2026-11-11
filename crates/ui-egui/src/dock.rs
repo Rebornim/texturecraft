@@ -2097,7 +2097,7 @@ fn projection_transform(ui: &mut Ui, projection: &Projection, salt: &str, edit: 
         }
         Projection::Decal(_) => return,
     };
-    let lock_id = egui::Id::new(("fill_tiling_lock", salt));
+    let lock_id = ui.make_persistent_id(("fill_tiling_lock", salt));
     let mut locked = ui.data(|data| data.get_temp::<bool>(lock_id)).unwrap_or(tiling[0] == tiling[1]);
     let was_locked = locked;
     if let Some((edited, merge)) = pair_sliders(ui, tr("Tiling"), tiling, FILL_SCALE_RANGE, 2, Some(&mut locked)) {

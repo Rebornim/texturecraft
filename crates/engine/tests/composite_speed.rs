@@ -19,7 +19,13 @@ fn bench_generator_masks() {
     let mut session = sample_session(2048, 1024).unwrap();
     println!("RESULT initial composite {:.3}s", settle(&mut session));
     let project = &session.doc.project;
-    let folder = project.texture_sets[0].stack.iter().copied().find(|id| project.layers.get(id).is_some_and(|layer| layer.name.contains("Rusted"))).expect("rusted folder");
+    let (set, folder) = project
+        .texture_sets
+        .iter()
+        .enumerate()
+        .find_map(|(index, set)| set.stack.iter().copied().find(|id| project.layers.get(id).is_some_and(|layer| layer.name.contains("Rusted"))).map(|id| (index, id)))
+        .expect("rusted folder");
+    session.active_set = set;
     for round in 1..=3 {
         execute(&mut session, "layer.visible", &json!({"layer": folder.0})).unwrap();
         settle(&mut session);

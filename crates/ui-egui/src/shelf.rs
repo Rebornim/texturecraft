@@ -226,29 +226,22 @@ pub fn drop_target(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response
 
 /// The Assets panel body (a dock tab)
 pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
-    let tokens = Tokens::get(ui.ctx());
     let ctx = ui.ctx().clone();
-    let searching = !app.ui.shelf_filter.is_empty();
     let filter = app.ui.shelf_filter.to_lowercase();
     scan_brushes(app);
     let matching: Vec<ShelfEntry> = ShelfEntry::all(app).into_iter().filter(|entry| entry.matches(&filter)).collect();
     let counts: Vec<usize> = TABS.iter().map(|(tab, _, _)| matching.iter().filter(|entry| entry.tab() == *tab).count()).collect();
+    search_field(app, ui);
     crate::shelf_tabs::row(app, ui, &counts, |_, _, _| {});
-
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(ic::MAGNIFYING_GLASS).color(tokens.text_dim));
-        ui.add(egui::TextEdit::singleline(&mut app.ui.shelf_filter).hint_text(tr("Search all assets")).desired_width(f32::INFINITY));
-    });
     ui.add_space(4.0);
 
     let tab = app.ui.shelf_tab;
     let shown_tab = TABS.get(tab).map(|(shown, _, _)| *shown);
-    // Searching shows matches from every tab in one grid
-    let mut entries: Vec<ShelfEntry> = matching.into_iter().filter(|entry| searching || crate::shelf_tabs::shows(tab, entry.tab())).collect();
+    let mut entries: Vec<ShelfEntry> = matching.into_iter().filter(|entry| crate::shelf_tabs::shows(tab, entry.tab())).collect();
     entries.sort_by_cached_key(|entry| entry.label().to_lowercase());
 
     egui::ScrollArea::vertical().id_salt("shelf_scroll").auto_shrink([false, false]).show(ui, |ui| {
-        if !searching && shown_tab == Some(Tab::Textures) {
+        if filter.is_empty() && shown_tab == Some(Tab::Textures) {
             import_images(app, ui, &ctx, entries.is_empty());
         }
         tiles(ui, |ui| {
@@ -257,11 +250,25 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
             }
         });
 
-        if searching || shown_tab.is_none_or(|shown| shown == Tab::Smart) {
+        if shown_tab.is_none_or(|shown| shown == Tab::Smart) {
             library(app, ui, &filter);
         }
     });
     drag_preview(&ctx);
+}
+
+/// The search field: a live filter on names (and categories) with a clear button while it has text
+fn search_field(app: &mut TextureCraftApp, ui: &mut Ui) {
+    let tk = Tokens::get(ui.ctx());
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(ic::MAGNIFYING_GLASS).color(tk.text_dim));
+        let clear_width = if app.ui.shelf_filter.is_empty() { 0.0 } else { ui.spacing().interact_size.y + ui.spacing().item_spacing.x };
+        let field = egui::TextEdit::singleline(&mut app.ui.shelf_filter).hint_text(tr("Search")).desired_width(ui.available_width() - clear_width);
+        ui.add(field);
+        if !app.ui.shelf_filter.is_empty() && ui.add(egui::Button::new(ic::X).frame(false)).on_hover_text(tr("Clear")).clicked() {
+            app.ui.shelf_filter.clear();
+        }
+    });
 }
 
 /// The dragged asset's name next to the pointer.

@@ -714,7 +714,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Screen", "スクリーン"),
     ("Screenshot of the viewport", "ビューポートのスクリーンショット"),
     ("Search", "検索"),
-    ("Search all assets", "すべてのアセットを検索"),
     ("Search commands or keys", "コマンドまたはキーを検索"),
     ("Seed", "シード"),
     ("Select a layer", "レイヤーを選択"),

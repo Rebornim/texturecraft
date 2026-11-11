@@ -663,7 +663,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Screen", "滤色"),
     ("Screenshot of the viewport", "视口截图"),
     ("Search", "搜索"),
-    ("Search all assets", "搜索所有资产"),
     ("Search commands or keys", "搜索命令或按键"),
     ("Seed", "随机种子"),
     ("Select a layer", "选择图层"),

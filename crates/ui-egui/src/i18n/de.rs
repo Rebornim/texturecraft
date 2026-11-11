@@ -732,7 +732,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Screen", "Negativ multiplizieren"),
     ("Screenshot of the viewport", "Screenshot des Ansichtsfensters"),
     ("Search", "Suchen"),
-    ("Search all assets", "Alle Assets durchsuchen"),
     ("Search commands or keys", "Befehle oder Tasten suchen"),
     ("Seed", "Startwert"),
     ("Select a layer", "Ebene auswählen"),

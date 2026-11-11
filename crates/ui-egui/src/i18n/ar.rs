@@ -696,7 +696,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Screen", "شاشة (Screen)"),
     ("Screenshot of the viewport", "لقطة شاشة لمنفذ العرض"),
     ("Search", "بحث"),
-    ("Search all assets", "البحث في جميع الأصول"),
     ("Search commands or keys", "البحث في الأوامر أو المفاتيح"),
     ("Seed", "البذرة العشوائية (Seed)"),
     ("Select a layer", "تحديد طبقة"),

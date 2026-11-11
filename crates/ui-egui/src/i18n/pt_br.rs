@@ -720,7 +720,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Screen", "Tela"),
     ("Screenshot of the viewport", "Captura de tela da viewport"),
     ("Search", "Pesquisar"),
-    ("Search all assets", "Pesquisar em todos os recursos"),
     ("Search commands or keys", "Pesquisar comandos ou teclas"),
     ("Seed", "Semente"),
     ("Select a layer", "Selecione uma camada"),

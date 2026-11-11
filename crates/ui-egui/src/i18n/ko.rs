@@ -705,7 +705,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Screen", "스크린"),
     ("Screenshot of the viewport", "뷰포트 스크린샷"),
     ("Search", "검색"),
-    ("Search all assets", "모든 에셋 검색"),
     ("Search commands or keys", "명령 또는 키 검색"),
     ("Seed", "시드"),
     ("Select a layer", "레이어를 선택하세요"),

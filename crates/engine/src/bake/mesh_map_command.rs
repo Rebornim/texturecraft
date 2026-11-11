@@ -394,7 +394,7 @@ fn cage_set(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Texture sets named by `ts` (default: the active one).
-fn sets_param(s: &Session, cmd: &str, p: &Value) -> Result<Vec<usize>> {
+pub(super) fn sets_param(s: &Session, cmd: &str, p: &Value) -> Result<Vec<usize>> {
     let n = s.set_count();
     let one = |v: &Value| v.as_u64().map(|t| t as usize).filter(|t| *t < n).ok_or_else(|| bad(cmd, format!("invalid texture set {v}")));
     match p.get("ts") {

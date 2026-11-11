@@ -836,3 +836,24 @@ fn engine_presets_follow_their_targets_layouts() {
     let sss = channels("Unreal Engine SSS (Packed)", "_SSS");
     assert_eq!(sss, [(Dest::L, SourceRef::Channel { channel: Channel::ScatterWeight, component: 0 })]);
 }
+
+#[test]
+fn a_map_preview_holds_the_values_its_file_stores() {
+    let mut fx = Fx::new(&default_channels());
+    fx.set_all(Channel::Metallic, |x, _| [x as f32 / 63.0; 3]);
+    fx.set_all(Channel::Roughness, |_, y| [y as f32 / 63.0; 3]);
+    let opts = ExportOptions::new(builtin_preset("Unity HDRP (Mask Map)").unwrap());
+    let mask = opts.preset.maps.iter().position(|map| map.file.contains("MaskMap")).unwrap();
+    let file = decode(find(&fx.render(&opts), "MaskMap")).to_rgba8();
+
+    let preview = preview_map(&fx.input(), &opts, mask, RES).unwrap().unwrap();
+    assert_eq!((preview.width, preview.height), (RES, RES));
+    assert_eq!(preview.channels, [Dest::R, Dest::G, Dest::B, Dest::A], "the mask map packs four channels");
+    for (i, (shown, stored)) in preview.pixels.chunks(4).zip(file.pixels()).enumerate() {
+        assert_eq!(shown, &stored.0[..], "pixel {i}");
+    }
+
+    let small = preview_map(&fx.input(), &opts, mask, 8).unwrap().unwrap();
+    assert_eq!((small.width, small.height, small.pixels.len()), (8, 8, 8 * 8 * 4), "a smaller preview samples the same map");
+    assert!(preview_map(&fx.input(), &opts, opts.preset.maps.len(), 8).is_err(), "a map the template doesn't have is an error");
+}

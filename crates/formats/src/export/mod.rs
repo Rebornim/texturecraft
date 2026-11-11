@@ -26,8 +26,10 @@ use crate::{FormatError, MAX_IMAGE_SIZE, Result};
 
 mod diffusion;
 mod map_options;
+mod preview;
 
 pub use map_options::MapOptions;
+pub use preview::{MAX_PREVIEW_SIDE, MapPreview, preview_map};
 
 /// Height-to-normal slope: with strength 1, a height change of 1 across 1/16 of the texture
 /// width tilts the normal 45°, at any resolution.
@@ -664,6 +666,22 @@ pub fn rnm(base: Vec3, detail: Vec3) -> Vec3 {
     (t * t.dot(u) / t.z.max(1e-4) - u).try_normalize().unwrap_or(base)
 }
 
+impl<'a> Sampler<'a> {
+    fn new(input: &ExportInput<'a>, opts: &ExportOptions, set: &'a TextureSet, tile_res: u32) -> Sampler<'a> {
+        Sampler {
+            set,
+            comp: input.composite,
+            baked: input.baked,
+            coverage: input.coverage,
+            res: input.composite.resolution,
+            tile_res,
+            scales: set.block_scales(),
+            normal_override: opts.normal_format,
+            project_normal: input.project.normal_format,
+        }
+    }
+}
+
 impl Sampler<'_> {
     fn channel(&self, c: Channel, at: At) -> [f32; 3] {
         match at {
@@ -801,17 +819,7 @@ pub fn render_maps(input: &ExportInput, opts: &ExportOptions) -> Result<Vec<Expo
         Padding::Infinite => Some(DilationMap::in_blocks(input.coverage, res, height, None, tile_res)),
     };
     let beyond_default = matches!(opts.padding, Padding::DilationDefault(_) | Padding::Infinite);
-    let sampler = Sampler {
-        set,
-        comp: input.composite,
-        baked: input.baked,
-        coverage: input.coverage,
-        res,
-        tile_res,
-        scales: set.block_scales(),
-        normal_override: opts.normal_format,
-        project_normal: input.project.normal_format,
-    };
+    let sampler = Sampler::new(input, opts, set, tile_res);
     planned
         .into_iter()
         .map(|p| {

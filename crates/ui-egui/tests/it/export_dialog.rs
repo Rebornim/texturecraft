@@ -511,3 +511,19 @@ fn an_output_map_gets_its_own_size() {
     let saved = harness.state().session.export_preset("mine").unwrap();
     assert_eq!(saved.maps.iter().map(|map| map.options.size).collect::<Vec<_>>(), [Some(512), None, None], "only the first map has its own size");
 }
+
+#[test]
+fn hovering_a_channel_box_shows_the_packed_file() {
+    let mut harness = harness(2, LAPTOP);
+    harness.state_mut().ui.export.preset = "Unity HDRP (Mask Map)".into();
+    harness.get_by_label("Output templates").click();
+    harness.run_steps(3);
+    let mixed_ao = |harness: &Harness<'static, TextureCraftApp>| harness.query_all_by_label("Mixed AO").count();
+    let chips = mixed_ao(&harness);
+    assert!(harness.query_by_label_contains(" · png 8 bits").is_none(), "nothing shows before the hover");
+    harness.get_all_by_role(Role::Button).find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with("R: Metallic"))).unwrap().hover();
+    harness.run_steps(60);
+    assert!(harness.query_all_by_label_contains("MaskMap.png").count() > 0);
+    assert_eq!(mixed_ao(&harness), chips + 1, "the green channel's source is named");
+    assert!(harness.query_by_label("256 x 256 · png 8 bits").is_some(), "the file's size and type");
+}

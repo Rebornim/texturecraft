@@ -379,4 +379,17 @@ mod tests {
         assert_eq!(back.export.unwrap().dir, "/tmp/out");
         assert_eq!(back.texture_sets[0].export, export);
     }
+
+    #[test]
+    fn export_preview_shows_a_packed_map_small() {
+        let mut s = crate::sample_session(128, 32).unwrap();
+        let preset = s.export_preset("Unity HDRP (Mask Map)").unwrap();
+        let mask = preset.maps.iter().position(|map| map.file.contains("MaskMap")).unwrap();
+        let preview = execute(&mut s, "export.preview", &json!({"preset": preset.name, "ts": 0, "map": mask, "side": 16})).unwrap();
+        assert_eq!((preview["width"].as_u64(), preview["height"].as_u64()), (Some(16), Some(16)));
+        assert_eq!(preview["channels"], json!(["R", "G", "B", "A"]));
+        assert_eq!(preview["pixels"].as_array().unwrap().len(), 16 * 16 * 4);
+        assert!(execute(&mut s, "export.preview", &json!({"preset": preset.name})).is_err(), "the map is required");
+        assert!(execute(&mut s, "export.preview", &json!({"preset": preset.name, "map": preset.maps.len()})).is_err());
+    }
 }

@@ -171,6 +171,16 @@ fn bottom_bar(app: &mut TextureCraftApp, ui: &mut Ui) -> Option<BottomAction> {
     let tk = Tokens::get(ui.ctx());
     let mut action = None;
     let count = exported_count(app);
+    // On Output templates, a template without outputs can't be saved into the settings or exported
+    let empty_template = app.ui.export.tab == 1
+        && app
+            .ui
+            .export
+            .draft
+            .as_ref()
+            .map(|draft| draft.maps.is_empty())
+            .or_else(|| app.session.export_preset(&app.ui.export.preset).map(|preset| preset.maps.is_empty()))
+            .unwrap_or(false);
     ui.horizontal(|ui| {
         if app.ui.export.tab == 0
             && ui.add(egui::Button::new(tr("Reset all")).min_size(BOTTOM_BUTTON_SIZE)).clicked()
@@ -179,10 +189,10 @@ fn bottom_bar(app: &mut TextureCraftApp, ui: &mut Ui) -> Option<BottomAction> {
             draft.reset(&app.ui.export.dir);
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add_enabled(count > 0, primary_button(ui, tr("Export")).min_size(BOTTOM_BUTTON_SIZE)).clicked() {
+            if ui.add_enabled(count > 0 && !empty_template, primary_button(ui, tr("Export")).min_size(BOTTOM_BUTTON_SIZE)).clicked() {
                 action = Some(BottomAction::Export);
             }
-            if ui.add(egui::Button::new(tr("Save settings")).min_size(BOTTOM_BUTTON_SIZE)).clicked() {
+            if ui.add_enabled(!empty_template, egui::Button::new(tr("Save settings")).min_size(BOTTOM_BUTTON_SIZE)).clicked() {
                 action = Some(BottomAction::Save);
             }
             if ui.add(egui::Button::new(tr("Cancel")).min_size(BOTTOM_BUTTON_SIZE)).clicked() {

@@ -2,6 +2,7 @@
 //! Keep feature tests in their own modules; the standalone ui_snapshots.rs target remains available.
 
 mod bake_mode;
+mod bake_sync;
 mod brush_drag;
 mod brush_section_reset;
 mod close_unsaved;

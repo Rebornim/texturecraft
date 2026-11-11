@@ -1,7 +1,10 @@
 use egui::{Align, Layout, RichText, Sense, Stroke, Ui, UiBuilder, vec2};
 use egui_phosphor::regular as icon;
-use texturecraft_engine::core::{BakeSettings, BakedMap};
+use serde_json::json;
+use texturecraft_engine::core::{BakeSettings, BakeSyncGroup, BakedMap};
 
+use super::set_picker::SetPicker;
+use super::set_picker_purpose::SetPickerPurpose;
 use crate::TextureCraftApp;
 use crate::docking::Panel;
 use crate::i18n::{baked_map_label, tr, trf};
@@ -26,28 +29,26 @@ pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSe
         }
         if several_sets {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if icon_button(ui, icon::LINK, tr("Synchronize Common Settings"), true, ROW_BUTTON_SIZE).clicked() {
-                    ui.data_mut(|data| data.insert_temp(sync_dialog_id(), true));
+                let shares = settings.sync.shares(BakeSyncGroup::Common);
+                if icon_button(ui, icon::LINK, tr("Synchronize Common Settings"), shares, ROW_BUTTON_SIZE).clicked() {
+                    SetPicker::open(app, ui.ctx(), SetPickerPurpose::Sync(BakeSyncGroup::Common));
                 }
             });
         }
     });
 
-    if ui.data(|data| data.get_temp::<bool>(sync_dialog_id())).unwrap_or(false) {
-        let names: Vec<String> = app.session.doc.project.texture_sets.iter().map(|set| set.name.clone()).collect();
-        sync_dialog(ui, &names);
-    }
+    SetPicker::show(app, &ui.ctx().clone());
 
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         check_all(ui, settings);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| list_menu(ui, settings));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| list_menu(app, ui, settings));
     });
     ui.separator();
 
     let selected = super::selected_map(app.ui.selected_baked_map, settings);
     for map in BakedMap::ALL {
-        if ui.push_id(map, |ui| row(ui, map, settings, map == selected, several_sets)).inner {
+        if ui.push_id(map, |ui| row(app, ui, map, settings, map == selected)).inner {
             app.ui.selected_baked_map = Some(map);
             app.ui.dock.focus(Panel::MeshMapSettings);
         }
@@ -68,7 +69,7 @@ fn check_all(ui: &mut Ui, settings: &mut BakeSettings) {
 }
 
 /// The ≡ menu beside Check All: check states, and copying them or every setting to other texture sets
-fn list_menu(ui: &mut Ui, settings: &mut BakeSettings) {
+fn list_menu(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSettings) {
     let button = icon_dropdown_button(ui, icon::LIST, tr("Mesh Map Bakers Menu"), false, ROW_BUTTON_SIZE);
     egui::Popup::menu(&button).show(|ui| {
         if ui.button(tr("Check All Mesh Maps")).clicked() {
@@ -80,16 +81,26 @@ fn list_menu(ui: &mut Ui, settings: &mut BakeSettings) {
         if ui.button(tr("Invert Checked Mesh Maps")).clicked() {
             BakedMap::ALL.into_iter().for_each(|map| settings.maps.set_enabled(map, !settings.maps.is_enabled(map)));
         }
-        let _ = ui.button(tr("Apply Checked to More Texture Sets..."));
-        let _ = ui.button(tr("Apply Checked to All Texture Sets"));
+        copy_items(app, ui, "checked", None, [tr("Apply Checked to More Texture Sets..."), tr("Apply Checked to All Texture Sets")]);
         ui.separator();
-        let _ = ui.button(tr("Sync All Settings to More Texture Sets..."));
-        let _ = ui.button(tr("Sync All Settings to All Texture Sets"));
+        copy_items(app, ui, "settings", None, [tr("Sync All Settings to More Texture Sets..."), tr("Sync All Settings to All Texture Sets")]);
     });
 }
 
+/// A copy's two menu items: "...more Texture Sets..." opens the set picker, "...all Texture Sets" copies to every set
+fn copy_items(app: &mut TextureCraftApp, ui: &mut Ui, what: &'static str, map: Option<BakedMap>, [more, all]: [&str; 2]) {
+    if ui.button(more).clicked() {
+        SetPicker::open(app, ui.ctx(), SetPickerPurpose::Copy { what, map });
+    }
+    if ui.button(all).clicked() {
+        let from = app.session.ts();
+        app.run("bake.copy", json!({ "what": what, "map": map.map(BakedMap::id), "from": from, "ts": "all" }));
+    }
+}
+
 /// One baker row; returns whether the row (not its checkbox or icons) was clicked
-fn row(ui: &mut Ui, map: BakedMap, settings: &mut BakeSettings, is_selected: bool, several_sets: bool) -> bool {
+fn row(app: &mut TextureCraftApp, ui: &mut Ui, map: BakedMap, settings: &mut BakeSettings, is_selected: bool) -> bool {
+    let several_sets = app.session.doc.project.texture_sets.len() > 1;
     let tokens = Tokens::get(ui.ctx());
     let name = tr(baked_map_label(map));
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
@@ -112,8 +123,9 @@ fn row(ui: &mut Ui, map: BakedMap, settings: &mut BakeSettings, is_selected: boo
     thumbnail(&mut content);
     let show_icons = is_selected || content.rect_contains_pointer(rect);
     content.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        if several_sets && show_icons {
-            let _ = icon_button(ui, icon::LINK, &trf("Synchronize {map} Settings", &[("map", &name)]), true, ROW_BUTTON_SIZE);
+        let shares = settings.sync.shares(BakeSyncGroup::Map(map));
+        if several_sets && show_icons && icon_button(ui, icon::LINK, &trf("Synchronize {map} Settings", &[("map", &name)]), shares, ROW_BUTTON_SIZE).clicked() {
+            SetPicker::open(app, ui.ctx(), SetPickerPurpose::Sync(BakeSyncGroup::Map(map)));
         }
         if show_icons {
             let _ = icon_button(ui, icon::LIGHTNING, &trf("Bake {map} Only", &[("map", &name)]), false, ROW_BUTTON_SIZE);
@@ -129,13 +141,16 @@ fn row(ui: &mut Ui, map: BakedMap, settings: &mut BakeSettings, is_selected: boo
     });
 
     response.context_menu(|ui| {
-        let _ = ui.button(trf("Check {map} for More Texture Sets...", &[("map", &name)]));
-        let _ = ui.button(trf("Check {map} for All Texture Sets", &[("map", &name)]));
+        let labels = |more: &str, all: &str| [trf(more, &[("map", &name)]), trf(all, &[("map", &name)])];
+        let [check_more, check_all] = labels("Check {map} for More Texture Sets...", "Check {map} for All Texture Sets");
+        copy_items(app, ui, "check", Some(map), [&check_more, &check_all]);
         ui.separator();
-        let _ = ui.button(trf("Apply {map} Settings to More Texture Sets...", &[("map", &name)]));
-        let _ = ui.button(trf("Apply {map} Settings to All Texture Sets", &[("map", &name)]));
+        let [apply_more, apply_all] = labels("Apply {map} Settings to More Texture Sets...", "Apply {map} Settings to All Texture Sets");
+        copy_items(app, ui, "settings", Some(map), [&apply_more, &apply_all]);
         ui.separator();
-        let _ = ui.button(tr("Sync Settings..."));
+        if ui.add_enabled(several_sets, egui::Button::new(tr("Sync Settings..."))).clicked() {
+            SetPicker::open(app, ui.ctx(), SetPickerPurpose::Sync(BakeSyncGroup::Map(map)));
+        }
     });
     response.clicked()
 }
@@ -147,40 +162,4 @@ fn thumbnail(ui: &mut Ui) {
     let stroke = Stroke::new(1.0, tokens.text_dim);
     ui.painter().rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Inside);
     ui.painter().line_segment([rect.left_top(), rect.right_bottom()], stroke);
-}
-
-fn sync_dialog_id() -> egui::Id {
-    egui::Id::unique("bake_common_settings_sync")
-}
-
-/// "Common Settings Sync": which texture sets share their Common Settings
-fn sync_dialog(ui: &mut Ui, names: &[String]) {
-    let modal = egui::Modal::new(egui::Id::unique("bake_common_settings_sync_modal")).show(ui.ctx(), |ui| {
-        ui.set_width(420.0);
-        ui.label(RichText::new(tr("Common Settings Sync")).strong());
-        ui.add_space(8.0);
-        ui.horizontal_top(|ui| {
-            ui.label(RichText::new(icon::GEAR).size(18.0));
-            ui.label(tr("All the selected texture sets share their Common Settings. Texture sets added later take on the synced settings."));
-        });
-        ui.add_space(6.0);
-        let mut all = true;
-        ui.checkbox(&mut all, tr("Deselect All"));
-        super::controls::indented(ui, |ui| {
-            for name in names {
-                let mut synced = true;
-                ui.checkbox(&mut synced, name);
-            }
-        });
-        ui.add_space(12.0);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let cancel = ui.button(tr("Cancel")).clicked();
-            let ok = ui.button(tr("OK")).clicked();
-            cancel || ok
-        })
-        .inner
-    });
-    if modal.inner || modal.should_close() {
-        ui.data_mut(|data| data.remove::<bool>(sync_dialog_id()));
-    }
 }

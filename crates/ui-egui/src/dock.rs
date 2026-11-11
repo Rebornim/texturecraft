@@ -2029,39 +2029,103 @@ fn projection_editor(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: 
 
     // One id per fill so each keeps its own open or closed state
     section(ui, &format!("sec_fill_transform{salt}"), tr("UV transformations"), true, |ui| {
-        projection_transform(ui, &fill.projection, &mut edit);
+        projection_transform(ui, &fill.projection, salt, &mut edit);
     });
 }
 
-/// Scale plus what the projection kind adds: UV rotation and offset, or a world offset
-fn projection_transform(ui: &mut Ui, projection: &Projection, edit: &mut impl FnMut(Value)) {
-    let mut scale = match projection {
-        Projection::Uv { scale, .. } => scale[0],
-        Projection::Triplanar { scale, .. } | Projection::Planar { scale, .. } | Projection::Spherical { scale } | Projection::Cylindrical { scale, .. } => {
-            *scale
+/// Width of the lock button between a pair of sliders
+const PAIR_LOCK_WIDTH: f32 = 22.0;
+
+/// Two sliders side by side after `label` (across and down), with a lock between them when
+/// `lock` is given: while locked, the second follows the first and is greyed. Returns the pair
+/// once one is edited, with [`slider_edit`]'s `merge`.
+fn pair_sliders(
+    ui: &mut Ui,
+    label: &str,
+    mut v: [f32; 2],
+    range: std::ops::RangeInclusive<f32>,
+    decimals: usize,
+    lock: Option<&mut bool>,
+) -> Option<([f32; 2], bool)> {
+    let mut edited = None;
+    ui.label(label);
+    ui.horizontal(|ui| {
+        let lock_width = if lock.is_some() { PAIR_LOCK_WIDTH } else { 0.0 };
+        let width = ((ui.available_width() - lock_width) / 2.0 - ui.spacing().item_spacing.x).max(40.0);
+        let locked = lock.as_deref().copied().unwrap_or(false);
+        ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
+            if let Some(merge) = slider_edit(ui, "", &mut v[0], range.clone(), decimals) {
+                if locked {
+                    v[1] = v[0];
+                }
+                edited = Some(merge);
+            }
+        });
+        if let Some(lock) = lock {
+            let icon = if *lock { ic::LOCK_SIMPLE } else { ic::LOCK_SIMPLE_OPEN };
+            if icon_button(ui, icon, tr("Lock the two values together"), *lock, 14.0).clicked() {
+                *lock = !*lock;
+                if *lock && v[1] != v[0] {
+                    v[1] = v[0];
+                    edited = Some(false);
+                }
+            }
+        }
+        ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
+            ui.add_enabled_ui(!locked, |ui| {
+                if let Some(merge) = slider_edit(ui, "", &mut v[1], range.clone(), decimals) {
+                    edited = Some(merge);
+                }
+            });
+        });
+    });
+    edited.map(|merge| (v, merge))
+}
+
+/// A projection's UV transformations: tiling across and down (locked together until unlocked),
+/// rotation and offset. A 3D projection also shows its scale and world offset here.
+fn projection_transform(ui: &mut Ui, projection: &Projection, salt: &str, edit: &mut impl FnMut(Value)) {
+    let (tiling, rotation, offset, offset_key) = match projection {
+        Projection::Uv { scale, rotation, offset } => (*scale, *rotation, *offset, "offset"),
+        Projection::Triplanar { uv, .. } | Projection::Planar { uv, .. } | Projection::Spherical { uv, .. } | Projection::Cylindrical { uv, .. } => {
+            (uv.tiling, uv.rotation, uv.offset, "uvOffset")
         }
         Projection::Decal(_) => return,
     };
-    if let Some(merge) = slider_edit(ui, tr("Scale / tiling"), &mut scale, FILL_SCALE_RANGE, 2) {
-        edit(json!({"scale": scale, "merge": merge}));
+    let lock_id = egui::Id::new(("fill_tiling_lock", salt));
+    let mut locked = ui.data(|data| data.get_temp::<bool>(lock_id)).unwrap_or(tiling[0] == tiling[1]);
+    let was_locked = locked;
+    if let Some((edited, merge)) = pair_sliders(ui, tr("Tiling"), tiling, FILL_SCALE_RANGE, 2, Some(&mut locked)) {
+        edit(json!({"tiling": edited, "merge": merge}));
+    }
+    if locked != was_locked {
+        ui.data_mut(|data| data.insert_temp(lock_id, locked));
+    }
+    let mut rotation_degrees = rotation;
+    if let Some(merge) = slider_edit(ui, tr("Rotation"), &mut rotation_degrees, FILL_ROTATION_DEGREES_RANGE, 0) {
+        edit(json!({"rotation": rotation_degrees, "merge": merge}));
+    }
+    if let Some((edited, merge)) = pair_sliders(ui, tr("Offset"), offset, -1.0..=1.0, 2, None) {
+        edit(json!({offset_key: edited, "merge": merge}));
     }
 
     match projection {
-        Projection::Uv { rotation, offset, .. } => {
-            let mut rotation_degrees = *rotation;
-            if let Some(merge) = slider_edit(ui, tr("Rotation"), &mut rotation_degrees, FILL_ROTATION_DEGREES_RANGE, 0) {
-                edit(json!({"rotation": rotation_degrees, "merge": merge}));
-            }
-            if let Some((edited_offset, merge)) = offset_sliders(ui, ["U", "V"], *offset) {
-                edit(json!({"offset": edited_offset, "merge": merge}));
-            }
-        }
-        Projection::Triplanar { offset, .. } | Projection::Planar { offset, .. } => {
+        Projection::Triplanar { scale, offset, .. } | Projection::Planar { scale, offset, .. } => {
+            world_scale(ui, *scale, edit);
             if let Some((edited_offset, merge)) = offset_sliders(ui, ["X", "Y", "Z"], *offset) {
                 edit(json!({"offset": edited_offset, "merge": merge}));
             }
         }
-        Projection::Spherical { .. } | Projection::Cylindrical { .. } | Projection::Decal(_) => {}
+        Projection::Spherical { scale, .. } | Projection::Cylindrical { scale, .. } => world_scale(ui, *scale, edit),
+        Projection::Uv { .. } | Projection::Decal(_) => {}
+    }
+}
+
+/// A 3D projection's scale: how many times its pattern fits across the mesh
+fn world_scale(ui: &mut Ui, scale: f32, edit: &mut impl FnMut(Value)) {
+    let mut scale = scale;
+    if let Some(merge) = slider_edit(ui, tr("Scale"), &mut scale, FILL_SCALE_RANGE, 2) {
+        edit(json!({"scale": scale, "merge": merge}));
     }
 }
 

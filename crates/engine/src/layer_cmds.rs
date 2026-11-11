@@ -3,7 +3,8 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    BlendMode, Channel, ChannelBlend, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Sampling, Source, UvWrap,
+    BlendMode, Channel, ChannelBlend, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Sampling, Source,
+    UvTransform, UvWrap,
 };
 
 use crate::commands::{
@@ -38,7 +39,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill projection",
             [],
             None,
-            "{layer? | effect?: content fill effect id, projection?: uv|triplanar|planar|spherical|cylindrical (default: the current one), scale?: number | [u, v] (uv), rotation?: degrees (uv), offset?: [u, v] (uv) | [x, y, z] (triplanar, planar), sharpness?: 1..64 (triplanar), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar)} — what is not given keeps its value",
+            "{layer? | effect?: content fill effect id, projection?: uv|triplanar|planar|spherical|cylindrical (default: the current one), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections: one number), offset?: [u, v] (uv) | [x, y, z] (triplanar, planar), sharpness?: 1..64 (triplanar), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar)} — what is not given keeps its value",
             has_layer,
             fill_projection
         ),
@@ -404,10 +405,10 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
     let named = match strp(p, "projection") {
         None => None,
         Some("uv") => Some(Projection::default()),
-        Some("triplanar" | "tri-planar") => Some(Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3] }),
-        Some("planar") => Some(Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3] }),
-        Some("spherical") => Some(Projection::Spherical { scale: 1.0 }),
-        Some("cylindrical") => Some(Projection::Cylindrical { scale: 1.0, axis: 1 }),
+        Some("triplanar" | "tri-planar") => Some(Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: Default::default() }),
+        Some("planar") => Some(Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: Default::default() }),
+        Some("spherical") => Some(Projection::Spherical { scale: 1.0, uv: Default::default() }),
+        Some("cylindrical") => Some(Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default() }),
         Some(other) => return Err(bad(cmd, format!("unknown projection `{other}`"))),
     };
     let mut proj = match (named, current) {
@@ -416,27 +417,42 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
         (None, c) => c.cloned().unwrap_or_default(),
     };
     let scale = floats::<2>(p, "scale", 0.001, 1000.0);
+    let tiling = floats::<2>(p, "tiling", 0.001, 1000.0);
+    let rotation = f32p(p, "rotation").map(|r| r.rem_euclid(360.0));
     let axis = u64p(p, "axis").map(|a| a.min(2) as u8);
+    // The UV transformations of a 3D projection: tiling, rotation and an offset across the surface
+    let place = |uv: &mut UvTransform| {
+        uv.tiling = tiling.unwrap_or(uv.tiling);
+        uv.rotation = rotation.unwrap_or(uv.rotation);
+        uv.offset = floats(p, "uvOffset", -1000.0, 1000.0).unwrap_or(uv.offset);
+    };
     match &mut proj {
-        Projection::Uv { scale: s, rotation, offset } => {
-            *s = scale.unwrap_or(*s);
-            *rotation = f32p(p, "rotation").map_or(*rotation, |r| r.rem_euclid(360.0));
+        Projection::Uv { scale: s, rotation: r, offset } => {
+            // A UV projection's scale is its tiling
+            *s = tiling.or(scale).unwrap_or(*s);
+            *r = rotation.unwrap_or(*r);
             *offset = floats(p, "offset", -1000.0, 1000.0).unwrap_or(*offset);
         }
-        Projection::Triplanar { scale: s, sharpness, offset } => {
+        Projection::Triplanar { scale: s, sharpness, offset, uv } => {
             *s = scale.map_or(*s, |v| v[0]);
             *sharpness = f32p(p, "sharpness").map_or(*sharpness, |v| v.clamp(1.0, 64.0));
             *offset = floats(p, "offset", -1000.0, 1000.0).unwrap_or(*offset);
+            place(uv);
         }
-        Projection::Planar { scale: s, axis: a, offset } => {
+        Projection::Planar { scale: s, axis: a, offset, uv } => {
             *s = scale.map_or(*s, |v| v[0]);
             *a = axis.unwrap_or(*a);
             *offset = floats(p, "offset", -1000.0, 1000.0).unwrap_or(*offset);
+            place(uv);
         }
-        Projection::Spherical { scale: s } => *s = scale.map_or(*s, |v| v[0]),
-        Projection::Cylindrical { scale: s, axis: a } => {
+        Projection::Spherical { scale: s, uv } => {
+            *s = scale.map_or(*s, |v| v[0]);
+            place(uv);
+        }
+        Projection::Cylindrical { scale: s, axis: a, uv } => {
             *s = scale.map_or(*s, |v| v[0]);
             *a = axis.unwrap_or(*a);
+            place(uv);
         }
         Projection::Decal(_) => {}
     }

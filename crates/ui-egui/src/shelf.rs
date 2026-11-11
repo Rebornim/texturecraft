@@ -25,16 +25,14 @@ use crate::i18n::{tr, trf};
 use crate::shelf_preview::ShelfPreview;
 use crate::theme::Tokens;
 use crate::thumbs::Thumbs;
-use crate::widgets::{dnd_release, icon_button};
+use crate::tile_look::TileLook;
+use crate::widgets::{dnd_release, elided, icon_button};
 
 /// A shelf tile's size in points
 const TILE_WIDTH: f32 = 72.0;
 const TILE_HEIGHT: f32 = 86.0;
 /// Corner radius of a tile's hover and selection highlights, in points
 const TILE_ROUNDING: f32 = 3.0;
-/// The thumbnail's size in a tile and its center below the tile's top, in points
-const THUMBNAIL_SIZE: f32 = 56.0;
-const THUMBNAIL_CENTER_Y: f32 = 32.0;
 /// Loading icon size relative to the thumbnail width, and its opacity over the dim text color
 const LOADING_ICON_SCALE: f32 = 0.9;
 const LOADING_ICON_OPACITY: f32 = 0.5;
@@ -616,6 +614,18 @@ pub(crate) fn tile(
     label: &str,
     drag: Option<&Asset>,
 ) -> egui::Response {
+    tile_with_look(ui, thumbs, (tex, preview), label, drag, TileLook::SHELF)
+}
+
+/// [`tile`] laid out with `look`
+pub(crate) fn tile_with_look(
+    ui: &mut Ui,
+    thumbs: &mut Thumbs,
+    (tex, preview): (Option<&egui::TextureHandle>, impl FnOnce() -> ShelfPreview),
+    label: &str,
+    drag: Option<&Asset>,
+    look: TileLook,
+) -> egui::Response {
     let tk = Tokens::get(ui.ctx());
     let sense = if drag.is_some() { Sense::click_and_drag() } else { Sense::click() };
     let (rect, resp) = ui.allocate_exact_size(vec2(TILE_WIDTH, TILE_HEIGHT), sense);
@@ -630,9 +640,13 @@ pub(crate) fn tile(
     if resp.hovered() || resp.dragged() {
         painter.rect_filled(rect, TILE_ROUNDING, tk.row_hover);
     }
-    let image_rect = egui::Rect::from_center_size(rect.center_top() + vec2(0.0, THUMBNAIL_CENTER_Y), vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE));
+    let image_rect = look.thumbnail_rect(rect);
     thumbnail(painter, tex, image_rect, &tk);
-    let galley = painter.layout(label.to_string(), egui::FontId::proportional(LABEL_FONT_SIZE), tk.text, rect.width() - LABEL_MARGIN);
+    let galley = if look.one_line_name {
+        elided(painter, label, LABEL_FONT_SIZE, tk.text, rect.width() - LABEL_MARGIN)
+    } else {
+        painter.layout(label.to_string(), egui::FontId::proportional(LABEL_FONT_SIZE), tk.text, rect.width() - LABEL_MARGIN)
+    };
     painter.galley(egui::pos2(rect.center().x - galley.size().x * 0.5, image_rect.bottom() + LABEL_GAP), galley, tk.text);
 
     let big = if resp.hovered() { big_preview(ui, thumbs, preview) } else { None };
@@ -646,7 +660,7 @@ fn big_preview(ui: &Ui, thumbs: &mut Thumbs, preview: impl FnOnce() -> ShelfPrev
     let requested_size_px = (BIG_PREVIEW_SIZE * ctx.pixels_per_point()).round() as usize;
 
     // High display scales must respect the orb camera's allocation limit
-    let on_the_orb = matches!(&preview, ShelfPreview::SmartMask(_) | ShelfPreview::SmartMaterial(_));
+    let on_the_orb = matches!(&preview, ShelfPreview::SmartMask(_) | ShelfPreview::Generator(_) | ShelfPreview::SmartMaterial(_));
     let size_px = if on_the_orb { requested_size_px.clamp(1, MAX_PREVIEW_SIZE_PX) } else { requested_size_px };
 
     // Scrolling moves tiles beneath a stationary pointer

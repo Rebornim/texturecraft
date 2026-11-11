@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::json;
-use texturecraft_core::{BakeResolution, BakedMap, Channel, CurvatureMethod, LayerId};
+use texturecraft_core::{BakeResolution, BakedMap, BlendMode, Channel, CurvatureMethod, EffectKind, Generator, GeneratorKind, LayerId, MaskBackground};
 use texturecraft_geom::glam::Vec3;
 use texturecraft_geom::primitives;
 use texturecraft_texel::TILE;
@@ -14,7 +14,7 @@ pub use crate::material_preview_pixel::MaterialPreviewPixel;
 use crate::orb_camera::OrbCamera;
 use crate::preview::Sample;
 use crate::session::Document;
-use crate::{EngineError, Result, Session, materials};
+use crate::{EngineError, Result, Session, materials, smart_masks};
 
 /// Bake resolution in texels; 256 loses the thin edge lines
 const TEXTURE_PX: u32 = 512;
@@ -80,7 +80,26 @@ impl OrbPreview {
         crate::execute(&mut self.session, "mask.smart.apply", &json!({ "name": id, "layer": self.layer.0 })).ok()?;
         // Previews need no undo history; retaining snapshots grows memory across presets
         self.session.undo.clear();
+        self.mask_pixels(size)
+    }
 
+    /// Row-major `size²` pixels of a mask holding one generator of `kind` at its defaults, with None outside the shape
+    /// Returns None for sizes outside 1..=[`MAX_PREVIEW_SIZE_PX`]
+    pub fn generator(&mut self, kind: GeneratorKind, size: usize) -> Option<Vec<Option<MaskPreviewPixel>>> {
+        if !valid_size(size) {
+            return None;
+        }
+
+        // Each generator goes on the bare shape, not over the previous mask
+        (self.session.doc, self.session.selected) = self.bare.clone();
+        let effects = vec![(EffectKind::Generator(Generator::new(kind)), BlendMode::Normal)];
+        let mask = smart_masks::build_mask(&mut self.session.doc.project, MaskBackground::Black, effects);
+        self.session.doc.project.layer_mut(self.layer).ok()?.mask = Some(mask);
+        self.mask_pixels(size)
+    }
+
+    /// Row-major `size²` pixels of the preview layer's current mask, with None outside the shape
+    fn mask_pixels(&mut self, size: usize) -> Option<Vec<Option<MaskPreviewPixel>>> {
         let camera = camera_for(&mut self.cameras, &self.session, size)?;
         let values = self.session.mask_at(self.layer, &camera.texels)?;
 
@@ -260,6 +279,28 @@ mod tests {
 
         preview.mask("edges_sharp", size * 2).unwrap();
         assert_eq!(preview.cameras.len(), CAMERAS_KEPT, "only the most recent sizes keep their camera");
+    }
+
+    #[test]
+    fn generator_previews_render_on_the_orb_and_each_starts_from_the_bare_shape() {
+        let size = 24;
+        let mut preview = OrbPreview::new().unwrap();
+        for kind in GeneratorKind::ALL {
+            let pixels = preview.generator(kind, size).unwrap_or_else(|| panic!("{kind:?}"));
+            assert_eq!(pixels.len(), size * size, "{kind:?}");
+            assert!(pixels[0].is_none(), "{kind:?}: the corners are outside the shape");
+            for pixel in pixels.iter().flatten() {
+                assert!((0.0..=1.0).contains(&pixel.mask) && pixel.normal.is_finite() && pixel.coverage > 0.0, "{kind:?}: {pixel:?}");
+            }
+        }
+
+        let (edges, dirt) = (preview.generator(GeneratorKind::EdgeWear, size).unwrap(), preview.generator(GeneratorKind::Dirt, size).unwrap());
+        assert!(difference(&edges, &dirt) > 0.05, "edge wear and dirt differ: {}", difference(&edges, &dirt));
+
+        // A smart mask rendered in between leaves nothing behind
+        preview.mask("dirt_cavities", size).unwrap();
+        assert_eq!(preview.generator(GeneratorKind::EdgeWear, size).unwrap(), edges);
+        assert!(preview.generator(GeneratorKind::EdgeWear, 0).is_none());
     }
 
     #[test]

@@ -5,7 +5,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use egui::{Color32, ColorImage, Painter, Pos2, Rect, TextureHandle, TextureOptions};
-use texturecraft_engine::core::ProceduralKind;
+use texturecraft_engine::core::{GeneratorKind, ProceduralKind};
 use texturecraft_engine::paint::presets::BrushPreset;
 use texturecraft_engine::paint::{BrushAlpha, alphas};
 use texturecraft_engine::texel::linear_to_srgb;
@@ -195,6 +195,11 @@ impl Thumbs {
     /// Smart mask thumbnail; None until the worker returns it
     pub fn smart_mask(&mut self, ctx: &egui::Context, id: &'static str) -> Option<TextureHandle> {
         self.worker_rendered(ctx, ShelfPreview::SmartMask(id), SPHERE_PX, false)
+    }
+
+    /// Generator thumbnail on the smart masks' orb; None until the worker returns it
+    pub fn generator(&mut self, ctx: &egui::Context, kind: GeneratorKind) -> Option<TextureHandle> {
+        self.worker_rendered(ctx, ShelfPreview::Generator(kind), SPHERE_PX, false)
     }
 
     /// Sphere thumbnail of library filter `id` applied to a sample material

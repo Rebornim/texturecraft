@@ -156,6 +156,7 @@ mod tests {
     use std::collections::HashMap;
     use std::time::{Duration, Instant};
 
+    use texturecraft_engine::core::GeneratorKind;
     use texturecraft_engine::materials::MATERIALS;
     use texturecraft_engine::smart_masks::SMART_MASKS;
 
@@ -196,6 +197,7 @@ mod tests {
             ("unknown material", ShelfPreview::Material("nope")),
             ("mask", ShelfPreview::SmartMask(SMART_MASKS[0].id)),
             ("unknown mask", ShelfPreview::SmartMask("nope")),
+            ("generator", ShelfPreview::Generator(GeneratorKind::Dirt)),
             ("smart material", ShelfPreview::SmartMaterial("steel_painted_worn")),
             ("unknown smart material", ShelfPreview::SmartMaterial("nope")),
         ];
@@ -211,7 +213,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
 
-        for key in ["material", "mask", "smart material"] {
+        for key in ["material", "mask", "generator", "smart material"] {
             let image = answers.get(key).and_then(Option::as_ref).unwrap_or_else(|| panic!("{key}: {answers:?}"));
             assert_eq!(image.size, [size_px, size_px], "{key}");
         }

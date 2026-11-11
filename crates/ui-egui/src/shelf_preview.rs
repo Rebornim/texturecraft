@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use egui::ColorImage;
 use texturecraft_engine::compose::ImageRes;
-use texturecraft_engine::core::ProceduralKind;
+use texturecraft_engine::core::{GeneratorKind, ProceduralKind};
 use texturecraft_engine::materials;
 use texturecraft_engine::paint::BrushSettings;
 use texturecraft_engine::paint::alphas::LibraryAlpha;
@@ -21,6 +21,8 @@ pub enum ShelfPreview {
     SmartMaterial(&'static str),
     /// Smart mask rendering requires the worker's baked orb
     SmartMask(&'static str),
+    /// A mask generator at its defaults, rendered like a smart mask on the worker's baked orb
+    Generator(GeneratorKind),
     /// A library filter on a sample material on a sphere
     Filter(&'static str),
     /// A procedural pattern as a grayscale swatch
@@ -48,6 +50,7 @@ impl ShelfPreview {
             ShelfPreview::Material(id) => format!("mat:{id}"),
             ShelfPreview::SmartMaterial(id) => format!("smart-mat:{id}"),
             ShelfPreview::SmartMask(id) => format!("mask:{id}"),
+            ShelfPreview::Generator(kind) => format!("generator:{kind:?}"),
             ShelfPreview::Filter(id) => format!("filter:{id}"),
             ShelfPreview::Procedural(kind) => format!("proc:{kind:?}"),
             ShelfPreview::Alpha(alpha) => format!("alpha:{}", alpha.id),
@@ -57,11 +60,11 @@ impl ShelfPreview {
     }
 
     /// Render a `size²` image; unknown assets return None
-    /// Smart masks and smart materials return None here because their bake belongs to the worker
+    /// Smart masks, generators and smart materials return None here because their bake belongs to the worker
     pub fn image(&self, size: usize) -> Option<ColorImage> {
         match self {
             ShelfPreview::Material(id) => Some(sphere_image(size, &preview::material(id, size)?)),
-            ShelfPreview::SmartMask(_) | ShelfPreview::SmartMaterial(_) => None,
+            ShelfPreview::SmartMask(_) | ShelfPreview::Generator(_) | ShelfPreview::SmartMaterial(_) => None,
             ShelfPreview::Filter(id) => Some(sphere_image(size, &preview::filter(id, size)?)),
             ShelfPreview::Procedural(kind) => Some(procedural_image(*kind, size)),
             ShelfPreview::Alpha(alpha) => Some(alpha_image(alpha, size)),

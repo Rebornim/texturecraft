@@ -780,7 +780,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         app.orbit_snap = None;
     }
 
-    if response.hovered() && !crate::move_on_model::takes_wheel(app) {
+    if response.hovered() {
         size_brush_by_ctrl_wheel(app, ui);
         if ui.input(|input| input.multi_touch().is_none()) {
             let pinch = trackpad_pinch(ui);

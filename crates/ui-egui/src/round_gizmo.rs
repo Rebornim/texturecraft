@@ -252,6 +252,11 @@ impl RoundGizmo {
         (nearest <= RING_GRAB).then_some(RoundGrab::Ring(axis))
     }
 
+    /// The `layer.fill.projection` params that slide the projector across the view from `from` to `to`, as its centre square does
+    pub(crate) fn slid(&self, app: &TextureCraftApp, rect: Rect, from: Pos2, to: Pos2) -> Option<Value> {
+        self.edit(app, rect, RoundGrab::Slide, from, to)
+    }
+
     /// The `layer.fill.projection` params a drag of `grab` from `from` to `to` sets
     fn edit(&self, app: &TextureCraftApp, rect: Rect, grab: RoundGrab, from: Pos2, to: Pos2) -> Option<Value> {
         let origin = self.world(self.local);

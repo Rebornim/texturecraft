@@ -2,7 +2,7 @@
 
 use egui::{Event, Modifiers, PointerButton, Pos2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::json;
 use texturecraft_engine::core::{LayerId, LayerKind, Projection, ShapeCrop};
 use texturecraft_ui_egui::TextureCraftApp;
@@ -139,4 +139,50 @@ fn the_3d_projection_settings_fold_away() {
     click(&mut harness, "3D projection settings");
     assert!(harness.query_by_label("Scale X").is_none());
     assert!(harness.query_by_label("Spherical projection").is_some(), "the rows above it stay");
+}
+
+/// The fill layer as the document holds it
+fn fill(harness: &Harness<'_, TextureCraftApp>, layer: u64) -> texturecraft_engine::core::Fill {
+    match &harness.state().session.doc.project.layer(LayerId(layer)).unwrap().kind {
+        LayerKind::Fill(fill) => fill.clone(),
+        other => panic!("not a fill: {other:?}"),
+    }
+}
+
+#[test]
+fn the_fill_caption_resets_the_whole_fill_section_in_one_undo_step() {
+    use texturecraft_engine::core::{Filtering, Sampling};
+    let (mut harness, layer) = app_with_fill("planar");
+    harness.state_mut().run("layer.fill.projection", json!({"layer": layer, "tiling": 3, "filtering": "nearest", "shapeCrop": "cropped", "symmetry": true}));
+    harness.run_steps(SETTLE_FRAMES);
+    let changed = fill(&harness, layer);
+    let reset = harness.get_by_label("Fill: Reset to defaults").rect().center();
+    let edges = harness.get_by_label("Restore defaults").rect().center();
+
+    // The band's reset puts back only Filtering and edges, through a real pointer click
+    click_at(&mut harness, edges);
+    let after_band = fill(&harness, layer);
+    assert_eq!((after_band.sampling.filtering, crop(&after_band.projection)), (Filtering::default(), Some(ShapeCrop::default())));
+    assert!(matches!(after_band.projection, Projection::Planar { .. }), "the projection stays planar");
+    assert!(harness.get_by_label("Restore defaults").accesskit_node().is_disabled(), "at its defaults the band's reset is inert");
+
+    // The caption's reset puts back the whole section
+    click_at(&mut harness, reset);
+    let after = fill(&harness, layer);
+    assert_eq!(after.projection, Projection::default(), "a UV projection at tiling 1");
+    assert_eq!(after.sampling, Sampling { symmetry: changed.sampling.symmetry, ..Sampling::default() }, "the symmetry stays");
+    assert!(harness.get_by_label("Fill: Reset to defaults").accesskit_node().is_disabled(), "at the defaults it is faint and inert");
+    click_at(&mut harness, reset);
+    assert_eq!(fill(&harness, layer), after, "a click at the defaults changes nothing");
+
+    harness.state_mut().run("edit.undo", json!({}));
+    assert_eq!(fill(&harness, layer), after_band, "one undo step brings the whole section back");
+}
+
+/// A projection's Shape crop, if it has a projector
+fn crop(projection: &Projection) -> Option<ShapeCrop> {
+    match projection {
+        Projection::Planar { projector, .. } | Projection::Triplanar { projector, .. } => Some(projector.crop),
+        _ => None,
+    }
 }

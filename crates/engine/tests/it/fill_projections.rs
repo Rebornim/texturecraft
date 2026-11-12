@@ -425,3 +425,34 @@ fn ramp_png() -> Vec<u8> {
     ramp.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).unwrap();
     out
 }
+
+/// Reset fill settings puts the whole Fill section back to a new fill's in one undo step and leaves the symmetry and sources alone
+#[test]
+fn reset_fill_settings_puts_the_fill_section_back_in_one_undo_step() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    let fresh = snapshot(&mut s);
+    set(
+        &mut s,
+        layer,
+        json!({"projection": "planar", "tiling": [3, 2], "rotation": 30, "filtering": "nearest", "wrap": "none", "scaleMode": "physicalSize", "shapeCrop": "cropped", "symmetry": true, "symmetryAxis": 1}),
+    );
+    let fill = |s: &Session| match &s.doc.project.layer(layer).unwrap().kind {
+        LayerKind::Fill(f) => f.clone(),
+        _ => panic!("a fill layer"),
+    };
+    let changed = fill(&s);
+    assert!(!texturecraft_engine::fill_reset_cmds::at_defaults(&changed.projection, changed.sampling));
+
+    execute(&mut s, "layer.fill.resetProjection", &json!({"layer": layer.0})).unwrap();
+    let reset = fill(&s);
+    assert_eq!(reset.projection, Projection::default(), "back to a UV projection at tiling 1");
+    assert_eq!(reset.sampling, Sampling { symmetry: changed.sampling.symmetry, ..Sampling::default() }, "the sampling is a new fill's; the symmetry stays");
+    assert_eq!(reset.sources, changed.sources, "the material stays");
+    assert!(texturecraft_engine::fill_reset_cmds::at_defaults(&reset.projection, reset.sampling));
+    assert_eq!(snapshot(&mut s), fresh, "it renders like the new fill");
+
+    execute(&mut s, "edit.undo", &Value::Null).unwrap();
+    assert_eq!(fill(&s), changed, "one undo brings every setting back");
+    assert!(execute(&mut s, "layer.fill.resetProjection", &json!({"layer": 9999})).is_err(), "no such layer");
+}

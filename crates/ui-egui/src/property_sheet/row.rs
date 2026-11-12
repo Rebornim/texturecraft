@@ -34,6 +34,15 @@ const SECTION_MENU_ICON_SIZE: f32 = 14.0;
 /// Distance from the right edge to the centre of a right-edge glyph (caret, menu)
 pub(super) const EDGE_GLYPH_INSET: f32 = 6.0;
 
+/// Size of the round reset glyph on a section caption or a band
+pub(super) const RESET_ICON_SIZE: f32 = 14.0;
+
+/// Opacity of a reset glyph at the defaults, where it does nothing
+pub(super) const RESET_AT_DEFAULT_OPACITY: f32 = 0.4;
+
+/// From the right edge to the centre of a section caption's reset: its 14 px glyph ends at the dropdowns' right edge
+const SECTION_RESET_INSET: f32 = RESET_ICON_SIZE / 2.0;
+
 impl PropertySheet<'_> {
     /// A section caption in capitals, a hairline above a later one; `menu` adds the ≡ button
     pub(crate) fn section(&mut self, title: &str, menu: bool) -> Option<Response> {
@@ -41,8 +50,49 @@ impl PropertySheet<'_> {
         self.section_in(title, menu, text)
     }
 
+    /// [`Self::section`] with the round section reset at the caption's right end: faint and inert at the defaults (`changed` false); returns whether it was clicked
+    pub(crate) fn section_reset(&mut self, title: &str, changed: bool) -> bool {
+        let text = self.tokens.text;
+        let center_y = self.section_caption(title, text);
+        let glyph = Rect::from_center_size(pos2(self.right - SECTION_RESET_INSET, center_y), egui::vec2(20.0, 20.0));
+        let id = self.id.with(("section_reset", title));
+        let sense = if changed { Sense::click() } else { Sense::hover() };
+        let response = self.ui.interact(glyph, id, sense);
+        let label = crate::i18n::tr("Reset to defaults");
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, changed, format_args!("{title}: {label}")));
+        if changed {
+            // Left of the glyph, on the caption's line: it covers no value
+            let mut tooltip = egui::Tooltip::for_enabled(&response);
+            tooltip.popup = tooltip.popup.anchor(glyph).align(egui::RectAlign::LEFT).align_alternatives(&[egui::RectAlign::BOTTOM_END]);
+            tooltip.show(|ui| ui.label(label));
+        }
+        let t = self.tokens;
+        let color = match (changed, response.hovered()) {
+            (false, _) => t.text_dim.gamma_multiply(RESET_AT_DEFAULT_OPACITY),
+            (true, true) => t.text_strong,
+            (true, false) => t.text_dim,
+        };
+        self.ui.painter().text(glyph.center(), Align2::CENTER_CENTER, ic::CLOCK_COUNTER_CLOCKWISE, FontId::proportional(RESET_ICON_SIZE), color);
+        changed && response.clicked()
+    }
+
     /// [`Self::section`] with its caption in `color`
     pub(super) fn section_in(&mut self, title: &str, menu: bool, color: egui::Color32) -> Option<Response> {
+        let center_y = self.section_caption(title, color);
+        if !menu {
+            return None;
+        }
+
+        let glyph = Rect::from_center_size(pos2(self.right - EDGE_GLYPH_INSET, center_y), egui::vec2(20.0, 20.0));
+        let id = self.id.with(("section_menu", title));
+        let response = self.ui.interact(glyph, id, Sense::click());
+        let color = if response.hovered() { self.tokens.text } else { self.tokens.text_dim };
+        self.ui.painter().text(glyph.center(), Align2::CENTER_CENTER, ic::LIST, FontId::proportional(SECTION_MENU_ICON_SIZE), color);
+        Some(response)
+    }
+
+    /// A section caption in capitals in `color`, a hairline above a later one; returns the caption's centre line
+    fn section_caption(&mut self, title: &str, color: egui::Color32) -> f32 {
         self.close_card();
         if !self.empty {
             self.space(SECTION_AIR);
@@ -65,16 +115,7 @@ impl PropertySheet<'_> {
         self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, title.to_uppercase(), semibold(SMALL_TEXT_SIZE), color);
         self.drawn(center_y + 6.0);
         self.air_at = None;
-        if !menu {
-            return None;
-        }
-
-        let glyph = Rect::from_center_size(pos2(self.right - EDGE_GLYPH_INSET, center_y), egui::vec2(20.0, 20.0));
-        let id = self.id.with(("section_menu", title));
-        let response = self.ui.interact(glyph, id, Sense::click());
-        let color = if response.hovered() { self.tokens.text } else { self.tokens.text_dim };
-        self.ui.painter().text(glyph.center(), Align2::CENTER_CENTER, ic::LIST, FontId::proportional(SECTION_MENU_ICON_SIZE), color);
-        Some(response)
+        center_y
     }
 
     /// One setting's row: label beside the controls column or stacked above; returns the control's box and centre

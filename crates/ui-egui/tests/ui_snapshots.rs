@@ -554,6 +554,54 @@ fn panel_header_snapshots() {
 
 #[test]
 #[ignore]
+fn fill_reset_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1]})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.fill.projection", &json!({"layer": layer, "tiling": [2.0, 2.0], "filtering": "nearest"})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 960.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    for (brightness, name) in [(Brightness::MediumDark, "medium"), (Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+        harness.state_mut().ui.prefs.brightness = brightness;
+        save(&mut harness, &output_dir, &format!("fill-reset-{name}"));
+    }
+    harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    let reset = harness.get_by_label("Fill: Reset to defaults").rect().center();
+    harness.hover_at(reset);
+    save(&mut harness, &output_dir, "fill-reset-hovered");
+    // The band sits under the fold at this height: scroll Properties down to it
+    harness.hover_at(reset);
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -110.0),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+    });
+    harness.run_steps(3);
+    let edges = harness.get_by_label("Restore defaults").rect().center();
+    harness.hover_at(edges);
+    save(&mut harness, &output_dir, "fill-reset-band-hovered");
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, 110.0),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+    });
+    harness.run_steps(3);
+    harness.get_by_label("Fill: Reset to defaults").click();
+    harness.hover_at(reset);
+    save(&mut harness, &output_dir, "fill-reset-at-defaults");
+}
+
+#[test]
+#[ignore]
 fn fill_properties_snapshots() {
     use serde_json::json;
     use texturecraft_engine::execute;

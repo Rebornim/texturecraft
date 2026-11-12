@@ -1274,6 +1274,11 @@ fn reference_presets_follow_their_targets_layouts() {
     assert_eq!(preset_source("Dota 2", "normal", Dest::R), opengl);
     assert_eq!(preset_source("Dota 2", "masks1", Dest::B), channel(Channel::Metallic));
     assert_eq!(preset_source("Dota 2", "masks2", Dest::A), SourceRef::Virtual { map: VirtualMap::Glossiness, component: 0 }, "specular exponent");
+
+    // Spark AR Studio: occlusion, roughness and metalness packed as glTF packs them
+    assert_eq!(preset_files("Spark AR Studio"), ["baseColor", "ORM", "normal", "emissive"]);
+    assert_eq!(preset_source("Spark AR Studio", "ORM", Dest::G), channel(Channel::Roughness));
+    assert_eq!(preset_source("Spark AR Studio", "ORM", Dest::B), channel(Channel::Metallic));
 }
 
 #[test]

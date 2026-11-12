@@ -29,7 +29,7 @@ mod export_settings;
 mod export_template_guards;
 mod file_dialogs;
 mod fill_channel_image;
-mod fill_projection_section;
+mod fill_projection_rows;
 mod filter_picker;
 mod frame_selection;
 mod generator_panel;

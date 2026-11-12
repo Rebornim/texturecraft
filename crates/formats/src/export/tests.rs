@@ -470,6 +470,27 @@ fn write_files_is_atomic_and_refuses_paths() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn slash_in_a_file_name_makes_folders() {
+    let fx = Fx::new(&default_channels());
+    let mut preset = builtin_preset("Unreal Engine (Packed)").unwrap();
+    preset.maps[0].file = "$mesh/$textureSet/Base color".into();
+    let files = fx.render(&ExportOptions::new(preset));
+    let base = find(&files, "/Base_color.");
+    assert_eq!(base.name, "sphere/Body_Set/Base_color.png");
+
+    let dir = std::env::temp_dir().join(format!("tc-formats-export-folders-{}", std::process::id()));
+    let paths = write_files(&files, &dir).unwrap();
+    assert!(paths.contains(&dir.join("sphere").join("Body_Set").join("Base_color.png")));
+    assert_eq!(std::fs::read(dir.join("sphere/Body_Set/Base_color.png")).unwrap(), base.bytes);
+    for name in ["/abs.png", "a//b.png", "a/../b.png", "a/b c/d.png"] {
+        let outside = ExportedFile { name: name.into(), ..files[0].clone() };
+        assert!(write_files(&[outside], &dir).is_err(), "{name}");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn write_files_accepts_planned_name_with_max_length_stem() {
     let fx = Fx::new(&default_channels());
@@ -496,7 +517,7 @@ fn validation_rejects_bad_presets() {
         p.validate().is_err()
     };
     let long = "x".repeat(300);
-    for file in ["a/b", r"a\b", "..", "x..y", "$meshes_$foo", "$", "", " ", "a\u{7}b", long.as_str()] {
+    for file in ["/a", "a/", "a//b", "a/ /b", r"a\b", "..", "x..y", "$meshes_$foo", "$", "", " ", "a\u{7}b", long.as_str()] {
         assert!(refused(&|p| p.maps[0].file = file.into()), "file template {file:?} must be refused");
     }
     assert!(refused(&|p| p.name = "  ".into()));

@@ -337,8 +337,10 @@ mod web {
         let name = match files.as_slice() {
             [] => return Err("the preset produced no files".into()),
             [f] => {
-                download(&f.name, &f.bytes)?;
-                f.name.clone()
+                // A browser download has no folders: the file alone
+                let name = f.name.rsplit('/').next().unwrap_or(&f.name).to_string();
+                download(&name, &f.bytes)?;
+                name
             }
             _ => {
                 let name = format!("{}_textures.zip", sanitize_file_stem(&app.session.doc.project.name));

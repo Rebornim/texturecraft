@@ -64,14 +64,16 @@ pub const FILE_TOKENS: [(&str, &str); 6] = [
     ("$udim", "UV tile number (1001 for sets without UV tiles)"),
 ];
 
-/// Why `template` is not a valid file name template: path separators, `..`, control characters
-/// and unknown `$` variables are refused.
+/// Why `template` is not a valid file name template (`/` makes folders; empty folders, `\\`, `..`, control characters and unknown `$` variables are refused)
 pub fn template_error(template: &str) -> Option<String> {
     if template.trim().is_empty() || template.len() > MAX_TEMPLATE {
         return Some(format!("file name \"{template}\" is empty or longer than {MAX_TEMPLATE} bytes"));
     }
-    if template.contains(['/', '\\']) || template.contains("..") || template.chars().any(char::is_control) {
-        return Some(format!("file name \"{template}\" contains a path separator, \"..\" or a control character"));
+    if template.contains('\\') || template.contains("..") || template.chars().any(char::is_control) {
+        return Some(format!("file name \"{template}\" contains \"\\\", \"..\" or a control character"));
+    }
+    if template.split('/').any(|folder| folder.trim().is_empty()) {
+        return Some(format!("file name \"{template}\" has an empty folder name: \"/\" separates folders"));
     }
     let mut rest = template;
     while let Some(i) = rest.find('$') {
@@ -576,6 +578,11 @@ pub fn sanitize_file_stem(s: &str) -> String {
     out
 }
 
+/// [`sanitize_file_stem`] for each folder of a `/`-separated path
+pub fn sanitize_file_path(path: &str) -> String {
+    path.split('/').map(sanitize_file_stem).collect::<Vec<_>>().join("/")
+}
+
 /// The files `opts` produces for texture set `ts`, without rendering (for the export dialog).
 /// Template variables: [`FILE_TOKENS`].
 pub fn list_outputs(project: &Project, ts: usize, mesh_name: &str, opts: &ExportOptions) -> Result<Vec<PlannedFile>> {
@@ -622,9 +629,9 @@ pub fn list_outputs(project: &Project, ts: usize, mesh_name: &str, opts: &Export
                     .replace("$textureSet", &set.name)
                     .replace("$channel", channel_label(map))
                     .replace("$colorSpace", color_space);
-                sanitize_file_stem(&t)
+                sanitize_file_path(&t)
             });
-            let stem = sanitize_file_stem(&stem);
+            let stem = sanitize_file_path(&stem);
             let ext = format.extension();
             let mut name = format!("{stem}.{ext}");
             let mut warnings = Vec::new();
@@ -1198,20 +1205,23 @@ fn write_exr((w, h): (u32, u32), n: usize, data: &[f32], half: bool, space: Opti
     Ok(out.into_inner())
 }
 
-/// Write exported files into `dir` (created if missing), each atomically (`name.tmp`, then
-/// rename). Names must be plain file names.
+/// Write exported files into `dir` (created if missing), each atomically; a `/` in a name is a folder below `dir`
 #[cfg(not(target_arch = "wasm32"))]
 pub fn write_files(files: &[ExportedFile], dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>> {
     std::fs::create_dir_all(dir)?;
     files
         .iter()
         .map(|f| {
-            // The planned name is `<sanitized stem>.<ext>`; the stem alone is capped at MAX_STEM.
+            // The planned name is `<sanitized folders and stem>.<ext>`, each part capped at MAX_STEM
             let (stem, ext) = f.name.rsplit_once('.').unwrap_or((&f.name, ""));
-            if f.name.is_empty() || stem != sanitize_file_stem(stem) || !ext.chars().all(|c| c.is_ascii_alphanumeric()) || f.name.trim_matches('.').is_empty() {
+            let plain = |part: &str| !part.trim_matches('.').is_empty() && part == sanitize_file_stem(part);
+            if f.name.is_empty() || !stem.split('/').all(plain) || !ext.chars().all(|c| c.is_ascii_alphanumeric()) || f.name.trim_matches('.').is_empty() {
                 return Err(FormatError::Invalid(format!("\"{}\" is not a plain file name", f.name)));
             }
             let path = dir.join(&f.name);
+            if let Some(folder) = path.parent() {
+                std::fs::create_dir_all(folder)?;
+            }
             crate::write_atomic(&path, &f.bytes)?;
             Ok(path)
         })

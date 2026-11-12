@@ -628,8 +628,13 @@ fn layer_row(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, depth: usize
         Rect::from_min_size(pos2(rect.right() - RIGHT_COLUMN - ROW_CONTROL_GAP, rect.center().y + ROW_STACK_GAP), vec2(RIGHT_COLUMN, ROW_CONTROL_HEIGHT));
     if let Some(channel_blend) = blend.filter(|_| show_blend) {
         let id = ui.scope_id().with(("blend", layer.id.0));
-        let (mode, opacity) =
-            blend_controls(ui, id, (mode_rect, opacity_rect), (channel_blend.mode, channel_blend.opacity), tr("Blending mode of the displayed channel"));
+        let (mode, opacity) = blend_controls(
+            ui,
+            id,
+            (mode_rect, opacity_rect),
+            (channel_blend.mode, channel_blend.opacity),
+            (tr("Blending mode of the displayed channel"), &layer.name),
+        );
         if let Some(mode) = mode {
             app.run("layer.blend", json!({"layer": layer.id.0, "channel": channel.id(), "mode": format!("{mode:?}")}));
         }
@@ -780,13 +785,13 @@ fn tree_lines(p: &egui::Painter, tk: &Tokens, rect: Rect, indent: f32, trunks: &
 /// The drag-and-drop payload of an effect row (the effect id).
 struct EffectDrag(u64);
 
-/// A stack row's blend mode menu and opacity field (percent): the mode picked, and the opacity (0..1) set this frame with whether it continues a drag.
+/// A stack row's blend mode menu and opacity field (percent, named after row `row_name`): the mode picked, and the opacity (0..1) set this frame with whether it continues a drag.
 fn blend_controls(
     ui: &mut Ui,
     id: egui::Id,
     (mode_rect, opacity_rect): (Rect, Rect),
     (mode, opacity): (BlendMode, f32),
-    hover: &str,
+    (hover, row_name): (&str, &str),
 ) -> (Option<BlendMode>, Option<(f32, bool)>) {
     let tokens = Tokens::get(ui.ctx());
     let painter = ui.painter().clone();
@@ -835,9 +840,15 @@ fn blend_controls(
         state.bg_stroke = Stroke::NONE;
     }
     let field = field_ui.add(egui::DragValue::new(&mut percent).range(0.0..=100.0).speed(OPACITY_DRAG_SPEED).max_decimals(0).suffix("%"));
+    field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::SpinButton, true, trf("Opacity of {name}", &[("name", &row_name)])));
 
-    // The later changes of one drag continue its first undo step
-    let merge = field.dragged() && !field.drag_started();
+    // A drag's first change starts an undo step and its later changes continue it (a drag can start without a change)
+    let drag_changed_id = id.with("opacity_drag_changed");
+    let drag_changed = !field.drag_started() && ui.data(|data| data.get_temp::<bool>(drag_changed_id)).unwrap_or(false);
+    let merge = field.dragged() && drag_changed;
+    if field.changed() || field.drag_started() {
+        ui.data_mut(|data| data.insert_temp(drag_changed_id, field.changed() && field.dragged()));
+    }
     (picked, field.changed().then_some((percent / 100.0, merge)))
 }
 
@@ -910,7 +921,8 @@ fn effect_row(
         let opacity_center = pos2(mode_rect.right() + ROW_CONTROL_GAP + EFFECT_OPACITY_WIDTH * 0.5, rect.center().y);
         let opacity_rect = Rect::from_center_size(opacity_center, vec2(EFFECT_OPACITY_WIDTH, ROW_CONTROL_HEIGHT));
         let id = ui.scope_id().with(("eff_blend", effect_id.0));
-        let (mode, opacity) = blend_controls(ui, id, (mode_rect, opacity_rect), (effect.blend, effect.opacity), tr("Blending mode of the effect"));
+        let (mode, opacity) =
+            blend_controls(ui, id, (mode_rect, opacity_rect), (effect.blend, effect.opacity), (tr("Blending mode of the effect"), &effect.name));
         if let Some(mode) = mode {
             app.run("effect.set", json!({"effect": effect_id.0, "blend": format!("{mode:?}")}));
         }

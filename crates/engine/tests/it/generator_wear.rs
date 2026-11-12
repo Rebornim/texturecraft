@@ -91,3 +91,15 @@ fn mode_and_sizes_keep_edge_wear_on_the_earlier_model_where_they_apply() {
     execute(&mut session, "effect.set", &json!({"effect": effect, "blur": 0.5})).unwrap();
     assert_eq!(generator(&session, effect).global.blur, 0.5, "the earlier model keeps its global blur");
 }
+
+#[test]
+fn a_wear_control_drops_the_earlier_models_offset() {
+    let mut session = session();
+    let effect = add(&mut session, json!({"generator": "edgeWear", "offset": 0.4}));
+    assert_eq!(generator(&session, effect).wear, None, "the offset keeps it on the earlier model");
+    assert_eq!(generator(&session, effect).offset, 0.4);
+
+    execute(&mut session, "effect.set", &json!({"effect": effect, "wearLevel": 0.6})).unwrap();
+    assert_eq!(generator(&session, effect).offset, 0.0, "on the wear controls the offset would shift the result unseen");
+    assert!(execute(&mut session, "effect.set", &json!({"effect": effect, "offset": 0.2, "wearLevel": 0.5})).is_err(), "not both at once");
+}

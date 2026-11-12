@@ -103,14 +103,14 @@ fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fil
         return;
     }
 
-    // Move on model: drags in the 3D view slide the projection, the wheel resizes it, Shift+drag turns it
+    // Move on model: drags in the 3D view slide the projection, Shift+drag turns it
     let target = match base.get("effect").and_then(Value::as_u64) {
         Some(effect) => MoveOnModel { layer: reader, effect: Some(LayerId(effect)) },
         None => MoveOnModel::layer(reader),
     };
     let moving = app.moving_on_model == Some(target);
     let response = sheet.button_lit(ic::HAND, tr("Move on model"), moving);
-    let response = sheet.tip(response, tr("Drag on the model to slide the projection, scroll to resize it, Shift+drag to turn it; Esc stops"));
+    let response = sheet.tip(response, tr("Drag on the model to slide the projection, Shift+drag to turn it; Esc stops"));
     if response.clicked() {
         app.moving_on_model = (!moving).then_some(target);
     }

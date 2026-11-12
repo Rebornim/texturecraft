@@ -38,6 +38,7 @@ mod fill_source_target;
 mod fill_symmetry_panel;
 mod filter_slot;
 pub mod fonts;
+mod frame_gizmo;
 mod generator_panel;
 pub mod gpu;
 mod gray_slider;
@@ -61,6 +62,7 @@ mod material_orb;
 mod material_preview_image;
 pub mod menus;
 mod mesh_export_options;
+pub mod move_on_model;
 mod name_error;
 mod named_layout;
 pub mod named_layouts;
@@ -97,6 +99,7 @@ mod resource_picker_choice;
 mod resource_picker_item;
 mod resource_picker_tab;
 mod resource_picker_tile;
+mod round_gizmo;
 mod running_bake;
 pub mod saved_search;
 mod screen_color_pick;
@@ -123,6 +126,7 @@ pub mod thumbs;
 mod tile_edits;
 pub mod titlebar;
 pub mod toolbar;
+mod trackpad_drag;
 pub mod ui_state_store;
 pub mod unavailable;
 #[cfg(not(target_arch = "wasm32"))]
@@ -246,7 +250,9 @@ pub struct TextureCraftApp {
     pub last_paint_point: Option<uv_paint_point::SurfacePaintPoint>,
     /// The last finished 2D stroke's endpoint, scoped to its mesh and texture set for Shift+click lines
     pub last_paint_uv: Option<uv_paint_point::UvPaintPoint>,
-    /// The decal layer the next click in the 3D view places.
+    /// The fill Move on model moves: drags in the 3D view slide its projection, the wheel resizes it, Shift+drag turns it
+    pub moving_on_model: Option<move_on_model::MoveOnModel>,
+    /// The decal layer or mask fill effect the next click in the 3D view places
     pub placing_decal: Option<texturecraft_engine::core::LayerId>,
     /// The Properties popup a right click in a view opens.
     pub properties_popup: Option<properties_popup::PropertiesPopup>,
@@ -356,6 +362,7 @@ impl TextureCraftApp {
             render: render_mode::RenderView::default(),
             last_paint_point: None,
             last_paint_uv: None,
+            moving_on_model: None,
             placing_decal: None,
             properties_popup: None,
             picking_id_color: None,

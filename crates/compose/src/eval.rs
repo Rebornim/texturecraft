@@ -23,6 +23,7 @@ use crate::curvature_sizes::CurvatureSizes;
 use crate::held_fields::HeldFields;
 use crate::pattern::{Coords, image_samples, procedural, world_noise};
 use crate::projector_cover::{framed_cover, projector_cover};
+use crate::projector_depth::ProjectorDepth;
 use crate::store::{BakedMaps, ImageRes, ImageStore, PixelStore, decode};
 
 const NCH: usize = Channel::ALL.len();
@@ -200,8 +201,11 @@ struct ChanPlan<'a> {
 }
 
 enum Content<'a> {
-    Paint { preview: bool },
-    Fill(&'a Fill),
+    Paint {
+        preview: bool,
+    },
+    /// A fill, with its projector's depth map when it culls by depth
+    Fill(&'a Fill, Option<Arc<ProjectorDepth>>),
     Group(Vec<Node<'a>>),
 }
 
@@ -217,6 +221,8 @@ struct EffectPlan<'a> {
     curvature_sizes: Option<Arc<CurvatureSizes>>,
     /// A filtered mask stage retained because an anchor above it records that stage.
     filtered_mask: Option<&'a Field>,
+    /// The projector's depth map of a fill or material effect that culls by depth
+    depth: Option<Arc<ProjectorDepth>>,
 }
 
 struct MaskPlan<'a> {
@@ -1077,6 +1083,10 @@ fn effect_plans<'a>(inp: &Inputs<'a>, effects: &'a [Effect], tile_x: u32, tile_y
                 EffectKind::Generator(Generator { detail: Some(detail), .. }) => CurvatureSizes::of(inp, &detail.blurred_sizes_in_use()),
                 _ => None,
             };
+            let depth = match &effect.kind {
+                EffectKind::Fill { projection, .. } | EffectKind::Material(Fill { projection, .. }) => ProjectorDepth::of(inp.mesh, inp.bounds, projection),
+                _ => None,
+            };
             EffectPlan {
                 id: effect.id,
                 kind: &effect.kind,
@@ -1086,6 +1096,7 @@ fn effect_plans<'a>(inp: &Inputs<'a>, effects: &'a [Effect], tile_x: u32, tile_y
                 preview: previews(inp, target),
                 curvature_sizes,
                 filtered_mask: None,
+                depth,
             }
         })
         .collect()
@@ -1177,7 +1188,7 @@ fn plan_node<'a>(
         .collect::<Vec<_>>();
     let content = match &layer.kind {
         LayerKind::Paint => Content::Paint { preview: previews(inp, PaintTarget::Layer(layer.id)) },
-        LayerKind::Fill(f) => Content::Fill(f),
+        LayerKind::Fill(f) => Content::Fill(f, ProjectorDepth::of(inp.mesh, inp.bounds, &f.projection)),
         LayerKind::Group { children, .. } => Content::Group(if kids { plan(inp, children, channels, tx, ty, depth + 1, fields) } else { Vec::new() }),
 
         // `content_layer` already followed instance links
@@ -1364,7 +1375,7 @@ impl<'a, 'b> Texel<'a, 'b> {
             Some(s) => Coords { uv: s.uv, pos: (s.pos - center) / r, nrm: s.nrm },
             None => Coords { uv: Vec2::new((self.x as f32 + 0.5) / g.width as f32, (self.y as f32 + 0.5) / g.height as f32), pos: Vec3::ZERO, nrm: Vec3::Y },
         };
-        // UV-tiled sets: projections see the mesh's own UVs (patterns repeat per tile).
+        // UV-tiled sets: projections see the mesh's own UVs (patterns repeat per tile)
         if let Ok(set) = self.inp.project.texture_set(self.inp.ts)
             && let Some(grid) = set.tile_grid()
         {
@@ -1439,8 +1450,17 @@ impl<'a, 'b> Texel<'a, 'b> {
         }
     }
 
+    /// How much a fill projected by `proj` covers this texel: [`Texel::shape_cover`], then depth culling through the projector's `depth` map
+    fn cover<'s>(&mut self, sources: impl Iterator<Item = &'s Source>, proj: &Projection, sampling: Sampling, depth: Option<&ProjectorDepth>) -> f32 {
+        let cover = self.shape_cover(sources, proj, sampling);
+        match depth.zip(proj.depth_culling()) {
+            Some((depth, culling)) if cover > 0.0 => cover * self.world().map_or(1.0, |p| depth.cover(p, culling.hardness)),
+            _ => cover,
+        }
+    }
+
     /// How much a fill projected by `proj` covers this texel: wrap, shape crop and backface culling, and a cropped framed projection's image alpha
-    fn cover<'s>(&mut self, mut sources: impl Iterator<Item = &'s Source>, proj: &Projection, sampling: Sampling) -> f32 {
+    fn shape_cover<'s>(&mut self, mut sources: impl Iterator<Item = &'s Source>, proj: &Projection, sampling: Sampling) -> f32 {
         let (Projection::Planar { projector, placed: Some(_), .. } | Projection::Warp { projector, .. }) = proj else {
             let coords = self.coords();
             return self.tile_cover(proj, &coords, sampling) * projector_cover(proj, &coords);
@@ -1683,7 +1703,9 @@ impl<'a, 'b> Texel<'a, 'b> {
                 }
                 EffectKind::Fill { source, projection, sampling } => {
                     let fill = self.source(source, projection, *sampling, ChannelKind::Scalar)[0];
-                    value += (blend1(effect.blend, value, fill) - value) * opacity * self.cover(std::iter::once(source), projection, *sampling);
+                    value += (blend1(effect.blend, value, fill) - value)
+                        * opacity
+                        * self.cover(std::iter::once(source), projection, *sampling, effect.depth.as_deref());
                 }
                 EffectKind::Generator(generator) => {
                     let generated = self.generator(generator, effect.curvature_sizes.as_deref());
@@ -1741,7 +1763,7 @@ impl<'a, 'b> Texel<'a, 'b> {
                         mix_group(acc, &inner, &n.chans, m);
                     }
                 }
-                Content::Fill(_) | Content::Paint { .. } if m > 0.0 => {
+                Content::Fill(..) | Content::Paint { .. } if m > 0.0 => {
                     let before = if n.anchors.iter().any(|a| a.1.is_some()) { Some(*acc) } else { None };
                     for c in &n.chans {
                         if let Some((v, cov)) = self.tape_content(&n.content, c) {
@@ -1876,8 +1898,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         self.stop = None;
     }
 
-    /// Straight value and coverage of one channel of a paint or fill layer at this texel
-    /// (content effects and live stroke preview included). None where the layer is empty.
+    /// Straight value and coverage of one channel of a paint or fill layer at this texel (content effects and live stroke preview included); None where the layer is empty
     fn content(&mut self, content: &Content, c: &ChanPlan) -> Option<([f32; 3], f32)> {
         self.content_to(content, c, usize::MAX)
     }
@@ -1892,14 +1913,14 @@ impl<'a, 'b> Texel<'a, 'b> {
             }
             None => {
                 let (v, cov) = match content {
-                    Content::Fill(f) => {
+                    Content::Fill(f, depth) => {
                         let ch = Channel::ALL.get(c.ch).copied()?;
                         // A channel without a source fills with its default (no clone per texel).
                         let v = match f.sources.get(&ch) {
                             Some(s) => self.source(s, &f.projection, f.sampling, ch.kind()),
                             None => ch.default_value(),
                         };
-                        (v, self.cover(f.sources.values(), &f.projection, f.sampling))
+                        (v, self.cover(f.sources.values(), &f.projection, f.sampling, depth.as_deref()))
                     }
                     Content::Paint { preview } => self.painted(c.data.as_deref(), c, *preview),
                     Content::Group(_) => return None,
@@ -1980,7 +2001,7 @@ impl<'a, 'b> Texel<'a, 'b> {
             EffectKind::Material(f) => match Channel::ALL.get(c.ch).and_then(|ch| f.sources.get(ch).map(|s| (*ch, s))) {
                 Some((ch, s)) => {
                     let p = self.source(s, &f.projection, f.sampling, ch.kind());
-                    let w = o * self.cover(f.sources.values(), &f.projection, f.sampling);
+                    let w = o * self.cover(f.sources.values(), &f.projection, f.sampling, e.depth.as_deref());
                     over(c, e.blend, v, cov, p, w)
                 }
                 None => (v, cov),

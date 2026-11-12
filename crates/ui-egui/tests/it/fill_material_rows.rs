@@ -2,7 +2,7 @@
 
 use egui::Role;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::json;
 use texturecraft_engine::core::{Channel, CookResolution, LayerId, LayerKind, LinkParam, MaterialLink, Procedural, ProceduralKind, Source};
 use texturecraft_ui_egui::TextureCraftApp;
@@ -239,7 +239,7 @@ fn the_picker_is_a_window_beside_the_panel_that_its_title_drags_and_its_close_or
     let (mut harness, _) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
     click(&mut harness, Role::Button, "Base color");
     let bar = harness.get_by_role_and_label(Role::Button, "Base color").rect();
-    let title = harness.get_by_role_and_label(Role::TitleBar, "Base color color").rect();
+    let title = harness.get_by_role_and_label(Role::TitleBar, "Base color").rect();
     let space = harness.get_by_role_and_label(Role::ComboBox, "sRGB").rect();
     assert!(title.right() <= bar.left(), "the window stands beside the panel, off its rows: {title:?} {bar:?}");
     assert!(title.top() <= bar.top() + 1.0, "level with the bar, or raised to stay on screen: {title:?} {bar:?}");
@@ -256,7 +256,7 @@ fn the_picker_is_a_window_beside_the_panel_that_its_title_drags_and_its_close_or
     }
     harness.event(egui::Event::PointerButton { pos: from + by, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
     harness.run_steps(SETTLE_FRAMES);
-    let moved = harness.get_by_role_and_label(Role::TitleBar, "Base color color").rect();
+    let moved = harness.get_by_role_and_label(Role::TitleBar, "Base color").rect();
     assert!((moved.min - (title.min + by)).length() < 1.0, "the title bar drags the window: {moved:?} from {title:?}");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "a drag on the title keeps it open");
 
@@ -266,14 +266,14 @@ fn the_picker_is_a_window_beside_the_panel_that_its_title_drags_and_its_close_or
         .unwrap();
     close.click();
     harness.run_steps(SETTLE_FRAMES);
-    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_none(), "× closes it");
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "× closes it");
 
     click(&mut harness, Role::Button, "Base color");
-    let reopened = harness.get_by_role_and_label(Role::TitleBar, "Base color color").rect();
+    let reopened = harness.get_by_role_and_label(Role::TitleBar, "Base color").rect();
     assert!((reopened.min - moved.min).length() < 1.0, "it opens again where it was dragged: {reopened:?}");
     harness.key_press(egui::Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
-    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_none(), "Escape closes it");
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "Escape closes it");
 }
 
 #[test]
@@ -287,7 +287,7 @@ fn escape_ends_an_eyedropper_pick_before_the_picker_and_an_alt_orbit_keeps_the_p
     harness.key_press(egui::Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
     assert!(harness.state().picking_color.is_none(), "Escape ends the pick");
-    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_some(), "the same Escape leaves the picker open");
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_some(), "the same Escape leaves the picker open");
 
     let view = harness.state().viewport_rect.center();
     let alt = egui::Modifiers::ALT;
@@ -300,11 +300,11 @@ fn escape_ends_an_eyedropper_pick_before_the_picker_and_an_alt_orbit_keeps_the_p
     harness.event(egui::Event::PointerButton { pos: view + egui::vec2(40.0, 10.0), button: egui::PointerButton::Primary, pressed: false, modifiers: alt });
     harness.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
     harness.run_steps(SETTLE_FRAMES);
-    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_some(), "an Alt+drag on the model orbits and keeps the picker open");
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_some(), "an Alt+drag on the model orbits and keeps the picker open");
 
     harness.key_press(egui::Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
-    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_none(), "the next Escape closes the picker");
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "the next Escape closes the picker");
 }
 
 /// A mouse press and release of `button` at `pos`, a frame apart, as a real click arrives
@@ -351,4 +351,88 @@ fn the_swatches_row_keeps_the_picker_colour_in_the_project_applies_it_on_a_click
     mouse_click(&mut harness, remove.center(), egui::PointerButton::Primary);
     assert!(harness.state().session.doc.project.swatches.is_empty(), "its right-click menu removes it");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "a pick in the menu keeps the picker open");
+}
+
+/// A primary-button drag from `from` by `by` in four moves, a frame apart, as a real drag arrives
+fn mouse_drag(harness: &mut Harness<'_, TextureCraftApp>, from: egui::Pos2, by: egui::Vec2) {
+    harness.hover_at(from);
+    harness.run_steps(1);
+    harness.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    harness.run_steps(1);
+    for step in 1..=4 {
+        harness.hover_at(from + by * (step as f32 / 4.0));
+        harness.run_steps(1);
+    }
+    harness.event(egui::Event::PointerButton { pos: from + by, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    harness.run_steps(SETTLE_FRAMES);
+}
+
+/// The open picker's frame: its title bar's top and sides, down to the air under the + chip
+fn picker_face(harness: &Harness<'_, TextureCraftApp>) -> egui::Rect {
+    // The air under the picker's last line (color_bar.rs PICKER_BOTTOM)
+    const PICKER_BOTTOM: f32 = 10.0;
+    let title = harness.get_by_role_and_label(Role::TitleBar, "Base color").rect();
+    let add = harness.get_by_role_and_label(Role::Button, "Add swatch").rect();
+    egui::Rect::from_min_max(title.min, egui::pos2(title.right() + CLOSE_ROOM, add.bottom() + PICKER_BOTTOM))
+}
+
+/// The title bar stops at the × (color_bar.rs: from the right edge to the close target's left edge)
+const CLOSE_ROOM: f32 = 22.0;
+
+#[test]
+fn the_picker_is_titled_by_its_channel_resizes_from_its_edges_keeps_its_size_and_previews_nothing_on_hover() {
+    let (mut harness, _) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
+    click(&mut harness, Role::Button, "Base color");
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_some(), "the title is the channel's name alone");
+
+    let face = picker_face(&harness);
+    let field = harness.get_by_role_and_label(Role::Slider, "Saturation and value").rect();
+    let hue = harness.get_by_role_and_label(Role::Slider, "Hue").rect();
+    let track = harness.get_by_role_and_label(Role::Slider, "S").rect();
+    let by = egui::vec2(80.0, 60.0);
+    mouse_drag(&mut harness, face.right_bottom() - egui::vec2(2.0, 2.0), by);
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "a resize keeps the picker open");
+    let grown = picker_face(&harness);
+    assert!((grown.min - face.min).length() < 1.0, "the bottom right corner leaves the top left where it was: {grown:?} {face:?}");
+    assert!((grown.size() - (face.size() + by)).length() < 1.0, "the corner drags the size: {grown:?} from {face:?}");
+    let grown_field = harness.get_by_role_and_label(Role::Slider, "Saturation and value").rect();
+    let grown_hue = harness.get_by_role_and_label(Role::Slider, "Hue").rect();
+    let grown_track = harness.get_by_role_and_label(Role::Slider, "S").rect();
+    assert!((grown_field.size() - (field.size() + by)).length() < 1.0, "the field takes the new width and height: {grown_field:?} {field:?}");
+    assert!((grown_hue.height() - (hue.height() + by.y)).abs() < 1.0 && (grown_hue.right() - hue.right() - by.x).abs() < 1.0, "the hue strip grows with it");
+    assert!((grown_track.width() - (track.width() + by.x)).abs() < 1.0, "the sliders' tracks take the new width");
+
+    mouse_drag(&mut harness, egui::pos2(grown.left() + 2.0, grown.center().y), egui::vec2(-50.0, 0.0));
+    let wider = picker_face(&harness);
+    assert!(
+        (wider.left() - (grown.left() - 50.0)).abs() < 1.0 && (wider.right() - grown.right()).abs() < 1.0,
+        "the left edge moves, the right stays: {wider:?}"
+    );
+
+    mouse_drag(&mut harness, wider.right_bottom() - egui::vec2(2.0, 2.0), egui::vec2(-1000.0, -1000.0));
+    let least = picker_face(&harness);
+    let least_field = harness.get_by_role_and_label(Role::Slider, "Saturation and value").rect();
+    assert!(least.width() >= 200.0 && least_field.height() >= 90.0, "it stops at a usable size: {least:?} {least_field:?}");
+
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(SETTLE_FRAMES);
+    click(&mut harness, Role::Button, "Base color");
+    let reopened = picker_face(&harness);
+    assert!((reopened.size() - least.size()).length() < 1.0, "it opens again at the size it was left: {reopened:?} {least:?}");
+
+    let value = |harness: &Harness<'_, TextureCraftApp>| harness.get_by_role_and_label(Role::Slider, "V").accesskit_node().numeric_value();
+    let shown = value(&harness);
+    assert!(shown.is_some(), "the V slider says its value");
+    click(&mut harness, Role::ComboBox, "sRGB");
+    harness.get_by_role_and_label(Role::ListBoxOption, "Linear").hover();
+    harness.run_steps(SETTLE_FRAMES);
+    assert_eq!(value(&harness), shown, "a hovered colour space changes nothing");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(SETTLE_FRAMES);
+    click(&mut harness, Role::ComboBox, "HSV");
+    harness.get_by_role_and_label(Role::ListBoxOption, "RGB").hover();
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(harness.query_by_role_and_label(Role::Slider, "R").is_none(), "a hovered model changes nothing");
+    click(&mut harness, Role::ListBoxOption, "RGB");
+    assert!(harness.query_by_role_and_label(Role::Slider, "R").is_some(), "a click picks it");
 }

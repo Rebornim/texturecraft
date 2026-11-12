@@ -675,7 +675,7 @@ fn steel_painted_worn() -> texturecraft_engine::core::MaterialLink {
     }
 }
 
-/// Screen 04: the colour picker window open on a uniform base colour with five swatches, its close, a slider, a swatch and + hovered, a swatch's menu, with its lists open and in RGB; `TC_UI_THEMES` set adds the dark and light themes
+/// Screen 04: the colour picker window open on a uniform base colour with five swatches, its close, a slider, a swatch and + hovered, a swatch's menu, with its lists open (a hovered option previews nothing), in RGB and resized from its top left corner; `TC_UI_THEMES` set adds the dark and light themes
 #[test]
 #[ignore]
 fn fill_color_picker_snapshots() {
@@ -701,7 +701,7 @@ fn fill_color_picker_snapshots() {
     harness.get_by_role_and_label(egui::Role::Button, "Base color").click();
     harness.run_steps(2);
     save(&mut harness, &output_dir, "picker-open");
-    let title = harness.get_by_role_and_label(egui::Role::TitleBar, "Base color color").rect();
+    let title = harness.get_by_role_and_label(egui::Role::TitleBar, "Base color").rect();
     harness.hover_at(egui::pos2(title.right() + 6.0, title.center().y));
     save(&mut harness, &output_dir, "picker-close-hover");
     harness.get_by_role_and_label(egui::Role::Slider, "S").hover();
@@ -736,10 +736,24 @@ fn fill_color_picker_snapshots() {
     harness.get_by_role_and_label(egui::Role::ListBoxOption, "RGB").click();
     harness.run_steps(2);
     save(&mut harness, &output_dir, "picker-rgb");
+    // The window stands at the screen's bottom here, so it grows from its top left corner
+    let corner = harness.get_by_role_and_label(egui::Role::TitleBar, "Base color").rect().left_top() + egui::vec2(2.0, 2.0);
+    let by = egui::vec2(-120.0, -90.0);
+    harness.hover_at(corner);
+    harness.run_steps(1);
+    harness.event(egui::Event::PointerButton { pos: corner, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    harness.run_steps(1);
+    for step in 1..=4 {
+        harness.hover_at(corner + by * (step as f32 / 4.0));
+        harness.run_steps(1);
+    }
+    harness.event(egui::Event::PointerButton { pos: corner + by, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    harness.run_steps(2);
+    save(&mut harness, &output_dir, "picker-resized");
     if std::env::var_os("TC_UI_THEMES").is_some() {
         for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
             harness.state_mut().ui.prefs.brightness = brightness;
-            save(&mut harness, &output_dir, &format!("picker-rgb-{name}"));
+            save(&mut harness, &output_dir, &format!("picker-resized-{name}"));
         }
     }
 }

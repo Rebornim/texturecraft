@@ -13,8 +13,9 @@ use crate::i18n::tr;
 use crate::theme::semibold;
 use crate::widgets::gradient;
 
-/// Height of the saturation/value field and the hue strip
-const FIELD_HEIGHT: f32 = 150.0;
+/// Height of the saturation/value field and the hue strip until the window is resized, and the least a resize leaves them
+pub(super) const FIELD_HEIGHT: f32 = 150.0;
+pub(super) const FIELD_MIN_HEIGHT: f32 = 100.0;
 
 /// Air above and below the field, like a control's margin in its row
 const FIELD_MARGIN: f32 = 2.0;
@@ -91,25 +92,24 @@ const RING_STROKE: f32 = 2.0;
 const OUTLINE_STROKE: f32 = 1.5;
 
 impl PropertySheet<'_> {
-    /// The picker's rows, editing `state`, the project's `swatches` last; `eyedropping` lights the eyedropper while a pick waits for its click
-    pub(super) fn color_picker_rows(&mut self, state: &mut PickerState, eyedropping: bool, swatches: &[[f32; 3]], id: egui::Id) -> ColorPick {
+    /// The picker's rows, editing `state`, its field `field_height` tall and the project's `swatches` last; `eyedropping` lights the eyedropper while a pick waits for its click
+    pub(super) fn color_picker_rows(
+        &mut self,
+        state: &mut PickerState,
+        eyedropping: bool,
+        swatches: &[[f32; 3]],
+        field_height: f32,
+        id: egui::Id,
+    ) -> ColorPick {
         let mut pick = ColorPick::none(id);
         let mut edited: Option<bool> = None;
 
-        // An option hovered in either list previews in the rows below for this frame only
-        let (space, model) = (state.space, state.model);
-        let hovered_space = self.space_row(state);
-        if let Some(hovered) = hovered_space {
-            state.set_space(hovered);
-        }
-        edited = edited.or(self.field_rows(state));
+        self.space_row(state);
+        edited = edited.or(self.field_rows(state, field_height));
         let (restored, eyedropper) = self.before_after_row(state, eyedropping);
         edited = edited.or(restored);
         pick.eyedropper = eyedropper;
-        let hovered_model = self.model_row(state);
-        if let Some(hovered) = hovered_model {
-            state.model = hovered;
-        }
+        self.model_row(state);
         edited = edited.or(self.model_sliders(state));
         self.working_line(state);
         let (applied, swatch) = self.swatch_rows(state, swatches);
@@ -118,12 +118,6 @@ impl PropertySheet<'_> {
             edited = Some(false);
         }
         pick.swatch = swatch;
-        if hovered_space.is_some() {
-            state.set_space(space);
-        }
-        if hovered_model.is_some() {
-            state.model = model;
-        }
 
         if let Some(merge) = edited {
             pick.picked = Some(state.linear);
@@ -132,26 +126,25 @@ impl PropertySheet<'_> {
         pick
     }
 
-    /// The colour space: a dropdown as wide as its longest option, so a hovered option doesn't resize it; the option hovered in its open list
-    fn space_row(&mut self, state: &mut PickerState) -> Option<ColorSpace> {
+    /// The colour space: a dropdown as wide as its longest option, so the button keeps its width whichever is picked; a click in its list picks, a hover changes nothing
+    fn space_row(&mut self, state: &mut PickerState) {
         let center_y = self.take(ROW_HEIGHT).center().y;
         let longest = ColorSpace::ALL.iter().map(|space| self.text_width(space.name(), semibold(TEXT_SIZE))).fold(0.0, f32::max);
         let button = Rect::from_min_size(pos2(self.left, center_y - CONTROL_HEIGHT / 2.0), vec2(longest + DROPDOWN_ROOM, CONTROL_HEIGHT));
         let response = self.dropdown_button(button, state.space.name(), None::<fn(&Painter, Rect)>);
         self.drawn(button.bottom());
-        let (picked, hovered) = self.hanging_list(&response, state.space, &ColorSpace::ALL, &|space: ColorSpace| space.name().to_owned(), None);
+        let (picked, _) = self.hanging_list(&response, state.space, &ColorSpace::ALL, &|space: ColorSpace| space.name().to_owned(), None);
         if let Some(space) = picked {
             state.set_space(space);
         }
-        hovered.filter(|space| *space != state.space)
     }
 
-    /// Saturation across and value up in the field, hue down the strip; Some(merge) when dragged or clicked
-    fn field_rows(&mut self, state: &mut PickerState) -> Option<bool> {
-        let block = self.take(FIELD_HEIGHT + 2.0 * FIELD_MARGIN);
+    /// Saturation across and value up in the field, hue down the strip, both `height` tall; Some(merge) when dragged or clicked
+    fn field_rows(&mut self, state: &mut PickerState, height: f32) -> Option<bool> {
+        let block = self.take(height + 2.0 * FIELD_MARGIN);
         let top = block.top() + FIELD_MARGIN;
-        let field = Rect::from_min_max(pos2(self.left, top), pos2(self.right - HUE_STRIP_WIDTH - FIELD_TO_STRIP, top + FIELD_HEIGHT));
-        let strip = Rect::from_min_max(pos2(self.right - HUE_STRIP_WIDTH, top), pos2(self.right, top + FIELD_HEIGHT));
+        let field = Rect::from_min_max(pos2(self.left, top), pos2(self.right - HUE_STRIP_WIDTH - FIELD_TO_STRIP, top + height));
+        let strip = Rect::from_min_max(pos2(self.right - HUE_STRIP_WIDTH, top), pos2(self.right, top + height));
         let mut edited = None;
 
         let field_id = self.next_id();
@@ -284,14 +277,14 @@ impl PropertySheet<'_> {
         parse_hex(&text)
     }
 
-    /// The model dropdown, sized to its value, and the ⋯ menu at the right edge; the model hovered in its open list
-    fn model_row(&mut self, state: &mut PickerState) -> Option<ColorModel> {
+    /// The model dropdown, sized to its value, and the ⋯ menu at the right edge; a click in its list picks, a hover changes nothing
+    fn model_row(&mut self, state: &mut PickerState) {
         let center_y = self.take(ROW_HEIGHT).center().y;
         let width = self.text_width(state.model.name(), semibold(TEXT_SIZE)) + DROPDOWN_ROOM;
         let button = Rect::from_min_size(pos2(self.left, center_y - CONTROL_HEIGHT / 2.0), vec2(width, CONTROL_HEIGHT));
         let response = self.dropdown_button(button, state.model.name(), None::<fn(&Painter, Rect)>);
         self.drawn(button.bottom());
-        let (picked, hovered) = self.hanging_list(&response, state.model, &ColorModel::ALL, &|model: ColorModel| model.name().to_owned(), None);
+        let (picked, _) = self.hanging_list(&response, state.model, &ColorModel::ALL, &|model: ColorModel| model.name().to_owned(), None);
         if let Some(model) = picked {
             state.model = model;
         }
@@ -314,7 +307,6 @@ impl PropertySheet<'_> {
                 ui.copy_text(format!("#{}", hex(shown)));
             }
         });
-        hovered.filter(|model| *model != state.model)
     }
 
     /// The model's three sliders: each track shows the colours it reaches; Some(merge) when one was dragged or typed

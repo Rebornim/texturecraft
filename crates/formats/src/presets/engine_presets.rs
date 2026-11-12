@@ -331,6 +331,34 @@ pub(super) fn engine_presets() -> Vec<ExportPreset> {
                 rgb8("Emissive", Channel::Emissive),
             ],
         ),
+        // Dota 2 hero shader (OpenGL normals): masks1 detail, fresnel, metalness, self-illumination; masks2 specular, rim, tint, exponent
+        preset(
+            "Dota 2",
+            vec![
+                map("color", 8, base_with_alpha()),
+                map("normal", 8, normal(VirtualMap::NormalOpenGl)),
+                map(
+                    "masks1",
+                    8,
+                    vec![
+                        (Dest::R, SourceRef::Constant(0.0)),
+                        (Dest::G, SourceRef::Constant(0.0)),
+                        (Dest::B, ch(Channel::Metallic, 0)),
+                        (Dest::A, SourceRef::Constant(0.0)),
+                    ],
+                ),
+                map(
+                    "masks2",
+                    8,
+                    vec![
+                        (Dest::R, ch(Channel::SpecularLevel, 0)),
+                        (Dest::G, SourceRef::Constant(0.0)),
+                        (Dest::B, ch(Channel::Metallic, 0)),
+                        (Dest::A, virt(VirtualMap::Glossiness, 0)),
+                    ],
+                ),
+            ],
+        ),
         // USD preview surface inputs, one map each
         preset(
             "USDZ (AR)",

@@ -1,7 +1,7 @@
 //! Procedural patterns and projections.
 
-use texturecraft_core::{Decal, DecalFlip, Procedural, ProceduralKind, Projection, UvTransform};
-use texturecraft_geom::glam::{Vec2, Vec3};
+use texturecraft_core::{Decal, DecalFlip, Procedural, ProceduralKind, Projection, Projector, UvTransform};
+use texturecraft_geom::glam::{EulerRot, Mat3, Vec2, Vec3};
 use texturecraft_texel::noise;
 
 use crate::pattern_context::PatternContext;
@@ -404,6 +404,18 @@ fn place_uv(q: Vec2, uv: &UvTransform) -> Vec2 {
     place(q, Vec2::from(uv.tiling), uv.rotation, Vec2::from(uv.offset))
 }
 
+/// `c` inside a projector turned and scaled by `projector`; the default projector returns `c` unchanged
+pub fn projector_local(projector: &Projector, c: &Coords) -> Coords {
+    if *projector == Projector::default() {
+        return *c;
+    }
+    let [x, y, z] = projector.rotation.map(f32::to_radians);
+    let to_local = Mat3::from_euler(EulerRot::ZYX, z, y, x).transpose();
+    let scale = Vec3::from(projector.scale).map(|s| if s.abs() < 1e-6 { 1e-6 } else { s });
+    let nrm = (to_local * c.nrm * scale).try_normalize().unwrap_or(c.nrm);
+    Coords { pos: to_local * c.pos / scale, nrm, ..*c }
+}
+
 /// Evaluate a procedural through a projection, at full resolution and without images
 pub fn procedural(pattern: &Procedural, projection: &Projection, coords: &Coords) -> f32 {
     procedural_in(pattern, projection, coords, &PatternContext::default())
@@ -417,7 +429,8 @@ pub fn procedural_in(pattern: &Procedural, projection: &Projection, coords: &Coo
     let flat = |q: Vec2| plane_value(pattern, q.extend(0.0), context);
     let value = match projection {
         Projection::Uv { scale, rotation, offset } => flat(place(coords.uv, Vec2::from(*scale), *rotation, Vec2::from(*offset)) * pattern_scale),
-        Projection::Triplanar { scale, sharpness, offset, uv } => {
+        Projection::Triplanar { scale, sharpness, offset, uv, projector } => {
+            let coords = &projector_local(projector, coords);
             let p = coords.pos * *scale * pattern_scale + Vec3::from(*offset);
 
             // Shape scales the blend by the contrast
@@ -425,8 +438,8 @@ pub fn procedural_in(pattern: &Procedural, projection: &Projection, coords: &Coo
             let planes = [(w.x, Vec2::new(p.z, p.y)), (w.y, Vec2::new(p.x, p.z)), (w.z, Vec2::new(p.x, p.y))];
             planes.into_iter().filter(|(w, _)| *w > 0.0).map(|(w, q)| flat(place_uv(q, uv)) * w).sum()
         }
-        Projection::Planar { scale, axis, offset, uv } => {
-            let p = coords.pos * *scale * pattern_scale + Vec3::from(*offset);
+        Projection::Planar { scale, axis, offset, uv, projector } => {
+            let p = projector_local(projector, coords).pos * *scale * pattern_scale + Vec3::from(*offset);
             let q = match axis {
                 0 => Vec2::new(p.z, p.y),
                 1 => Vec2::new(p.x, p.z),
@@ -434,14 +447,14 @@ pub fn procedural_in(pattern: &Procedural, projection: &Projection, coords: &Coo
             };
             flat(place_uv(q, uv))
         }
-        Projection::Spherical { scale, uv } => {
-            let d = coords.pos.try_normalize().unwrap_or(Vec3::Y);
+        Projection::Spherical { scale, uv, offset, projector } => {
+            let d = (projector_local(projector, coords).pos + Vec3::from(*offset)).try_normalize().unwrap_or(Vec3::Y);
             let u = d.z.atan2(d.x) / std::f32::consts::TAU + 0.5;
             let v = d.y.clamp(-1.0, 1.0).acos() / std::f32::consts::PI;
             flat(place_uv(Vec2::new(u * 4.0, v * 2.0) * *scale * pattern_scale, uv))
         }
-        Projection::Cylindrical { scale, axis, uv } => {
-            let p = coords.pos;
+        Projection::Cylindrical { scale, axis, uv, offset, projector } => {
+            let p = projector_local(projector, coords).pos + Vec3::from(*offset);
             let (a, h, b) = match axis {
                 0 => (p.y, p.x, p.z),
                 2 => (p.x, p.z, p.y),
@@ -503,7 +516,8 @@ pub fn image_samples(projection: &Projection, coords: &Coords) -> [(Vec2, f32); 
     let one = |uv: Vec2| [(uv, 1.0), (Vec2::ZERO, 0.0), (Vec2::ZERO, 0.0)];
     match projection {
         Projection::Uv { scale, rotation, offset } => one(place(coords.uv, Vec2::from(*scale), *rotation, Vec2::from(*offset))),
-        Projection::Triplanar { scale, sharpness, offset, uv } => {
+        Projection::Triplanar { scale, sharpness, offset, uv, projector } => {
+            let coords = &projector_local(projector, coords);
             let p = coords.pos * *scale + Vec3::from(*offset);
 
             // Float images can exceed 1, so even a tiny plane weight can carry visible detail
@@ -511,8 +525,8 @@ pub fn image_samples(projection: &Projection, coords: &Coords) -> [(Vec2, f32); 
             let weights = weights / (weights.x + weights.y + weights.z).max(1e-6);
             [(place_uv(Vec2::new(p.z, -p.y), uv), weights.x), (place_uv(Vec2::new(p.x, p.z), uv), weights.y), (place_uv(Vec2::new(p.x, -p.y), uv), weights.z)]
         }
-        Projection::Planar { scale, axis, offset, uv } => {
-            let p = coords.pos * *scale + Vec3::from(*offset);
+        Projection::Planar { scale, axis, offset, uv, projector } => {
+            let p = projector_local(projector, coords).pos * *scale + Vec3::from(*offset);
             let q = match axis {
                 0 => Vec2::new(p.z, -p.y),
                 1 => Vec2::new(p.x, p.z),
@@ -520,14 +534,14 @@ pub fn image_samples(projection: &Projection, coords: &Coords) -> [(Vec2, f32); 
             };
             one(place_uv(q * 0.5 + Vec2::splat(0.5), uv))
         }
-        Projection::Spherical { scale, uv } => {
-            let d = coords.pos.try_normalize().unwrap_or(Vec3::Y);
+        Projection::Spherical { scale, uv, offset, projector } => {
+            let d = (projector_local(projector, coords).pos + Vec3::from(*offset)).try_normalize().unwrap_or(Vec3::Y);
             let u = d.z.atan2(d.x) / std::f32::consts::TAU + 0.5;
             let v = d.y.clamp(-1.0, 1.0).acos() / std::f32::consts::PI;
             one(place_uv(Vec2::new(u, v) * *scale, uv))
         }
-        Projection::Cylindrical { scale, axis, uv } => {
-            let p = coords.pos;
+        Projection::Cylindrical { scale, axis, uv, offset, projector } => {
+            let p = projector_local(projector, coords).pos + Vec3::from(*offset);
             let (a, h, b) = match axis {
                 0 => (p.y, p.x, p.z),
                 2 => (p.x, p.z, p.y),
@@ -647,10 +661,10 @@ mod tests {
     fn every_pattern_and_projection_stays_in_range() {
         let projections = [
             Projection::default(),
-            Projection::Triplanar { scale: 1.0, sharpness: 4.0, offset: [0.0; 3], uv: Default::default() },
-            Projection::Planar { scale: 1.0, axis: 1, offset: [0.0; 3], uv: Default::default() },
-            Projection::Spherical { scale: 1.0, uv: Default::default() },
-            Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default() },
+            Projection::Triplanar { scale: 1.0, sharpness: 4.0, offset: [0.0; 3], uv: Default::default(), projector: Default::default() },
+            Projection::Planar { scale: 1.0, axis: 1, offset: [0.0; 3], uv: Default::default(), projector: Default::default() },
+            Projection::Spherical { scale: 1.0, uv: Default::default(), offset: [0.0; 3], projector: Default::default() },
+            Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default(), offset: [0.0; 3], projector: Default::default() },
             Projection::Decal(Decal {
                 center: [0.0; 3],
                 normal: [0.0, 0.0, 1.0],
@@ -703,7 +717,8 @@ mod tests {
             for contrast in [1.0, 4.0, 16.0] {
                 let pattern = Procedural { contrast, ..Procedural::new(kind) };
                 for sharpness in [1.0, 4.0, 8.0, 16.0] {
-                    let projection = Projection::Triplanar { scale: 1.0, sharpness, offset: [0.0; 3], uv: UvTransform::default() };
+                    let projection =
+                        Projection::Triplanar { scale: 1.0, sharpness, offset: [0.0; 3], uv: UvTransform::default(), projector: Projector::default() };
                     for index in 0..400 {
                         // Cover axis aligned and oblique normals at varied positions
                         let position = index as f32 / 400.0;
@@ -734,7 +749,7 @@ mod tests {
     fn triplanar_image_sampling_preserves_bright_float_pixels() {
         let image = crate::ImageRes::new(2, 2, vec![[0.0; 4], [0.0; 4], [0.0; 4], [100_000.0; 4]], false);
         let coords = Coords { uv: Vec2::ZERO, pos: Vec3::new(0.25, 0.25, 0.75), nrm: Vec3::new(0.2, 1.0, 0.1).normalize() };
-        let projection = Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: UvTransform::default() };
+        let projection = Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: UvTransform::default(), projector: Projector::default() };
         let weights = coords.nrm.abs().powf(8.0);
         let expected = 100_000.0 * weights.x / (weights.x + weights.y + weights.z);
 

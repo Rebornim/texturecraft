@@ -42,6 +42,7 @@ fn with_ramp(mut v: Value, ramp: &[[f32; 3]]) -> Value {
 fn fill_json(f: &Fill) -> Value {
     let mut v = json!({
         "projection": f.projection.label(),
+        "projectionSettings": f.projection,
         "filtering": f.sampling.filtering.id(),
         "wrap": f.sampling.wrap.id(),
         "scaleMode": f.sampling.scale.id(),

@@ -12,6 +12,7 @@ pub mod bake;
 pub mod blend;
 mod block_scales;
 pub mod channel;
+pub mod depth_culling;
 pub mod layer;
 pub mod project;
 pub mod projector;
@@ -28,6 +29,7 @@ pub use bake::{
 };
 pub use blend::{BlendMode, blend1, blend3, lum, mix3};
 pub use channel::{Channel, ChannelFormat, ChannelKind};
+pub use depth_culling::DepthCulling;
 pub use layer::{
     ChannelBlend, CompareOp, CurvatureDetail, CurvatureMode, Decal, Effect, EffectKind, Fill, Filter, Filtering, Generator, GeneratorKind, HeightMask, Layer,
     LayerId, LayerKind, Levels, LinkParam, LinkPreset, Mask, MaskBackground, MaterialLink, PathShape, Procedural, ProceduralKind, Projection, Sampling,

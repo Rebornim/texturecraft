@@ -1,7 +1,7 @@
 //! The 3D projection settings and the projection kinds of a fill, through engine commands
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, LayerId, LayerKind, Projection, Projector};
+use texturecraft_engine::core::{Channel, DepthCulling, LayerId, LayerKind, Projection, Projector};
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute};
 
@@ -237,4 +237,42 @@ fn warp_projection_bends_to_its_corners_reaches_its_depth_and_resets_its_frame()
     assert_eq!(row["fill"]["projectionSettings"]["Warp"]["corners"], json!(Projection::FRAME_CORNERS));
     set(&mut s, layer, json!({"projection": "planar"}));
     assert!(execute(&mut s, "layer.fill.resetFrame", &json!({"layer": layer.0})).is_err(), "only a warp has a frame to reset");
+}
+
+/// Depth culling keeps planar and warp projections off surfaces hidden behind others from the projector; new ones start with it on, older saves without it
+#[test]
+fn depth_culling_keeps_planar_and_warp_projections_off_hidden_surfaces() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    execute(&mut s, "layer.visible", &json!({"layer": layer.0, "visible": false})).unwrap();
+    let empty = snapshot(&mut s);
+    execute(&mut s, "layer.visible", &json!({"layer": layer.0, "visible": true})).unwrap();
+    set(&mut s, layer, json!({"projection": "planar", "axis": 2}));
+    let Projection::Planar { projector, .. } = projection(&s, layer) else { panic!("{:?}", projection(&s, layer)) };
+    assert_eq!(projector.depth, DepthCulling::NEW, "a new planar projection culls by depth");
+    let culled = snapshot(&mut s);
+    set(&mut s, layer, json!({"depthCulling": false}));
+    let plain = snapshot(&mut s);
+
+    // The sphere's far side sits behind its near side, seen from +Z
+    let (far, near) = (facing_z(&s, -1.1, -0.3), facing_z(&s, 0.3, 1.1));
+    assert!(!far.is_empty() && !near.is_empty());
+    assert!(far.iter().any(|&i| plain[i] != empty[i]), "without depth culling the far side gets the projection");
+    assert!(far.iter().all(|&i| culled[i] == empty[i]), "hidden behind the near side, the far side gets none of it");
+    assert!(near.iter().all(|&i| culled[i] == plain[i]), "the near side keeps all of it");
+
+    set(&mut s, layer, json!({"depthCulling": true, "depthCullingHardness": 0}));
+    assert_ne!(snapshot(&mut s), culled, "a softer cull fades further behind the near side");
+    let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap();
+    let row = inspect["layers"].as_array().unwrap().iter().find(|l| l["id"] == layer.0).unwrap().clone();
+    assert_eq!(row["fill"]["projectionSettings"]["Planar"]["projector"]["depth"], json!({"on": true, "hardness": 0.0}));
+
+    set(&mut s, layer, json!({"projection": "warp"}));
+    let Projection::Warp { projector, .. } = projection(&s, layer) else { panic!("{:?}", projection(&s, layer)) };
+    assert_eq!(projector.depth, DepthCulling::NEW, "a new warp culls by depth");
+    let warped = snapshot(&mut s);
+    assert!(far.iter().all(|&i| warped[i] == empty[i]), "a warp from the front leaves the far side bare");
+
+    let saved: Projector = serde_json::from_value(json!({"rotation": [0, 0, 0], "scale": [1, 1, 1]})).unwrap();
+    assert_eq!(saved.depth, DepthCulling { on: false, hardness: 0.75 }, "an older save has no depth culling");
 }

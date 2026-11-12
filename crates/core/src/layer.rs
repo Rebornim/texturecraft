@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Backface, BlendMode, Channel, ChannelKind, Projector, ShapeCrop, lum};
+use crate::{Backface, BlendMode, Channel, ChannelKind, DepthCulling, Projector, ShapeCrop, lum};
 
 mod curvature_detail;
 mod curvature_mode;
@@ -387,7 +387,7 @@ impl Projection {
             corners: Projection::FRAME_CORNERS,
             depth: Projection::WARP_DEPTH,
             uv: UvTransform::default(),
-            projector: Projector::default(),
+            projector: Projector::depth_culled(),
         }
     }
 
@@ -395,6 +395,14 @@ impl Projection {
     pub fn decal(frame: Decal) -> Projection {
         let projector = Projector { crop: ShapeCrop::Cropped, backface: Backface { on: true, ..Backface::default() }, ..Projector::default() };
         Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: UvTransform::default(), projector, placed: Some(frame) }
+    }
+
+    /// The depth culling of a planar or warp projection that has it on
+    pub fn depth_culling(&self) -> Option<DepthCulling> {
+        match self {
+            Projection::Planar { projector, .. } | Projection::Warp { projector, .. } => Some(projector.depth).filter(|depth| depth.on),
+            _ => None,
+        }
     }
 
     /// The frame on the surface a placed planar projection projects from
@@ -1178,10 +1186,9 @@ impl Filter {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum EffectKind {
-    /// Painted grayscale (mask) or material (content) pixels keyed by the effect id.
+    /// Painted grayscale (mask) or material (content) pixels keyed by the effect id
     Paint,
-    /// A path sublayer: pixels keyed by the effect id like [`EffectKind::Paint`], but painted
-    /// only from its stored paths and repainted whenever one is added, edited or removed.
+    /// A path sublayer: pixels keyed by the effect id like [`EffectKind::Paint`], but painted only from its stored paths and repainted whenever one is added, edited or removed
     Path(Vec<PathShape>),
     /// A uniform or procedural grayscale fill.
     Fill {

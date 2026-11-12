@@ -3,7 +3,7 @@
 //! maps from images and fill projection transforms, through engine commands.
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, EffectKind, Filter, LayerId, LayerKind, Projection};
+use texturecraft_engine::core::{Channel, EffectKind, Filter, LayerId, LayerKind, Projection, Projector};
 use texturecraft_engine::geom::NO_TRI;
 use texturecraft_engine::geom::glam::Vec2;
 use texturecraft_engine::geom::primitives;
@@ -565,7 +565,7 @@ fn fill_projection_edits_keep_what_they_do_not_change() {
     set(&mut s, json!({"projection": "planar", "axis": 7, "offset": [1e9, 0, 0]})).unwrap();
     assert_eq!(
         proj(&s),
-        Projection::Planar { scale: 1.0, axis: 2, offset: [1000.0, 0.0, 0.0], uv: Default::default(), projector: Default::default(), placed: None },
+        Projection::Planar { scale: 1.0, axis: 2, offset: [1000.0, 0.0, 0.0], uv: Default::default(), projector: Projector::depth_culled(), placed: None },
         "hostile values are clamped"
     );
     assert!(set(&mut s, json!({"projection": "hexagonal"})).is_err());

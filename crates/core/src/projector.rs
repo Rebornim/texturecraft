@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Backface, ShapeCrop};
+use crate::{Backface, DepthCulling, ShapeCrop};
 
 /// Rotation (degrees about X, then Y, then Z) and per-axis scale of a 3D projection's shape; default = unchanged
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -12,15 +12,22 @@ pub struct Projector {
     pub scale: [f32; 3],
     pub crop: ShapeCrop,
     pub backface: Backface,
+    /// Planar and warp projections only
+    pub depth: DepthCulling,
 }
 
 impl Default for Projector {
     fn default() -> Self {
-        Projector { rotation: [0.0; 3], scale: [1.0; 3], crop: ShapeCrop::default(), backface: Backface::default() }
+        Projector { rotation: [0.0; 3], scale: [1.0; 3], crop: ShapeCrop::default(), backface: Backface::default(), depth: DepthCulling::default() }
     }
 }
 
 impl Projector {
+    /// The settings a new planar or warp projection starts with: depth culled
+    pub fn depth_culled() -> Projector {
+        Projector { depth: DepthCulling::NEW, ..Projector::default() }
+    }
+
     /// Whether it turns or stretches the projection at all
     pub fn turns(&self) -> bool {
         self.rotation != [0.0; 3] || self.scale != [1.0; 3]

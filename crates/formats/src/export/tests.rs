@@ -1284,6 +1284,9 @@ fn reference_presets_follow_their_targets_layouts() {
     assert_eq!(preset_files("Maxwell (Metallic Roughness)"), ["BaseColor", "Metallic", "Roughness", "Normal", "Height", "Emissive", "Opacity"]);
     assert_eq!(preset_source("Maxwell (Specular Glossiness)", "Specular", Dest::R), SourceRef::Virtual { map: VirtualMap::SpecularColor, component: 0 });
     assert_eq!(preset_source("Maxwell (Specular Glossiness)", "Glossiness", Dest::L), SourceRef::Virtual { map: VirtualMap::Glossiness, component: 0 });
+
+    // Shade 3D: a map per metallic/roughness input
+    assert_eq!(preset_files("Shade 3D"), ["BaseColor", "Metallic", "Roughness", "Normal", "AmbientOcclusion", "Height", "Emissive", "Opacity"]);
 }
 
 #[test]

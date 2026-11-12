@@ -9,8 +9,17 @@ use crate::i18n::{tr, trf};
 /// Built-in templates that aren't for one engine or renderer: listed first, apart from the rest, as the reference does
 const GENERAL_TEMPLATES: [&str; 5] = ["Document channels + Normal + AO", "glTF PBR Metal Roughness", "OpenPBR (separate maps)", "Separate maps", "USDZ (AR)"];
 /// File types offered besides the template's own, in menu order
-const FILE_TYPES: [FileFormat; 8] =
-    [FileFormat::Bmp, FileFormat::Jpeg, FileFormat::Png, FileFormat::Tga, FileFormat::Tiff, FileFormat::Hdr, FileFormat::Exr, FileFormat::Webp];
+const FILE_TYPES: [FileFormat; 9] = [
+    FileFormat::Bmp,
+    FileFormat::Jpeg,
+    FileFormat::Pgm,
+    FileFormat::Png,
+    FileFormat::Tga,
+    FileFormat::Tiff,
+    FileFormat::Hdr,
+    FileFormat::Exr,
+    FileFormat::Webp,
+];
 /// Output sizes offered besides each texture set's own
 pub(crate) const SIZES: [u32; 7] = [128, 256, 512, 1024, 2048, 4096, 8192];
 /// Padding modes in menu order

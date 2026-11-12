@@ -40,7 +40,7 @@ skrifa = { version = "0.44", default-features = false, features = ["std"] }
 # The UI's built-in fonts (Ubuntu Light, Hack): text alphas fall back to them without system fonts.
 epaint_default_fonts = "0.37"
 log = "0.4"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "tiff", "exr", "hdr", "bmp", "webp"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "tiff", "exr", "hdr", "bmp", "webp", "pnm"] }
 half = "2"
 exr = { version = "1.73", default-features = false }
 eframe = { version = "0.37", default-features = false }

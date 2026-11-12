@@ -14,6 +14,8 @@ use texturecraft_engine::paint::{BrushAlpha, BrushSettings, alphas};
 use texturecraft_engine::{CloneFrom, StackTarget, Tool};
 
 use crate::TextureCraftApp;
+use crate::fill_pictures::{self, ProjectionKind};
+use crate::prop_ui;
 use crate::i18n::{filtering_label, n_, tr, trf, wrap_label};
 use crate::layer_panel::{effect_preview_size, effect_row_height, layer_preview_size, layer_row_height};
 use crate::shelf::{Asset, ShelfDrag};
@@ -1139,6 +1141,10 @@ pub(crate) fn properties_title(app: &TextureCraftApp) -> String {
 pub(crate) fn properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     // A floating scroll bar would cover the right-aligned slider values and section reset icons
     ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+    // A fill's tabs stay on the panel's top edge while its content scrolls
+    if shows_fill(app) {
+        fill_tab_strip(ui);
+    }
     egui::ScrollArea::vertical().id_salt("props").auto_shrink([false, false]).show(ui, |ui| properties_contents(app, ui));
 }
 
@@ -1778,7 +1784,6 @@ fn fill_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer) {
         ui.add_space(6.0);
     }
     let on: Vec<Channel> = layer.channels.keys().copied().collect();
-    ui.label(caption(tr("Fill")));
     fill_editor(app, ui, fill, &json!({"layer": layer.id.0}), &on, layer.id);
 }
 
@@ -1933,17 +1938,274 @@ const FILL_MATERIAL_GAP: f32 = 6.0;
 /// Space between a fill's channel chips and its channel sources
 const FILL_CHANNELS_GAP: f32 = 4.0;
 
-/// Projection and sources of a fill layer or fill effect (`base`) for its channels `on`; `reader` owns it
+/// The Properties panel's tabs for a fill: its placement, its symmetry, its material
+fn fill_tabs_id() -> egui::Id {
+    egui::Id::new("fill_properties_tabs")
+}
+
+/// Whether the Properties panel shows a fill (a fill layer's content or a content fill effect),
+/// so it draws the fill tabs above its scrolling content
+fn shows_fill(app: &TextureCraftApp) -> bool {
+    if app.session.tool.tool == Tool::PolygonFill {
+        return false;
+    }
+    let project = &app.session.doc.project;
+    let Some(layer) = app.session.selected_layer().and_then(|id| project.layers.get(&id)) else { return false };
+    match app.session.target {
+        StackTarget::Content => matches!(layer.kind, LayerKind::Fill(_)),
+        StackTarget::Effect(effect) => project.effect(effect).is_some_and(|(_, found)| matches!(found.kind, EffectKind::Material(_))),
+        StackTarget::Mask => false,
+    }
+}
+
+/// The fill tabs on the panel's top edge
+fn fill_tab_strip(ui: &mut Ui) {
+    prop_ui::edge_tabs(ui, fill_tabs_id(), &[(ic::SLIDERS_HORIZONTAL, tr("Fill")), (ic::FLIP_HORIZONTAL, tr("Symmetry")), (ic::CIRCLE_HALF, tr("Material"))]);
+}
+
+/// Index of the fill tabs' Symmetry tab
+const FILL_TAB_SYMMETRY: usize = 1;
+/// Index of the fill tabs' Material tab
+const FILL_TAB_MATERIAL: usize = 2;
+
+/// Space between a fill's channel chips and its channel sources
+const FILL_CHANNELS_GAP: f32 = 4.0;
+
+/// A fill layer or fill effect (`base`) for its channels `on`, as the tab chosen in the fill
+/// tabs shows it; `reader` owns it
 fn fill_editor(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: &Value, on: &[Channel], reader: LayerId) {
     let salt = base.to_string();
+    match ui.data(|data| data.get_temp::<usize>(fill_tabs_id())).unwrap_or(0) {
+        FILL_TAB_SYMMETRY => fill_symmetry_tab(ui, fill),
+        FILL_TAB_MATERIAL => fill_material_tab(app, ui, fill, base, on, reader, &salt),
+        _ => fill_placement_tab(app, ui, fill, base, reader, &salt),
+    }
+}
+
+/// The Fill tab: projection, where the fill's tiles land, then its folded settings
+fn fill_placement_tab(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: &Value, reader: LayerId, salt: &str) {
+    prop_ui::section_header(ui, tr("Fill"), true, None);
     if let Projection::Decal(decal) = &fill.projection {
         decal_editor(app, ui, decal, reader);
-    } else {
-        projection_editor(app, ui, fill, base, &salt);
+        return;
     }
+    let kind = ProjectionKind::of(&fill.projection).unwrap_or(ProjectionKind::Uv);
+    let projection_popup = ui.make_persistent_id(("fill_projection", salt));
+    if let Some(picked) = prop_ui::row(ui, tr("Projection"), |ui| {
+        prop_ui::picture_combo(ui, projection_popup, kind, &ProjectionKind::ALL, ProjectionKind::label, fill_pictures::projection_picture)
+    }) {
+        app.run("layer.fill.projection", with(base, json!({"projection": picked.id()})));
+    }
+    placement_block(app, ui, fill, base, salt);
+    filtering_group(app, ui, fill, base, salt);
+    projection_3d_group(app, ui, fill, base, salt);
+}
 
-    ui.add_space(FILL_MATERIAL_GAP);
-    ui.label(caption(tr("Material")));
+/// Width and height of the window preview beside the placement sliders
+const PLACEMENT_PREVIEW_SIZE: f32 = 104.0;
+/// Space between the window preview and its sliders
+const PLACEMENT_PREVIEW_GAP: f32 = 12.0;
+/// Space between a placement caption and the sliders under it
+const PLACEMENT_CAPTION_GAP: f32 = 2.0;
+/// Width of the direction arrow before an across or down slider
+const PLACEMENT_ARROW_WIDTH: f32 = 14.0;
+/// Size of the link button after the Size slider
+const PLACEMENT_LINK_SIZE: f32 = 20.0;
+
+/// Slider range of a fill's scale or tiling
+const FILL_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.01..=20.0;
+
+/// Slider range of a fill's rotation, a full turn
+const FILL_ROTATION_DEGREES_RANGE: std::ops::RangeInclusive<f32> = 0.0..=360.0;
+
+/// Slider range of a fill's offset, in tiles
+const FILL_OFFSET_RANGE: std::ops::RangeInclusive<f32> = -1.0..=1.0;
+
+/// Tri-planar hardness, the exponent weighting the three projections; `layer.fill.projection` clamps to the same range
+const TRIPLANAR_HARDNESS_RANGE: std::ops::RangeInclusive<f32> = 1.0..=64.0;
+
+/// The fill's tiling, rotation and offset and the param names that set them
+fn placement_of(projection: &Projection) -> Option<(fill_pictures::Placement, &'static str)> {
+    let placement = |tiling: [f32; 2], rotation: f32, offset: [f32; 2]| fill_pictures::Placement { tiling, rotation, offset };
+    match projection {
+        Projection::Uv { scale, rotation, offset } => Some((placement(*scale, *rotation, *offset), "offset")),
+        Projection::Triplanar { uv, .. } | Projection::Planar { uv, .. } | Projection::Spherical { uv, .. } | Projection::Cylindrical { uv, .. } => {
+            Some((placement(uv.tiling, uv.rotation, uv.offset), "uvOffset"))
+        }
+        Projection::Decal(_) => None,
+    }
+}
+
+/// A number as the placement sliders show it: at most two decimals, no trailing zeros
+fn placement_number(value: f32) -> String {
+    let text = format!("{value:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// The window preview of where the fill's tiles land, with Size (linked, or across and down),
+/// Offset (across and down) and Rotation stacked beside it
+fn placement_block(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: &Value, salt: &str) {
+    let tokens = Tokens::get(ui.ctx());
+    let Some((placement, offset_key)) = placement_of(&fill.projection) else { return };
+    let link_id = ui.make_persistent_id(("fill_size_link", salt));
+    let mut linked = ui.data(|data| data.get_temp::<bool>(link_id)).unwrap_or(placement.tiling[0] == placement.tiling[1]);
+    let mut edits: Vec<Value> = Vec::new();
+    ui.horizontal_top(|ui| {
+        let (preview, _) = ui.allocate_exact_size(egui::vec2(PLACEMENT_PREVIEW_SIZE, PLACEMENT_PREVIEW_SIZE), Sense::hover());
+        fill_pictures::window_preview(ui.painter(), preview, placement, &tokens);
+        ui.add_space(PLACEMENT_PREVIEW_GAP);
+        ui.vertical(|ui| {
+            ui.set_width(ui.available_width());
+            let caption_row = |ui: &mut Ui, text: &str| {
+                ui.label(RichText::new(text).size(11.0).color(tokens.text_dim));
+                ui.add_space(PLACEMENT_CAPTION_GAP);
+            };
+            let arrow_slider = |ui: &mut Ui, arrow: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, shown: &str, centered: bool| {
+                ui.horizontal(|ui| {
+                    if arrow.is_empty() {
+                        prop_ui::value_slider(ui, value, range, shown, centered)
+                    } else {
+                        let (rect, _) = ui.allocate_exact_size(egui::vec2(PLACEMENT_ARROW_WIDTH, prop_ui::ROW_HEIGHT), Sense::hover());
+                        ui.painter().text(rect.left_center(), egui::Align2::LEFT_CENTER, arrow, egui::FontId::proportional(12.0), tokens.text_dim);
+                        prop_ui::value_slider(ui, value, range, shown, centered)
+                    }
+                })
+                .inner
+            };
+
+            caption_row(ui, tr("Size"));
+            let mut tiling = placement.tiling;
+            ui.horizontal(|ui| {
+                ui.add_space(0.0);
+                let width = ui.available_width() - PLACEMENT_LINK_SIZE - ui.spacing().item_spacing.x;
+                ui.allocate_ui(egui::vec2(width, prop_ui::ROW_HEIGHT), |ui| {
+                    let arrow = if linked { "" } else { ic::ARROW_RIGHT };
+                    if let Some(merge) = arrow_slider(ui, arrow, &mut tiling[0], FILL_SCALE_RANGE, &placement_number(tiling[0]), false) {
+                        if linked {
+                            tiling[1] = tiling[0];
+                        }
+                        edits.push(json!({"tiling": tiling, "merge": merge}));
+                    }
+                });
+                let icon = if linked { ic::LINK_SIMPLE_HORIZONTAL } else { ic::LINK_SIMPLE_HORIZONTAL_BREAK };
+                if icon_button(ui, icon, tr("Link across and down"), linked, PLACEMENT_LINK_SIZE).clicked() {
+                    linked = !linked;
+                    ui.data_mut(|data| data.insert_temp(link_id, linked));
+                    if linked && tiling[1] != tiling[0] {
+                        edits.push(json!({"tiling": [tiling[0], tiling[0]]}));
+                    }
+                }
+            });
+            if !linked {
+                let width = ui.available_width() - PLACEMENT_LINK_SIZE - ui.spacing().item_spacing.x;
+                ui.allocate_ui(egui::vec2(width, prop_ui::ROW_HEIGHT), |ui| {
+                    if let Some(merge) = arrow_slider(ui, ic::ARROW_DOWN, &mut tiling[1], FILL_SCALE_RANGE, &placement_number(tiling[1]), false) {
+                        edits.push(json!({"tiling": tiling, "merge": merge}));
+                    }
+                });
+            }
+
+            caption_row(ui, tr("Offset"));
+            let mut offset = placement.offset;
+            for (axis, arrow) in [(0, ic::ARROW_RIGHT), (1, ic::ARROW_DOWN)] {
+                if let Some(merge) = arrow_slider(ui, arrow, &mut offset[axis], FILL_OFFSET_RANGE, &placement_number(offset[axis]), true) {
+                    edits.push(json!({offset_key: offset, "merge": merge}));
+                }
+            }
+
+            caption_row(ui, tr("Rotation"));
+            let mut rotation = placement.rotation;
+            if let Some(merge) = arrow_slider(ui, "", &mut rotation, FILL_ROTATION_DEGREES_RANGE, &format!("{rotation:.0}°"), false) {
+                edits.push(json!({"rotation": rotation, "merge": merge}));
+            }
+        });
+    });
+    ui.add_space(prop_ui::ROW_GAP);
+    for edit in edits {
+        app.run("layer.fill.projection", with(base, edit));
+    }
+}
+
+/// The folded "Filtering and edges" group: Filtering and UV Wrap (tri-planar has no tile to wrap)
+fn filtering_group(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: &Value, salt: &str) {
+    let filtering = fill.sampling.filtering;
+    let wrap = fill.sampling.wrap;
+    let wraps = !matches!(fill.projection, Projection::Triplanar { .. });
+    let filtering_picture = move |painter: &egui::Painter, rect: egui::Rect, tokens: &Tokens| fill_pictures::filtering_picture(painter, rect, filtering, tokens);
+    let wrap_picture = move |painter: &egui::Painter, rect: egui::Rect, tokens: &Tokens| fill_pictures::wrap_picture(painter, rect, wrap, tokens);
+    let pictures: Vec<&dyn Fn(&egui::Painter, egui::Rect, &Tokens)> = if wraps { vec![&filtering_picture, &wrap_picture] } else { vec![&filtering_picture] };
+    let mut edit = None;
+    prop_ui::folded(ui, ui.make_persistent_id(("fill_filtering_group", salt)), tr("Filtering and edges"), &pictures, |ui| {
+        let filtering_popup = ui.make_persistent_id(("fill_filtering", salt));
+        if let Some(picked) = prop_ui::row(ui, tr("Filtering"), |ui| {
+            prop_ui::picture_combo(ui, filtering_popup, filtering, &Filtering::ALL, filtering_label, fill_pictures::filtering_picture)
+        }) {
+            edit = Some(json!({"filtering": picked.id()}));
+        }
+        if wraps {
+            let wrap_popup = ui.make_persistent_id(("fill_wrap", salt));
+            if let Some(picked) =
+                prop_ui::row(ui, tr("UV Wrap"), |ui| prop_ui::picture_combo(ui, wrap_popup, wrap, &UvWrap::ALL, wrap_label, fill_pictures::wrap_picture))
+            {
+                edit = Some(json!({"wrap": picked.id()}));
+            }
+        }
+    });
+    if let Some(edit) = edit {
+        app.run("layer.fill.projection", with(base, edit));
+    }
+}
+
+/// The folded "3D projection settings" group of a 3D projection: its axis or hardness, its
+/// scale and its offset in the world
+fn projection_3d_group(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: &Value, salt: &str) {
+    if matches!(fill.projection, Projection::Uv { .. } | Projection::Decal(_)) {
+        return;
+    }
+    let mut edits: Vec<Value> = Vec::new();
+    prop_ui::folded(ui, ui.make_persistent_id(("fill_3d_group", salt)), tr("3D projection settings"), &[], |ui| {
+        if let Projection::Planar { axis, .. } | Projection::Cylindrical { axis, .. } = &fill.projection
+            && let Some(picked_axis) = axis_combo(ui, *axis)
+        {
+            edits.push(json!({"axis": picked_axis}));
+        }
+        if let Projection::Triplanar { sharpness, .. } = &fill.projection {
+            let mut hardness = *sharpness;
+            if let Some(merge) = slider_edit(ui, tr("Hardness"), &mut hardness, TRIPLANAR_HARDNESS_RANGE, 1) {
+                edits.push(json!({"sharpness": hardness, "merge": merge}));
+            }
+        }
+        let world_scale = match &fill.projection {
+            Projection::Triplanar { scale, .. } | Projection::Planar { scale, .. } | Projection::Spherical { scale, .. } | Projection::Cylindrical { scale, .. } => *scale,
+            Projection::Uv { .. } | Projection::Decal(_) => return,
+        };
+        let mut scale = world_scale;
+        if let Some(merge) = slider_edit(ui, tr("Scale"), &mut scale, FILL_SCALE_RANGE, 2) {
+            edits.push(json!({"scale": scale, "merge": merge}));
+        }
+        if let Projection::Triplanar { offset, .. } | Projection::Planar { offset, .. } = &fill.projection
+            && let Some((edited_offset, merge)) = offset_sliders(ui, ["X", "Y", "Z"], *offset)
+        {
+            edits.push(json!({"offset": edited_offset, "merge": merge}));
+        }
+    });
+    for edit in edits {
+        app.run("layer.fill.projection", with(base, edit));
+    }
+}
+
+/// The Symmetry tab: fill symmetry needs a 3D projection
+fn fill_symmetry_tab(ui: &mut Ui, fill: &Fill) {
+    let tokens = Tokens::get(ui.ctx());
+    prop_ui::section_header(ui, tr("Symmetry"), true, None);
+    if matches!(fill.projection, Projection::Uv { .. }) {
+        ui.label(RichText::new(tr("Symmetry is not available with UV projection")).color(tokens.text_dim));
+    }
+}
+
+/// The Material tab: the channels the fill sets and the source of each
+fn fill_material_tab(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: &Value, on: &[Channel], reader: LayerId, salt: &str) {
+    prop_ui::section_header(ui, tr("Material"), true, None);
     let channels = app.session.doc.project.texture_set(app.session.ts()).map(|texture_set| texture_set.channel_list()).unwrap_or_default();
     ui.horizontal_wrapped(|ui| {
         for channel in &channels {
@@ -1959,178 +2221,8 @@ fn fill_editor(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: &Value
     let anchors = anchors_below(app, reader);
     for channel in channels {
         if on.contains(&channel) {
-            fill_channel(app, ui, fill, base, channel, &anchors, &salt);
+            fill_channel(app, ui, fill, base, channel, &anchors, salt);
         }
-    }
-}
-
-/// Slider range of a fill's scale or tiling
-const FILL_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.01..=20.0;
-
-/// Slider range of a UV fill's rotation, a full turn
-const FILL_ROTATION_DEGREES_RANGE: std::ops::RangeInclusive<f32> = 0.0..=360.0;
-
-/// Tri-planar hardness, the exponent weighting the three projections; `layer.fill.projection` clamps to the same range
-const TRIPLANAR_HARDNESS_RANGE: std::ops::RangeInclusive<f32> = 1.0..=64.0;
-
-/// A fill's projection kind, axis and hardness, then its collapsible UV transformations
-fn projection_editor(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: &Value, salt: &str) {
-    let projection_label = fill.projection.label();
-    combo(ui, tr("Projection"), tr(projection_label), |ui| {
-        for (id, label) in [
-            ("uv", n_("UV projection")),
-            ("triplanar", n_("Tri-planar projection")),
-            ("planar", n_("Planar projection")),
-            ("spherical", n_("Spherical projection")),
-            ("cylindrical", n_("Cylindrical projection")),
-        ] {
-            if ui.selectable_label(projection_label == label, tr(label)).clicked() {
-                app.run("layer.fill.projection", with(base, json!({"projection": id})));
-            }
-        }
-    });
-
-    let filtering = fill.sampling.filtering;
-    combo(ui, tr("Filtering"), tr(filtering_label(filtering)), |ui| {
-        for f in Filtering::ALL {
-            if ui.selectable_label(f == filtering, tr(filtering_label(f))).clicked() && f != filtering {
-                app.run("layer.fill.projection", with(base, json!({"filtering": f.id()})));
-            }
-        }
-    });
-
-    // Tri-planar has no tile to repeat
-    if !matches!(fill.projection, Projection::Triplanar { .. }) {
-        let wrap = fill.sampling.wrap;
-        combo(ui, tr("UV Wrap"), tr(wrap_label(wrap)), |ui| {
-            for w in UvWrap::ALL {
-                if ui.selectable_label(w == wrap, tr(wrap_label(w))).clicked() && w != wrap {
-                    app.run("layer.fill.projection", with(base, json!({"wrap": w.id()})));
-                }
-            }
-        });
-    }
-
-    // Each edit sends only the fields it changed; the command keeps the others
-    let mut edit = |fields: Value| {
-        app.run("layer.fill.projection", with(base, fields));
-    };
-    if let Projection::Planar { axis, .. } | Projection::Cylindrical { axis, .. } = &fill.projection
-        && let Some(picked_axis) = axis_combo(ui, *axis)
-    {
-        edit(json!({"axis": picked_axis}));
-    }
-    if let Projection::Triplanar { sharpness, .. } = &fill.projection {
-        let mut hardness = *sharpness;
-        if let Some(merge) = slider_edit(ui, tr("Hardness"), &mut hardness, TRIPLANAR_HARDNESS_RANGE, 1) {
-            edit(json!({"sharpness": hardness, "merge": merge}));
-        }
-    }
-
-    // One id per fill so each keeps its own open or closed state
-    section(ui, &format!("sec_fill_transform{salt}"), tr("UV transformations"), true, |ui| {
-        projection_transform(ui, &fill.projection, salt, &mut edit);
-    });
-}
-
-/// Width of the lock button between a pair of sliders
-const PAIR_LOCK_WIDTH: f32 = 22.0;
-
-/// Height of one slider: its value row over its track
-const PAIR_SLIDER_HEIGHT: f32 = 34.0;
-
-/// Two sliders side by side under `label` (across and down), with a lock between them when
-/// `lock` is given: while locked, the second follows the first and is greyed. Returns the pair
-/// once one is edited, with [`slider_edit`]'s `merge`.
-fn pair_sliders(
-    ui: &mut Ui,
-    label: &str,
-    mut v: [f32; 2],
-    range: std::ops::RangeInclusive<f32>,
-    decimals: usize,
-    lock: Option<&mut bool>,
-) -> Option<([f32; 2], bool)> {
-    let mut edited = None;
-    ui.label(label);
-    let locked = lock.as_deref().copied().unwrap_or(false);
-    let lock_width = if lock.is_some() { PAIR_LOCK_WIDTH } else { ui.spacing().item_spacing.x };
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), PAIR_SLIDER_HEIGHT), Sense::hover());
-    let half = ((rect.width() - lock_width) / 2.0).max(1.0);
-    let left = egui::Rect::from_min_size(rect.min, egui::vec2(half, rect.height()));
-    let right = egui::Rect::from_min_size(egui::pos2(rect.right() - half, rect.top()), egui::vec2(half, rect.height()));
-    let slot = |ui: &mut Ui, area: egui::Rect| ui.new_child(egui::UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
-
-    if let Some(merge) = slider_edit(&mut slot(ui, left), "", &mut v[0], range.clone(), decimals) {
-        if locked {
-            v[1] = v[0];
-        }
-        edited = Some(merge);
-    }
-    if let Some(lock) = lock {
-        let middle = egui::Rect::from_center_size(egui::pos2(rect.center().x, rect.bottom() - 9.0), egui::vec2(PAIR_LOCK_WIDTH, 18.0));
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(middle).layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight)));
-        let icon = if *lock { ic::LOCK_SIMPLE } else { ic::LOCK_SIMPLE_OPEN };
-        if icon_button(&mut child, icon, tr("Lock the two values together"), *lock, 14.0).clicked() {
-            *lock = !*lock;
-            if *lock && v[1] != v[0] {
-                v[1] = v[0];
-                edited = Some(false);
-            }
-        }
-    }
-    let mut second = slot(ui, right);
-    second.add_enabled_ui(!locked, |ui| {
-        if let Some(merge) = slider_edit(ui, "", &mut v[1], range.clone(), decimals) {
-            edited = Some(merge);
-        }
-    });
-    edited.map(|merge| (v, merge))
-}
-
-/// A projection's UV transformations: tiling across and down (locked together until unlocked),
-/// rotation and offset. A 3D projection also shows its scale and world offset here.
-fn projection_transform(ui: &mut Ui, projection: &Projection, salt: &str, edit: &mut impl FnMut(Value)) {
-    let (tiling, rotation, offset, offset_key) = match projection {
-        Projection::Uv { scale, rotation, offset } => (*scale, *rotation, *offset, "offset"),
-        Projection::Triplanar { uv, .. } | Projection::Planar { uv, .. } | Projection::Spherical { uv, .. } | Projection::Cylindrical { uv, .. } => {
-            (uv.tiling, uv.rotation, uv.offset, "uvOffset")
-        }
-        Projection::Decal(_) => return,
-    };
-    let lock_id = ui.make_persistent_id(("fill_tiling_lock", salt));
-    let mut locked = ui.data(|data| data.get_temp::<bool>(lock_id)).unwrap_or(tiling[0] == tiling[1]);
-    let was_locked = locked;
-    if let Some((edited, merge)) = pair_sliders(ui, tr("Tiling"), tiling, FILL_SCALE_RANGE, 2, Some(&mut locked)) {
-        edit(json!({"tiling": edited, "merge": merge}));
-    }
-    if locked != was_locked {
-        ui.data_mut(|data| data.insert_temp(lock_id, locked));
-    }
-    let mut rotation_degrees = rotation;
-    if let Some(merge) = slider_edit(ui, tr("Rotation"), &mut rotation_degrees, FILL_ROTATION_DEGREES_RANGE, 0) {
-        edit(json!({"rotation": rotation_degrees, "merge": merge}));
-    }
-    if let Some((edited, merge)) = pair_sliders(ui, tr("Offset"), offset, -1.0..=1.0, 2, None) {
-        edit(json!({offset_key: edited, "merge": merge}));
-    }
-
-    match projection {
-        Projection::Triplanar { scale, offset, .. } | Projection::Planar { scale, offset, .. } => {
-            world_scale(ui, *scale, edit);
-            if let Some((edited_offset, merge)) = offset_sliders(ui, ["X", "Y", "Z"], *offset) {
-                edit(json!({"offset": edited_offset, "merge": merge}));
-            }
-        }
-        Projection::Spherical { scale, .. } | Projection::Cylindrical { scale, .. } => world_scale(ui, *scale, edit),
-        Projection::Uv { .. } | Projection::Decal(_) => {}
-    }
-}
-
-/// A 3D projection's scale: how many times its pattern fits across the mesh
-fn world_scale(ui: &mut Ui, scale: f32, edit: &mut impl FnMut(Value)) {
-    let mut scale = scale;
-    if let Some(merge) = slider_edit(ui, tr("Scale"), &mut scale, FILL_SCALE_RANGE, 2) {
-        edit(json!({"scale": scale, "merge": merge}));
     }
 }
 

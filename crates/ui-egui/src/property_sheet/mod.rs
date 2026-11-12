@@ -1,0 +1,163 @@
+//! The Properties panel's rows, groups and controls, shared by every panel so they line up
+
+mod band_response;
+mod choice;
+mod group;
+mod number_field;
+mod open_card;
+mod row;
+mod sheet_measure;
+mod slider;
+mod slot;
+mod slot_response;
+mod switch_control;
+mod tooltip;
+
+#[cfg(test)]
+mod tests;
+
+pub(crate) use band_response::BandResponse;
+pub(crate) use number_field::NumberField;
+pub(crate) use slot_response::SlotResponse;
+
+use egui::{Color32, FontId, Id, Rect, Ui, pos2, vec2};
+
+use crate::theme::{Tokens, semibold};
+use open_card::OpenCard;
+use sheet_measure::SheetMeasure;
+
+/// Side padding: every row starts and ends this far inside the panel
+pub(crate) const PAD: f32 = 12.0;
+
+/// Row pitch: every control row is one box this tall with its control centred
+pub(crate) const ROW_HEIGHT: f32 = 28.0;
+
+/// Height of dropdowns, fields, switches and buttons
+const CONTROL_HEIGHT: f32 = 24.0;
+
+/// Air between groups and after loose rows
+const GROUP_GAP: f32 = 6.0;
+
+/// The narrowest label column, from the panel's left padding to the controls
+const LABEL_COLUMN_MIN: f32 = 90.0;
+
+/// Labels wider than this stack above a full-width control and never widen the column
+const LABEL_MAX: f32 = 132.0;
+
+/// Air between the widest label and the controls column
+const LABEL_TO_CONTROL: f32 = 12.0;
+
+/// A label fits beside its control when it leaves at least this much air before the column
+const LABEL_MIN_AIR: f32 = 8.0;
+
+/// The narrowest value column at a slider's right end
+const VALUE_MIN_WIDTH: f32 = 26.0;
+
+/// Size of regular labels and SemiBold values
+const TEXT_SIZE: f32 = 12.0;
+
+/// Size of captions, pill names and the switch's words
+const SMALL_TEXT_SIZE: f32 = 11.0;
+
+/// Size of the caret and small glyphs drawn as icons
+const ICON_SIZE: f32 = 12.0;
+
+/// The Properties panel being laid out this frame: where the controls column is, which card is open, and what this frame measured for the next one
+pub(crate) struct PropertySheet<'u> {
+    pub(crate) ui: &'u mut Ui,
+    tokens: Tokens,
+    id: Id,
+    left: f32,
+    right: f32,
+    used: SheetMeasure,
+    seen: SheetMeasure,
+    card: Option<OpenCard>,
+    air_at: Option<f32>,
+    drawn_bottom: f32,
+    empty: bool,
+}
+
+impl<'u> PropertySheet<'u> {
+    /// Lays out `body` as one panel; when its measured columns change, egui reruns the frame unseen
+    pub(crate) fn show<R>(ui: &'u mut Ui, id_salt: impl egui::AsIdSalt, body: impl FnOnce(&mut PropertySheet<'_>) -> R) -> R {
+        let id = ui.make_persistent_id(id_salt);
+        let used = ui.data(|data| data.get_temp::<SheetMeasure>(id)).unwrap_or_default();
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        let rect = ui.available_rect_before_wrap();
+        let mut sheet = PropertySheet {
+            tokens: Tokens::get(ui.ctx()),
+            id,
+            left: rect.left() + PAD,
+            right: rect.right() - PAD,
+            used,
+            seen: SheetMeasure::default(),
+            card: None,
+            air_at: None,
+            drawn_bottom: rect.top(),
+            empty: true,
+            ui,
+        };
+        let result = body(&mut sheet);
+        sheet.close_card();
+
+        let seen = sheet.seen;
+        if seen != used {
+            sheet.ui.data_mut(|data| data.insert_temp(id, seen));
+            sheet.ui.ctx().request_discard("Properties columns changed");
+        }
+        result
+    }
+
+    /// The controls column: wide enough for this panel's labels, capped at [`LABEL_MAX`]
+    fn column(&self) -> f32 {
+        self.left + LABEL_COLUMN_MIN.max(self.used.label_width + LABEL_TO_CONTROL)
+    }
+
+    /// Where the knob of a slider's track ends: left of this panel's widest value
+    fn track_end(&self) -> f32 {
+        self.right - self.used.value_width.max(VALUE_MIN_WIDTH) - 14.0
+    }
+
+    /// Records a value's width for the panel's value column
+    fn measure_value(&mut self, text: &str) {
+        let width = self.text_width(text, semibold(TEXT_SIZE));
+        self.seen.value_width = self.seen.value_width.max(width);
+    }
+
+    fn text_width(&self, text: &str, font: FontId) -> f32 {
+        self.ui.painter().layout_no_wrap(text.to_owned(), font, Color32::WHITE).size().x
+    }
+
+    /// Takes the next `height` pixels of the panel, full width; marks what it draws down to
+    fn take(&mut self, height: f32) -> Rect {
+        let (rect, _) = self.ui.allocate_exact_size(vec2(self.ui.available_width(), height), egui::Sense::hover());
+        self.empty = false;
+        rect
+    }
+
+    /// Leaves `height` pixels of air
+    fn space(&mut self, height: f32) {
+        self.ui.add_space(height);
+    }
+
+    fn cursor_y(&self) -> f32 {
+        self.ui.cursor().top()
+    }
+
+    /// Notes that something was painted down to `bottom`, so an open card ends its padding below it
+    fn drawn(&mut self, bottom: f32) {
+        self.drawn_bottom = self.drawn_bottom.max(bottom);
+    }
+
+    /// A control's box: [`CONTROL_HEIGHT`] tall, centred in its row, from `x0` to the right edge
+    fn control_box(&self, x0: f32, center_y: f32) -> Rect {
+        Rect::from_min_max(pos2(x0, center_y - CONTROL_HEIGHT / 2.0), pos2(self.right, center_y + CONTROL_HEIGHT / 2.0))
+    }
+
+    /// The colour of a top-level band: between the window frame and a card
+    fn band_fill(&self) -> Color32 {
+        let t = &self.tokens;
+        let mid = |a: u8, b: u8| ((u16::from(a) + u16::from(b)) / 2) as u8;
+        Color32::from_rgb(mid(t.chrome.r(), t.row.r()), mid(t.chrome.g(), t.row.g()), mid(t.chrome.b(), t.row.b()))
+    }
+}

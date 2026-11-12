@@ -51,24 +51,24 @@ const PICKER_SHADOW: Shadow = Shadow { offset: [2, 4], blur: 0, spread: 0, color
 const PREFERENCES_KEY: &str = "color_picker_preferences";
 
 impl PropertySheet<'_> {
-    /// A uniform colour (linear): a bar across the card that opens the picker, and the eyedropper; `eyedropping` is the bar whose pick waits for its click
-    pub(crate) fn color_bar(&mut self, label: &str, linear: [f32; 3], eyedropping: Option<Id>) -> ColorPick {
+    /// A uniform colour (linear): a bar across the card that opens the picker (with the project's `swatches`), and the eyedropper; `eyedropping` is the bar whose pick waits for its click
+    pub(crate) fn color_bar(&mut self, label: &str, linear: [f32; 3], eyedropping: Option<Id>, swatches: &[[f32; 3]]) -> ColorPick {
         let center_y = self.take(super::ROW_HEIGHT).center().y;
         let bar = Rect::from_min_max(pos2(self.left, center_y - COLOR_BAR_HEIGHT / 2.0), pos2(self.right - EYEDROPPER_ROOM, center_y + COLOR_BAR_HEIGHT / 2.0));
-        self.color_bar_at(bar, label, linear, eyedropping)
+        self.color_bar_at(bar, label, linear, eyedropping, swatches)
     }
 
     /// [`Self::color_bar`] in the controls column, beside `label`
-    pub(crate) fn color_bar_led(&mut self, label: &str, linear: [f32; 3], eyedropping: Option<Id>) -> ColorPick {
+    pub(crate) fn color_bar_led(&mut self, label: &str, linear: [f32; 3], eyedropping: Option<Id>, swatches: &[[f32; 3]]) -> ColorPick {
         let (control, center_y) = self.row(label);
         let bar = Rect::from_min_max(
             pos2(control.left(), center_y - COLOR_BAR_HEIGHT / 2.0),
             pos2(control.right() - EYEDROPPER_ROOM, center_y + COLOR_BAR_HEIGHT / 2.0),
         );
-        self.color_bar_at(bar, label, linear, eyedropping)
+        self.color_bar_at(bar, label, linear, eyedropping, swatches)
     }
 
-    fn color_bar_at(&mut self, bar: Rect, label: &str, linear: [f32; 3], eyedropping: Option<Id>) -> ColorPick {
+    fn color_bar_at(&mut self, bar: Rect, label: &str, linear: [f32; 3], eyedropping: Option<Id>, swatches: &[[f32; 3]]) -> ColorPick {
         let id = self.next_id();
         let response = self.ui.interact(bar, id, Sense::click());
         response.widget_info(|| WidgetInfo::labeled(Role::Button, true, label));
@@ -102,10 +102,11 @@ impl PropertySheet<'_> {
         }
 
         if state.open {
-            let inside = self.picker_popup(&response, glyph, label, &mut state, waiting, id);
+            let inside = self.picker_popup(&response, glyph, label, &mut state, waiting, swatches, id);
             pick.picked = pick.picked.or(inside.picked);
             pick.merge = inside.merge;
             pick.eyedropper |= inside.eyedropper;
+            pick.swatch = inside.swatch;
         }
         ctx.data_mut(|data| {
             data.insert_temp(state_id, state);
@@ -114,8 +115,18 @@ impl PropertySheet<'_> {
         pick
     }
 
-    /// The open picker: a window the panel's width, its rows at the panel's edges, with `label`'s title, standing beside the panel level with `bar` (its title bar drags it, × or Escape closes it, and so does a press off it, the bar and the bar's `eyedropper` unless an eyedropper pick waits)
-    fn picker_popup(&mut self, bar: &Response, eyedropper: Rect, label: &str, state: &mut PickerState, waiting: bool, id: Id) -> ColorPick {
+    /// The open picker: a window the panel's width, its rows at the panel's edges (the project's `swatches` last), with `label`'s title, standing beside the panel level with `bar` (its title bar drags it, × or Escape closes it, and so does a press off it, the bar and the bar's `eyedropper` unless an eyedropper pick waits)
+    #[allow(clippy::too_many_arguments)]
+    fn picker_popup(
+        &mut self,
+        bar: &Response,
+        eyedropper: Rect,
+        label: &str,
+        state: &mut PickerState,
+        waiting: bool,
+        swatches: &[[f32; 3]],
+        id: Id,
+    ) -> ColorPick {
         let ctx = self.ui.ctx().clone();
         let width = self.right - self.left + 2.0 * PAD;
         let height_id = id.with("picker_height");
@@ -159,7 +170,7 @@ impl PropertySheet<'_> {
             let (pick, bottom) = ui
                 .scope_builder(UiBuilder::new().max_rect(rows), |ui| {
                     PropertySheet::show(ui, id.with("picker_rows"), |sheet| {
-                        let pick = sheet.color_picker_rows(state, waiting, id);
+                        let pick = sheet.color_picker_rows(state, waiting, swatches, id);
                         (pick, sheet.drawn_bottom)
                     })
                 })

@@ -4,11 +4,13 @@ mod color_model;
 mod color_pick;
 mod color_space;
 mod picker_state;
+mod swatch_edit;
 
 pub(crate) use color_model::ColorModel;
 pub(crate) use color_pick::ColorPick;
 pub(crate) use color_space::ColorSpace;
 pub(crate) use picker_state::PickerState;
+pub(crate) use swatch_edit::SwatchEdit;
 
 /// Where the open picker window stood and the pass that drew it
 fn window_id() -> egui::Id {

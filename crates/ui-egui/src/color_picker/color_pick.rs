@@ -1,6 +1,8 @@
 use egui::{Context, Id};
 
-/// What a colour bar did this frame: the colour picked (linear) and whether it continues the last edit, or a click on its eyedropper
+use super::SwatchEdit;
+
+/// What a colour bar did this frame: the colour picked (linear) and whether it continues the last edit, a click on its eyedropper, or a change to the swatches
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ColorPick {
     /// The bar's id: an eyedropper pick for it is handed over with [`ColorPick::deliver`]
@@ -9,11 +11,12 @@ pub(crate) struct ColorPick {
     /// The pick continues a drag: it joins the last undo step
     pub(crate) merge: bool,
     pub(crate) eyedropper: bool,
+    pub(crate) swatch: Option<SwatchEdit>,
 }
 
 impl ColorPick {
     pub(crate) fn none(id: Id) -> Self {
-        ColorPick { id, picked: None, merge: false, eyedropper: false }
+        ColorPick { id, picked: None, merge: false, eyedropper: false, swatch: None }
     }
 
     /// Hands the colour an eyedropper picked to the bar `target`, which reports it next frame

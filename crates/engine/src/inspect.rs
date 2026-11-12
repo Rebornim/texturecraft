@@ -234,6 +234,7 @@ pub fn session(session: &Session) -> Value {
         "bakePreview": crate::bake_preview::preview_json(session),
         "camera": crate::view_cmds::camera_json(session),
         "display": session.doc.project.display,
+        "swatches": session.doc.project.swatches,
         "history": { "undo": session.undo_label(), "redo": session.redo_label(), "depth": session.history_labels().len() },
         "memoryBytes": session.memory().total(),
         "pendingTiles": session.pending_tiles(),

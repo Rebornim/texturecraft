@@ -534,6 +534,14 @@ None is an undo step.
 the shading uses (mesh normal, Height channel slope and Normal channel), unlit; the 2D view shows its
 tangent-space form.
 
+## Colour swatches
+
+The project's swatches (`Project.swatches`, linear RGB, stored in the `.tcraft` file; projects without any
+save none) are the Swatches row under the colour picker. `swatch.list` lists them, `swatch.add {color}`
+(`[r, g, b]` linear or `"#rrggbb"`, clamped to 0..1, at most 64) adds one at the end and
+`swatch.remove {index}` removes one; `project.inspect` shows them as `swatches`. Applying a swatch is an
+ordinary colour edit (`layer.fill.set {color}`).
+
 ## MaterialCraft materials
 
 A v3 `.mcmat` holds a published SBS graph and its source assets. TextureCraft uses the shared `craft-mcmat` reader and cooks the archive through `materialcraft-cli`. The resulting fill stores its channel textures and the original archive in the project. Linked cooks use the Settings percentage of available RAM. A cook that exceeds the estimated budget reports the required and configured byte counts without replacing the current fill. Its exposed values, presets and mesh-map inputs appear in `project.inspect`. Republish older MCMAT files from their original authoring project. Procedural imports and re-cooks require the desktop CLI. Saved projects retain their baked maps for use in the browser.

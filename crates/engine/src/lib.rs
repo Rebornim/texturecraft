@@ -64,6 +64,7 @@ mod session_log;
 pub mod set_cmds;
 pub mod smart_masks;
 mod solo;
+pub mod swatch_cmds;
 pub mod template_cmds;
 pub mod text_cmds;
 pub mod thumbs;

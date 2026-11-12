@@ -8,7 +8,7 @@ use texturecraft_engine::core::{
 use texturecraft_engine::texel::linear_to_srgb;
 
 use crate::TextureCraftApp;
-use crate::color_picker::ColorPick;
+use crate::color_picker::{ColorPick, SwatchEdit};
 use crate::dock::{anchors_below, with};
 use crate::i18n::{tr, trf};
 use crate::material_orb::{OrbLook, material_orb};
@@ -243,7 +243,7 @@ fn pick_source(
 fn uniform_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, channel: Channel, value: [f32; 3], set: &impl Fn(Value) -> Value) {
     let label = tr(channel.label());
     if channel.kind() == ChannelKind::Color {
-        let pick = sheet.color_bar(label, value, app.picking_color);
+        let pick = sheet.color_bar(label, value, app.picking_color, &app.session.doc.project.swatches);
         if let Some(color) = take_color_pick(app, pick) {
             app.run("layer.fill.set", set(json!({"color": color, "merge": pick.merge})));
         }
@@ -260,10 +260,19 @@ fn uniform_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, channe
     }
 }
 
-/// The colour `pick` picked, after starting or ending an eyedropper pick its eyedropper asked for
+/// The colour `pick` picked, after starting or ending an eyedropper pick its eyedropper asked for and making the change its Swatches row asked for
 fn take_color_pick(app: &mut TextureCraftApp, pick: ColorPick) -> Option<[f32; 3]> {
     if pick.eyedropper {
         app.picking_color = if app.picking_color == Some(pick.id) { None } else { Some(pick.id) };
+    }
+    match pick.swatch {
+        Some(SwatchEdit::Add(color)) => {
+            app.run("swatch.add", json!({"color": color}));
+        }
+        Some(SwatchEdit::Remove(index)) => {
+            app.run("swatch.remove", json!({"index": index}));
+        }
+        None => {}
     }
     pick.picked
 }
@@ -305,7 +314,7 @@ fn procedural_rows(
         }
         if channel.kind() == ChannelKind::Color {
             for (label, value) in [(tr("Low"), &mut low), (tr("High"), &mut high)] {
-                let pick = sheet.color_bar_led(label, *value, app.picking_color);
+                let pick = sheet.color_bar_led(label, *value, app.picking_color, &app.session.doc.project.swatches);
                 if let Some(picked) = take_color_pick(app, pick) {
                     *value = picked;
                     merge = merge.or(Some(pick.merge));

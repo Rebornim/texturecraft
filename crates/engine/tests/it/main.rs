@@ -45,5 +45,6 @@ mod udim;
 mod user_smart_mask;
 mod uv_strokes;
 
+mod fill_whole_material;
 mod swatches;
 mod symmetry;

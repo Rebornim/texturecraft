@@ -395,6 +395,20 @@ pub(super) fn engine_presets() -> Vec<ExportPreset> {
                 gray8("Opacity", Channel::Opacity),
             ],
         ),
+        // Shade 3D's PBR material: a map per metallic/roughness input
+        preset(
+            "Shade 3D",
+            vec![
+                rgb8("BaseColor", Channel::BaseColor),
+                gray8("Metallic", Channel::Metallic),
+                gray8("Roughness", Channel::Roughness),
+                project_normal("Normal"),
+                map("AmbientOcclusion", 8, gray(virt(VirtualMap::AoMixed, 0))),
+                height("Height"),
+                rgb8("Emissive", Channel::Emissive),
+                gray8("Opacity", Channel::Opacity),
+            ],
+        ),
         // USD preview surface inputs, one map each
         preset(
             "USDZ (AR)",

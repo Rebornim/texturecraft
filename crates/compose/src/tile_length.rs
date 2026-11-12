@@ -18,7 +18,7 @@ fn unit_tile(projection: &Projection, size: MeshSize) -> Option<[f32; 2]> {
         Projection::Uv { .. } => Some([size.uv_density; 2]),
         Projection::Triplanar { scale, .. } => Some([r / scale; 2]),
         Projection::Planar { scale, .. } => Some([2.0 * r / scale; 2]),
-        Projection::Cylindrical { scale, .. } => Some([TAU * r / scale, 2.0 * r / scale]),
+        Projection::Cylindrical { scale, angle, .. } => Some([TAU * r * (angle / 360.0) / scale, 2.0 * r / scale]),
         Projection::UvTile | Projection::Spherical { .. } | Projection::Decal(_) => None,
     }
 }
@@ -65,7 +65,7 @@ mod tests {
             Projection::Uv { scale: [3.0, 1.5], rotation: 0.0, offset: [0.0; 2] },
             Projection::Triplanar { scale: 1.5, sharpness: 8.0, offset: [0.0; 3], uv, projector: Default::default() },
             Projection::Planar { scale: 0.5, axis: 2, offset: [0.0; 3], uv, projector: Default::default() },
-            Projection::Cylindrical { scale: 2.0, axis: 1, uv, offset: [0.0; 3], projector: Default::default() },
+            Projection::Cylindrical { scale: 2.0, axis: 1, uv, offset: [0.0; 3], projector: Default::default(), angle: 360.0 },
         ] {
             let length = tile_length(&projection, SIZE).unwrap();
             let tiling = tiling_for_length(&projection, SIZE, length).unwrap();

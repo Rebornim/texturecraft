@@ -167,6 +167,12 @@ fn place(q: Vec2, tiling: Vec2, rotation: f32, offset: Vec2) -> Vec2 {
     Vec2::new(q.x * cs - q.y * sn, q.x * sn + q.y * cs) * tiling + offset
 }
 
+/// 0..1 around a cylindrical projection's axis (`b` over `a`), over an arc of `angle` degrees centred on the front
+fn around(a: f32, b: f32, angle: f32) -> f32 {
+    let u = b.atan2(a) / std::f32::consts::TAU + 0.5;
+    if angle == 360.0 { u } else { (u - 0.5) * 360.0 / angle.max(1.0) + 0.5 }
+}
+
 fn place_uv(q: Vec2, uv: &UvTransform) -> Vec2 {
     place(q, Vec2::from(uv.tiling), uv.rotation, Vec2::from(uv.offset))
 }
@@ -213,14 +219,14 @@ pub fn procedural(pr: &Procedural, proj: &Projection, c: &Coords) -> f32 {
             let v = d.y.clamp(-1.0, 1.0).acos() / std::f32::consts::PI;
             flat(place_uv(Vec2::new(u * 4.0, v * 2.0) * *scale * s, uv))
         }
-        Projection::Cylindrical { scale, axis, uv, offset, projector } => {
+        Projection::Cylindrical { scale, axis, uv, offset, projector, angle } => {
             let p = projector_local(projector, c).pos + Vec3::from(*offset);
             let (a, h, b) = match axis {
                 0 => (p.y, p.x, p.z),
                 2 => (p.x, p.z, p.y),
                 _ => (p.x, p.y, p.z),
             };
-            let u = b.atan2(a) / std::f32::consts::TAU + 0.5;
+            let u = around(a, b, *angle);
             flat(place_uv(Vec2::new(u * 4.0, h) * *scale * s, uv))
         }
         // `c.uv` is already in the decal's frame (see [`decal_uv`]).
@@ -258,14 +264,14 @@ pub fn image_samples(proj: &Projection, c: &Coords) -> [(Vec2, f32); 3] {
             let v = d.y.clamp(-1.0, 1.0).acos() / std::f32::consts::PI;
             one(place_uv(Vec2::new(u, v) * *scale, uv))
         }
-        Projection::Cylindrical { scale, axis, uv, offset, projector } => {
+        Projection::Cylindrical { scale, axis, uv, offset, projector, angle } => {
             let p = projector_local(projector, c).pos + Vec3::from(*offset);
             let (a, h, b) = match axis {
                 0 => (p.y, p.x, p.z),
                 2 => (p.x, p.z, p.y),
                 _ => (p.x, p.y, p.z),
             };
-            let u = b.atan2(a) / std::f32::consts::TAU + 0.5;
+            let u = around(a, b, *angle);
             one(place_uv(Vec2::new(u, 0.5 - h * 0.5) * *scale, uv))
         }
         Projection::Decal(_) => one(c.uv),
@@ -326,7 +332,7 @@ mod tests {
             Projection::Triplanar { scale: 1.0, sharpness: 4.0, offset: [0.0; 3], uv: Default::default(), projector: Default::default() },
             Projection::Planar { scale: 1.0, axis: 1, offset: [0.0; 3], uv: Default::default(), projector: Default::default() },
             Projection::Spherical { scale: 1.0, uv: Default::default(), offset: [0.0; 3], projector: Default::default() },
-            Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default(), offset: [0.0; 3], projector: Default::default() },
+            Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default(), offset: [0.0; 3], projector: Default::default(), angle: 360.0 },
             Projection::Decal(Decal {
                 center: [0.0; 3],
                 normal: [0.0, 0.0, 1.0],

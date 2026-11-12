@@ -63,9 +63,9 @@ const SLOT_BAR_HEIGHT: f32 = 2.0;
 const DROP_HIGHLIGHT_WIDTH: f32 = 1.5;
 const DROP_HIGHLIGHT_GAP: f32 = 2.0;
 const HANDLE_ICON_SIZE: f32 = 16.0;
-/// The $ button inside the name field: its icon size and its inset from the field's edge
+/// The $ button beside the name field: its icon size and its width
 const DOLLAR_ICON_SIZE: f32 = 12.0;
-const DOLLAR_INSET: f32 = 3.0;
+const DOLLAR_BUTTON_WIDTH: f32 = 22.0;
 /// A dragged map's chip sits below and right of the pointer, clear of the drop target under it
 const DRAG_CHIP_OFFSET: egui::Vec2 = vec2(8.0, 8.0);
 /// The Current preset and output count bars' inner margin
@@ -87,13 +87,11 @@ const BOX_CONSTANT_RANGE: f32 = 160.0;
 /// Width of an output's file type and bit depth combos
 const FILE_TYPE_WIDTH: f32 = 96.0;
 const SIZE_WIDTH: f32 = 46.0;
-/// Room at the name field's right end for the $ button
-const NAME_DOLLAR_ROOM: f32 = 26.0;
 /// Room between an output's file type combo and its icon button
 const FILE_TYPE_STACK_GAP: f32 = 12.0;
 const FILE_TYPE_STACK_WIDTH: f32 = FILE_TYPE_WIDTH + ICON + FILE_TYPE_STACK_GAP;
-/// The file name field's inner margin: its left edge and its top and bottom (the right end is NAME_DOLLAR_ROOM)
-const NAME_MARGIN_LEFT: i8 = 4;
+/// The file name field's inner margin: its sides, and its top and bottom
+const NAME_MARGIN_SIDE: i8 = 4;
 const NAME_MARGIN_VERTICAL: i8 = 2;
 /// Space under the Presets header, under the Current preset bar and below each output card
 const PRESET_LIST_GAP: f32 = 2.0;
@@ -268,7 +266,7 @@ fn sync_draft(app: &mut TextureCraftApp) {
     }
 }
 
-/// The Output templates tab; `width` is the window's fixed width (widths measured from the ui would grow with any overflow)
+/// The Output templates tab; `width` is the tab's width, set by the window (widths measured from the content would grow with any overflow)
 pub fn tab(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[ExportPreset], width: f32) {
     sync_draft(app);
     let height = ui.available_height();
@@ -293,7 +291,9 @@ pub fn tab(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[ExportPreset], wi
         shown.iter().flat_map(|preset| preset.maps.iter()).flat_map(|map| map.channels.iter()).map(|(_, source)| with_component(source, 0)).collect();
     column(ui, INPUTS_WIDTH, &mut |ui| input_maps(ui, openpbr, &used));
     ui.separator();
-    column(ui, MESH_WIDTH, &mut |ui| mesh_and_converted_maps(ui, &used));
+    // The last column takes what the others leave, up to the tab's right edge
+    let mesh_width = ui.available_width().max(MESH_WIDTH);
+    column(ui, mesh_width, &mut |ui| mesh_and_converted_maps(ui, &used));
     if let Some(list_action) = list_action {
         apply(app, ui.ctx(), list_action);
     }
@@ -328,7 +328,11 @@ fn preset_list(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[ExportPreset]
     ui.add_space(PRESET_LIST_GAP);
     let names: Vec<String> = app.session.export_presets.list.iter().map(|preset| preset.name.clone()).collect();
     egui::ScrollArea::vertical().id_salt("exp_presets").auto_shrink([false; 2]).show(ui, |ui| {
-        for preset in builtins {
+        let builtin_names: Vec<&str> = builtins.iter().map(|preset| preset.name.as_str()).collect();
+        for (index, preset) in builtins.iter().enumerate() {
+            if crate::export_controls::starts_template_group(&builtin_names, index) {
+                ui.separator();
+            }
             let response = preset_row(ui, ic::FILE_LOCK, &preset.name, preset.name == selected).on_hover_text(tr("Built-in (read-only): duplicate it to edit"));
 
             if response.clicked() {
@@ -340,6 +344,9 @@ fn preset_list(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[ExportPreset]
                     action = Some(ListAction::DuplicateNamed(preset.name.clone()));
                 }
             });
+        }
+        if !names.is_empty() {
+            ui.separator();
         }
         for name in names {
             match app.ui.export.renaming.as_mut().filter(|_| name == selected) {
@@ -767,18 +774,27 @@ fn name_field(ui: &mut Ui, map: &mut MapSpec, file: Option<&str>, width: f32) ->
         Some(file) => trf("Writes {file}", &[("file", &file)]),
         None => tr("Not exported: no source in this texture set").to_string(),
     };
-    let margin = egui::Margin { left: NAME_MARGIN_LEFT, right: NAME_DOLLAR_ROOM as i8, top: NAME_MARGIN_VERTICAL, bottom: NAME_MARGIN_VERTICAL };
-    let field =
-        ui.add(egui::TextEdit::singleline(&mut map.file).font(egui::TextStyle::Monospace).margin(margin).align(egui::Align2::LEFT_CENTER).desired_width(width));
+    let margin = egui::Margin::symmetric(NAME_MARGIN_SIDE, NAME_MARGIN_VERTICAL);
+    // The $ button sits beside the field, as the reference has it, so the name never runs under it
+    let row = ui.horizontal(|ui| {
+        let field_width = width - DOLLAR_BUTTON_WIDTH - ui.spacing().item_spacing.x;
+        let field = ui.add(
+            egui::TextEdit::singleline(&mut map.file)
+                .font(egui::TextStyle::Monospace)
+                .margin(margin)
+                .align(egui::Align2::LEFT_CENTER)
+                .desired_width(field_width),
+        );
+        let field_height = field.rect.height();
+        let dollar = ui
+            .add_sized(vec2(DOLLAR_BUTTON_WIDTH, field_height), egui::Button::new(RichText::new(ic::CURRENCY_DOLLAR).size(DOLLAR_ICON_SIZE)))
+            .on_hover_text(tr("Insert a variable"));
+        (field, dollar)
+    });
+    let (field, dollar) = row.inner;
     changed |= field.changed();
-    let field = field.on_hover_text(writes);
+    field.on_hover_text(writes);
 
-    let dollar_rect = egui::Rect::from_min_max(
-        egui::pos2(field.rect.right() - NAME_DOLLAR_ROOM + DOLLAR_INSET, field.rect.top() + DOLLAR_INSET),
-        egui::pos2(field.rect.right() - DOLLAR_INSET, field.rect.bottom() - DOLLAR_INSET),
-    );
-    let dollar =
-        ui.put(dollar_rect, egui::Button::new(RichText::new(ic::CURRENCY_DOLLAR).size(DOLLAR_ICON_SIZE)).small()).on_hover_text(tr("Insert a variable"));
     egui::Popup::menu(&dollar).show(|ui| {
         for (token, what) in FILE_TOKENS {
             if ui.button(RichText::new(token).monospace()).on_hover_text(what).clicked() {

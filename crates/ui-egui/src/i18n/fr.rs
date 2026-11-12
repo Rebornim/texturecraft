@@ -7,6 +7,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Baking {map} ({n}/{total})", "Cuisson de {map} ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "Cuisson de {map} ({n}/{total}), jeu de textures {set} sur {sets}"),
     ("Cancel Export", "Annuler l'export"),
+    ("Cannot open {dir}: {error}", "Impossible d'ouvrir {dir} : {error}"),
     ("Console", "Console"),
     ("Export cancelled", "Export annulé"),
     ("Export successfully finished: {n} files", "Export terminé : {n} fichiers"),

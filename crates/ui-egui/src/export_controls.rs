@@ -2,10 +2,12 @@
 
 use egui::{RichText, Ui, vec2};
 use texturecraft_engine::core::ExportFileType;
-use texturecraft_engine::formats::FileFormat;
+use texturecraft_engine::formats::{ExportPreset, FileFormat};
 
 use crate::i18n::{tr, trf};
 
+/// Built-in templates that aren't for one engine or renderer: listed first, apart from the rest, as the reference does
+const GENERAL_TEMPLATES: [&str; 5] = ["Document channels + Normal + AO", "glTF PBR Metal Roughness", "OpenPBR (separate maps)", "Separate maps", "USDZ (AR)"];
 /// File types offered besides the template's own, in menu order
 const FILE_TYPES: [FileFormat; 8] =
     [FileFormat::Bmp, FileFormat::Jpeg, FileFormat::Png, FileFormat::Tga, FileFormat::Tiff, FileFormat::Hdr, FileFormat::Exr, FileFormat::Webp];
@@ -25,7 +27,10 @@ const MAP_FORMAT_WIDTH: f32 = 64.0;
 
 pub fn template_combo(ui: &mut Ui, id: &str, preset: &mut String, builtins: &[String], user: &[String], width: f32) {
     egui::ComboBox::from_id_salt(id).width(width).selected_text(preset.clone()).show_ui(ui, |ui| {
-        for name in builtins {
+        for (index, name) in builtins.iter().enumerate() {
+            if starts_template_group(builtins, index) {
+                ui.separator();
+            }
             ui.selectable_value(preset, name.clone(), name);
         }
         if !user.is_empty() {
@@ -35,6 +40,17 @@ pub fn template_combo(ui: &mut Ui, id: &str, preset: &mut String, builtins: &[St
             ui.selectable_value(preset, name.clone(), name);
         }
     });
+}
+
+/// Built-in templates in the order both lists show them: the general ones, then the rest, each group alphabetical
+pub fn sort_templates(presets: &mut [ExportPreset]) {
+    presets.sort_by_key(|preset| (!GENERAL_TEMPLATES.contains(&preset.name.as_str()), preset.name.to_lowercase()));
+}
+
+/// Whether the sorted template `index` of `names` is the first one after the general group
+pub fn starts_template_group(names: &[impl AsRef<str>], index: usize) -> bool {
+    let general = |index: usize| names.get(index).is_some_and(|name| GENERAL_TEMPLATES.contains(&name.as_ref()));
+    index > 0 && general(index - 1) && !general(index)
 }
 
 /// A file type's name in Settings (the extension elsewhere)

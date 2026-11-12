@@ -19,6 +19,13 @@ const TITLE_BAR_GRAB_OFFSET: f32 = 12.0;
 /// The drag that moves the window, and how far the window may end from where that drag puts it
 const WINDOW_DRAG: egui::Vec2 = egui::vec2(-80.0, 40.0);
 const WINDOW_MOVE_TOLERANCE: f32 = 2.0;
+/// How far inside the dialog's bottom right corner its resize grip is grabbed, and the drag that sizes it
+const RESIZE_GRAB_INSET: f32 = 3.0;
+const WINDOW_RESIZE: egui::Vec2 = egui::vec2(60.0, 80.0);
+/// How far the size may end from that drag: the grip starts following a couple of points into it
+const WINDOW_RESIZE_TOLERANCE: f32 = 4.0;
+/// The most of the Settings tab's height its parameters may leave empty
+const MOST_EMPTY_SETTINGS: f32 = 0.25;
 
 /// The sample project with `set_count` texture sets in an app window of `size`, Export textures open
 fn harness(set_count: usize, size: egui::Vec2) -> Harness<'static, TextureCraftApp> {
@@ -137,15 +144,17 @@ fn the_color_space_says_data_maps_stay_linear() {
 }
 
 #[test]
-fn save_settings_writes_the_project_and_cancel_drops_the_edits() {
+fn save_settings_writes_the_project_and_closes_and_cancel_drops_the_edits() {
     let mut harness = harness(2, LAPTOP);
     draft(&mut harness).settings.parameters.file_type.format = "tga".into();
     harness.get_by_label("Save settings").click();
     harness.run_steps(2);
     let saved = harness.state().session.doc.project.export.clone().unwrap();
     assert_eq!(saved.parameters.file_type.format, "tga");
-    assert!(harness.state().ui.windows.export, "Save settings keeps the window open");
+    assert!(!harness.state().ui.windows.export, "Save settings closes the window");
 
+    harness.state_mut().ui.windows.export = true;
+    harness.run_steps(2);
     draft(&mut harness).settings.parameters.file_type.format = "png".into();
     harness.get_by_label("Cancel").click();
     harness.run_steps(2);
@@ -414,11 +423,12 @@ fn an_empty_template_cannot_be_saved_or_exported() {
 }
 
 #[test]
-fn the_template_list_is_alphabetical() {
+fn the_template_list_puts_the_general_templates_first_then_the_rest_alphabetically() {
     let mut harness = harness(2, LAPTOP);
     harness.get_by_label("Output templates").click();
     harness.run_steps(2);
     let y = |name: &str| harness.get_by_label(name).rect().top();
+    assert!(y("OpenPBR (separate maps)") < y("USDZ (AR)") && y("USDZ (AR)") < y("Arnold (Standard Surface)"), "the general group comes first");
     assert!(y("Arnold (Standard Surface)") < y("CryEngine (Illum)") && y("CryEngine (Illum)") < y("Unity URP (Metallic)"));
 }
 
@@ -480,17 +490,64 @@ fn the_window_moves_by_its_title_bar() {
     let mut harness = harness(2, egui::vec2(1600.0, 960.0));
     let before = dialog_rect(&harness);
     let grab = egui::pos2(before.center().x, before.top() + TITLE_BAR_GRAB_OFFSET);
-    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
-    harness.hover_at(grab);
-    harness.event(button(grab, true));
-    harness.run_steps(1);
-    let to = grab + WINDOW_DRAG;
-    harness.hover_at(to);
-    harness.run_steps(1);
-    harness.event(button(to, false));
-    harness.run_steps(2);
+    drag(&mut harness, grab, grab + WINDOW_DRAG);
     let after = dialog_rect(&harness);
     assert!((after.center() - before.center() - WINDOW_DRAG).length() < WINDOW_MOVE_TOLERANCE, "{before:?} -> {after:?}");
+}
+
+/// Press at `from`, move to `to` and release, a frame apart
+fn drag(harness: &mut Harness<'static, TextureCraftApp>, from: egui::Pos2, to: egui::Pos2) {
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    harness.hover_at(from);
+    harness.event(button(from, true));
+    harness.run_steps(1);
+    harness.hover_at(to);
+    harness.run_steps(2);
+    harness.event(button(to, false));
+    harness.run_steps(2);
+}
+
+#[test]
+fn the_window_sizes_by_its_corner_and_keeps_that_size_on_every_tab() {
+    let mut harness = harness(2, egui::vec2(1600.0, 960.0));
+    let before = dialog_rect(&harness);
+    let grab = before.right_bottom() - egui::Vec2::splat(RESIZE_GRAB_INSET);
+    drag(&mut harness, grab, grab + WINDOW_RESIZE);
+    let resized = dialog_rect(&harness);
+    let change = resized.size() - before.size();
+    assert!((change - WINDOW_RESIZE).length() < WINDOW_RESIZE_TOLERANCE, "{before:?} -> {resized:?}");
+
+    for tab in ["Output templates", "List of exports", "Settings"] {
+        harness.get_by_label(tab).click();
+        harness.run_steps(5);
+        let size = dialog_rect(&harness).size();
+        assert!((size - resized.size()).length() < 1.0, "{tab}: {size:?} vs {:?}", resized.size());
+    }
+}
+
+#[test]
+fn the_settings_tab_opens_at_most_a_quarter_empty() {
+    let harness = harness(2, egui::vec2(1600.0, 960.0));
+    let top = harness.get_by_label("General export parameters").rect().top();
+    let last = harness.get_by_label("Export shader parameters").rect().bottom();
+    let bottom = harness.get_all_by_label("Reset all").find(|node| node.accesskit_node().role() == Role::Button).unwrap().rect().top();
+    let empty = (bottom - last) / (bottom - top);
+    assert!(empty <= MOST_EMPTY_SETTINGS, "{:.0}% of the Settings tab is empty", empty * 100.0);
+}
+
+#[test]
+fn the_variable_button_sits_beside_the_name_not_on_it() {
+    let mut harness = harness(2, LAPTOP);
+    harness.state_mut().ui.export.preset = "Unity HDRP (Mask Map)".into();
+    harness.get_by_label("Output templates").click();
+    harness.run_steps(3);
+    let names: Vec<egui::Rect> =
+        harness.get_all_by_role(Role::TextInput).filter(|node| node.value().is_some_and(|value| value.starts_with('$'))).map(|node| node.rect()).collect();
+    let buttons: Vec<egui::Rect> = harness.get_all_by_label(egui_phosphor::regular::CURRENCY_DOLLAR).map(|node| node.rect()).collect();
+    assert_eq!(buttons.len(), names.len(), "one $ button per name");
+    for (name, button) in names.iter().zip(&buttons) {
+        assert!(!name.intersects(*button) && button.left() >= name.right(), "the $ {button:?} covers the name {name:?}");
+    }
 }
 
 #[test]

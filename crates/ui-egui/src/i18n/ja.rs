@@ -7,6 +7,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Baking {map} ({n}/{total})", "{map} をベイク中 ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "{map} をベイク中 ({n}/{total})、テクスチャセット {set}/{sets}"),
     ("Cancel Export", "書き出しをキャンセル"),
+    ("Cannot open {dir}: {error}", "{dir} を開けません: {error}"),
     ("Console", "コンソール"),
     ("Export cancelled", "書き出しをキャンセルしました"),
     ("Export successfully finished: {n} files", "書き出しが完了しました: {n} ファイル"),

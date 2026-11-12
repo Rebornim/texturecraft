@@ -7,6 +7,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Baking {map} ({n}/{total})", "{map} 베이크 중 ({n}/{total})"),
     ("Baking {map} ({n}/{total}), texture set {set} of {sets}", "{map} 베이크 중 ({n}/{total}), 텍스처 세트 {set}/{sets}"),
     ("Cancel Export", "내보내기 취소"),
+    ("Cannot open {dir}: {error}", "{dir}을(를) 열 수 없습니다: {error}"),
     ("Console", "콘솔"),
     ("Export cancelled", "내보내기가 취소되었습니다"),
     ("Export successfully finished: {n} files", "내보내기 완료: 파일 {n}개"),

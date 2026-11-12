@@ -307,7 +307,8 @@ fn every_format_encodes_and_decodes() {
     };
     let mut preset = builtin_preset("glTF PBR Metal Roughness").unwrap();
     preset.maps.push(gray_alpha);
-    for format in FileFormat::ALL {
+    // PGM holds gray only: `pgm_writes_gray_at_8_and_16_bits`
+    for format in FileFormat::ALL.into_iter().filter(|format| *format != FileFormat::Pgm) {
         for &depth in format.bit_depths() {
             let mut opts = ExportOptions::new(preset.clone());
             opts.format_override = Some(format);
@@ -330,6 +331,31 @@ fn every_format_encodes_and_decodes() {
                 _ => assert!(decode(base).color().has_alpha(), "{format:?} keeps opacity"),
             }
         }
+    }
+}
+
+#[test]
+fn pgm_writes_gray_at_8_and_16_bits() {
+    let fx = Fx::new(&default_channels());
+    for depth in [8, 16] {
+        let mut opts = ExportOptions::new(builtin_preset("glTF PBR Metal Roughness").unwrap());
+        opts.format_override = Some(FileFormat::Pgm);
+        opts.bit_depth_override = Some(depth);
+        let files = fx.render(&opts);
+        let orm = find(&files, "OcclusionRoughnessMetallic.");
+        assert!(orm.name.ends_with(".pgm"));
+        assert!(orm.bytes.starts_with(b"P5"), "binary graymap");
+        let image = decode(orm);
+        let expected = if depth == 16 { image::ColorType::L16 } else { image::ColorType::L8 };
+        assert_eq!(image.color(), expected);
+        assert!(orm.warnings.iter().any(|warning| warning.contains("luminance")), "{:?}", orm.warnings);
+
+        // The colour maps' luminance survives: Rec. 709 weights of the ORM texel
+        let texel = fx.render(&ExportOptions::new(builtin_preset("glTF PBR Metal Roughness").unwrap()));
+        let rgb = decode(find(&texel, "OcclusionRoughnessMetallic.")).to_rgb32f().get_pixel(1, 1).0;
+        let luma = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+        let gray = image.to_luma32f().get_pixel(1, 1)[0];
+        assert!((gray - luma).abs() < 0.01, "{depth} bits: {gray} vs {luma}");
     }
 }
 

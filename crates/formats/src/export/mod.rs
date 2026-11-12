@@ -38,6 +38,8 @@ pub use preview::{MAX_PREVIEW_SIDE, preview_map};
 /// width tilts the normal 45°, at any resolution.
 const HEIGHT_SPAN: f32 = 16.0;
 const JPEG_QUALITY: u8 = 95;
+/// Rec. 709 luminance weights, for colour written to a grayscale-only format
+const REC709_LUMA: [f32; 3] = [0.2126, 0.7152, 0.0722];
 /// Converted maps of the metallic workflow: a dielectric's reflectance, and the IORs 1/ior runs between
 const DIELECTRIC_F0: f32 = 0.04;
 const DIELECTRIC_IOR: f32 = 1.4;
@@ -91,11 +93,22 @@ pub enum FileFormat {
     Webp,
     Exr,
     Hdr,
+    /// Netpbm grayscale (P5)
+    Pgm,
 }
 
 impl FileFormat {
-    pub const ALL: [FileFormat; 8] =
-        [FileFormat::Png, FileFormat::Jpeg, FileFormat::Tga, FileFormat::Tiff, FileFormat::Bmp, FileFormat::Webp, FileFormat::Exr, FileFormat::Hdr];
+    pub const ALL: [FileFormat; 9] = [
+        FileFormat::Png,
+        FileFormat::Jpeg,
+        FileFormat::Tga,
+        FileFormat::Tiff,
+        FileFormat::Bmp,
+        FileFormat::Webp,
+        FileFormat::Exr,
+        FileFormat::Hdr,
+        FileFormat::Pgm,
+    ];
 
     pub fn extension(self) -> &'static str {
         match self {
@@ -107,6 +120,7 @@ impl FileFormat {
             FileFormat::Webp => "webp",
             FileFormat::Exr => "exr",
             FileFormat::Hdr => "hdr",
+            FileFormat::Pgm => "pgm",
         }
     }
 
@@ -122,7 +136,7 @@ impl FileFormat {
     /// Bit depths this format is written with (16 and 32 are half and full float for EXR).
     pub fn bit_depths(self) -> &'static [u8] {
         match self {
-            FileFormat::Png | FileFormat::Tiff => &[8, 16],
+            FileFormat::Png | FileFormat::Tiff | FileFormat::Pgm => &[8, 16],
             FileFormat::Exr => &[16, 32],
             FileFormat::Hdr => &[32],
             _ => &[8],
@@ -1005,6 +1019,11 @@ fn encode(
             (remap(&encoded, component_count, if component_count == 2 { &[0] } else { &[0, 1, 2] }), component_count - 1)
         }
         (FileFormat::Tiff, 2) => (remap(&encoded, 2, &[0, 0, 0, 1]), 4),
+        (FileFormat::Pgm, 1) => (encoded, 1),
+        (FileFormat::Pgm, _) => {
+            warnings.push(pgm_warning(component_count).into());
+            (luminance(&encoded, component_count), 1)
+        }
         _ => (encoded, component_count),
     };
 
@@ -1054,6 +1073,26 @@ fn dither_offset(component_index: usize) -> f32 {
     (hash >> 40) as f32 / (1u64 << 24) as f32
 }
 
+/// What a PGM file loses from an `component_count`-component image
+fn pgm_warning(component_count: usize) -> &'static str {
+    match component_count {
+        2 => "PGM has no alpha channel; alpha was dropped",
+        3 => "PGM is grayscale; the colours were written as their luminance",
+        _ => "PGM is grayscale with no alpha channel; the colours were written as their luminance and alpha was dropped",
+    }
+}
+
+/// The Rec. 709 luminance of every texel of an `n`-component image (gray stays gray, alpha is dropped)
+fn luminance(data: &[f32], n: usize) -> Vec<f32> {
+    data.chunks_exact(n.max(1))
+        .map(|texel| match texel {
+            [red, green, blue, ..] => REC709_LUMA[0] * red + REC709_LUMA[1] * green + REC709_LUMA[2] * blue,
+            [gray, ..] => *gray,
+            [] => 0.0,
+        })
+        .collect()
+}
+
 /// Pick components `pick` from every texel of an `n`-component image.
 fn remap(data: &[f32], n: usize, pick: &[usize]) -> Vec<f32> {
     data.chunks_exact(n.max(1)).flat_map(|px| pick.iter().map(|k| px.get(*k).copied().unwrap_or(0.0))).collect()
@@ -1095,6 +1134,16 @@ fn write_image(format: FileFormat, bytes: &[u8], (w, h): (u32, u32), color: imag
                 let _ = enc.set_icc_profile(p);
             }
             enc.write_image(bytes, w, h, color)?;
+            return Ok(out.into_inner());
+        }
+        FileFormat::Pgm => {
+            let header = image::codecs::pnm::GraymapHeader {
+                encoding: image::codecs::pnm::SampleEncoding::Binary,
+                width: w,
+                height: h,
+                maxwhite: if color == ExtendedColorType::L16 { u32::from(u16::MAX) } else { u32::from(u8::MAX) },
+            };
+            image::codecs::pnm::PnmEncoder::new(&mut out).with_header(header.into()).write_image(bytes, w, h, color)?;
             return Ok(out.into_inner());
         }
         FileFormat::Png => image::ImageFormat::Png,

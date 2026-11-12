@@ -16,6 +16,7 @@ pub mod bake_presets;
 mod bake_report;
 mod bake_scene;
 mod color_management;
+mod color_picker;
 mod color_selection_editor;
 pub mod control;
 mod decal_drop;
@@ -253,6 +254,8 @@ pub struct TextureCraftApp {
     pub picking_id_color: Option<id_color_pick::IdColorPick>,
     /// Whether the next click on the model places the symmetry planes (Pick point in the symmetry settings)
     pub picking_symmetry_plane: bool,
+    /// The colour bar whose eyedropper waits for a click on the model
+    pub picking_color: Option<egui::Id>,
     /// The wgpu state (screenshots read the renderer's targets).
     pub render_state: Option<eframe::egui_wgpu::RenderState>,
     /// CJK fallback fonts for the UI language.
@@ -357,6 +360,7 @@ impl TextureCraftApp {
             properties_popup: None,
             picking_id_color: None,
             picking_symmetry_plane: false,
+            picking_color: None,
             render_state: cc.wgpu_render_state.clone(),
             fonts: fonts::UiFonts::default(),
             banner: None,

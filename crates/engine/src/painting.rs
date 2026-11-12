@@ -665,6 +665,14 @@ impl Session {
 
     /// Material picker: copy the material under the cursor into the tool's paint values
     pub fn color_pick(&mut self, screen: Vec2, viewport: Vec2) -> Result<BTreeMap<Channel, [f32; 3]>> {
+        let picked = self.color_at(screen, viewport)?;
+        self.tool.values.extend(&picked);
+        self.tool.material = None;
+        Ok(picked)
+    }
+
+    /// The composited value of every channel on the surface under `screen`, changing nothing (an eyedropper's read)
+    pub fn color_at(&self, screen: Vec2, viewport: Vec2) -> Result<BTreeMap<Channel, [f32; 3]>> {
         let hit = self.pick(screen, viewport).ok_or_else(|| EngineError::Other("nothing under the cursor".into()))?;
         let texture_set = self.texture_set_of_material(hit.material).unwrap_or(self.ts());
         let cache = self.caches.get(texture_set).ok_or_else(|| EngineError::Other("texture set not ready".into()))?;
@@ -674,10 +682,7 @@ impl Session {
 
         let tile = (x / texturecraft_texel::TILE, y / texturecraft_texel::TILE);
         let source = self.document_composite(texture_set, &[tile]).ok_or_else(|| EngineError::Other("texture set not ready".into()))?;
-        let picked: BTreeMap<_, _> = source.channels.keys().map(|&channel| (channel, source.value(channel, x, y))).collect();
-        self.tool.values.extend(&picked);
-        self.tool.material = None;
-        Ok(picked)
+        Ok(source.channels.keys().map(|&channel| (channel, source.value(channel, x, y))).collect())
     }
 
     /// The stroke canvas alpha of the active stroke (for overlays and tests).

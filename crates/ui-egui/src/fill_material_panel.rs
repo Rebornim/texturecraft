@@ -5,13 +5,15 @@ use serde_json::{Value, json};
 use texturecraft_engine::core::{
     Channel, ChannelKind, CookResolution, Fill, LayerId, LinkParam, MaterialLink, NormalFormat, Procedural, ProceduralKind, Source,
 };
+use texturecraft_engine::fill_material_cmds::whole_materials;
+use texturecraft_engine::materials::{SmartMaterial, find};
 use texturecraft_engine::texel::linear_to_srgb;
 
 use crate::TextureCraftApp;
 use crate::color_picker::{ColorPick, SwatchEdit};
 use crate::dock::{anchors_below, with};
 use crate::i18n::{tr, trf};
-use crate::material_orb::{OrbLook, material_orb};
+use crate::material_orb::{OrbLook, material_orb, material_orb_in};
 use crate::property_sheet::PropertySheet;
 use crate::resolution_band::resolution_band;
 use crate::slot_thumbnail::{paint_thumbnail, thumbnail};
@@ -57,17 +59,12 @@ pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
     let orb = |painter: &Painter, rect: Rect| material_orb(painter, rect, look, &tokens);
     let link = fill.link.as_deref().zip(base.get("layer").and_then(Value::as_u64)).map(|(link, layer)| (link.clone(), LayerId(layer)));
     let mode_id = sheet.ui.make_persistent_id(("material_mode", base.to_string()));
-    let mode = match &link {
-        Some(_) => sheet.ui.data(|data| data.get_temp::<usize>(mode_id)).unwrap_or(MATERIAL_MODE),
-        None => CHANNELS_MODE,
-    };
-    if link.is_some() {
-        let modes = MODES.map(tr);
-        if let Some(picked) = sheet.orb_switch(&orb, &modes, mode) {
-            sheet.ui.data_mut(|data| data.insert_temp(mode_id, picked));
-        }
-    } else {
-        sheet.orb_switch(&orb, &[], 0);
+    // A fill opens on the side that made it: a material (linked or built-in) on Material, separate sources on Channels
+    let made_whole = link.is_some() || fill.material.is_some();
+    let mode = sheet.ui.data(|data| data.get_temp::<usize>(mode_id)).unwrap_or(if made_whole { MATERIAL_MODE } else { CHANNELS_MODE });
+    let modes = MODES.map(tr);
+    if let Some(picked) = sheet.orb_switch(&orb, &modes, mode) {
+        sheet.ui.data_mut(|data| data.insert_temp(mode_id, picked));
     }
 
     match link {
@@ -90,6 +87,7 @@ pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
                 crate::dock::open_link_in_materialcraft(app, layer, &link);
             }
         }
+        None if mode == MATERIAL_MODE => whole_material_card(app, sheet, fill, base, look),
         _ => {
             let anchors = anchors_below(app, reader);
             for channel in channels.into_iter().filter(|channel| on.contains(channel)) {
@@ -364,6 +362,34 @@ fn material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, link:
     if waiting && !sheet.ui.input(|input| input.pointer.any_down()) {
         sheet.ui.data_mut(|data| data.remove::<bool>(pending));
         app.cook_link(layer);
+    }
+    sheet.close_card();
+}
+
+/// The Material side of a fill without a linked material: one card holding the built-in material its sources came from (the row lists every plain material, × returns the channels to their defaults)
+fn whole_material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, look: OrbLook) {
+    let tokens = Tokens::get(sheet.ui.ctx());
+    let held = fill.material.as_deref().and_then(find);
+    let name = held.map_or_else(|| tr("None"), |material| tr(material.label));
+    let slot = sheet.slot(&|painter, rect| material_orb(painter, rect, look, &tokens), name, tr("Material"), None, held.is_some(), false);
+    let materials: Vec<&'static SmartMaterial> = whole_materials().collect();
+    let options: Vec<usize> = (0..materials.len()).collect();
+    let current = held.and_then(|material| materials.iter().position(|listed| listed.id == material.id)).unwrap_or(usize::MAX);
+    let label = |index: usize| materials.get(index).map(|material| tr(material.label).to_owned()).unwrap_or_default();
+    let picture = |painter: &Painter, rect: Rect, index: usize| {
+        if let Some(material) = materials.get(index) {
+            let look = OrbLook { base: material.base, metallic: material.metallic, roughness: material.roughness };
+            material_orb_in(painter, rect, look, &tokens, material.id);
+        }
+    };
+    if let (Some(index), _) = sheet.hanging_list(&slot.pick, current, &options, &label, Some(&picture))
+        && index != current
+        && let Some(material) = materials.get(index)
+    {
+        app.run("layer.fill.material", with(base, json!({"material": material.id})));
+    }
+    if slot.clear {
+        app.run("layer.fill.material", with(base, json!({"material": null})));
     }
     sheet.close_card();
 }

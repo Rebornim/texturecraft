@@ -35,6 +35,9 @@ fn fill_json(f: &Fill) -> Value {
     if let Some(link) = &f.link {
         v["link"] = json!(link);
     }
+    if let Some(material) = &f.material {
+        v["material"] = json!(material);
+    }
     v
 }
 

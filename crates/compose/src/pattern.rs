@@ -428,6 +428,7 @@ pub fn procedural_in(pattern: &Procedural, projection: &Projection, coords: &Coo
     // Evaluate two-dimensional patterns on a slice of the volume
     let flat = |q: Vec2| plane_value(pattern, q.extend(0.0), context);
     let value = match projection {
+        Projection::UvTile => flat((coords.uv - coords.uv.floor()) * pattern_scale),
         Projection::Uv { scale, rotation, offset } => flat(place(coords.uv, Vec2::from(*scale), *rotation, Vec2::from(*offset)) * pattern_scale),
         Projection::Triplanar { scale, sharpness, offset, uv, projector } => {
             let coords = &projector_local(projector, coords);
@@ -515,6 +516,7 @@ fn pattern_value(pattern: &Procedural, point: Vec3, context: &PatternContext) ->
 pub fn image_samples(projection: &Projection, coords: &Coords) -> [(Vec2, f32); 3] {
     let one = |uv: Vec2| [(uv, 1.0), (Vec2::ZERO, 0.0), (Vec2::ZERO, 0.0)];
     match projection {
+        Projection::UvTile => one(coords.uv - coords.uv.floor()),
         Projection::Uv { scale, rotation, offset } => one(place(coords.uv, Vec2::from(*scale), *rotation, Vec2::from(*offset))),
         Projection::Triplanar { scale, sharpness, offset, uv, projector } => {
             let coords = &projector_local(projector, coords);

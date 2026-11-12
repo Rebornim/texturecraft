@@ -17,6 +17,7 @@ pub mod eval;
 mod fabric;
 pub mod fill_copies;
 pub mod fill_copy;
+pub mod frame_placement;
 mod fur_lock;
 mod held_fields;
 mod image_identity;

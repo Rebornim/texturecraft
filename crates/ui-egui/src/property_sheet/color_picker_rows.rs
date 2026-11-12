@@ -49,8 +49,8 @@ const MENU_INSET: f32 = 6.0;
 const GLYPH_SIZE: f32 = 13.0;
 const GLYPH_TARGET: f32 = 18.0;
 
-/// The model dropdown is as wide as its value plus this (its padding and caret)
-const MODEL_BUTTON_ROOM: f32 = 34.0;
+/// A dropdown is as wide as its value plus this (its padding and caret)
+const DROPDOWN_ROOM: f32 = 34.0;
 
 /// Pitch of the three sliders (the stack rhythm's part rows)
 const SLIDER_ROW: f32 = 22.0;
@@ -109,10 +109,11 @@ impl PropertySheet<'_> {
         pick
     }
 
-    /// The colour space: a full-width dropdown; the option hovered in its open list
+    /// The colour space: a dropdown as wide as its longest option, so a hovered option doesn't resize it; the option hovered in its open list
     fn space_row(&mut self, state: &mut PickerState) -> Option<ColorSpace> {
         let center_y = self.take(ROW_HEIGHT).center().y;
-        let button = self.control_box(self.left, center_y);
+        let longest = ColorSpace::ALL.iter().map(|space| self.text_width(space.name(), semibold(TEXT_SIZE))).fold(0.0, f32::max);
+        let button = Rect::from_min_size(pos2(self.left, center_y - CONTROL_HEIGHT / 2.0), vec2(longest + DROPDOWN_ROOM, CONTROL_HEIGHT));
         let response = self.dropdown_button(button, state.space.name(), None::<fn(&Painter, Rect)>);
         self.drawn(button.bottom());
         let (picked, hovered) = self.hanging_list(&response, state.space, &ColorSpace::ALL, &|space: ColorSpace| space.name().to_owned(), None);
@@ -263,7 +264,7 @@ impl PropertySheet<'_> {
     /// The model dropdown, sized to its value, and the ⋯ menu at the right edge; the model hovered in its open list
     fn model_row(&mut self, state: &mut PickerState) -> Option<ColorModel> {
         let center_y = self.take(ROW_HEIGHT).center().y;
-        let width = self.text_width(state.model.name(), semibold(TEXT_SIZE)) + MODEL_BUTTON_ROOM;
+        let width = self.text_width(state.model.name(), semibold(TEXT_SIZE)) + DROPDOWN_ROOM;
         let button = Rect::from_min_size(pos2(self.left, center_y - CONTROL_HEIGHT / 2.0), vec2(width, CONTROL_HEIGHT));
         let response = self.dropdown_button(button, state.model.name(), None::<fn(&Painter, Rect)>);
         self.drawn(button.bottom());

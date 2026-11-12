@@ -13,7 +13,8 @@ use crate::TextureCraftApp;
 use crate::color_picker::{ColorPick, SwatchEdit};
 use crate::dock::{anchors_below, with};
 use crate::i18n::{tr, trf};
-use crate::material_orb::{OrbLook, material_orb, material_orb_in};
+use crate::material_orb::material_orb;
+use crate::orb_material::OrbMaterial;
 use crate::property_sheet::PropertySheet;
 use crate::resolution_band::resolution_band;
 use crate::slot_thumbnail::{paint_thumbnail, thumbnail};
@@ -27,9 +28,6 @@ const CHANNELS_MODE: usize = 1;
 /// Pattern scale and contrast a procedural's sliders run over (typed values stay inside them too)
 const PATTERN_SCALE: std::ops::RangeInclusive<f32> = 0.1..=32.0;
 const PATTERN_CONTRAST: std::ops::RangeInclusive<f32> = 0.0..=2.0;
-
-/// The base colour, metallic and roughness the orb shows for an image or anchor source it cannot read
-const UNREAD_GRAY: f32 = 0.5;
 
 /// A source the slot's list offers
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -55,8 +53,9 @@ pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
     }
 
     let tokens = Tokens::get(sheet.ui.ctx());
-    let look = orb_look(fill, on);
-    let orb = |painter: &Painter, rect: Rect| material_orb(painter, rect, look, &tokens);
+    let look = OrbMaterial::of_fill(fill, on, &app.session.images);
+    let place = base.to_string();
+    let orb = |painter: &Painter, rect: Rect| material_orb(painter, rect, &look, &tokens, &format!("orb{place}"));
     let link = fill.link.as_deref().zip(base.get("layer").and_then(Value::as_u64)).map(|(link, layer)| (link.clone(), LayerId(layer)));
     let mode_id = sheet.ui.make_persistent_id(("material_mode", base.to_string()));
     // A fill opens on the side that made it: a material (linked or built-in) on Material, separate sources on Channels
@@ -70,7 +69,7 @@ pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
     match link {
         Some((link, layer)) if mode == MATERIAL_MODE => {
             let shown: Vec<Channel> = channels.into_iter().filter(|channel| on.contains(channel)).collect();
-            material_card(app, sheet, &link, layer, look);
+            material_card(app, sheet, &link, layer, &look, &place);
             mapping_band(app, sheet, fill, &shown, layer);
             let texture_set = app.session.doc.project.texture_set(app.session.ts()).map_or(link.size, |texture_set| texture_set.resolution);
             if let Some(picked) = resolution_band(sheet, link.resolution.unwrap_or(CookResolution::TEXTURE_SET), texture_set) {
@@ -87,7 +86,7 @@ pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
                 crate::dock::open_link_in_materialcraft(app, layer, &link);
             }
         }
-        None if mode == MATERIAL_MODE => whole_material_card(app, sheet, fill, base, look),
+        None if mode == MATERIAL_MODE => whole_material_card(app, sheet, fill, base, &look, &place),
         _ => {
             let anchors = anchors_below(app, reader);
             for channel in channels.into_iter().filter(|channel| on.contains(channel)) {
@@ -108,21 +107,6 @@ fn pill_name(channel: Channel) -> &'static str {
         Channel::Opacity => "Opacity",
         other => other.label(),
     }
-}
-
-/// What the orb shows for the fill: its uniform values, the middle of a procedural's two values, a gray for what it cannot read; defaults for channels that are off
-fn orb_look(fill: &Fill, on: &[Channel]) -> OrbLook {
-    let value = |channel: Channel| {
-        if !on.contains(&channel) {
-            return channel.default_value();
-        }
-        match fill.source(channel) {
-            Source::Uniform(value) => value,
-            Source::Procedural { low, high, .. } => [0, 1, 2].map(|k| (low[k] + high[k]) / 2.0),
-            Source::Image { .. } | Source::Anchor { .. } => [UNREAD_GRAY; 3],
-        }
-    };
-    OrbLook { base: value(Channel::BaseColor), metallic: value(Channel::Metallic)[0], roughness: value(Channel::Roughness)[0] }
 }
 
 /// A linear colour as the sRGB colour the screen shows
@@ -335,10 +319,10 @@ fn procedural_rows(
 }
 
 /// The Material side: the fill's whole material in one card (the row lists its presets), its inputs, then opening it in MaterialCraft
-fn material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, link: &MaterialLink, layer: LayerId, look: OrbLook) {
+fn material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, link: &MaterialLink, layer: LayerId, look: &OrbMaterial, place: &str) {
     let tokens = Tokens::get(sheet.ui.ctx());
     let base = json!({"layer": layer.0, "cook": false});
-    let slot = sheet.slot(&|painter, rect| material_orb(painter, rect, look, &tokens), &link.name, tr("Material"), None, false, false);
+    let slot = sheet.slot(&|painter, rect| material_orb(painter, rect, look, &tokens, &format!("card{place}")), &link.name, tr("Material"), None, false, false);
     let presets: Vec<usize> = (0..link.presets.len()).collect();
     let preset_name = |index: usize| link.presets.get(index).map(|preset| preset.name.clone()).unwrap_or_default();
     let editable = cfg!(not(target_arch = "wasm32"));
@@ -367,19 +351,20 @@ fn material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, link:
 }
 
 /// The Material side of a fill without a linked material: one card holding the built-in material its sources came from (the row lists every plain material, × returns the channels to their defaults)
-fn whole_material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, look: OrbLook) {
+fn whole_material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, look: &OrbMaterial, place: &str) {
     let tokens = Tokens::get(sheet.ui.ctx());
     let held = fill.material.as_deref().and_then(find);
     let name = held.map_or_else(|| tr("None"), |material| tr(material.label));
-    let slot = sheet.slot(&|painter, rect| material_orb(painter, rect, look, &tokens), name, tr("Material"), None, held.is_some(), false);
+    let slot =
+        sheet.slot(&|painter, rect| material_orb(painter, rect, look, &tokens, &format!("card{place}")), name, tr("Material"), None, held.is_some(), false);
     let materials: Vec<&'static SmartMaterial> = whole_materials().collect();
     let options: Vec<usize> = (0..materials.len()).collect();
     let current = held.and_then(|material| materials.iter().position(|listed| listed.id == material.id)).unwrap_or(usize::MAX);
     let label = |index: usize| materials.get(index).map(|material| tr(material.label).to_owned()).unwrap_or_default();
     let picture = |painter: &Painter, rect: Rect, index: usize| {
         if let Some(material) = materials.get(index) {
-            let look = OrbLook { base: material.base, metallic: material.metallic, roughness: material.roughness };
-            material_orb_in(painter, rect, look, &tokens, material.id);
+            let look = OrbMaterial::uniform(material.base, material.metallic, material.roughness);
+            material_orb(painter, rect, &look, &tokens, material.id);
         }
     };
     if let (Some(index), _) = sheet.hanging_list(&slot.pick, current, &options, &label, Some(&picture))

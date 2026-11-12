@@ -354,6 +354,8 @@ pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Respons
     {
         params["merge"] = json!(drag.stepped);
         drag.stepped |= texturecraft_engine::execute(&mut app.session, "layer.fill.projection", &params).is_ok();
+        // The panel drew before this edit: one more frame shows its fields and preview where the projector is now
+        ctx.request_repaint();
     }
     ctx.data_mut(|data| data.insert_temp(drag_id(), drag));
     true
@@ -399,7 +401,7 @@ mod tests {
     use texturecraft_engine::core::{LayerId, Projection, Projector};
 
     use super::*;
-    use crate::frame_gizmo::tests::{drag, fill_app, projection};
+    use crate::frame_gizmo::tests::{drag, drag_frames, fill_app, panel_xyz, projection};
 
     fn moving(projection_id: &str) -> (egui_kittest::Harness<'static, TextureCraftApp>, LayerId) {
         let (mut harness, layer) = fill_app(projection_id);
@@ -497,5 +499,43 @@ mod tests {
         let (_, offset) = projector_and_offset(&projection(&harness, layer));
         assert!(offset[1] < -0.1 && offset[0].abs() < 0.05, "sliding up shifts the texture by the tiling: {offset:?}");
         assert!(gizmo(&harness).center.distance(box_gizmo.center + vec2(0.0, -30.0)) < 1.5, "the centre sits under the pointer");
+    }
+
+    /// Every drag on the projector shows in the panel the same frame: its Offset, Rotation and Scale fields hold the projector's values and the preview square re-renders, every frame of the drag; one undo step per drag
+    #[test]
+    fn the_panel_and_its_preview_follow_every_frame_of_a_projector_drag() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        for kind in ["spherical", "cylindrical"] {
+            let (mut harness, layer) = moving(kind);
+            let steps = harness.state().session.history_labels().len();
+            let read = |harness: &egui_kittest::Harness<'_, TextureCraftApp>| {
+                let (projector, offset) = projector_and_offset(&projection(harness, layer));
+                let (row_offset, row_rotation, row_scale) = (panel_xyz(harness, "Offset"), panel_xyz(harness, "Rotation"), panel_xyz(harness, "Scale"));
+                for (row, field, value) in
+                    [("Offset", row_offset, offset), ("Rotation", row_rotation, projector.rotation), ("Scale", row_scale, projector.scale)]
+                {
+                    for axis in 0..3 {
+                        assert!((field[axis] - value[axis]).abs() < 1e-3, "{kind}: the panel's {row} shows the projector's {value:?}, not {field:?}");
+                    }
+                }
+            };
+
+            let start = gizmo(&harness);
+            let (dot, _) = start.dots[0];
+            drag_frames(&mut harness, layer, dot, start.center + (dot - start.center) * 1.5, Modifiers::NONE, true, read);
+            let tip = gizmo(&harness).arrows[0].unwrap();
+            let center = gizmo(&harness).center;
+            drag_frames(&mut harness, layer, tip, tip + (tip - center).normalized() * 30.0, Modifiers::NONE, true, read);
+            let turned = gizmo(&harness);
+            let clear = |p: &&Pos2| turned.rings[..2].iter().flatten().map(|other| other.distance(**p)).fold(f32::INFINITY, f32::min);
+            let on_ring = *turned.rings[2].iter().max_by(|a, b| clear(a).total_cmp(&clear(b))).unwrap();
+            drag_frames(&mut harness, layer, on_ring, turned.center + (on_ring - turned.center).rot90(), Modifiers::NONE, true, read);
+            let (projector, _) = projector_and_offset(&projection(&harness, layer));
+            assert!(
+                projector.scale.iter().copied().fold(0.0, f32::max) > 1.3 && projector.rotation[2].abs() > 30.0,
+                "{kind}: resized and turned: {projector:?}"
+            );
+            assert_eq!(harness.state().session.history_labels().len(), steps + 3, "{kind}: one undo step per drag");
+        }
     }
 }

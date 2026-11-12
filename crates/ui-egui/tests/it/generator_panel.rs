@@ -152,10 +152,20 @@ fn each_kind_shows_its_section_rows_and_no_earlier_ones() {
 
     let (harness, _) = harness_with(false, json!({"generator": "worldSpaceNormals"}));
     assert_eq!(count(&harness, "Blending mode"), 3);
+    for axis in ["Right to left", "Top to bottom", "Front to back"] {
+        assert_eq!(count(&harness, axis), 2, "{axis}: a section heading and its weight slider");
+    }
     let (harness, _) = harness_with(false, json!({"generator": "direction"}));
     assert_eq!(count(&harness, "Angle"), 2, "an Angle slider beside each dial");
     let (harness, _) = harness_with(false, json!({"generator": "position", "level": 0.4}));
     assert!(count(&harness, "Level") > 0 && count(&harness, "Balance") > 0, "the earlier model keeps its level beside the section at its defaults");
+}
+
+/// The blending mode dropdown in the Front to back section: the first dropdown below its heading, the topmost "Front to back"
+fn front_to_back_dropdown<'a>(harness: &'a Harness<'_, TextureCraftApp>) -> egui_kittest::Node<'a> {
+    let heading = harness.query_all_by_label("Front to back").map(|node| node.rect().top()).fold(f32::INFINITY, f32::min);
+    let below = harness.get_all_by_role(Role::ComboBox).filter(|node| node.rect().top() > heading);
+    below.min_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).unwrap()
 }
 
 #[test]
@@ -165,9 +175,9 @@ fn each_axis_has_its_own_blending_mode_dropdown() {
         harness.get_all_by_role(Role::ComboBox).filter(|node| node.value().as_deref() == Some("Linear Dodge (Add)")).count()
     };
     assert_eq!(added(&harness), 3);
-    harness.get_all_by_role(Role::ComboBox).filter(|node| node.value().as_deref() == Some("Linear Dodge (Add)")).nth(2).unwrap().scroll_to_me();
+    front_to_back_dropdown(&harness).scroll_to_me();
     harness.run_steps(3);
-    harness.get_all_by_role(Role::ComboBox).filter(|node| node.value().as_deref() == Some("Linear Dodge (Add)")).nth(2).unwrap().click();
+    front_to_back_dropdown(&harness).click();
     harness.run_steps(2);
     harness.get_by_label("Multiply").click();
     harness.run_steps(3);
@@ -202,7 +212,7 @@ fn the_light_dial_turns_towards_the_pointer() {
     harness.drop_at(left);
     harness.run_steps(3);
     let horizontal = generator(&harness, effect).light.unwrap().horizontal;
-    assert!((horizontal - 180.0).abs() < 1.0, "a click left of the centre points the needle left: {horizontal}");
+    assert!(!(1.0..=359.0).contains(&horizontal), "0 is on the left, as in the reference: {horizontal}");
 }
 
 #[test]

@@ -88,6 +88,12 @@ fn with_section(kind: GeneratorKind, change: impl FnOnce(&mut SectionParameters)
     generator
 }
 
+/// `generator` with a uniform `value` plugged into its Position input
+fn plugged(mut generator: Generator, value: f32) -> Generator {
+    generator.inputs.insert(BakedMap::Position, Source::Uniform([value; 3]));
+    generator
+}
+
 fn with_light(change: impl FnOnce(&mut LightParameters)) -> Generator {
     let mut generator = Generator::new(GeneratorKind::Direction);
     let mut light = generator.light.unwrap();
@@ -159,7 +165,7 @@ fn world_space_normals_combine_the_axes_of_the_normal() {
 }
 
 #[test]
-fn position_reads_the_mesh_bounds_without_a_bake_and_the_baked_map_with_one() {
+fn position_reads_the_mesh_bounds_unless_an_image_is_plugged_in() {
     let mut fixture = fixture();
     let points = surface(&fixture);
     let texels: Vec<_> = points.iter().map(|point| point.0).collect();
@@ -168,7 +174,9 @@ fn position_reads_the_mesh_bounds_without_a_bake_and_the_baked_map_with_one() {
     assert_close(&mask(&mut fixture, Generator::new(GeneratorKind::Position), &texels), &expected, "bounds");
 
     fixture.baked = uniform_map(BakedMap::Position, 0.25);
-    let balanced = with_section(GeneratorKind::Position, |section| section.balance = 0.25);
+    assert_close(&mask(&mut fixture, Generator::new(GeneratorKind::Position), &texels), &expected, "a baked Position map is not read");
+
+    let balanced = plugged(with_section(GeneratorKind::Position, |section| section.balance = 0.25), 0.25);
     assert_close(&mask(&mut fixture, balanced, &texels), &vec![0.25f32.powf(0.2); texels.len()], "a power curve balance");
 }
 
@@ -183,10 +191,9 @@ fn occlusion_balance_is_linear_and_brightness_lerps() {
     let inverted = with_section(GeneratorKind::AmbientOcclusion, |section| section.invert = true);
     assert_close(&mask(&mut fixture, inverted, &texels), &vec![0.4; texels.len()], "section invert");
 
-    fixture.baked = uniform_map(BakedMap::Position, 0.4);
-    let brighter = with_section(GeneratorKind::Position, |section| section.brightness = 0.5);
+    let brighter = plugged(with_section(GeneratorKind::Position, |section| section.brightness = 0.5), 0.4);
     assert_close(&mask(&mut fixture, brighter, &texels), &vec![0.7; texels.len()], "brightness 0.5 halves the way to white");
-    let darker = with_section(GeneratorKind::Position, |section| section.brightness = -0.5);
+    let darker = plugged(with_section(GeneratorKind::Position, |section| section.brightness = -0.5), 0.4);
     assert_close(&mask(&mut fixture, darker, &texels), &vec![0.2; texels.len()], "brightness -0.5 halves the value");
 }
 
@@ -203,9 +210,9 @@ fn section_blur_spreads_occlusion_across_a_step() {
     let blurred = mask(&mut fixture, with_section(GeneratorKind::AmbientOcclusion, |section| section.blur = 16.0), &row);
     assert!(blurred.iter().all(|value| *value > 0.05 && *value < 0.95), "blurred across the step: {blurred:?}");
 
-    let position = with_section(GeneratorKind::Position, |section| section.blur = 16.0);
-    fixture.baked = uniform_map(BakedMap::Position, 0.3);
-    assert_close(&mask(&mut fixture, position, &row), &vec![0.3; row.len()], "position has no section blur");
+    let sharp_position = mask(&mut fixture, Generator::new(GeneratorKind::Position), &row);
+    let blurred_position = mask(&mut fixture, with_section(GeneratorKind::Position, |section| section.blur = 16.0), &row);
+    assert_close(&blurred_position, &sharp_position, "position has no section blur");
 }
 
 #[test]

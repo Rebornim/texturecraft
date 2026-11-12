@@ -992,14 +992,8 @@ fn curvature_sizes_in_use(generator: &Generator) -> [bool; LEVEL_RADII.len()] {
         return wear::levels_in_use(generator.kind, &wear);
     }
 
-    let detail = curvature_detail_in_use(generator).as_ref().map(CurvatureDetail::blurred_sizes_in_use).unwrap_or_default();
+    let detail = generator.detail_in_use().as_ref().map(CurvatureDetail::blurred_sizes_in_use).unwrap_or_default();
     std::array::from_fn(|level| detail.get(level).copied().unwrap_or(false))
-}
-
-/// The mode and detail sizes `generator` reads its curvature with: its own, the defaults on Curvature's section controls, else None
-fn curvature_detail_in_use(generator: &Generator) -> Option<CurvatureDetail> {
-    let on_section = generator.kind == GeneratorKind::Curvature && generator.section_controls().is_some();
-    generator.detail.clone().or_else(|| on_section.then(CurvatureDetail::default))
 }
 
 /// The wear controls `generator` computes with: its own, Fiber Glass Edge Wear's defaults when it has none (it has no earlier model), else None
@@ -1421,7 +1415,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         if let Some(light) = &generator.light {
             let normal =
                 self.generator_input_color(generator, BakedMap::WorldNormal).map_or_else(|| self.coords().nrm, |encoded| Vec3::from(encoded) * 2.0 - 1.0);
-            let position = self.generator_input_color(generator, BakedMap::Position).map_or_else(|| self.bounds_position(), Vec3::from);
+            let position = Vec3::from(self.position_input(generator));
             return sections::light_value(light, normal, position, generator.invert);
         }
         if let Some(section) = generator.section_controls() {
@@ -1445,6 +1439,7 @@ impl<'a, 'b> Texel<'a, 'b> {
             (GeneratorKind::ThinAreas, _) => 1.0 - self.generator_input(generator, BakedMap::Thickness).unwrap_or(1.0),
             (GeneratorKind::Position, _) => coords.pos.dot(Vec3::from(generator.direction).try_normalize().unwrap_or(Vec3::Y)) * 0.5 + 0.5,
             (GeneratorKind::Direction, _) => coords.nrm.dot(Vec3::from(generator.direction).try_normalize().unwrap_or(Vec3::Y)) * 0.5 + 0.5,
+            // World Space Normals always computes with its section controls: this arm only keeps the match whole
             (GeneratorKind::WorldSpaceNormals, _) => coords.nrm.y * 0.5 + 0.5,
         };
         let signal = if generator.noise_amount > 0.0 {
@@ -1471,21 +1466,30 @@ impl<'a, 'b> Texel<'a, 'b> {
     fn section_signal(&mut self, generator: &Generator, section: &SectionParameters, curvature_sizes: Option<&CurvatureSizes>) -> f32 {
         match generator.kind {
             GeneratorKind::Curvature => {
-                let detail = curvature_detail_in_use(generator).unwrap_or_default();
+                let detail = generator.detail_in_use().unwrap_or_default();
                 let sizes = if generator.inputs.contains_key(&BakedMap::Curvature) { None } else { curvature_sizes };
                 let curvature = self.generator_input(generator, BakedMap::Curvature);
                 self.curvature_detail(&detail, sizes, curvature)
             }
             GeneratorKind::AmbientOcclusion => self.generator_input(generator, BakedMap::AmbientOcclusion).unwrap_or(1.0),
             GeneratorKind::Position => {
-                let position = self.generator_input_color(generator, BakedMap::Position).unwrap_or_else(|| self.bounds_position().to_array());
+                let position = self.position_input(generator);
                 sections::axes_signal(position, &section.axes)
             }
             GeneratorKind::WorldSpaceNormals => {
                 let normal = self.generator_input_color(generator, BakedMap::WorldNormal).unwrap_or_else(|| (self.coords().nrm * 0.5 + 0.5).to_array());
                 sections::axes_signal(normal, &section.axes)
             }
+            // Only the kinds with section controls reach here: this arm only keeps the match whole
             GeneratorKind::EdgeWear | GeneratorKind::Dirt | GeneratorKind::ThinAreas | GeneratorKind::Direction | GeneratorKind::FiberGlassEdgeWear => 0.0,
+        }
+    }
+
+    /// The image in `generator`'s Position input, else this texel's position across the mesh's bounds: the baked Position map is not read, its normalisation is a bake setting
+    fn position_input(&mut self, generator: &Generator) -> [f32; 3] {
+        match generator.inputs.get(&BakedMap::Position) {
+            Some(source) => self.source(source, &Projection::default(), ChannelKind::NormalMap),
+            None => self.bounds_position().to_array(),
         }
     }
 

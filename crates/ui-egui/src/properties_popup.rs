@@ -55,8 +55,9 @@ pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
         Some(PropertiesPopup::Closing) if !any_down => app.properties_popup = None,
         Some(PropertiesPopup::Open { .. }) => {
             let shown = ctx.memory(|memory| memory.area_rect(area_id()));
-            let outside = pressed_at.is_some_and(|at| shown.is_some_and(|rect| !rect.contains(at)));
-            // A press in one of the popup's own dropdowns lands outside its area
+            let in_picker = |at: egui::Pos2| crate::color_picker::open_window(ctx).is_some_and(|picker| picker.contains(at));
+            let outside = pressed_at.is_some_and(|at| shown.is_some_and(|rect| !rect.contains(at)) && !in_picker(at));
+            // A press in one of the popup's own dropdowns or its colour picker window lands outside its area
             if outside && !egui::Popup::is_any_open(ctx) {
                 app.properties_popup = Some(PropertiesPopup::Closing);
             }

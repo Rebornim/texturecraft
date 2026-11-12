@@ -23,6 +23,7 @@ mod layers_panel;
 mod levels_editor;
 mod mask_value_swap;
 mod new_project_baked_maps;
+mod panel_header;
 mod path_in_view;
 mod path_list;
 mod pen_pressure;

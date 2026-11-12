@@ -367,16 +367,16 @@ fn area_id() -> Id {
     Id::unique("texturecraft-docking")
 }
 
-/// The dock look: every panel group is a card on the window's frame colour, its tab strip
-/// without hard lines, the shown tab a pill.
+/// The dock look: every panel group is a card under one chrome-coloured header bar, names in capitals at the left, a close × at the right
 fn style(ui: &Ui, t: &Tokens) -> DockStyle {
     let mut s = DockStyle::from_ui(ui);
     s.gap = f32::from(crate::theme::GUTTER);
     // Smallest panel extent a divider drag leaves.
     s.min_pane = 60.0;
     s.background = t.panel;
-    s.tab_background = t.panel;
-    s.active_background = t.button;
+    s.tab_background = t.chrome;
+    // The shown and the hovered tab keep the bar's colour; their names brighten instead
+    s.active_background = t.chrome;
     s.text = t.text_strong;
     s.inactive_text = t.text_dim;
     s.border = egui::Stroke::NONE;
@@ -442,6 +442,20 @@ pub fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     }
 }
 
+/// Size of the panel names on a header bar
+const HEADER_TITLE_SIZE: f32 = 12.0;
+
+/// Side of the close × at the right end of a header bar
+const HEADER_CLOSE_SIZE: f32 = 22.0;
+
+/// Room right of the close × button, so its glyph ends where the Properties controls end (side padding plus scroll bar gutter)
+const HEADER_CLOSE_RIGHT_MARGIN: f32 = 18.0;
+
+/// Whether a docked group's header bar ends in a close × (floating windows have one on their title bar; the viewport never closes)
+fn header_closes(active: &Panel, floating: bool) -> bool {
+    !floating && permissions(active).closable
+}
+
 /// The panels' contents, names and limits for the dock area
 struct Panels<'a> {
     app: &'a mut TextureCraftApp,
@@ -494,8 +508,32 @@ impl DockContent<Panel> for Panels<'_> {
         }
     }
 
-    fn label(&mut self, _ui: &Ui, _panel: &Panel, logical: &str, font: &egui::FontId, color: egui::Color32) -> egui::WidgetText {
-        RichText::new(logical).font(font.clone()).color(color).into()
+    fn label(&mut self, _ui: &Ui, _panel: &Panel, logical: &str, _font: &egui::FontId, color: egui::Color32) -> egui::WidgetText {
+        // Capitals on the bar only: menus and screen readers keep the logical name
+        RichText::new(logical.to_uppercase()).font(crate::theme::semibold(HEADER_TITLE_SIZE)).color(color).into()
+    }
+
+    fn group_header_width(&self, _panels: &[Panel], active: &Panel, floating: bool, _strip_width: f32) -> f32 {
+        if header_closes(active, floating) { HEADER_CLOSE_SIZE + HEADER_CLOSE_RIGHT_MARGIN } else { 0.0 }
+    }
+
+    fn group_header(&mut self, ui: &mut Ui, _panels: &[Panel], active: &Panel, floating: bool) {
+        if !header_closes(active, floating) {
+            return;
+        }
+        let rect = ui.max_rect();
+        let button = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - HEADER_CLOSE_RIGHT_MARGIN - HEADER_CLOSE_SIZE / 2.0, rect.center().y),
+            vec2(HEADER_CLOSE_SIZE, HEADER_CLOSE_SIZE),
+        );
+        let clicked = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(button), |ui| {
+                crate::widgets::icon_button(ui, egui_phosphor::regular::X, tr("Close Panel"), false, HEADER_CLOSE_SIZE).clicked()
+            })
+            .inner;
+        if clicked {
+            self.app.ui.dock.close(*active);
+        }
     }
 
     fn permissions(&self, panel: &Panel) -> Permissions {

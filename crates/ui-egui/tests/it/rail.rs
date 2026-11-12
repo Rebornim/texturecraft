@@ -195,9 +195,11 @@ fn dragging_the_title_onto_a_tab_strip_docks_the_panel_there() {
     let mut harness = app();
 
     click_rail(&mut harness, "Log");
-    let title = popup_title(&harness, "Log").center();
-    let properties_tab = harness.get_by_label("Properties - Paint").rect().center();
-    drag(&mut harness, title, properties_tab);
+    let title = popup_title(&harness, "Log");
+    // The popup covers the Properties strip and stays put while dragged: drop on the Texture Sets strip above it
+    let texture_sets_tab = harness.get_by_label("Texture Sets").rect();
+    assert!(texture_sets_tab.bottom() < title.top(), "the Texture Sets strip {texture_sets_tab:?} is under the popup at {title:?}");
+    drag(&mut harness, title.center(), texture_sets_tab.center());
 
     let layout = &harness.state().ui.dock.workspace().layout;
     assert!(layout.contains(&Panel::Log) && !layout.floating.iter().any(|window| window.contains(&Panel::Log)), "the Log is docked");

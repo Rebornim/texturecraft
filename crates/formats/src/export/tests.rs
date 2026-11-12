@@ -1268,6 +1268,12 @@ fn reference_presets_follow_their_targets_layouts() {
     let displacement = displaced.maps.last().unwrap();
     assert!(displacement.file.ends_with("_Displacement"));
     assert_eq!((displacement.bit_depth, displacement.channels.as_slice()), (16, &[(Dest::L, channel(Channel::Height))][..]));
+
+    // Dota 2: colour, normal and the two masks Valve's hero shader reads
+    assert_eq!(preset_files("Dota 2"), ["color", "normal", "masks1", "masks2"]);
+    assert_eq!(preset_source("Dota 2", "normal", Dest::R), opengl);
+    assert_eq!(preset_source("Dota 2", "masks1", Dest::B), channel(Channel::Metallic));
+    assert_eq!(preset_source("Dota 2", "masks2", Dest::A), SourceRef::Virtual { map: VirtualMap::Glossiness, component: 0 }, "specular exponent");
 }
 
 #[test]

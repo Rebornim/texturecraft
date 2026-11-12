@@ -93,6 +93,17 @@ pub fn builtin_presets() -> Vec<ExportPreset> {
             maps.push(map("ambientOcclusion", 8, gray(virt(VirtualMap::AoMixed, 0))));
             maps
         }),
+        // The same with opacity in the base color's alpha instead of a file of its own
+        preset("Document channels + Normal + AO (With Alpha)", {
+            let mut maps: Vec<MapSpec> = Channel::ALL
+                .into_iter()
+                .filter(|c| !matches!(c, Channel::Normal | Channel::AmbientOcclusion | Channel::Opacity))
+                .map(|c| if c == Channel::BaseColor { map("$channel", 8, base_with_alpha()) } else { channel_map(c) })
+                .collect();
+            maps.push(map("normal", 8, rgb(|k| ch(Channel::Normal, k))));
+            maps.push(map("ambientOcclusion", 8, gray(virt(VirtualMap::AoMixed, 0))));
+            maps
+        }),
         preset("glTF PBR Metal Roughness", gltf_pbr_maps(|s| format!("$mesh_$textureSet_{s}"))),
         preset(
             "Unreal Engine (Packed)",

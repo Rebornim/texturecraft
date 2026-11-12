@@ -1238,6 +1238,15 @@ fn reference_presets_follow_their_targets_layouts() {
     assert_eq!(preset_files(sketchfab), ["BaseColor", "Normal", "Metallic", "Roughness", "AmbientOcclusion", "Emissive"]);
     assert_eq!(preset_source(sketchfab, "Normal", Dest::R), SourceRef::Virtual { map: VirtualMap::NormalDirectX, component: 0 });
     assert_eq!(preset_source(sketchfab, "BaseColor", Dest::A), channel(Channel::Opacity));
+
+    // Document channels With Alpha: opacity rides in the base color, and has no file of its own
+    let fx = Fx::new(&[Channel::BaseColor, Channel::Opacity, Channel::Roughness]);
+    let with_alpha = fx.render_preset("Document channels + Normal + AO (With Alpha)");
+    let without = fx.render_preset("Document channels + Normal + AO");
+    assert!(decode(find(&with_alpha, "_baseColor.")).color().has_alpha());
+    assert!(!with_alpha.iter().any(|file| file.name.contains("_opacity.")), "{:?}", with_alpha.iter().map(|file| &file.name).collect::<Vec<_>>());
+    assert!(without.iter().any(|file| file.name.contains("_opacity.")));
+    assert_eq!(with_alpha.len() + 1, without.len());
 }
 
 #[test]

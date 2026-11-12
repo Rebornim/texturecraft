@@ -562,6 +562,11 @@ fn fill_set(session: &mut Session, params: &Value) -> Result<Value> {
             }
         }
 
+        // A channel set on its own (its source or its gradient map): the sources are no longer one whole material
+        if source.is_some() || colors.is_some() || init_ramp {
+            fill.material = None;
+        }
+
         let current = fill.sources.get(&channel);
         let colors = if init_ramp { initial_ramp(channel, source.as_ref(), current)? } else { colors };
         let source = with_ramp(channel, current, source, colors)?;

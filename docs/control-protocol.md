@@ -568,6 +568,16 @@ save none) are the Swatches row under the colour picker. `swatch.list` lists the
 `swatch.remove {index}` removes one; `project.inspect` shows them as `swatches`. Applying a swatch is an
 ordinary colour edit (`layer.fill.set {color}`).
 
+## A fill's whole material
+
+A fill layer or content fill effect can hold one built-in plain material whole (the Material side of
+its Material section). `layer.fill.material {layer? | effect?, material}` sets every channel the
+material writes from it, turns those channels on and the others off, and keeps the fill's projection;
+`material: null` returns the channels to their defaults. Smart materials (folders of layers) are added
+with `material.apply` instead. The fill remembers the material (`Fill.material`, saved only when set;
+`project.inspect` shows it as `material`) until a channel's source is set on its own with
+`layer.fill.set`. A plain material added from the shelf names its fill the same way.
+
 ## MaterialCraft materials
 
 A v3 `.mcmat` holds a published SBS graph and its source assets. TextureCraft uses the shared `craft-mcmat` reader and cooks the archive through `materialcraft-cli`. The resulting fill stores its channel textures and the original archive in the project. Linked cooks use the Settings percentage of available RAM. A cook that exceeds the estimated budget reports the required and configured byte counts without replacing the current fill. Its exposed values, presets and mesh-map inputs appear in `project.inspect`. Republish older MCMAT files from their original authoring project. Procedural imports and re-cooks require the desktop CLI. Saved projects retain their baked maps for use in the browser.

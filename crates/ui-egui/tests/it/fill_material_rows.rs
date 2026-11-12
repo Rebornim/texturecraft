@@ -119,7 +119,7 @@ fn a_uniform_gray_ramp_inverts_its_value() {
 #[test]
 fn a_linked_material_shows_its_inputs_and_the_switch_shows_its_channels() {
     let (mut harness, layer) = app_with_fill(json!({}));
-    assert!(harness.query_by_role_and_label(Role::RadioButton, "Material").is_none(), "a fill without a material has no switch");
+    assert!(harness.query_by_role_and_label(Role::RadioButton, "Material").is_some(), "every fill has the switch");
 
     let wear = LinkParam {
         id: "wear".into(),
@@ -435,4 +435,40 @@ fn the_picker_is_titled_by_its_channel_resizes_from_its_edges_keeps_its_size_and
     assert!(harness.query_by_role_and_label(Role::Slider, "R").is_none(), "a hovered model changes nothing");
     click(&mut harness, Role::ListBoxOption, "RGB");
     assert!(harness.query_by_role_and_label(Role::Slider, "R").is_some(), "a click picks it");
+}
+
+fn whole_material(harness: &Harness<'_, TextureCraftApp>, layer: LayerId) -> Option<String> {
+    match &harness.state().session.doc.project.layer(layer).unwrap().kind {
+        LayerKind::Fill(fill) => fill.material.clone(),
+        other => panic!("not a fill: {other:?}"),
+    }
+}
+
+/// A real click (press and release a frame apart) in the middle of the `role` named `label`
+fn mouse_click_on(harness: &mut Harness<'_, TextureCraftApp>, role: Role, label: &str) {
+    let at = harness.get_by_role_and_label(role, label).rect().center();
+    mouse_click(harness, at, egui::PointerButton::Primary);
+}
+
+#[test]
+fn a_plain_fill_switches_to_one_whole_material_picks_it_from_its_card_and_clears_it() {
+    let (mut harness, layer) = app_with_fill(json!({}));
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "Metallic").is_some(), "a plain fill opens on Channels: a card per channel");
+
+    mouse_click_on(&mut harness, Role::RadioButton, "Material");
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "Metallic").is_none(), "the Material side has no channel cards");
+    mouse_click_on(&mut harness, Role::ComboBox, "None");
+    mouse_click_on(&mut harness, Role::ListBoxOption, "Copper Hammered");
+    assert_eq!(whole_material(&harness, layer).as_deref(), Some("copper_hammered"), "the card's list sets the whole material");
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "Copper Hammered").is_some(), "the card names it");
+    assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Steel").is_none(), "the list closed on the pick");
+
+    mouse_click_on(&mut harness, Role::RadioButton, "Channels");
+    assert!(matches!(source(&harness, layer, Channel::BaseColor), Source::Procedural { .. }), "the material set every channel");
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "Height").is_some(), "its channels show as cards");
+
+    mouse_click_on(&mut harness, Role::RadioButton, "Material");
+    click_in_slot(&mut harness, "Copper Hammered", Role::Button, "Clear");
+    assert_eq!(whole_material(&harness, layer), None, "× drops the material");
+    assert_eq!(source(&harness, layer, Channel::BaseColor), Source::uniform_of(Channel::BaseColor), "and returns the channels to their defaults");
 }

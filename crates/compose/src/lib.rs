@@ -14,6 +14,8 @@ pub mod curvature_sizes;
 pub mod display;
 pub mod eval;
 mod fabric;
+pub mod fill_copies;
+pub mod fill_copy;
 mod fur_lock;
 mod held_fields;
 mod image_identity;

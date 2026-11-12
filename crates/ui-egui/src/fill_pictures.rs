@@ -1,4 +1,4 @@
-//! Pictures of what a fill's settings do: one per projection, filtering and UV wrap choice, and the window preview
+//! Pictures of what a fill's settings do: one per projection, filtering and UV wrap choice, the window preview and the ring of radial copies
 
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
 use texturecraft_engine::core::{Filtering, ShapeCrop, UvWrap};
@@ -218,6 +218,33 @@ pub(crate) fn warp_preview(painter: &Painter, rect: Rect, corners: [[f32; 2]; 4]
     }
     painter.rect_stroke(rect, 0, Stroke::new(1.0, tokens.field_border), egui::StrokeKind::Inside);
 }
+
+/// Radial copies seen along their axis: the axis at the centre (its colour), the original (white) at the top and `count - 1` copies (accent) round the ring over `span` degrees
+pub(crate) fn ring_picture(painter: &Painter, rect: Rect, count: u32, span: f32, axis_color: Color32, tokens: &Tokens) {
+    painter.rect_filled(rect, 0, tokens.field);
+    let center = rect.center();
+    let radius = rect.width() * RING_RADIUS;
+    let full = span >= 360.0;
+    let step = if full { span / count.max(1) as f32 } else { span / count.saturating_sub(1).max(1) as f32 };
+    let at = |degrees: f32| {
+        let turn = (degrees - 90.0).to_radians();
+        center + vec2(turn.cos(), turn.sin()) * radius
+    };
+    let ring_end = if full { 360.0 } else { span };
+    let ring: Vec<Pos2> = (0..=RING_SEGMENTS).map(|k| at(ring_end * k as f32 / RING_SEGMENTS as f32)).collect();
+    painter.add(Shape::line(ring, Stroke::new(1.0, tokens.separator)));
+    painter.circle_filled(center, RING_AXIS_DOT, axis_color);
+    for k in 0..count {
+        let color = if k == 0 { tokens.text } else { tokens.accent };
+        painter.circle_filled(at(k as f32 * step), RING_COPY_DOT, color);
+    }
+}
+
+/// The ring's radius in the picture's widths, its dots' radii, and the segments it is drawn with
+const RING_RADIUS: f32 = 0.34;
+const RING_AXIS_DOT: f32 = 2.0;
+const RING_COPY_DOT: f32 = 3.5;
+const RING_SEGMENTS: usize = 64;
 
 fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
     let mix = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round().clamp(0.0, 255.0) as u8;

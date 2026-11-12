@@ -1,4 +1,4 @@
-use egui::{Align2, CornerRadius, FontId, Painter, Rect, Role, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, FontId, Painter, Rect, Role, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
 
 use super::{PropertySheet, ROW_HEIGHT, ROW_PICTURE_AIR, ROW_PICTURE_SIZE, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
@@ -25,6 +25,10 @@ const TOGGLE_LABEL_AIR: f32 = 10.0;
 /// From that column to the pill's centre
 const TOGGLE_CENTER_OFFSET: f32 = 14.0;
 
+/// From one of a pair's toggles to the next, and from its name to its pill's centre
+const PAIR_PITCH: f32 = 76.0;
+const PAIR_NAME_TO_PILL: f32 = 32.0;
+
 /// Height of a channel pill, and the air between pills
 const CHANNEL_PILL_HEIGHT: f32 = 22.0;
 const CHANNEL_PILL_GAP: f32 = 4.0;
@@ -35,6 +39,11 @@ const CHANNEL_STRIP_AIR: f32 = 6.0;
 impl PropertySheet<'_> {
     /// Two to four short choices as a boxed switch, or a dropdown when one doesn't fit; returns the picked index
     pub(crate) fn switch(&mut self, label: &str, options: &[&str], selected: usize) -> Option<usize> {
+        self.switch_tinted(label, options, selected, &[])
+    }
+
+    /// [`Self::switch`] whose chosen word takes its colour from `tints` (axis colours)
+    pub(crate) fn switch_tinted(&mut self, label: &str, options: &[&str], selected: usize, tints: &[Color32]) -> Option<usize> {
         let stacks = self.text_width(label, FontId::proportional(TEXT_SIZE)) > self.column() - self.left - super::LABEL_MIN_AIR;
         let x0 = if stacks { self.left } else { self.column() };
         let segment = (self.right - x0) / options.len().max(1) as f32;
@@ -65,7 +74,8 @@ impl PropertySheet<'_> {
             } else if response.hovered() {
                 painter.rect_filled(rect.shrink(SEGMENT_INSET), CornerRadius::same(4), t.row_hover);
             }
-            let (font, color) = if on { (semibold(SMALL_TEXT_SIZE), t.text) } else { (FontId::proportional(SMALL_TEXT_SIZE), t.text_dim) };
+            let tint = tints.get(index).copied().unwrap_or(t.text);
+            let (font, color) = if on { (semibold(SMALL_TEXT_SIZE), tint) } else { (FontId::proportional(SMALL_TEXT_SIZE), t.text_dim) };
             painter.text(rect.center(), Align2::CENTER_CENTER, *option, font, color);
         }
         picked
@@ -101,16 +111,46 @@ impl PropertySheet<'_> {
             draw(painter, Rect::from_center_size(pos2(self.left + ROW_PICTURE_SIZE / 2.0, center_y), vec2(ROW_PICTURE_SIZE, ROW_PICTURE_SIZE)));
         }
         painter.text(pos2(label_x, center_y), Align2::LEFT_CENTER, label, font, if child { t.text_dim } else { t.text });
-        let (fill, border, knob, knob_x) = if *on {
-            (t.accent_dim, t.accent, t.text, pill.center().x + TOGGLE_KNOB_TRAVEL)
-        } else {
-            (t.button, t.button_border, t.text_dim, pill.center().x - TOGGLE_KNOB_TRAVEL)
-        };
-        painter.rect(pill, CornerRadius::same(6), fill, Stroke::new(1.0, border), StrokeKind::Inside);
-        painter.circle_filled(pos2(knob_x, center_y), TOGGLE_KNOB_RADIUS, knob);
+        self.pill(pill.center(), *on, true);
         let bottom = if picture.is_some() { ROW_PICTURE_SIZE } else { PILL_SIZE.y } / 2.0;
         self.drawn(center_y + bottom);
         response.clicked()
+    }
+
+    /// Two named toggles side by side after one label (Flip copy: U, V); returns the index clicked
+    pub(crate) fn toggle_pair(&mut self, label: &str, names: [&str; 2], on: &mut [bool; 2]) -> Option<usize> {
+        let (control, center_y) = self.row(label);
+        let font = FontId::proportional(TEXT_SIZE);
+        let mut clicked = None;
+        for (index, (name, state)) in names.into_iter().zip(on.iter_mut()).enumerate() {
+            let x = control.left() + index as f32 * PAIR_PITCH;
+            let pill = pos2(x + PAIR_NAME_TO_PILL, center_y);
+            let hit = Rect::from_min_max(pos2(x, control.top()), pos2(pill.x + PILL_SIZE.x / 2.0, control.bottom()));
+            let id = self.next_id();
+            let response = self.ui.interact(hit, id, Sense::click());
+            response.widget_info(|| WidgetInfo::selected(Role::CheckBox, true, *state, format!("{label} {name}")));
+            if response.clicked() {
+                *state = !*state;
+                clicked = Some(index);
+            }
+            let t = self.tokens;
+            self.ui.painter().text(pos2(x, center_y), Align2::LEFT_CENTER, name, font.clone(), if *state { t.text } else { t.text_dim });
+            self.pill(pill, *state, true);
+        }
+        clicked
+    }
+
+    /// A toggle's pill centred on `center`: on (accent), off, or greyed out when not `enabled`
+    pub(super) fn pill(&self, center: egui::Pos2, on: bool, enabled: bool) {
+        let t = self.tokens;
+        let (fill, border, knob, knob_x) = match (enabled, on) {
+            (false, _) => (t.field, t.separator, t.separator, center.x - TOGGLE_KNOB_TRAVEL),
+            (true, true) => (t.accent_dim, t.accent, t.text, center.x + TOGGLE_KNOB_TRAVEL),
+            (true, false) => (t.button, t.button_border, t.text_dim, center.x - TOGGLE_KNOB_TRAVEL),
+        };
+        let painter = self.ui.painter();
+        painter.rect(Rect::from_center_size(center, PILL_SIZE), CornerRadius::same(6), fill, Stroke::new(1.0, border), StrokeKind::Inside);
+        painter.circle_filled(pos2(knob_x, center.y), TOGGLE_KNOB_RADIUS, knob);
     }
 
     /// The channel strip: one pill per channel; returns the clicked index and whether Alt (solo) was held

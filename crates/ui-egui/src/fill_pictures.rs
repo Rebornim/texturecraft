@@ -1,7 +1,7 @@
 //! Pictures of what a fill's settings do: one per projection, filtering and UV wrap choice, and the window preview
 
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
-use texturecraft_engine::core::{Filtering, UvWrap};
+use texturecraft_engine::core::{Filtering, ShapeCrop, UvWrap};
 
 use crate::fill_placement::Placement;
 use crate::projection_kind::ProjectionKind;
@@ -14,7 +14,7 @@ pub(crate) fn projection_picture(painter: &Painter, rect: Rect, kind: Projection
     let glyph = match kind {
         ProjectionKind::UvTile | ProjectionKind::Uv => icon::SQUARE,
         ProjectionKind::Triplanar => icon::CUBE,
-        ProjectionKind::Planar => icon::SELECTION,
+        ProjectionKind::Planar | ProjectionKind::Warp => icon::SELECTION,
         ProjectionKind::Spherical => icon::GLOBE,
         ProjectionKind::Cylindrical => icon::CYLINDER,
     };
@@ -106,6 +106,115 @@ pub(crate) fn window_preview(painter: &Painter, rect: Rect, placement: Placement
             let (x, y) = (tile_x as f32, tile_y as f32);
             painter.add(Shape::closed_line([[x, y], [x + 1.0, y], [x + 1.0, y + 1.0], [x, y + 1.0]].map(to_window).to_vec(), border));
         }
+    }
+    painter.rect_stroke(rect, 0, Stroke::new(1.0, tokens.field_border), egui::StrokeKind::Inside);
+}
+
+/// The darker accent pictures fill with, beside the accent itself
+fn accent_shade(tokens: &Tokens) -> Color32 {
+    lerp_color(tokens.accent, Color32::BLACK, ACCENT_SHADE)
+}
+
+/// How far the darker accent sits from the accent towards black
+const ACCENT_SHADE: f32 = 0.36;
+
+/// Shape crop: the projection inside its shape only, or past it too
+pub(crate) fn crop_picture(painter: &Painter, rect: Rect, crop: ShapeCrop, tokens: &Tokens) {
+    let inner = rect.shrink(3.0);
+    match crop {
+        ShapeCrop::Cropped => {
+            painter.rect_filled(inner, 3, accent_shade(tokens));
+        }
+        ShapeCrop::ExtendsOutside => {
+            painter.rect_filled(rect, 2, accent_shade(tokens));
+        }
+    }
+    painter.rect_stroke(inner, 3, Stroke::new(1.0, tokens.text), egui::StrokeKind::Inside);
+}
+
+/// Depth culling, seen from the side: the surface the projection lands on and what lies under it
+pub(crate) fn depth_picture(painter: &Painter, rect: Rect, tokens: &Tokens) {
+    let top = rect.top() + rect.height() * 0.25;
+    let under = Rect::from_min_max(pos2(rect.left(), top), pos2(rect.right(), top + rect.height() * 0.45 + 2.0));
+    painter.rect_filled(under, 2, accent_shade(tokens));
+    painter.line_segment([pos2(rect.left(), top), pos2(rect.right(), top)], Stroke::new(1.0, tokens.text));
+    painter.text(
+        pos2(rect.center().x, rect.top() + 3.0),
+        egui::Align2::CENTER_CENTER,
+        egui_phosphor::regular::ARROW_DOWN,
+        egui::FontId::proportional(9.0),
+        tokens.accent,
+    );
+}
+
+/// Backface culling: a face turned away, darker while culled
+pub(crate) fn backface_picture(painter: &Painter, rect: Rect, on: bool, tokens: &Tokens) {
+    let (left, apex, right) =
+        (pos2(rect.left() + 2.0, rect.bottom() - 3.0), pos2(rect.center().x, rect.top() + 3.0), pos2(rect.right() - 2.0, rect.bottom() - 3.0));
+    painter.add(Shape::convex_polygon(vec![left, apex, right], if on { accent_shade(tokens) } else { tokens.accent }, Stroke::NONE));
+    painter.line_segment([apex, right], Stroke::new(1.0, tokens.text));
+}
+
+/// Points around the Angle picture's arc per full turn
+const ARC_POINTS: usize = 48;
+
+/// A cylindrical projection's Angle seen from above: the slice of a turn one repeat spans
+pub(crate) fn angle_picture(painter: &Painter, rect: Rect, degrees: f32, tokens: &Tokens) {
+    let center = rect.center();
+    let radius = rect.width() * 0.45;
+    let sweep = degrees.clamp(0.0, 360.0) / 360.0;
+    if sweep >= 1.0 {
+        painter.circle_filled(center, radius, tokens.accent);
+    } else {
+        let steps = ((ARC_POINTS as f32 * sweep).ceil() as usize).max(1);
+        let mut points = vec![center];
+        for step in 0..=steps {
+            let turn = (step as f32 / steps as f32 * sweep - 0.25) * std::f32::consts::TAU;
+            points.push(pos2(center.x + radius * turn.cos(), center.y + radius * turn.sin()));
+        }
+        // A slice wider than half a turn is not convex: fill it as a fan from the centre
+        for pair in points[1..].windows(2) {
+            painter.add(Shape::convex_polygon(vec![center, pair[0], pair[1]], tokens.accent, Stroke::NONE));
+        }
+    }
+    painter.circle_stroke(center, radius, Stroke::new(1.0, tokens.button_border));
+}
+
+/// Checker cells across a warp preview's frame
+const WARP_CELLS: usize = 4;
+
+/// How much of the preview an unpulled frame spans
+const WARP_FRAME_SPAN: f32 = 0.62;
+
+/// Radius of a warp preview's corner handle
+const WARP_HANDLE_RADIUS: f32 = 3.5;
+
+/// A warp's frame with its corners where they are pulled, the checker bending with them
+pub(crate) fn warp_preview(painter: &Painter, rect: Rect, corners: [[f32; 2]; 4], tokens: &Tokens) {
+    let painter = painter.with_clip_rect(rect);
+    painter.rect_filled(rect, 0, tokens.field);
+    // Across and up in frame sizes from its centre -> the square
+    let [top_left, top_right, bottom_right, bottom_left] =
+        corners.map(|[x, y]| pos2(rect.center().x + x * WARP_FRAME_SPAN * rect.width(), rect.center().y - y * WARP_FRAME_SPAN * rect.height()));
+    let at = |u: f32, v: f32| -> Pos2 {
+        let top = top_left + (top_right - top_left) * u;
+        let bottom = bottom_left + (bottom_right - bottom_left) * u;
+        top + (bottom - top) * v
+    };
+    let (dark, light) = (lerp_color(tokens.field, tokens.text, PREVIEW_DARK), lerp_color(tokens.field, tokens.text, PREVIEW_LIGHT));
+    let cells = WARP_CELLS as f32;
+    for i in 0..WARP_CELLS {
+        for j in 0..WARP_CELLS {
+            let (u0, v0, u1, v1) = (i as f32 / cells, j as f32 / cells, (i + 1) as f32 / cells, (j + 1) as f32 / cells);
+            let outline = vec![at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)];
+            let color = if (i + j) % 2 == 0 { light } else { dark };
+            painter.add(Shape::convex_polygon(outline, color, Stroke::NONE));
+        }
+    }
+    let edge = vec![top_left, top_right, bottom_right, bottom_left];
+    painter.add(Shape::closed_line(edge.clone(), Stroke::new(1.5, tokens.accent)));
+    for corner in edge {
+        painter.circle(corner, WARP_HANDLE_RADIUS, tokens.text, Stroke::new(1.0, tokens.accent));
     }
     painter.rect_stroke(rect, 0, Stroke::new(1.0, tokens.field_border), egui::StrokeKind::Inside);
 }

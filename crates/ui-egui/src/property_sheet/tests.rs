@@ -138,6 +138,7 @@ fn gallery(ui: &mut egui::Ui, g: &mut Gallery) {
                     value: g.position[axis],
                     speed: 0.01,
                     decimals: 2,
+                    suffix: "",
                 });
                 if let Some((axis, _)) = s.number_fields("Position", &mut fields, Some(&mut g.linked), false)
                     && let Some(slot) = g.position.get_mut(axis)

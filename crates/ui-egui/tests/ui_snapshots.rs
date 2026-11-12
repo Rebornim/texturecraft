@@ -555,7 +555,36 @@ fn fill_properties_snapshots() {
     save(&mut harness, &output_dir, "fill-uv-physical");
     harness.get_by_label("Link").click();
     save(&mut harness, &output_dir, "fill-uv-physical-unlinked");
+    // Screen 02: every other projection, with the lists that open from its new rows
+    let cases = [
+        ("spherical", json!({}), "fill-spherical"),
+        ("cylindrical", json!({"scaleMode": "physicalSize"}), "fill-cylindrical"),
+        ("cylindrical", json!({"angle": 120.0, "backfaceCulling": true}), "fill-cylindrical-angle"),
+        ("triplanar", json!({"scaleMode": "physicalSize"}), "fill-triplanar"),
+        ("planar", json!({"scaleMode": "physicalSize", "backfaceCulling": true, "shapeCrop": "cropped"}), "fill-planar"),
+        ("warp", json!({"scaleMode": "physicalSize", "warpCorners": [[-0.55, 0.48], [0.56, 0.6], [0.48, -0.55], [-0.45, -0.45]]}), "fill-warp"),
+        ("uvTile", json!({}), "fill-uvtile"),
+    ];
+    for (kind, settings, name) in cases {
+        let session = &mut harness.state_mut().session;
+        execute(session, "layer.fill.projection", &json!({"layer": layer, "projection": kind})).unwrap();
+        let mut settings = settings;
+        settings["layer"] = layer.clone();
+        execute(session, "layer.fill.projection", &settings).unwrap();
+        save(&mut harness, &output_dir, name);
+    }
+    harness.get_by_label("Fill (Match per UV Tile)").click();
+    harness.run_steps(2);
+    harness.get_by_label("Warp projection").hover();
+    save(&mut harness, &output_dir, "fill-uvtile-projection-open");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
     let session = &mut harness.state_mut().session;
+    // Tri-planar's Shape crop sits highest in the panel: its list opens in view
     execute(session, "layer.fill.projection", &json!({"layer": layer, "projection": "triplanar"})).unwrap();
-    save(&mut harness, &output_dir, "fill-triplanar");
+    harness.run_steps(2);
+    harness.get_by_label("Projection Extends Outside Shape").click();
+    harness.run_steps(2);
+    harness.get_by_label("Projection Cropped to Shape").hover();
+    save(&mut harness, &output_dir, "fill-triplanar-crop-open");
 }

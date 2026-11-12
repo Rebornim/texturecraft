@@ -12,7 +12,7 @@ mod effect_rows;
 mod effect_sliders;
 mod file_dialogs;
 mod fill_channel_image;
-mod fill_projection_section;
+mod fill_projection_rows;
 mod filter_picker;
 mod history_panel;
 mod layer_clipboard;

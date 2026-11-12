@@ -144,13 +144,15 @@ fn it_shows_what_the_properties_panel_shows() {
     let fill = harness.state().session.doc.project.layers.values().find(|layer| matches!(layer.kind, LayerKind::Fill(_))).map(|layer| layer.id.0).unwrap();
     let selected = texturecraft_engine::execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": fill}));
     assert!(selected.is_ok(), "{selected:?}");
+    let projected = texturecraft_engine::execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": fill, "projection": "uv"}));
+    assert!(projected.is_ok(), "{projected:?}");
     harness.run_steps(3);
 
     let center = view_center(&harness);
     click(&mut harness, PointerButton::Secondary, center);
     let popup = harness.ctx.memory(|memory| memory.area_rect(properties_popup::area_id())).unwrap();
     let in_popup = |label: &str| harness.query_all_by_label(label).any(|node| popup.contains_rect(node.rect()));
-    assert!(in_popup("Projection"), "a selected fill shows its fill settings");
+    assert!(in_popup("UV projection"), "a selected fill shows its fill settings");
     assert!(!in_popup("Minimum size (%)"), "not the brush's");
 }
 

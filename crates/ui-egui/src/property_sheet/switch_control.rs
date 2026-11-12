@@ -1,6 +1,6 @@
 use egui::{Align2, CornerRadius, FontId, Painter, Rect, Role, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
 
-use super::{PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE, TEXT_SIZE};
+use super::{PropertySheet, ROW_HEIGHT, ROW_PICTURE_AIR, ROW_PICTURE_SIZE, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Draws a picture row's picture into its square
@@ -24,10 +24,6 @@ const TOGGLE_LABEL_AIR: f32 = 10.0;
 
 /// From that column to the pill's centre
 const TOGGLE_CENTER_OFFSET: f32 = 14.0;
-
-/// Size of a picture row's picture, and the air after it
-const ROW_PICTURE_SIZE: f32 = 18.0;
-const ROW_PICTURE_AIR: f32 = 8.0;
 
 /// Height of a channel pill, and the air between pills
 const CHANNEL_PILL_HEIGHT: f32 = 22.0;

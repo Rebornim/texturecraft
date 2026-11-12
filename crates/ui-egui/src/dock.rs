@@ -6,8 +6,8 @@ use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::compose::ThumbTarget;
 use texturecraft_engine::core::{
-    BakedMap, BlendMode, Channel, CurvatureDetail, CurvatureMode, Decal, Effect, EffectKind, Fill, Filter, Generator, GeneratorKind, Layer, LayerId, LayerKind,
-    LinkParam, MaterialLink, ProceduralKind, Projection, Source,
+    BakedMap, BlendMode, Channel, CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter, Generator, GeneratorKind, Layer, LayerId, LayerKind,
+    LinkParam, MaterialLink, ProceduralKind, Source,
 };
 use texturecraft_engine::filter_lib::scalar_params;
 use texturecraft_engine::paint::{BrushAlpha, BrushSettings, alphas};
@@ -1946,40 +1946,6 @@ pub(crate) fn anchors_below(app: &TextureCraftApp, reader: LayerId) -> Vec<(Laye
 fn anchor_label(app: &TextureCraftApp, anchor: LayerId, channel: Channel) -> String {
     let name = app.session.doc.project.effect(anchor).map(|(_, e)| e.name.clone()).unwrap_or_else(|| tr("missing").into());
     trf("Anchor: {name} ({channel})", &[("name", &name), ("channel", &tr(channel.label()))])
-}
-
-/// A decal's frame: place it with a click in the 3D view, then size, turn and shift it.
-pub(crate) fn decal_editor(app: &mut TextureCraftApp, ui: &mut Ui, d: &Decal, layer: LayerId) {
-    let tk = Tokens::get(ui.ctx());
-    ui.label(caption(tr("Decal")));
-    let placing = app.placing_decal == Some(layer);
-    let label = format!("{} {}", ic::CROSSHAIR, if placing { tr("Click the mesh to place the decal") } else { tr("Place on the surface") });
-    if ui.selectable_label(placing, label).on_hover_text(tr("The next click in the 3D view moves the decal there")).clicked() {
-        app.placing_decal = if placing { None } else { Some(layer) };
-    }
-    let (lo, hi) = app.session.mesh.bounds();
-    let diag = (hi - lo).length().max(1e-3);
-    let mut v = [d.size[0], d.size[1], d.rotation, d.offset[0], d.offset[1], d.depth];
-    let rows = [
-        (tr("Width"), diag * 0.01..=diag * 2.0),
-        (tr("Height"), diag * 0.01..=diag * 2.0),
-        (tr("Rotation (degrees)"), 0.0..=360.0),
-        (tr("Offset right"), -diag..=diag),
-        (tr("Offset up"), -diag..=diag),
-        (tr("Depth"), diag * 0.005..=diag),
-    ];
-    let mut edit = None;
-    for ((label, range), x) in rows.into_iter().zip(v.iter_mut()) {
-        edit = edit.or(slider_edit(ui, label, x, range, 3));
-    }
-    if let Some(merge) = edit {
-        app.run("layer.decal.set", json!({"layer": layer.0, "size": [v[0], v[1]], "rotation": v[2], "offset": [v[3], v[4]], "depth": v[5], "merge": merge}));
-    }
-    ui.label(
-        RichText::new(tr("The image's alpha cuts the decal's shape; faces turned away and surfaces beyond its depth stay clear."))
-            .size(10.5)
-            .color(tk.text_dim),
-    );
 }
 
 /// The source of one fill channel: uniform, procedural, image or anchor.

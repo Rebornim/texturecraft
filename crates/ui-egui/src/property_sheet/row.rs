@@ -1,7 +1,10 @@
 use egui::{Align2, FontId, Id, Rect, Response, Sense, Stroke, pos2};
 use egui_phosphor::regular as ic;
 
-use super::{CONTROL_HEIGHT, ICON_SIZE, LABEL_MAX, LABEL_MIN_AIR, PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE, TEXT_SIZE};
+use super::{
+    CONTROL_HEIGHT, ICON_SIZE, LABEL_MAX, LABEL_MIN_AIR, LOOSE_LABEL_AIR, PropertySheet, ROW_HEIGHT, ROW_PICTURE_AIR, ROW_PICTURE_SIZE, RowLead,
+    SMALL_TEXT_SIZE, TEXT_SIZE,
+};
 use crate::theme::semibold;
 
 /// Air above a stacked label
@@ -68,16 +71,43 @@ impl PropertySheet<'_> {
 
     /// One setting's row: label beside the controls column or stacked above; returns the control's box and centre
     pub(crate) fn row(&mut self, label: &str) -> (Rect, f32) {
-        let x0 = self.lead(label, false);
+        self.row_with(RowLead::label(label))
+    }
+
+    /// [`Self::row`] led by `lead`
+    pub(crate) fn row_with(&mut self, lead: RowLead<'_>) -> (Rect, f32) {
+        let x0 = self.lead_with(lead);
         let rect = self.take(ROW_HEIGHT);
         let center_y = rect.center().y;
-        self.drawn(center_y + CONTROL_HEIGHT / 2.0);
+        let picture = matches!(lead, RowLead::Picture { .. });
+        self.drawn(center_y + if picture { ROW_PICTURE_SIZE } else { CONTROL_HEIGHT } / 2.0);
         (self.control_box(x0, center_y), center_y)
     }
 
-    /// Paints `label` and returns where its control starts: the controls column, or the left edge when it stacks
-    pub(crate) fn lead(&mut self, label: &str, stack: bool) -> f32 {
+    /// Paints a row's lead and returns where its control starts; pictures and children never widen the column
+    pub(crate) fn lead_with(&mut self, lead: RowLead<'_>) -> f32 {
         let font = FontId::proportional(TEXT_SIZE);
+        let center_y = self.cursor_y() + ROW_HEIGHT / 2.0;
+        let label_x = self.left + ROW_PICTURE_SIZE + ROW_PICTURE_AIR;
+        let (label, stack) = match lead {
+            RowLead::Label { text, stack } => (text, stack),
+            RowLead::Loose(text) if self.text_width(text, font.clone()) <= self.column() - self.left - LOOSE_LABEL_AIR => {
+                self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, text, font, self.tokens.text);
+                return self.column();
+            }
+            RowLead::Loose(text) => return self.stacked_label(text),
+            RowLead::Picture { picture, text } => {
+                let square = Rect::from_center_size(pos2(self.left + ROW_PICTURE_SIZE / 2.0, center_y), egui::vec2(ROW_PICTURE_SIZE, ROW_PICTURE_SIZE));
+                picture(self.ui.painter(), square);
+                self.ui.painter().text(pos2(label_x, center_y), Align2::LEFT_CENTER, text, font, self.tokens.text);
+                return self.column();
+            }
+            RowLead::Child(text) => {
+                self.ui.painter().text(pos2(label_x, center_y), Align2::LEFT_CENTER, text, font, self.tokens.text_dim);
+                return self.column();
+            }
+        };
+
         let width = self.text_width(label, font.clone());
         if width <= LABEL_MAX {
             self.seen.label_width = self.seen.label_width.max(width);
@@ -85,14 +115,19 @@ impl PropertySheet<'_> {
 
         let text = self.tokens.text;
         if width <= self.column() - self.left - LABEL_MIN_AIR && !stack {
-            let center_y = self.cursor_y() + ROW_HEIGHT / 2.0;
             self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, label, font, text);
             return self.column();
         }
 
+        self.stacked_label(label)
+    }
+
+    /// Paints `label` on its own line above a full-width control; returns the control's left edge
+    fn stacked_label(&mut self, label: &str) -> f32 {
         self.space(STACK_AIR);
         let rect = self.take(STACK_LABEL_LINE);
-        self.ui.painter().text(pos2(self.left, rect.top() + 8.0), Align2::LEFT_CENTER, label, font, text);
+        let text = self.tokens.text;
+        self.ui.painter().text(pos2(self.left, rect.top() + 8.0), Align2::LEFT_CENTER, label, FontId::proportional(TEXT_SIZE), text);
         self.left
     }
 

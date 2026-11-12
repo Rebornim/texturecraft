@@ -11,11 +11,19 @@ pub(crate) enum ProjectionKind {
     Planar,
     Spherical,
     Cylindrical,
+    Warp,
 }
 
 impl ProjectionKind {
-    pub(crate) const ALL: [ProjectionKind; 6] =
-        [ProjectionKind::UvTile, ProjectionKind::Uv, ProjectionKind::Triplanar, ProjectionKind::Planar, ProjectionKind::Spherical, ProjectionKind::Cylindrical];
+    pub(crate) const ALL: [ProjectionKind; 7] = [
+        ProjectionKind::UvTile,
+        ProjectionKind::Uv,
+        ProjectionKind::Triplanar,
+        ProjectionKind::Planar,
+        ProjectionKind::Warp,
+        ProjectionKind::Spherical,
+        ProjectionKind::Cylindrical,
+    ];
 
     /// The `projection` param of `layer.fill.projection`
     pub(crate) fn id(self) -> &'static str {
@@ -26,19 +34,19 @@ impl ProjectionKind {
             ProjectionKind::Planar => "planar",
             ProjectionKind::Spherical => "spherical",
             ProjectionKind::Cylindrical => "cylindrical",
+            ProjectionKind::Warp => "warp",
         }
     }
 
-    pub(crate) fn of(projection: &Projection) -> Option<ProjectionKind> {
+    pub(crate) fn of(projection: &Projection) -> ProjectionKind {
         match projection {
-            Projection::UvTile => Some(ProjectionKind::UvTile),
-            Projection::Uv { .. } => Some(ProjectionKind::Uv),
-            Projection::Triplanar { .. } => Some(ProjectionKind::Triplanar),
-            Projection::Planar { .. } => Some(ProjectionKind::Planar),
-            Projection::Spherical { .. } => Some(ProjectionKind::Spherical),
-            Projection::Cylindrical { .. } => Some(ProjectionKind::Cylindrical),
-            // Not in the dropdown until the panel's warp rows land
-            Projection::Warp { .. } => None,
+            Projection::UvTile => ProjectionKind::UvTile,
+            Projection::Uv { .. } => ProjectionKind::Uv,
+            Projection::Triplanar { .. } => ProjectionKind::Triplanar,
+            Projection::Planar { .. } => ProjectionKind::Planar,
+            Projection::Spherical { .. } => ProjectionKind::Spherical,
+            Projection::Cylindrical { .. } => ProjectionKind::Cylindrical,
+            Projection::Warp { .. } => ProjectionKind::Warp,
         }
     }
 
@@ -52,6 +60,7 @@ impl ProjectionKind {
             ProjectionKind::Planar => n_("Planar projection"),
             ProjectionKind::Spherical => n_("Spherical projection"),
             ProjectionKind::Cylindrical => n_("Cylindrical projection"),
+            ProjectionKind::Warp => n_("Warp projection"),
         }
     }
 }

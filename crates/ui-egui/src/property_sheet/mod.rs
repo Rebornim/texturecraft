@@ -10,6 +10,7 @@ mod preview_edit;
 mod preview_lower;
 mod preview_size;
 mod row;
+mod row_lead;
 mod section_tabs;
 mod sheet_measure;
 mod slider;
@@ -25,6 +26,7 @@ pub(crate) use band_response::BandResponse;
 pub(crate) use number_field::NumberField;
 pub(crate) use preview_lower::PreviewLower;
 pub(crate) use preview_size::PreviewSize;
+pub(crate) use row_lead::RowLead;
 pub(crate) use section_tabs::section_tabs;
 pub(crate) use slot_response::SlotResponse;
 
@@ -58,6 +60,9 @@ const LABEL_TO_CONTROL: f32 = 12.0;
 /// A label fits beside its control when it leaves at least this much air before the column
 const LABEL_MIN_AIR: f32 = 8.0;
 
+/// The least air a loose label leaves before the controls column
+const LOOSE_LABEL_AIR: f32 = 2.0;
+
 /// The narrowest value column at a slider's right end
 const VALUE_MIN_WIDTH: f32 = 26.0;
 
@@ -69,6 +74,10 @@ const SMALL_TEXT_SIZE: f32 = 11.0;
 
 /// Size of the caret and small glyphs drawn as icons
 const ICON_SIZE: f32 = 12.0;
+
+/// Size of a picture row's picture, and the air after it
+const ROW_PICTURE_SIZE: f32 = 18.0;
+const ROW_PICTURE_AIR: f32 = 8.0;
 
 /// The Properties panel being laid out this frame: where the controls column is, which card is open, and what this frame measured for the next one
 pub(crate) struct PropertySheet<'u> {

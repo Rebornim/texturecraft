@@ -21,11 +21,12 @@ use crate::i18n::{tr, trf};
 use crate::theme::{Tokens, caption, semibold};
 use crate::widgets::{icon_button, icon_button_without_tooltip, primary_button};
 
-/// The window's size, made smaller to fit a smaller app window
-const EXPORT_DIALOG_SIZE: egui::Vec2 = egui::vec2(1040.0, 775.0);
+/// The window's starting size (smaller in a smaller app window): the Settings tab's parameters leave under a quarter of it empty
+const EXPORT_DIALOG_SIZE: egui::Vec2 = egui::vec2(1040.0, 590.0);
+/// The smallest size it can be dragged to: as wide as the Settings tab's columns need, so no tab is wider than another
+const EXPORT_DIALOG_MIN_SIZE: egui::Vec2 = egui::vec2(EXPORT_DIALOG_SIZE.x, 400.0);
 /// Room kept around the window inside the app window, and the window's own padding around its body
 const EXPORT_DIALOG_MARGIN: f32 = 16.0;
-const EXPORT_DIALOG_PADDING: f32 = 32.0;
 const EXPORT_SET_LIST_WIDTH: f32 = 250.0;
 /// Room under the tabs' body for the button row
 const EXPORT_FOOTER_HEIGHT: f32 = 44.0;
@@ -100,18 +101,18 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     let tk = Tokens::get(ctx);
     let mut open = true;
     let mut action = None;
-    // Built-in templates in alphabetical order, as both lists show them
     let mut presets = texturecraft_engine::formats::builtin_presets();
-    presets.sort_by_key(|preset| preset.name.to_lowercase());
-    // A fixed size: the tabs fill the window, so a window that followed its content would grow every frame
-    let size = EXPORT_DIALOG_SIZE.min(ctx.content_rect().size() - egui::Vec2::splat(2.0 * EXPORT_DIALOG_MARGIN)).max(egui::Vec2::ZERO);
-    // Opens centred and moves by its title bar (the other dialogs are pinned to the centre)
+    controls::sort_templates(&mut presets);
+    let max_size = (ctx.content_rect().size() - egui::Vec2::splat(2.0 * EXPORT_DIALOG_MARGIN)).max(egui::Vec2::ZERO);
+    // Opens centred, moves by its title bar and sizes by its edges (the other dialogs are pinned to the centre); the tabs fill whatever size it has
     let window = egui::Window::new(tr("Export textures"))
         .id(egui::Id::unique("export_textures"))
         .open(&mut open)
         .collapsible(false)
-        .resizable(false)
-        .fixed_size(size)
+        .resizable(true)
+        .default_size(EXPORT_DIALOG_SIZE.min(max_size))
+        .min_size(EXPORT_DIALOG_MIN_SIZE.min(max_size))
+        .max_size(max_size)
         .pivot(egui::Align2::CENTER_CENTER)
         .default_pos(ctx.content_rect().center());
     window.show(ctx, |ui| {
@@ -131,10 +132,10 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
             if app.ui.export.tab == ExportTab::ListOfExports {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(tr("Open output directory")).clicked()
-                        && let Some(draft) = app.ui.export.settings.as_ref()
+                        && let Some(dir) = app.ui.export.settings.as_ref().map(|draft| draft.settings.dir.clone())
+                        && let Err(error) = open_folder(&dir)
                     {
-                        let _ = std::fs::create_dir_all(&draft.settings.dir);
-                        ui.ctx().open_url(egui::OpenUrl::new_tab(format!("file:///{}", draft.settings.dir.trim_start_matches('/'))));
+                        app.toast(trf("Cannot open {dir}: {error}", &[("dir", &dir), ("error", &error)]), true);
                     }
                 });
             }
@@ -159,9 +160,12 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
         let border = egui::Stroke::new(TAB_STROKE, tk.separator);
         egui::Frame::new().fill(tk.panel).stroke(border).corner_radius(body_corners).inner_margin(BODY_MARGIN).show(ui, |ui| {
             ui.allocate_ui_with_layout(vec2(ui.available_width(), body_height), egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                // Every tab's frame fills the window, so its right edge lines up with the row above it
+                let body_width = ui.available_width();
+                ui.set_width(body_width);
                 ui.set_height(body_height);
                 if app.ui.export.tab == ExportTab::OutputTemplates {
-                    crate::export_templates::tab(app, ui, &presets, size.x - EXPORT_DIALOG_PADDING - 2.0 * BODY_MARGIN);
+                    crate::export_templates::tab(app, ui, &presets, body_width);
                     return;
                 }
                 if app.ui.export.tab == ExportTab::ListOfExports {
@@ -183,8 +187,11 @@ pub fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     });
 
     match action {
+        // As the reference: Save settings keeps them and closes the window
         Some(BottomAction::Save) => {
-            save(app);
+            if save(app) {
+                app.ui.windows.export = false;
+            }
         }
         Some(BottomAction::Export) => {
             if save(app) {
@@ -303,6 +310,23 @@ fn save(app: &mut TextureCraftApp) -> bool {
     // A new project starts in the last folder used
     app.ui.export.dir.clone_from(&draft.settings.dir);
     app.run("export.settings.set", draft.params()).is_some()
+}
+
+/// Show `dir` in the system's file manager, creating it first so a folder nothing was exported to yet opens too
+#[cfg(not(target_arch = "wasm32"))]
+fn open_folder(dir: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+
+    let file_manager = if cfg!(target_os = "windows") {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    // Explorer reads only backslashes
+    let dir = if cfg!(target_os = "windows") { dir.replace('/', "\\") } else { dir.to_string() };
+    std::process::Command::new(file_manager).arg(dir).spawn().map(drop)
 }
 
 /// Start exporting with the saved settings: the List of exports tab shows the run

@@ -133,6 +133,9 @@ fn split(axis: SplitAxis, size: SplitSize, first: Node<Panel>, second: Node<Pane
     Node::Split { axis, size, first: Box::new(first), second: Box::new(second) }
 }
 
+/// Layers' default share under the texture sets: Properties' 69% shows a fill down to its channels, Layers keeps three rows
+const DEFAULT_LAYERS_SHARE: f32 = 0.31;
+
 /// The default: assets left of the viewport, then texture sets, layers (tabbed with texture set settings) and properties; ratios fit 1600x960
 pub fn default_workspace() -> Workspace {
     use Panel::*;
@@ -140,7 +143,7 @@ pub fn default_workspace() -> Workspace {
         SplitAxis::Vertical,
         SplitSize::Ratio(0.125),
         tabs(&[TextureSetList]),
-        split(SplitAxis::Vertical, SplitSize::Ratio(0.57), tabs(&[Layers, TextureSetSettings]), tabs(&[Properties])),
+        split(SplitAxis::Vertical, SplitSize::Ratio(DEFAULT_LAYERS_SHARE), tabs(&[Layers, TextureSetSettings]), tabs(&[Properties])),
     );
     let root =
         split(SplitAxis::Horizontal, SplitSize::Ratio(0.115), tabs(&[Assets]), split(SplitAxis::Horizontal, SplitSize::Ratio(0.78), tabs(&[Viewport]), column));
@@ -566,6 +569,30 @@ mod tests {
             assert!(w.layout.contains(&panel) || w.hidden.iter().any(|(p, _)| *p == panel), "{panel:?} is neither shown nor hidden");
         }
         assert_eq!(panels_of(&w), [Panel::Assets, Panel::Viewport, Panel::TextureSetList, Panel::Layers, Panel::TextureSetSettings, Panel::Properties]);
+    }
+
+    #[test]
+    fn the_default_right_column_gives_properties_about_two_thirds_under_the_texture_sets() {
+        let w = default_workspace();
+        let Some(Node::Split { second: right, .. }) = w.layout.root.as_ref() else { panic!("assets | rest") };
+        let Node::Split { second: column, .. } = right.as_ref() else { panic!("viewport | right column") };
+        let Node::Split { second: below_sets, .. } = column.as_ref() else { panic!("texture sets | rest") };
+        let Node::Split { size: SplitSize::Ratio(layers), first, second, .. } = below_sets.as_ref() else { panic!("layers | properties") };
+        assert!(matches!(first.as_ref(), Node::Tabs { panels, .. } if panels.first() == Some(&Panel::Layers)));
+        assert!(matches!(second.as_ref(), Node::Tabs { panels, .. } if panels == &[Panel::Properties]));
+        assert!((layers - 0.31).abs() < 1e-6, "Layers about 31%, Properties about 69%: {layers}");
+    }
+
+    #[test]
+    fn a_saved_split_keeps_its_own_share() {
+        let mut w = default_workspace();
+        let Some(Node::Split { second: right, .. }) = w.layout.root.as_mut() else { panic!("assets | rest") };
+        let Node::Split { second: column, .. } = right.as_mut() else { panic!("viewport | right column") };
+        let Node::Split { second: below_sets, .. } = column.as_mut() else { panic!("texture sets | rest") };
+        let Node::Split { size, .. } = below_sets.as_mut() else { panic!("layers | properties") };
+        *size = SplitSize::Ratio(0.57);
+        let back = Dock::from_value(serde_json::to_value(&w).unwrap());
+        assert_eq!(back.workspace(), &w, "a layout saved with the old split opens unchanged");
     }
 
     #[test]

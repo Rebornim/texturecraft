@@ -14,6 +14,8 @@ pub(crate) struct PickerState {
     pub(crate) hsv: [f32; 3],
     pub(crate) space: ColorSpace,
     pub(crate) model: ColorModel,
+    /// Where its title bar's drag left the window's top left corner; None while it stands beside the panel
+    pub(crate) moved_to: Option<egui::Pos2>,
 }
 
 impl PickerState {

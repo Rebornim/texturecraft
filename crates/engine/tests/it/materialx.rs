@@ -172,3 +172,14 @@ fn saved_settings_export_one_set_at_a_time_and_still_catch_the_name_clash_and_wa
     assert!(warnings.iter().any(|w| w.contains("\"A_B\"")), "{r}");
     assert_eq!(warnings.iter().filter(|w| w.contains("DirectX")).count(), 1, "{r}");
 }
+
+#[test]
+fn a_psd_is_left_out_of_the_material_and_said_so() {
+    let mut s = Session::new_project("t", primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+    let dir = temp("psd");
+    let r = execute(&mut s, "file.exportTextures", &json!({"dir": dir.display().to_string(), "preset": OPENPBR, "format": "psd", "materialX": true})).unwrap();
+    let all = files(&r);
+    assert!(all.iter().any(|f| f.ends_with(".psd")), "{all:?}");
+    assert!(!all.iter().any(|f| f.ends_with(".mtlx")), "no material reads a PSD: {all:?}");
+    assert!(r["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("MaterialX can't read PSD")), "{r}");
+}

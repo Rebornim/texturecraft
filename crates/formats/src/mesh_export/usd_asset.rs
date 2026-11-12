@@ -7,13 +7,13 @@ use texturecraft_texel::ColorSpace;
 use super::usd::{SLOTS, scene, usda};
 use super::usd_texture_input::UsdTextureInput;
 use crate::Result;
-use crate::export::{Dest, ExportOptions, PlannedFile, SourceRef, VirtualMap};
+use crate::export::{Dest, ExportOptions, FileFormat, PlannedFile, SourceRef, VirtualMap};
 
-/// The preview surface inputs `planned` (one texture set's files, rendered with `options`) can feed, and which channels feed them
+/// The preview surface inputs `planned` (one texture set's files, rendered with `options`) can feed, and which channels feed them; USD can't read a PSD
 pub fn usd_asset_inputs(planned: &[PlannedFile], options: &ExportOptions, project_normal: NormalFormat) -> Vec<UsdTextureInput> {
     let mut inputs = Vec::new();
     for (slot, &(stem, ..)) in SLOTS.iter().enumerate() {
-        let found = planned.iter().find_map(|file| {
+        let found = planned.iter().filter(|file| file.format != FileFormat::Psd).find_map(|file| {
             let map = options.preset.maps.get(file.map)?;
             let read = slot_read(stem, &map.channels, project_normal)?;
             Some((file, read))

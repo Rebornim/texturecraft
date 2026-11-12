@@ -11,15 +11,16 @@ pub struct MeshSize {
     pub uv_density: f32,
 }
 
-/// Mesh units one tile covers across and down at a tiling of 1; None without a physical size (per UV tile, spherical, decal)
+/// Mesh units one tile covers across and down at a tiling of 1; None without a physical size (per UV tile, spherical)
 fn unit_tile(projection: &Projection, size: MeshSize) -> Option<[f32; 2]> {
     let r = size.radius;
     match projection {
         Projection::Uv { .. } => Some([size.uv_density; 2]),
         Projection::Triplanar { scale, .. } => Some([r / scale; 2]),
+        Projection::Planar { placed: Some(frame), .. } => Some(frame.size),
         Projection::Planar { scale, .. } => Some([2.0 * r / scale; 2]),
         Projection::Cylindrical { scale, angle, .. } => Some([TAU * r * (angle / 360.0) / scale, 2.0 * r / scale]),
-        Projection::UvTile | Projection::Spherical { .. } | Projection::Decal(_) => None,
+        Projection::UvTile | Projection::Spherical { .. } => None,
     }
 }
 
@@ -28,7 +29,7 @@ fn tiling(projection: &Projection) -> Option<[f32; 2]> {
     match projection {
         Projection::Uv { scale, .. } => Some(*scale),
         Projection::Triplanar { uv, .. } | Projection::Planar { uv, .. } | Projection::Cylindrical { uv, .. } => Some(uv.tiling),
-        Projection::UvTile | Projection::Spherical { .. } | Projection::Decal(_) => None,
+        Projection::UvTile | Projection::Spherical { .. } => None,
     }
 }
 
@@ -64,7 +65,7 @@ mod tests {
         for projection in [
             Projection::Uv { scale: [3.0, 1.5], rotation: 0.0, offset: [0.0; 2] },
             Projection::Triplanar { scale: 1.5, sharpness: 8.0, offset: [0.0; 3], uv, projector: Default::default() },
-            Projection::Planar { scale: 0.5, axis: 2, offset: [0.0; 3], uv, projector: Default::default() },
+            Projection::Planar { scale: 0.5, axis: 2, offset: [0.0; 3], uv, projector: Default::default(), placed: None },
             Projection::Cylindrical { scale: 2.0, axis: 1, uv, offset: [0.0; 3], projector: Default::default(), angle: 360.0 },
         ] {
             let length = tile_length(&projection, SIZE).unwrap();

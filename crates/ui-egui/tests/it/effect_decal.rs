@@ -24,7 +24,7 @@ fn selected_mask_decal() -> (Harness<'static, TextureCraftApp>, LayerId) {
 
 fn decal(harness: &Harness<'_, TextureCraftApp>, effect: LayerId) -> Decal {
     match &harness.state().session.doc.project.effect(effect).unwrap().1.kind {
-        EffectKind::Fill { projection: Projection::Decal(decal), .. } => *decal,
+        EffectKind::Fill { projection: Projection::Planar { placed: Some(decal), .. }, .. } => *decal,
         _ => panic!("a decal fill effect"),
     }
 }

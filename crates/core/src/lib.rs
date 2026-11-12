@@ -15,6 +15,7 @@ pub mod channel;
 pub mod layer;
 pub mod project;
 pub mod projector;
+mod saved_projection;
 pub mod shape_crop;
 
 pub use backface::Backface;

@@ -44,14 +44,14 @@ fn app_with_decal() -> (Harness<'static, TextureCraftApp>, u64) {
 fn offset_of(harness: &Harness<'_, TextureCraftApp>, layer: u64) -> f32 {
     let project = &harness.state().session.doc.project;
     let LayerKind::Fill(fill) = &project.layer(texturecraft_engine::core::LayerId(layer)).unwrap().kind else { panic!("a fill layer") };
-    let Projection::Decal(decal) = &fill.projection else { panic!("a decal") };
+    let Projection::Planar { placed: Some(decal), .. } = &fill.projection else { panic!("a decal") };
     decal.symmetry.expect("a mirrored copy").offset
 }
 
 fn symmetry_of(harness: &Harness<'_, TextureCraftApp>, layer: u64) -> Option<(u8, DecalFlip)> {
     let project = &harness.state().session.doc.project;
     let LayerKind::Fill(fill) = &project.layer(texturecraft_engine::core::LayerId(layer)).unwrap().kind else { panic!("a fill layer") };
-    let Projection::Decal(decal) = &fill.projection else { panic!("a decal") };
+    let Projection::Planar { placed: Some(decal), .. } = &fill.projection else { panic!("a decal") };
     decal.symmetry.map(|symmetry| (symmetry.axis, symmetry.flip))
 }
 

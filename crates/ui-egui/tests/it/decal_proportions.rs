@@ -36,7 +36,7 @@ fn app_with_decal() -> (Harness<'static, TextureCraftApp>, LayerId) {
 
 fn decal(harness: &Harness<'_, TextureCraftApp>, layer: LayerId) -> Decal {
     let LayerKind::Fill(fill) = &harness.state().session.doc.project.layer(layer).unwrap().kind else { panic!("a fill layer") };
-    let Projection::Decal(decal) = &fill.projection else { panic!("a decal") };
+    let Projection::Planar { placed: Some(decal), .. } = &fill.projection else { panic!("a decal") };
     *decal
 }
 

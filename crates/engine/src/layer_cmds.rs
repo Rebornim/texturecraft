@@ -39,7 +39,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill projection",
             [],
             None,
-            "{layer? | effect?: content fill effect id, projection?: uv|triplanar|planar|spherical|cylindrical (default: the current one), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections: one number), offset?: [u, v] (uv) | [x, y, z] (triplanar, planar), sharpness?: 1..64 (triplanar), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar)} — what is not given keeps its value",
+            "{layer? | effect?: content fill effect id, projection?: uvTile (Fill (Match per UV Tile))|uv|triplanar|planar|spherical|cylindrical (default: the current one), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections: one number), offset?: [u, v] (uv) | [x, y, z] (3D projections), projectorRotation?: [x, y, z] degrees, projectorScale?: number | [x, y, z] (3D projection settings), sharpness?: 1..64 (triplanar), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar)} — what is not given keeps its value",
             has_layer,
             fill_projection
         ),
@@ -409,6 +409,7 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
     let named = match strp(p, "projection") {
         None => None,
         Some("uv") => Some(Projection::default()),
+        Some("uvTile") => Some(Projection::UvTile),
         Some("triplanar" | "tri-planar") => {
             Some(Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: Default::default(), projector: Default::default() })
         }
@@ -445,6 +446,7 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
             *r = rotation.unwrap_or(*r);
             *offset = floats(p, "offset", -1000.0, 1000.0).unwrap_or(*offset);
         }
+        Projection::UvTile => {}
         Projection::Triplanar { scale: s, sharpness, offset, uv, projector } => {
             *s = scale.map_or(*s, |v| v[0]);
             *sharpness = f32p(p, "sharpness").map_or(*sharpness, |v| v.clamp(1.0, 64.0));

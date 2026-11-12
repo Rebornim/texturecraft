@@ -11,7 +11,7 @@ pub struct MeshSize {
     pub uv_density: f32,
 }
 
-/// Mesh units one tile covers across and down at a tiling of 1; None without a physical size (spherical, decal)
+/// Mesh units one tile covers across and down at a tiling of 1; None without a physical size (per UV tile, spherical, decal)
 fn unit_tile(projection: &Projection, size: MeshSize) -> Option<[f32; 2]> {
     let r = size.radius;
     match projection {
@@ -19,7 +19,7 @@ fn unit_tile(projection: &Projection, size: MeshSize) -> Option<[f32; 2]> {
         Projection::Triplanar { scale, .. } => Some([r / scale; 2]),
         Projection::Planar { scale, .. } => Some([2.0 * r / scale; 2]),
         Projection::Cylindrical { scale, .. } => Some([TAU * r / scale, 2.0 * r / scale]),
-        Projection::Spherical { .. } | Projection::Decal(_) => None,
+        Projection::UvTile | Projection::Spherical { .. } | Projection::Decal(_) => None,
     }
 }
 
@@ -28,7 +28,7 @@ fn tiling(projection: &Projection) -> Option<[f32; 2]> {
     match projection {
         Projection::Uv { scale, .. } => Some(*scale),
         Projection::Triplanar { uv, .. } | Projection::Planar { uv, .. } | Projection::Cylindrical { uv, .. } => Some(uv.tiling),
-        Projection::Spherical { .. } | Projection::Decal(_) => None,
+        Projection::UvTile | Projection::Spherical { .. } | Projection::Decal(_) => None,
     }
 }
 

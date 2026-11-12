@@ -108,6 +108,10 @@ fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fil
     if let Some(kind) = picked {
         run(app, json!({"projection": kind.id()}));
     }
+    // Per UV tile, the source fills each tile once: nothing to place
+    if kind == ProjectionKind::UvTile {
+        return;
+    }
 
     let size = mesh_size(app);
     let length = tile_length(&fill.projection, size);
@@ -158,7 +162,7 @@ fn placement_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill
         Projection::Triplanar { uv, .. } | Projection::Planar { uv, .. } | Projection::Spherical { uv, .. } | Projection::Cylindrical { uv, .. } => {
             (uv.tiling, uv.rotation, uv.offset, "uvOffset")
         }
-        Projection::Decal(_) => return,
+        Projection::UvTile | Projection::Decal(_) => return,
     };
 
     let link_id = sheet.ui.make_persistent_id(("fill_tiling_link", salt));
@@ -219,7 +223,7 @@ fn world_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &F
     let (scale, offset) = match &fill.projection {
         Projection::Triplanar { scale, offset, .. } | Projection::Planar { scale, offset, .. } => (*scale, Some(*offset)),
         Projection::Spherical { scale, .. } | Projection::Cylindrical { scale, .. } => (*scale, None),
-        Projection::Uv { .. } | Projection::Decal(_) => return,
+        Projection::UvTile | Projection::Uv { .. } | Projection::Decal(_) => return,
     };
     if !sheet.band(tr("3D projection settings"), true, None, None).open {
         return;

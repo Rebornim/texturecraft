@@ -12,7 +12,7 @@ use crate::theme::Tokens;
 pub(crate) fn projection_picture(painter: &Painter, rect: Rect, kind: ProjectionKind, tokens: &Tokens) {
     use egui_phosphor::regular as icon;
     let glyph = match kind {
-        ProjectionKind::Uv => icon::SQUARE,
+        ProjectionKind::UvTile | ProjectionKind::Uv => icon::SQUARE,
         ProjectionKind::Triplanar => icon::CUBE,
         ProjectionKind::Planar => icon::SELECTION,
         ProjectionKind::Spherical => icon::GLOBE,

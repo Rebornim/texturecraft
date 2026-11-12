@@ -267,6 +267,8 @@ impl Sampling {
 pub enum Projection {
     /// Texture coordinates of the mesh.
     Uv { scale: [f32; 2], rotation: f32, offset: [f32; 2] },
+    /// The source stretched once over each UV tile (0..1 in every tile)
+    UvTile,
     /// World-space box projection blended by the normal.
     Triplanar {
         scale: f32,
@@ -355,6 +357,7 @@ impl Default for Projection {
 impl Projection {
     pub fn label(&self) -> &'static str {
         match self {
+            Projection::UvTile => "Fill (Match per UV Tile)",
             Projection::Uv { .. } => "UV projection",
             Projection::Triplanar { .. } => "Tri-planar projection",
             Projection::Planar { .. } => "Planar projection",

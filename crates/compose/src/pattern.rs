@@ -189,6 +189,7 @@ pub fn procedural(pr: &Procedural, proj: &Projection, c: &Coords) -> f32 {
     // 2D patterns sample a slice of the 3D pattern.
     let flat = |q: Vec2| raw(pr.kind, q.extend(0.0), pr.seed);
     let v = match proj {
+        Projection::UvTile => flat((c.uv - c.uv.floor()) * s),
         Projection::Uv { scale, rotation, offset } => flat(place(c.uv, Vec2::from(*scale), *rotation, Vec2::from(*offset)) * s),
         Projection::Triplanar { scale, sharpness, offset, uv, projector } => {
             let c = &projector_local(projector, c);
@@ -233,6 +234,7 @@ pub fn procedural(pr: &Procedural, proj: &Projection, c: &Coords) -> f32 {
 pub fn image_samples(proj: &Projection, c: &Coords) -> [(Vec2, f32); 3] {
     let one = |uv: Vec2| [(uv, 1.0), (Vec2::ZERO, 0.0), (Vec2::ZERO, 0.0)];
     match proj {
+        Projection::UvTile => one(c.uv - c.uv.floor()),
         Projection::Uv { scale, rotation, offset } => one(place(c.uv, Vec2::from(*scale), *rotation, Vec2::from(*offset))),
         Projection::Triplanar { scale, sharpness, offset, uv, projector } => {
             let c = &projector_local(projector, c);

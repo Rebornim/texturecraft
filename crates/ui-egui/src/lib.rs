@@ -74,6 +74,7 @@ pub mod profile;
 mod project_config;
 pub mod project_form;
 pub mod properties_popup;
+mod property_sheet;
 mod rail_popup;
 pub mod render_mode;
 mod resource_panel;

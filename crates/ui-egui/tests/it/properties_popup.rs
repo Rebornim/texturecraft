@@ -1,6 +1,6 @@
 //! A plain right click in a view opens the Properties panel's contents at the cursor; right drags keep their gestures
 
-use egui::{Event, Key, Modifiers, PointerButton, Pos2, vec2};
+use egui::{Event, Key, Modifiers, PointerButton, Pos2, Role, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
@@ -166,4 +166,36 @@ fn bake_and_render_modes_never_open_it() {
         click(&mut harness, PointerButton::Secondary, center);
         assert_eq!(harness.state().properties_popup, None, "{mode:?}");
     }
+}
+
+#[test]
+fn the_colour_picker_opened_in_the_popup_takes_its_presses_and_the_first_escape() {
+    let mut harness = harness();
+    harness.state_mut().ui.prefs.language = "en".into();
+    texturecraft_engine::execute(&mut harness.state_mut().session, "layer.add.fill", &json!({"color": [0.2, 0.2, 0.2]})).unwrap();
+    harness.run_steps(3);
+    let center = view_center(&harness);
+    click(&mut harness, PointerButton::Secondary, center);
+    assert!(is_open(&harness));
+
+    let popup = harness.ctx.memory(|memory| memory.area_rect(properties_popup::area_id())).unwrap();
+    let in_popup = |rect: egui::Rect| popup.x_range().contains(rect.center().x);
+    harness.get_all_by_role_and_label(Role::Button, "Base color").find(|node| in_popup(node.rect())).unwrap().scroll_to_me();
+    // The scroll animates for about twenty frames
+    harness.run_steps(25);
+    harness.get_all_by_role_and_label(Role::Button, "Base color").find(|node| in_popup(node.rect())).unwrap().click();
+    harness.run_steps(3);
+    let title = harness.get_by_role_and_label(Role::TitleBar, "Base color color").rect();
+
+    click(&mut harness, PointerButton::Primary, title.center());
+    assert!(is_open(&harness), "a press in the picker window stays in the popup");
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_some(), "and keeps the picker open");
+
+    harness.key_press(Key::Escape);
+    harness.run_steps(3);
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_none(), "the first Escape closes the picker");
+    assert!(is_open(&harness), "and leaves the popup open");
+    harness.key_press(Key::Escape);
+    harness.run_steps(3);
+    assert!(!is_open(&harness), "the next Escape closes the popup");
 }

@@ -106,6 +106,7 @@ mod round_gizmo;
 mod running_bake;
 pub mod saved_search;
 mod screen_color_pick;
+pub mod screen_pick;
 mod section_page;
 pub mod settings_window;
 pub mod shader_settings;
@@ -263,8 +264,12 @@ pub struct TextureCraftApp {
     pub picking_id_color: Option<id_color_pick::IdColorPick>,
     /// Whether the next click on the model places the symmetry planes (Pick point in the symmetry settings)
     pub picking_symmetry_plane: bool,
-    /// The colour bar whose eyedropper waits for a click on the model
+    /// The colour bar whose eyedropper waits for a click on the model or, outside the app, on the screen
     pub picking_color: Option<egui::Id>,
+    /// That eyedropper pick's wait for a click outside the app
+    pub screen_pick: Option<screen_pick::ScreenPick>,
+    /// Whether an eyedropper pick also takes a click outside the app (only with a real window: never in tests)
+    pub screen_picking: bool,
     /// The wgpu state (screenshots read the renderer's targets).
     pub render_state: Option<eframe::egui_wgpu::RenderState>,
     /// CJK fallback fonts for the UI language.
@@ -371,6 +376,11 @@ impl TextureCraftApp {
             picking_id_color: None,
             picking_symmetry_plane: false,
             picking_color: None,
+            screen_pick: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            screen_picking: raw_window_handle::HasWindowHandle::window_handle(cc).is_ok(),
+            #[cfg(target_arch = "wasm32")]
+            screen_picking: false,
             render_state: cc.wgpu_render_state.clone(),
             fonts: fonts::UiFonts::default(),
             banner: None,
@@ -1055,7 +1065,7 @@ impl eframe::App for TextureCraftApp {
         updates_ui::tick(self, ctx);
         self.bindings.sync(&self.ui.keymap, craft_keymap::egui::platform(ctx));
         menus::shortcuts(self, ctx);
-
+        screen_pick::sync(self, ctx);
         // The Path tool's curve repaints (a preview while placed) as its points, brush or material change
         if let Err(e) = self.session.path_live() {
             self.session.cancel_path();

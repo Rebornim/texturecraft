@@ -39,7 +39,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill projection",
             [],
             None,
-            "{layer? | effect?: content fill effect id, projection?: uvTile (Fill (Match per UV Tile))|uv|triplanar|planar|spherical|cylindrical (default: the current one), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections: one number), offset?: [u, v] (uv) | [x, y, z] (3D projections), projectorRotation?: [x, y, z] degrees, projectorScale?: number | [x, y, z] (3D projection settings), sharpness?: 1..64 (triplanar), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar)} — what is not given keeps its value",
+            "{layer? | effect?: content fill effect id, projection?: uvTile (Fill (Match per UV Tile))|uv|triplanar|planar|spherical|cylindrical (default: the current one), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections: one number), offset?: [u, v] (uv) | [x, y, z] (3D projections), projectorRotation?: [x, y, z] degrees, projectorScale?: number | [x, y, z] (3D projection settings), sharpness?: 1..64 (triplanar), angle?: 1..360 degrees one repeat spans (cylindrical), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar)} — what is not given keeps its value",
             has_layer,
             fill_projection
         ),
@@ -415,7 +415,9 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
         }
         Some("planar") => Some(Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: Default::default(), projector: Default::default() }),
         Some("spherical") => Some(Projection::Spherical { scale: 1.0, uv: Default::default(), offset: [0.0; 3], projector: Default::default() }),
-        Some("cylindrical") => Some(Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default(), offset: [0.0; 3], projector: Default::default() }),
+        Some("cylindrical") => {
+            Some(Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default(), offset: [0.0; 3], projector: Default::default(), angle: 360.0 })
+        }
         Some(other) => return Err(bad(cmd, format!("unknown projection `{other}`"))),
     };
     let mut proj = match (named, current) {
@@ -467,8 +469,9 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
             place(uv);
             turn(projector);
         }
-        Projection::Cylindrical { scale: s, axis: a, uv, offset, projector } => {
+        Projection::Cylindrical { scale: s, axis: a, uv, offset, projector, angle } => {
             *s = scale.map_or(*s, |v| v[0]);
+            *angle = f32p(p, "angle").map_or(*angle, |v| v.clamp(1.0, 360.0));
             *a = axis.unwrap_or(*a);
             *offset = offset3.unwrap_or(*offset);
             place(uv);

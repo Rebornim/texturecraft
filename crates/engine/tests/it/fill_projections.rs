@@ -104,3 +104,21 @@ fn match_per_uv_tile_repeats_the_source_once_per_tile() {
     let worst = left.iter().zip(&right).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
     assert!(worst < 1e-4, "every tile shows the same pattern (worst difference {worst})");
 }
+
+/// Cylindrical Angle is the arc one repeat spans; older saves go the whole way round
+#[test]
+fn cylindrical_angle_is_the_arc_one_repeat_spans() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    set(&mut s, layer, json!({"projection": "cylindrical"}));
+    let plain = snapshot(&mut s);
+    set(&mut s, layer, json!({"angle": 120}));
+    assert!(matches!(projection(&s, layer), Projection::Cylindrical { angle: 120.0, .. }));
+    assert_ne!(snapshot(&mut s), plain, "a third of the way round repeats three times");
+    set(&mut s, layer, json!({"angle": 360}));
+    assert_eq!(snapshot(&mut s), plain, "360 degrees is the whole way round");
+
+    let mut saved = serde_json::to_value(projection(&s, layer)).unwrap();
+    saved["Cylindrical"].as_object_mut().unwrap().remove("angle");
+    assert!(matches!(serde_json::from_value(saved).unwrap(), Projection::Cylindrical { angle: 360.0, .. }));
+}

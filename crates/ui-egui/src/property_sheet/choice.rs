@@ -4,6 +4,9 @@ use egui_phosphor::regular as ic;
 use super::{CONTROL_HEIGHT, ICON_SIZE, PropertySheet, TEXT_SIZE};
 use crate::theme::semibold;
 
+/// Draws an option's picture into its square
+type ChoicePicture<'a, T> = &'a dyn Fn(&Painter, Rect, T);
+
 /// Size of a picture in a dropdown button and in its list
 const PICTURE_SIZE: f32 = 18.0;
 
@@ -63,7 +66,7 @@ impl PropertySheet<'_> {
         current: T,
         options: &[T],
         name: impl Fn(T) -> String,
-        picture: Option<&dyn Fn(&Painter, Rect, T)>,
+        picture: Option<ChoicePicture<'_, T>>,
     ) -> (Option<T>, Option<T>) {
         let x0 = self.lead(label, false);
         let row = self.take(super::ROW_HEIGHT);
@@ -102,7 +105,7 @@ impl PropertySheet<'_> {
         current: T,
         options: &[T],
         name: &impl Fn(T) -> String,
-        picture: Option<&dyn Fn(&Painter, Rect, T)>,
+        picture: Option<ChoicePicture<'_, T>>,
     ) -> (Option<T>, Option<T>) {
         let t = self.tokens;
         let width = button.rect.width() - 2.0 * LIST_BORDER;

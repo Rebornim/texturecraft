@@ -1,7 +1,7 @@
 //! How fills read their image sources (filtering), through engine commands
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, Fill, Filtering, LayerId, LayerKind, Sampling};
+use texturecraft_engine::core::{Channel, Fill, Filtering, LayerId, LayerKind, Projection, Sampling, ScaleMode};
 use texturecraft_engine::geom::NO_TRI;
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute};
@@ -69,7 +69,7 @@ fn filtering_decides_how_a_shrunk_image_reads() {
         .filter(|&(x, y)| cache.gbuf.tri[(y * w + x) as usize] != NO_TRI)
         .all(|(x, y)| {
             let red = cache.composite.value(Channel::BaseColor, x, y)[0];
-            red < 0.01 || red > 0.99
+            !(0.01..=0.99).contains(&red)
         });
     assert!(pure, "Nearest reads one image texel: black or white only");
 
@@ -194,4 +194,25 @@ fn three_d_projections_take_uv_transformations() {
     // On a UV projection, tiling is its scale
     set(&mut s, json!({"projection": "uv", "tiling": [2, 4]})).unwrap();
     assert!(matches!(projection(&s), Projection::Uv { scale, .. } if scale == [2.0, 4.0]));
+}
+
+/// Physical size keeps the fill's tiling; inspect reports the mode and older fills open on Tiling
+#[test]
+fn scale_mode_is_stored_without_changing_the_tiling() {
+    let mut s = session();
+    let layer = checker_fill(&mut s, 2.0);
+    execute(&mut s, "layer.fill.projection", &json!({"layer": layer.0, "scaleMode": "physicalSize"})).unwrap();
+    let LayerKind::Fill(fill) = s.doc.project.layer(layer).unwrap().kind.clone() else { panic!("a fill layer") };
+    assert_eq!(fill.sampling.scale, ScaleMode::PhysicalSize);
+    assert!(matches!(fill.projection, Projection::Uv { scale: [2.0, 2.0], .. }), "{:?}", fill.projection);
+
+    let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap();
+    let row = inspect["layers"].as_array().unwrap().iter().find(|l| l["id"] == layer.0).unwrap().clone();
+    assert_eq!(row["fill"]["scaleMode"], json!("physicalSize"));
+    assert!(execute(&mut s, "layer.fill.projection", &json!({"layer": layer.0, "scaleMode": "inches"})).is_err());
+
+    let mut saved = serde_json::to_value(&fill).unwrap();
+    saved["sampling"].as_object_mut().unwrap().remove("scale");
+    let loaded: Fill = serde_json::from_value(saved).unwrap();
+    assert_eq!(loaded.sampling.scale, ScaleMode::Tiling);
 }

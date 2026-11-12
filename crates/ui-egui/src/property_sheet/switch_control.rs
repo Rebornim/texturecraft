@@ -3,6 +3,9 @@ use egui::{Align2, CornerRadius, FontId, Painter, Rect, Role, Sense, Stroke, Str
 use super::{PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
 
+/// Draws a picture row's picture into its square
+type RowPicture<'a> = &'a dyn Fn(&Painter, Rect);
+
 /// Room a switch's word needs in its segment beyond its own width
 const SEGMENT_AIR: f32 = 16.0;
 
@@ -78,7 +81,7 @@ impl PropertySheet<'_> {
     }
 
     /// A toggle row led by a picture (culling rows); a `child` row is dim, its label under its parent's label
-    pub(crate) fn picture_toggle(&mut self, picture: Option<&dyn Fn(&Painter, Rect)>, label: &str, on: &mut bool, child: bool) -> bool {
+    pub(crate) fn picture_toggle(&mut self, picture: Option<RowPicture<'_>>, label: &str, on: &mut bool, child: bool) -> bool {
         let rect = self.take(ROW_HEIGHT);
         let center_y = rect.center().y;
         let label_x = if picture.is_some() || child { self.left + ROW_PICTURE_SIZE + ROW_PICTURE_AIR } else { self.left };

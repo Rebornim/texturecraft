@@ -526,17 +526,35 @@ fn fill_properties_snapshots() {
     std::fs::create_dir_all(&output_dir).unwrap();
     let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
     let layer = execute(&mut session, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1]})).unwrap()["layer"].clone();
+    execute(
+        &mut session,
+        "layer.fill.projection",
+        &json!({"layer": layer, "tiling": [2.0, 2.0], "rotation": 30.0, "offset": [0.25, 0.0], "wrap": "repeat", "filtering": "bilinearHq"}),
+    )
+    .unwrap();
     let mut harness =
-        Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).with_pixels_per_point(1.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
-    save(&mut harness, &output_dir, "fill-uv");
-    for (shown, name) in [("Bilinear | HQ", "fill-uv-filtering-open"), ("Repeat", "fill-uv-wrap-open")] {
-        if let Some(combo) = harness.query_by_value(shown) {
-            combo.click();
-            save(&mut harness, &output_dir, name);
-            harness.query_by_value(shown).map(|combo| combo.click());
-            harness.run_steps(2);
-        }
+        Harness::builder().with_size(egui::vec2(1600.0, 1500.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    for (brightness, name) in [(Brightness::MediumDark, "medium"), (Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+        harness.state_mut().ui.prefs.brightness = brightness;
+        save(&mut harness, &output_dir, &format!("fill-uv-{name}"));
     }
+    harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    for (shown, hover, name) in [
+        ("UV projection", "Planar projection", "fill-uv-projection-open"),
+        ("Bilinear | HQ", "Nearest", "fill-uv-filtering-open"),
+        ("Repeat", "Repeat horizontally", "fill-uv-wrap-open"),
+    ] {
+        harness.get_by_label(shown).click();
+        harness.run_steps(2);
+        harness.get_by_label(hover).hover();
+        save(&mut harness, &output_dir, name);
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+    }
+    harness.get_by_label("Physical size").click();
+    save(&mut harness, &output_dir, "fill-uv-physical");
+    harness.get_by_label("Link").click();
+    save(&mut harness, &output_dir, "fill-uv-physical-unlinked");
     let session = &mut harness.state_mut().session;
     execute(session, "layer.fill.projection", &json!({"layer": layer, "projection": "triplanar"})).unwrap();
     save(&mut harness, &output_dir, "fill-triplanar");

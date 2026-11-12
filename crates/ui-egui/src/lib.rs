@@ -18,6 +18,9 @@ pub mod docking;
 pub mod export_templates;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_dialogs;
+mod fill_panel;
+mod fill_pictures;
+mod fill_placement;
 mod filter_slot;
 pub mod fonts;
 pub mod gpu;
@@ -40,6 +43,7 @@ mod preview_image;
 mod preview_request;
 mod preview_worker;
 pub mod profile;
+mod projection_kind;
 pub mod properties_popup;
 mod property_sheet;
 mod rail_popup;

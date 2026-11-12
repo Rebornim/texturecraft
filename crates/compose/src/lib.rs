@@ -16,6 +16,7 @@ pub mod eval;
 pub mod pattern;
 pub mod store;
 pub mod thumb;
+pub mod tile_length;
 
 pub use below::{BelowCache, StackKey};
 pub use display::{DisplayKind, tile_bytes};

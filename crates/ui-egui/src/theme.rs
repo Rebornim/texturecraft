@@ -384,6 +384,9 @@ pub fn apply(ctx: &egui::Context, b: Brightness, accent: Accent) {
     });
 }
 
+/// X, Y and Z as the view corner, the symmetry manipulator and the 3D fields show them
+pub const AXIS_COLORS: [Color32; 3] = [Color32::from_rgb(0xd8, 0x60, 0x4f), Color32::from_rgb(0x6c, 0xbc, 0x5a), Color32::from_rgb(0x5a, 0x8c, 0xe0)];
+
 /// A section caption inside a panel: semibold in the strong colour, as written (no capitals).
 pub fn caption(text: &str) -> egui::RichText {
     egui::RichText::new(text).font(semibold(12.5)).strong()

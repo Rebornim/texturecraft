@@ -217,21 +217,46 @@ impl UvWrap {
     }
 }
 
-/// How a fill samples its images. Fills saved before these choices existed read their images
-/// with [`Sampling::SAVED_BEFORE`], so they keep their look.
+/// What a fill's size is set in: repeats of its tile, or the tile's length on the mesh (stored as tiling either way)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ScaleMode {
+    #[default]
+    Tiling,
+    PhysicalSize,
+}
+
+impl ScaleMode {
+    pub const ALL: [ScaleMode; 2] = [ScaleMode::Tiling, ScaleMode::PhysicalSize];
+
+    /// Command id
+    pub fn id(self) -> &'static str {
+        match self {
+            ScaleMode::Tiling => "tiling",
+            ScaleMode::PhysicalSize => "physicalSize",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<ScaleMode> {
+        ScaleMode::ALL.into_iter().find(|mode| mode.id() == id)
+    }
+}
+
+/// How a fill samples its images and what its size is set in; older fills read with [`Sampling::SAVED_BEFORE`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Sampling {
     #[serde(default)]
     pub filtering: Filtering,
     #[serde(default)]
     pub wrap: UvWrap,
+    #[serde(default)]
+    pub scale: ScaleMode,
 }
 
 impl Sampling {
     /// What fills saved before the sampling choices existed did: plain bilinear
-    pub const SAVED_BEFORE: Sampling = Sampling { filtering: Filtering::BilinearSharp, wrap: UvWrap::Repeat };
+    pub const SAVED_BEFORE: Sampling = Sampling { filtering: Filtering::BilinearSharp, wrap: UvWrap::Repeat, scale: ScaleMode::Tiling };
 
-    /// Serde default for fills saved before the field existed.
+    /// Serde default for fills saved before the field existed
     pub fn saved_before() -> Sampling {
         Sampling::SAVED_BEFORE
     }

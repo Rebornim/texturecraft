@@ -6,16 +6,17 @@ use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::compose::ThumbTarget;
 use texturecraft_engine::core::{
-    BakedMap, BlendMode, Channel, CurvatureDetail, CurvatureMode, Decal, Effect, EffectKind, Fill, Filter, Filtering, Generator, GeneratorKind, Layer, LayerId,
-    LayerKind, LinkParam, MaterialLink, ProceduralKind, Projection, Source, UvWrap,
+    BakedMap, BlendMode, Channel, CurvatureDetail, CurvatureMode, Decal, Effect, EffectKind, Fill, Filter, Generator, GeneratorKind, Layer, LayerId, LayerKind,
+    LinkParam, MaterialLink, ProceduralKind, Projection, Source,
 };
 use texturecraft_engine::filter_lib::scalar_params;
 use texturecraft_engine::paint::{BrushAlpha, BrushSettings, alphas};
 use texturecraft_engine::{CloneFrom, StackTarget, Tool};
 
 use crate::TextureCraftApp;
-use crate::i18n::{filtering_label, n_, tr, trf, wrap_label};
+use crate::i18n::{tr, trf};
 use crate::layer_panel::{effect_preview_size, effect_row_height, layer_preview_size, layer_row_height};
+use crate::property_sheet::{PAD, PropertySheet};
 use crate::shelf::{Asset, ShelfDrag};
 use crate::state::PropsTab;
 use crate::theme::{Tokens, caption};
@@ -1139,7 +1140,26 @@ pub(crate) fn properties_title(app: &TextureCraftApp) -> String {
 pub(crate) fn properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     // A floating scroll bar would cover the right-aligned slider values and section reset icons
     ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+    if properties_has_fill_tabs(app) {
+        crate::property_sheet::section_tabs(ui, &crate::fill_panel::fill_tabs());
+    }
     egui::ScrollArea::vertical().id_salt("props").auto_shrink([false, false]).show(ui, |ui| properties_contents(app, ui));
+}
+
+/// Whether the panel shows a fill layer's sections, which the tabs jump between
+fn properties_has_fill_tabs(app: &TextureCraftApp) -> bool {
+    let layer = app.session.selected_layer().and_then(|id| app.session.doc.project.layers.get(&id));
+    app.session.tool.tool != Tool::PolygonFill
+        && app.session.target == StackTarget::Content
+        && layer.is_some_and(|layer| matches!(&layer.kind, LayerKind::Fill(fill) if !matches!(fill.projection, Projection::Decal(_))))
+}
+
+/// Room around the Properties rows not yet laid out by the property sheet, as every other panel has
+const LEGACY_BODY_MARGIN: egui::Margin = egui::Margin::symmetric(8, 4);
+
+/// Lays out `body` with the other panels' margin
+fn legacy_body(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
+    egui::Frame::new().inner_margin(LEGACY_BODY_MARGIN).show(ui, body);
 }
 
 /// What the Properties panel edits: polygon fill's own settings, the selected effect, fill, folder or instance, else the tool
@@ -1149,19 +1169,19 @@ pub(crate) fn properties_contents(app: &mut TextureCraftApp, ui: &mut Ui) {
 
     match (&selected, app.session.target) {
         // Polygon fill shows its own settings and says what it fills into, whatever is selected
-        _ if app.session.tool.tool == Tool::PolygonFill => polygon_fill_properties(app, ui),
-        (Some(layer), StackTarget::Effect(effect)) => effect_properties(app, ui, layer, effect),
+        _ if app.session.tool.tool == Tool::PolygonFill => legacy_body(ui, |ui| polygon_fill_properties(app, ui)),
+        (Some(layer), StackTarget::Effect(effect)) => legacy_body(ui, |ui| effect_properties(app, ui, layer, effect)),
         (Some(layer), StackTarget::Content) if matches!(layer.kind, LayerKind::Fill(_)) => fill_properties(app, ui, layer),
-        (Some(layer), StackTarget::Content) if layer.is_group() => {
+        (Some(layer), StackTarget::Content) if layer.is_group() => legacy_body(ui, |ui| {
             ui.label(RichText::new(tr("A folder blends its children (pass-through). Set per-channel opacity in the layer rows.")).color(tokens.text_dim));
-        }
-        (Some(layer), StackTarget::Content) if layer.instance_source().is_some() => instance_properties(app, ui, layer),
-        (Some(layer), StackTarget::Mask) => {
+        }),
+        (Some(layer), StackTarget::Content) if layer.instance_source().is_some() => legacy_body(ui, |ui| instance_properties(app, ui, layer)),
+        (Some(layer), StackTarget::Mask) => legacy_body(ui, |ui| {
             height_mask_section(app, ui, layer);
             ui.separator();
             tool_properties(app, ui);
-        }
-        _ => tool_properties(app, ui),
+        }),
+        _ => legacy_body(ui, |ui| tool_properties(app, ui)),
     }
 }
 
@@ -1773,13 +1793,14 @@ fn material_controls(app: &mut TextureCraftApp, ui: &mut Ui) {
 
 fn fill_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer) {
     let LayerKind::Fill(fill) = &layer.kind else { return };
-    if let Some(link) = &fill.link {
-        link_properties(app, ui, layer.id, link);
-        ui.add_space(6.0);
-    }
     let on: Vec<Channel> = layer.channels.keys().copied().collect();
-    ui.label(caption(tr("Fill")));
-    fill_editor(app, ui, fill, &json!({"layer": layer.id.0}), &on, layer.id);
+    PropertySheet::show(ui, ("fill_sheet", layer.id.0), |sheet| {
+        if let Some(link) = &fill.link {
+            let link = link.clone();
+            egui::Frame::new().inner_margin(egui::Margin::symmetric(PAD as i8, 4)).show(sheet.ui, |ui| link_properties(app, ui, layer.id, &link));
+        }
+        crate::fill_panel::fill_sheet(app, sheet, fill, &json!({"layer": layer.id.0}), &on, layer.id);
+    });
 }
 
 /// A MaterialCraft material's presets and exposed inputs; edits store the value and re-cook the
@@ -1901,7 +1922,7 @@ fn link_param_editor(ui: &mut Ui, layer: LayerId, p: &LinkParam) -> Option<Value
 }
 
 /// `base` with the fields of `extra` added.
-fn with(base: &Value, extra: Value) -> Value {
+pub(crate) fn with(base: &Value, extra: Value) -> Value {
     let mut v = base.clone();
     if let (Some(o), Value::Object(e)) = (v.as_object_mut(), extra) {
         o.extend(e);
@@ -1910,7 +1931,7 @@ fn with(base: &Value, extra: Value) -> Value {
 }
 
 /// Anchor points below layer `reader` in its texture set: (effect id, "layer / anchor" label).
-fn anchors_below(app: &TextureCraftApp, reader: LayerId) -> Vec<(LayerId, String)> {
+pub(crate) fn anchors_below(app: &TextureCraftApp, reader: LayerId) -> Vec<(LayerId, String)> {
     let p = &app.session.doc.project;
     let Some((ts, _, _)) = p.locate(reader) else { return Vec::new() };
     p.walk(ts)
@@ -1927,238 +1948,8 @@ fn anchor_label(app: &TextureCraftApp, anchor: LayerId, channel: Channel) -> Str
     trf("Anchor: {name} ({channel})", &[("name", &name), ("channel", &tr(channel.label()))])
 }
 
-/// Space above a fill's Material caption, setting it apart from the projection
-const FILL_MATERIAL_GAP: f32 = 6.0;
-
-/// Space between a fill's channel chips and its channel sources
-const FILL_CHANNELS_GAP: f32 = 4.0;
-
-/// Projection and sources of a fill layer or fill effect (`base`) for its channels `on`; `reader` owns it
-fn fill_editor(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: &Value, on: &[Channel], reader: LayerId) {
-    let salt = base.to_string();
-    if let Projection::Decal(decal) = &fill.projection {
-        decal_editor(app, ui, decal, reader);
-    } else {
-        projection_editor(app, ui, fill, base, &salt);
-    }
-
-    ui.add_space(FILL_MATERIAL_GAP);
-    ui.label(caption(tr("Material")));
-    let channels = app.session.doc.project.texture_set(app.session.ts()).map(|texture_set| texture_set.channel_list()).unwrap_or_default();
-    ui.horizontal_wrapped(|ui| {
-        for channel in &channels {
-            let enabled = on.contains(channel);
-            if chip(ui, tr(channel.short()), enabled).on_hover_text(tr(SOLO_HINT)).clicked() {
-                let solo = ui.input(|input| input.modifiers.alt);
-                app.run("layer.fill.set", with(base, json!({"channel": channel.id(), "enabled": solo || !enabled, "solo": solo})));
-            }
-        }
-    });
-
-    ui.add_space(FILL_CHANNELS_GAP);
-    let anchors = anchors_below(app, reader);
-    for channel in channels {
-        if on.contains(&channel) {
-            fill_channel(app, ui, fill, base, channel, &anchors, &salt);
-        }
-    }
-}
-
-/// Slider range of a fill's scale or tiling
-const FILL_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.01..=20.0;
-
-/// Slider range of a UV fill's rotation, a full turn
-const FILL_ROTATION_DEGREES_RANGE: std::ops::RangeInclusive<f32> = 0.0..=360.0;
-
-/// Tri-planar hardness, the exponent weighting the three projections; `layer.fill.projection` clamps to the same range
-const TRIPLANAR_HARDNESS_RANGE: std::ops::RangeInclusive<f32> = 1.0..=64.0;
-
-/// A fill's projection kind, axis and hardness, then its collapsible UV transformations
-fn projection_editor(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: &Value, salt: &str) {
-    let projection_label = fill.projection.label();
-    combo(ui, tr("Projection"), tr(projection_label), |ui| {
-        for (id, label) in [
-            ("uv", n_("UV projection")),
-            ("triplanar", n_("Tri-planar projection")),
-            ("planar", n_("Planar projection")),
-            ("spherical", n_("Spherical projection")),
-            ("cylindrical", n_("Cylindrical projection")),
-        ] {
-            if ui.selectable_label(projection_label == label, tr(label)).clicked() {
-                app.run("layer.fill.projection", with(base, json!({"projection": id})));
-            }
-        }
-    });
-
-    let filtering = fill.sampling.filtering;
-    combo(ui, tr("Filtering"), tr(filtering_label(filtering)), |ui| {
-        for f in Filtering::ALL {
-            if ui.selectable_label(f == filtering, tr(filtering_label(f))).clicked() && f != filtering {
-                app.run("layer.fill.projection", with(base, json!({"filtering": f.id()})));
-            }
-        }
-    });
-
-    // Tri-planar has no tile to repeat
-    if !matches!(fill.projection, Projection::Triplanar { .. }) {
-        let wrap = fill.sampling.wrap;
-        combo(ui, tr("UV Wrap"), tr(wrap_label(wrap)), |ui| {
-            for w in UvWrap::ALL {
-                if ui.selectable_label(w == wrap, tr(wrap_label(w))).clicked() && w != wrap {
-                    app.run("layer.fill.projection", with(base, json!({"wrap": w.id()})));
-                }
-            }
-        });
-    }
-
-    // Each edit sends only the fields it changed; the command keeps the others
-    let mut edit = |fields: Value| {
-        app.run("layer.fill.projection", with(base, fields));
-    };
-    if let Projection::Planar { axis, .. } | Projection::Cylindrical { axis, .. } = &fill.projection
-        && let Some(picked_axis) = axis_combo(ui, *axis)
-    {
-        edit(json!({"axis": picked_axis}));
-    }
-    if let Projection::Triplanar { sharpness, .. } = &fill.projection {
-        let mut hardness = *sharpness;
-        if let Some(merge) = slider_edit(ui, tr("Hardness"), &mut hardness, TRIPLANAR_HARDNESS_RANGE, 1) {
-            edit(json!({"sharpness": hardness, "merge": merge}));
-        }
-    }
-
-    // One id per fill so each keeps its own open or closed state
-    section(ui, &format!("sec_fill_transform{salt}"), tr("UV transformations"), true, |ui| {
-        projection_transform(ui, &fill.projection, salt, &mut edit);
-    });
-}
-
-/// Width of the lock button between a pair of sliders
-const PAIR_LOCK_WIDTH: f32 = 22.0;
-
-/// Height of one slider: its value row over its track
-const PAIR_SLIDER_HEIGHT: f32 = 34.0;
-
-/// Two sliders side by side under `label` (across and down), with a lock between them when
-/// `lock` is given: while locked, the second follows the first and is greyed. Returns the pair
-/// once one is edited, with [`slider_edit`]'s `merge`.
-fn pair_sliders(
-    ui: &mut Ui,
-    label: &str,
-    mut v: [f32; 2],
-    range: std::ops::RangeInclusive<f32>,
-    decimals: usize,
-    lock: Option<&mut bool>,
-) -> Option<([f32; 2], bool)> {
-    let mut edited = None;
-    ui.label(label);
-    let locked = lock.as_deref().copied().unwrap_or(false);
-    let lock_width = if lock.is_some() { PAIR_LOCK_WIDTH } else { ui.spacing().item_spacing.x };
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), PAIR_SLIDER_HEIGHT), Sense::hover());
-    let half = ((rect.width() - lock_width) / 2.0).max(1.0);
-    let left = egui::Rect::from_min_size(rect.min, egui::vec2(half, rect.height()));
-    let right = egui::Rect::from_min_size(egui::pos2(rect.right() - half, rect.top()), egui::vec2(half, rect.height()));
-    let slot = |ui: &mut Ui, area: egui::Rect| ui.new_child(egui::UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
-
-    if let Some(merge) = slider_edit(&mut slot(ui, left), "", &mut v[0], range.clone(), decimals) {
-        if locked {
-            v[1] = v[0];
-        }
-        edited = Some(merge);
-    }
-    if let Some(lock) = lock {
-        let middle = egui::Rect::from_center_size(egui::pos2(rect.center().x, rect.bottom() - 9.0), egui::vec2(PAIR_LOCK_WIDTH, 18.0));
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(middle).layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight)));
-        let icon = if *lock { ic::LOCK_SIMPLE } else { ic::LOCK_SIMPLE_OPEN };
-        if icon_button(&mut child, icon, tr("Lock the two values together"), *lock, 14.0).clicked() {
-            *lock = !*lock;
-            if *lock && v[1] != v[0] {
-                v[1] = v[0];
-                edited = Some(false);
-            }
-        }
-    }
-    let mut second = slot(ui, right);
-    second.add_enabled_ui(!locked, |ui| {
-        if let Some(merge) = slider_edit(ui, "", &mut v[1], range.clone(), decimals) {
-            edited = Some(merge);
-        }
-    });
-    edited.map(|merge| (v, merge))
-}
-
-/// A projection's UV transformations: tiling across and down (locked together until unlocked),
-/// rotation and offset. A 3D projection also shows its scale and world offset here.
-fn projection_transform(ui: &mut Ui, projection: &Projection, salt: &str, edit: &mut impl FnMut(Value)) {
-    let (tiling, rotation, offset, offset_key) = match projection {
-        Projection::Uv { scale, rotation, offset } => (*scale, *rotation, *offset, "offset"),
-        Projection::Triplanar { uv, .. } | Projection::Planar { uv, .. } | Projection::Spherical { uv, .. } | Projection::Cylindrical { uv, .. } => {
-            (uv.tiling, uv.rotation, uv.offset, "uvOffset")
-        }
-        Projection::Decal(_) => return,
-    };
-    let lock_id = ui.make_persistent_id(("fill_tiling_lock", salt));
-    let mut locked = ui.data(|data| data.get_temp::<bool>(lock_id)).unwrap_or(tiling[0] == tiling[1]);
-    let was_locked = locked;
-    if let Some((edited, merge)) = pair_sliders(ui, tr("Tiling"), tiling, FILL_SCALE_RANGE, 2, Some(&mut locked)) {
-        edit(json!({"tiling": edited, "merge": merge}));
-    }
-    if locked != was_locked {
-        ui.data_mut(|data| data.insert_temp(lock_id, locked));
-    }
-    let mut rotation_degrees = rotation;
-    if let Some(merge) = slider_edit(ui, tr("Rotation"), &mut rotation_degrees, FILL_ROTATION_DEGREES_RANGE, 0) {
-        edit(json!({"rotation": rotation_degrees, "merge": merge}));
-    }
-    if let Some((edited, merge)) = pair_sliders(ui, tr("Offset"), offset, -1.0..=1.0, 2, None) {
-        edit(json!({offset_key: edited, "merge": merge}));
-    }
-
-    match projection {
-        Projection::Triplanar { scale, offset, .. } | Projection::Planar { scale, offset, .. } => {
-            world_scale(ui, *scale, edit);
-            if let Some((edited_offset, merge)) = offset_sliders(ui, ["X", "Y", "Z"], *offset) {
-                edit(json!({"offset": edited_offset, "merge": merge}));
-            }
-        }
-        Projection::Spherical { scale, .. } | Projection::Cylindrical { scale, .. } => world_scale(ui, *scale, edit),
-        Projection::Uv { .. } | Projection::Decal(_) => {}
-    }
-}
-
-/// A 3D projection's scale: how many times its pattern fits across the mesh
-fn world_scale(ui: &mut Ui, scale: f32, edit: &mut impl FnMut(Value)) {
-    let mut scale = scale;
-    if let Some(merge) = slider_edit(ui, tr("Scale"), &mut scale, FILL_SCALE_RANGE, 2) {
-        edit(json!({"scale": scale, "merge": merge}));
-    }
-}
-
-/// A slider per offset component ("Offset U", …): the whole offset once one is edited, with
-/// [`slider_edit`]'s `merge`.
-fn offset_sliders<const N: usize>(ui: &mut Ui, axes: [&str; N], mut v: [f32; N]) -> Option<([f32; N], bool)> {
-    let mut edit = None;
-    for (axis, x) in axes.iter().zip(v.iter_mut()) {
-        edit = edit.or(slider_edit(ui, &trf("Offset {axis}", &[("axis", axis)]), x, -1.0..=1.0, 2));
-    }
-    edit.map(|merge| (v, merge))
-}
-
-/// The axis a planar or cylindrical projection runs along: the one picked, if any.
-fn axis_combo(ui: &mut Ui, axis: u8) -> Option<u8> {
-    let mut picked = None;
-    combo(ui, tr("Axis"), ["X", "Y", "Z"].get(usize::from(axis)).copied().unwrap_or("Z"), |ui| {
-        for (i, name) in (0u8..).zip(["X", "Y", "Z"]) {
-            if ui.selectable_label(i == axis, name).clicked() && i != axis {
-                picked = Some(i);
-            }
-        }
-    });
-    picked
-}
-
 /// A decal's frame: place it with a click in the 3D view, then size, turn and shift it.
-fn decal_editor(app: &mut TextureCraftApp, ui: &mut Ui, d: &Decal, layer: LayerId) {
+pub(crate) fn decal_editor(app: &mut TextureCraftApp, ui: &mut Ui, d: &Decal, layer: LayerId) {
     let tk = Tokens::get(ui.ctx());
     ui.label(caption(tr("Decal")));
     let placing = app.placing_decal == Some(layer);
@@ -2192,7 +1983,7 @@ fn decal_editor(app: &mut TextureCraftApp, ui: &mut Ui, d: &Decal, layer: LayerI
 }
 
 /// The source of one fill channel: uniform, procedural, image or anchor.
-fn fill_channel(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: &Value, c: Channel, anchors: &[(LayerId, String)], salt: &str) {
+pub(crate) fn fill_channel(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: &Value, c: Channel, anchors: &[(LayerId, String)], salt: &str) {
     let tk = Tokens::get(ui.ctx());
     use texturecraft_engine::core::ChannelKind;
     {
@@ -2379,9 +2170,10 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, eid:
             }
         }
         EffectKind::Material(fill) => {
-            ui.label(caption(tr("Fill")));
             let enabled: Vec<Channel> = fill.sources.keys().copied().collect();
-            fill_editor(app, ui, fill, &json!({"effect": id}), &enabled, layer.id);
+            PropertySheet::show(ui, ("fill_effect_sheet", id), |sheet| {
+                crate::fill_panel::fill_sheet(app, sheet, fill, &json!({"effect": id}), &enabled, layer.id);
+            });
         }
         EffectKind::Anchor => {
             ui.label(caption(tr("Anchor point")));

@@ -16,6 +16,9 @@ const SECTION_AIR: f32 = 6.0;
 /// The hairline above a later section caption, to the caption's top
 const SECTION_RULE_TO_CAPTION: f32 = 12.0;
 
+/// Air above the panel's first section caption
+const FIRST_SECTION_AIR: f32 = 12.0;
+
 /// Height of a section caption's line, including the air under it
 const SECTION_CAPTION_LINE: f32 = 24.0;
 
@@ -37,9 +40,15 @@ impl PropertySheet<'_> {
             let sep = self.tokens.separator;
             self.ui.painter().line_segment([pos2(left, y), pos2(right, y)], Stroke::new(1.0, sep));
             self.space(SECTION_RULE_TO_CAPTION);
+        } else {
+            self.space(FIRST_SECTION_AIR);
         }
 
         let rect = self.take(SECTION_CAPTION_LINE);
+        self.sections.push((title.to_owned(), rect.top()));
+        if super::section_tabs::take_jump(self.ui, title) {
+            self.ui.scroll_to_rect(rect.expand2(egui::vec2(0.0, SECTION_RULE_TO_CAPTION)), Some(egui::Align::TOP));
+        }
         let center_y = rect.top() + 7.0;
         let text = self.tokens.text;
         self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, title.to_uppercase(), semibold(SMALL_TEXT_SIZE), text);

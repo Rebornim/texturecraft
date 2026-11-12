@@ -453,7 +453,9 @@ const PANEL_BODY_MARGIN: Margin = Margin::symmetric(8, 4);
 
 /// The body of every panel except the viewport, in the dock or on the rail
 pub(crate) fn panel_body(app: &mut TextureCraftApp, ui: &mut Ui, panel: Panel) {
-    egui::Frame::new().inner_margin(PANEL_BODY_MARGIN).show(ui, |ui| match panel {
+    // Properties draws full-width bands and tabs, so it keeps its own margins
+    let margin = if panel == Panel::Properties { Margin::ZERO } else { PANEL_BODY_MARGIN };
+    egui::Frame::new().inner_margin(margin).show(ui, |ui| match panel {
         Panel::MeshMapSettings => crate::bake_mode::mesh_map_settings_panel(app, ui),
         Panel::Assets => crate::shelf::body(app, ui),
         Panel::CommonSettings => crate::bake_mode::common_settings_panel(app, ui),

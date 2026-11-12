@@ -34,11 +34,11 @@ const CHIP_PADDING: f32 = 24.0;
 const CHIP_TO_VALUE: f32 = 18.0;
 
 /// What a slider's knob runs along and shows
-struct Track {
-    start: f32,
-    end: f32,
-    center_y: f32,
-    signed: bool,
+pub(super) struct Track {
+    pub(super) start: f32,
+    pub(super) end: f32,
+    pub(super) center_y: f32,
+    pub(super) signed: bool,
 }
 
 impl PropertySheet<'_> {
@@ -120,7 +120,7 @@ impl PropertySheet<'_> {
     }
 
     /// A typed value wins over a drag in the same frame and starts its own undo step
-    fn apply_typed(value: &mut f32, typed: Option<f32>, dragged: Option<bool>) -> Option<bool> {
+    pub(super) fn apply_typed(value: &mut f32, typed: Option<f32>, dragged: Option<bool>) -> Option<bool> {
         match typed {
             Some(typed) => {
                 *value = typed;
@@ -131,7 +131,7 @@ impl PropertySheet<'_> {
     }
 
     /// Paints a track with its knob and moves `value` while it is clicked or dragged
-    fn track(&mut self, id: Id, label: &str, track: &Track, value: &mut f32, range: &RangeInclusive<f32>) -> Option<bool> {
+    pub(super) fn track(&mut self, id: Id, label: &str, track: &Track, value: &mut f32, range: &RangeInclusive<f32>) -> Option<bool> {
         let (minimum, maximum) = (*range.start(), *range.end());
         let span = (maximum - minimum).max(f32::EPSILON);
         let length = (track.end - track.start).max(1.0);
@@ -171,14 +171,31 @@ impl PropertySheet<'_> {
         let shown = format!("{value:.decimals$}{suffix}");
         self.measure_value(&shown);
         let width = self.used.value_width.max(super::VALUE_MIN_WIDTH);
-        let rect = Rect::from_min_max(pos2(self.right - width, center_y - 10.0), pos2(self.right, center_y + 10.0));
+        self.value_field_at(id, self.right, width, center_y, value, range, decimals, suffix)
+    }
+
+    /// [`Self::value_field`] ending at `right`, `width` wide, outside the panel's value column
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn value_field_at(
+        &mut self,
+        id: Id,
+        right: f32,
+        width: f32,
+        center_y: f32,
+        value: f32,
+        range: &RangeInclusive<f32>,
+        decimals: usize,
+        suffix: &str,
+    ) -> Option<f32> {
+        let shown = format!("{value:.decimals$}{suffix}");
+        let rect = Rect::from_min_max(pos2(right - width, center_y - 10.0), pos2(right, center_y + 10.0));
         let field_id = id.with("typed");
         let editing = self.ui.data(|data| data.get_temp::<String>(field_id));
 
         let t = self.tokens;
         let Some(mut text) = editing else {
             let response = self.ui.interact(rect, id.with("value"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
-            self.ui.painter().text(pos2(self.right, center_y), Align2::RIGHT_CENTER, &shown, semibold(TEXT_SIZE), t.text);
+            self.ui.painter().text(pos2(right, center_y), Align2::RIGHT_CENTER, &shown, semibold(TEXT_SIZE), t.text);
             if response.clicked() {
                 self.ui.data_mut(|data| data.insert_temp(field_id, format!("{value:.decimals$}")));
                 self.ui.memory_mut(|memory| memory.request_focus(field_id));

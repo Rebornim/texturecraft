@@ -5,7 +5,12 @@ mod choice;
 mod group;
 mod number_field;
 mod open_card;
+mod preview_block;
+mod preview_edit;
+mod preview_lower;
+mod preview_size;
 mod row;
+mod section_tabs;
 mod sheet_measure;
 mod slider;
 mod slot;
@@ -18,6 +23,9 @@ mod tests;
 
 pub(crate) use band_response::BandResponse;
 pub(crate) use number_field::NumberField;
+pub(crate) use preview_lower::PreviewLower;
+pub(crate) use preview_size::PreviewSize;
+pub(crate) use section_tabs::section_tabs;
 pub(crate) use slot_response::SlotResponse;
 
 use egui::{Color32, FontId, Id, Rect, Ui, pos2, vec2};
@@ -75,6 +83,7 @@ pub(crate) struct PropertySheet<'u> {
     air_at: Option<f32>,
     drawn_bottom: f32,
     empty: bool,
+    sections: Vec<(String, f32)>,
 }
 
 impl<'u> PropertySheet<'u> {
@@ -95,10 +104,15 @@ impl<'u> PropertySheet<'u> {
             air_at: None,
             drawn_bottom: rect.top(),
             empty: true,
+            sections: Vec::new(),
             ui,
         };
         let result = body(&mut sheet);
         sheet.close_card();
+        if !sheet.sections.is_empty() {
+            let view_top = sheet.ui.clip_rect().top();
+            section_tabs::remember(sheet.ui, section_tabs::SectionTops { tops: std::mem::take(&mut sheet.sections), view_top });
+        }
 
         let seen = sheet.seen;
         if seen != used {

@@ -11,7 +11,7 @@ const FIELD_GAP: f32 = 4.0;
 const LINK_SLOT: f32 = 26.0;
 
 /// Size of the link button
-const LINK_SIZE: f32 = 18.0;
+pub(super) const LINK_SIZE: f32 = 18.0;
 
 /// From a field's left edge to its axis letter's left edge
 const TAG_LETTER_INSET: f32 = 7.0;
@@ -55,21 +55,29 @@ impl PropertySheet<'_> {
         }
 
         if let Some(linked) = link {
-            let rect = Rect::from_center_size(pos2(self.right - LINK_SIZE / 2.0, center_y), vec2(LINK_SIZE, LINK_SIZE));
-            let id = self.next_id();
-            let response = self.ui.interact(rect, id, Sense::click());
-            if response.clicked() {
-                *linked = !*linked;
-            }
-
-            let t = self.tokens;
-            let (fill, border) = if *linked { (t.accent_dim, t.accent) } else { (t.button, t.button_border) };
-            let painter = self.ui.painter();
-            painter.rect(rect, CornerRadius::same(4), fill, Stroke::new(1.0, border), StrokeKind::Inside);
-            let glyph = if *linked { ic::LINK } else { ic::LINK_BREAK };
-            painter.text(rect.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(ICON_SIZE), t.text);
+            self.link_button(pos2(self.right - LINK_SIZE / 2.0, center_y), linked);
         }
         edited
+    }
+
+    /// The link that keeps two values together; returns whether it was clicked
+    pub(super) fn link_button(&mut self, center: egui::Pos2, linked: &mut bool) -> bool {
+        let rect = Rect::from_center_size(center, vec2(LINK_SIZE, LINK_SIZE));
+        let id = self.next_id();
+        let response = self.ui.interact(rect, id, Sense::click());
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, *linked, crate::i18n::tr("Link")));
+        let response = self.tip(response, crate::i18n::tr("Link"));
+        if response.clicked() {
+            *linked = !*linked;
+        }
+
+        let t = self.tokens;
+        let (fill, border) = if *linked { (t.accent_dim, t.accent) } else { (t.button, t.button_border) };
+        let painter = self.ui.painter();
+        painter.rect(rect, CornerRadius::same(4), fill, Stroke::new(1.0, border), StrokeKind::Inside);
+        let glyph = if *linked { ic::LINK_SIMPLE_HORIZONTAL } else { ic::LINK_SIMPLE_HORIZONTAL_BREAK };
+        painter.text(rect.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(ICON_SIZE), t.text);
+        response.clicked()
     }
 
     /// One field: its tag on the left, the value on the right; drag or click to type

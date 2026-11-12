@@ -1,7 +1,7 @@
 //! The 3D projection settings and the projection kinds of a fill, through engine commands
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, DepthCulling, LayerId, LayerKind, Projection, Projector};
+use texturecraft_engine::core::{Channel, DepthCulling, FillSymmetry, LayerId, LayerKind, Projection, Projector, Sampling};
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute};
 
@@ -275,4 +275,65 @@ fn depth_culling_keeps_planar_and_warp_projections_off_hidden_surfaces() {
 
     let saved: Projector = serde_json::from_value(json!({"rotation": [0, 0, 0], "scale": [1, 1, 1]})).unwrap();
     assert_eq!(saved.depth, DepthCulling { on: false, hardness: 0.75 }, "an older save has no depth culling");
+}
+
+/// Texels of `far` that `values` gives something other than the bare `empty`
+fn filled(far: &[usize], values: &[f32], empty: &[f32]) -> usize {
+    far.iter().filter(|&&i| values[i] != empty[i]).count()
+}
+
+/// Mirror and radial symmetry copy a planar projection onto the sphere's far side and leave the near side as it was; Flip copy turns the copies' images over; UV projections and older saves have no copies
+#[test]
+fn fill_symmetry_mirrors_or_turns_copies_of_a_3d_projection() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    execute(&mut s, "layer.visible", &json!({"layer": layer.0, "visible": false})).unwrap();
+    let empty = snapshot(&mut s);
+    execute(&mut s, "layer.visible", &json!({"layer": layer.0, "visible": true})).unwrap();
+    // Depth culled from +Z, the planar projection reaches only the near side
+    set(&mut s, layer, json!({"projection": "planar", "axis": 2}));
+    let plain = snapshot(&mut s);
+    let (far, near) = (facing_z(&s, -1.1, -0.3), facing_z(&s, 0.3, 1.1));
+    assert_eq!(filled(&far, &plain, &empty), 0);
+
+    set(&mut s, layer, json!({"symmetry": true, "symmetryType": "mirror", "symmetryAxis": 2}));
+    let mirrored = snapshot(&mut s);
+    assert!(filled(&far, &mirrored, &empty) > far.len() / 2, "the mirror copy reaches the far side");
+    assert!(near.iter().all(|&i| mirrored[i] == plain[i]), "the original keeps its own half");
+
+    set(&mut s, layer, json!({"symmetryType": "radial", "symmetryAxis": 1, "symmetryCount": 2}));
+    let turned = snapshot(&mut s);
+    assert!(filled(&far, &turned, &empty) > far.len() / 2, "the copy turned half round reaches the far side");
+    assert!(near.iter().all(|&i| turned[i] == plain[i]), "the original keeps its own wedge");
+    assert_ne!(turned, mirrored, "a turned copy is not a mirrored one");
+    set(&mut s, layer, json!({"symmetry": false}));
+    assert_eq!(snapshot(&mut s), plain, "switched off, the copies go");
+
+    // A left to right ramp shows a copy's image turned over
+    let ramp = s.import_resource_bytes("ramp.png", ramp_png()).unwrap();
+    execute(&mut s, "layer.fill.set", &json!({"layer": layer.0, "channel": "baseColor", "image": ramp})).unwrap();
+    set(&mut s, layer, json!({"symmetry": true}));
+    let copied = snapshot(&mut s);
+    set(&mut s, layer, json!({"flipCopy": [true, false]}));
+    let flipped = snapshot(&mut s);
+    assert!(far.iter().filter(|&&i| (flipped[i] - copied[i]).abs() > 0.1).count() > far.len() / 4, "Flip copy U turns the copy's ramp round");
+    assert!(near.iter().all(|&i| flipped[i] == copied[i]), "the original is never flipped");
+
+    set(&mut s, layer, json!({"projection": "uv"}));
+    let uv = snapshot(&mut s);
+    set(&mut s, layer, json!({"symmetry": false}));
+    assert_eq!(snapshot(&mut s), uv, "a UV projection has no copies");
+
+    assert!(execute(&mut s, "layer.fill.projection", &json!({"layer": layer.0, "symmetryType": "spiral"})).is_err());
+    assert!(execute(&mut s, "layer.fill.projection", &json!({"layer": layer.0, "symmetryAxis": 3})).is_err());
+    let saved: Sampling = serde_json::from_value(json!({"filtering": "BilinearHq", "wrap": "Repeat", "scale": "Tiling"})).unwrap();
+    assert_eq!(saved.symmetry, FillSymmetry::OFF, "an older save has no symmetry");
+}
+
+/// A 64 × 8 PNG whose red climbs from left to right
+fn ramp_png() -> Vec<u8> {
+    let mut out = Vec::new();
+    let ramp = image::RgbaImage::from_fn(64, 8, |x, _| image::Rgba([(x * 4) as u8, 0, 0, 255]));
+    ramp.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).unwrap();
+    out
 }

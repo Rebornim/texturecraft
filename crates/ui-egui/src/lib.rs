@@ -21,6 +21,7 @@ pub mod file_dialogs;
 mod fill_panel;
 mod fill_pictures;
 mod fill_placement;
+mod fill_symmetry_panel;
 mod filter_slot;
 pub mod fonts;
 pub mod gpu;

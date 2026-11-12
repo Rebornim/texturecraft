@@ -26,6 +26,7 @@ fn fill_json(f: &Fill) -> Value {
         "filtering": f.sampling.filtering.id(),
         "wrap": f.sampling.wrap.id(),
         "scaleMode": f.sampling.scale.id(),
+        "symmetry": f.sampling.symmetry,
         "sources": f.sources.iter().map(|(c, s)| (c.id().to_string(), source_json(s))).collect::<serde_json::Map<_, _>>(),
     });
     if let Some(frame) = f.projection.placed() {
@@ -63,6 +64,7 @@ fn effect_json(session: &Session, effect: &Effect, content: bool) -> Value {
             out["filtering"] = json!(sampling.filtering.id());
             out["wrap"] = json!(sampling.wrap.id());
             out["scaleMode"] = json!(sampling.scale.id());
+            out["symmetry"] = json!(sampling.symmetry);
         }
         EffectKind::Material(fill) => out["fill"] = fill_json(fill),
         EffectKind::Filter(filter) => {

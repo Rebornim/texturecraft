@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Backface, BlendMode, Channel, ChannelKind, DepthCulling, Projector, ShapeCrop, lum};
+use crate::{Backface, BlendMode, Channel, ChannelKind, DepthCulling, FillSymmetry, Projector, ShapeCrop, lum};
 
 mod curvature_detail;
 mod curvature_mode;
@@ -242,7 +242,7 @@ impl ScaleMode {
 }
 
 /// How a fill samples its images and what its size is set in; older fills read with [`Sampling::SAVED_BEFORE`]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct Sampling {
     #[serde(default)]
     pub filtering: Filtering,
@@ -250,11 +250,14 @@ pub struct Sampling {
     pub wrap: UvWrap,
     #[serde(default)]
     pub scale: ScaleMode,
+    #[serde(default, skip_serializing_if = "FillSymmetry::is_default")]
+    pub symmetry: FillSymmetry,
 }
 
 impl Sampling {
     /// What fills saved before the sampling choices existed did: plain bilinear
-    pub const SAVED_BEFORE: Sampling = Sampling { filtering: Filtering::BilinearSharp, wrap: UvWrap::Repeat, scale: ScaleMode::Tiling };
+    pub const SAVED_BEFORE: Sampling =
+        Sampling { filtering: Filtering::BilinearSharp, wrap: UvWrap::Repeat, scale: ScaleMode::Tiling, symmetry: FillSymmetry::OFF };
 
     /// Serde default for fills saved before the field existed
     pub fn saved_before() -> Sampling {
@@ -403,6 +406,11 @@ impl Projection {
             Projection::Planar { projector, .. } | Projection::Warp { projector, .. } => Some(projector.depth).filter(|depth| depth.on),
             _ => None,
         }
+    }
+
+    /// Whether the projection works in 3D, so a fill's symmetry can copy it (UV projections cannot)
+    pub fn takes_symmetry(&self) -> bool {
+        !matches!(self, Projection::Uv { .. } | Projection::UvTile)
     }
 
     /// The frame on the surface a placed planar projection projects from

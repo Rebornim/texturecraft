@@ -25,6 +25,9 @@ const FIRST_SECTION_AIR: f32 = 12.0;
 /// Height of a section caption's line, including the air under it
 const SECTION_CAPTION_LINE: f32 = 24.0;
 
+/// From a section caption's line top to its text's centre
+pub(super) const SECTION_CAPTION_CENTER: f32 = 7.0;
+
 /// Size of a section's menu glyph
 const SECTION_MENU_ICON_SIZE: f32 = 14.0;
 
@@ -34,6 +37,12 @@ pub(super) const EDGE_GLYPH_INSET: f32 = 6.0;
 impl PropertySheet<'_> {
     /// A section caption in capitals, a hairline above a later one; `menu` adds the ≡ button
     pub(crate) fn section(&mut self, title: &str, menu: bool) -> Option<Response> {
+        let text = self.tokens.text;
+        self.section_in(title, menu, text)
+    }
+
+    /// [`Self::section`] with its caption in `color`
+    pub(super) fn section_in(&mut self, title: &str, menu: bool, color: egui::Color32) -> Option<Response> {
         self.close_card();
         if !self.empty {
             self.space(SECTION_AIR);
@@ -52,9 +61,8 @@ impl PropertySheet<'_> {
         if super::section_tabs::take_jump(self.ui, title) {
             self.ui.scroll_to_rect(rect.expand2(egui::vec2(0.0, SECTION_RULE_TO_CAPTION)), Some(egui::Align::TOP));
         }
-        let center_y = rect.top() + 7.0;
-        let text = self.tokens.text;
-        self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, title.to_uppercase(), semibold(SMALL_TEXT_SIZE), text);
+        let center_y = rect.top() + SECTION_CAPTION_CENTER;
+        self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, title.to_uppercase(), semibold(SMALL_TEXT_SIZE), color);
         self.drawn(center_y + 6.0);
         self.air_at = None;
         if !menu {

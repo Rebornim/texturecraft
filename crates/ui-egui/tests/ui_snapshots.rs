@@ -595,3 +595,54 @@ fn fill_properties_snapshots() {
         save(&mut harness, &output_dir, &format!("fill-triplanar-{name}"));
     }
 }
+
+/// Screen 03: a planar fill's Symmetry section off, mirrored (a moved Y plane with U flipped), radial (6 over a full turn, 4 over half a turn, also in the dark and light themes), its Type list open, and a UV fill's greyed switch
+#[test]
+#[ignore]
+fn fill_symmetry_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1]})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.fill.projection", &json!({"layer": layer, "projection": "planar"})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1500.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::Tab, "Symmetry").click();
+    let cases = [
+        (json!({}), "symmetry-off"),
+        (json!({"symmetry": true}), "symmetry-mirror"),
+        (json!({"symmetryAxis": 1, "axisPosition": [0.0, 0.4, 0.0], "flipCopy": [true, false]}), "symmetry-mirror-y"),
+        (json!({"symmetryType": "radial", "symmetryAxis": 2, "axisPosition": 0, "flipCopy": [false, false]}), "symmetry-radial"),
+        (json!({"symmetryCount": 4, "angleSpan": 180}), "symmetry-radial-half"),
+    ];
+    for (settings, name) in cases {
+        let mut settings = settings;
+        settings["layer"] = layer.clone();
+        execute(&mut harness.state_mut().session, "layer.fill.projection", &settings).unwrap();
+        save(&mut harness, &output_dir, name);
+    }
+    for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+        harness.state_mut().ui.prefs.brightness = brightness;
+        save(&mut harness, &output_dir, &format!("symmetry-radial-half-{name}"));
+    }
+    harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Radial symmetry").click();
+    harness.run_steps(2);
+    harness.get_by_label("Mirror symmetry").hover();
+    save(&mut harness, &output_dir, "symmetry-type-open");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::Role::RadioButton, "X").hover();
+    save(&mut harness, &output_dir, "symmetry-axis-hover");
+
+    execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": layer, "projection": "uv"})).unwrap();
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::Tab, "Symmetry").click();
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::CheckBox, "Symmetry").hover();
+    save(&mut harness, &output_dir, "symmetry-uv");
+}

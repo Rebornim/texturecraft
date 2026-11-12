@@ -63,8 +63,8 @@ const ROTATION_FIELD_SPEED: f32 = 0.5;
 const SCALE_FIELD_SPEED: f32 = 0.01;
 
 /// The tabs over a fill's Properties: each jumps to its section
-pub(crate) fn fill_tabs() -> [(&'static str, &'static str); 2] {
-    [(ic::SLIDERS_HORIZONTAL, tr("Fill")), (ic::CIRCLE_HALF, tr("Material"))]
+pub(crate) fn fill_tabs() -> [(&'static str, &'static str); 3] {
+    [(ic::SLIDERS_HORIZONTAL, tr("Fill")), (ic::FLIP_HORIZONTAL, tr("Symmetry")), (ic::CIRCLE_HALF, tr("Material"))]
 }
 
 /// The mesh's size for the texture set being painted, as the projections see it
@@ -74,11 +74,12 @@ fn mesh_size(app: &TextureCraftApp) -> MeshSize {
     MeshSize { radius: mesh.radius(), uv_density: mesh.uv_density(material).unwrap_or(1.0) }
 }
 
-/// A fill's whole Properties: the Fill section, then the Material section with one slot per channel that is on
+/// A fill's whole Properties: the Fill section, the Symmetry section, then the Material section with one slot per channel that is on
 pub(crate) fn fill_sheet(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, on: &[Channel], reader: LayerId) {
     let salt = base.to_string();
     sheet.section(tr("Fill"), false);
     projection_rows(app, sheet, fill, base, &salt, reader);
+    crate::fill_symmetry_panel::symmetry_section(app, sheet, &fill.projection, fill.sampling, base);
 
     sheet.section(tr("Material"), false);
     let channels = app.session.doc.project.texture_set(app.session.ts()).map(|texture_set| texture_set.channel_list()).unwrap_or_default();

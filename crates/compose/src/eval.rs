@@ -15,17 +15,22 @@ use texturecraft_core::{
     TileGrid, blend1, blend3, lum, mix3, per_unit,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
-use texturecraft_geom::{Mesh, NO_TRI, UvGBuffer};
+use texturecraft_geom::{Mesh, NO_TRI, Surface, UvGBuffer};
 use texturecraft_texel::{DilationMap, TILE, TILE_AREA, TileImage, from_u16, noise, to_u16, to_u16_signed};
 
 use crate::below::{Band, BelowCache, Level};
 use crate::curvature_sizes::CurvatureSizes;
+use crate::fill_copies::FillCopies;
+use crate::fill_copy::FillCopy;
 use crate::pattern::{Coords, image_samples, procedural, world_noise};
 use crate::projector_cover::{framed_cover, projector_cover};
 use crate::projector_depth::ProjectorDepth;
 use crate::store::{BakedMaps, ImageRes, ImageStore, PixelStore, decode};
 
 const NCH: usize = Channel::ALL.len();
+
+/// Coverage past which a symmetric fill's remaining copies would not show under the ones above
+const COVERED: f32 = 0.9999;
 
 /// Stack values being composited, per channel.
 type Acc = [[f32; 3]; NCH];
@@ -1040,6 +1045,8 @@ struct Texel<'a, 'b> {
     anchors: Vec<(LayerId, Acc)>,
     /// Where `eval` takes layer masks and content from.
     tape: Tape<'b>,
+    /// The copy of a symmetric fill being sampled: the surface point and normal it sees, and its image's flip
+    copy: Option<FillCopy>,
 }
 
 /// What a layer contributes (its mask, its content value and coverage per channel): evaluated
@@ -1072,7 +1079,7 @@ impl<'t> Tape<'t> {
 
 impl<'a, 'b> Texel<'a, 'b> {
     fn new(inp: &'b Inputs<'a>, x: u32, y: u32, o: usize, stroke: f32) -> Self {
-        Texel { inp, x, y, o, res: inp.gbuf.width, coords: None, stroke, stop: None, anchors: Vec::new(), tape: Tape::Off }
+        Texel { inp, x, y, o, res: inp.gbuf.width, coords: None, stroke, stop: None, anchors: Vec::new(), tape: Tape::Off, copy: None }
     }
 
     /// Run `f` with `tape` as this texel's tape.
@@ -1129,7 +1136,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         let (lo, hi) = self.inp.bounds;
         let center = (lo + hi) * 0.5;
         let r = ((hi - lo).length() * 0.5).max(1e-4);
-        let mut c = match g.surface(self.inp.mesh, i) {
+        let mut c = match self.surface(i) {
             Some(s) => Coords { uv: s.uv, pos: (s.pos - center) / r, nrm: s.nrm },
             None => Coords { uv: Vec2::new((self.x as f32 + 0.5) / g.width as f32, (self.y as f32 + 0.5) / g.height as f32), pos: Vec3::ZERO, nrm: Vec3::Y },
         };
@@ -1149,7 +1156,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         if x >= g.width || y >= g.height {
             return None;
         }
-        let s = g.surface(self.inp.mesh, (y * g.width + x) as usize)?;
+        let s = self.surface((y * g.width + x) as usize)?;
         let (lo, hi) = self.inp.bounds;
         let center = (lo + hi) * 0.5;
         let r = ((hi - lo).length() * 0.5).max(1e-4);
@@ -1171,7 +1178,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         let mut out = [1.0f32; 3];
         for (dx, dy) in [(1, 0), (0, 1)] {
             let Some(next) = self.projected_at(proj, self.x + dx, self.y + dy) else { continue };
-            for ((footprint, (uv, _)), (next_uv, _)) in out.iter_mut().zip(samples).zip(image_samples(proj, &next)) {
+            for ((footprint, (uv, _)), (next_uv, _)) in out.iter_mut().zip(samples).zip(self.image_uvs(proj, &next)) {
                 let span = ((next_uv - *uv) * size).length();
                 // A jump of more than a quarter of the image is a UV seam, not the texel's size
                 if span.is_finite() && span < size.max_element() * 0.25 {
@@ -1184,8 +1191,61 @@ impl<'a, 'b> Texel<'a, 'b> {
 
     /// World position of this texel (None when uncovered)
     fn world(&self) -> Option<Vec3> {
-        let i = (self.y * self.inp.gbuf.width + self.x) as usize;
-        self.inp.gbuf.surface(self.inp.mesh, i).map(|s| s.pos)
+        self.surface((self.y * self.inp.gbuf.width + self.x) as usize).map(|s| s.pos)
+    }
+
+    /// The surface at G-buffer index `i`, as the fill copy being sampled sees it
+    fn surface(&self, i: usize) -> Option<Surface> {
+        let mut s = self.inp.gbuf.surface(self.inp.mesh, i)?;
+        if let Some(copy) = self.copy {
+            s.pos = copy.point(s.pos);
+            s.nrm = copy.normal(s.nrm);
+            s.geo_nrm = copy.normal(s.geo_nrm);
+        }
+        Some(s)
+    }
+
+    /// Where `proj` reads images at `coords`, turned over as the fill copy being sampled says
+    fn image_uvs(&self, proj: &Projection, coords: &Coords) -> [(Vec2, f32); 3] {
+        let samples = image_samples(proj, coords);
+        match self.copy {
+            Some(copy) => samples.map(|(uv, weight)| (copy.uv(uv), weight)),
+            None => samples,
+        }
+    }
+
+    /// A fill's value and coverage through `proj`, from `one` (which samples it once): with `sampling`'s symmetry on, every copy of the projection is sampled and the copies are laid over each other, the texel's own copy on top
+    fn symmetric(&mut self, proj: &Projection, sampling: Sampling, mut one: impl FnMut(&mut Self) -> ([f32; 3], f32)) -> ([f32; 3], f32) {
+        let symmetry = sampling.symmetry;
+        let world = self.inp.gbuf.surface(self.inp.mesh, (self.y * self.inp.gbuf.width + self.x) as usize).map(|s| s.pos);
+        let (Some(p), true) = (world, symmetry.on && proj.takes_symmetry()) else {
+            return one(self);
+        };
+
+        let (lo, hi) = self.inp.bounds;
+        let radius = ((hi - lo).length() * 0.5).max(1e-4);
+        let cached = self.coords.take();
+        let mut value = [0.0f32; 3];
+        let mut cover = 0.0f32;
+        for copy in FillCopies::new(&symmetry, p, (lo + hi) * 0.5, radius) {
+            self.copy = Some(copy);
+            self.coords = None;
+            let (v, c) = one(self);
+            let weight = c.clamp(0.0, 1.0) * (1.0 - cover);
+            for (total, part) in value.iter_mut().zip(v) {
+                *total += part * weight;
+            }
+            cover += weight;
+            if cover >= COVERED {
+                break;
+            }
+        }
+        self.copy = None;
+        self.coords = cached;
+        if cover <= 0.0 {
+            return ([0.0; 3], 0.0);
+        }
+        (value.map(|v| v / cover), cover)
     }
 
     fn baked(&self, m: BakedMap) -> Option<f32> {
@@ -1233,7 +1293,8 @@ impl<'a, 'b> Texel<'a, 'b> {
             Source::Image { name, .. } => self.inp.images.get(name),
             _ => None,
         });
-        cover * image.map_or(1.0, |img| img.sample(c.uv.x, c.uv.y)[3].clamp(0.0, 1.0))
+        let uv = self.copy.map_or(c.uv, |copy| copy.uv(c.uv));
+        cover * image.map_or(1.0, |img| img.sample(uv.x, uv.y)[3].clamp(0.0, 1.0))
     }
 
     /// 1 where a fill placed by `proj` at `coords` lands inside its 0..1 tile on every axis `sampling.wrap` does not repeat, else 0
@@ -1242,7 +1303,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         if (across && down) || matches!(proj, Projection::Triplanar { .. }) {
             return 1.0;
         }
-        let [(uv, _), ..] = image_samples(proj, coords);
+        let [(uv, _), ..] = self.image_uvs(proj, coords);
         let inside = |t: f32, repeats: bool| repeats || (0.0..1.0).contains(&t);
         if inside(uv.x, across) && inside(uv.y, down) { 1.0 } else { 0.0 }
     }
@@ -1260,7 +1321,7 @@ impl<'a, 'b> Texel<'a, 'b> {
                 let Some(image) = self.inp.images.get(name) else { return [0.5; 3] };
 
                 let (coords, _) = self.projected(projection);
-                let samples = image_samples(projection, &coords);
+                let samples = self.image_uvs(projection, &coords);
                 let footprints = match sampling.filtering {
                     Filtering::BilinearHq => self.footprints(projection, &samples, image),
                     Filtering::BilinearSharp | Filtering::Nearest => [1.0; 3],
@@ -1392,10 +1453,11 @@ impl<'a, 'b> Texel<'a, 'b> {
                     }
                 }
                 EffectKind::Fill { source, projection, sampling } => {
-                    let fill = self.source(source, projection, *sampling, ChannelKind::Scalar)[0];
-                    value += (blend1(effect.blend, value, fill) - value)
-                        * opacity
-                        * self.cover(std::iter::once(source), projection, *sampling, effect.depth.as_deref());
+                    let ([fill, ..], cover) = self.symmetric(projection, *sampling, |t| {
+                        let fill = t.source(source, projection, *sampling, ChannelKind::Scalar);
+                        (fill, t.cover(std::iter::once(source), projection, *sampling, effect.depth.as_deref()))
+                    });
+                    value += (blend1(effect.blend, value, fill) - value) * opacity * cover;
                 }
                 EffectKind::Generator(generator) => {
                     let generated = self.generator(generator, effect.curvature_sizes.as_deref());
@@ -1601,12 +1663,14 @@ impl<'a, 'b> Texel<'a, 'b> {
                 let (v, cov) = match content {
                     Content::Fill(f, depth) => {
                         let ch = Channel::ALL.get(c.ch).copied()?;
-                        // A channel without a source fills with its default (no clone per texel).
-                        let v = match f.sources.get(&ch) {
-                            Some(s) => self.source(s, &f.projection, f.sampling, ch.kind()),
-                            None => ch.default_value(),
-                        };
-                        (v, self.cover(f.sources.values(), &f.projection, f.sampling, depth.as_deref()))
+                        self.symmetric(&f.projection, f.sampling, |t| {
+                            // A channel without a source fills with its default (no clone per texel)
+                            let v = match f.sources.get(&ch) {
+                                Some(s) => t.source(s, &f.projection, f.sampling, ch.kind()),
+                                None => ch.default_value(),
+                            };
+                            (v, t.cover(f.sources.values(), &f.projection, f.sampling, depth.as_deref()))
+                        })
                     }
                     Content::Paint { preview } => self.painted(c.data.as_deref(), c, *preview),
                     Content::Group(_) => return None,
@@ -1686,9 +1750,10 @@ impl<'a, 'b> Texel<'a, 'b> {
             }
             EffectKind::Material(f) => match Channel::ALL.get(c.ch).and_then(|ch| f.sources.get(ch).map(|s| (*ch, s))) {
                 Some((ch, s)) => {
-                    let p = self.source(s, &f.projection, f.sampling, ch.kind());
-                    let w = o * self.cover(f.sources.values(), &f.projection, f.sampling, e.depth.as_deref());
-                    over(c, e.blend, v, cov, p, w)
+                    let (p, w) = self.symmetric(&f.projection, f.sampling, |t| {
+                        (t.source(s, &f.projection, f.sampling, ch.kind()), t.cover(f.sources.values(), &f.projection, f.sampling, e.depth.as_deref()))
+                    });
+                    over(c, e.blend, v, cov, p, w * o)
                 }
                 None => (v, cov),
             },

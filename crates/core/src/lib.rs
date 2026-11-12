@@ -13,11 +13,13 @@ pub mod blend;
 mod block_scales;
 pub mod channel;
 pub mod depth_culling;
+pub mod fill_symmetry;
 pub mod layer;
 pub mod project;
 pub mod projector;
 mod saved_projection;
 pub mod shape_crop;
+pub mod symmetry_kind;
 
 pub use backface::Backface;
 pub use bake::{
@@ -30,6 +32,7 @@ pub use bake::{
 pub use blend::{BlendMode, blend1, blend3, lum, mix3};
 pub use channel::{Channel, ChannelFormat, ChannelKind};
 pub use depth_culling::DepthCulling;
+pub use fill_symmetry::FillSymmetry;
 pub use layer::{
     ChannelBlend, CompareOp, CurvatureDetail, CurvatureMode, Decal, Effect, EffectKind, Fill, Filter, Filtering, Generator, GeneratorKind, HeightMask, Layer,
     LayerId, LayerKind, Levels, LinkParam, LinkPreset, Mask, MaskBackground, MaterialLink, PathShape, Procedural, ProceduralKind, Projection, Sampling,
@@ -41,6 +44,7 @@ pub use project::{
 };
 pub use projector::Projector;
 pub use shape_crop::ShapeCrop;
+pub use symmetry_kind::SymmetryKind;
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq)]
 pub enum CoreError {

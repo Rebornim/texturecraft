@@ -1,5 +1,6 @@
 //! The Properties panel's rows, groups and controls, shared by every panel so they line up
 
+mod axis_rows;
 mod band_response;
 mod choice;
 mod group;
@@ -16,6 +17,7 @@ mod sheet_measure;
 mod slider;
 mod slot;
 mod slot_response;
+mod stack_slider;
 mod switch_control;
 mod tooltip;
 
@@ -29,6 +31,7 @@ pub(crate) use preview_size::PreviewSize;
 pub(crate) use row_lead::RowLead;
 pub(crate) use section_tabs::section_tabs;
 pub(crate) use slot_response::SlotResponse;
+pub(crate) use stack_slider::StackSlider;
 
 use egui::{Color32, FontId, Id, Rect, Ui, pos2, vec2};
 

@@ -3,8 +3,8 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    BlendMode, Channel, ChannelBlend, Decal, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Projector,
-    Sampling, ScaleMode, ShapeCrop, Source, UvTransform, UvWrap,
+    BlendMode, Channel, ChannelBlend, Decal, EffectKind, Fill, FillSymmetry, Filtering, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection,
+    Projector, Sampling, ScaleMode, ShapeCrop, Source, SymmetryKind, UvTransform, UvWrap,
 };
 
 use crate::commands::{
@@ -39,7 +39,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill projection",
             [],
             None,
-            "{layer? | effect?: content fill effect id, projection?: uvTile (Fill (Match per UV Tile))|uv|triplanar|planar|spherical|cylindrical|warp (default: the current one; a new warp's frame sits around the mesh, seen from the front), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections: one number), offset?: [u, v] (uv) | [x, y, z] (3D projections), projectorRotation?: [x, y, z] degrees, projectorScale?: number | [x, y, z] (3D projection settings), shapeCrop?: cropped|extendsOutside (3D projections), backfaceCulling?: bool, backfaceAngle?: degrees, backfaceHardness?: 0..1 (planar, cylindrical), depthCulling?: bool, depthCullingHardness?: 0..1 (planar, warp; surfaces hidden from the projector behind others get none of it; new planar and warp projections start with it on at 0.75), sharpness?: 1..64 (triplanar), warpCorners?: [[x, y] × 4] (warp: top left, top right, bottom right, bottom left, across and up in frame sizes from its centre; unpulled = ±0.5), projectionDepth?: lengths of the frame's longer side it reaches in front of and behind it when cropped (warp), angle?: 1..360 degrees one repeat spans (cylindrical), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar)} — what is not given keeps its value",
+            "{layer? | effect?: content fill effect id, projection?: uvTile (Fill (Match per UV Tile))|uv|triplanar|planar|spherical|cylindrical|warp (default: the current one; a new warp's frame sits around the mesh, seen from the front), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections: one number), offset?: [u, v] (uv) | [x, y, z] (3D projections), projectorRotation?: [x, y, z] degrees, projectorScale?: number | [x, y, z] (3D projection settings), shapeCrop?: cropped|extendsOutside (3D projections), backfaceCulling?: bool, backfaceAngle?: degrees, backfaceHardness?: 0..1 (planar, cylindrical), depthCulling?: bool, depthCullingHardness?: 0..1 (planar, warp; surfaces hidden from the projector behind others get none of it; new planar and warp projections start with it on at 0.75), sharpness?: 1..64 (triplanar), warpCorners?: [[x, y] × 4] (warp: top left, top right, bottom right, bottom left, across and up in frame sizes from its centre; unpulled = ±0.5), projectionDepth?: lengths of the frame's longer side it reaches in front of and behind it when cropped (warp), angle?: 1..360 degrees one repeat spans (cylindrical), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar), symmetry?: bool (copies of a 3D projection; UV projections have none), symmetryType?: mirror|radial, symmetryAxis?: 0|1|2 (the mirror plane's normal or the turning axis), flipCopy?: [u, v] (turn the copies' images over), axisPosition?: number | [x, y, z] (where the plane or axis passes, -1..1 mesh radii from the mesh's centre), symmetryCount?: 2..64 (radial copies, the original included), angleSpan?: 1..360 degrees (radial copies spread over it; 360 spaces them evenly)} — what is not given keeps its value",
             has_layer,
             fill_projection
         ),
@@ -519,7 +519,7 @@ const MAX_CORNER_REACH: f32 = 100.0;
 /// The largest Projection Depth, in lengths of the frame's longer side
 const MAX_PROJECTION_DEPTH: f32 = 100.0;
 
-/// `current` with the `filtering`, `wrap` and `scaleMode` params applied
+/// `current` with the `filtering`, `wrap`, `scaleMode` and symmetry params applied
 pub(crate) fn sampling_from(p: &Value, cmd: &str, current: Sampling) -> Result<Sampling> {
     let mut sampling = current;
     if let Some(id) = strp(p, "filtering") {
@@ -531,8 +531,39 @@ pub(crate) fn sampling_from(p: &Value, cmd: &str, current: Sampling) -> Result<S
     if let Some(id) = strp(p, "scaleMode") {
         sampling.scale = ScaleMode::from_id(id).ok_or_else(|| bad(cmd, format!("unknown scaleMode `{id}`: tiling or physicalSize")))?;
     }
+    sampling.symmetry = symmetry_from(p, cmd, sampling.symmetry)?;
     Ok(sampling)
 }
+
+/// `current` with the `symmetry`, `symmetryType`, `symmetryAxis`, `flipCopy`, `axisPosition`, `symmetryCount` and `angleSpan` params applied
+fn symmetry_from(p: &Value, cmd: &str, current: FillSymmetry) -> Result<FillSymmetry> {
+    let mut symmetry = current;
+    symmetry.on = boolp(p, "symmetry").unwrap_or(symmetry.on);
+    if let Some(id) = strp(p, "symmetryType") {
+        symmetry.kind = SymmetryKind::from_id(id).ok_or_else(|| bad(cmd, format!("unknown symmetryType `{id}`: mirror or radial")))?;
+    }
+    if let Some(axis) = u64p(p, "symmetryAxis") {
+        symmetry.axis = u8::try_from(axis).ok().filter(|axis| *axis <= 2).ok_or_else(|| bad(cmd, "symmetryAxis is 0 (X), 1 (Y) or 2 (Z)"))?;
+    }
+    if let Some(flips) = p.get("flipCopy") {
+        let [across, down] = flips.as_array().map(Vec::as_slice).unwrap_or_default() else {
+            return Err(bad(cmd, "flipCopy is [u, v], two booleans"));
+        };
+
+        symmetry.flip = [across, down].map(|flip| flip.as_bool().unwrap_or(false));
+    }
+    let reach = FillSymmetry::REACH;
+    symmetry.position = floats(p, "axisPosition", -reach, reach).unwrap_or(symmetry.position);
+    if let Some(count) = u64p(p, "symmetryCount") {
+        let (fewest, most) = (u64::from(*FillSymmetry::COUNTS.start()), u64::from(*FillSymmetry::COUNTS.end()));
+        symmetry.count = u32::try_from(count.clamp(fewest, most)).unwrap_or(*FillSymmetry::COUNTS.start());
+    }
+    symmetry.span = f32p(p, "angleSpan").map_or(symmetry.span, |span| span.clamp(MIN_ANGLE_SPAN, 360.0));
+    Ok(symmetry)
+}
+
+/// The narrowest a radial symmetry's copies may spread, in degrees
+const MIN_ANGLE_SPAN: f32 = 1.0;
 
 /// `key` as `N` finite numbers clamped to `lo..=hi`: an array of `N`, or one number for all.
 fn floats<const N: usize>(p: &Value, key: &str, lo: f32, hi: f32) -> Option<[f32; N]> {

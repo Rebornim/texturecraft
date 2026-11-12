@@ -34,4 +34,5 @@ mod tools;
 mod udim;
 mod uv_strokes;
 
+mod swatches;
 mod symmetry;

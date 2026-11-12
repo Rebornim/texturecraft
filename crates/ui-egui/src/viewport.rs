@@ -508,7 +508,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         }
     }
 
-    if response.hovered() && !crate::move_on_model::takes_wheel(app) {
+    if response.hovered() {
         let scroll = ui.input(|input| input.smooth_scroll_delta.y);
         if scroll != 0.0 {
             if shift && app.ui.mode == crate::state::Mode::Painting {

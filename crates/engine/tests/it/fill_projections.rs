@@ -77,3 +77,30 @@ fn three_d_projection_settings_turn_stretch_and_move_every_3d_projection() {
     let row = inspect["layers"].as_array().unwrap().iter().find(|l| l["id"] == layer.0).unwrap().clone();
     assert_eq!(row["fill"]["projectionSettings"]["Cylindrical"]["projector"]["scale"], json!([1.0, 1.0, 1.0]));
 }
+
+/// Fill (Match per UV Tile) shows the same pattern on both UDIM tiles, where UV runs on across them
+#[test]
+fn match_per_uv_tile_repeats_the_source_once_per_tile() {
+    let mut s = Session::new_project("t", primitives::udim_plane(), "builtin:udim_plane", None, 128).unwrap();
+    let layer = LayerId(execute(&mut s, "layer.add.fill", &Value::Null).unwrap()["layer"].as_u64().unwrap());
+    execute(
+        &mut s,
+        "layer.fill.set",
+        &json!({"layer": layer.0, "channel": "baseColor", "procedural": "Clouds", "scale": 3, "low": [0, 0, 0], "high": [1, 1, 1]}),
+    )
+    .unwrap();
+    let tiles = |s: &mut Session| {
+        s.update();
+        let composite = &s.caches[0].composite;
+        let tile = |block: u32| (0..128 * 128).map(|i| composite.value(Channel::BaseColor, block * 128 + i % 128, i / 128)[0]).collect::<Vec<f32>>();
+        (tile(0), tile(1))
+    };
+    let (left, right) = tiles(&mut s);
+    assert_ne!(left, right, "a UV projection runs on into the next tile");
+
+    set(&mut s, layer, json!({"projection": "uvTile"}));
+    assert_eq!(projection(&s, layer), Projection::UvTile);
+    let (left, right) = tiles(&mut s);
+    let worst = left.iter().zip(&right).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+    assert!(worst < 1e-4, "every tile shows the same pattern (worst difference {worst})");
+}

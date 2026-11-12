@@ -5,6 +5,7 @@ use texturecraft_engine::core::Projection;
 /// The projections a fill's Projection dropdown offers, with their command ids
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProjectionKind {
+    UvTile,
     Uv,
     Triplanar,
     Planar,
@@ -13,12 +14,13 @@ pub(crate) enum ProjectionKind {
 }
 
 impl ProjectionKind {
-    pub(crate) const ALL: [ProjectionKind; 5] =
-        [ProjectionKind::Uv, ProjectionKind::Triplanar, ProjectionKind::Planar, ProjectionKind::Spherical, ProjectionKind::Cylindrical];
+    pub(crate) const ALL: [ProjectionKind; 6] =
+        [ProjectionKind::UvTile, ProjectionKind::Uv, ProjectionKind::Triplanar, ProjectionKind::Planar, ProjectionKind::Spherical, ProjectionKind::Cylindrical];
 
     /// The `projection` param of `layer.fill.projection`
     pub(crate) fn id(self) -> &'static str {
         match self {
+            ProjectionKind::UvTile => "uvTile",
             ProjectionKind::Uv => "uv",
             ProjectionKind::Triplanar => "triplanar",
             ProjectionKind::Planar => "planar",
@@ -29,6 +31,7 @@ impl ProjectionKind {
 
     pub(crate) fn of(projection: &Projection) -> Option<ProjectionKind> {
         match projection {
+            Projection::UvTile => Some(ProjectionKind::UvTile),
             Projection::Uv { .. } => Some(ProjectionKind::Uv),
             Projection::Triplanar { .. } => Some(ProjectionKind::Triplanar),
             Projection::Planar { .. } => Some(ProjectionKind::Planar),
@@ -42,6 +45,7 @@ impl ProjectionKind {
     pub(crate) fn label(self) -> &'static str {
         use crate::i18n::n_;
         match self {
+            ProjectionKind::UvTile => n_("Fill (Match per UV Tile)"),
             ProjectionKind::Uv => n_("UV projection"),
             ProjectionKind::Triplanar => n_("Tri-planar projection"),
             ProjectionKind::Planar => n_("Planar projection"),

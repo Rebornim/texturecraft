@@ -79,6 +79,7 @@ pub mod profile;
 mod project_config;
 pub mod project_form;
 mod projection_kind;
+mod projection_preview;
 pub mod properties_popup;
 mod property_sheet;
 mod query_field;

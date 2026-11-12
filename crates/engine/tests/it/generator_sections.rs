@@ -1,7 +1,7 @@
-//! The section controls through `effect.add.generator` and `effect.set`, beside the earlier level, softness and noise
+//! The section and light controls through `effect.add.generator` and `effect.set`, beside the earlier level, softness and noise
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{AxisBlend, EffectKind, Generator, GeneratorKind, LayerId, SectionParameters};
+use texturecraft_engine::core::{AxisBlend, EffectKind, Generator, GeneratorKind, LayerId, LightParameters, SectionParameters};
 use texturecraft_engine::mask_cmds::section_key_applies;
 use texturecraft_engine::{Session, execute};
 
@@ -31,6 +31,9 @@ fn new_generators_start_on_the_reference_controls() {
         let added = generator(&session, effect);
         assert_eq!(added.section, SectionParameters::defaults(added.kind), "{kind}");
     }
+    let effect = add(&mut session, json!({"generator": "direction"}));
+    let light = generator(&session, effect);
+    assert_eq!(light.light, LightParameters::defaults(GeneratorKind::Direction));
     assert_eq!(GeneratorKind::parse("World Space Normals"), Some(GeneratorKind::WorldSpaceNormals));
 }
 
@@ -72,6 +75,7 @@ fn keys_a_kind_lacks_or_both_models_at_once_are_refused() {
         (occlusion, "sectionBrightness"),
         (occlusion, "rightLeftInvert"),
         (position, "sectionBlur"),
+        (position, "lightHorizontal"),
         (dirt, "sectionContrast"),
     ] {
         assert!(execute(&mut session, "effect.set", &json!({"effect": effect, key: 0.5})).is_err(), "{key} on {effect}");
@@ -87,4 +91,29 @@ fn keys_a_kind_lacks_or_both_models_at_once_are_refused() {
 
     assert!(!section_key_applies(GeneratorKind::Position, "sectionBlur"));
     assert!(section_key_applies(GeneratorKind::WorldSpaceNormals, "rightLeftBlend"));
+}
+
+#[test]
+fn light_takes_its_controls_and_refuses_the_global_ones() {
+    let mut session = session();
+    let light = add(&mut session, json!({"generator": "direction"}));
+    execute(&mut session, "effect.set", &json!({"effect": light, "lightHorizontal": 400.0, "highlightGlossiness": 1.0, "invert": true})).unwrap();
+    let edited = generator(&session, light);
+    let expected = LightParameters {
+        horizontal: 360.0,
+        glossiness: *LightParameters::GLOSSINESS_RANGE.end(),
+        ..LightParameters::defaults(GeneratorKind::Direction).unwrap()
+    };
+    assert_eq!(edited.light, Some(expected));
+    assert!(edited.invert);
+
+    assert!(execute(&mut session, "effect.set", &json!({"effect": light, "blur": 0.5})).is_err(), "Light has no global blur");
+    assert!(execute(&mut session, "effect.set", &json!({"effect": light, "sectionInvert": true})).is_err());
+
+    let earlier = add(&mut session, json!({"generator": "direction", "level": 0.4, "blur": 0.3}));
+    assert_eq!(generator(&session, earlier).light, None, "the earlier model keeps its global adjustments");
+    execute(&mut session, "effect.set", &json!({"effect": earlier, "lightVertical": 60.0})).unwrap();
+    let moved = generator(&session, earlier);
+    assert_eq!(moved.light.map(|light| light.vertical), Some(60.0));
+    assert_eq!(moved.global, Generator::new(GeneratorKind::Direction).global, "the light controls have no global adjustments");
 }

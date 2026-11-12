@@ -134,6 +134,11 @@ fn each_kind_shows_its_section_rows_and_no_earlier_ones() {
         ("ambientOcclusion", &["Blur", "Balance", "Global contrast"][..], &["Brightness", "Blending mode", "Level"][..]),
         ("position", &["Balance", "Brightness", "Right to left", "Front to back"][..], &["Blur", "Level", "Sharp"][..]),
         ("worldSpaceNormals", &["Blur", "Balance", "Brightness", "Top to bottom"][..], &["Level", "Softness"][..]),
+        (
+            "direction",
+            &["Horizontal angle", "Vertical angle", "Highlight glossiness", "Highlight level", "Light attenuation"][..],
+            &["Global blur", "Level"][..],
+        ),
     ];
     for (kind, shown, hidden) in rows {
         let (harness, _) = harness_with(false, json!({"generator": kind}));
@@ -147,6 +152,8 @@ fn each_kind_shows_its_section_rows_and_no_earlier_ones() {
 
     let (harness, _) = harness_with(false, json!({"generator": "worldSpaceNormals"}));
     assert_eq!(count(&harness, "Blending mode"), 3);
+    let (harness, _) = harness_with(false, json!({"generator": "direction"}));
+    assert_eq!(count(&harness, "Angle"), 2, "an Angle slider beside each dial");
     let (harness, _) = harness_with(false, json!({"generator": "position", "level": 0.4}));
     assert!(count(&harness, "Level") > 0 && count(&harness, "Balance") > 0, "the earlier model keeps its level beside the section at its defaults");
 }
@@ -181,6 +188,31 @@ fn a_section_control_moves_an_earlier_generator_onto_the_section_controls() {
     assert_ne!(section.balance, defaults.balance, "the drag set the balance");
     assert_eq!(SectionParameters { balance: defaults.balance, ..section }, defaults, "the other controls start at their defaults");
     assert_eq!(count(&harness, "Level"), 0, "the earlier rows are gone");
+}
+
+#[test]
+fn the_light_dial_turns_towards_the_pointer() {
+    let (mut harness, effect) = harness_with(false, json!({"generator": "direction"}));
+    harness.get_by_role_and_label(Role::Slider, "Horizontal angle").scroll_to_me();
+    harness.run_steps(3);
+    let rect = harness.get_by_role_and_label(Role::Slider, "Horizontal angle").rect();
+    let left = egui::pos2(rect.left() + 2.0, rect.center().y);
+    harness.drag_at(left);
+    harness.run_steps(2);
+    harness.drop_at(left);
+    harness.run_steps(3);
+    let horizontal = generator(&harness, effect).light.unwrap().horizontal;
+    assert!((horizontal - 180.0).abs() < 1.0, "a click left of the centre points the needle left: {horizontal}");
+}
+
+#[test]
+fn restore_defaults_puts_a_light_back_on_its_defaults() {
+    let (mut harness, effect) = harness_with(false, json!({"generator": "direction", "lightHorizontal": 10.0, "highlightLevel": 0.7, "invert": true}));
+    harness.get_by_label("Restore defaults").scroll_to_me();
+    harness.run_steps(2);
+    harness.get_by_label("Restore defaults").click();
+    harness.run_steps(3);
+    assert_eq!(generator(&harness, effect), Generator::new(GeneratorKind::Direction));
 }
 
 #[test]
@@ -233,7 +265,7 @@ fn wear_panel_snapshots() {
 fn section_panel_snapshots() {
     let directory = std::path::PathBuf::from(std::env::var_os("TC_UI_SNAPSHOTS").expect("set TC_UI_SNAPSHOTS"));
     std::fs::create_dir_all(&directory).unwrap();
-    for kind in ["curvature", "ambientOcclusion", "position", "worldSpaceNormals"] {
+    for kind in ["curvature", "ambientOcclusion", "position", "worldSpaceNormals", "direction"] {
         let (mut harness, _) = harness_with(true, json!({"generator": kind}));
         harness.run_steps(12);
         harness.render().unwrap().save(directory.join(format!("section-panel-{kind}.png"))).unwrap();

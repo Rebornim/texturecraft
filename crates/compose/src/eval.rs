@@ -912,10 +912,10 @@ fn resampled_by_cells(values: &[f32], cover: &[f32], (region_x, region_y, width,
         .collect()
 }
 
-/// A generator's (possibly blurred) ramp after balance, contrast, invert and offset.
+/// A generator's (possibly blurred) ramp after balance, contrast, invert and offset (the light controls invert their shading themselves).
 fn finish_generator(generator: &Generator, ramp: f32) -> f32 {
     let value = generator.applied_global().apply(ramp);
-    let value = if generator.invert { 1.0 - value } else { value };
+    let value = if generator.invert && generator.light.is_none() { 1.0 - value } else { value };
     let offset = if generator.offset.is_finite() { generator.offset } else { 0.0 };
     (value + offset).clamp(0.0, 1.0)
 }
@@ -1417,6 +1417,12 @@ impl<'a, 'b> Texel<'a, 'b> {
     fn generator_ramp(&mut self, generator: &Generator, curvature_sizes: Option<&CurvatureSizes>) -> f32 {
         if let Some(wear) = wear_parameters(generator) {
             return self.wear_ramp(generator, &wear, curvature_sizes);
+        }
+        if let Some(light) = &generator.light {
+            let normal =
+                self.generator_input_color(generator, BakedMap::WorldNormal).map_or_else(|| self.coords().nrm, |encoded| Vec3::from(encoded) * 2.0 - 1.0);
+            let position = self.generator_input_color(generator, BakedMap::Position).map_or_else(|| self.bounds_position(), Vec3::from);
+            return sections::light_value(light, normal, position, generator.invert);
         }
         if let Some(section) = generator.section_controls() {
             return self.section_signal(generator, &section, curvature_sizes);

@@ -4,15 +4,15 @@ use egui::{RichText, Ui};
 use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::core::{
-    AxisBlend, BakedMap, CurvatureDetail, CurvatureMode, Generator, GeneratorKind, LayerId, OutputResolution, ResolutionMode, SectionParameters, Source,
-    WearParameters,
+    AxisBlend, BakedMap, CurvatureDetail, CurvatureMode, Generator, GeneratorKind, LayerId, LightParameters, OutputResolution, ResolutionMode,
+    SectionParameters, Source, WearParameters,
 };
 
 use crate::TextureCraftApp;
 use crate::dock::{anchor_label, anchors_below, image_drop, image_menu, mesh_map_color};
 use crate::i18n::{baked_map_label, tr, trf};
 use crate::theme::Tokens;
-use crate::widgets::{combo, section, slider_edit};
+use crate::widgets::{combo, section, slider_edit, slider_edit_with_suffix};
 
 /// Random seeds stay below this, short enough to read and type.
 const SEED_RANGE: u32 = 10_000;
@@ -30,6 +30,14 @@ const INPUT_TILE_ICON_SIZE: f32 = 16.0;
 /// Width of a False/True button, so the buttons line up under each other
 const TOGGLE_WIDTH: f32 = 136.0;
 
+/// Edge of a light angle's dial, the width of its needle and the radius of its hub
+const DIAL_SIZE: f32 = 36.0;
+const DIAL_NEEDLE_WIDTH: f32 = 2.0;
+const DIAL_HUB_RADIUS: f32 = 2.0;
+
+/// Closest to a dial's centre a pointer still turns it, so the angle is defined
+const DIAL_DEAD_ZONE: f32 = 1.0;
+
 /// Width of the names in the Attributes section, so their values line up.
 const ATTRIBUTE_KEY_WIDTH: f32 = 80.0;
 
@@ -44,14 +52,19 @@ pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer
         if let Some(defaults) = WearParameters::defaults(generator.kind) {
             // A wear generator saved before its wear controls shows them at their defaults: editing one moves it onto them
             wear_parameters(app, ui, id, generator, generator.wear.unwrap_or(defaults));
+        } else if let Some(light) = generator.light {
+            light_parameters(app, ui, id, Some(generator.invert), light);
         } else {
             global_adjustments(app, ui, id, generator);
             if generator.on_earlier_model() {
                 ramp_parameters(app, ui, id, generator);
             }
-            // Saved before the section controls, a generator shows them at their defaults: editing one moves it onto them
+            // Saved before the section or light controls, a generator shows them at their defaults: editing one moves it onto them
             if let Some(defaults) = SectionParameters::defaults(generator.kind) {
                 section_parameters(app, ui, id, generator, generator.section_controls().unwrap_or(defaults));
+            }
+            if let Some(defaults) = LightParameters::defaults(generator.kind) {
+                light_parameters(app, ui, id, None, defaults);
             }
         }
         ui.horizontal(|ui| {
@@ -76,9 +89,9 @@ pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer
     }
 }
 
-/// The inputs `generator` reads: none for Position on its earlier model, which reads the mesh itself
+/// The inputs `generator` reads: none for Position and Light on their earlier model, which read the mesh itself
 fn inputs_in_use(generator: &Generator) -> &'static [BakedMap] {
-    let reads_geometry = generator.on_earlier_model() && generator.kind == GeneratorKind::Position;
+    let reads_geometry = generator.on_earlier_model() && matches!(generator.kind, GeneratorKind::Position | GeneratorKind::Direction);
     if reads_geometry { &[] } else { generator.kind.inputs() }
 }
 
@@ -310,10 +323,11 @@ fn defaults_of(id: u64, kind: GeneratorKind) -> Value {
 
     // A generator on the reference's controls restores those only: the earlier model's keys would move it back onto that model
     let global = json!({"blur": defaults.global.blur, "balance": defaults.global.balance, "contrast": defaults.global.contrast});
-    let own = match (&defaults.wear, &defaults.section) {
-        (Some(wear), _) => wear_params(kind, wear),
-        (None, Some(section)) => merged(section_params(kind, section), global),
-        (None, None) => json!({
+    let own = match (&defaults.wear, &defaults.section, &defaults.light) {
+        (Some(wear), _, _) => wear_params(kind, wear),
+        (None, _, Some(light)) => light_params(light),
+        (None, Some(section), None) => merged(section_params(kind, section), global),
+        (None, None, None) => json!({
             "level": defaults.level,
             "softness": defaults.softness,
             "noise": defaults.noise_amount,
@@ -422,6 +436,81 @@ fn axis_blend_label(blend: AxisBlend) -> &'static str {
         AxisBlend::AddSub => tr("Add/Sub"),
         AxisBlend::Max => tr("Max (Lighten)"),
     }
+}
+
+/// The Light generator's controls of effect `id`, showing `shown`; `invert` adds its Invert row (None on the earlier model, whose global invert it is)
+fn light_parameters(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, invert: Option<bool>, shown: LightParameters) {
+    if let Some(mut invert) = invert
+        && true_false(ui, tr("Invert"), &mut invert)
+    {
+        app.run("effect.set", json!({"effect": id, "invert": invert}));
+    }
+    let mut edited = shown;
+    let mut edit = angle_row(ui, "generator_light_horizontal", tr("Horizontal angle"), &mut edited.horizontal);
+    edit = edit.or(angle_row(ui, "generator_light_vertical", tr("Vertical angle"), &mut edited.vertical));
+    edit = edit.or(slider_edit(ui, tr("Highlight glossiness"), &mut edited.glossiness, LightParameters::GLOSSINESS_RANGE, 2));
+    edit = edit.or(slider_edit(ui, tr("Highlight level"), &mut edited.highlight_level, 0.0..=1.0, 2));
+    edit = edit.or(slider_edit(ui, tr("Light attenuation"), &mut edited.attenuation, 0.0..=1.0, 2));
+    if let Some(merge) = edit {
+        app.run("effect.set", merged(json!({"effect": id, "merge": merge}), light_params(&edited)));
+    }
+}
+
+/// The `effect.set` params that set every light control to `light`
+fn light_params(light: &LightParameters) -> Value {
+    json!({
+        "lightHorizontal": light.horizontal,
+        "lightVertical": light.vertical,
+        "highlightGlossiness": light.glossiness,
+        "highlightLevel": light.highlight_level,
+        "lightAttenuation": light.attenuation,
+    })
+}
+
+/// A light angle in degrees: its name, then a dial beside an Angle slider; `Some(merge)` when either changes it
+fn angle_row(ui: &mut Ui, id: &str, label: &str, degrees: &mut f32) -> Option<bool> {
+    ui.label(label);
+    ui.push_id(id, |ui| {
+        ui.horizontal(|ui| {
+            let dial = angle_dial(ui, label, degrees);
+            let slider = ui.vertical(|ui| slider_edit_with_suffix(ui, tr("Angle"), degrees, LightParameters::ANGLE_RANGE, 0, "°")).inner;
+            dial.or(slider)
+        })
+        .inner
+    })
+    .inner
+}
+
+/// A round dial whose needle points at `degrees` (counterclockwise from the right); dragging it turns it, `Some(merge)` like [`slider_edit`]
+fn angle_dial(ui: &mut Ui, label: &str, degrees: &mut f32) -> Option<bool> {
+    let tokens = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(DIAL_SIZE, DIAL_SIZE), egui::Sense::click_and_drag());
+    let mut edit = None;
+    if (response.dragged() || response.clicked())
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let offset = pointer - rect.center();
+        let turned = (-offset.y).atan2(offset.x).to_degrees().rem_euclid(*LightParameters::ANGLE_RANGE.end());
+        if offset.length() > DIAL_DEAD_ZONE && (turned - *degrees).abs() > f32::EPSILON {
+            *degrees = turned;
+            // Later frames of one drag share its undo step
+            edit = Some(ui.data_mut(|data| std::mem::replace(data.get_temp_mut_or_default::<bool>(response.id), true)));
+        }
+    }
+    if response.drag_stopped() || response.clicked() {
+        ui.data_mut(|data| data.remove_temp::<bool>(response.id));
+    }
+    let shown = *degrees;
+    response.widget_info(|| egui::WidgetInfo::slider(true, f64::from(shown), label));
+
+    let painter = ui.painter();
+    let radius = DIAL_SIZE * 0.5 - 1.0;
+    painter.circle(rect.center(), radius, tokens.field, egui::Stroke::new(DIAL_NEEDLE_WIDTH, tokens.button_border));
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    let tip = rect.center() + egui::vec2(cos, -sin) * radius;
+    painter.line_segment([rect.center(), tip], egui::Stroke::new(DIAL_NEEDLE_WIDTH, tokens.accent));
+    painter.circle_filled(rect.center(), DIAL_HUB_RADIUS, tokens.text);
+    edit
 }
 
 /// The curvature mode and detail size weights of generator effect `id` (`detail` None: saved before detail sizes).

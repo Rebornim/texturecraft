@@ -1,11 +1,11 @@
-//! The section controls of the Curvature, Ambient Occlusion, Position and World Space Normals generators on a sphere, beside their earlier model
+//! The section and light controls of the Curvature, Ambient Occlusion, Position, World Space Normals and Light generators on a sphere, beside their earlier model
 
 use std::sync::Arc;
 
 use texturecraft_compose::{BakedMaps, Inputs, PixelStore, mask_at};
 use texturecraft_core::{
-    AxisBlend, BakedMap, Channel, Effect, EffectKind, Fill, Generator, GeneratorKind, Layer, LayerId, LayerKind, Mask, MaskBackground, Project,
-    SectionParameters, Source, TextureSet,
+    AxisBlend, BakedMap, Channel, Effect, EffectKind, Fill, Generator, GeneratorKind, Layer, LayerId, LayerKind, LightParameters, Mask, MaskBackground,
+    Project, SectionParameters, Source, TextureSet,
 };
 use texturecraft_geom::glam::Vec3;
 use texturecraft_geom::{Mesh, UvGBuffer, primitives};
@@ -77,7 +77,7 @@ fn earlier_ramp(generator: &Generator, signal: f32) -> f32 {
 }
 
 fn earlier(kind: GeneratorKind) -> Generator {
-    Generator { section: None, ..Generator::new(kind) }
+    Generator { section: None, light: None, ..Generator::new(kind) }
 }
 
 fn with_section(kind: GeneratorKind, change: impl FnOnce(&mut SectionParameters)) -> Generator {
@@ -85,6 +85,14 @@ fn with_section(kind: GeneratorKind, change: impl FnOnce(&mut SectionParameters)
     let mut section = generator.section.unwrap();
     change(&mut section);
     generator.section = Some(section);
+    generator
+}
+
+fn with_light(change: impl FnOnce(&mut LightParameters)) -> Generator {
+    let mut generator = Generator::new(GeneratorKind::Direction);
+    let mut light = generator.light.unwrap();
+    change(&mut light);
+    generator.light = Some(light);
     generator
 }
 
@@ -198,4 +206,37 @@ fn section_blur_spreads_occlusion_across_a_step() {
     let position = with_section(GeneratorKind::Position, |section| section.blur = 16.0);
     fixture.baked = uniform_map(BakedMap::Position, 0.3);
     assert_close(&mask(&mut fixture, position, &row), &vec![0.3; row.len()], "position has no section blur");
+}
+
+#[test]
+fn light_angles_light_the_faces_towards_them() {
+    let mut fixture = fixture();
+    let points = surface(&fixture);
+    let facing = |axis: Vec3| -> Vec<(u32, u32)> { points.iter().filter(|(_, _, nrm)| nrm.dot(axis) > 0.97).map(|point| point.0).collect() };
+
+    for (horizontal, vertical, towards) in [(0.0, 0.0, Vec3::NEG_X), (90.0, 0.0, Vec3::Z), (180.0, 0.0, Vec3::X), (0.0, 90.0, Vec3::Y)] {
+        let light = with_light(|light| (light.horizontal, light.vertical, light.attenuation) = (horizontal, vertical, 0.0));
+        let lit = mask(&mut fixture, light.clone(), &facing(towards));
+        let dark = mask(&mut fixture, light, &facing(-towards));
+        assert!(lit.iter().all(|value| *value > 0.95), "{horizontal}° {vertical}° lights {towards}: {lit:?}");
+        assert!(dark.iter().all(|value| *value == 0.0), "{horizontal}° {vertical}° leaves {} dark: {dark:?}", -towards);
+    }
+
+    let inverted = Generator { invert: true, ..with_light(|light| (light.horizontal, light.vertical, light.attenuation) = (0.0, 0.0, 0.0)) };
+    assert!(mask(&mut fixture, inverted, &facing(Vec3::X)).iter().all(|value| *value > 0.95), "invert lights the far side");
+}
+
+#[test]
+fn light_attenuation_darkens_the_side_away_from_the_light() {
+    let mut fixture = fixture();
+    let sides: Vec<(u32, u32)> = surface(&fixture).iter().filter(|(_, _, nrm)| nrm.y > 0.97).map(|point| point.0).collect();
+    let half_lit =
+        |attenuation: f32| with_light(|light| (light.horizontal, light.vertical, light.glossiness, light.attenuation) = (0.0, 0.0, 0.0, attenuation));
+
+    let kept = mask(&mut fixture, half_lit(0.0), &sides);
+    let attenuated = mask(&mut fixture, half_lit(0.5), &sides);
+    for (kept, attenuated) in kept.iter().zip(&attenuated) {
+        assert!((kept - 0.5).abs() < 0.15, "the top is about half lit from the side: {kept}");
+        assert!(*attenuated < kept * 0.75, "halfway across the bounds, attenuation darkens it: {attenuated} vs {kept}");
+    }
 }

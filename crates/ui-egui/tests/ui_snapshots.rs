@@ -596,4 +596,24 @@ fn export_dialog_snapshots() {
     harness.run_steps(2);
     harness.get_all_by_role(egui::accesskit::Role::ComboBox).find(|node| node.value().as_deref() == Some("From template / project (DirectX)")).unwrap().click();
     save(&mut harness, &output_dir, "export-normal-format-open");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+
+    // The file types and the templates, each list open
+    for (shown, name) in [("Based on output template", "export-file-types-open"), ("Unreal Engine (Packed)", "export-templates-open")] {
+        harness.get_all_by_role(egui::accesskit::Role::ComboBox).find(|node| node.value().as_deref() == Some(shown)).unwrap().click();
+        harness.run_steps(2);
+        save(&mut harness, &output_dir, name);
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+    }
+
+    // A PSD export: each output shows the file and its layer
+    let parameters = &mut harness.state_mut().ui.export.settings.as_mut().unwrap().settings.parameters;
+    parameters.preset = "PBR Metallic Roughness (folders or PSD groups)".into();
+    parameters.file_type = texturecraft_engine::core::ExportFileType::new("psd", 8);
+    harness.state_mut().ui.export.tab = ExportTab::OutputTemplates;
+    harness.state_mut().ui.export.preset = "PBR Metallic Roughness (folders or PSD groups)".into();
+    harness.run_steps(60);
+    save(&mut harness, &output_dir, "export-templates-psd");
 }

@@ -413,7 +413,9 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
         Some("triplanar" | "tri-planar") => {
             Some(Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: Default::default(), projector: Default::default() })
         }
-        Some("planar") => Some(Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: Default::default(), projector: Default::default() }),
+        Some("planar") => {
+            Some(Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: Default::default(), projector: Default::default(), placed: None })
+        }
         Some("spherical") => Some(Projection::Spherical { scale: 1.0, uv: Default::default(), offset: [0.0; 3], projector: Default::default() }),
         Some("cylindrical") => {
             Some(Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default(), offset: [0.0; 3], projector: Default::default(), angle: 360.0 })
@@ -464,7 +466,7 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
             place(uv);
             turn(projector);
         }
-        Projection::Planar { scale: s, axis: a, offset, uv, projector } => {
+        Projection::Planar { scale: s, axis: a, offset, uv, projector, .. } => {
             *s = scale.map_or(*s, |v| v[0]);
             *a = axis.unwrap_or(*a);
             *offset = offset3.unwrap_or(*offset);
@@ -485,7 +487,6 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
             place(uv);
             turn(projector);
         }
-        Projection::Decal(_) => {}
     }
     Ok(proj)
 }

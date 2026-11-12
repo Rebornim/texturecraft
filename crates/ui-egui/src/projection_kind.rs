@@ -37,7 +37,6 @@ impl ProjectionKind {
             Projection::Planar { .. } => Some(ProjectionKind::Planar),
             Projection::Spherical { .. } => Some(ProjectionKind::Spherical),
             Projection::Cylindrical { .. } => Some(ProjectionKind::Cylindrical),
-            Projection::Decal(_) => None,
         }
     }
 

@@ -1,0 +1,17 @@
+//! The 3D projection settings shared by tri-planar, planar, spherical and cylindrical projections
+
+use serde::{Deserialize, Serialize};
+
+/// Rotation (degrees about X, then Y, then Z) and per-axis scale of a 3D projection's shape; default = unchanged
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Projector {
+    pub rotation: [f32; 3],
+    pub scale: [f32; 3],
+}
+
+impl Default for Projector {
+    fn default() -> Self {
+        Projector { rotation: [0.0; 3], scale: [1.0; 3] }
+    }
+}

@@ -3,7 +3,7 @@ use texturecraft_core::{ChannelFormat, Project, TextureSet};
 use texturecraft_texel::{to_u16, to_u16_signed};
 
 use super::*;
-use crate::presets::{builtin_preset, builtin_presets, preset_from_json, preset_to_json};
+use crate::presets::{builtin_preset, builtin_presets, preset_from_json, preset_to_json, rgb};
 
 const RES: u32 = 64;
 
@@ -1258,6 +1258,9 @@ fn reference_presets_follow_their_targets_layouts() {
     assert_eq!(preset_source("Non-PBR Specular Glossiness", "Glossiness", Dest::L), channel(Channel::Glossiness));
     let spec_gloss = Fx::new(&[Channel::BaseColor, Channel::Specular, Channel::Glossiness, Channel::Normal]);
     assert_eq!(spec_gloss.render_preset("Non-PBR Specular Glossiness").len(), 4, "diffuse, specular, glossiness and normal");
+
+    // 2D View: the one map the 2D view draws
+    assert_eq!(preset_maps("2D View"), [("2DView".to_string(), rgb(|k| SourceRef::Virtual { map: VirtualMap::View2d, component: k }))]);
 }
 
 #[test]

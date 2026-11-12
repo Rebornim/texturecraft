@@ -93,6 +93,8 @@ pub fn builtin_presets() -> Vec<ExportPreset> {
             maps.push(map("ambientOcclusion", 8, gray(virt(VirtualMap::AoMixed, 0))));
             maps
         }),
+        // One unlit texture of what the 2D view shows, for targets that draw the colour alone
+        preset("2D View", vec![map("2DView", 8, rgb(|k| virt(VirtualMap::View2d, k)))]),
         // The same with opacity in the base color's alpha instead of a file of its own
         preset("Document channels + Normal + AO (With Alpha)", {
             let mut maps: Vec<MapSpec> = Channel::ALL

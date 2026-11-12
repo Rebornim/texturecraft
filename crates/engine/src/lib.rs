@@ -20,6 +20,7 @@ pub mod file_cmds;
 pub mod fill_hit_test;
 pub mod fill_mode;
 pub mod fill_material_cmds;
+pub mod fill_reset_cmds;
 pub mod filter_lib;
 pub mod inspect;
 pub mod instance_cmds;

@@ -82,7 +82,10 @@ fn mesh_size(app: &TextureCraftApp) -> MeshSize {
 /// A fill's whole Properties: the Fill section, the Symmetry section, then the Material section with one slot per channel that is on
 pub(crate) fn fill_sheet(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, on: &[Channel], reader: LayerId) {
     let salt = base.to_string();
-    sheet.section(tr("Fill"), false);
+    // The section reset: projection, placement, sampling and culling back to a new fill's in one undo step
+    if sheet.section_reset(tr("Fill"), !texturecraft_engine::fill_reset_cmds::at_defaults(&fill.projection, fill.sampling)) {
+        app.run("layer.fill.resetProjection", base.clone());
+    }
     projection_rows(app, sheet, fill, base, &salt, reader);
     crate::fill_symmetry_panel::symmetry_section(app, sheet, &fill.projection, fill.sampling, base);
 
@@ -135,7 +138,20 @@ fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fil
     frame_rows(app, sheet, fill, base);
     culling_rows(app, sheet, fill, base);
 
-    if sheet.band(tr("Filtering and edges"), true, None, None).open {
+    let crop = projector_of(&fill.projection).map(|projector| projector.crop);
+    let shows_wrap = kind != ProjectionKind::Triplanar;
+    let edges_changed = fill.sampling.filtering != Filtering::default()
+        || (shows_wrap && fill.sampling.wrap != UvWrap::default())
+        || crop.is_some_and(|crop| crop != ShapeCrop::default());
+    let band = sheet.band(tr("Filtering and edges"), true, Some(edges_changed), None);
+    if band.reset {
+        let mut fields = json!({"filtering": Filtering::default().id(), "wrap": UvWrap::default().id()});
+        if crop.is_some() {
+            fields["shapeCrop"] = json!(ShapeCrop::default().id());
+        }
+        run(app, fields);
+    }
+    if band.open {
         let filtering = fill.sampling.filtering;
         let picture = |painter: &Painter, rect: Rect, filtering: Filtering| filtering_picture(painter, rect, filtering, &tokens);
         let (picked, _) = sheet.dropdown(tr("Filtering"), filtering, &Filtering::ALL, |filtering| tr(filtering_label(filtering)).to_owned(), Some(&picture));
@@ -143,7 +159,7 @@ fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fil
             run(app, json!({"filtering": filtering.id()}));
         }
         // Tri-planar has no tile to repeat
-        if kind != ProjectionKind::Triplanar {
+        if shows_wrap {
             let picture = |painter: &Painter, rect: Rect, wrap: UvWrap| wrap_picture(painter, rect, wrap, &tokens);
             let (picked, _) = sheet.dropdown(tr("UV Wrap"), fill.sampling.wrap, &UvWrap::ALL, |wrap| tr(wrap_label(wrap)).to_owned(), Some(&picture));
             if let Some(wrap) = picked {

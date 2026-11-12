@@ -10,6 +10,28 @@ pub(crate) use color_pick::ColorPick;
 pub(crate) use color_space::ColorSpace;
 pub(crate) use picker_state::PickerState;
 
+/// Where the open picker window stood and the pass that drew it
+fn window_id() -> egui::Id {
+    egui::Id::unique("color_picker_window")
+}
+
+/// Records the open picker window's `face` this pass, so Escape and the popup it opened from treat it as on top of them
+pub(crate) fn remember_window(ctx: &egui::Context, face: egui::Rect) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.insert_temp(window_id(), (face, pass)));
+}
+
+/// The picker window closed this pass
+pub(crate) fn forget_window(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<(egui::Rect, u64)>(window_id()));
+}
+
+/// The picker window drawn this pass or the last one, if a picker is open
+pub(crate) fn open_window(ctx: &egui::Context) -> Option<egui::Rect> {
+    let (face, pass) = ctx.data(|data| data.get_temp::<(egui::Rect, u64)>(window_id()))?;
+    (pass.saturating_add(1) >= ctx.cumulative_pass_nr()).then_some(face)
+}
+
 /// `rgb` (0..1 each) as six hex digits, as the hex field shows it
 pub(crate) fn hex(rgb: [f32; 3]) -> String {
     rgb.iter().map(|c| format!("{:02X}", (c.clamp(0.0, 1.0) * 255.0).round() as u8)).collect()

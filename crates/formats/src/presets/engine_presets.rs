@@ -369,6 +369,32 @@ pub(super) fn engine_presets() -> Vec<ExportPreset> {
                 rgb8("emissive", Channel::Emissive),
             ],
         ),
+        // Maxwell Render matches maps by file name; its metallic/roughness material
+        preset(
+            "Maxwell (Metallic Roughness)",
+            vec![
+                rgb8("BaseColor", Channel::BaseColor),
+                gray8("Metallic", Channel::Metallic),
+                gray8("Roughness", Channel::Roughness),
+                project_normal("Normal"),
+                height("Height"),
+                rgb8("Emissive", Channel::Emissive),
+                gray8("Opacity", Channel::Opacity),
+            ],
+        ),
+        // Maxwell Render's specular/glossiness material, converted from metallic/roughness
+        preset(
+            "Maxwell (Specular Glossiness)",
+            vec![
+                converted8("Diffuse", VirtualMap::Diffuse),
+                converted8("Specular", VirtualMap::SpecularColor),
+                map("Glossiness", 8, gray(virt(VirtualMap::Glossiness, 0))),
+                project_normal("Normal"),
+                height("Height"),
+                rgb8("Emissive", Channel::Emissive),
+                gray8("Opacity", Channel::Opacity),
+            ],
+        ),
         // USD preview surface inputs, one map each
         preset(
             "USDZ (AR)",

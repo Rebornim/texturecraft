@@ -1279,6 +1279,11 @@ fn reference_presets_follow_their_targets_layouts() {
     assert_eq!(preset_files("Spark AR Studio"), ["baseColor", "ORM", "normal", "emissive"]);
     assert_eq!(preset_source("Spark AR Studio", "ORM", Dest::G), channel(Channel::Roughness));
     assert_eq!(preset_source("Spark AR Studio", "ORM", Dest::B), channel(Channel::Metallic));
+
+    // Maxwell: a map per input, the specular/glossiness one converted
+    assert_eq!(preset_files("Maxwell (Metallic Roughness)"), ["BaseColor", "Metallic", "Roughness", "Normal", "Height", "Emissive", "Opacity"]);
+    assert_eq!(preset_source("Maxwell (Specular Glossiness)", "Specular", Dest::R), SourceRef::Virtual { map: VirtualMap::SpecularColor, component: 0 });
+    assert_eq!(preset_source("Maxwell (Specular Glossiness)", "Glossiness", Dest::L), SourceRef::Virtual { map: VirtualMap::Glossiness, component: 0 });
 }
 
 #[test]

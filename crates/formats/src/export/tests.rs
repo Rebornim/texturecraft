@@ -1304,6 +1304,15 @@ fn reference_presets_follow_their_targets_layouts() {
         preset_source("Arnold (aiStandard, UDIM legacy)", "diffuse.$textureSet", Dest::R),
         SourceRef::Virtual { map: VirtualMap::Diffuse, component: 0 }
     );
+
+    // Folders or PSD groups: the PBR maps in a folder per mesh, a layer group in a PSD
+    let folders = "PBR Metallic Roughness (folders or PSD groups)";
+    assert_eq!(names(&fx, folders), ["sphere/Body_Set_BaseColor.png", "sphere/Body_Set_Metallic.png", "sphere/Body_Set_Roughness.png"]);
+    let mut psd = ExportOptions::new(builtin_preset(folders).unwrap());
+    psd.format_override = Some(FileFormat::Psd);
+    let (_, layers) = only_psd(&fx.render(&psd));
+    let records: Vec<(&str, u32)> = layers.iter().map(|layer| (layer.name.as_str(), layer.section)).collect();
+    assert_eq!(records, [("</Layer group>", 3), ("Body_Set_Roughness", 0), ("Body_Set_Metallic", 0), ("Body_Set_BaseColor", 0), ("sphere", 1)]);
 }
 
 #[test]

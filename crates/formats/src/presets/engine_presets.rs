@@ -44,6 +44,19 @@ fn unity_mask(suffix: &str) -> MapSpec {
     )
 }
 
+/// Generic metallic/roughness maps, one per input
+fn pbr_metallic_roughness() -> Vec<MapSpec> {
+    vec![
+        map("BaseColor", 8, base_with_alpha()),
+        gray8("Metallic", Channel::Metallic),
+        gray8("Roughness", Channel::Roughness),
+        map("Normal", 8, normal(VirtualMap::NormalOpenGl)),
+        height("Height"),
+        rgb8("Emissive", Channel::Emissive),
+        map("AmbientOcclusion", 8, gray(virt(VirtualMap::AoMixed, 0))),
+    ]
+}
+
 /// V-Ray, metalness: base color as diffuse, roughness and metalness (the material's reflection stays white)
 fn vray_metal_roughness() -> Vec<MapSpec> {
     vec![rgb8("diffuse", Channel::BaseColor), gray8("roughness", Channel::Roughness), gray8("metalness", Channel::Metallic), project_normal("normal")]
@@ -64,17 +77,17 @@ fn udim_legacy(maps: Vec<MapSpec>) -> Vec<MapSpec> {
 pub(super) fn engine_presets() -> Vec<ExportPreset> {
     let preset = |name: &str, maps: Vec<MapSpec>| ExportPreset { name: name.into(), maps };
     vec![
+        preset("PBR Metallic Roughness", pbr_metallic_roughness()),
+        // The same maps in a folder per mesh, which a PSD export turns into a layer group
         preset(
-            "PBR Metallic Roughness",
-            vec![
-                map("BaseColor", 8, base_with_alpha()),
-                gray8("Metallic", Channel::Metallic),
-                gray8("Roughness", Channel::Roughness),
-                map("Normal", 8, normal(VirtualMap::NormalOpenGl)),
-                height("Height"),
-                rgb8("Emissive", Channel::Emissive),
-                map("AmbientOcclusion", 8, gray(virt(VirtualMap::AoMixed, 0))),
-            ],
+            "PBR Metallic Roughness (folders or PSD groups)",
+            pbr_metallic_roughness()
+                .into_iter()
+                .map(|mut spec| {
+                    spec.file = spec.file.replacen("$mesh_", "$mesh/", 1);
+                    spec
+                })
+                .collect(),
         ),
         // Unity HDRP Lit, specular color material type: the mask map keeps occlusion and smoothness
         preset(

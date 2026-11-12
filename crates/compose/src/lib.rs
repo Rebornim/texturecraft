@@ -23,6 +23,7 @@ mod pattern_context;
 pub mod solo;
 pub mod store;
 pub mod thumb;
+pub mod tile_length;
 mod tile_pattern;
 mod tile_random_stream;
 mod timber;

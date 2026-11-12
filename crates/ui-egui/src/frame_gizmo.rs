@@ -3,6 +3,7 @@
 use egui::{Color32, PointerButton, Pos2, Rect, Stroke, Ui, vec2};
 use serde_json::{Value, json};
 use texturecraft_engine::compose::axis_frame::placed_from_axis;
+use texturecraft_engine::compose::frame_placement::folded;
 use texturecraft_engine::compose::pattern::{decal_axes, decal_corners};
 use texturecraft_engine::core::{Decal, EffectKind, Fill, LayerId, LayerKind, Projection};
 use texturecraft_engine::geom::glam::{Vec2, Vec3};
@@ -123,7 +124,9 @@ impl FrameGizmo {
             StackTarget::Mask => return None,
         };
         let placed = placed_from_axis(projection, app.session.mesh.bounds());
-        let decal = *placed.as_ref().unwrap_or(projection).frame()?;
+        // Where the projection lands: a projector's own turn and scale moved into the frame, as the panel's 3D projection settings show it
+        let landed = folded(placed.as_ref().unwrap_or(projection))?;
+        let decal = *landed.frame()?;
         let warp = match projection {
             Projection::Warp { corners, .. } => Some(*corners),
             _ => None,
@@ -282,6 +285,8 @@ pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Respons
         params["merge"] = json!(drag.stepped);
         // Off the plane or past the size limits: the frame waits where it is
         drag.stepped |= texturecraft_engine::execute(&mut app.session, command, &params).is_ok();
+        // The panel drew before this edit: one more frame shows its fields and preview where the frame is now
+        ctx.request_repaint();
     }
     ctx.data_mut(|data| data.insert_temp(drag_id(), drag));
     true
@@ -393,6 +398,50 @@ pub(crate) mod tests {
         harness.run_steps(2);
     }
 
+    /// A drag as a mouse sends it, one small move per frame; after each frame `check` looks at the app and (with `preview`) the 3D preview square must have re-rendered
+    #[track_caller]
+    pub(crate) fn drag_frames(
+        harness: &mut egui_kittest::Harness<'_, TextureCraftApp>,
+        layer: LayerId,
+        from: Pos2,
+        to: Pos2,
+        modifiers: Modifiers,
+        preview: bool,
+        mut check: impl FnMut(&egui_kittest::Harness<'_, TextureCraftApp>),
+    ) {
+        harness.event_modifiers(egui::Event::PointerMoved(from), modifiers);
+        harness.event_modifiers(egui::Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers }, modifiers);
+        harness.run_steps(2);
+        let mut shown = crate::projection_preview::shown_key(&harness.ctx);
+        let mut was = projection(harness, layer);
+        let mut moved = 0;
+        for step in 1..=6 {
+            harness.event_modifiers(egui::Event::PointerMoved(from.lerp(to, step as f32 / 6.0)), modifiers);
+            harness.step();
+            let now = projection(harness, layer);
+            // Until the pointer passes the drag threshold nothing moves
+            if now == was {
+                assert_eq!(moved, 0, "frame {step}: once started, every frame of the drag moves it");
+                continue;
+            }
+            moved += 1;
+            check(harness);
+            let key = crate::projection_preview::shown_key(&harness.ctx);
+            assert!(!preview || (key.is_some() && key != shown), "frame {step}: the preview square re-rendered for the new values");
+            (shown, was) = (key, now);
+        }
+        assert!(moved >= 4, "the drag moved it on {moved} frames");
+        harness.event_modifiers(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers }, modifiers);
+        harness.run_steps(2);
+        check(harness);
+    }
+
+    /// The panel's X, Y and Z fields of a 3D projection settings row
+    pub(crate) fn panel_xyz(harness: &egui_kittest::Harness<'_, TextureCraftApp>, row: &str) -> [f32; 3] {
+        use egui_kittest::kittest::NodeT;
+        ["X", "Y", "Z"].map(|tag| harness.get_by_label(&format!("{row} {tag}")).accesskit_node().numeric_value().unwrap() as f32)
+    }
+
     fn gizmo(harness: &egui_kittest::Harness<'_, TextureCraftApp>) -> FrameGizmo {
         FrameGizmo::of(harness.state(), harness.state().viewport_rect).unwrap()
     }
@@ -484,6 +533,41 @@ pub(crate) mod tests {
         harness.run_steps(4);
         harness.render().unwrap().save(directory.join("move-warp-corner-hover.png")).unwrap();
 
+        // Mid drag: the panel's 3D projection settings and the preview square hold the frame the gizmo is dragging
+        let (mut harness, layer) = fill_app_rendered(json!({"projection": "planar", "scale": 3}), true);
+        checker(&mut harness, layer);
+        harness.run_steps(4);
+        let held = gizmo(&harness);
+        let (from, to) = (held.sides[0], held.center + (held.sides[0] - held.center) * 0.6 + vec2(30.0, 0.0));
+        harness.event(egui::Event::PointerMoved(from));
+        harness.event(egui::Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        harness.run_steps(2);
+        for step in 1..=6 {
+            harness.event(egui::Event::PointerMoved(from.lerp(to, step as f32 / 6.0)));
+            harness.run_steps(1);
+        }
+        harness.run_steps(3);
+        harness.render().unwrap().save(directory.join("sync-planar-mid-drag.png")).unwrap();
+        harness.event(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        harness.run_steps(2);
+
+        let (mut harness, layer) = fill_app_rendered(json!({"projection": "spherical"}), true);
+        checker(&mut harness, layer);
+        harness.get_by_label("Move on model").click();
+        harness.run_steps(4);
+        let round = crate::round_gizmo::RoundGizmo::of(harness.state(), harness.state().viewport_rect).unwrap();
+        let (dot, _) = round.dots[0];
+        let to = round.center + (dot - round.center) * 0.6;
+        harness.event(egui::Event::PointerMoved(dot));
+        harness.event(egui::Event::PointerButton { pos: dot, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        harness.run_steps(2);
+        for step in 1..=6 {
+            harness.event(egui::Event::PointerMoved(dot.lerp(to, step as f32 / 6.0)));
+            harness.run_steps(1);
+        }
+        harness.run_steps(3);
+        harness.render().unwrap().save(directory.join("sync-sphere-mid-drag.png")).unwrap();
+
         // The round projections while moved on the model: the shape round it, a ring hovered
         for kind in ["triplanar", "spherical", "cylindrical"] {
             let (mut harness, layer) = fill_app_rendered(json!({"projection": kind}), true);
@@ -495,5 +579,59 @@ pub(crate) mod tests {
             harness.run_steps(4);
             harness.render().unwrap().save(directory.join(format!("move-{kind}.png"))).unwrap();
         }
+    }
+
+    /// The panel's 3D projection settings show the frame the gizmo drags (its centre, turn and size), and the preview square follows, every frame of every drag: resize, stretch, slide, turn, a warp's slide and corners; one undo step per drag
+    #[test]
+    fn the_panel_and_its_preview_follow_every_frame_of_a_frame_drag() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        use texturecraft_engine::compose::frame_placement::placement;
+
+        let check = |layer: LayerId| {
+            move |harness: &egui_kittest::Harness<'_, TextureCraftApp>| {
+                let Some(shown) = placement(&projection(harness, layer), harness.state().session.mesh.bounds()) else { panic!("placed on its first drag") };
+                for (row, value) in [("Offset", shown.offset), ("Rotation", shown.rotation), ("Scale", shown.scale)] {
+                    let field = panel_xyz(harness, row);
+                    for axis in 0..3 {
+                        assert!((field[axis] - value[axis]).abs() < 1e-3, "the panel's {row} shows the frame's {value:?}, not {field:?}");
+                    }
+                }
+            }
+        };
+
+        let (mut harness, layer) = fill_app("planar");
+        let steps = harness.state().session.history_labels().len();
+        let center = gizmo(&harness).center;
+        drag_frames(&mut harness, layer, center, center + vec2(30.0, -10.0), Modifiers::NONE, true, check(layer));
+        let slid = placement(&projection(&harness, layer), harness.state().session.mesh.bounds()).unwrap();
+        // The top edge dot and a corner inside the view (the frame starts bigger than the model)
+        let side = gizmo(&harness);
+        drag_frames(&mut harness, layer, side.sides[0], side.center + (side.sides[0] - side.center) * 0.5, Modifiers::NONE, true, check(layer));
+        let narrowed = placement(&projection(&harness, layer), harness.state().session.mesh.bounds()).unwrap();
+        assert!(narrowed.scale[1] < slid.scale[1] * 0.75 && (narrowed.scale[0] - slid.scale[0]).abs() < 1e-4, "{slid:?} -> {narrowed:?}");
+        let corner = gizmo(&harness);
+        let view = harness.state().viewport_rect.shrink(10.0);
+        let inside = *corner.corners.iter().find(|at| view.contains(**at)).expect("a corner in the view");
+        drag_frames(&mut harness, layer, inside, corner.center + (inside - corner.center) * 0.6, Modifiers::NONE, true, check(layer));
+        let scaled = placement(&projection(&harness, layer), harness.state().session.mesh.bounds()).unwrap();
+        assert!(scaled.scale[1] < narrowed.scale[1] * 0.8 && scaled.scale[0] < narrowed.scale[0] * 0.8, "a corner scales it: {scaled:?}");
+
+        // Move on model: Shift+drag turns the frame round its normal
+        harness.state_mut().moving_on_model = Some(crate::move_on_model::MoveOnModel::layer(layer));
+        harness.run_steps(2);
+        let before = placement(&projection(&harness, layer), harness.state().session.mesh.bounds()).unwrap();
+        let off = gizmo(&harness).center + vec2(-100.0, 80.0);
+        drag_frames(&mut harness, layer, off, off + vec2(60.0, 0.0), Modifiers::SHIFT, true, check(layer));
+        let turned = placement(&projection(&harness, layer), harness.state().session.mesh.bounds()).unwrap();
+        assert!((turned.rotation[2] - before.rotation[2]).abs() > 10.0, "turned: {before:?} -> {turned:?}");
+        assert_eq!(harness.state().session.history_labels().len(), steps + 4, "one undo step per drag");
+
+        let (mut harness, layer) = fill_app("warp");
+        let warp = gizmo(&harness);
+        drag_frames(&mut harness, layer, warp.center, warp.center + vec2(30.0, 25.0), Modifiers::NONE, false, check(layer));
+        let warp = gizmo(&harness);
+        drag_frames(&mut harness, layer, warp.corners[0], warp.corners[0] + vec2(-25.0, -15.0), Modifiers::NONE, false, check(layer));
+        let Projection::Warp { corners, .. } = projection(&harness, layer) else { panic!("a warp") };
+        assert_ne!(corners[0], Projection::FRAME_CORNERS[0], "the corner was pulled");
     }
 }

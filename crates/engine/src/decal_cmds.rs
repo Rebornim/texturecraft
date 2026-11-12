@@ -4,6 +4,7 @@
 
 use serde_json::{Value, json};
 use texturecraft_compose::axis_frame::placed_from_axis;
+use texturecraft_compose::frame_placement::{folded, placed, placement as frame_placement};
 use texturecraft_core::{Channel, Decal, Effect, EffectKind, Fill, Layer, LayerId, LayerKind, Mask, MaskBackground, Projection, Source};
 use texturecraft_geom::glam::{Vec2, Vec3};
 
@@ -27,7 +28,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit decal",
             [],
             None,
-            "{layer? | effect?: a mask fill effect id (a decal placed as a mask; with `layer`, it must be in that layer) — any fill with a planar or warp projection: moves the frame it projects from (an axis planar is first placed as the frame it projects from, reading images exactly as before; a warp keeps its corners), x?, y?, viewport? | position?, normal? (re-place it on its own texture set), up?: [x,y,z], size?: height | [w,h], rotation?: degrees, offset?: [right, up] (world units from where it was placed), depth?, image?: replaces the image in the channel or mask it was placed in, merge?: true continues the previous Edit decal undo step (drags)}",
+            "{layer? | effect?: a mask fill effect id (a decal placed as a mask; with `layer`, it must be in that layer) — any fill with a planar or warp projection: moves the frame it projects from (an axis planar is first placed as the frame it projects from, reading images exactly as before; a warp keeps its corners), x?, y?, viewport? | position?, normal? (re-place it on its own texture set), up?: [x,y,z], size?: height | [w,h], rotation?: degrees, offset?: [right, up] (world units from where it was placed), depth?, frameOffset?: [x, y, z] (the frame's centre in mesh radii from the mesh's centre), frameRotation?: [x, y, z] degrees (its turn: unturned it faces +Z with +Y up), frameScale?: [width, height, reach] (in mesh diagonals; reach = how far it projects in front of and behind it, a warp's Projection Depth times its longer side) — the frame as the 3D projection settings show it, applied before the other fields; any projector turn or scale is first folded into the frame (it lands the same), image?: replaces the image in the channel or mask it was placed in, merge?: true continues the previous Edit decal undo step (drags)}",
             has_layer,
             set
         ),
@@ -159,7 +160,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "layer": id.0, "decal": decal, "maskEffect": mask_effect.map(|effect| effect.0) }))
 }
 
-/// The projection of fill layer `id`, or of mask fill effect `effect` when given, with the frame it projects from: an axis planar is placed as the frame it already projects from (it reads images exactly as before)
+/// The projection of fill layer `id`, or of mask fill effect `effect` when given, with the frame it projects from: an axis planar is placed as the frame it already projects from (it reads images exactly as before), a turned or scaled projector is folded into its frame
 fn framed(s: &Session, cmd: &str, id: LayerId, effect: Option<LayerId>) -> Result<(Projection, Decal)> {
     let projection = match effect {
         Some(effect) => match s.doc.project.effect(effect).map(|(_, effect)| &effect.kind) {
@@ -172,10 +173,39 @@ fn framed(s: &Session, cmd: &str, id: LayerId, effect: Option<LayerId>) -> Resul
         },
     };
     let projection = placed_from_axis(projection, s.mesh.bounds()).unwrap_or_else(|| projection.clone());
+    // The frame moves as it lands: a projector's own turn and scale go into it first
+    let projection = folded(&projection).unwrap_or(projection);
     let frame =
         projection.frame().copied().ok_or_else(|| bad(cmd, "the projection has no frame: a planar or warp projection has one (layer.add.decal places one)"))?;
     Ok((projection, frame))
 }
+
+/// `projection` with its frame where `frameOffset`, `frameRotation` and `frameScale` put it (None when none is given)
+fn placed_as_shown(s: &Session, cmd: &str, p: &Value, projection: &Projection) -> Result<Option<Projection>> {
+    let fields = ["frameOffset", "frameRotation", "frameScale"];
+    if fields.iter().all(|key| p.get(*key).is_none()) {
+        return Ok(None);
+    }
+    let read = |key: &str| match p.get(key) {
+        None => Ok(None),
+        Some(_) => vec3(p, key).map(Some).ok_or_else(|| bad(cmd, format!("`{key}` must be [x, y, z]"))),
+    };
+    let bounds = s.mesh.bounds();
+    let mut shown = frame_placement(projection, bounds).ok_or_else(|| bad(cmd, "the frame is degenerate"))?;
+    if let Some(offset) = read("frameOffset")? {
+        shown.offset = offset.clamp(Vec3::splat(-MAX_FRAME_OFFSET), Vec3::splat(MAX_FRAME_OFFSET)).to_array();
+    }
+    if let Some(rotation) = read("frameRotation")? {
+        shown.rotation = rotation.clamp(Vec3::splat(-360.0), Vec3::splat(360.0)).to_array();
+    }
+    if let Some(scale) = read("frameScale")? {
+        shown.scale = scale.clamp(Vec3::splat(MIN_SIZE), Vec3::splat(MAX_SIZE)).to_array();
+    }
+    placed(projection, &shown, bounds).map(Some).ok_or_else(|| bad(cmd, "that frame is degenerate"))
+}
+
+/// How far from the mesh's centre `frameOffset` may put a frame, in mesh radii
+const MAX_FRAME_OFFSET: f32 = 100.0;
 
 /// `projection` projecting from `frame`, its other settings kept
 fn move_frame(projection: &mut Projection, frame: Decal) {
@@ -203,6 +233,10 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
     let texture_set =
         session.doc.project.locate(layer_id).map(|(texture_set, _, _)| texture_set).ok_or_else(|| bad(command, "the decal has no texture set"))?;
     let mesh_diagonal = mesh_size(session);
+    if let Some(moved) = placed_as_shown(session, command, params, &projection)? {
+        projection = moved;
+        decal = projection.frame().copied().ok_or_else(|| bad(command, "the projection lost its frame"))?;
+    }
     if let Some((center, normal, hit_set)) = placement(session, command, params, texture_set, true)? {
         // Selecting another set must not let this decal leave its layer's stack
         if hit_set != texture_set {

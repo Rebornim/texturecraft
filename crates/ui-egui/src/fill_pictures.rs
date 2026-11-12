@@ -183,19 +183,26 @@ pub(crate) fn angle_picture(painter: &Painter, rect: Rect, degrees: f32, tokens:
 /// Checker cells across a warp preview's frame
 const WARP_CELLS: usize = 4;
 
-/// How much of the preview an unpulled frame spans
-const WARP_FRAME_SPAN: f32 = 0.62;
+/// How much of the preview an unpulled frame spans per mesh diagonal of its side (a new warp's frame round a ball spans about 0.62)
+const WARP_SPAN_PER_DIAGONAL: f32 = 1.07;
+/// The least and most of the preview a frame's side spans
+const WARP_SPAN_RANGE: std::ops::RangeInclusive<f32> = 0.05..=0.95;
 
 /// Radius of a warp preview's corner handle
 const WARP_HANDLE_RADIUS: f32 = 3.5;
 
-/// A warp's frame with its corners where they are pulled, the checker bending with them
-pub(crate) fn warp_preview(painter: &Painter, rect: Rect, corners: [[f32; 2]; 4], tokens: &Tokens) {
+/// A warp's frame with its corners where they are pulled, the checker bending with them; `size` is the frame's width and height in mesh diagonals, `turn` its turn round its normal (degrees), so resizing or turning the frame shows
+pub(crate) fn warp_preview(painter: &Painter, rect: Rect, corners: [[f32; 2]; 4], size: [f32; 2], turn: f32, tokens: &Tokens) {
     let painter = painter.with_clip_rect(rect);
     painter.rect_filled(rect, 0, tokens.field);
-    // Across and up in frame sizes from its centre -> the square
-    let [top_left, top_right, bottom_right, bottom_left] =
-        corners.map(|[x, y]| pos2(rect.center().x + x * WARP_FRAME_SPAN * rect.width(), rect.center().y - y * WARP_FRAME_SPAN * rect.height()));
+    let span = size.map(|side| (side * WARP_SPAN_PER_DIAGONAL).clamp(*WARP_SPAN_RANGE.start(), *WARP_SPAN_RANGE.end()));
+    let (sin, cos) = turn.to_radians().sin_cos();
+    // Across and up in frame sizes from its centre -> turned -> the square
+    let [top_left, top_right, bottom_right, bottom_left] = corners.map(|[x, y]| {
+        let (x, y) = (x * span[0], y * span[1]);
+        let (x, y) = (x * cos - y * sin, x * sin + y * cos);
+        pos2(rect.center().x + x * rect.width(), rect.center().y - y * rect.height())
+    });
     let at = |u: f32, v: f32| -> Pos2 {
         let top = top_left + (top_right - top_left) * u;
         let bottom = bottom_left + (bottom_right - bottom_left) * u;

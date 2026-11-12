@@ -2,6 +2,7 @@
 
 use serde_json::{Value, json};
 use texturecraft_engine::core::{Channel, DepthCulling, FillSymmetry, LayerId, LayerKind, Projection, Projector, Sampling};
+use texturecraft_engine::geom::glam::Vec3;
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute};
 
@@ -363,6 +364,58 @@ fn moving_an_axis_planar_places_it_as_its_frame_first() {
     assert_eq!((frame.rotation, corners[1]), (30.0, [0.9, 0.9]), "a warp's frame turns and keeps its corners");
     set(&mut s, layer, json!({"projection": "spherical"}));
     assert!(execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "rotation": 30})).is_err(), "a spherical projection has no frame");
+}
+
+/// A frame's 3D projection settings (Offset, Rotation, Scale as the panel and the gizmo share them) move it in one undo step, and a turned or scaled projector folds into the frame first, landing the same
+#[test]
+fn a_frame_takes_its_offset_rotation_and_scale_and_folds_its_projector_in_first() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    let ramp = s.import_resource_bytes("ramp.png", ramp_png()).unwrap();
+    execute(&mut s, "layer.fill.set", &json!({"layer": layer.0, "channel": "baseColor", "image": ramp})).unwrap();
+    set(&mut s, layer, json!({"projection": "planar", "axis": 2}));
+    execute(&mut s, "layer.decal.set", &json!({"layer": layer.0})).unwrap();
+    // Depth culling off: its depth map is drawn along the frame, so a folded turn re-draws it (a few silhouette texels differ)
+    set(&mut s, layer, json!({"projectorRotation": [0, 0, 30], "projectorScale": 1.25, "depthCulling": false}));
+    let turned = snapshot(&mut s);
+    let steps = s.history_labels().len();
+
+    // Moving the frame as shown: the turn and scale are in the frame now, the image where it was
+    execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "frameOffset": [0.0, 0.0, 0.0]})).unwrap();
+    let Projection::Planar { placed: Some(frame), projector, .. } = projection(&s, layer) else { panic!("still placed") };
+    assert_eq!((projector.rotation, projector.scale), ([0.0; 3], [1.0; 3]), "folded into the frame");
+    let (lo, hi) = s.mesh.bounds();
+    assert!((Vec3::from(frame.center) - (lo + hi) * 0.5).length() < 1e-4, "offset 0 = the mesh's centre: {frame:?}");
+    let shown = texturecraft_engine::compose::frame_placement::placement(&projection(&s, layer), (lo, hi)).unwrap();
+    assert!((shown.rotation[2] - 30.0).abs() < 1e-3 && shown.rotation[0].abs() < 1e-3, "the projector's turn shows as the frame's: {shown:?}");
+    let folded = snapshot(&mut s);
+    let changed = turned.iter().zip(&folded).filter(|(a, b)| (*a - *b).abs() > 2.0 / 255.0).count();
+    assert!(changed * 200 < turned.len(), "the frame was already at the centre: the image stays, {changed} of {} texels changed", turned.len());
+
+    execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "frameScale": [shown.scale[0] * 0.5, shown.scale[1], shown.scale[2]], "merge": true}))
+        .unwrap();
+    let Projection::Planar { placed: Some(narrow), .. } = projection(&s, layer) else { panic!("still placed") };
+    assert!((narrow.size[0] - frame.size[0] * 0.5).abs() < 1e-4 && (narrow.size[1] - frame.size[1]).abs() < 1e-4, "Scale X halves the width");
+    execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "frameRotation": [0, 0, 90], "merge": true})).unwrap();
+    let again = texturecraft_engine::compose::frame_placement::placement(&projection(&s, layer), (lo, hi)).unwrap();
+    assert!((again.rotation[2] - 90.0).abs() < 1e-3 && (again.scale[0] - shown.scale[0] * 0.5).abs() < 1e-4, "{again:?}");
+    assert_eq!(s.history_labels().len(), steps + 1, "a drag is one undo step");
+    s.undo().unwrap();
+    assert_eq!(snapshot(&mut s), turned, "undo puts the turned projector back");
+
+    for bad in [json!({"frameScale": [1, 2]}), json!({"frameOffset": "x"}), json!({"frameScale": [0, -1, f64::NAN]})] {
+        let mut params = bad.clone();
+        params["layer"] = json!(layer.0);
+        assert!(execute(&mut s, "layer.decal.set", &params).is_err(), "{bad}");
+    }
+
+    // A warp's Scale Z is its reach: Projection Depth times the longer side
+    set(&mut s, layer, json!({"projection": "warp"}));
+    let Projection::Warp { frame, .. } = projection(&s, layer) else { panic!("a warp") };
+    let diagonal = (hi - lo).length();
+    execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "frameScale": [frame.size[0] / diagonal, frame.size[1] / diagonal, 0.1]})).unwrap();
+    let Projection::Warp { frame, depth, .. } = projection(&s, layer) else { panic!("a warp") };
+    assert!((depth * frame.size[0].max(frame.size[1]) - 0.1 * diagonal).abs() < 1e-4, "reach {depth}");
 }
 
 /// A 64 × 8 PNG whose red climbs from left to right

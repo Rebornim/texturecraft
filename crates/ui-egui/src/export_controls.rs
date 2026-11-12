@@ -7,11 +7,12 @@ use texturecraft_engine::formats::{ExportPreset, FileFormat};
 use crate::i18n::{tr, trf};
 
 /// Built-in templates that aren't for one engine or renderer: listed first, apart from the rest, as the reference does
-const GENERAL_TEMPLATES: [&str; 8] = [
+const GENERAL_TEMPLATES: [&str; 9] = [
     "2D View",
     "Document channels + Normal + AO",
     "Document channels + Normal + AO (With Alpha)",
     "glTF PBR Metal Roughness",
+    "glTF PBR Metal Roughness + Displacement",
     "OpenPBR (separate maps)",
     "Separate maps",
     "Sketchfab (PBR Metal Roughness)",

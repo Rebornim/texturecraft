@@ -107,6 +107,12 @@ pub fn builtin_presets() -> Vec<ExportPreset> {
             maps
         }),
         preset("glTF PBR Metal Roughness", gltf_pbr_maps(|s| format!("$mesh_$textureSet_{s}"))),
+        // glTF has no displacement slot: the height goes beside the glTF maps for the target to wire up, in 16 bits
+        preset("glTF PBR Metal Roughness + Displacement", {
+            let mut maps = gltf_pbr_maps(|s| format!("$mesh_$textureSet_{s}"));
+            maps.push(map("Displacement", 16, gray(ch(Channel::Height, 0))));
+            maps
+        }),
         preset(
             "Unreal Engine (Packed)",
             vec![map("BaseColor", 8, base_with_alpha()), map("OcclusionRoughnessMetallic", 8, orm()), map("Normal", 8, normal(VirtualMap::NormalDirectX))],

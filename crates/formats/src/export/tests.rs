@@ -1261,6 +1261,13 @@ fn reference_presets_follow_their_targets_layouts() {
 
     // 2D View: the one map the 2D view draws
     assert_eq!(preset_maps("2D View"), [("2DView".to_string(), rgb(|k| SourceRef::Virtual { map: VirtualMap::View2d, component: k }))]);
+
+    // glTF + Displacement: the glTF maps, then the height in 16 bits
+    let displaced = builtin_preset("glTF PBR Metal Roughness + Displacement").unwrap();
+    assert_eq!(displaced.maps[..displaced.maps.len() - 1], builtin_preset("glTF PBR Metal Roughness").unwrap().maps[..]);
+    let displacement = displaced.maps.last().unwrap();
+    assert!(displacement.file.ends_with("_Displacement"));
+    assert_eq!((displacement.bit_depth, displacement.channels.as_slice()), (16, &[(Dest::L, channel(Channel::Height))][..]));
 }
 
 #[test]

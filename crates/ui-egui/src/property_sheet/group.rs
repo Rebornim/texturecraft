@@ -39,6 +39,7 @@ impl PropertySheet<'_> {
         let band = Rect::from_x_y_ranges(self.ui.max_rect().x_range(), rect.y_range());
         let mut open = self.ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
         let response = self.ui.interact(band, id, Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, title));
 
         let reset_rect = Rect::from_center_size(pos2(self.right - BAND_RESET_INSET, rect.center().y), vec2(20.0, 20.0));
         let mut reset_clicked = false;

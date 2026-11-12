@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 use egui::{Align2, CornerRadius, FontId, Id, Rect, Response, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
 use egui_phosphor::regular as ic;
 
-use super::{ICON_SIZE, PropertySheet, SMALL_TEXT_SIZE, TEXT_SIZE};
+use super::{ICON_SIZE, PropertySheet, RowLead, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Radius of a slider's knob
@@ -49,10 +49,15 @@ impl PropertySheet<'_> {
 
     /// [`Self::slider`] with a unit after the value ("°", "%")
     pub(crate) fn slider_with_suffix(&mut self, label: &str, value: &mut f32, range: RangeInclusive<f32>, decimals: usize, suffix: &str) -> Option<bool> {
-        let (control, center_y) = self.row(label);
+        self.slider_led(RowLead::label(label), value, range, decimals, suffix)
+    }
+
+    /// [`Self::slider_with_suffix`] led by `lead` (a picture row, a child setting)
+    pub(crate) fn slider_led(&mut self, lead: RowLead<'_>, value: &mut f32, range: RangeInclusive<f32>, decimals: usize, suffix: &str) -> Option<bool> {
+        let (control, center_y) = self.row_with(lead);
         let id = self.next_id();
         let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, signed: false };
-        let dragged = self.track(id, label, &track, value, &range);
+        let dragged = self.track(id, lead.text(), &track, value, &range);
         let typed = self.value_field(id, center_y, *value, &range, decimals, suffix);
         Self::apply_typed(value, typed, dragged)
     }
@@ -69,11 +74,16 @@ impl PropertySheet<'_> {
 
     /// An angle in degrees: the track, then a small dial just before the value
     pub(crate) fn angle(&mut self, label: &str, degrees: &mut f32, range: RangeInclusive<f32>) -> Option<bool> {
-        let (control, center_y) = self.row(label);
+        self.angle_led(RowLead::label(label), degrees, range)
+    }
+
+    /// [`Self::angle`] led by `lead`
+    pub(crate) fn angle_led(&mut self, lead: RowLead<'_>, degrees: &mut f32, range: RangeInclusive<f32>) -> Option<bool> {
+        let (control, center_y) = self.row_with(lead);
         let id = self.next_id();
         let dial_x = self.right - self.used.value_width.max(super::VALUE_MIN_WIDTH) - DIAL_AIR - DIAL_RADIUS;
         let track = Track { start: control.left() + KNOB_RADIUS, end: dial_x - DIAL_RADIUS - DIAL_AIR, center_y, signed: *range.start() < 0.0 };
-        let dragged = self.track(id, label, &track, degrees, &range);
+        let dragged = self.track(id, lead.text(), &track, degrees, &range);
 
         let t = self.tokens;
         let painter = self.ui.painter();

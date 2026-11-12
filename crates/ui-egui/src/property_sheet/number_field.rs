@@ -35,6 +35,9 @@ pub(crate) struct NumberField<'a> {
     pub(crate) speed: f32,
 
     pub(crate) decimals: usize,
+
+    /// A unit after the value ("°")
+    pub(crate) suffix: &'a str,
 }
 
 impl PropertySheet<'_> {
@@ -49,7 +52,7 @@ impl PropertySheet<'_> {
         for (index, field) in fields.iter_mut().enumerate() {
             let left = control.left() + index as f32 * (width + FIELD_GAP);
             let rect = Rect::from_min_size(pos2(left, control.top()), vec2(width, control.height()));
-            if let Some(merge) = self.number_field(rect, field) {
+            if let Some(merge) = self.number_field(rect, label, field) {
                 edited = Some((index, merge));
             }
         }
@@ -80,8 +83,8 @@ impl PropertySheet<'_> {
         response.clicked()
     }
 
-    /// One field: its tag on the left, the value on the right; drag or click to type
-    fn number_field(&mut self, rect: Rect, field: &mut NumberField) -> Option<bool> {
+    /// One field: its tag on the left, the value on the right; drag or click to type. Named "`label` `tag`" ("Scale X")
+    fn number_field(&mut self, rect: Rect, label: &str, field: &mut NumberField) -> Option<bool> {
         let id = self.next_id();
         let typing_id = id.with("typed");
         let t = self.tokens;
@@ -121,7 +124,7 @@ impl PropertySheet<'_> {
             if self.ui.input(|input| input.key_pressed(egui::Key::Escape)) {
                 return None;
             }
-            let typed: f32 = text.trim().parse().ok()?;
+            let typed: f32 = text.trim().trim_end_matches(field.suffix).trim().parse().ok()?;
             if !typed.is_finite() || typed == field.value {
                 return None;
             }
@@ -130,7 +133,8 @@ impl PropertySheet<'_> {
         }
 
         let response = self.ui.interact(rect, id, Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-        let shown = format!("{:.decimals$}", field.value);
+        response.widget_info(|| egui::WidgetInfo::slider(true, f64::from(field.value), format!("{label} {}", field.tag)));
+        let shown = format!("{:.decimals$}{}", field.value, field.suffix);
         painter.text(pos2(rect.right() - VALUE_INSET, rect.center().y), Align2::RIGHT_CENTER, shown, semibold(TEXT_SIZE), t.text);
         if response.hovered() || response.dragged() {
             painter.rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, t.button_border), StrokeKind::Inside);

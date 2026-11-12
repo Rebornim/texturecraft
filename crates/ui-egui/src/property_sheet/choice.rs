@@ -1,7 +1,7 @@
 use egui::{Align2, Color32, CornerRadius, FontId, Frame, Margin, Painter, Rect, RectAlign, Response, Role, Sense, Shadow, Stroke, WidgetInfo, pos2, vec2};
 use egui_phosphor::regular as ic;
 
-use super::{CONTROL_HEIGHT, ICON_SIZE, PropertySheet, TEXT_SIZE};
+use super::{CONTROL_HEIGHT, ICON_SIZE, PropertySheet, RowLead, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Draws an option's picture into its square
@@ -68,7 +68,19 @@ impl PropertySheet<'_> {
         name: impl Fn(T) -> String,
         picture: Option<ChoicePicture<'_, T>>,
     ) -> (Option<T>, Option<T>) {
-        let x0 = self.lead(label, false);
+        self.dropdown_led(RowLead::label(label), current, options, name, picture)
+    }
+
+    /// [`Self::dropdown`] led by `lead` (a label stacked above it, when its values differ only at their end)
+    pub(crate) fn dropdown_led<T: Copy + PartialEq>(
+        &mut self,
+        lead: RowLead<'_>,
+        current: T,
+        options: &[T],
+        name: impl Fn(T) -> String,
+        picture: Option<ChoicePicture<'_, T>>,
+    ) -> (Option<T>, Option<T>) {
+        let x0 = self.lead_with(lead);
         let row = self.take(super::ROW_HEIGHT);
         let center_y = row.center().y;
         self.drawn(center_y + CONTROL_HEIGHT / 2.0);

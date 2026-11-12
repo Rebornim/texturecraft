@@ -23,6 +23,7 @@ use crate::curvature_sizes::CurvatureSizes;
 use crate::held_fields::HeldFields;
 use crate::pattern::{Coords, decal_uv_symmetric, image_samples, pattern_pixels, procedural_in, world_noise};
 use crate::pattern_context::PatternContext;
+use crate::projector_cover::projector_cover;
 use crate::store::{BakedMaps, ImageRes, ImageStore, PixelStore, decode};
 
 const NCH: usize = Channel::ALL.len();
@@ -1457,11 +1458,11 @@ impl<'a, 'b> Texel<'a, 'b> {
         }
     }
 
-    /// How much a fill projected by `proj` covers this texel: 1, or for a decal its frame
-    /// coverage times the alpha of its first image source.
+    /// How much a fill projected by `proj` covers this texel (wrap, shape crop, backface culling; decals: frame × image alpha)
     fn cover<'s>(&mut self, mut sources: impl Iterator<Item = &'s Source>, proj: &Projection, sampling: Sampling) -> f32 {
         if !matches!(proj, Projection::Decal(_)) {
-            return self.tile_cover(proj, sampling);
+            let coords = self.coords();
+            return self.tile_cover(proj, sampling) * projector_cover(proj, &coords);
         }
         let (c, _, w) = self.projected(proj);
         let image = sources.find_map(|s| match s {

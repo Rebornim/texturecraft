@@ -37,6 +37,8 @@ impl ProjectionKind {
             Projection::Planar { .. } => Some(ProjectionKind::Planar),
             Projection::Spherical { .. } => Some(ProjectionKind::Spherical),
             Projection::Cylindrical { .. } => Some(ProjectionKind::Cylindrical),
+            // Not in the dropdown until the panel's warp rows land
+            Projection::Warp { .. } => None,
         }
     }
 

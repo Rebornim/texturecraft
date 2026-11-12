@@ -191,3 +191,50 @@ fn saved_decals_load_as_planar_projections_placed_on_the_surface() {
     assert_eq!(projector.backface, Backface { on: true, angle: 90.0, hardness: 0.5 });
     assert_eq!(serde_json::to_value(&fill.projection).unwrap()["Planar"]["placed"], json!(frame), "it saves as a planar projection");
 }
+
+/// A warp projects from a frame around the mesh: pulling a corner bends the image, Projection Depth bounds it when cropped, and Reset frame unpulls the corners
+#[test]
+fn warp_projection_bends_to_its_corners_reaches_its_depth_and_resets_its_frame() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    execute(&mut s, "layer.visible", &json!({"layer": layer.0, "visible": false})).unwrap();
+    let empty = snapshot(&mut s);
+    execute(&mut s, "layer.visible", &json!({"layer": layer.0, "visible": true})).unwrap();
+    set(&mut s, layer, json!({"projection": "warp"}));
+    let Projection::Warp { frame, corners, depth, .. } = projection(&s, layer) else { panic!("{:?}", projection(&s, layer)) };
+    assert_eq!((corners, depth), (Projection::FRAME_CORNERS, Projection::WARP_DEPTH));
+    assert_eq!((frame.normal, frame.up), ([0.0, 0.0, 1.0], [0.0, 1.0, 0.0]), "seen from the front");
+    assert!(frame.size.iter().all(|side| (side - 2.0).abs() < 1e-3) && frame.center.iter().all(|c| c.abs() < 1e-3), "around the unit sphere: {frame:?}");
+    let unpulled = snapshot(&mut s);
+    assert_ne!(unpulled, empty);
+
+    let pulled = json!([[-0.5, 0.5], [0.9, 0.9], [0.5, -0.5], [-0.5, -0.5]]);
+    set(&mut s, layer, json!({"warpCorners": pulled}));
+    let bent = snapshot(&mut s);
+    assert_ne!(bent, unpulled, "a pulled corner bends the image");
+    set(&mut s, layer, json!({"projection": "warp", "rotation": 0}));
+    assert_eq!(snapshot(&mut s), bent, "picking warp again keeps the corners");
+
+    set(&mut s, layer, json!({"shapeCrop": "cropped", "warpCorners": Projection::FRAME_CORNERS}));
+    let cropped = snapshot(&mut s);
+    // Depth 0.1 of a frame 2 wide reaches 0.2 in front of and behind the frame through the sphere's middle
+    let (beyond, within) = (facing_z(&s, 0.35, 1.1), facing_z(&s, -0.05, 0.05));
+    assert!(!beyond.is_empty() && !within.is_empty());
+    assert!(beyond.iter().all(|&i| cropped[i] == empty[i]), "past its Projection Depth the warp does not reach");
+    assert!(within.iter().all(|&i| cropped[i] == unpulled[i]), "within it the warp covers as before");
+    set(&mut s, layer, json!({"projectionDepth": 1}));
+    let deep = snapshot(&mut s);
+    assert!(beyond.iter().all(|&i| deep[i] == unpulled[i]), "a deeper warp reaches the whole sphere");
+
+    set(&mut s, layer, json!({"warpCorners": pulled}));
+    execute(&mut s, "layer.fill.resetFrame", &json!({"layer": layer.0})).unwrap();
+    let Projection::Warp { frame: reset, corners, depth, .. } = projection(&s, layer) else { panic!("still a warp") };
+    assert_eq!((reset, corners, depth), (frame, Projection::FRAME_CORNERS, 1.0), "the frame and corners go back; the depth stays");
+
+    let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap();
+    let row = inspect["layers"].as_array().unwrap().iter().find(|l| l["id"] == layer.0).unwrap().clone();
+    assert_eq!(row["fill"]["projection"], "Warp projection");
+    assert_eq!(row["fill"]["projectionSettings"]["Warp"]["corners"], json!(Projection::FRAME_CORNERS));
+    set(&mut s, layer, json!({"projection": "planar"}));
+    assert!(execute(&mut s, "layer.fill.resetFrame", &json!({"layer": layer.0})).is_err(), "only a warp has a frame to reset");
+}

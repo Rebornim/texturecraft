@@ -281,7 +281,7 @@ pub(crate) fn anchor_source(s: &Session, cmd: &str, reader: LayerId, anchor: Lay
 }
 
 fn add_fill(s: &mut Session, p: &Value) -> Result<Value> {
-    let projection = projection_from(p, "effect.add.fill", None)?;
+    let projection = projection_from(p, "effect.add.fill", None, || crate::warp_cmds::fitted_frame(&s.mesh))?;
     let sampling = crate::layer_cmds::sampling_from(p, "effect.add.fill", Sampling::default())?;
     let blend = blend_param("effect.add.fill", p, "blend")?.unwrap_or(BlendMode::Normal);
     let id = layer_param(s, "effect.add.fill", p)?;

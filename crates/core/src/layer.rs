@@ -316,6 +316,17 @@ pub enum Projection {
         #[serde(default = "full_turn")]
         angle: f32,
     },
+    /// A planar projection from a frame whose four corners are pulled freely, bending the image to the quad they make
+    Warp {
+        /// The frame it projects from (its depth is unused: `depth` sets the reach)
+        frame: Decal,
+        /// Where the frame's corners sit (top left, top right, bottom right, bottom left), across and up in frame sizes from its centre
+        corners: [[f32; 2]; 4],
+        /// Projection Depth: how far in front of and behind the frame it reaches when cropped to its shape, in lengths of the frame's longer side
+        depth: f32,
+        uv: UvTransform,
+        projector: Projector,
+    },
 }
 
 /// Tiling, rotation (degrees) and offset a 3D projection lays on the surface; the default changes nothing
@@ -341,9 +352,9 @@ pub struct Decal {
     pub normal: [f32; 3],
     /// Up direction of the unrotated frame.
     pub up: [f32; 3],
-    /// Width and height (world units).
+    /// Width and height (world units)
     pub size: [f32; 2],
-    /// Rotation around the normal (degrees).
+    /// Rotation around the normal (degrees)
     pub rotation: f32,
     /// Shift of the frame from `center` along the unrotated right and up directions (world units).
     pub offset: [f32; 2],
@@ -363,6 +374,23 @@ impl Default for Projection {
 }
 
 impl Projection {
+    /// A warp's corners before any is pulled: the frame's own
+    pub const FRAME_CORNERS: [[f32; 2]; 4] = [[-0.5, 0.5], [0.5, 0.5], [0.5, -0.5], [-0.5, -0.5]];
+
+    /// A new warp's Projection Depth
+    pub const WARP_DEPTH: f32 = 0.1;
+
+    /// A warp projection from `frame` with its corners where the frame's are
+    pub fn warp(frame: Decal) -> Projection {
+        Projection::Warp {
+            frame,
+            corners: Projection::FRAME_CORNERS,
+            depth: Projection::WARP_DEPTH,
+            uv: UvTransform::default(),
+            projector: Projector::default(),
+        }
+    }
+
     /// A planar projection from `frame` with a decal's look: cropped to its frame, depth and image alpha, off faces turned away
     pub fn decal(frame: Decal) -> Projection {
         let projector = Projector { crop: ShapeCrop::Cropped, backface: Backface { on: true, ..Backface::default() }, ..Projector::default() };
@@ -377,6 +405,15 @@ impl Projection {
         }
     }
 
+    /// The frame on the surface a placed planar or a warp projection projects from
+    pub fn frame(&self) -> Option<&Decal> {
+        match self {
+            Projection::Planar { placed, .. } => placed.as_ref(),
+            Projection::Warp { frame, .. } => Some(frame),
+            _ => None,
+        }
+    }
+
     pub fn label(&self) -> &'static str {
         match self {
             Projection::UvTile => "Fill (Match per UV Tile)",
@@ -385,6 +422,7 @@ impl Projection {
             Projection::Planar { .. } => "Planar projection",
             Projection::Spherical { .. } => "Spherical projection",
             Projection::Cylindrical { .. } => "Cylindrical projection",
+            Projection::Warp { .. } => "Warp projection",
         }
     }
 }

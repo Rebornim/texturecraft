@@ -3,7 +3,8 @@
 use texturecraft_core::{Backface, Decal, Projection, Projector, ShapeCrop};
 use texturecraft_geom::glam::{Vec2, Vec3};
 
-use crate::pattern::{Coords, frame_crop, frame_facing, frame_local, placed_uv, projector_local, smoothstep};
+use crate::pattern::{Coords, depth_fade, frame_crop, frame_facing, frame_local, placed_uv, projector_local, smoothstep};
+use crate::warp::warp_uv;
 
 /// How much of the texel at `c` the projection reaches through its shape crop and backface culling
 pub fn projector_cover(proj: &Projection, c: &Coords) -> f32 {
@@ -12,7 +13,8 @@ pub fn projector_cover(proj: &Projection, c: &Coords) -> f32 {
         | Projection::Planar { projector, .. }
         | Projection::Spherical { projector, .. }
         | Projection::Cylindrical { projector, .. } => projector,
-        Projection::Uv { .. } | Projection::UvTile => return 1.0,
+        // Framed on the surface: see [`framed_cover`]
+        Projection::Warp { .. } | Projection::Uv { .. } | Projection::UvTile => return 1.0,
     };
     if projector.crop == ShapeCrop::ExtendsOutside && !projector.backface.on {
         return 1.0;
@@ -43,7 +45,7 @@ pub fn projector_cover(proj: &Projection, c: &Coords) -> f32 {
             let outward = if radius > 1e-6 { (na * a + nb * b) / radius } else { 1.0 };
             (radius <= 1.0 && h.abs() <= 1.0, Some(outward))
         }
-        Projection::Uv { .. } | Projection::UvTile => (true, None),
+        Projection::Warp { .. } | Projection::Uv { .. } | Projection::UvTile => (true, None),
     };
     if projector.crop == ShapeCrop::Cropped && !inside {
         return 0.0;
@@ -73,6 +75,27 @@ pub fn placed_cover(frame: &Decal, projector: &Projector, p: Vec3, nrm: Vec3) ->
         cover *= frame_crop(frame, local);
     }
     Some((placed_uv(local), cover))
+}
+
+/// A projection from a frame on the surface (a placed planar or a warp) at world point `p` with normal `nrm`: its texture coordinates and how much it covers there (None for other projections, a degenerate frame or where nothing lands)
+pub fn framed_cover(proj: &Projection, p: Vec3, nrm: Vec3) -> Option<(Vec2, f32)> {
+    match proj {
+        Projection::Planar { projector, placed: Some(frame), .. } => placed_cover(frame, projector, p, nrm),
+        Projection::Warp { frame, corners, depth, projector, .. } => warp_cover(frame, corners, *depth, projector, p),
+        _ => None,
+    }
+}
+
+/// A warp projection at world point `p`: its texture coordinates in the quad its corners make, and, cropped to its shape, how much of the quad and of its Projection Depth (in lengths of the frame's longer side) cover it
+pub fn warp_cover(frame: &Decal, corners: &[[f32; 2]; 4], depth: f32, projector: &Projector, p: Vec3) -> Option<(Vec2, f32)> {
+    let local = frame_local(frame, projector, p)?;
+    let uv = warp_uv(corners, local.truncate())?;
+    if projector.crop == ShapeCrop::ExtendsOutside {
+        return Some((uv, 1.0));
+    }
+    let inside = (0.0..=1.0).contains(&uv.x) && (0.0..=1.0).contains(&uv.y);
+    let reach = depth * frame.size[0].max(frame.size[1]);
+    Some((uv, if inside { depth_fade(local.z, reach) } else { 0.0 }))
 }
 
 /// The turn (in cosine) over which backface culling fades at hardness 0

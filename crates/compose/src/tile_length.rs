@@ -17,7 +17,7 @@ fn unit_tile(projection: &Projection, size: MeshSize) -> Option<[f32; 2]> {
     match projection {
         Projection::Uv { .. } => Some([size.uv_density; 2]),
         Projection::Triplanar { scale, .. } => Some([r / scale; 2]),
-        Projection::Planar { placed: Some(frame), .. } => Some(frame.size),
+        Projection::Planar { placed: Some(frame), .. } | Projection::Warp { frame, .. } => Some(frame.size),
         Projection::Planar { scale, .. } => Some([2.0 * r / scale; 2]),
         Projection::Cylindrical { scale, angle, .. } => Some([TAU * r * (angle / 360.0) / scale, 2.0 * r / scale]),
         Projection::UvTile | Projection::Spherical { .. } => None,
@@ -28,7 +28,7 @@ fn unit_tile(projection: &Projection, size: MeshSize) -> Option<[f32; 2]> {
 fn tiling(projection: &Projection) -> Option<[f32; 2]> {
     match projection {
         Projection::Uv { scale, .. } => Some(*scale),
-        Projection::Triplanar { uv, .. } | Projection::Planar { uv, .. } | Projection::Cylindrical { uv, .. } => Some(uv.tiling),
+        Projection::Triplanar { uv, .. } | Projection::Planar { uv, .. } | Projection::Cylindrical { uv, .. } | Projection::Warp { uv, .. } => Some(uv.tiling),
         Projection::UvTile | Projection::Spherical { .. } => None,
     }
 }

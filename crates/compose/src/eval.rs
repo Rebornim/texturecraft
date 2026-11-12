@@ -21,7 +21,7 @@ use texturecraft_texel::{DilationMap, TILE, TILE_AREA, TileImage, from_u16, nois
 use crate::below::{Band, BelowCache, Level};
 use crate::curvature_sizes::CurvatureSizes;
 use crate::pattern::{Coords, image_samples, procedural, world_noise};
-use crate::projector_cover::{placed_cover, projector_cover};
+use crate::projector_cover::{framed_cover, projector_cover};
 use crate::store::{BakedMaps, ImageRes, ImageStore, PixelStore, decode};
 
 const NCH: usize = Channel::ALL.len();
@@ -1148,10 +1148,10 @@ impl<'a, 'b> Texel<'a, 'b> {
         {
             c.uv = Vec2::from(set.from_atlas(&grid, c.uv.to_array()));
         }
-        match proj {
-            Projection::Planar { projector, placed: Some(frame), .. } => placed_cover(frame, projector, s.pos, s.nrm).map(|(uv, _)| Coords { uv, ..c }),
-            _ => Some(c),
+        if proj.frame().is_none() {
+            return Some(c);
         }
+        framed_cover(proj, s.pos, s.nrm).map(|(uv, _)| Coords { uv, ..c })
     }
 
     /// Image texels one surface texel spans at each of `samples`, from the next texel across and down (1 at a seam)
@@ -1185,21 +1185,21 @@ impl<'a, 'b> Texel<'a, 'b> {
         self.inp.baked.sample_working(map, self.x, self.y, (self.res, self.inp.gbuf.height), &self.inp.block_scales)
     }
 
-    /// Where `proj` samples this texel: its coordinates, or for a planar projection placed on the surface its place in the frame, and how much backface culling and the shape crop let through
+    /// Where `proj` samples this texel: its coordinates, or for a projection from a frame on the surface (placed planar, warp) its place in the frame, and how much backface culling and the shape crop let through
     fn projected(&mut self, proj: &Projection) -> (Coords, f32) {
         let c = self.coords();
-        match proj {
-            Projection::Planar { projector, placed: Some(frame), .. } => match self.world().and_then(|p| placed_cover(frame, projector, p, c.nrm)) {
-                Some((uv, cover)) => (Coords { uv, ..c }, cover),
-                None => (c, 0.0),
-            },
-            _ => (c, 1.0),
+        if proj.frame().is_none() {
+            return (c, 1.0);
+        }
+        match self.world().and_then(|p| framed_cover(proj, p, c.nrm)) {
+            Some((uv, cover)) => (Coords { uv, ..c }, cover),
+            None => (c, 0.0),
         }
     }
 
-    /// How much a fill projected by `proj` covers this texel: wrap, shape crop and backface culling, and a cropped placed planar's image alpha
+    /// How much a fill projected by `proj` covers this texel: wrap, shape crop and backface culling, and a cropped framed projection's image alpha
     fn cover<'s>(&mut self, mut sources: impl Iterator<Item = &'s Source>, proj: &Projection, sampling: Sampling) -> f32 {
-        let Projection::Planar { projector, placed: Some(_), .. } = proj else {
+        let (Projection::Planar { projector, placed: Some(_), .. } | Projection::Warp { projector, .. }) = proj else {
             let coords = self.coords();
             return self.tile_cover(proj, &coords, sampling) * projector_cover(proj, &coords);
         };
@@ -1208,7 +1208,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         if projector.crop == ShapeCrop::ExtendsOutside {
             return cover * self.tile_cover(proj, &c, sampling);
         }
-        // Cropped to its shape, a placed planar takes the shape of its image too
+        // Cropped to its shape, a framed projection takes the shape of its image too
         let image = sources.find_map(|s| match s {
             Source::Image { name, .. } => self.inp.images.get(name),
             _ => None,

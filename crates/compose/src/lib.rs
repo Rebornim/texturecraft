@@ -18,6 +18,7 @@ pub mod projector_cover;
 pub mod store;
 pub mod thumb;
 pub mod tile_length;
+pub mod warp;
 
 pub use below::{BelowCache, StackKey};
 pub use display::{DisplayKind, tile_bytes};

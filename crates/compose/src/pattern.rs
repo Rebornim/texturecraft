@@ -204,8 +204,8 @@ pub fn procedural(pr: &Procedural, proj: &Projection, c: &Coords) -> f32 {
             let w = w / (w.x + w.y + w.z).max(1e-6);
             flat(place_uv(Vec2::new(p.z, p.y), uv)) * w.x + flat(place_uv(Vec2::new(p.x, p.z), uv)) * w.y + flat(place_uv(Vec2::new(p.x, p.y), uv)) * w.z
         }
-        // `c.uv` is already in the placed frame (see [`placed_uv`])
-        Projection::Planar { uv, placed: Some(_), .. } => flat(place_uv(c.uv, uv) * s),
+        // `c.uv` is already in the placed or warped frame (see [`placed_uv`] and [`crate::warp::warp_uv`])
+        Projection::Planar { uv, placed: Some(_), .. } | Projection::Warp { uv, .. } => flat(place_uv(c.uv, uv) * s),
         Projection::Planar { scale, axis, offset, uv, projector, .. } => {
             let p = projector_local(projector, c).pos * *scale * s + Vec3::from(*offset);
             let q = match axis {
@@ -249,7 +249,7 @@ pub fn image_samples(proj: &Projection, c: &Coords) -> [(Vec2, f32); 3] {
             let w = w / (w.x + w.y + w.z).max(1e-6);
             [(place_uv(Vec2::new(p.z, -p.y), uv), w.x), (place_uv(Vec2::new(p.x, p.z), uv), w.y), (place_uv(Vec2::new(p.x, -p.y), uv), w.z)]
         }
-        Projection::Planar { uv, placed: Some(_), .. } => one(place_uv(c.uv, uv)),
+        Projection::Planar { uv, placed: Some(_), .. } | Projection::Warp { uv, .. } => one(place_uv(c.uv, uv)),
         Projection::Planar { scale, axis, offset, uv, projector, .. } => {
             let p = projector_local(projector, c).pos * *scale + Vec3::from(*offset);
             let q = match axis {
@@ -329,8 +329,16 @@ pub fn placed_uv(local: Vec3) -> Vec2 {
 
 /// How much frame `d` covers a point at `local` when cropped to its shape: 0 outside the frame or past its depth, fading near the depth
 pub fn frame_crop(d: &Decal, local: Vec3) -> f32 {
-    let (lz, depth) = (local.z.abs(), d.depth.max(1e-6));
-    if local.x.abs() > 0.5 || local.y.abs() > 0.5 || lz > depth {
+    if local.x.abs() > 0.5 || local.y.abs() > 0.5 {
+        return 0.0;
+    }
+    depth_fade(local.z, d.depth)
+}
+
+/// How much a frame reaching `depth` in front of and behind it covers a point `z` out from it: 0 past the depth, fading near it
+pub fn depth_fade(z: f32, depth: f32) -> f32 {
+    let (lz, depth) = (z.abs(), depth.max(1e-6));
+    if lz > depth {
         return 0.0;
     }
     1.0 - smoothstep(0.75 * depth, depth, lz)

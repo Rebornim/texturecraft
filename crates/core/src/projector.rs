@@ -2,16 +2,20 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::{Backface, ShapeCrop};
+
 /// Rotation (degrees about X, then Y, then Z) and per-axis scale of a 3D projection's shape; default = unchanged
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Projector {
     pub rotation: [f32; 3],
     pub scale: [f32; 3],
+    pub crop: ShapeCrop,
+    pub backface: Backface,
 }
 
 impl Default for Projector {
     fn default() -> Self {
-        Projector { rotation: [0.0; 3], scale: [1.0; 3] }
+        Projector { rotation: [0.0; 3], scale: [1.0; 3], crop: ShapeCrop::default(), backface: Backface::default() }
     }
 }

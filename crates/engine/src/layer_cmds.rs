@@ -3,8 +3,8 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    BlendMode, Channel, ChannelBlend, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Projector, Sampling, ScaleMode,
-    Source, UvTransform, UvWrap,
+    BlendMode, Channel, ChannelBlend, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Projector, Sampling,
+    ScaleMode, ShapeCrop, Source, UvTransform, UvWrap,
 };
 
 use crate::commands::{
@@ -39,7 +39,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill projection",
             [],
             None,
-            "{layer? | effect?: content fill effect id, projection?: uvTile (Fill (Match per UV Tile))|uv|triplanar|planar|spherical|cylindrical (default: the current one), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections: one number), offset?: [u, v] (uv) | [x, y, z] (3D projections), projectorRotation?: [x, y, z] degrees, projectorScale?: number | [x, y, z] (3D projection settings), sharpness?: 1..64 (triplanar), angle?: 1..360 degrees one repeat spans (cylindrical), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar)} — what is not given keeps its value",
+            "{layer? | effect?: content fill effect id, projection?: uvTile (Fill (Match per UV Tile))|uv|triplanar|planar|spherical|cylindrical (default: the current one), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections: one number), offset?: [u, v] (uv) | [x, y, z] (3D projections), projectorRotation?: [x, y, z] degrees, projectorScale?: number | [x, y, z] (3D projection settings), shapeCrop?: cropped|extendsOutside (3D projections), backfaceCulling?: bool, backfaceAngle?: degrees, backfaceHardness?: 0..1 (planar, cylindrical), sharpness?: 1..64 (triplanar), angle?: 1..360 degrees one repeat spans (cylindrical), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar)} — what is not given keeps its value",
             has_layer,
             fill_projection
         ),
@@ -437,9 +437,17 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
     };
     // The 3D projection settings: the projector's offset, turn and per-axis scale
     let offset3 = floats::<3>(p, "offset", -1000.0, 1000.0);
+    let crop = match strp(p, "shapeCrop") {
+        None => None,
+        Some(id) => Some(ShapeCrop::from_id(id).ok_or_else(|| bad(cmd, format!("unknown shapeCrop `{id}`: cropped or extendsOutside")))?),
+    };
     let turn = |pr: &mut Projector| {
         pr.rotation = floats(p, "projectorRotation", -360.0, 360.0).unwrap_or(pr.rotation);
         pr.scale = floats(p, "projectorScale", 0.001, 1000.0).unwrap_or(pr.scale);
+        pr.crop = crop.unwrap_or(pr.crop);
+        pr.backface.on = p.get("backfaceCulling").and_then(Value::as_bool).unwrap_or(pr.backface.on);
+        pr.backface.angle = f32p(p, "backfaceAngle").map_or(pr.backface.angle, |v| v.clamp(0.0, 180.0));
+        pr.backface.hardness = f32p(p, "backfaceHardness").map_or(pr.backface.hardness, |v| v.clamp(0.0, 1.0));
     };
     match &mut proj {
         Projection::Uv { scale: s, rotation: r, offset } => {

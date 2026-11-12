@@ -122,3 +122,56 @@ fn cylindrical_angle_is_the_arc_one_repeat_spans() {
     saved["Cylindrical"].as_object_mut().unwrap().remove("angle");
     assert!(matches!(serde_json::from_value(saved).unwrap(), Projection::Cylindrical { angle: 360.0, .. }));
 }
+
+/// Texel indices whose surface normal has a Z above `above` (and below `below`)
+fn facing_z(s: &Session, above: f32, below: f32) -> Vec<usize> {
+    let cache = &s.caches[0];
+    let (w, h) = cache.size;
+    (0..(w * h) as usize).filter(|&i| cache.gbuf.surface(&s.mesh, i).is_some_and(|surface| surface.nrm.z > above && surface.nrm.z < below)).collect()
+}
+
+/// Cropped to Shape stops a shrunk tri-planar box short of the mesh; the default box holds it all
+#[test]
+fn shape_crop_stops_a_projection_at_its_shape() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    execute(&mut s, "layer.visible", &json!({"layer": layer.0, "visible": false})).unwrap();
+    let empty = snapshot(&mut s);
+    execute(&mut s, "layer.visible", &json!({"layer": layer.0, "visible": true})).unwrap();
+    set(&mut s, layer, json!({"projection": "triplanar"}));
+    let plain = snapshot(&mut s);
+    set(&mut s, layer, json!({"shapeCrop": "cropped"}));
+    assert_eq!(snapshot(&mut s), plain, "the default box holds the whole mesh");
+
+    set(&mut s, layer, json!({"projectorScale": 0.5}));
+    let cropped = snapshot(&mut s);
+    let gone = cropped.iter().zip(&empty).filter(|(a, b)| a == b).count();
+    set(&mut s, layer, json!({"shapeCrop": "extendsOutside"}));
+    let extends = snapshot(&mut s);
+    let gone_extending = extends.iter().zip(&empty).filter(|(a, b)| a == b).count();
+    assert!(gone > gone_extending + 1000, "the half-size box leaves the rest of the mesh bare ({gone} vs {gone_extending} bare texels)");
+    assert!(execute(&mut s, "layer.fill.projection", &json!({"layer": layer.0, "shapeCrop": "clipped"})).is_err());
+}
+
+/// Backface culling leaves the far side of the sphere bare and the near side unchanged
+#[test]
+fn backface_culling_keeps_a_planar_projection_off_faces_turned_away() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    execute(&mut s, "layer.visible", &json!({"layer": layer.0, "visible": false})).unwrap();
+    let empty = snapshot(&mut s);
+    execute(&mut s, "layer.visible", &json!({"layer": layer.0, "visible": true})).unwrap();
+    set(&mut s, layer, json!({"projection": "planar", "axis": 2}));
+    let plain = snapshot(&mut s);
+    set(&mut s, layer, json!({"backfaceCulling": true, "backfaceAngle": 90, "backfaceHardness": 1}));
+    let culled = snapshot(&mut s);
+    let (far, near) = (facing_z(&s, -1.1, -0.05), facing_z(&s, 0.05, 1.1));
+    assert!(!far.is_empty() && !near.is_empty());
+    assert!(far.iter().all(|&i| culled[i] == empty[i]), "faces turned away get none of the projection");
+    assert!(near.iter().all(|&i| culled[i] == plain[i]), "faces turned towards it keep all of it");
+
+    set(&mut s, layer, json!({"backfaceAngle": 45}));
+    let narrow = snapshot(&mut s);
+    let sideways = facing_z(&s, 0.1, 0.6);
+    assert!(sideways.iter().all(|&i| narrow[i] == empty[i]), "past 45 degrees nothing is left");
+}

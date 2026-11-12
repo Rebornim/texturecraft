@@ -1287,6 +1287,23 @@ fn reference_presets_follow_their_targets_layouts() {
 
     // Shade 3D: a map per metallic/roughness input
     assert_eq!(preset_files("Shade 3D"), ["BaseColor", "Metallic", "Roughness", "Normal", "AmbientOcclusion", "Height", "Emissive", "Opacity"]);
+
+    // UDIM legacy: each texture set is a tile named by its number, which ends the file name
+    let fx = Fx::new(&[Channel::BaseColor, Channel::Roughness, Channel::Metallic]);
+    let mut tile = Fx::new(&[Channel::BaseColor, Channel::Roughness, Channel::Metallic]);
+    tile.project.texture_sets[0].name = "1001".into();
+    let names = |fx: &Fx, preset: &str| fx.render_preset(preset).into_iter().map(|file| file.name).collect::<Vec<_>>();
+    assert_eq!(names(&tile, "V-Ray (Metal Roughness, UDIM legacy)"), ["sphere_diffuse.1001.png", "sphere_roughness.1001.png", "sphere_metalness.1001.png"]);
+    assert_eq!(
+        builtin_preset("V-Ray (Metal Roughness, UDIM legacy)").unwrap().maps.iter().map(|map| &map.channels).collect::<Vec<_>>(),
+        builtin_preset("V-Ray (Metal Roughness)").unwrap().maps.iter().map(|map| &map.channels).collect::<Vec<_>>(),
+        "the same maps as V-Ray's"
+    );
+    assert!(names(&fx, "Arnold (aiStandard, UDIM legacy)").contains(&"sphere_specular_roughness.Body_Set.png".to_string()));
+    assert_eq!(
+        preset_source("Arnold (aiStandard, UDIM legacy)", "diffuse.$textureSet", Dest::R),
+        SourceRef::Virtual { map: VirtualMap::Diffuse, component: 0 }
+    );
 }
 
 #[test]

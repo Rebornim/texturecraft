@@ -44,6 +44,23 @@ fn unity_mask(suffix: &str) -> MapSpec {
     )
 }
 
+/// V-Ray, metalness: base color as diffuse, roughness and metalness (the material's reflection stays white)
+fn vray_metal_roughness() -> Vec<MapSpec> {
+    vec![rgb8("diffuse", Channel::BaseColor), gray8("roughness", Channel::Roughness), gray8("metalness", Channel::Metallic), project_normal("normal")]
+}
+
+/// The older UDIM layout, each texture set one UV tile named by its number: `$mesh_<map>.$textureSet`
+fn udim_legacy(maps: Vec<MapSpec>) -> Vec<MapSpec> {
+    maps.into_iter()
+        .map(|mut spec| {
+            if let Some(suffix) = spec.file.strip_prefix("$mesh_$textureSet_") {
+                spec.file = format!("$mesh_{suffix}.$textureSet");
+            }
+            spec
+        })
+        .collect()
+}
+
 pub(super) fn engine_presets() -> Vec<ExportPreset> {
     let preset = |name: &str, maps: Vec<MapSpec>| ExportPreset { name: name.into(), maps };
     vec![
@@ -149,17 +166,7 @@ pub(super) fn engine_presets() -> Vec<ExportPreset> {
                 height("height"),
             ],
         ),
-        // V-Ray, metalness: base color as diffuse, a white reflection, roughness and metalness
-        preset(
-            "V-Ray (Metal Roughness)",
-            vec![
-                rgb8("diffuse", Channel::BaseColor),
-                map("reflection", 8, gray(SourceRef::Constant(1.0))),
-                gray8("roughness", Channel::Roughness),
-                gray8("metalness", Channel::Metallic),
-                project_normal("normal"),
-            ],
-        ),
+        preset("V-Ray (Metal Roughness)", vray_metal_roughness()),
         // V-Ray, glossiness: diffuse, the reflection color and glossiness
         preset(
             "V-Ray (Specular Glossiness)",
@@ -409,6 +416,19 @@ pub(super) fn engine_presets() -> Vec<ExportPreset> {
                 gray8("Opacity", Channel::Opacity),
             ],
         ),
+        // Arnold's older aiStandard shader (diffuse and specular colours, no metalness), in the older UDIM layout
+        preset(
+            "Arnold (aiStandard, UDIM legacy)",
+            udim_legacy(vec![
+                converted8("diffuse", VirtualMap::Diffuse),
+                converted8("specular", VirtualMap::SpecularColor),
+                gray8("specular_roughness", Channel::Roughness),
+                map("normal", 8, normal(VirtualMap::NormalOpenGl)),
+                rgb8("emission", Channel::Emissive),
+                gray8("opacity", Channel::Opacity),
+            ]),
+        ),
+        preset("V-Ray (Metal Roughness, UDIM legacy)", udim_legacy(vray_metal_roughness())),
         // USD preview surface inputs, one map each
         preset(
             "USDZ (AR)",

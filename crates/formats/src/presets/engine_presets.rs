@@ -359,6 +359,16 @@ pub(super) fn engine_presets() -> Vec<ExportPreset> {
                 ),
             ],
         ),
+        // Spark AR Studio's physically based material: base colour with opacity, glTF-style ORM, normal, emissive
+        preset(
+            "Spark AR Studio",
+            vec![
+                map("baseColor", 8, base_with_alpha()),
+                map("ORM", 8, orm()),
+                map("normal", 8, normal(VirtualMap::NormalOpenGl)),
+                rgb8("emissive", Channel::Emissive),
+            ],
+        ),
         // USD preview surface inputs, one map each
         preset(
             "USDZ (AR)",

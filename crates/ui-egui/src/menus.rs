@@ -461,6 +461,8 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
             crate::id_color_pick::IdColorPick::end(app);
         } else if app.picking_symmetry_plane && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.picking_symmetry_plane = false;
+        } else if !popup_open && app.moving_on_model.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
+            app.moving_on_model = None;
         } else if app.ui.mode == Mode::Painting && !popup_open && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.session.cancel_stroke();
             app.session.cancel_path();

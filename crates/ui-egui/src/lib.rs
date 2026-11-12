@@ -49,6 +49,7 @@ pub mod profile;
 #[cfg(not(target_arch = "wasm32"))]
 mod project_config;
 mod projection_kind;
+mod projection_preview;
 pub mod properties_popup;
 mod property_sheet;
 mod rail_popup;

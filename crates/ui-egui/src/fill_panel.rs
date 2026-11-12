@@ -16,6 +16,7 @@ use crate::fill_pictures::{
 use crate::fill_placement::Placement;
 use crate::i18n::{filtering_label, tr, wrap_label};
 use crate::projection_kind::ProjectionKind;
+use crate::projection_preview::projection_preview;
 use crate::property_sheet::{NumberField, PAD, PreviewLower, PreviewSize, PropertySheet, RowLead};
 use crate::theme::{AXIS_COLORS, Tokens};
 
@@ -318,9 +319,14 @@ fn placement_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill
         Projection::Warp { corners, .. } => Some(*corners),
         _ => None,
     };
+    let projection = &fill.projection;
     let picture = |painter: &Painter, rect: Rect| match corners {
         Some(corners) => warp_preview(painter, rect, corners, &tokens),
-        None => window_preview(painter, rect, placement, &tokens),
+        None => {
+            if projection_preview(painter, rect, projection, &tokens).is_none() {
+                window_preview(painter, rect, placement, &tokens);
+            }
+        }
     };
     let edit = sheet.preview_block(&picture, size_edit, lower);
 

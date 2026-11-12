@@ -587,4 +587,11 @@ fn fill_properties_snapshots() {
     harness.run_steps(2);
     harness.get_by_label("Projection Cropped to Shape").hover();
     save(&mut harness, &output_dir, "fill-triplanar-crop-open");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    // The shape previews take their colours from the theme
+    for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+        harness.state_mut().ui.prefs.brightness = brightness;
+        save(&mut harness, &output_dir, &format!("fill-triplanar-{name}"));
+    }
 }

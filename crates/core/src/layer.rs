@@ -333,6 +333,9 @@ pub enum Projection {
         offset: [f32; 3],
         #[serde(default)]
         projector: Projector,
+        /// The arc one repeat of the source spans around the axis (degrees), centred on the front
+        #[serde(default = "full_turn")]
+        angle: f32,
     },
     /// A geometry decal: the image projected from a frame placed on the surface (outside the
     /// frame, behind it or beyond its depth the fill does not cover).
@@ -382,6 +385,11 @@ pub struct Decal {
 /// Serde helper: a decal that mirrors nothing saves without the field
 fn not_flipped(flip: &[bool; 2]) -> bool {
     !flip[0] && !flip[1]
+}
+
+/// Serde default of a cylindrical projection's angle: the whole way round
+fn full_turn() -> f32 {
+    360.0
 }
 
 impl Default for Projection {

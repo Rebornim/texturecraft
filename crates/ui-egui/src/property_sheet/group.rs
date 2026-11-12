@@ -1,8 +1,8 @@
 use egui::{Align2, CornerRadius, FontId, Rect, Sense, Shape, Stroke, pos2, vec2};
 use egui_phosphor::regular as ic;
 
-use super::row::EDGE_GLYPH_INSET;
-use super::{BandResponse, GROUP_GAP, ICON_SIZE, OpenCard, PropertySheet, ROW_HEIGHT, TEXT_SIZE};
+use super::row::{EDGE_GLYPH_INSET, RESET_AT_DEFAULT_OPACITY, RESET_ICON_SIZE};
+use super::{BandResponse, GROUP_GAP, OpenCard, PropertySheet, ROW_HEIGHT, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Draws a band's picture in its rect
@@ -59,10 +59,17 @@ impl PropertySheet<'_> {
 
         let reset_rect = Rect::from_center_size(pos2(self.right - BAND_RESET_INSET, rect.center().y), vec2(20.0, 20.0));
         let mut reset_clicked = false;
+        let mut reset_hovered = false;
         if let Some(changed) = reset {
-            let reset_response = self.tip(self.ui.interact(reset_rect, id.with("reset"), Sense::click()), crate::i18n::tr("Restore defaults"));
+            // At the defaults it is inert: a click there folds the band like the rest of it
+            let sense = if changed { Sense::click() } else { Sense::hover() };
+            let mut reset_response = self.ui.interact(reset_rect, id.with("reset"), sense);
+            if changed {
+                reset_response = self.tip(reset_response, crate::i18n::tr("Restore defaults"));
+            }
             reset_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, changed, crate::i18n::tr("Restore defaults")));
             reset_clicked = changed && reset_response.clicked();
+            reset_hovered = reset_response.hovered();
         }
         if response.clicked() && !reset_clicked {
             open = !open;
@@ -77,8 +84,13 @@ impl PropertySheet<'_> {
         let center_y = rect.center().y;
         painter.text(pos2(self.left, center_y), Align2::LEFT_CENTER, title, semibold(TEXT_SIZE), t.text);
         if let Some(changed) = reset {
-            let color = if changed { t.text } else { t.text_dim };
-            painter.text(reset_rect.center(), Align2::CENTER_CENTER, ic::ARROW_COUNTER_CLOCKWISE, FontId::proportional(ICON_SIZE), color);
+            // The round section reset, as on a section caption: faint where it does nothing
+            let color = match (changed, reset_hovered) {
+                (false, _) => t.text_dim.gamma_multiply(RESET_AT_DEFAULT_OPACITY),
+                (true, true) => t.text_strong,
+                (true, false) => t.text_dim,
+            };
+            painter.text(reset_rect.center(), Align2::CENTER_CENTER, ic::CLOCK_COUNTER_CLOCKWISE, FontId::proportional(RESET_ICON_SIZE), color);
         }
         if let Some(value) = value {
             let shown = painter.text(pos2(self.right - BAND_VALUE_INSET, center_y), Align2::RIGHT_CENTER, value, FontId::proportional(TEXT_SIZE), t.text_dim);

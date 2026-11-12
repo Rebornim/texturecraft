@@ -66,7 +66,52 @@ fn find<'a>(files: &'a [ExportedFile], suffix: &str) -> &'a ExportedFile {
 
 fn decode(f: &ExportedFile) -> DynamicImage {
     let ext = f.name.rsplit('.').next().unwrap();
+    if ext == "jng" {
+        return decode_jng(&f.bytes);
+    }
     image::load_from_memory_with_format(&f.bytes, ImageFormat::from_extension(ext).unwrap()).unwrap()
+}
+
+/// A JNG's chunks, checked against their CRCs: (type, data)
+fn jng_chunks(bytes: &[u8]) -> Vec<([u8; 4], Vec<u8>)> {
+    assert_eq!(bytes[..8], [0x8B, b'J', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A], "JNG signature");
+    let mut chunks = Vec::new();
+    let mut rest = &bytes[8..];
+    while !rest.is_empty() {
+        let length = u32::from_be_bytes(rest[..4].try_into().unwrap()) as usize;
+        let kind: [u8; 4] = rest[4..8].try_into().unwrap();
+        let data = rest[8..8 + length].to_vec();
+        let mut crc = flate2::Crc::new();
+        crc.update(&kind);
+        crc.update(&data);
+        assert_eq!(u32::from_be_bytes(rest[8 + length..12 + length].try_into().unwrap()), crc.sum(), "{} CRC", String::from_utf8_lossy(&kind));
+        chunks.push((kind, data));
+        rest = &rest[12 + length..];
+    }
+    chunks
+}
+
+/// A JNG read back: the JPEG colour, plus the zlib alpha when JHDR says there is one
+fn decode_jng(bytes: &[u8]) -> DynamicImage {
+    use std::io::Read;
+    let chunks = jng_chunks(bytes);
+    let data = |kind: &[u8; 4]| chunks.iter().filter(|(k, _)| k == kind).flat_map(|(_, d)| d.clone()).collect::<Vec<u8>>();
+    let header = data(b"JHDR");
+    let (width, height, color_type) = (u32::from_be_bytes(header[..4].try_into().unwrap()), u32::from_be_bytes(header[4..8].try_into().unwrap()), header[8]);
+    assert_eq!(chunks.last().unwrap().0, *b"IEND");
+    let color = image::load_from_memory_with_format(&data(b"JDAT"), ImageFormat::Jpeg).unwrap();
+    assert_eq!((color.width(), color.height()), (width, height));
+    if !matches!(color_type, 12 | 14) {
+        return color;
+    }
+    let mut rows = Vec::new();
+    flate2::read::ZlibDecoder::new(&data(b"IDAT")[..]).read_to_end(&mut rows).unwrap();
+    let alpha: Vec<u8> = rows.chunks_exact(width as usize + 1).flat_map(|row| row[1..].to_vec()).collect();
+    let mut rgba = color.to_rgba8();
+    for (texel, a) in rgba.pixels_mut().zip(alpha) {
+        texel[3] = a;
+    }
+    if color_type == 12 { DynamicImage::ImageLumaA8(DynamicImage::ImageRgba8(rgba).to_luma_alpha8()) } else { DynamicImage::ImageRgba8(rgba) }
 }
 
 fn default_channels() -> Vec<Channel> {
@@ -357,6 +402,23 @@ fn pgm_writes_gray_at_8_and_16_bits() {
         let gray = image.to_luma32f().get_pixel(1, 1)[0];
         assert!((gray - luma).abs() < 0.01, "{depth} bits: {gray} vs {luma}");
     }
+}
+
+#[test]
+fn jng_keeps_alpha_lossless() {
+    let fx = Fx::new(&[Channel::BaseColor, Channel::Opacity, Channel::Roughness]);
+    let mut opts = ExportOptions::new(builtin_preset("glTF PBR Metal Roughness").unwrap());
+    opts.format_override = Some(FileFormat::Jng);
+    let files = fx.render(&opts);
+    let base = find(&files, "_BaseColor.");
+    assert!(base.warnings.is_empty(), "JNG keeps opacity: {:?}", base.warnings);
+    let header = &jng_chunks(&base.bytes)[0].1;
+    assert_eq!(header[8], 14, "colour with alpha");
+
+    // The PNG export's alpha, exactly: JNG's alpha is not JPEG-compressed
+    let png = fx.render(&ExportOptions::new(builtin_preset("glTF PBR Metal Roughness").unwrap()));
+    let alpha = |image: DynamicImage| image.to_rgba8().pixels().map(|texel| texel[3]).collect::<Vec<u8>>();
+    assert_eq!(alpha(decode(base)), alpha(decode(find(&png, "_BaseColor."))));
 }
 
 #[test]

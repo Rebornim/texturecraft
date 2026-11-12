@@ -1,14 +1,16 @@
 //! A uniform colour's bar with its eyedropper, and the colour picker window it opens beside the panel
 
 use egui::{
-    Align2, Color32, CornerRadius, FontId, Id, Order, Pos2, Rect, Response, Role, Sense, Shadow, Stroke, StrokeKind, UiBuilder, Vec2, WidgetInfo, pos2, vec2,
+    Align2, Color32, CornerRadius, CursorIcon, FontId, Id, Order, Pos2, Rect, Response, Role, Sense, Shadow, Stroke, StrokeKind, UiBuilder, Vec2, WidgetInfo,
+    pos2, vec2,
 };
 use egui_phosphor::regular as ic;
 
+use super::color_picker_rows::{FIELD_HEIGHT, FIELD_MIN_HEIGHT};
 use super::{PAD, PropertySheet};
 use crate::color_picker::{ColorModel, ColorPick, ColorSpace, PickerState};
 use crate::fill_material_panel::shown_color;
-use crate::i18n::{tr, trf};
+use crate::i18n::tr;
 
 /// Height of a colour bar
 const COLOR_BAR_HEIGHT: f32 = 16.0;
@@ -49,6 +51,16 @@ const PICKER_SHADOW: Shadow = Shadow { offset: [2, 4], blur: 0, spread: 0, color
 
 /// Where the space and model last picked are kept, so the next picker opens with them
 const PREFERENCES_KEY: &str = "color_picker_preferences";
+
+/// Where the size a resize left (width, field height) is kept, so every picker opens with it, in this run and the next
+const SIZE_KEY: &str = "color_picker_size";
+
+/// Narrowest the picker resizes to: its dropdowns, hex field and slider tracks keep their room
+const PICKER_MIN_WIDTH: f32 = 240.0;
+
+/// Depth of the grip inside each edge (in the rows' side padding and the air under the last line), and side of a corner's grip (small enough to leave × its click)
+const RESIZE_GRIP: f32 = 5.0;
+const RESIZE_CORNER: f32 = 8.0;
 
 impl PropertySheet<'_> {
     /// A uniform colour (linear): a bar across the card that opens the picker (with the project's `swatches`), and the eyedropper; `eyedropping` is the bar whose pick waits for its click
@@ -115,7 +127,7 @@ impl PropertySheet<'_> {
         pick
     }
 
-    /// The open picker: a window the panel's width, its rows at the panel's edges (the project's `swatches` last), with `label`'s title, standing beside the panel level with `bar` (its title bar drags it, × or Escape closes it, and so does a press off it, the bar and the bar's `eyedropper` unless an eyedropper pick waits)
+    /// The open picker: a window the panel's width until resized (its edges and corners drag its size, kept for every picker), its rows at its edges (the project's `swatches` last), titled `label`, standing beside the panel level with `bar` (its title bar drags it, × or Escape closes it, and so does a press off it, the bar and the bar's `eyedropper` unless an eyedropper pick waits)
     #[allow(clippy::too_many_arguments)]
     fn picker_popup(
         &mut self,
@@ -128,10 +140,15 @@ impl PropertySheet<'_> {
         id: Id,
     ) -> ColorPick {
         let ctx = self.ui.ctx().clone();
-        let width = self.right - self.left + 2.0 * PAD;
-        let height_id = id.with("picker_height");
-        let height = ctx.data(|data| data.get_temp::<f32>(height_id)).unwrap_or(PICKER_HEIGHT_GUESS);
+        let size_id = Id::unique(SIZE_KEY);
+        let kept = ctx.data_mut(|data| data.get_persisted::<[f32; 2]>(size_id));
+        let [width, field_height] = kept.unwrap_or([self.right - self.left + 2.0 * PAD, FIELD_HEIGHT]);
         let screen = ctx.content_rect();
+        // A kept size may come from a bigger screen or a damaged settings file (max/min also turn NaN into a bound)
+        let width = width.max(PICKER_MIN_WIDTH).min(screen.width().max(PICKER_MIN_WIDTH));
+        let field_height = field_height.max(FIELD_MIN_HEIGHT).min(screen.height().max(FIELD_MIN_HEIGHT));
+        let height_id = id.with("picker_height");
+        let height = ctx.data(|data| data.get_temp::<f32>(height_id)).unwrap_or(PICKER_HEIGHT_GUESS + field_height - FIELD_HEIGHT);
         let panel = Rect::from_x_y_ranges(self.ui.clip_rect().left().min(self.left - PAD)..=self.right + PAD, screen.y_range());
         let corner = state.moved_to.unwrap_or_else(|| beside(panel, bar.rect.top(), vec2(width, height), screen));
         // The title bar stays on screen, so a drag can always bring the window back
@@ -142,14 +159,14 @@ impl PropertySheet<'_> {
         // A press that picks from one of the picker's own lists must not close it
         let list_open = egui::Popup::is_any_open(&ctx);
         let tokens = self.tokens;
-        let title = trf("{channel} color", &[("channel", &label)]);
+        let title = label;
 
         let shown = egui::Area::new(id.with("picker_area")).order(Order::Foreground).fixed_pos(corner).show(&ctx, |ui| {
             let background = ui.painter().add(egui::Shape::Noop);
             let title_bar = Rect::from_min_size(corner, vec2(width, TITLE_HEIGHT));
             let close = Rect::from_center_size(pos2(title_bar.right() - TITLE_INSET, title_bar.center().y), vec2(CLOSE_TARGET, CLOSE_TARGET));
             let drag = ui.interact(Rect::from_min_max(title_bar.min, pos2(close.left(), title_bar.bottom())), id.with("picker_title"), Sense::drag());
-            drag.widget_info(|| WidgetInfo::labeled(Role::TitleBar, true, &title));
+            drag.widget_info(|| WidgetInfo::labeled(Role::TitleBar, true, title));
             let drag = drag.on_hover_cursor(egui::CursorIcon::Grab);
             let closed = ui.interact(close, id.with("picker_close"), Sense::click());
             closed.widget_info(|| WidgetInfo::labeled(Role::Button, true, tr("Close")));
@@ -157,7 +174,7 @@ impl PropertySheet<'_> {
             painter.text(
                 pos2(title_bar.left() + PAD, title_bar.center().y),
                 Align2::LEFT_CENTER,
-                &title,
+                title,
                 FontId::proportional(TITLE_TEXT_SIZE),
                 tokens.text_dim,
             );
@@ -170,7 +187,7 @@ impl PropertySheet<'_> {
             let (pick, bottom) = ui
                 .scope_builder(UiBuilder::new().max_rect(rows), |ui| {
                     PropertySheet::show(ui, id.with("picker_rows"), |sheet| {
-                        let pick = sheet.color_picker_rows(state, waiting, swatches, id);
+                        let pick = sheet.color_picker_rows(state, waiting, swatches, field_height, id);
                         (pick, sheet.drawn_bottom)
                     })
                 })
@@ -180,12 +197,32 @@ impl PropertySheet<'_> {
             let frame =
                 egui::epaint::RectShape::new(face, CornerRadius::same(PICKER_RADIUS), tokens.chrome, Stroke::new(1.0, tokens.field_border), StrokeKind::Inside);
             ui.painter().set(background, egui::Shape::Vec(vec![shadow.into(), frame.into()]));
-            (pick, face, drag.dragged().then(|| drag.drag_delta()), closed.clicked())
+
+            // Registered after the rows and the title bar, so the grips win at the edges
+            let mut resize = None;
+            for (index, (grip, sides)) in grips(face).into_iter().enumerate() {
+                let cursor = resize_cursor(sides);
+                let response = ui.interact(grip, id.with(("picker_resize", index)), Sense::drag()).on_hover_cursor(cursor);
+                if response.dragged() {
+                    ui.ctx().set_cursor_icon(cursor);
+                    resize = Some((sides, response.drag_delta()));
+                }
+            }
+            (pick, face, drag.dragged().then(|| drag.drag_delta()), closed.clicked(), resize)
         });
-        let (pick, face, dragged, closed) = shown.inner;
+        let (pick, face, dragged, closed, resize) = shown.inner;
         ctx.data_mut(|data| data.insert_temp(height_id, face.height()));
         if let Some(delta) = dragged {
             state.moved_to = Some(corner + delta);
+        }
+        if let Some((sides, delta)) = resize {
+            // Only the field grows taller: the other rows keep their pitch
+            let rows = face.height() - field_height;
+            let most = vec2(screen.width().max(PICKER_MIN_WIDTH), (screen.height() - rows).max(FIELD_MIN_HEIGHT));
+            let (moved, size) = resized(corner, vec2(width, field_height), sides, delta, most);
+            // A resized window stays where it was put instead of following the panel
+            state.moved_to = Some(moved);
+            ctx.data_mut(|data| data.insert_persisted(size_id, [size.x, size.y]));
         }
 
         // Alt+drag orbits the camera, which keeps the picker open
@@ -211,4 +248,61 @@ fn beside(panel: Rect, top: f32, size: Vec2, screen: Rect) -> Pos2 {
     let left_of = panel.left() - WINDOW_GAP - size.x;
     let x = if left_of >= screen.left() { left_of } else { panel.right() + WINDOW_GAP };
     pos2(x, top.min(screen.bottom() - size.y).max(screen.top()))
+}
+
+/// The eight resize grips inside `face`'s edges and corners, each with the sides it moves (-1 left/top, 1 right/bottom, 0 neither); corners last, so they win where they overlap an edge
+fn grips(face: Rect) -> [(Rect, Vec2); 8] {
+    let edge = |sides: Vec2| {
+        let x = match sides.x {
+            x if x < 0.0 => face.left()..=face.left() + RESIZE_GRIP,
+            x if x > 0.0 => face.right() - RESIZE_GRIP..=face.right(),
+            _ => face.left()..=face.right(),
+        };
+        let y = match sides.y {
+            y if y < 0.0 => face.top()..=face.top() + RESIZE_GRIP,
+            y if y > 0.0 => face.bottom() - RESIZE_GRIP..=face.bottom(),
+            _ => face.top()..=face.bottom(),
+        };
+        (Rect::from_x_y_ranges(x, y), sides)
+    };
+    let corner = |sides: Vec2| {
+        let x = if sides.x < 0.0 { face.left() } else { face.right() - RESIZE_CORNER };
+        let y = if sides.y < 0.0 { face.top() } else { face.bottom() - RESIZE_CORNER };
+        (Rect::from_min_size(pos2(x, y), vec2(RESIZE_CORNER, RESIZE_CORNER)), sides)
+    };
+    [
+        edge(vec2(-1.0, 0.0)),
+        edge(vec2(1.0, 0.0)),
+        edge(vec2(0.0, -1.0)),
+        edge(vec2(0.0, 1.0)),
+        corner(vec2(-1.0, -1.0)),
+        corner(vec2(1.0, -1.0)),
+        corner(vec2(-1.0, 1.0)),
+        corner(vec2(1.0, 1.0)),
+    ]
+}
+
+/// The pointer over a grip that moves `sides`
+fn resize_cursor(sides: Vec2) -> CursorIcon {
+    match (sides.x == 0.0, sides.y == 0.0) {
+        (false, true) => CursorIcon::ResizeHorizontal,
+        (true, false) => CursorIcon::ResizeVertical,
+        _ if sides.x == sides.y => CursorIcon::ResizeNwSe,
+        _ => CursorIcon::ResizeNeSw,
+    }
+}
+
+/// The corner and size (width, field height) after a grip moving `sides` was dragged by `delta`, the size held between the least and `most`; a left or top edge moves the corner so the opposite edge stays put
+fn resized(corner: Pos2, size: Vec2, sides: Vec2, delta: Vec2, most: Vec2) -> (Pos2, Vec2) {
+    let least = vec2(PICKER_MIN_WIDTH, FIELD_MIN_HEIGHT);
+    let mut corner = corner;
+    let mut size = size;
+    for axis in 0..2 {
+        let grown = (size[axis] + sides[axis] * delta[axis]).clamp(least[axis], most[axis]);
+        if sides[axis] < 0.0 {
+            corner[axis] += size[axis] - grown;
+        }
+        size[axis] = grown;
+    }
+    (corner, size)
 }

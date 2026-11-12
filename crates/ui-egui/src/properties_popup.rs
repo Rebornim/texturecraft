@@ -34,7 +34,7 @@ pub(crate) fn open_on_right_click(app: &mut TextureCraftApp, ui: &Ui, response: 
     let free = app.ui.mode == Mode::Painting
         && app.properties_popup.is_none()
         && !app.session.stroke_active()
-        && app.placing_decal.is_none()
+        && app.moving_on_model.is_none()
         && !gesture_key_held
         && !crate::viewport::focus_picking(ui.ctx())
         && ui.input(|input| input.modifiers.is_none());

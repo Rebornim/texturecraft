@@ -1,7 +1,9 @@
 //! Geometry decals: an image resource projected onto the surface from a frame placed on it
-//! (a decal fill with a planar projection), as a fill layer with a decal projection.
+//! (a decal fill with a planar projection), as a fill layer with a decal projection, and moving
+//! the frame of any planar or warp projection
 
 use serde_json::{Value, json};
+use texturecraft_compose::axis_frame::placed_from_axis;
 use texturecraft_core::{Channel, Decal, Effect, EffectKind, Fill, Layer, LayerId, LayerKind, Mask, MaskBackground, Projection, Source};
 use texturecraft_geom::glam::{Vec2, Vec3};
 
@@ -25,7 +27,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit decal",
             [],
             None,
-            "{layer? | effect?: a mask fill effect id (a decal placed as a mask; with `layer`, it must be in that layer), x?, y?, viewport? | position?, normal? (re-place it on its own texture set), up?: [x,y,z], size?: height | [w,h], rotation?: degrees, offset?: [right, up] (world units from where it was placed), depth?, image?: replaces the image in the channel or mask it was placed in, merge?: true continues the previous Edit decal undo step (drags)}",
+            "{layer? | effect?: a mask fill effect id (a decal placed as a mask; with `layer`, it must be in that layer) — any fill with a planar or warp projection: moves the frame it projects from (an axis planar is first placed as the frame it projects from, reading images exactly as before; a warp keeps its corners), x?, y?, viewport? | position?, normal? (re-place it on its own texture set), up?: [x,y,z], size?: height | [w,h], rotation?: degrees, offset?: [right, up] (world units from where it was placed), depth?, image?: replaces the image in the channel or mask it was placed in, merge?: true continues the previous Edit decal undo step (drags)}",
             has_layer,
             set
         ),
@@ -157,25 +159,30 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "layer": id.0, "decal": decal, "maskEffect": mask_effect.map(|effect| effect.0) }))
 }
 
-/// The decal of fill layer `id`, or of mask fill effect `effect` when given
-fn decal_of(s: &Session, cmd: &str, id: LayerId, effect: Option<LayerId>) -> Result<Decal> {
-    if let Some(effect) = effect {
-        return match s.doc.project.effect(effect).map(|(_, effect)| &effect.kind) {
-            Some(EffectKind::Fill { projection: Projection::Planar { placed: Some(decal), .. }, .. }) => Ok(*decal),
-            _ => Err(bad(cmd, "the effect is not a decal (layer.add.decal with channel mask)")),
-        };
-    }
-
-    match &s.doc.project.layer(id)?.kind {
-        LayerKind::Fill(Fill { projection: Projection::Planar { placed: Some(decal), .. }, .. }) => Ok(*decal),
-        _ => Err(bad(cmd, "the layer is not a decal (a planar projection placed on the surface: layer.add.decal)")),
-    }
+/// The projection of fill layer `id`, or of mask fill effect `effect` when given, with the frame it projects from: an axis planar is placed as the frame it already projects from (it reads images exactly as before)
+fn framed(s: &Session, cmd: &str, id: LayerId, effect: Option<LayerId>) -> Result<(Projection, Decal)> {
+    let projection = match effect {
+        Some(effect) => match s.doc.project.effect(effect).map(|(_, effect)| &effect.kind) {
+            Some(EffectKind::Fill { projection, .. }) => projection,
+            _ => return Err(bad(cmd, "the effect is not a mask fill effect")),
+        },
+        None => match &s.doc.project.layer(id)?.kind {
+            LayerKind::Fill(fill) => &fill.projection,
+            _ => return Err(bad(cmd, "the layer is not a fill layer")),
+        },
+    };
+    let projection = placed_from_axis(projection, s.mesh.bounds()).unwrap_or_else(|| projection.clone());
+    let frame =
+        projection.frame().copied().ok_or_else(|| bad(cmd, "the projection has no frame: a planar or warp projection has one (layer.add.decal places one)"))?;
+    Ok((projection, frame))
 }
 
-/// Places a placed planar projection's frame at `frame`, keeping its other settings
+/// `projection` projecting from `frame`, its other settings kept
 fn move_frame(projection: &mut Projection, frame: Decal) {
-    if let Projection::Planar { placed: Some(placed), .. } = projection {
-        *placed = frame;
+    match projection {
+        Projection::Planar { placed: Some(placed), .. } => *placed = frame,
+        Projection::Warp { frame: warp, .. } => *warp = frame,
+        _ => {}
     }
 }
 
@@ -192,7 +199,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         return Err(bad(command, format!("effect {} is not in layer {layer}", effect.0)));
     }
 
-    let mut decal = decal_of(session, command, layer_id, effect)?;
+    let (mut projection, mut decal) = framed(session, command, layer_id, effect)?;
     let texture_set =
         session.doc.project.locate(layer_id).map(|(texture_set, _, _)| texture_set).ok_or_else(|| bad(command, "the decal has no texture set"))?;
     let mesh_diagonal = mesh_size(session);
@@ -230,16 +237,17 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         return Err(bad(command, format!("no image resource `{name}`")));
     }
 
+    move_frame(&mut projection, decal);
     session.edit("Edit decal", |session| {
         if let Some(effect) = effect {
-            if let Some(EffectKind::Fill { source, projection, .. }) = session.doc.project.effect_mut(effect).map(|effect| &mut effect.kind) {
-                move_frame(projection, decal);
+            if let Some(EffectKind::Fill { source, projection: stored, .. }) = session.doc.project.effect_mut(effect).map(|effect| &mut effect.kind) {
+                *stored = projection;
                 if let Some(image) = image {
                     *source = Source::image(image);
                 }
             }
         } else if let LayerKind::Fill(fill) = &mut session.doc.project.layer_mut(layer_id)?.kind {
-            move_frame(&mut fill.projection, decal);
+            fill.projection = projection;
 
             // The new image goes where the decal's image is (the channel it was placed in)
             let placed = fill.sources.values().find_map(|source| match source {

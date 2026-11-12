@@ -114,6 +114,11 @@ impl PropertySheet<'_> {
 
     /// A full-width button: centred icon and words
     pub(crate) fn button(&mut self, icon: &str, text: &str) -> egui::Response {
+        self.button_lit(icon, text, false)
+    }
+
+    /// A full-width button lit in the accent while what it turns on stays on
+    pub(crate) fn button_lit(&mut self, icon: &str, text: &str, lit: bool) -> egui::Response {
         let rect = self.take(ROW_HEIGHT);
         let button = self.control_box(self.left, rect.center().y);
         let id = self.next_id();
@@ -125,8 +130,12 @@ impl PropertySheet<'_> {
         painter.rect(
             button,
             CornerRadius::same(4),
-            if response.hovered() { t.row_hover } else { t.button },
-            Stroke::new(1.0, t.button_border),
+            match (lit, response.hovered()) {
+                (true, _) => t.accent_dim,
+                (false, true) => t.row_hover,
+                (false, false) => t.button,
+            },
+            Stroke::new(1.0, if lit { t.accent } else { t.button_border }),
             StrokeKind::Inside,
         );
         let font = FontId::proportional(TEXT_SIZE);

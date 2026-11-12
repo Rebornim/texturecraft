@@ -26,6 +26,7 @@ mod fill_placement;
 mod fill_symmetry_panel;
 mod filter_slot;
 pub mod fonts;
+mod frame_gizmo;
 pub mod gpu;
 pub mod i18n;
 pub mod id_color_pick;
@@ -38,6 +39,7 @@ mod mask_preview_image;
 mod material_orb;
 mod material_preview_image;
 pub mod menus;
+pub mod move_on_model;
 pub mod new_project_advanced;
 mod orb_shape;
 pub mod parity;
@@ -56,6 +58,7 @@ pub mod render_mode;
 mod resolution_band;
 mod resource_picker;
 mod resource_picker_item;
+mod round_gizmo;
 mod running_bake;
 pub mod shelf;
 pub mod shelf_preview;
@@ -67,6 +70,7 @@ pub mod theme;
 pub mod thumbs;
 pub mod titlebar;
 pub mod toolbar;
+mod trackpad_drag;
 pub mod ui_state_store;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod updates_ui;
@@ -162,8 +166,8 @@ pub struct TextureCraftApp {
     pub last_paint_point: Option<texturecraft_engine::geom::glam::Vec2>,
     /// The last finished 2D stroke's endpoint, scoped to its mesh and texture set for Shift+click lines
     pub last_paint_uv: Option<uv_paint_point::UvPaintPoint>,
-    /// The decal layer the next click in the 3D view places.
-    pub placing_decal: Option<texturecraft_engine::core::LayerId>,
+    /// The fill Move on model moves: drags in the 3D view slide its projection, the wheel resizes it, Shift+drag turns it
+    pub moving_on_model: Option<move_on_model::MoveOnModel>,
     /// The Properties popup a right click in a view opens.
     pub properties_popup: Option<properties_popup::PropertiesPopup>,
     /// The color selection the next click in the 3D or 2D view picks an ID color for
@@ -245,7 +249,7 @@ impl TextureCraftApp {
             render: render_mode::RenderView::default(),
             last_paint_point: None,
             last_paint_uv: None,
-            placing_decal: None,
+            moving_on_model: None,
             properties_popup: None,
             picking_id_color: None,
             picking_color: None,

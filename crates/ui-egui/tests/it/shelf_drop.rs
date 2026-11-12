@@ -255,7 +255,7 @@ fn the_click_that_closes_the_drop_menu_does_not_move_a_decal_being_placed() {
     harness.get_all_by_label("Roughness").min_by(|a, b| distance(a).total_cmp(&distance(b))).unwrap().click();
     harness.run_steps(2);
     let decal_layer = harness.state().session.selected_layer().unwrap();
-    harness.state_mut().placing_decal = Some(decal_layer);
+    harness.state_mut().moving_on_model = Some(texturecraft_ui_egui::move_on_model::MoveOnModel::layer(decal_layer));
 
     let image = import_white_image(&mut harness);
     drop_asset(&mut harness, Asset::Texture(image), position);

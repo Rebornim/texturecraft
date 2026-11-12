@@ -28,6 +28,9 @@ pub mod export_templates;
 mod export_window;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_dialogs;
+mod fill_panel;
+mod fill_pictures;
+mod fill_placement;
 mod fill_source_slot;
 mod fill_source_target;
 mod filter_slot;
@@ -75,6 +78,7 @@ pub mod profile;
 #[cfg(not(target_arch = "wasm32"))]
 mod project_config;
 pub mod project_form;
+mod projection_kind;
 pub mod properties_popup;
 mod property_sheet;
 mod query_field;

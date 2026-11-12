@@ -233,3 +233,45 @@ fn the_colour_bar_opens_the_picker_which_types_restores_and_waits_for_an_eyedrop
     harness.run_steps(SETTLE_FRAMES);
     assert!(harness.state().picking_color.is_some(), "the eyedropper waits for a click on the model");
 }
+
+#[test]
+fn the_picker_is_a_window_beside_the_panel_that_its_title_drags_and_its_close_or_escape_closes() {
+    let (mut harness, _) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
+    click(&mut harness, Role::Button, "Base color");
+    let bar = harness.get_by_role_and_label(Role::Button, "Base color").rect();
+    let title = harness.get_by_role_and_label(Role::TitleBar, "Base color color").rect();
+    let space = harness.get_by_role_and_label(Role::ComboBox, "sRGB").rect();
+    assert!(title.right() <= bar.left(), "the window stands beside the panel, off its rows: {title:?} {bar:?}");
+    assert!(title.top() <= bar.top() + 1.0, "level with the bar, or raised to stay on screen: {title:?} {bar:?}");
+    assert!(space.width() < title.width() / 3.0, "the colour space dropdown is as wide as its text: {space:?}");
+
+    let from = title.left_center() + egui::vec2(20.0, 0.0);
+    let by = egui::vec2(-120.0, 90.0);
+    harness.hover_at(from);
+    harness.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    harness.run_steps(1);
+    for step in 1..=4 {
+        harness.hover_at(from + by * (step as f32 / 4.0));
+        harness.run_steps(1);
+    }
+    harness.event(egui::Event::PointerButton { pos: from + by, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    harness.run_steps(SETTLE_FRAMES);
+    let moved = harness.get_by_role_and_label(Role::TitleBar, "Base color color").rect();
+    assert!((moved.min - (title.min + by)).length() < 1.0, "the title bar drags the window: {moved:?} from {title:?}");
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "a drag on the title keeps it open");
+
+    let close = harness
+        .get_all_by_role_and_label(Role::Button, "Close")
+        .find(|node| moved.y_range().contains(node.rect().center().y) && node.rect().left() >= moved.right())
+        .unwrap();
+    close.click();
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_none(), "× closes it");
+
+    click(&mut harness, Role::Button, "Base color");
+    let reopened = harness.get_by_role_and_label(Role::TitleBar, "Base color color").rect();
+    assert!((reopened.min - moved.min).length() < 1.0, "it opens again where it was dragged: {reopened:?}");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_none(), "Escape closes it");
+}

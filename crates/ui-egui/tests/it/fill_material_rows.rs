@@ -306,3 +306,49 @@ fn escape_ends_an_eyedropper_pick_before_the_picker_and_an_alt_orbit_keeps_the_p
     harness.run_steps(SETTLE_FRAMES);
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_none(), "the next Escape closes the picker");
 }
+
+/// A mouse press and release of `button` at `pos`, a frame apart, as a real click arrives
+fn mouse_click(harness: &mut Harness<'_, TextureCraftApp>, pos: egui::Pos2, button: egui::PointerButton) {
+    harness.hover_at(pos);
+    harness.run_steps(1);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos, button, pressed, modifiers: egui::Modifiers::NONE });
+        harness.run_steps(1);
+    }
+    harness.run_steps(SETTLE_FRAMES);
+}
+
+#[test]
+fn the_swatches_row_keeps_the_picker_colour_in_the_project_applies_it_on_a_click_and_removes_it_from_its_menu() {
+    let (mut harness, layer) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
+    let before = base_color(&harness, layer);
+    click(&mut harness, Role::Button, "Base color");
+    click(&mut harness, Role::TextInput, "Hex color");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.event(egui::Event::Text("FF8000".into()));
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(SETTLE_FRAMES);
+    let orange = base_color(&harness, layer);
+
+    let add = harness.get_by_role_and_label(Role::Button, "Add swatch").rect();
+    let space = harness.get_by_role_and_label(Role::ComboBox, "sRGB").rect();
+    assert!(add.top() > space.bottom() && (add.left() - space.left()).abs() < 1.0, "the row is under the picker, at its left edge: {add:?}");
+    mouse_click(&mut harness, add.center(), egui::PointerButton::Primary);
+    assert_eq!(harness.state().session.doc.project.swatches, vec![orange], "+ keeps the picker's colour in the project");
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "the picker stays open");
+
+    click(&mut harness, Role::Button, "Previous color");
+    assert_eq!(base_color(&harness, layer), before);
+    let chip = harness.get_by_role_and_label(Role::Button, "#FF8000").rect();
+    let moved_add = harness.get_by_role_and_label(Role::Button, "Add swatch").rect();
+    assert!((chip.left() - add.left()).abs() < 1.0 && moved_add.left() > chip.right(), "the swatch takes the + chip's place, + moves right");
+    mouse_click(&mut harness, chip.center(), egui::PointerButton::Primary);
+    assert_eq!(base_color(&harness, layer), orange, "a click on a swatch applies it");
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "applying keeps the picker open");
+
+    mouse_click(&mut harness, chip.center(), egui::PointerButton::Secondary);
+    let remove = harness.get_by_role_and_label(Role::Button, "Remove swatch").rect();
+    mouse_click(&mut harness, remove.center(), egui::PointerButton::Primary);
+    assert!(harness.state().session.doc.project.swatches.is_empty(), "its right-click menu removes it");
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "a pick in the menu keeps the picker open");
+}

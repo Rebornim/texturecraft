@@ -41,8 +41,8 @@ pub use layer::{
     ScaleMode, Source, UvTransform, UvWrap, gradient, hsl_adjust, per_unit,
 };
 pub use project::{
-    AoMixing, BlockScales, Camera, DepthOfField, DisplaySettings, FORMAT_VERSION, MAX_RESOLUTION, MIN_RESOLUTION, NormalFormat, NormalMixing, Project,
-    TextureSet, TileGrid, ToneMapping, UDIM_RANGE, udim_at,
+    AoMixing, BlockScales, Camera, DepthOfField, DisplaySettings, FORMAT_VERSION, MAX_RESOLUTION, MAX_SWATCHES, MIN_RESOLUTION, NormalFormat, NormalMixing,
+    Project, TextureSet, TileGrid, ToneMapping, UDIM_RANGE, udim_at,
 };
 pub use projector::Projector;
 pub use shape_crop::ShapeCrop;

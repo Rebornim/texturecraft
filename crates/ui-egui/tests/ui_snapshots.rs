@@ -675,7 +675,7 @@ fn steel_painted_worn() -> texturecraft_engine::core::MaterialLink {
     }
 }
 
-/// Screen 04: the colour picker window open on a uniform base colour, its close and a slider hovered, with its lists open and in RGB; `TC_UI_THEMES` set adds the dark and light themes
+/// Screen 04: the colour picker window open on a uniform base colour with five swatches, its close, a slider, a swatch and + hovered, a swatch's menu, with its lists open and in RGB; `TC_UI_THEMES` set adds the dark and light themes
 #[test]
 #[ignore]
 fn fill_color_picker_snapshots() {
@@ -688,6 +688,9 @@ fn fill_color_picker_snapshots() {
     let orange = [0xE5, 0x8A, 0x4E].map(|c| texturecraft_engine::texel::srgb_to_linear(f32::from(c as u8) / 255.0));
     let layer = execute(&mut session, "layer.add.fill", &json!({"color": orange})).unwrap()["layer"].as_u64().unwrap();
     execute(&mut session, "layer.fill.set", &json!({"layer": layer, "channel": "height", "enabled": true})).unwrap();
+    for swatch in ["#E58A4E", "#BEBEBE", "#3C4046", "#7A7AF5", "#B0623A"] {
+        execute(&mut session, "swatch.add", &json!({"color": swatch})).unwrap();
+    }
     let mut harness =
         Harness::builder().with_size(egui::vec2(1600.0, 2000.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
     harness.state_mut().ui.prefs.language = "en".into();
@@ -703,6 +706,23 @@ fn fill_color_picker_snapshots() {
     save(&mut harness, &output_dir, "picker-close-hover");
     harness.get_by_role_and_label(egui::Role::Slider, "S").hover();
     save(&mut harness, &output_dir, "picker-hover");
+    harness.get_by_role_and_label(egui::Role::Button, "#7A7AF5").hover();
+    save(&mut harness, &output_dir, "picker-swatch-hover");
+    harness.get_by_role_and_label(egui::Role::Button, "Add swatch").hover();
+    harness.run_steps(30);
+    save(&mut harness, &output_dir, "picker-add-hover");
+    let chip = harness.get_by_role_and_label(egui::Role::Button, "#7A7AF5").rect().center();
+    harness.hover_at(chip);
+    harness.run_steps(1);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: chip, button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE });
+        harness.run_steps(1);
+    }
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::Role::Button, "Remove swatch").hover();
+    save(&mut harness, &output_dir, "picker-swatch-menu");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
     harness.get_by_role_and_label(egui::Role::ComboBox, "sRGB").click();
     harness.run_steps(2);
     harness.get_by_role_and_label(egui::Role::ListBoxOption, "Linear").hover();

@@ -1,11 +1,13 @@
-//! The colour picker's rows: its colour space, the saturation/value field beside the hue strip, before | after with the hex code and eyedropper, the model's three sliders and the working-space values
+//! The colour picker's rows: its colour space, the saturation/value field beside the hue strip, before | after with the hex code and eyedropper, the model's three sliders, the working-space values and the project's swatches
 
 use egui::ecolor::{hsv_from_rgb, rgb_from_hsv};
 use egui::{Align2, Color32, CornerRadius, FontId, Painter, Rect, Response, Role, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
 use egui_phosphor::regular as ic;
 
-use super::{CONTROL_HEIGHT, PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE, TEXT_SIZE};
-use crate::color_picker::{ColorModel, ColorPick, ColorSpace, PickerState, hex, parse_hex};
+use texturecraft_engine::core::MAX_SWATCHES;
+
+use super::{CONTROL_HEIGHT, PAD, PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE, TEXT_SIZE};
+use crate::color_picker::{ColorModel, ColorPick, ColorSpace, PickerState, SwatchEdit, hex, parse_hex};
 use crate::fill_material_panel::shown_color as screen_color;
 use crate::i18n::tr;
 use crate::theme::semibold;
@@ -69,13 +71,28 @@ const VALUE_WIDTH: f32 = 40.0;
 /// Height of the working-space line (the stack rhythm's label line)
 const WORKING_LINE: f32 = 18.0;
 
+/// Air above and below the line between the working-space values and the swatches
+const SWATCHES_RULE_AIR: f32 = 6.0;
+
+/// Height of the Swatches caption line, and the air between it and the chips
+const SWATCHES_CAPTION: f32 = 18.0;
+const SWATCHES_CAPTION_AIR: f32 = 2.0;
+
+/// Side of a swatch chip (a control's height), and the air between chips and between their rows
+const SWATCH_CHIP: f32 = 24.0;
+const SWATCH_CHIP_GAP: f32 = 6.0;
+
+/// Corner radius of a swatch chip, and the size of the + chip's glyph
+const SWATCH_CHIP_RADIUS: u8 = 4;
+const PLUS_GLYPH_SIZE: f32 = 12.0;
+
 /// Ring strokes: the field's ring, the knobs' and the hue marker's outline
 const RING_STROKE: f32 = 2.0;
 const OUTLINE_STROKE: f32 = 1.5;
 
 impl PropertySheet<'_> {
-    /// The picker's rows, editing `state`; `eyedropping` lights the eyedropper while a pick waits for its click
-    pub(super) fn color_picker_rows(&mut self, state: &mut PickerState, eyedropping: bool, id: egui::Id) -> ColorPick {
+    /// The picker's rows, editing `state`, the project's `swatches` last; `eyedropping` lights the eyedropper while a pick waits for its click
+    pub(super) fn color_picker_rows(&mut self, state: &mut PickerState, eyedropping: bool, swatches: &[[f32; 3]], id: egui::Id) -> ColorPick {
         let mut pick = ColorPick::none(id);
         let mut edited: Option<bool> = None;
 
@@ -95,6 +112,12 @@ impl PropertySheet<'_> {
         }
         edited = edited.or(self.model_sliders(state));
         self.working_line(state);
+        let (applied, swatch) = self.swatch_rows(state, swatches);
+        if let Some(color) = applied {
+            state.set_linear(color);
+            edited = Some(false);
+        }
+        pick.swatch = swatch;
         if hovered_space.is_some() {
             state.set_space(space);
         }
@@ -349,6 +372,66 @@ impl PropertySheet<'_> {
         let [r, g, b] = state.linear;
         painter.text(pos2(self.right, center_y), Align2::RIGHT_CENTER, format!("{r:.2}  {g:.2}  {b:.2}"), font, t.text_dim);
         self.drawn(label.bottom());
+    }
+
+    /// A line across the window, the Swatches caption, then the project's `swatches` as chips (wrapping) and the + chip that keeps the picker's colour; the swatch clicked, and an add or a removal (a swatch's right-click menu)
+    fn swatch_rows(&mut self, state: &PickerState, swatches: &[[f32; 3]]) -> (Option<[f32; 3]>, Option<SwatchEdit>) {
+        let t = self.tokens;
+        self.space(SWATCHES_RULE_AIR);
+        let rule_y = self.cursor_y();
+        self.ui.painter().hline((self.left - PAD)..=(self.right + PAD), rule_y, Stroke::new(1.0, t.separator));
+        self.space(SWATCHES_RULE_AIR);
+        let caption = self.take(SWATCHES_CAPTION);
+        self.ui.painter().text(pos2(self.left, caption.center().y), Align2::LEFT_CENTER, tr("Swatches"), semibold(SMALL_TEXT_SIZE), t.text);
+        self.space(SWATCHES_CAPTION_AIR);
+
+        let count = swatches.len().min(MAX_SWATCHES);
+        let pitch = SWATCH_CHIP + SWATCH_CHIP_GAP;
+        let per_row = (((self.right - self.left + SWATCH_CHIP_GAP) / pitch).floor() as usize).max(1);
+        let chips = count + 1;
+        let rows = chips.div_ceil(per_row);
+        let block = self.take(rows as f32 * pitch - SWATCH_CHIP_GAP);
+        let left = self.left;
+        let chip_at = |index: usize| {
+            let (row, column) = (index / per_row, index % per_row);
+            Rect::from_min_size(pos2(left + column as f32 * pitch, block.top() + row as f32 * pitch), vec2(SWATCH_CHIP, SWATCH_CHIP))
+        };
+
+        let (mut applied, mut edit) = (None, None);
+        for (index, &color) in swatches.iter().take(MAX_SWATCHES).enumerate() {
+            let chip = chip_at(index);
+            let chip_id = self.next_id();
+            let response = self.ui.interact(chip, chip_id, Sense::click());
+            let code = format!("#{}", hex(state.space.shown(color)));
+            response.widget_info(|| WidgetInfo::labeled(Role::Button, true, &code));
+            let border = if response.hovered() { t.accent } else { Color32::TRANSPARENT };
+            self.ui.painter().rect(chip, CornerRadius::same(SWATCH_CHIP_RADIUS), screen_color(color), Stroke::new(1.0, border), StrokeKind::Inside);
+            if response.clicked() {
+                applied = Some(color);
+            }
+            response.context_menu(|ui| {
+                if ui.button(tr("Remove swatch")).clicked() {
+                    edit = Some(SwatchEdit::Remove(index));
+                    ui.close();
+                }
+            });
+        }
+
+        let add = chip_at(count);
+        let room = count < MAX_SWATCHES;
+        let label = tr("Add swatch");
+        let add_id = self.next_id();
+        let response = self.tip(self.ui.interact(add, add_id, if room { Sense::click() } else { Sense::hover() }), label);
+        response.widget_info(|| WidgetInfo::labeled(Role::Button, room, label));
+        let (border, glyph) = if response.hovered() && room { (t.accent, t.text) } else { (t.field_border, t.text_dim) };
+        let painter = self.ui.painter();
+        painter.rect_stroke(add, CornerRadius::same(SWATCH_CHIP_RADIUS), Stroke::new(1.0, border), StrokeKind::Inside);
+        painter.text(add.center(), Align2::CENTER_CENTER, ic::PLUS, FontId::proportional(PLUS_GLYPH_SIZE), glyph);
+        if room && response.clicked() {
+            edit = Some(SwatchEdit::Add(state.linear));
+        }
+        self.drawn(block.bottom());
+        (applied, edit)
     }
 }
 

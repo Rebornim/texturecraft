@@ -320,6 +320,14 @@ is at), `camera.select {index? | name?}` restores one, `camera.rename {index? | 
 go to the first nine. Commands jump straight to the view; the desktop UI glides there over about a third
 of a second.
 
+## Colour swatches
+
+The project's swatches (`Project.swatches`, linear RGB, stored in the `.tcraft` file; projects without any
+save none) are the Swatches row under the colour picker. `swatch.list` lists them, `swatch.add {color}`
+(`[r, g, b]` linear or `"#rrggbb"`, clamped to 0..1, at most 64) adds one at the end and
+`swatch.remove {index}` removes one; `project.inspect` shows them as `swatches`. Applying a swatch is an
+ordinary colour edit (`layer.fill.set {color}`).
+
 ## MaterialCraft materials
 
 A `.mcmat` portable material (MaterialCraft's format, read here by `formats::mcmat`; the manifest is

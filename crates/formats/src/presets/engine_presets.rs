@@ -184,9 +184,20 @@ pub(super) fn engine_presets() -> Vec<ExportPreset> {
                 height("height"),
             ],
         ),
-        // Khronos' specular-glossiness layout: diffuse with opacity, specular color with glossiness in alpha
+        // Khronos' specular-glossiness layout from the document's own channels: diffuse with opacity, specular with glossiness in alpha
         preset(
             "PBR Specular Glossiness",
+            vec![
+                map("Diffuse", 8, base_with_alpha()),
+                map("SpecularGlossiness", 8, rgb(|k| ch(Channel::Specular, k)).into_iter().chain([(Dest::A, ch(Channel::Glossiness, 0))]).collect()),
+                map("Normal", 8, normal(VirtualMap::NormalOpenGl)),
+                map("Occlusion", 8, gray(virt(VirtualMap::AoMixed, 0))),
+                rgb8("Emissive", Channel::Emissive),
+            ],
+        ),
+        // The same converted from metallic/roughness: metal blackens the diffuse and colours the specular
+        preset(
+            "PBR Specular Glossiness (converted from Metallic Roughness)",
             vec![
                 map("Diffuse", 8, rgb(|k| virt(VirtualMap::Diffuse, k)).into_iter().chain([(Dest::A, ch(Channel::Opacity, 0))]).collect()),
                 map(
@@ -197,6 +208,19 @@ pub(super) fn engine_presets() -> Vec<ExportPreset> {
                 map("Normal", 8, normal(VirtualMap::NormalOpenGl)),
                 map("Occlusion", 8, gray(virt(VirtualMap::AoMixed, 0))),
                 rgb8("Emissive", Channel::Emissive),
+            ],
+        ),
+        // Older, non-energy-conserving renderers: diffuse, specular and glossiness each a file of their own
+        preset(
+            "Non-PBR Specular Glossiness",
+            vec![
+                rgb8("Diffuse", Channel::BaseColor),
+                rgb8("Specular", Channel::Specular),
+                gray8("Glossiness", Channel::Glossiness),
+                map("Normal", 8, normal(VirtualMap::NormalOpenGl)),
+                height("Height"),
+                rgb8("Emissive", Channel::Emissive),
+                gray8("Opacity", Channel::Opacity),
             ],
         ),
         // Corona Physical Material in its default roughness mode

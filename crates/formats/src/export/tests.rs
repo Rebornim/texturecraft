@@ -1247,6 +1247,17 @@ fn reference_presets_follow_their_targets_layouts() {
     assert!(!with_alpha.iter().any(|file| file.name.contains("_opacity.")), "{:?}", with_alpha.iter().map(|file| &file.name).collect::<Vec<_>>());
     assert!(without.iter().any(|file| file.name.contains("_opacity.")));
     assert_eq!(with_alpha.len() + 1, without.len());
+
+    // Specular/glossiness: the plain presets read a specular/glossiness document's channels, the converted one computes them
+    assert_eq!(preset_source("PBR Specular Glossiness", "SpecularGlossiness", Dest::R), channel(Channel::Specular));
+    assert_eq!(preset_source("PBR Specular Glossiness", "SpecularGlossiness", Dest::A), channel(Channel::Glossiness));
+    let converted = "PBR Specular Glossiness (converted from Metallic Roughness)";
+    assert_eq!(preset_source(converted, "SpecularGlossiness", Dest::R), SourceRef::Virtual { map: VirtualMap::SpecularColor, component: 0 });
+    assert_eq!(preset_source(converted, "SpecularGlossiness", Dest::A), SourceRef::Virtual { map: VirtualMap::Glossiness, component: 0 });
+    assert_eq!(preset_files("Non-PBR Specular Glossiness"), ["Diffuse", "Specular", "Glossiness", "Normal", "Height", "Emissive", "Opacity"]);
+    assert_eq!(preset_source("Non-PBR Specular Glossiness", "Glossiness", Dest::L), channel(Channel::Glossiness));
+    let spec_gloss = Fx::new(&[Channel::BaseColor, Channel::Specular, Channel::Glossiness, Channel::Normal]);
+    assert_eq!(spec_gloss.render_preset("Non-PBR Specular Glossiness").len(), 4, "diffuse, specular, glossiness and normal");
 }
 
 #[test]

@@ -330,6 +330,41 @@ fn fill_symmetry_mirrors_or_turns_copies_of_a_3d_projection() {
     assert_eq!(saved.symmetry, FillSymmetry::OFF, "an older save has no symmetry");
 }
 
+/// Moving an axis planar on the model first places it as the frame it projects from: nothing moves until the frame does, and undo puts the axis planar back
+#[test]
+fn moving_an_axis_planar_places_it_as_its_frame_first() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    let ramp = s.import_resource_bytes("ramp.png", ramp_png()).unwrap();
+    execute(&mut s, "layer.fill.set", &json!({"layer": layer.0, "channel": "baseColor", "image": ramp})).unwrap();
+    set(&mut s, layer, json!({"projection": "planar", "axis": 0, "scale": 1.5, "offset": [0.2, -0.1, 0.0], "projectorRotation": [0, 30, 10]}));
+    let axis = projection(&s, layer);
+    let before = snapshot(&mut s);
+
+    execute(&mut s, "layer.decal.set", &json!({"layer": layer.0})).unwrap();
+    let placed = projection(&s, layer);
+    let Projection::Planar { placed: Some(frame), projector, .. } = &placed else { panic!("placed: {placed:?}") };
+    assert_eq!((projector.rotation, projector.scale), ([0.0; 3], [1.0; 3]), "the turn is in the frame now");
+    let after = snapshot(&mut s);
+    let moved = before.iter().zip(&after).filter(|(a, b)| (*a - *b).abs() > 2.0 / 255.0).count();
+    assert!(moved * 200 < before.len(), "the image stays where it was: {moved} of {} texels changed", before.len());
+
+    execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "offset": [0.4, 0.0], "merge": true})).unwrap();
+    assert_ne!(snapshot(&mut s), after, "then the frame moves the image");
+    let Projection::Planar { placed: Some(slid), .. } = projection(&s, layer) else { panic!("still placed") };
+    assert_eq!((slid.offset, slid.size), ([0.4, 0.0], frame.size));
+
+    s.undo().unwrap();
+    assert_eq!(projection(&s, layer), axis, "placing and moving is one step");
+
+    set(&mut s, layer, json!({"projection": "warp", "warpCorners": [[-0.5, 0.5], [0.9, 0.9], [0.5, -0.5], [-0.5, -0.5]]}));
+    execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "rotation": 30})).unwrap();
+    let Projection::Warp { frame, corners, .. } = projection(&s, layer) else { panic!("still a warp") };
+    assert_eq!((frame.rotation, corners[1]), (30.0, [0.9, 0.9]), "a warp's frame turns and keeps its corners");
+    set(&mut s, layer, json!({"projection": "spherical"}));
+    assert!(execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "rotation": 30})).is_err(), "a spherical projection has no frame");
+}
+
 /// A 64 × 8 PNG whose red climbs from left to right
 fn ramp_png() -> Vec<u8> {
     let mut out = Vec::new();

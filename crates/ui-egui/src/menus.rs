@@ -471,8 +471,9 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
         input.events.extend(aliases);
     });
 
-    // Escape closes a dropdown before Properties, the rail popup, color picking or the stroke
+    // Escape closes a dropdown before an eyedropper pick, the colour picker window, Properties, the rail popup, color picking or the stroke
     let popup_open = egui::Popup::is_any_open(ctx);
+    let picker_open = crate::color_picker::open_window(ctx).is_some();
 
     let no_widget_focused = ctx.memory(|memory| memory.focused().is_none());
     #[cfg(not(target_arch = "wasm32"))]
@@ -523,17 +524,21 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
         } else if app.ui.windows.import_resources.is_some() {
             #[cfg(not(target_arch = "wasm32"))]
             crate::import_resources::keys_in(app, input, nothing_focused, popup_open);
-        } else if !popup_open && app.properties_popup.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if !popup_open && app.picking_color.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
+            app.picking_color = None;
+        } else if popup_open || picker_open {
+            // The open list or the picker window closes on this Escape itself
+        } else if app.properties_popup.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.properties_popup = None;
-        } else if !popup_open && crate::rail_popup::is_visible(app) && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if crate::rail_popup::is_visible(app) && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.ui.rail_panel = None;
-        } else if !popup_open && app.picking_id_color.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if app.picking_id_color.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
             crate::id_color_pick::IdColorPick::end(app);
         } else if app.picking_symmetry_plane && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.picking_symmetry_plane = false;
-        } else if !popup_open && app.moving_on_model.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if app.moving_on_model.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.moving_on_model = None;
-        } else if app.ui.mode == Mode::Painting && !popup_open && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if app.ui.mode == Mode::Painting && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.session.cancel_stroke();
             app.session.cancel_path();
         }

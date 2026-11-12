@@ -275,3 +275,34 @@ fn the_picker_is_a_window_beside_the_panel_that_its_title_drags_and_its_close_or
     harness.run_steps(SETTLE_FRAMES);
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_none(), "Escape closes it");
 }
+
+#[test]
+fn escape_ends_an_eyedropper_pick_before_the_picker_and_an_alt_orbit_keeps_the_picker_open() {
+    let (mut harness, _) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
+    click(&mut harness, Role::Button, "Base color");
+    harness.get_all_by_role_and_label(Role::Button, "Pick color").next().unwrap().click();
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(harness.state().picking_color.is_some(), "the eyedropper waits for a click on the model");
+
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(harness.state().picking_color.is_none(), "Escape ends the pick");
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_some(), "the same Escape leaves the picker open");
+
+    let view = harness.state().viewport_rect.center();
+    let alt = egui::Modifiers::ALT;
+    harness.event(egui::Event::ModifiersChanged(alt));
+    harness.hover_at(view);
+    harness.event(egui::Event::PointerButton { pos: view, button: egui::PointerButton::Primary, pressed: true, modifiers: alt });
+    harness.run_steps(1);
+    harness.hover_at(view + egui::vec2(40.0, 10.0));
+    harness.run_steps(1);
+    harness.event(egui::Event::PointerButton { pos: view + egui::vec2(40.0, 10.0), button: egui::PointerButton::Primary, pressed: false, modifiers: alt });
+    harness.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_some(), "an Alt+drag on the model orbits and keeps the picker open");
+
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_none(), "the next Escape closes the picker");
+}

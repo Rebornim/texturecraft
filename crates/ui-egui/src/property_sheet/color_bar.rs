@@ -102,7 +102,7 @@ impl PropertySheet<'_> {
         }
 
         if state.open {
-            let inside = self.picker_popup(&response, label, &mut state, waiting, id);
+            let inside = self.picker_popup(&response, glyph, label, &mut state, waiting, id);
             pick.picked = pick.picked.or(inside.picked);
             pick.merge = inside.merge;
             pick.eyedropper |= inside.eyedropper;
@@ -114,8 +114,8 @@ impl PropertySheet<'_> {
         pick
     }
 
-    /// The open picker: a window the panel's width, its rows at the panel's edges, with `label`'s title, standing beside the panel level with `bar` (its title bar drags it, × or Escape closes it, and so does a press elsewhere unless an eyedropper pick waits)
-    fn picker_popup(&mut self, bar: &Response, label: &str, state: &mut PickerState, waiting: bool, id: Id) -> ColorPick {
+    /// The open picker: a window the panel's width, its rows at the panel's edges, with `label`'s title, standing beside the panel level with `bar` (its title bar drags it, × or Escape closes it, and so does a press off it, the bar and the bar's `eyedropper` unless an eyedropper pick waits)
+    fn picker_popup(&mut self, bar: &Response, eyedropper: Rect, label: &str, state: &mut PickerState, waiting: bool, id: Id) -> ColorPick {
         let ctx = self.ui.ctx().clone();
         let width = self.right - self.left + 2.0 * PAD;
         let height_id = id.with("picker_height");
@@ -177,13 +177,19 @@ impl PropertySheet<'_> {
             state.moved_to = Some(corner + delta);
         }
 
-        let pressed_outside =
-            ctx.input(|input| input.pointer.primary_pressed() && input.pointer.interact_pos().is_some_and(|at| !face.contains(at) && !bar.rect.contains(at)));
-        // The app consumes Escape before the panels draw (painting cancels a stroke), so read the raw event; Escape in the hex field ends the typing first
-        let escape = ctx.input(|input| input.raw.events.iter().any(|event| matches!(event, egui::Event::Key { key: egui::Key::Escape, pressed: true, .. })))
-            && ctx.memory(|memory| memory.focused().is_none_or(|focused| focused == bar.id));
+        // Alt+drag orbits the camera, which keeps the picker open
+        let pressed_outside = ctx.input(|input| {
+            input.pointer.primary_pressed()
+                && !input.modifiers.alt
+                && input.pointer.interact_pos().is_some_and(|at| !face.contains(at) && !bar.rect.contains(at) && !eyedropper.contains(at))
+        });
+        // The app leaves Escape to an open picker (menus.rs); Escape in the hex field ends the typing first
+        let escape = ctx.input(|input| input.key_pressed(egui::Key::Escape)) && ctx.memory(|memory| memory.focused().is_none_or(|focused| focused == bar.id));
         if closed || (!list_open && !waiting && (pressed_outside || escape)) {
             state.open = false;
+            crate::color_picker::forget_window(&ctx);
+        } else {
+            crate::color_picker::remember_window(&ctx, face);
         }
         pick
     }

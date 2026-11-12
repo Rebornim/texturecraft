@@ -295,6 +295,18 @@ pub(super) fn engine_presets() -> Vec<ExportPreset> {
                 gray8("Roughness", Channel::Roughness),
             ],
         ),
+        // Sketchfab assigns each file to a slot by its suffix and reads normals as DirectX by default
+        preset(
+            "Sketchfab (PBR Metal Roughness)",
+            vec![
+                map("BaseColor", 8, base_with_alpha()),
+                map("Normal", 8, normal(VirtualMap::NormalDirectX)),
+                gray8("Metallic", Channel::Metallic),
+                gray8("Roughness", Channel::Roughness),
+                map("AmbientOcclusion", 8, gray(virt(VirtualMap::AoMixed, 0))),
+                rgb8("Emissive", Channel::Emissive),
+            ],
+        ),
         // USD preview surface inputs, one map each
         preset(
             "USDZ (AR)",

@@ -1232,6 +1232,12 @@ fn reference_presets_follow_their_targets_layouts() {
     }
     assert_eq!(preset_source("Roblox (SurfaceAppearance)", "Color", Dest::A), channel(Channel::Opacity));
     assert!(preset_maps("Roblox (MaterialVariant)")[0].1.iter().all(|(dest, _)| *dest != Dest::A), "MaterialVariant colour has no alpha");
+
+    // Sketchfab: one map per slot, DirectX normals (its default)
+    let sketchfab = "Sketchfab (PBR Metal Roughness)";
+    assert_eq!(preset_files(sketchfab), ["BaseColor", "Normal", "Metallic", "Roughness", "AmbientOcclusion", "Emissive"]);
+    assert_eq!(preset_source(sketchfab, "Normal", Dest::R), SourceRef::Virtual { map: VirtualMap::NormalDirectX, component: 0 });
+    assert_eq!(preset_source(sketchfab, "BaseColor", Dest::A), channel(Channel::Opacity));
 }
 
 #[test]

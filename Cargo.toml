@@ -8,7 +8,7 @@ default-members = ["crates/core", "crates/texel", "crates/geom", "crates/compose
 version = "0.6.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-rust-version = "1.95"
+rust-version = "1.96"
 repository = "https://github.com/storytold/texturecraft"
 
 [workspace.dependencies]
@@ -43,6 +43,8 @@ log = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "tiff", "exr", "hdr", "bmp", "webp", "pnm"] }
 half = "2"
 exr = { version = "1.73", default-features = false }
+j2k = "0.11.3"
+j2k-core = "0.11.3"
 eframe = { version = "0.37", default-features = false }
 egui = "0.37"
 wgpu = "30"

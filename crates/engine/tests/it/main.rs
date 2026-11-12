@@ -8,6 +8,7 @@ mod bake_tiles;
 mod color_selection;
 mod content_effects;
 mod export_colour_space;
+mod fill_projections;
 mod fill_sampling;
 mod filter_swap;
 mod filters;

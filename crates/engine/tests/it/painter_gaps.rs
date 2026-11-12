@@ -557,11 +557,15 @@ fn fill_projection_edits_keep_what_they_do_not_change() {
     set(&mut s, json!({"sharpness": 100})).unwrap();
     assert_eq!(
         proj(&s),
-        Projection::Triplanar { scale: 1.0, sharpness: 64.0, offset: [1.0, 2.0, 3.0], uv: Default::default() },
+        Projection::Triplanar { scale: 1.0, sharpness: 64.0, offset: [1.0, 2.0, 3.0], uv: Default::default(), projector: Default::default() },
         "a new kind starts from its defaults"
     );
     set(&mut s, json!({"projection": "planar", "axis": 7, "offset": [1e9, 0, 0]})).unwrap();
-    assert_eq!(proj(&s), Projection::Planar { scale: 1.0, axis: 2, offset: [1000.0, 0.0, 0.0], uv: Default::default() }, "hostile values are clamped");
+    assert_eq!(
+        proj(&s),
+        Projection::Planar { scale: 1.0, axis: 2, offset: [1000.0, 0.0, 0.0], uv: Default::default(), projector: Default::default() },
+        "hostile values are clamped"
+    );
     assert!(set(&mut s, json!({"projection": "hexagonal"})).is_err());
     // The offset moves the pattern: a UV offset changes what the composite shows.
     set(&mut s, json!({"projection": "uv", "scale": 1})).unwrap();

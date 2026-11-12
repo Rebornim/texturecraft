@@ -13,6 +13,7 @@ mod block_scales;
 pub mod channel;
 pub mod layer;
 pub mod project;
+pub mod projector;
 
 pub use bake::{
     AmbientOcclusionAttenuation, AmbientOcclusionSettings, BackfaceMode, BakeAntialiasing, BakePaintTarget, BakeResolution, BakeSettings, BakedMap,
@@ -28,6 +29,7 @@ pub use layer::{
     LayerId, LayerKind, Levels, LinkParam, LinkPreset, Mask, MaskBackground, MaterialLink, PathShape, Procedural, ProceduralKind, Projection, Sampling,
     ScaleMode, Source, UvTransform, UvWrap, gradient, hsl_adjust, per_unit,
 };
+pub use projector::Projector;
 pub use project::{
     AoMixing, BlockScales, Camera, DepthOfField, DisplaySettings, FORMAT_VERSION, MAX_RESOLUTION, MIN_RESOLUTION, NormalFormat, NormalMixing, Project,
     TextureSet, TileGrid, ToneMapping, UDIM_RANGE, udim_at,

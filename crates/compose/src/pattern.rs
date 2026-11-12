@@ -1,7 +1,7 @@
 //! Procedural patterns and projections.
 
-use texturecraft_core::{Decal, Procedural, ProceduralKind, Projection, UvTransform};
-use texturecraft_geom::glam::{Vec2, Vec3};
+use texturecraft_core::{Decal, Procedural, ProceduralKind, Projection, Projector, UvTransform};
+use texturecraft_geom::glam::{EulerRot, Mat3, Vec2, Vec3};
 use texturecraft_texel::noise;
 
 /// Where a texel is, for pattern evaluation.
@@ -171,6 +171,18 @@ fn place_uv(q: Vec2, uv: &UvTransform) -> Vec2 {
     place(q, Vec2::from(uv.tiling), uv.rotation, Vec2::from(uv.offset))
 }
 
+/// `c` inside a projector turned and scaled by `projector`; the default projector returns `c` unchanged
+pub fn projector_local(projector: &Projector, c: &Coords) -> Coords {
+    if *projector == Projector::default() {
+        return *c;
+    }
+    let [x, y, z] = projector.rotation.map(f32::to_radians);
+    let to_local = Mat3::from_euler(EulerRot::ZYX, z, y, x).transpose();
+    let scale = Vec3::from(projector.scale).map(|s| if s.abs() < 1e-6 { 1e-6 } else { s });
+    let nrm = (to_local * c.nrm * scale).try_normalize().unwrap_or(c.nrm);
+    Coords { pos: to_local * c.pos / scale, nrm, ..*c }
+}
+
 /// Evaluate a procedural through a projection.
 pub fn procedural(pr: &Procedural, proj: &Projection, c: &Coords) -> f32 {
     let s = pr.scale.max(1e-4);
@@ -178,14 +190,15 @@ pub fn procedural(pr: &Procedural, proj: &Projection, c: &Coords) -> f32 {
     let flat = |q: Vec2| raw(pr.kind, q.extend(0.0), pr.seed);
     let v = match proj {
         Projection::Uv { scale, rotation, offset } => flat(place(c.uv, Vec2::from(*scale), *rotation, Vec2::from(*offset)) * s),
-        Projection::Triplanar { scale, sharpness, offset, uv } => {
+        Projection::Triplanar { scale, sharpness, offset, uv, projector } => {
+            let c = &projector_local(projector, c);
             let p = c.pos * *scale * s + Vec3::from(*offset);
             let w = c.nrm.abs().powf(sharpness.max(1.0));
             let w = w / (w.x + w.y + w.z).max(1e-6);
             flat(place_uv(Vec2::new(p.z, p.y), uv)) * w.x + flat(place_uv(Vec2::new(p.x, p.z), uv)) * w.y + flat(place_uv(Vec2::new(p.x, p.y), uv)) * w.z
         }
-        Projection::Planar { scale, axis, offset, uv } => {
-            let p = c.pos * *scale * s + Vec3::from(*offset);
+        Projection::Planar { scale, axis, offset, uv, projector } => {
+            let p = projector_local(projector, c).pos * *scale * s + Vec3::from(*offset);
             let q = match axis {
                 0 => Vec2::new(p.z, p.y),
                 1 => Vec2::new(p.x, p.z),
@@ -193,14 +206,14 @@ pub fn procedural(pr: &Procedural, proj: &Projection, c: &Coords) -> f32 {
             };
             flat(place_uv(q, uv))
         }
-        Projection::Spherical { scale, uv } => {
-            let d = c.pos.try_normalize().unwrap_or(Vec3::Y);
+        Projection::Spherical { scale, uv, offset, projector } => {
+            let d = (projector_local(projector, c).pos + Vec3::from(*offset)).try_normalize().unwrap_or(Vec3::Y);
             let u = d.z.atan2(d.x) / std::f32::consts::TAU + 0.5;
             let v = d.y.clamp(-1.0, 1.0).acos() / std::f32::consts::PI;
             flat(place_uv(Vec2::new(u * 4.0, v * 2.0) * *scale * s, uv))
         }
-        Projection::Cylindrical { scale, axis, uv } => {
-            let p = c.pos;
+        Projection::Cylindrical { scale, axis, uv, offset, projector } => {
+            let p = projector_local(projector, c).pos + Vec3::from(*offset);
             let (a, h, b) = match axis {
                 0 => (p.y, p.x, p.z),
                 2 => (p.x, p.z, p.y),
@@ -221,14 +234,15 @@ pub fn image_samples(proj: &Projection, c: &Coords) -> [(Vec2, f32); 3] {
     let one = |uv: Vec2| [(uv, 1.0), (Vec2::ZERO, 0.0), (Vec2::ZERO, 0.0)];
     match proj {
         Projection::Uv { scale, rotation, offset } => one(place(c.uv, Vec2::from(*scale), *rotation, Vec2::from(*offset))),
-        Projection::Triplanar { scale, sharpness, offset, uv } => {
+        Projection::Triplanar { scale, sharpness, offset, uv, projector } => {
+            let c = &projector_local(projector, c);
             let p = c.pos * *scale + Vec3::from(*offset);
             let w = c.nrm.abs().powf(sharpness.max(1.0));
             let w = w / (w.x + w.y + w.z).max(1e-6);
             [(place_uv(Vec2::new(p.z, -p.y), uv), w.x), (place_uv(Vec2::new(p.x, p.z), uv), w.y), (place_uv(Vec2::new(p.x, -p.y), uv), w.z)]
         }
-        Projection::Planar { scale, axis, offset, uv } => {
-            let p = c.pos * *scale + Vec3::from(*offset);
+        Projection::Planar { scale, axis, offset, uv, projector } => {
+            let p = projector_local(projector, c).pos * *scale + Vec3::from(*offset);
             let q = match axis {
                 0 => Vec2::new(p.z, -p.y),
                 1 => Vec2::new(p.x, p.z),
@@ -236,14 +250,14 @@ pub fn image_samples(proj: &Projection, c: &Coords) -> [(Vec2, f32); 3] {
             };
             one(place_uv(q * 0.5 + Vec2::splat(0.5), uv))
         }
-        Projection::Spherical { scale, uv } => {
-            let d = c.pos.try_normalize().unwrap_or(Vec3::Y);
+        Projection::Spherical { scale, uv, offset, projector } => {
+            let d = (projector_local(projector, c).pos + Vec3::from(*offset)).try_normalize().unwrap_or(Vec3::Y);
             let u = d.z.atan2(d.x) / std::f32::consts::TAU + 0.5;
             let v = d.y.clamp(-1.0, 1.0).acos() / std::f32::consts::PI;
             one(place_uv(Vec2::new(u, v) * *scale, uv))
         }
-        Projection::Cylindrical { scale, axis, uv } => {
-            let p = c.pos;
+        Projection::Cylindrical { scale, axis, uv, offset, projector } => {
+            let p = projector_local(projector, c).pos + Vec3::from(*offset);
             let (a, h, b) = match axis {
                 0 => (p.y, p.x, p.z),
                 2 => (p.x, p.z, p.y),
@@ -307,10 +321,10 @@ mod tests {
     fn every_pattern_and_projection_stays_in_range() {
         let projs = [
             Projection::default(),
-            Projection::Triplanar { scale: 1.0, sharpness: 4.0, offset: [0.0; 3], uv: Default::default() },
-            Projection::Planar { scale: 1.0, axis: 1, offset: [0.0; 3], uv: Default::default() },
-            Projection::Spherical { scale: 1.0, uv: Default::default() },
-            Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default() },
+            Projection::Triplanar { scale: 1.0, sharpness: 4.0, offset: [0.0; 3], uv: Default::default(), projector: Default::default() },
+            Projection::Planar { scale: 1.0, axis: 1, offset: [0.0; 3], uv: Default::default(), projector: Default::default() },
+            Projection::Spherical { scale: 1.0, uv: Default::default(), offset: [0.0; 3], projector: Default::default() },
+            Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default(), offset: [0.0; 3], projector: Default::default() },
             Projection::Decal(Decal {
                 center: [0.0; 3],
                 normal: [0.0, 0.0, 1.0],

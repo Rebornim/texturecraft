@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    BlendMode, Channel, ChannelBlend, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Sampling, ScaleMode,
+    BlendMode, Channel, ChannelBlend, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Projector, Sampling, ScaleMode,
     Source, UvTransform, UvWrap,
 };
 
@@ -409,10 +409,12 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
     let named = match strp(p, "projection") {
         None => None,
         Some("uv") => Some(Projection::default()),
-        Some("triplanar" | "tri-planar") => Some(Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: Default::default() }),
-        Some("planar") => Some(Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: Default::default() }),
-        Some("spherical") => Some(Projection::Spherical { scale: 1.0, uv: Default::default() }),
-        Some("cylindrical") => Some(Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default() }),
+        Some("triplanar" | "tri-planar") => {
+            Some(Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: Default::default(), projector: Default::default() })
+        }
+        Some("planar") => Some(Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: Default::default(), projector: Default::default() }),
+        Some("spherical") => Some(Projection::Spherical { scale: 1.0, uv: Default::default(), offset: [0.0; 3], projector: Default::default() }),
+        Some("cylindrical") => Some(Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default(), offset: [0.0; 3], projector: Default::default() }),
         Some(other) => return Err(bad(cmd, format!("unknown projection `{other}`"))),
     };
     let mut proj = match (named, current) {
@@ -430,6 +432,12 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
         uv.rotation = rotation.unwrap_or(uv.rotation);
         uv.offset = floats(p, "uvOffset", -1000.0, 1000.0).unwrap_or(uv.offset);
     };
+    // The 3D projection settings: the projector's offset, turn and per-axis scale
+    let offset3 = floats::<3>(p, "offset", -1000.0, 1000.0);
+    let turn = |pr: &mut Projector| {
+        pr.rotation = floats(p, "projectorRotation", -360.0, 360.0).unwrap_or(pr.rotation);
+        pr.scale = floats(p, "projectorScale", 0.001, 1000.0).unwrap_or(pr.scale);
+    };
     match &mut proj {
         Projection::Uv { scale: s, rotation: r, offset } => {
             // A UV projection's scale is its tiling
@@ -437,26 +445,32 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
             *r = rotation.unwrap_or(*r);
             *offset = floats(p, "offset", -1000.0, 1000.0).unwrap_or(*offset);
         }
-        Projection::Triplanar { scale: s, sharpness, offset, uv } => {
+        Projection::Triplanar { scale: s, sharpness, offset, uv, projector } => {
             *s = scale.map_or(*s, |v| v[0]);
             *sharpness = f32p(p, "sharpness").map_or(*sharpness, |v| v.clamp(1.0, 64.0));
-            *offset = floats(p, "offset", -1000.0, 1000.0).unwrap_or(*offset);
+            *offset = offset3.unwrap_or(*offset);
             place(uv);
+            turn(projector);
         }
-        Projection::Planar { scale: s, axis: a, offset, uv } => {
+        Projection::Planar { scale: s, axis: a, offset, uv, projector } => {
             *s = scale.map_or(*s, |v| v[0]);
             *a = axis.unwrap_or(*a);
-            *offset = floats(p, "offset", -1000.0, 1000.0).unwrap_or(*offset);
+            *offset = offset3.unwrap_or(*offset);
             place(uv);
+            turn(projector);
         }
-        Projection::Spherical { scale: s, uv } => {
+        Projection::Spherical { scale: s, uv, offset, projector } => {
             *s = scale.map_or(*s, |v| v[0]);
+            *offset = offset3.unwrap_or(*offset);
             place(uv);
+            turn(projector);
         }
-        Projection::Cylindrical { scale: s, axis: a, uv } => {
+        Projection::Cylindrical { scale: s, axis: a, uv, offset, projector } => {
             *s = scale.map_or(*s, |v| v[0]);
             *a = axis.unwrap_or(*a);
+            *offset = offset3.unwrap_or(*offset);
             place(uv);
+            turn(projector);
         }
         Projection::Decal(_) => {}
     }

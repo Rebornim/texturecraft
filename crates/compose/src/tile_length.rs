@@ -63,9 +63,9 @@ mod tests {
         let uv = UvTransform { tiling: [3.0, 1.5], ..UvTransform::default() };
         for projection in [
             Projection::Uv { scale: [3.0, 1.5], rotation: 0.0, offset: [0.0; 2] },
-            Projection::Triplanar { scale: 1.5, sharpness: 8.0, offset: [0.0; 3], uv },
-            Projection::Planar { scale: 0.5, axis: 2, offset: [0.0; 3], uv },
-            Projection::Cylindrical { scale: 2.0, axis: 1, uv },
+            Projection::Triplanar { scale: 1.5, sharpness: 8.0, offset: [0.0; 3], uv, projector: Default::default() },
+            Projection::Planar { scale: 0.5, axis: 2, offset: [0.0; 3], uv, projector: Default::default() },
+            Projection::Cylindrical { scale: 2.0, axis: 1, uv, offset: [0.0; 3], projector: Default::default() },
         ] {
             let length = tile_length(&projection, SIZE).unwrap();
             let tiling = tiling_for_length(&projection, SIZE, length).unwrap();
@@ -75,6 +75,6 @@ mod tests {
 
     #[test]
     fn spherical_has_no_physical_size() {
-        assert_eq!(tile_length(&Projection::Spherical { scale: 1.0, uv: UvTransform::default() }, SIZE), None);
+        assert_eq!(tile_length(&Projection::Spherical { scale: 1.0, uv: UvTransform::default(), offset: [0.0; 3], projector: Default::default() }, SIZE), None);
     }
 }

@@ -1,8 +1,8 @@
-//! The Material section's own rows: the orb beside the Material | Channels switch, a uniform channel's gray ramp and its colour bar
+//! The Material section's own rows: the orb beside the Material | Channels switch and a uniform channel's gray ramp
 
 use std::ops::RangeInclusive;
 
-use egui::{Align2, Color32, CornerRadius, FontId, Mesh, Painter, Rect, Response, Sense, Stroke, StrokeKind, pos2, vec2};
+use egui::{Align2, Color32, FontId, Mesh, Painter, Rect, Sense, pos2, vec2};
 use egui_phosphor::regular as ic;
 
 use super::slider::{KNOB_RADIUS, Track};
@@ -27,9 +27,8 @@ const INVERT_INSET: f32 = 8.0;
 /// Width of a ramp's typed value
 const RAMP_VALUE_WIDTH: f32 = 34.0;
 
-/// Height of a ramp's track and of a colour bar
+/// Height of a ramp's track
 const RAMP_HEIGHT: f32 = 4.0;
-const COLOR_BAR_HEIGHT: f32 = 16.0;
 
 /// Size of the invert glyph
 const INVERT_GLYPH_SIZE: f32 = 13.0;
@@ -82,13 +81,6 @@ impl PropertySheet<'_> {
         RampEdit { changed: Self::apply_typed(value, typed, dragged), invert: response.clicked() }
     }
 
-    /// [`Self::color_bar`] in the controls column, beside `label`
-    pub(crate) fn color_bar_led(&mut self, label: &str, color: Color32) -> Response {
-        let (control, center_y) = self.row(label);
-        let bar = Rect::from_min_max(pos2(control.left(), center_y - COLOR_BAR_HEIGHT / 2.0), pos2(control.right(), center_y + COLOR_BAR_HEIGHT / 2.0));
-        self.paint_color_bar(bar, label, color)
-    }
-
     /// Controls the sheet has no row for yet, laid out by egui between the panel's edges
     pub(crate) fn embed<R>(&mut self, body: impl FnOnce(&mut egui::Ui) -> R) -> R {
         let width = self.right - self.left;
@@ -106,25 +98,6 @@ impl PropertySheet<'_> {
         self.empty = false;
         self.drawn(bottom);
         inner.inner
-    }
-
-    /// A uniform colour: a bar across the card in `color`; returns the bar's response (a click opens the colour picker)
-    pub(crate) fn color_bar(&mut self, label: &str, color: Color32) -> Response {
-        let row = self.take(ROW_HEIGHT);
-        let center_y = row.center().y;
-        let bar = Rect::from_min_max(pos2(self.left, center_y - COLOR_BAR_HEIGHT / 2.0), pos2(self.right, center_y + COLOR_BAR_HEIGHT / 2.0));
-        self.paint_color_bar(bar, label, color)
-    }
-
-    fn paint_color_bar(&mut self, bar: Rect, label: &str, color: Color32) -> Response {
-        let id = self.next_id();
-        let response = self.ui.interact(bar, id, Sense::click());
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
-        let t = self.tokens;
-        let border = if response.hovered() { t.accent } else { t.field_border };
-        self.ui.painter().rect(bar, CornerRadius::same(3), color, Stroke::new(1.0, border), StrokeKind::Inside);
-        self.drawn(bar.bottom());
-        response
     }
 }
 

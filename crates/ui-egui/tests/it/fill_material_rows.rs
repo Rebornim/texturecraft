@@ -197,3 +197,39 @@ fn a_linked_material_maps_its_channels_and_picks_its_resolution() {
     click_below(&mut harness, Role::RadioButton, "Relative");
     assert_eq!(link(&harness).resolution, Some(CookResolution::Relative(2)), "1024 is the texture set's ×4");
 }
+
+/// The fill's uniform base colour (linear)
+fn base_color(harness: &Harness<'_, TextureCraftApp>, layer: LayerId) -> [f32; 3] {
+    let Source::Uniform(color) = source(harness, layer, Channel::BaseColor) else { panic!("a uniform colour") };
+    color
+}
+
+#[test]
+fn the_colour_bar_opens_the_picker_which_types_restores_and_waits_for_an_eyedropper_click() {
+    let (mut harness, layer) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
+    let before = base_color(&harness, layer);
+    click(&mut harness, Role::Button, "Base color");
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "the picker shows its colour space");
+
+    click(&mut harness, Role::TextInput, "Hex color");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.event(egui::Event::Text("FF8000".into()));
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(SETTLE_FRAMES);
+    let typed = base_color(&harness, layer);
+    let expected = [1.0, texturecraft_engine::texel::srgb_to_linear(128.0 / 255.0), 0.0];
+    assert!(typed.iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-3), "the typed sRGB code is stored linear: {typed:?}");
+
+    click(&mut harness, Role::ComboBox, "HSV");
+    click(&mut harness, Role::ListBoxOption, "RGB");
+    assert!(harness.query_by_role_and_label(Role::Slider, "R").is_some(), "the sliders edit R, G and B");
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "picking from its own list keeps the picker open");
+
+    click(&mut harness, Role::Button, "Previous color");
+    let restored = base_color(&harness, layer);
+    assert!(restored.iter().zip(before).all(|(a, b)| (a - b).abs() < 1e-4), "a click on the previous colour restores it: {restored:?} {before:?}");
+
+    harness.get_all_by_role_and_label(Role::Button, "Pick color").next().unwrap().click();
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(harness.state().picking_color.is_some(), "the eyedropper waits for a click on the model");
+}

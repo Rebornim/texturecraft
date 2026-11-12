@@ -675,6 +675,52 @@ fn steel_painted_worn() -> texturecraft_engine::core::MaterialLink {
     }
 }
 
+/// Screen 04: the colour picker open on a uniform base colour, hovered, with its model list open and in RGB; `TC_UI_THEMES` set adds the dark and light themes
+#[test]
+#[ignore]
+fn fill_color_picker_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let orange = [0xE5, 0x8A, 0x4E].map(|c| texturecraft_engine::texel::srgb_to_linear(f32::from(c as u8) / 255.0));
+    let layer = execute(&mut session, "layer.add.fill", &json!({"color": orange})).unwrap()["layer"].as_u64().unwrap();
+    execute(&mut session, "layer.fill.set", &json!({"layer": layer, "channel": "height", "enabled": true})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 2000.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
+    // The tab scrolls the panel to its section (the scroll animates for about twenty frames)
+    harness.run_steps(25);
+    harness.get_by_role_and_label(egui::Role::Button, "Base color").click();
+    harness.run_steps(2);
+    save(&mut harness, &output_dir, "picker-open");
+    harness.get_by_role_and_label(egui::Role::Slider, "S").hover();
+    save(&mut harness, &output_dir, "picker-hover");
+    harness.get_by_role_and_label(egui::Role::ComboBox, "sRGB").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, "Linear").hover();
+    save(&mut harness, &output_dir, "picker-space-list");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::Role::ComboBox, "HSV").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, "RGB").hover();
+    save(&mut harness, &output_dir, "picker-model-list");
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, "RGB").click();
+    harness.run_steps(2);
+    save(&mut harness, &output_dir, "picker-rgb");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("picker-rgb-{name}"));
+        }
+    }
+}
+
 /// Screen 04: a fill's Material section in Channels (a procedural base colour with its Attributes open, a uniform metallic, a normal image, a signed height), its source list open with a hover, the picker on the base colour, and the Material side of a linked material; the linked one also in the dark and light themes
 #[test]
 #[ignore]

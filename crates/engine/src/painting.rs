@@ -555,18 +555,19 @@ impl Session {
 
     /// Color picker: copy the material under the cursor into the tool's paint values.
     pub fn color_pick(&mut self, screen: Vec2, viewport: Vec2) -> Result<BTreeMap<Channel, [f32; 3]>> {
+        let picked = self.color_at(screen, viewport)?;
+        self.tool.values.extend(picked.iter().map(|(channel, value)| (*channel, *value)));
+        Ok(picked)
+    }
+
+    /// The composited value of every channel on the surface under `screen`, changing nothing (an eyedropper's read)
+    pub fn color_at(&self, screen: Vec2, viewport: Vec2) -> Result<BTreeMap<Channel, [f32; 3]>> {
         let hit = self.pick(screen, viewport).ok_or_else(|| EngineError::Other("nothing under the cursor".into()))?;
         let ts = self.texture_set_of_material(hit.material).unwrap_or(self.ts());
         let cache = self.caches.get(ts).ok_or_else(|| EngineError::Other("texture set not ready".into()))?;
         let (w, h) = (cache.size.0 as f32, cache.size.1 as f32);
         let (x, y) = ((hit.uv.x * w).clamp(0.0, w - 1.0) as u32, (hit.uv.y * h).clamp(0.0, h - 1.0) as u32);
-        let mut out = BTreeMap::new();
-        for c in cache.composite.channels.keys() {
-            let v = cache.composite.value(*c, x, y);
-            self.tool.values.insert(*c, v);
-            out.insert(*c, v);
-        }
-        Ok(out)
+        Ok(cache.composite.channels.keys().map(|channel| (*channel, cache.composite.value(*channel, x, y))).collect())
     }
 
     /// The stroke canvas alpha of the active stroke (for overlays and tests).

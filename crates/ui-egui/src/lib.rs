@@ -10,6 +10,7 @@
 mod bake_job;
 pub mod bake_mode;
 mod bake_scene;
+mod color_picker;
 mod color_selection_editor;
 pub mod control;
 mod decal_drop;
@@ -167,6 +168,8 @@ pub struct TextureCraftApp {
     pub properties_popup: Option<properties_popup::PropertiesPopup>,
     /// The color selection the next click in the 3D or 2D view picks an ID color for
     pub picking_id_color: Option<id_color_pick::IdColorPick>,
+    /// The colour bar whose eyedropper waits for a click on the model
+    pub picking_color: Option<egui::Id>,
     /// The wgpu state (screenshots read the renderer's targets).
     pub render_state: Option<eframe::egui_wgpu::RenderState>,
     /// CJK fallback fonts for the UI language.
@@ -245,6 +248,7 @@ impl TextureCraftApp {
             placing_decal: None,
             properties_popup: None,
             picking_id_color: None,
+            picking_color: None,
             render_state: cc.wgpu_render_state.clone(),
             fonts: fonts::UiFonts::default(),
             banner: None,

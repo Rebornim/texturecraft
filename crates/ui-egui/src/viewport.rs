@@ -597,16 +597,19 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     crate::properties_popup::open_on_right_click(app, ui, &response, rect, s_held || v_held);
     let popup = app.properties_popup.is_some() || rail_popup;
 
-    // A pending ID color pick takes the next click instead of the brush
-    let picking_id_color = app.picking_id_color.is_some();
-    if picking_id_color {
+    // A pending ID color pick or eyedropper takes the next click instead of the brush
+    let picking = app.picking_id_color.is_some() || app.picking_color.is_some();
+    if picking {
         crate::id_color_pick::IdColorPick::draw_cursor(ui, rect);
         if !alt
             && response.clicked_by(PointerButton::Primary)
             && let Some(position) = response.interact_pointer_pos()
         {
             let (pixel, viewport) = (local(position), app.session.viewport);
-            crate::id_color_pick::IdColorPick::pick_at(app, json!({"x": pixel.x, "y": pixel.y, "viewport": [viewport.x, viewport.y]}));
+            match app.picking_color {
+                Some(bar) => eyedrop(app, ui.ctx(), bar, pixel, viewport),
+                None => crate::id_color_pick::IdColorPick::pick_at(app, json!({"x": pixel.x, "y": pixel.y, "viewport": [viewport.x, viewport.y]})),
+            }
         }
     }
 
@@ -617,7 +620,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !focus_pick
         && !popup
         && placing.is_none()
-        && !picking_id_color
+        && !picking
         && touch.is_none()
         && !DecalDrop::blocks_input(ui.ctx())
         && decal_input(app, ui, &response, rect);
@@ -628,7 +631,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !focus_pick
         && !popup
         && placing.is_none()
-        && !picking_id_color
+        && !picking
         && touch.is_none()
         && !DecalDrop::blocks_input(ui.ctx())
         && !decal_drag
@@ -646,7 +649,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !v_held
         && !focus_pick
         && placing.is_none()
-        && !picking_id_color
+        && !picking
         && touch.is_none()
         && !decal_drag
         && !symmetry_drag
@@ -1937,6 +1940,16 @@ fn bake_paint_overlay(app: &TextureCraftApp, ui: &Ui, painter: &egui::Painter, t
         }
     };
     painter.image(tex.id(), Rect::from_two_pos(top_left, bottom_right), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+}
+
+/// Hands the base colour on the model at `pixel` to the colour bar `bar` and ends its eyedropper pick; a click off the model ends it too
+fn eyedrop(app: &mut TextureCraftApp, ctx: &egui::Context, bar: egui::Id, pixel: Vec2, viewport: Vec2) {
+    app.picking_color = None;
+    let Ok(values) = app.session.color_at(pixel, viewport) else { return };
+
+    if let Some(color) = values.get(&texturecraft_engine::core::Channel::BaseColor) {
+        crate::color_picker::ColorPick::deliver(ctx, bar, *color);
+    }
 }
 
 #[cfg(test)]

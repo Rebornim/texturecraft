@@ -22,6 +22,13 @@ fn select_map(harness: &mut Harness<'_, TextureCraftApp>, name: &str) {
 
 fn save(h: &mut Harness<'_, TextureCraftApp>, dir: &Path, name: &str) {
     h.run_steps(6);
+    // Material orbs render off the UI thread: wait for their full pictures
+    let start = std::time::Instant::now();
+    while !texturecraft_ui_egui::orb_previews::OrbPreviews::settled(&h.ctx) && start.elapsed() < std::time::Duration::from_secs(20) {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        h.run_steps(1);
+    }
+    h.run_steps(2);
     let img = h.render().unwrap_or_else(|e| panic!("{name}: {e}"));
     let path = dir.join(format!("{name}.png"));
     img.save(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));

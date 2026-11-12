@@ -758,7 +758,7 @@ fn fill_color_picker_snapshots() {
     }
 }
 
-/// Screen 04: a fill's Material section in Channels (a procedural base colour with its Attributes open, a uniform metallic, a normal image, a signed height), its source list open with a hover, the picker on the base colour, and the Material side of a linked material; the linked one also in the dark and light themes
+/// Screen 04: a fill's Material section in Channels (a procedural base colour with its Attributes open, a uniform metallic, a normal image, a signed height), its source list open with a hover, the picker on the base colour, the Material side of a plain fill (no material, its material list open with a hover, Copper picked; Copper also in the dark and light themes) and of a linked material; the linked one also in the dark and light themes
 #[test]
 #[ignore]
 fn fill_material_snapshots() {
@@ -804,6 +804,30 @@ fn fill_material_snapshots() {
     harness.run_steps(2);
     harness.get_all_by_role_and_label(egui::Role::Button, "Invert").next().unwrap().hover();
     save(&mut harness, &output_dir, "material-invert-hover");
+    // The same plain fill on the Material side: one whole material, picked from the card's list
+    harness.get_by_role_and_label(egui::Role::RadioButton, "Material").click();
+    harness.run_steps(2);
+    save(&mut harness, &output_dir, "material-whole-none");
+    harness.get_by_role_and_label(egui::Role::ComboBox, "None").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, "Copper").hover();
+    save(&mut harness, &output_dir, "material-whole-list");
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, "Copper").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::Role::RadioButton, "Channels").hover();
+    save(&mut harness, &output_dir, "material-whole-copper");
+    for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+        harness.state_mut().ui.prefs.brightness = brightness;
+        save(&mut harness, &output_dir, &format!("material-whole-copper-{name}"));
+    }
+    harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    harness.get_by_role_and_label(egui::Role::RadioButton, "Channels").click();
+    harness.run_steps(2);
+    save(&mut harness, &output_dir, "material-whole-copper-channels");
+    harness.get_by_role_and_label(egui::Role::RadioButton, "Material").click();
+    harness.run_steps(2);
+    // Back to the fill the linked shots below expect (the pick was one undo step)
+    execute(&mut harness.state_mut().session, "edit.undo", &json!({})).unwrap();
 
     let session = &mut harness.state_mut().session;
     if let Some(LayerKind::Fill(fill)) = session.doc.project.layers.get_mut(&LayerId(layer)).map(|layer| &mut layer.kind) {
@@ -817,6 +841,12 @@ fn fill_material_snapshots() {
         harness.get_by_role_and_label(role, label).scroll_to_me();
         harness.run_steps(25);
     };
+    // The band is folded by the time it is reached in this run: unfold it first
+    if harness.query_by_role_and_label(egui::Role::ComboBox, "normal").is_none() {
+        reach(&mut harness, egui::Role::Button, "Channels mapping");
+        harness.get_by_role_and_label(egui::Role::Button, "Channels mapping").click();
+        harness.run_steps(2);
+    }
     reach(&mut harness, egui::Role::ComboBox, "normal");
     harness.get_by_role_and_label(egui::Role::ComboBox, "roughness").click();
     harness.run_steps(2);

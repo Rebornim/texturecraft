@@ -34,10 +34,15 @@ pub(crate) struct OrbLook {
 
 /// Draws the orb for `look` into `rect` on the panel's darkest backdrop
 pub(crate) fn material_orb(painter: &Painter, rect: Rect, look: OrbLook, tokens: &Tokens) {
+    material_orb_in(painter, rect, look, tokens, "");
+}
+
+/// [`material_orb`] cached under its own `place` as well, so a list drawing many orbs of one size keeps each of them
+pub(crate) fn material_orb_in(painter: &Painter, rect: Rect, look: OrbLook, tokens: &Tokens, place: &str) {
     let ctx = painter.ctx();
     let side = ((rect.width() * ctx.pixels_per_point()).round() as usize).clamp(1, MAX_SIDE_PX);
     let key = format!("{side}{look:?}{:?}", tokens.chrome);
-    let id = egui::Id::unique(("material_orb", side));
+    let id = egui::Id::unique(("material_orb", side, place));
     // The picture and the key it was rendered for
     let cached = ctx.data(|data| data.get_temp::<(String, TextureHandle)>(id)).filter(|(rendered, _)| *rendered == key);
     let texture = match cached {

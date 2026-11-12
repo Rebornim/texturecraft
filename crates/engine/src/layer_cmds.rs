@@ -371,6 +371,10 @@ fn fill_set(s: &mut Session, p: &Value) -> Result<Value> {
                 _ => return Err(bad("layer.fill.set", "`normalFormat` needs an image on the channel")),
             }
         }
+        // A channel set on its own: the sources are no longer one whole material
+        if source.is_some() {
+            f.material = None;
+        }
         match target {
             // A fill effect's channel is on while it has a source.
             FillTarget::Effect(_) if enabled == Some(false) => {

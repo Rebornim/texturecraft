@@ -622,6 +622,9 @@ pub struct Fill {
     /// Set when the sources are maps cooked from a MaterialCraft material.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<Box<MaterialLink>>,
+    /// The built-in material (shelf id) the sources were set from as one whole material; cleared when a channel's source changes on its own
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<String>,
 }
 
 /// A MaterialCraft material behind a fill (from a `.mcmat` portable material): its channel

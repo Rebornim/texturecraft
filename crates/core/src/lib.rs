@@ -12,6 +12,7 @@ pub mod bake;
 pub mod blend;
 mod block_scales;
 pub mod channel;
+pub mod cook_resolution;
 pub mod depth_culling;
 pub mod fill_symmetry;
 pub mod layer;
@@ -31,6 +32,7 @@ pub use bake::{
 };
 pub use blend::{BlendMode, blend1, blend3, lum, mix3};
 pub use channel::{Channel, ChannelFormat, ChannelKind};
+pub use cook_resolution::CookResolution;
 pub use depth_culling::DepthCulling;
 pub use fill_symmetry::FillSymmetry;
 pub use layer::{

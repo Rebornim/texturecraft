@@ -2,14 +2,14 @@
 
 use std::ops::RangeInclusive;
 
-use egui::{Margin, Painter, Rect};
+use egui::{Painter, Rect};
 use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::compose::tile_length::{MeshSize, tile_length, tiling_for_length};
 use texturecraft_engine::core::{Channel, Fill, Filtering, LayerId, Projection, Projector, ScaleMode, ShapeCrop, UvWrap};
 
 use crate::TextureCraftApp;
-use crate::dock::{anchors_below, fill_channel, with};
+use crate::dock::with;
 use crate::fill_pictures::{
     angle_picture, backface_picture, crop_picture, depth_picture, filtering_picture, projection_picture, warp_preview, window_preview, wrap_picture,
 };
@@ -17,7 +17,7 @@ use crate::fill_placement::Placement;
 use crate::i18n::{filtering_label, tr, wrap_label};
 use crate::projection_kind::ProjectionKind;
 use crate::projection_preview::projection_preview;
-use crate::property_sheet::{NumberField, PAD, PreviewLower, PreviewSize, PropertySheet, RowLead};
+use crate::property_sheet::{NumberField, PreviewLower, PreviewSize, PropertySheet, RowLead};
 use crate::theme::{AXIS_COLORS, Tokens};
 
 /// Centimetres in one mesh unit: meshes are read in metres
@@ -81,34 +81,7 @@ pub(crate) fn fill_sheet(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_
     projection_rows(app, sheet, fill, base, &salt, reader);
     crate::fill_symmetry_panel::symmetry_section(app, sheet, &fill.projection, fill.sampling, base);
 
-    sheet.section(tr("Material"), false);
-    let channels = app.session.doc.project.texture_set(app.session.ts()).map(|texture_set| texture_set.channel_list()).unwrap_or_default();
-    let names: Vec<&str> = channels.iter().map(|channel| tr(channel.short())).collect();
-    let enabled: Vec<bool> = channels.iter().map(|channel| on.contains(channel)).collect();
-    if let Some((index, solo)) = sheet.channel_pills(&names, &enabled)
-        && let Some(channel) = channels.get(index)
-    {
-        let enable = solo || !enabled[index];
-        app.run("layer.fill.set", with(base, json!({"channel": channel.id(), "enabled": enable, "solo": solo})));
-    }
-
-    let anchors = anchors_below(app, reader);
-    legacy(sheet, |ui| {
-        for channel in channels {
-            if on.contains(&channel) {
-                fill_channel(app, ui, fill, base, channel, &anchors, &salt);
-            }
-        }
-    });
-}
-
-/// Controls not yet drawn with the sheet's primitives, at the panel's padding
-fn legacy(sheet: &mut PropertySheet<'_>, body: impl FnOnce(&mut egui::Ui)) {
-    sheet.close_card();
-    egui::Frame::new().inner_margin(Margin::symmetric(PAD as i8, 4)).show(sheet.ui, |ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
-        body(ui);
-    });
+    crate::fill_material_panel::material_section(app, sheet, fill, base, on, reader);
 }
 
 /// Projection, Move on model, Scale, the preview with size and offset, Rotation, the culling rows, then the Filtering and edges and 3D projection settings bands

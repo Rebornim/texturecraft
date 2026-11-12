@@ -6,8 +6,8 @@ use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::compose::ThumbTarget;
 use texturecraft_engine::core::{
-    BakedMap, BlendMode, Channel, ChannelBlend, ChannelKind, Decal, DecalFlip, Effect, EffectKind, Fill, Filter, Layer, LayerId, LayerKind, LinkParam,
-    MaterialLink, Projection, Source,
+    BakedMap, BlendMode, Channel, ChannelBlend, Decal, DecalFlip, Effect, EffectKind, Filter, Layer, LayerId, LayerKind, LinkParam, MaterialLink, Projection,
+    Source,
 };
 use texturecraft_engine::filter_lib::scalar_params;
 use texturecraft_engine::paint::alpha_params::MAX_ALPHA_CONTRAST;
@@ -15,10 +15,9 @@ use texturecraft_engine::paint::{BrushAlpha, BrushSettings, alphas};
 use texturecraft_engine::{CloneFrom, StackTarget, Tool};
 
 use crate::TextureCraftApp;
-use crate::filter_slot::SLOT_HEIGHT;
 use crate::i18n::{n_, tr, trf};
 use crate::layer_panel::{effect_preview_size, effect_row_height, layer_preview_size, layer_row_height};
-use crate::property_sheet::{PAD, PropertySheet};
+use crate::property_sheet::PropertySheet;
 use crate::shelf::{Asset, ShelfDrag};
 use crate::state::PropsTab;
 use crate::theme::{Tokens, caption};
@@ -2584,77 +2583,28 @@ fn fill_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer) {
     let LayerKind::Fill(fill) = &layer.kind else { return };
     let on: Vec<Channel> = layer.channels.keys().copied().collect();
     PropertySheet::show(ui, ("fill_sheet", layer.id.0), |sheet| {
-        if let Some(link) = &fill.link {
-            let link = link.clone();
-            egui::Frame::new().inner_margin(egui::Margin::symmetric(PAD as i8, 4)).show(sheet.ui, |ui| link_properties(app, ui, layer.id, &link));
-        }
         crate::fill_panel::fill_sheet(app, sheet, fill, &json!({"layer": layer.id.0}), &on, layer.id);
     });
 }
 
-/// A MaterialCraft material's presets and exposed inputs; edits store the value and re-cook the
-/// maps on a worker thread (desktop only: cooking runs MaterialCraft's command line).
-fn link_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: LayerId, link: &MaterialLink) {
-    let tk = Tokens::get(ui.ctx());
-    let base = json!({"layer": layer.0, "cook": false});
-    ui.label(caption(tr("MaterialCraft material")));
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(&link.name).strong());
-        ui.label(RichText::new(trf("Cooked at {size} px", &[("size", &link.size)])).size(10.0).color(tk.text_dim));
-        if app.link_cooks.iter().any(|c| c.layer == layer) {
-            ui.spinner();
-        }
-    });
-    let editable = cfg!(not(target_arch = "wasm32"));
-    ui.add_enabled_ui(editable, |ui| {
-        if !link.presets.is_empty() {
-            combo(ui, tr("Preset"), "", |ui| {
-                for p in &link.presets {
-                    if ui.selectable_label(false, &p.name).clicked() && app.run("material.link.preset", with(&base, json!({"name": p.name}))).is_some() {
-                        app.cook_link(layer);
-                    }
-                }
-            });
-        }
-        let mut group = "";
-        for p in &link.params {
-            if p.group != group && !p.group.is_empty() {
-                ui.label(RichText::new(p.group.to_uppercase()).size(10.0).strong().color(tk.text_dim));
-            }
-            group = &p.group;
-            if let Some(v) = link_param_editor(ui, layer, p)
-                && app.run("material.link.set", with(&base, json!({"id": p.id, "value": v}))).is_some()
-            {
-                app.cook_link(layer);
-            }
-        }
-    });
-    if !editable {
-        ui.label(RichText::new(tr("Parameters change in the desktop app, with MaterialCraft installed")).size(10.0).color(tk.text_dim));
+/// Writes the material's package to a temporary file and opens it in MaterialCraft
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn open_link_in_materialcraft(app: &mut TextureCraftApp, layer: LayerId, link: &MaterialLink) {
+    let ext = texturecraft_engine::link_cmds::source_extension(&link.package);
+    let path = std::env::temp_dir().join(format!("{}.{ext}", texturecraft_engine::formats::export::sanitize_file_stem(&link.name)));
+    let opened = app
+        .session
+        .link_package(layer)
+        .and_then(|b| std::fs::write(&path, b.as_slice()).map_err(|e| texturecraft_engine::EngineError::Other(e.to_string())))
+        .and_then(|()| texturecraft_engine::link_cmds::open_in_materialcraft(&path));
+    match opened {
+        Ok(()) => app.toast(tr("Opened in MaterialCraft: use File > Send to TextureCraft there to bring your changes back"), false),
+        Err(e) => app.toast(e.to_string(), true),
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    ui.horizontal(|ui| {
-        if ui.button(tr("Re-cook")).clicked() {
-            app.cook_link(layer);
-        }
-        if ui.button(tr("Open in MaterialCraft")).clicked() {
-            let ext = texturecraft_engine::link_cmds::source_extension(&link.package);
-            let path = std::env::temp_dir().join(format!("{}.{ext}", texturecraft_engine::formats::export::sanitize_file_stem(&link.name)));
-            let opened = app
-                .session
-                .link_package(layer)
-                .and_then(|b| std::fs::write(&path, b.as_slice()).map_err(|e| texturecraft_engine::EngineError::Other(e.to_string())))
-                .and_then(|()| texturecraft_engine::link_cmds::open_in_materialcraft(&path));
-            match opened {
-                Ok(()) => app.toast(tr("Opened in MaterialCraft: use File > Send to TextureCraft there to bring your changes back"), false),
-                Err(e) => app.toast(e.to_string(), true),
-            }
-        }
-    });
 }
 
 /// The editor of one linked-material input; returns its new value when an edit completes.
-fn link_param_editor(ui: &mut Ui, layer: LayerId, p: &LinkParam) -> Option<Value> {
+pub(crate) fn link_param_editor(ui: &mut Ui, layer: LayerId, p: &LinkParam) -> Option<Value> {
     let t = p.default.get("t").and_then(Value::as_str).unwrap_or("");
     let v = p.value.get("v").unwrap_or(&Value::Null);
     let num = |x: &Value| x.as_f64().unwrap_or(0.0) as f32;
@@ -3069,121 +3019,6 @@ fn decal_symmetry_editor(app: &mut TextureCraftApp, ui: &mut Ui, decal: &Decal, 
 
     if let Some(change) = picked {
         app.run("layer.decal.set", with(base, change));
-    }
-}
-
-/// Space a fill channel's color swatch leaves at the group's right edge
-const CHANNEL_SWATCH_MARGIN: f32 = 4.0;
-/// Width of a pattern's low and high swatches
-const PATTERN_RANGE_SWATCH_WIDTH: f32 = 60.0;
-/// Size of the gradient map menu icon beside the fill source slot
-const FILL_CHANNEL_MENU_ICON_SIZE: f32 = 13.0;
-const GRADIENT_MAP_HINT: &str = n_("Colors the procedural or anchor from dark to light through color stops");
-
-/// The source slot, source settings and gradient map of one fill channel
-pub(crate) fn fill_channel(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: &Value, channel: Channel, anchors: &[(LayerId, String)], salt: &str) {
-    let tokens = Tokens::get(ui.ctx());
-    let set = |extra: Value| with(base, with(&json!({"channel": channel.id()}), extra));
-    let default_source = Source::uniform_of(channel);
-    let source = fill.sources.get(&channel).unwrap_or(&default_source);
-    let is_color = channel.kind() == ChannelKind::Color;
-    let group = ui.group(|ui| {
-        let slot = crate::fill_source_target::FillSourceTarget::Channel { base: base.clone(), channel };
-        if is_color {
-            ui.allocate_ui_with_layout(vec2(ui.available_width(), SLOT_HEIGHT), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.menu_button(RichText::new(ic::DOTS_THREE).size(FILL_CHANNEL_MENU_ICON_SIZE), |ui| gradient_map_item(app, ui, source, &set))
-                    .response
-                    .on_hover_text(tr(GRADIENT_MAP_HINT));
-                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                    crate::fill_source_slot::show(app, ui, &slot, source, (anchors, tr(channel.label())));
-                });
-            });
-        } else {
-            crate::fill_source_slot::show(app, ui, &slot, source, (anchors, tr(channel.label())));
-        }
-
-        match source {
-            Source::Uniform(value) if is_color => {
-                let mut value = *value;
-                if color_swatch(ui, &format!("fill_{salt}_{}", channel.id()), &mut value, ui.available_width() - CHANNEL_SWATCH_MARGIN) {
-                    app.run("layer.fill.set", set(json!({"color": value})));
-                }
-            }
-            Source::Uniform(value) => {
-                let mut value = value[0];
-                let range = if channel.kind() == ChannelKind::Signed { -1.0..=1.0 } else { 0.0..=1.0 };
-                if let Some(merge) = slider_edit(ui, tr("Value"), &mut value, range, 2) {
-                    app.run("layer.fill.set", set(json!({"value": value, "merge": merge})));
-                }
-            }
-            Source::Procedural { pattern, low, high, ramp } => {
-                let target = crate::pattern_target::PatternTarget {
-                    command: "layer.fill.set",
-                    base: with(base, json!({"channel": channel.id(), "low": low, "high": high})),
-                    salt: format!("{salt}_{}", channel.id()),
-                };
-                crate::pattern_panel::pattern_properties(app, ui, &target, pattern);
-                if is_color && ramp.is_empty() {
-                    let (mut low, mut high) = (*low, *high);
-                    let mut changed = false;
-                    ui.horizontal(|ui| {
-                        ui.label(tr("Low"));
-                        changed |= color_swatch(ui, &format!("lo_{salt}_{}", channel.id()), &mut low, PATTERN_RANGE_SWATCH_WIDTH);
-                        ui.label(tr("High"));
-                        changed |= color_swatch(ui, &format!("hi_{salt}_{}", channel.id()), &mut high, PATTERN_RANGE_SWATCH_WIDTH);
-                    });
-                    if changed {
-                        crate::pattern_panel::send(app, &target, pattern, json!({"low": low, "high": high}));
-                    }
-                }
-            }
-            Source::Image { name, normal_format } => {
-                ui.label(trf("Image: {name}", &[("name", name)]));
-                if channel.kind() == ChannelKind::NormalMap {
-                    let mut directx = *normal_format == texturecraft_engine::core::NormalFormat::DirectX;
-                    let toggle = ui
-                        .checkbox(&mut directx, tr("DirectX normal map"))
-                        .on_hover_text(tr("Flips the image's green channel, for normal maps made with Y pointing down"));
-                    if toggle.changed() {
-                        app.run("layer.fill.set", set(json!({"normalFormat": if directx { "directX" } else { "openGl" }})));
-                    }
-                }
-            }
-            Source::Anchor { anchor, channel: anchored, .. } => {
-                ui.label(RichText::new(anchor_label(app, *anchor, *anchored)).color(tokens.text_dim));
-            }
-        }
-
-        if is_color && !source.ramp().is_empty() {
-            ramp_editor(app, ui, source.ramp(), &format!("ramp_{salt}_{}", channel.id()), &set);
-        }
-    });
-
-    // A shelf image dropped on the channel becomes its source
-    if let Some(name) = image_drop(ui, &group.response.interact(Sense::hover())) {
-        app.run("layer.fill.set", set(json!({"image": name})));
-    }
-}
-
-/// The Gradient Map item beside a color channel's source slot: turns the color stops of its
-/// procedural (starting from its low and high, so the look holds) or anchor on, or off.
-fn gradient_map_item(app: &mut TextureCraftApp, ui: &mut Ui, source: &Source, set: &impl Fn(Value) -> Value) {
-    let can = matches!(source, Source::Procedural { .. } | Source::Anchor { .. });
-    let on = !source.ramp().is_empty();
-    let hint = tr(GRADIENT_MAP_HINT);
-    let item = ui.add_enabled_ui(can, |ui| ui.selectable_label(on, tr("Gradient Map"))).inner;
-    if item.on_hover_text(hint).on_disabled_hover_text(hint).clicked() {
-        let params = if on { json!({ "colors": [] }) } else { json!({ "gradientMap": true }) };
-        app.run("layer.fill.set", set(params));
-        ui.close();
-    }
-}
-
-/// The color stops of a fill channel's gradient map.
-fn ramp_editor(app: &mut TextureCraftApp, ui: &mut Ui, ramp: &[[f32; 3]], salt: &str, set: &impl Fn(Value) -> Value) {
-    let mut stops = ramp.to_vec();
-    if gradient_stops(ui, salt, &mut stops) {
-        app.run("layer.fill.set", set(json!({ "colors": stops })));
     }
 }
 

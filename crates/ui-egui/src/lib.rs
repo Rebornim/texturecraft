@@ -26,6 +26,7 @@ mod export_panel;
 pub mod export_templates;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_dialogs;
+mod fill_material_panel;
 mod fill_panel;
 mod fill_pictures;
 mod fill_placement;
@@ -53,6 +54,7 @@ mod line_snap;
 mod list_action;
 pub mod log_panel;
 mod mask_preview_image;
+mod material_orb;
 mod material_preview_image;
 pub mod menus;
 mod mesh_export_options;
@@ -83,6 +85,7 @@ pub mod properties_popup;
 mod property_sheet;
 mod rail_popup;
 pub mod render_mode;
+mod resolution_band;
 mod resource_panel;
 mod resource_picker;
 mod resource_picker_anchor;
@@ -104,6 +107,7 @@ pub mod shelf_preview;
 mod shelf_tabs;
 mod shelf_toolbar;
 pub mod shelf_view;
+mod slot_thumbnail;
 #[cfg(not(target_arch = "wasm32"))]
 mod smart_mask_menu;
 mod soft_box;
@@ -579,7 +583,8 @@ impl TextureCraftApp {
                     return false;
                 };
 
-                let resized = self.session.doc.project.texture_set(set).is_ok_and(|set| set.resolution != c.size);
+                // A cook for another size than the layer's picked or texture set resolution is redone
+                let resized = self.session.link_size(c.layer).is_ok_and(|now| now != c.size);
                 let baked = self.session.baked(set);
                 let stale = resized || c.baked_inputs.iter().any(|input| !input.is_current(baked));
                 done.push((c.layer, c.values.clone(), stale, result));

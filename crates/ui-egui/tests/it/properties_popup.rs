@@ -185,15 +185,15 @@ fn the_colour_picker_opened_in_the_popup_takes_its_presses_and_the_first_escape(
     harness.run_steps(25);
     harness.get_all_by_role_and_label(Role::Button, "Base color").find(|node| in_popup(node.rect())).unwrap().click();
     harness.run_steps(3);
-    let title = harness.get_by_role_and_label(Role::TitleBar, "Base color color").rect();
+    let title = harness.get_by_role_and_label(Role::TitleBar, "Base color").rect();
 
     click(&mut harness, PointerButton::Primary, title.center());
     assert!(is_open(&harness), "a press in the picker window stays in the popup");
-    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_some(), "and keeps the picker open");
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_some(), "and keeps the picker open");
 
     harness.key_press(Key::Escape);
     harness.run_steps(3);
-    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color color").is_none(), "the first Escape closes the picker");
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "the first Escape closes the picker");
     assert!(is_open(&harness), "and leaves the popup open");
     harness.key_press(Key::Escape);
     harness.run_steps(3);

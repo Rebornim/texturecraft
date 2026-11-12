@@ -26,6 +26,7 @@ use texturecraft_texel::{ColorSpace, DilationMap, linear_to_srgb};
 use crate::{FormatError, MAX_IMAGE_SIZE, Result};
 
 mod diffusion;
+mod jng;
 mod map_options;
 mod map_preview;
 mod preview;
@@ -95,10 +96,12 @@ pub enum FileFormat {
     Hdr,
     /// Netpbm grayscale (P5)
     Pgm,
+    /// JPEG Network Graphics: a JPEG with a lossless alpha channel
+    Jng,
 }
 
 impl FileFormat {
-    pub const ALL: [FileFormat; 9] = [
+    pub const ALL: [FileFormat; 10] = [
         FileFormat::Png,
         FileFormat::Jpeg,
         FileFormat::Tga,
@@ -108,6 +111,7 @@ impl FileFormat {
         FileFormat::Exr,
         FileFormat::Hdr,
         FileFormat::Pgm,
+        FileFormat::Jng,
     ];
 
     pub fn extension(self) -> &'static str {
@@ -121,6 +125,7 @@ impl FileFormat {
             FileFormat::Exr => "exr",
             FileFormat::Hdr => "hdr",
             FileFormat::Pgm => "pgm",
+            FileFormat::Jng => "jng",
         }
     }
 
@@ -1136,6 +1141,7 @@ fn write_image(format: FileFormat, bytes: &[u8], (w, h): (u32, u32), color: imag
             enc.write_image(bytes, w, h, color)?;
             return Ok(out.into_inner());
         }
+        FileFormat::Jng => return jng::write_jng(bytes, (w, h), color, JPEG_QUALITY, icc),
         FileFormat::Pgm => {
             let header = image::codecs::pnm::GraymapHeader {
                 encoding: image::codecs::pnm::SampleEncoding::Binary,

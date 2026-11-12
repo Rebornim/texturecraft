@@ -143,7 +143,7 @@ impl PropertySheet<'_> {
         signed: bool,
     ) -> Option<bool> {
         let id = self.next_id();
-        let dragged = self.track(id, label, &Track { start, end, center_y, signed }, value, range);
+        let dragged = self.track(id, label, &Track { start, end, center_y, signed, ramp: false }, value, range);
         let typed = self.value_field_at(id, value_right, SIDE_VALUE_WIDTH - 8.0, center_y, *value, typed_range, decimals, "");
         Self::apply_typed(value, typed, dragged)
     }

@@ -1,6 +1,7 @@
 use egui::{Align2, CornerRadius, FontId, Painter, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use egui_phosphor::regular as ic;
 
+use super::group::CARD_BLEED;
 use super::{PropertySheet, ROW_HEIGHT, SlotResponse, TEXT_SIZE};
 use crate::theme::semibold;
 
@@ -40,7 +41,7 @@ const DICE_WIDTH: f32 = 28.0;
 const BUTTON_ICON_GAP: f32 = 8.0;
 
 impl PropertySheet<'_> {
-    /// Opens a slot card with its top row: thumbnail, name over source, then ⟲, × and the toggle on the right
+    /// Opens a slot card with its top row: thumbnail, name over source, then ⟲, × and the toggle on the right; the row opens the source list
     pub(crate) fn slot(
         &mut self,
         thumbnail: &dyn Fn(&Painter, Rect),
@@ -56,26 +57,20 @@ impl PropertySheet<'_> {
         let center_y = rect.top() + SLOT_HEIGHT / 2.0;
         let enabled = on.as_deref().copied().unwrap_or(true);
         let has_toggle = on.is_some();
-        let mut result = SlotResponse::default();
-
         let thumb = Rect::from_min_size(pos2(self.left, center_y - THUMB_SIZE / 2.0), vec2(THUMB_SIZE, THUMB_SIZE));
         let clear_x = self.right - if has_toggle { CLEAR_INSET_WITH_TOGGLE } else { CLEAR_INSET };
         let reset_x = if clear { clear_x - RESET_STEP } else { clear_x };
-        let pick_end = if reset {
-            reset_x
-        } else if clear {
-            clear_x
-        } else {
-            self.right
-        } - 12.0;
+        // The whole row across the card picks the source, so its list hangs at the card's width; the glyphs on the right take their clicks first
+        let row = Rect::from_min_max(pos2(self.left - CARD_BLEED, rect.top()), pos2(self.right + CARD_BLEED, rect.bottom()));
         let pick_id = self.next_id();
-        let pick = self.ui.interact(Rect::from_min_max(thumb.min, pos2(pick_end, thumb.bottom())), pick_id, Sense::click());
-        result.pick = pick.clicked();
+        let pick = self.ui.interact(row, pick_id, Sense::click());
+        pick.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, name));
+        let mut result = SlotResponse { pick, clear: false, reset: false, toggled: false };
 
         let t = self.tokens;
         let painter = self.ui.painter().clone();
         thumbnail(&painter, thumb);
-        painter.rect_stroke(thumb, CornerRadius::ZERO, Stroke::new(1.0, if pick.hovered() { t.accent } else { t.field_border }), StrokeKind::Inside);
+        painter.rect_stroke(thumb, CornerRadius::ZERO, Stroke::new(1.0, if result.pick.hovered() { t.accent } else { t.field_border }), StrokeKind::Inside);
         let text_x = thumb.right() + THUMB_TO_NAME;
         let (name_font, name_color) = if enabled { (semibold(TEXT_SIZE), t.text) } else { (FontId::proportional(TEXT_SIZE), t.text_dim) };
         painter.text(pos2(text_x, center_y - 7.0), Align2::LEFT_CENTER, name, name_font, name_color);

@@ -407,7 +407,7 @@ pub fn color_swatch(ui: &mut Ui, id: &str, linear: &mut [f32; 3], width: f32) ->
 
 /// A color picker `width` wide: R, G, B (sRGB 0–255) with a copy button, a saturation/value
 /// square and a hue strip. Returns true when the color changed.
-fn color_picker(ui: &mut Ui, id: egui::Id, c: &mut Color32, width: f32) -> bool {
+pub(crate) fn color_picker(ui: &mut Ui, id: egui::Id, c: &mut Color32, width: f32) -> bool {
     use egui::ecolor::{hsv_from_rgb, rgb_from_hsv};
     let tk = Tokens::get(ui.ctx());
     let mut srgb = [c.r(), c.g(), c.b()];

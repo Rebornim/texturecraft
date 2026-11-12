@@ -1,4 +1,4 @@
-//! A fill channel takes an image resource from its source menu.
+//! A fill channel takes an image resource from its slot's source list
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -6,21 +6,11 @@ use serde_json::json;
 use texturecraft_engine::core::{Channel, LayerId, LayerKind, Source};
 use texturecraft_ui_egui::TextureCraftApp;
 
-/// The Roughness channel's name in Properties (the rightmost "Roughness" label).
-fn roughness<'a>(harness: &'a Harness<'_, TextureCraftApp>) -> egui_kittest::Node<'a> {
-    harness.get_all_by_label("Roughness").max_by(|a, b| a.rect().right().total_cmp(&b.rect().right())).unwrap()
-}
-
-/// Opens the source menu of the Roughness channel, which sits in the row of the channel's name.
+/// Opens the Roughness slot's source list on the Material tab, hanging at the card's width
 fn open_roughness_source_menu(harness: &mut Harness<'_, TextureCraftApp>) {
-    const ROW_CENTER_TOLERANCE_POINTS: f32 = 6.0;
-
-    // Allow the scroll animation to finish before locating the menu
-    roughness(harness).scroll_to_me();
-    harness.run_steps(30);
-    let row = roughness(harness).rect().center().y;
-    let menu = harness.get_all_by_label(egui_phosphor::regular::DOTS_THREE).find(|n| (n.rect().center().y - row).abs() < ROW_CENTER_TOLERANCE_POINTS).unwrap();
-    menu.click();
+    harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
+    harness.run_steps(3);
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Roughness").click();
     harness.run_steps(2);
 }
 
@@ -39,7 +29,7 @@ fn a_fill_channel_takes_an_image_from_its_source_menu() {
     harness.run_steps(4);
 
     open_roughness_source_menu(&mut harness);
-    harness.get_by_label(&name).click();
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, &name).click();
     harness.run_steps(3);
 
     let LayerKind::Fill(fill) = &harness.state().session.doc.project.layers[&layer].kind else { panic!("a fill layer") };
@@ -158,7 +148,7 @@ fn a_mask_fill_selects_an_image_edits_projection_and_returns_to_uniform() {
     assert!(matches!(effect, EffectKind::Fill { source: Source::Uniform(_), .. }));
 }
 
-/// An image on a fill's Normal channel offers a DirectX toggle that flips its green.
+/// An image on a fill's Normal channel offers OpenGL | DirectX in its Attributes; DirectX flips its green
 #[test]
 fn a_normal_image_can_be_marked_directx() {
     let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
@@ -172,9 +162,15 @@ fn a_normal_image_can_be_marked_directx() {
     h.state_mut().ui.prefs.language = "en".into();
     h.run_steps(4);
 
-    h.get_by_label("DirectX normal map").scroll_to_me();
+    h.get_by_role_and_label(egui::Role::Tab, "Material").click();
+    h.run_steps(3);
+    // The normal image's convention sits in the slot's folded Attributes
+    h.get_by_role_and_label(egui::Role::Button, "Attributes").scroll_to_me();
+    // The scroll animates for about twenty frames
     h.run_steps(30);
-    h.get_by_label("DirectX normal map").click();
+    h.get_by_role_and_label(egui::Role::Button, "Attributes").click();
+    h.run_steps(3);
+    h.get_by_role_and_label(egui::Role::RadioButton, "DirectX").click();
     h.run_steps(3);
 
     let LayerKind::Fill(fill) = &h.state().session.doc.project.layers[&layer].kind else { panic!("a fill layer") };

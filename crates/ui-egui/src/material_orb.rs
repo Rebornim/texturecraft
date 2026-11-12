@@ -1,145 +1,289 @@
-//! The Material section's orb: a lit sphere in the fill's base colour, metallic and roughness, rendered once per look and size
+//! The material orbs of the Properties panel: a sphere showing the whole material (every channel, height and normal relief
+//! included) lit by a photographed studio, rendered at its on-screen size in physical pixels, off the UI thread, cached by look
 
-use egui::{Color32, ColorImage, Painter, Rect, TextureHandle, TextureOptions, pos2};
+use egui::{Color32, ColorImage, Painter, Rect, pos2};
+use rayon::prelude::*;
+use texturecraft_engine::geom::glam::Vec3;
 use texturecraft_engine::texel::linear_to_srgb;
 
+use crate::orb_environment::OrbEnvironment;
+use crate::orb_material::{OrbMaterial, OrbSample, orb_coords};
+use crate::orb_previews::{OrbJob, OrbPreviews};
+use crate::preview_image::aces;
 use crate::theme::Tokens;
 
 /// Largest orb rendered, in physical pixels
-const MAX_SIDE_PX: usize = 256;
+const MAX_SIDE_PX: usize = 512;
 
 /// The sphere's radius in halves of the square
 const SPHERE_RADIUS: f32 = 0.84;
 
-/// Where the light comes from: upper left, in front (normalised below)
-const LIGHT: [f32; 3] = [-0.55, 0.6, 0.58];
-
-/// Light falling on the sphere and the ambient share that fills its dark side
-const LIGHT_STRENGTH: f32 = 2.6;
-const AMBIENT: f32 = 0.18;
-
 /// Reflectance of a non-metal seen face on
 const DIELECTRIC_F0: f32 = 0.04;
 
-/// Samples per pixel along each side
-const SUPERSAMPLE: usize = 2;
+/// The lowest roughness shaded (a perfect mirror aliases at orb sizes)
+const MIN_ROUGHNESS: f32 = 0.03;
 
-/// What the orb shows: linear base colour, metallic and roughness
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct OrbLook {
-    pub(crate) base: [f32; 3],
-    pub(crate) metallic: f32,
-    pub(crate) roughness: f32,
-}
+/// How deep the height channel's full range carves the surface, in orb radii
+const HEIGHT_DEPTH: f32 = 0.05;
 
-/// Draws the orb for `look` into `rect` on the panel's darkest backdrop
-pub(crate) fn material_orb(painter: &Painter, rect: Rect, look: OrbLook, tokens: &Tokens) {
-    material_orb_in(painter, rect, look, tokens, "");
-}
+/// Exposure before tone mapping
+const EXPOSURE: f32 = 0.55;
 
-/// [`material_orb`] cached under its own `place` as well, so a list drawing many orbs of one size keeps each of them
-pub(crate) fn material_orb_in(painter: &Painter, rect: Rect, look: OrbLook, tokens: &Tokens, place: &str) {
+/// Draws `material`'s orb into `rect` on the panel's darkest backdrop; each `place` keeps its last picture while a new one renders
+pub(crate) fn material_orb(painter: &Painter, rect: Rect, material: &OrbMaterial, tokens: &Tokens, place: &str) {
     let ctx = painter.ctx();
     let side = ((rect.width() * ctx.pixels_per_point()).round() as usize).clamp(1, MAX_SIDE_PX);
-    let key = format!("{side}{look:?}{:?}", tokens.chrome);
-    let id = egui::Id::unique(("material_orb", side, place));
-    // The picture and the key it was rendered for
-    let cached = ctx.data(|data| data.get_temp::<(String, TextureHandle)>(id)).filter(|(rendered, _)| *rendered == key);
-    let texture = match cached {
-        Some((_, texture)) => texture,
-        None => {
-            let texture = ctx.load_texture("material-orb", render(look, side, tokens.chrome), TextureOptions::LINEAR);
-            ctx.data_mut(|data| data.insert_temp(id, (key, texture.clone())));
-            texture
-        }
-    };
-    painter.image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    let job = OrbJob::new(material.clone(), side, tokens.chrome);
+    if let Some(texture) = OrbPreviews::texture(ctx, egui::Id::unique(("material_orb", place)), job) {
+        painter.image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    }
 }
 
-fn render(look: OrbLook, side: usize, backdrop: Color32) -> ColorImage {
-    let light = normalised(LIGHT);
-    let base = look.base.map(|c| c.clamp(0.0, 1.0));
-    let metallic = look.metallic.clamp(0.0, 1.0);
-    let roughness = look.roughness.clamp(0.04, 1.0);
-    let diffuse = base.map(|c| c * (1.0 - metallic));
-    let f0 = base.map(|c| DIELECTRIC_F0 + (c - DIELECTRIC_F0) * metallic);
+/// The orb `side` pixels square, on `backdrop`
+pub(crate) fn render(material: &OrbMaterial, side: usize, backdrop: Color32) -> ColorImage {
+    let side = side.clamp(1, MAX_SIDE_PX);
+    let env = OrbEnvironment::get();
     let back = [backdrop.r(), backdrop.g(), backdrop.b()].map(|c| f32::from(c) / 255.0);
-    let samples = (SUPERSAMPLE * SUPERSAMPLE) as f32;
-    let mut pixels = Vec::with_capacity(side * side);
-    for y in 0..side {
-        for x in 0..side {
-            let mut sum = [0.0_f32; 3];
-            for sy in 0..SUPERSAMPLE {
-                for sx in 0..SUPERSAMPLE {
-                    let u = ((x * SUPERSAMPLE + sx) as f32 + 0.5) / (side * SUPERSAMPLE) as f32 * 2.0 - 1.0;
-                    let v = 1.0 - ((y * SUPERSAMPLE + sy) as f32 + 0.5) / (side * SUPERSAMPLE) as f32 * 2.0;
-                    let shade = shade_at(u / SPHERE_RADIUS, v / SPHERE_RADIUS, light, diffuse, f0, roughness);
-                    let color = shade.map_or(back, |linear| linear.map(|c| linear_to_srgb(c / (1.0 + c))));
-                    for (total, part) in sum.iter_mut().zip(color) {
-                        *total += part;
-                    }
-                }
+    // One pixel in orb radii: the step for the height slope and the reach of the anti-aliased outline
+    let pixel = 2.0 / (side as f32 * SPHERE_RADIUS);
+    let uniform = (!material.varies()).then(|| material.sample(&orb_coords(Vec3::Y), 1.0));
+    let mut pixels = vec![Color32::TRANSPARENT; side * side];
+    pixels.par_chunks_mut(side).enumerate().for_each(|(y, row)| {
+        for (x, out) in row.iter_mut().enumerate() {
+            let u = ((x as f32 + 0.5) / side as f32 * 2.0 - 1.0) / SPHERE_RADIUS;
+            let v = (1.0 - (y as f32 + 0.5) / side as f32 * 2.0) / SPHERE_RADIUS;
+            let distance = (u * u + v * v).sqrt();
+            let coverage = ((1.0 - distance) / pixel + 0.5).clamp(0.0, 1.0);
+            if coverage <= 0.0 {
+                *out = backdrop;
+                continue;
             }
-            let [r, g, b] = sum.map(|c| (c / samples * 255.0).round().clamp(0.0, 255.0) as u8);
-            pixels.push(Color32::from_rgb(r, g, b));
+            // Pixels on the outline shade the sphere's rim
+            let (u, v) = if distance > 1.0 { (u / distance, v / distance) } else { (u, v) };
+            let normal = Vec3::new(u, v, (1.0 - u * u - v * v).max(0.0).sqrt());
+            let (linear, opacity) = shade(material, env, normal, pixel, uniform);
+            let alpha = coverage * opacity;
+            let [r, g, b] = [0, 1, 2].map(|k| {
+                let shown = linear_to_srgb(aces(linear[k] * EXPOSURE));
+                ((back[k] + (shown - back[k]) * alpha) * 255.0).round().clamp(0.0, 255.0) as u8
+            });
+            *out = Color32::from_rgb(r, g, b);
         }
-    }
+    });
     ColorImage::new([side, side], pixels)
 }
 
-/// The linear light leaving the sphere at (`u`, `v`) in sphere radii (None off the sphere): lambert diffuse, a GGX highlight and an ambient fill
-fn shade_at(u: f32, v: f32, light: [f32; 3], diffuse: [f32; 3], f0: [f32; 3], roughness: f32) -> Option<[f32; 3]> {
-    let z2 = 1.0 - u * u - v * v;
-    if z2 <= 0.0 {
-        return None;
+/// The linear light leaving the orb at view-space unit `direction` from its centre, and the material's opacity there
+fn shade(material: &OrbMaterial, env: &OrbEnvironment, direction: Vec3, pixel: f32, uniform: Option<OrbSample>) -> ([f32; 3], f32) {
+    // Facing the viewer, the orb's poles sit on its outline, where their UV pinch does not show
+    let coords = orb_coords(direction);
+    let footprint = pixel * std::f32::consts::FRAC_1_PI;
+    let sample = uniform.unwrap_or_else(|| material.sample(&coords, footprint));
+    // Tangent frame on the material: east along the UVs, then north
+    let east = Vec3::new(-direction.z, 0.0, direction.x).try_normalize().unwrap_or(Vec3::X);
+    let north = direction.cross(east).try_normalize().unwrap_or(Vec3::Y);
+    let mapped = Vec3::from(sample.normal.map(|c| c * 2.0 - 1.0));
+    let mut surface = (east * mapped.x + north * mapped.y + direction * mapped.z).try_normalize().unwrap_or(direction);
+    if material.has_relief() {
+        let height = material.height(&coords, footprint);
+        let slope = |toward: Vec3| (material.height(&orb_coords((direction + toward * pixel).normalize()), footprint) - height) / pixel;
+        surface = (surface - (east * slope(east) + north * slope(north)) * HEIGHT_DEPTH).try_normalize().unwrap_or(surface);
     }
-    let normal = [u, v, z2.sqrt()];
-    let n_dot_l = dot(normal, light).max(0.0);
-    let half = normalised([light[0], light[1], light[2] + 1.0]);
-    let n_dot_h = dot(normal, half).max(0.0);
-    let alpha = roughness * roughness;
-    let alpha2 = alpha * alpha;
-    let denominator = n_dot_h * n_dot_h * (alpha2 - 1.0) + 1.0;
-    let highlight = alpha2 / (std::f32::consts::PI * denominator * denominator) * 0.25;
-    // The sky above lights the upper half more than the ground lights the lower
-    let sky = AMBIENT * (0.6 + 0.4 * normal[1]);
+
+    let normal = surface;
+    let roughness = sample.roughness.clamp(MIN_ROUGHNESS, 1.0);
+    let metallic = sample.metallic.clamp(0.0, 1.0);
+    let normal_dot_view = normal.z.max(1e-4);
+    // Mirror the direction towards the viewer (+Z) about the normal
+    let reflected = (2.0 * normal_dot_view * normal - Vec3::Z).normalize_or_zero();
+    let specular_light = env.reflected(reflected, roughness);
+    let diffuse_light = env.diffuse(normal);
+    let (scale, bias) = environment_brdf(roughness, normal_dot_view);
     let mut out = [0.0; 3];
     for (k, value) in out.iter_mut().enumerate() {
-        *value = diffuse[k] * (n_dot_l * LIGHT_STRENGTH / std::f32::consts::PI + sky) + f0[k] * (highlight * n_dot_l * LIGHT_STRENGTH + sky * 2.0);
+        let base = sample.base[k].clamp(0.0, 1.0);
+        let f0 = DIELECTRIC_F0 + (base - DIELECTRIC_F0) * metallic;
+        let specular = f0 * scale + bias;
+        *value = diffuse_light[k] * base * (1.0 - metallic) * (1.0 - specular) + specular_light[k] * specular + sample.emissive[k].max(0.0);
     }
-    Some(out)
+    (out, sample.opacity.clamp(0.0, 1.0))
 }
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn normalised(v: [f32; 3]) -> [f32; 3] {
-    let length = dot(v, v).sqrt().max(f32::EPSILON);
-    v.map(|c| c / length)
+/// The split-sum environment BRDF as scale and bias on F0, from Karis' analytic fit for mobile (no lookup table)
+fn environment_brdf(roughness: f32, normal_dot_view: f32) -> (f32, f32) {
+    let r = [1.0 - roughness, roughness * -0.0275 + 0.0425, roughness * -0.572 + 1.04, roughness * 0.022 - 0.04];
+    let a004 = (r[0] * r[0]).min((-9.28 * normal_dot_view).exp2()) * r[0] + r[1];
+    (a004 * -1.04 + r[2], a004 * 1.04 + r[3])
 }
 
 #[cfg(test)]
 mod tests {
+    use texturecraft_engine::core::{Channel, Fill, Procedural, ProceduralKind, Source};
+
     use super::*;
 
-    const COPPER: OrbLook = OrbLook { base: [0.8, 0.35, 0.18], metallic: 1.0, roughness: 0.35 };
+    const BACKDROP: Color32 = Color32::from_rgb(27, 31, 39);
+
+    fn copper() -> OrbMaterial {
+        OrbMaterial::uniform([0.8, 0.35, 0.18], 1.0, 0.35)
+    }
+
+    fn at(image: &ColorImage, x: usize, y: usize) -> Color32 {
+        image.pixels.get(y * image.size[0] + x).copied().unwrap_or_default()
+    }
+
+    /// Mean of how far each pixel's channels spread apart (0 = gray)
+    fn saturation(image: &ColorImage) -> f32 {
+        let spread = |pixel: &Color32| f32::from(pixel.r().max(pixel.g()).max(pixel.b()) - pixel.r().min(pixel.g()).min(pixel.b()));
+        let shown: Vec<f32> = image.pixels.iter().filter(|pixel| **pixel != BACKDROP).map(spread).collect();
+        shown.iter().sum::<f32>() / shown.len().max(1) as f32
+    }
 
     #[test]
     fn the_orb_sits_on_its_backdrop_and_shows_its_colour() {
-        let backdrop = Color32::from_rgb(27, 31, 39);
-        let image = render(COPPER, 64, backdrop);
-        assert_eq!(image.pixels[0], backdrop, "the corner is off the sphere");
-        let middle = image.pixels[32 * 64 + 32];
+        let image = render(&copper(), 64, BACKDROP);
+        assert_eq!(image.pixels[0], BACKDROP, "the corner is off the sphere");
+        let middle = at(&image, 32, 32);
         assert!(middle.r() > middle.b(), "copper is warm: {middle:?}");
     }
 
     #[test]
     fn rougher_materials_spread_their_highlight() {
         let peak = |roughness: f32| {
-            let image = render(OrbLook { roughness, ..COPPER }, 64, Color32::BLACK);
+            let image = render(&OrbMaterial::uniform([0.8, 0.35, 0.18], 1.0, roughness), 64, Color32::BLACK);
             image.pixels.iter().map(|pixel| pixel.r()).max().unwrap_or(0)
         };
-        assert!(peak(0.2) > peak(0.9), "a polished orb has a brighter hot spot");
+        assert!(peak(0.1) > peak(0.9), "a polished orb has a brighter hot spot");
+    }
+
+    #[test]
+    fn a_metal_reflects_the_studio_in_its_own_colour() {
+        // The studio's soft boxes and dark walls show as bright and dark bands across a polished metal, tinted by its colour
+        let image = render(&OrbMaterial::uniform([0.95, 0.64, 0.54], 1.0, 0.15), 96, BACKDROP);
+        let lightness: Vec<u8> = image.pixels.iter().filter(|pixel| **pixel != BACKDROP).map(|pixel| pixel.r()).collect();
+        let (darkest, brightest) = (lightness.iter().min().copied().unwrap_or(0), lightness.iter().max().copied().unwrap_or(0));
+        assert!(brightest - darkest > 120, "reflections show light and dark: {darkest}..{brightest}");
+        assert!(saturation(&image) > 25.0, "copper stays coloured, not gray: {}", saturation(&image));
+    }
+
+    fn fill_with(channel: Channel, source: Source) -> Fill {
+        let mut fill = Fill::default();
+        fill.sources.insert(channel, source);
+        fill
+    }
+
+    #[test]
+    fn every_channel_shows_on_the_orb_relief_included() {
+        let flat = render(&OrbMaterial::of_fill(&Fill::default(), &[Channel::BaseColor, Channel::Height, Channel::Normal], &Default::default()), 64, BACKDROP);
+        let pattern = Procedural::new(ProceduralKind::Cells);
+        for channel in [Channel::BaseColor, Channel::Roughness, Channel::Height, Channel::Normal] {
+            let (low, high) = match channel {
+                Channel::Normal => ([0.2, 0.5, 0.9], [0.8, 0.5, 0.9]),
+                Channel::Height => ([-1.0; 3], [1.0; 3]),
+                _ => ([0.0; 3], [1.0; 3]),
+            };
+            let fill = fill_with(channel, Source::Procedural { pattern: pattern.clone(), low, high });
+            let on = [Channel::BaseColor, Channel::Roughness, Channel::Height, Channel::Normal];
+            let shown = render(&OrbMaterial::of_fill(&fill, &on, &Default::default()), 64, BACKDROP);
+            let changed = shown.pixels.iter().zip(&flat.pixels).filter(|(a, b)| a != b).count();
+            assert!(changed > 64 * 64 / 4, "{channel:?} changes the orb: {changed} pixels");
+            let off = render(&OrbMaterial::of_fill(&fill, &[], &Default::default()), 64, BACKDROP);
+            let flat_off = render(&OrbMaterial::of_fill(&Fill::default(), &[], &Default::default()), 64, BACKDROP);
+            assert_eq!(off.pixels, flat_off.pixels, "{channel:?} switched off shows its default");
+        }
+    }
+
+    #[test]
+    fn an_image_source_shows_on_the_orb() {
+        use std::sync::Arc;
+        use texturecraft_engine::compose::ImageRes;
+
+        // Left half black, right half white
+        let rgba = (0..64 * 64).map(|i| if i % 64 < 32 { [0.0, 0.0, 0.0, 1.0] } else { [1.0; 4] }).collect();
+        let images = std::collections::HashMap::from([("stripes".to_owned(), Arc::new(ImageRes::new(64, 64, rgba, false)))]);
+        let fill = fill_with(Channel::BaseColor, Source::Image { name: "stripes".into(), normal_format: Default::default() });
+        let image = render(&OrbMaterial::of_fill(&fill, &[Channel::BaseColor], &images), 64, BACKDROP);
+        let lightness: Vec<u8> = image.pixels.iter().filter(|pixel| **pixel != BACKDROP).map(|pixel| pixel.g()).collect();
+        let (darkest, brightest) = (lightness.iter().min().copied().unwrap_or(0), lightness.iter().max().copied().unwrap_or(0));
+        assert!(brightest - darkest > 100, "the black and white halves both show: {darkest}..{brightest}");
+        let missing = render(&OrbMaterial::of_fill(&fill, &[Channel::BaseColor], &Default::default()), 64, BACKDROP);
+        assert_ne!(missing.pixels, image.pixels, "a missing image reads the default");
+    }
+
+    #[test]
+    fn hostile_sizes_and_values_render_without_panicking() {
+        for side in [0, 1, 2, 100_000] {
+            let image = render(&OrbMaterial::uniform([f32::NAN, f32::INFINITY, -1.0], f32::NAN, f32::NEG_INFINITY), side, BACKDROP);
+            assert!(image.size[0] >= 1 && image.size[0] <= MAX_SIDE_PX);
+        }
+    }
+
+    #[test]
+    fn the_orb_renders_at_its_size_on_screen_times_the_screen_scale() {
+        use std::time::{Duration, Instant};
+
+        use crate::orb_previews::OrbPreviews;
+
+        // 160 points: wider than the old 256-pixel cap once doubled
+        for scale in [1.0_f32, 2.0] {
+            let ctx = egui::Context::default();
+            ctx.set_pixels_per_point(scale);
+            let material = copper();
+            let expected = (160.0 * scale) as usize;
+            let start = Instant::now();
+            while OrbPreviews::shown_size(&ctx, "hidpi") != Some([expected, expected]) && start.elapsed() < Duration::from_secs(20) {
+                let mut output = ctx.run_pass(Default::default(), |ctx| {
+                    let painter = ctx.layer_painter(egui::LayerId::background());
+                    let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(160.0, 160.0));
+                    material_orb(&painter, rect, &material, &Tokens::get(ctx), "hidpi");
+                });
+                // Nothing draws these textures here
+                output.textures_delta.clear();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(OrbPreviews::shown_size(&ctx, "hidpi"), Some([expected, expected]), "at {scale}x");
+        }
+    }
+
+    /// Milliseconds per orb, written by `cargo test --release -p texturecraft-ui-egui --lib -- orb_render_timing --ignored --nocapture`
+    #[test]
+    #[ignore = "a timing, not a check"]
+    fn orb_render_timing() {
+        use std::time::Instant;
+
+        use texturecraft_engine::compose::ImageRes;
+
+        let started = Instant::now();
+        crate::orb_environment::OrbEnvironment::get();
+        eprintln!("studio prefilter (once): {:.1} ms", started.elapsed().as_secs_f64() * 1000.0);
+        let rgba = (0..512 * 512).map(|i| [(i % 512) as f32 / 512.0, 0.5, (i / 512) as f32 / 512.0, 1.0]).collect();
+        let images = std::collections::HashMap::from([("photo".to_owned(), std::sync::Arc::new(ImageRes::new(512, 512, rgba, true)))]);
+        let mut complex = Fill::default();
+        complex.sources.insert(Channel::BaseColor, Source::Image { name: "photo".into(), normal_format: Default::default() });
+        complex.sources.insert(Channel::Roughness, Source::Procedural { pattern: Procedural::new(ProceduralKind::Clouds), low: [0.2; 3], high: [0.8; 3] });
+        complex.sources.insert(Channel::Height, Source::Procedural { pattern: Procedural::new(ProceduralKind::Cells), low: [-1.0; 3], high: [1.0; 3] });
+        complex
+            .sources
+            .insert(Channel::Normal, Source::Procedural { pattern: Procedural::new(ProceduralKind::Perlin), low: [0.3, 0.5, 0.9], high: [0.7, 0.5, 0.9] });
+        let on = [Channel::BaseColor, Channel::Roughness, Channel::Height, Channel::Normal];
+        let looks = [("uniform", copper()), ("image+procedurals+height+normal", OrbMaterial::of_fill(&complex, &on, &images))];
+        for (name, look) in looks {
+            for side in [25, 100, 200, 400] {
+                let runs = 10;
+                let started = Instant::now();
+                for _ in 0..runs {
+                    std::hint::black_box(render(&look, side, BACKDROP));
+                }
+                eprintln!("{name} {side}px: {:.2} ms", started.elapsed().as_secs_f64() * 1000.0 / f64::from(runs));
+            }
+        }
+    }
+
+    #[test]
+    fn the_key_changes_with_the_look_and_only_with_it() {
+        let a = OrbMaterial::uniform([0.8, 0.35, 0.18], 1.0, 0.35);
+        assert_eq!(a.key(), copper().key());
+        assert_ne!(a.key(), OrbMaterial::uniform([0.8, 0.35, 0.18], 1.0, 0.36).key());
     }
 }

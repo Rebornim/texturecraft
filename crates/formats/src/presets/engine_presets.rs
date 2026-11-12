@@ -275,6 +275,26 @@ pub(super) fn engine_presets() -> Vec<ExportPreset> {
                 project_normal("normal"),
             ],
         ),
+        // Roblox SurfaceAppearance: colour with opacity in alpha, OpenGL normal (all Roblox reads), suffixes its importer assigns
+        preset(
+            "Roblox (SurfaceAppearance)",
+            vec![
+                map("Color", 8, base_with_alpha()),
+                map("Normal", 8, normal(VirtualMap::NormalOpenGl)),
+                gray8("Metalness", Channel::Metallic),
+                gray8("Roughness", Channel::Roughness),
+            ],
+        ),
+        // Roblox MaterialVariant: the same maps, its colour without alpha (MaterialVariant doesn't use it)
+        preset(
+            "Roblox (MaterialVariant)",
+            vec![
+                rgb8("Color", Channel::BaseColor),
+                map("Normal", 8, normal(VirtualMap::NormalOpenGl)),
+                gray8("Metalness", Channel::Metallic),
+                gray8("Roughness", Channel::Roughness),
+            ],
+        ),
         // USD preview surface inputs, one map each
         preset(
             "USDZ (AR)",

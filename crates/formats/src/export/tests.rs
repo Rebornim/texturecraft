@@ -1201,6 +1201,39 @@ fn engine_presets_follow_their_targets_layouts() {
     assert_eq!(sss, [(Dest::L, SourceRef::Channel { channel: Channel::ScatterWeight, component: 0 })]);
 }
 
+/// A built-in preset's maps: each one's file name end and its (destination, source) pairs
+fn preset_maps(name: &str) -> Vec<(String, Vec<(Dest, SourceRef)>)> {
+    let preset = builtin_preset(name).unwrap_or_else(|| panic!("no built-in preset \"{name}\""));
+    preset.maps.into_iter().map(|map| (map.file.rsplit('_').next().unwrap_or_default().to_string(), map.channels)).collect()
+}
+
+/// The file name ends of a built-in preset's maps
+fn preset_files(name: &str) -> Vec<String> {
+    preset_maps(name).into_iter().map(|(file, _)| file).collect()
+}
+
+/// What `name`'s map ending in `file` writes into `dest`
+fn preset_source(name: &str, file: &str, dest: Dest) -> SourceRef {
+    let maps = preset_maps(name);
+    let (_, channels) = maps.iter().find(|(end, _)| end == file).unwrap_or_else(|| panic!("{name} has no {file}"));
+    channels.iter().find(|(channel_dest, _)| *channel_dest == dest).unwrap_or_else(|| panic!("{name} {file} writes no {dest:?}")).1.clone()
+}
+
+#[test]
+fn reference_presets_follow_their_targets_layouts() {
+    let opengl = SourceRef::Virtual { map: VirtualMap::NormalOpenGl, component: 0 };
+    let channel = |channel| SourceRef::Channel { channel, component: 0 };
+
+    // Roblox: suffixes its importer assigns, OpenGL normals; only SurfaceAppearance reads alpha
+    for roblox in ["Roblox (SurfaceAppearance)", "Roblox (MaterialVariant)"] {
+        assert_eq!(preset_files(roblox), ["Color", "Normal", "Metalness", "Roughness"]);
+        assert_eq!(preset_source(roblox, "Normal", Dest::R), opengl);
+        assert_eq!(preset_source(roblox, "Metalness", Dest::L), channel(Channel::Metallic));
+    }
+    assert_eq!(preset_source("Roblox (SurfaceAppearance)", "Color", Dest::A), channel(Channel::Opacity));
+    assert!(preset_maps("Roblox (MaterialVariant)")[0].1.iter().all(|(dest, _)| *dest != Dest::A), "MaterialVariant colour has no alpha");
+}
+
 #[test]
 fn a_map_preview_holds_the_values_its_file_stores() {
     let mut fx = Fx::new(&default_channels());

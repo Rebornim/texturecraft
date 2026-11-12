@@ -1,6 +1,7 @@
 use egui::{Align, Layout, RichText, Sense, Stroke, Ui, UiBuilder, vec2};
 use egui_phosphor::regular as icon;
 use serde_json::json;
+use texturecraft_engine::ViewMode;
 use texturecraft_engine::core::{BakeSettings, BakeSyncGroup, BakedMap};
 
 use super::set_picker::SetPicker;
@@ -128,8 +129,20 @@ fn row(app: &mut TextureCraftApp, ui: &mut Ui, map: BakedMap, settings: &mut Bak
             SetPicker::open(app, ui.ctx(), SetPickerPurpose::Sync(BakeSyncGroup::Map(map)));
         }
         if show_icons {
-            let _ = icon_button(ui, icon::LIGHTNING, &trf("Bake {map} Only", &[("map", &name)]), false, ROW_BUTTON_SIZE);
-            let _ = icon_button(ui, icon::EYE, &trf("Show {map} in the Viewport", &[("map", &name)]), false, ROW_BUTTON_SIZE);
+            let baking = app.bake_progress().is_some();
+            if ui
+                .add_enabled_ui(!baking, |ui| icon_button(ui, icon::LIGHTNING, &trf("Bake {map} Only", &[("map", &name)]), false, ROW_BUTTON_SIZE))
+                .inner
+                .clicked()
+            {
+                let active = app.session.ts();
+                app.start_bake_of(vec![active], Some(map));
+            }
+            let shown = app.session.view == ViewMode::MeshMap(map);
+            if icon_button(ui, icon::EYE, &trf("Show {map} in the Viewport", &[("map", &name)]), shown, ROW_BUTTON_SIZE).clicked() {
+                let mode = if shown { "material".to_owned() } else { format!("map:{}", map.id()) };
+                app.run("viewport.view", json!({ "mode": mode }));
+            }
         }
         let text = if is_selected { RichText::new(name).strong() } else { RichText::new(name) };
         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {

@@ -315,6 +315,11 @@ impl TextureCraftApp {
     /// Start baking texture sets in the background, one after another. Invalid set indices
     /// show an error without starting a preview or queuing any work.
     pub fn start_bake(&mut self, sets: Vec<usize>) {
+        self.start_bake_of(sets, None);
+    }
+
+    /// Bake `sets`: only map `only` when given, else each set's checked maps
+    pub fn start_bake_of(&mut self, sets: Vec<usize>, only: Option<texturecraft_engine::core::BakedMap>) {
         if self.bake.is_some() || sets.is_empty() {
             return;
         }
@@ -322,13 +327,18 @@ impl TextureCraftApp {
         // Restore the picker's view before the preview starts following baked maps
         id_color_pick::IdColorPick::end(self);
 
-        if let Err(error) = self.session.bake_preview_begin_for(&sets) {
-            self.toast(error.to_string(), true);
-            return;
+        match only {
+            Some(map) => self.session.bake_preview_begin(sets.iter().map(|set| (*set, vec![map])).collect()),
+            None => {
+                if let Err(error) = self.session.bake_preview_begin_for(&sets) {
+                    self.toast(error.to_string(), true);
+                    return;
+                }
+            }
         }
 
         let total = sets.len();
-        self.bake = Some(BakeJob { queue: sets, current: None, total });
+        self.bake = Some(BakeJob { queue: sets, current: None, total, only });
     }
 
     /// Re-cook MaterialCraft material layer `layer` in the background. While one cook of the layer
@@ -440,9 +450,13 @@ impl TextureCraftApp {
         }
 
         let set_index = job.queue.remove(0);
+        let only = job.only;
         self.session.bake_preview_set_current(set_index);
         match self.session.bake_task(set_index) {
-            Ok(task) => {
+            Ok(mut task) => {
+                if let Some(map) = only {
+                    task.settings.maps.select([map]);
+                }
                 let progress = Arc::new(Progress::new());
                 let worker_progress = progress.clone();
                 let maps_total = task.maps().len();

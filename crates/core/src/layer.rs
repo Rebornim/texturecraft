@@ -11,10 +11,13 @@ mod axis_layer;
 mod curvature_detail;
 mod curvature_mode;
 mod generator_global;
+mod grayscale_conversion;
 mod light_parameters;
 mod output_resolution;
 mod resolution_mode;
 mod section_parameters;
+mod texture_blend;
+mod texture_layer;
 mod wear_parameters;
 
 pub use axis_blend::AxisBlend;
@@ -22,10 +25,13 @@ pub use axis_layer::AxisLayer;
 pub use curvature_detail::CurvatureDetail;
 pub use curvature_mode::CurvatureMode;
 pub use generator_global::GeneratorGlobal;
+pub use grayscale_conversion::GrayscaleConversion;
 pub use light_parameters::LightParameters;
 pub use output_resolution::OutputResolution;
 pub use resolution_mode::ResolutionMode;
 pub use section_parameters::SectionParameters;
+pub use texture_blend::TextureBlend;
+pub use texture_layer::TextureLayer;
 pub use wear_parameters::WearParameters;
 
 /// Id of a layer or effect (one id space per project).
@@ -642,6 +648,9 @@ pub struct Generator {
     /// The Light generator's controls (None: the level, softness and noise above, as saved before they existed)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub light: Option<LightParameters>,
+    /// The texture blended over the signal on the section controls (None: Use Texture never touched, as saved before it existed)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texture: Option<TextureLayer>,
 }
 
 impl Generator {
@@ -672,6 +681,16 @@ impl Generator {
     pub fn inputs_in_use(&self) -> &'static [BakedMap] {
         let reads_geometry = self.on_earlier_model() && matches!(self.kind, GeneratorKind::Position | GeneratorKind::Direction);
         if reads_geometry { &[] } else { self.kind.inputs() }
+    }
+
+    /// The texture the generator blends over its signal: only on the section controls, turned on with some opacity
+    pub fn texture_in_use(&self) -> Option<&TextureLayer> {
+        self.texture.as_ref().filter(|texture| texture.in_use() && self.section_controls().is_some())
+    }
+
+    /// Everything the generator reads instead of its mesh maps: its inputs, then its texture
+    pub fn sources(&self) -> impl Iterator<Item = &Source> {
+        self.inputs.values().chain(self.texture.as_ref().and_then(|texture| texture.source.as_ref()))
     }
 
     /// Whether the generator is on the level, softness and noise it had before the reference app's controls
@@ -709,6 +728,7 @@ impl Generator {
             wear: WearParameters::defaults(kind),
             section: SectionParameters::defaults(kind),
             light: LightParameters::defaults(kind),
+            texture: None,
         }
     }
 
@@ -1184,7 +1204,7 @@ impl EffectKind {
         match self {
             EffectKind::Fill { source, .. } => source.anchor().is_some(),
             EffectKind::Material(fill) => fill.sources.values().any(|source| source.anchor().is_some()),
-            EffectKind::Generator(generator) => generator.inputs.values().any(|source| source.anchor().is_some()),
+            EffectKind::Generator(generator) => generator.sources().any(|source| source.anchor().is_some()),
             _ => false,
         }
     }
@@ -1194,7 +1214,7 @@ impl EffectKind {
         let sources: Vec<&Source> = match self {
             EffectKind::Fill { source, .. } => vec![source],
             EffectKind::Material(fill) => fill.sources.values().collect(),
-            EffectKind::Generator(generator) => generator.inputs.values().collect(),
+            EffectKind::Generator(generator) => generator.sources().collect(),
             _ => Vec::new(),
         };
         sources
@@ -1210,7 +1230,7 @@ impl EffectKind {
     pub fn images_read(&self) -> impl Iterator<Item = &str> {
         let sources: Vec<&Source> = match self {
             EffectKind::Fill { source, .. } => vec![source],
-            EffectKind::Generator(generator) => generator.inputs.values().collect(),
+            EffectKind::Generator(generator) => generator.sources().collect(),
             _ => Vec::new(),
         };
         sources.into_iter().filter_map(|source| match source {

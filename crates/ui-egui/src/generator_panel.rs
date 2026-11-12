@@ -4,8 +4,8 @@ use egui::{RichText, Ui};
 use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::core::{
-    AxisBlend, BakedMap, CurvatureDetail, CurvatureMode, Generator, GeneratorKind, LayerId, LightParameters, OutputResolution, ResolutionMode,
-    SectionParameters, Source, WearParameters,
+    AxisBlend, BakedMap, CurvatureDetail, CurvatureMode, Generator, GeneratorKind, GrayscaleConversion, LayerId, LightParameters, OutputResolution,
+    ResolutionMode, SectionParameters, Source, TextureBlend, TextureLayer, WearParameters,
 };
 
 use crate::TextureCraftApp;
@@ -62,6 +62,7 @@ pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer
             // Saved before the section or light controls, a generator shows them at their defaults: editing one moves it onto them
             if let Some(defaults) = SectionParameters::defaults(generator.kind) {
                 section_parameters(app, ui, id, generator, generator.section_controls().unwrap_or(defaults));
+                texture_parameters(app, ui, id, generator.texture.clone().unwrap_or_default());
             }
             if let Some(defaults) = LightParameters::defaults(generator.kind) {
                 light_parameters(app, ui, id, None, defaults);
@@ -70,15 +71,19 @@ pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button(tr("Restore defaults")).clicked() {
-                    app.run("effect.set", defaults_of(id, generator.kind));
+                    app.run("effect.set", defaults_of(id, generator));
                 }
             });
         });
     });
-    if !generator.inputs_in_use().is_empty() {
+    let texture = generator.texture.as_ref().filter(|texture| texture.enabled && SectionParameters::defaults(generator.kind).is_some());
+    if !generator.inputs_in_use().is_empty() || texture.is_some() {
         section(ui, "generator_inputs", tr("Image inputs"), true, |ui| {
+            if let Some(texture) = texture {
+                input_slot(app, ui, (layer, id), InputSlot::Texture, texture.source.as_ref(), false);
+            }
             for map in generator.inputs_in_use() {
-                input_slot(app, ui, (layer, id), *map, generator.inputs.get(map), generator.detail_in_use().is_some());
+                input_slot(app, ui, (layer, id), InputSlot::Map(*map), generator.inputs.get(map), generator.detail_in_use().is_some());
             }
         });
     }
@@ -304,7 +309,8 @@ fn random_seed(current: u32) -> u32 {
 }
 
 /// The `effect.set` params that put generator effect `id` back to the defaults of its kind.
-fn defaults_of(id: u64, kind: GeneratorKind) -> Value {
+fn defaults_of(id: u64, generator: &Generator) -> Value {
+    let kind = generator.kind;
     let defaults = Generator::new(kind);
     let params = json!({
         "effect": id,
@@ -320,6 +326,10 @@ fn defaults_of(id: u64, kind: GeneratorKind) -> Value {
     let own = match (&defaults.wear, &defaults.section, &defaults.light) {
         (Some(wear), _, _) => wear_params(kind, wear),
         (None, _, Some(light)) => light_params(light),
+        // The texture's controls only once it has them: its image stays in its slot
+        (None, Some(section), None) if generator.texture.is_some() => {
+            merged(merged(section_params(kind, section), global), texture_params(&TextureLayer::default()))
+        }
         (None, Some(section), None) => merged(section_params(kind, section), global),
         (None, None, None) => json!({
             "level": defaults.level,
@@ -421,6 +431,58 @@ fn section_params(kind: GeneratorKind, section: &SectionParameters) -> Value {
 }
 
 /// The translated name of axis blending mode `blend`
+/// Use Texture and, once it is on, the texture's controls and its opacity
+fn texture_parameters(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, shown: TextureLayer) {
+    let mut edited = shown;
+    let mut edit = true_false(ui, tr("Use texture"), &mut edited.enabled).then_some(false);
+    if edited.enabled {
+        section(ui, "generator_texture", tr("Texture"), true, |ui| {
+            edit = edit.or(true_false(ui, tr("Invert"), &mut edited.invert).then_some(false));
+            combo(ui, tr("Grayscale conversion"), tr(edited.grayscale.label()), |ui| {
+                for mode in GrayscaleConversion::ALL {
+                    if ui.selectable_label(mode == edited.grayscale, tr(mode.label())).clicked() {
+                        edited.grayscale = mode;
+                        edit = Some(false);
+                    }
+                }
+            });
+            combo(ui, tr("Blending mode"), tr(edited.blend.label()), |ui| {
+                for blend in TextureBlend::ALL {
+                    if ui.selectable_label(blend == edited.blend, tr(blend.label())).clicked() {
+                        edited.blend = blend;
+                        edit = Some(false);
+                    }
+                }
+            });
+            edit = edit.or(slider_edit(ui, tr("Scale"), &mut edited.scale, TextureLayer::SCALE_RANGE, 2));
+            edit = edit.or(slider_edit(ui, tr("Contrast"), &mut edited.contrast, -1.0..=1.0, 2));
+            edit = edit.or(slider_edit(ui, tr("Brightness"), &mut edited.brightness, -1.0..=1.0, 2));
+            edit = edit.or(true_false(ui, tr("Triplanar"), &mut edited.triplanar).then_some(false));
+            edit = edit.or(slider_edit(ui, tr("Triplanar contrast"), &mut edited.triplanar_contrast, TextureLayer::TRIPLANAR_CONTRAST_RANGE, 2));
+        });
+        edit = edit.or(slider_edit(ui, tr("Texture opacity"), &mut edited.opacity, 0.0..=1.0, 2));
+    }
+    if let Some(merge) = edit {
+        app.run("effect.set", merged(json!({"effect": id, "merge": merge}), texture_params(&edited)));
+    }
+}
+
+/// The texture controls as `effect.set` keys (its image is the `texture` input)
+fn texture_params(texture: &TextureLayer) -> Value {
+    json!({
+        "useTexture": texture.enabled,
+        "textureOpacity": texture.opacity,
+        "textureInvert": texture.invert,
+        "textureGrayscale": texture.grayscale.id(),
+        "textureBlend": texture.blend.id(),
+        "textureScale": texture.scale,
+        "textureContrast": texture.contrast,
+        "textureBrightness": texture.brightness,
+        "textureTriplanar": texture.triplanar,
+        "textureTriplanarContrast": texture.triplanar_contrast,
+    })
+}
+
 fn axis_blend_label(blend: AxisBlend) -> &'static str {
     match blend {
         AxisBlend::Normal => tr("Normal"),
@@ -540,26 +602,62 @@ fn curvature_mode_label(mode: CurvatureMode) -> &'static str {
     }
 }
 
-/// One input of generator effect `id` on `layer`: what it reads (its mesh map unless `source` replaces it), a menu to replace it, and a button to read the mesh map again.
-fn input_slot(app: &mut TextureCraftApp, ui: &mut Ui, (layer, id): (LayerId, u64), map: BakedMap, source: Option<&Source>, detail_sizes: bool) {
+/// What an image input slot of a generator replaces: a mesh map it reads, or its texture
+#[derive(Clone, Copy)]
+enum InputSlot {
+    Map(BakedMap),
+    Texture,
+}
+
+impl InputSlot {
+    /// The input's name in `effect.set`
+    fn id(self) -> &'static str {
+        match self {
+            InputSlot::Map(map) => map.id(),
+            InputSlot::Texture => "texture",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            InputSlot::Map(map) => tr(baked_map_label(map)),
+            InputSlot::Texture => tr("Texture"),
+        }
+    }
+
+    /// The value a slot set to a uniform value starts at
+    fn neutral(self) -> f32 {
+        match self {
+            InputSlot::Map(map) => map.neutral()[0],
+            InputSlot::Texture => 0.0,
+        }
+    }
+}
+
+/// One image input: what it reads now, a menu to replace it with a value, an anchor point or an image, and a button to empty it
+fn input_slot(app: &mut TextureCraftApp, ui: &mut Ui, (layer, id): (LayerId, u64), slot: InputSlot, source: Option<&Source>, detail_sizes: bool) {
     let tokens = Tokens::get(ui.ctx());
-    let input = map.id();
-    let current = match source {
-        None => trf("Mesh map: {map}", &[("map", &tr(baked_map_label(map)))]),
-        Some(Source::Image { name, .. }) => trf("Image: {name}", &[("name", name)]),
-        Some(Source::Uniform(_)) => tr("Uniform value").to_string(),
-        Some(Source::Anchor { anchor, channel }) => anchor_label(app, *anchor, *channel),
-        Some(Source::Procedural { .. }) => tr("Procedural").to_string(),
+    let input = slot.id();
+    let current = match (source, slot) {
+        (None, InputSlot::Map(map)) => trf("Mesh map: {map}", &[("map", &tr(baked_map_label(map)))]),
+        (None, InputSlot::Texture) | (Some(Source::Uniform(_)), _) => tr("Uniform value").to_string(),
+        (Some(Source::Image { name, .. }), _) => trf("Image: {name}", &[("name", name)]),
+        (Some(Source::Anchor { anchor, channel }), _) => anchor_label(app, *anchor, *channel),
+        (Some(Source::Procedural { .. }), _) => tr("Procedural").to_string(),
+    };
+    let empty_hint = match slot {
+        InputSlot::Map(_) => tr("Read the mesh map again"),
+        InputSlot::Texture => tr("Empty the slot"),
     };
     let group = ui.group(|ui| {
         ui.horizontal(|ui| {
-            input_tile(app, ui, map, source);
+            input_tile(app, ui, slot, source);
             ui.vertical(|ui| {
-                ui.label(RichText::new(tr(baked_map_label(map))).strong());
+                ui.label(RichText::new(slot.title()).strong());
                 ui.label(RichText::new(&current).size(NOTE_FONT_SIZE).color(tokens.text_dim));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if source.is_some() && ui.button(ic::X).on_hover_text(tr("Read the mesh map again")).clicked() {
+                if source.is_some() && ui.button(ic::X).on_hover_text(empty_hint).clicked() {
                     app.run("effect.set", json!({"effect": id, "input": input, "inputBaked": true}));
                 }
             });
@@ -568,11 +666,14 @@ fn input_slot(app: &mut TextureCraftApp, ui: &mut Ui, (layer, id): (LayerId, u64
         ui.push_id(input, |ui| {
             combo(ui, tr("Source"), current.clone(), |ui| {
                 let anchors = anchors_below(app, layer);
-                if ui.selectable_label(source.is_none(), tr("Mesh map")).clicked() {
+                if let InputSlot::Map(_) = slot
+                    && ui.selectable_label(source.is_none(), tr("Mesh map")).clicked()
+                {
                     app.run("effect.set", json!({"effect": id, "input": input, "inputBaked": true}));
                 }
-                if ui.selectable_label(matches!(source, Some(Source::Uniform(_))), tr("Uniform value")).clicked() {
-                    app.run("effect.set", json!({"effect": id, "input": input, "inputValue": map.neutral()[0]}));
+                let uniform = matches!(source, Some(Source::Uniform(_))) || (source.is_none() && matches!(slot, InputSlot::Texture));
+                if ui.selectable_label(uniform, tr("Uniform value")).clicked() {
+                    app.run("effect.set", json!({"effect": id, "input": input, "inputValue": slot.neutral()}));
                 }
                 for (anchor, label) in &anchors {
                     if ui
@@ -590,13 +691,18 @@ fn input_slot(app: &mut TextureCraftApp, ui: &mut Ui, (layer, id): (LayerId, u64
                 }
             })
         });
-        if let Some(Source::Uniform(value)) = source {
-            let mut value = value[0];
-            if let Some(merge) = slider_edit(ui, tr("Value"), &mut value, 0.0..=1.0, 2) {
-                app.run("effect.set", json!({"effect": id, "input": input, "inputValue": value, "merge": merge}));
-            }
+        let uniform = match (source, slot) {
+            (Some(Source::Uniform(value)), _) => Some(value[0]),
+            (None, InputSlot::Texture) => Some(slot.neutral()),
+            _ => None,
+        };
+        if let Some(mut value) = uniform
+            && let Some(merge) = slider_edit(ui, tr("Value"), &mut value, 0.0..=1.0, 2)
+        {
+            app.run("effect.set", json!({"effect": id, "input": input, "inputValue": value, "merge": merge}));
         }
-        if detail_sizes && map == BakedMap::Curvature && source.is_some_and(|source| !matches!(source, Source::Uniform(_))) {
+        let replaced_curvature = matches!(slot, InputSlot::Map(BakedMap::Curvature)) && source.is_some_and(|source| !matches!(source, Source::Uniform(_)));
+        if detail_sizes && replaced_curvature {
             ui.label(
                 RichText::new(tr("Detail sizes blur the mesh map, so a replaced curvature input is read at its own size only."))
                     .size(NOTE_FONT_SIZE)
@@ -609,14 +715,15 @@ fn input_slot(app: &mut TextureCraftApp, ui: &mut Ui, (layer, id): (LayerId, u64
     }
 }
 
-/// The picture of what an input reads: the image itself, the uniform value's gray, or the mesh map's swatch (as in the texture set's list).
-fn input_tile(app: &mut TextureCraftApp, ui: &mut Ui, map: BakedMap, source: Option<&Source>) {
+/// The picture beside an image input: its image, its value as gray, an icon for an anchor or a procedural, else its mesh map's color (black for an empty texture)
+fn input_tile(app: &mut TextureCraftApp, ui: &mut Ui, slot: InputSlot, source: Option<&Source>) {
     let tokens = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(egui::vec2(INPUT_TILE_SIZE, INPUT_TILE_SIZE), egui::Sense::hover());
     let painter = ui.painter();
     let whole = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-    match source {
-        Some(Source::Image { name, .. }) => match app.session.images.get(name) {
+    let gray = |value: f32| egui::Color32::from_gray((value.clamp(0.0, 1.0) * 255.0).round() as u8);
+    match (source, slot) {
+        (Some(Source::Image { name, .. }), _) => match app.session.images.get(name) {
             Some(image) => {
                 let texture = app.thumbs.image(ui.ctx(), name, image);
                 painter.image(texture.id(), rect, whole, egui::Color32::WHITE);
@@ -625,15 +732,18 @@ fn input_tile(app: &mut TextureCraftApp, ui: &mut Ui, map: BakedMap, source: Opt
                 painter.rect_filled(rect, INPUT_TILE_ROUNDING, tokens.button);
             }
         },
-        Some(Source::Uniform(value)) => {
-            painter.rect_filled(rect, INPUT_TILE_ROUNDING, egui::Color32::from_gray((value[0].clamp(0.0, 1.0) * 255.0).round() as u8));
+        (Some(Source::Uniform(value)), _) => {
+            painter.rect_filled(rect, INPUT_TILE_ROUNDING, gray(value[0]));
         }
-        Some(Source::Anchor { .. } | Source::Procedural { .. }) => {
+        (Some(Source::Anchor { .. } | Source::Procedural { .. }), _) => {
             let glyph = if matches!(source, Some(Source::Anchor { .. })) { ic::ANCHOR } else { ic::MAGIC_WAND };
             painter.rect_filled(rect, INPUT_TILE_ROUNDING, tokens.button);
             painter.text(rect.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(INPUT_TILE_ICON_SIZE), tokens.text_dim);
         }
-        None => {
+        (None, InputSlot::Texture) => {
+            painter.rect_filled(rect, INPUT_TILE_ROUNDING, gray(slot.neutral()));
+        }
+        (None, InputSlot::Map(map)) => {
             let baked = app.session.doc.baked.get(&app.session.ts()).is_some_and(|baked| baked.maps.contains_key(&map));
             painter.rect_filled(rect, INPUT_TILE_ROUNDING, if baked { mesh_map_color(map) } else { tokens.button });
         }

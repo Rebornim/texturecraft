@@ -16,6 +16,7 @@ pub mod eval;
 pub mod pattern;
 mod sections;
 pub mod store;
+mod texture_layer;
 pub mod thumb;
 mod wear;
 mod wear_inputs;

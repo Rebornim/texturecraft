@@ -281,3 +281,60 @@ fn section_panel_snapshots() {
         harness.render().unwrap().save(directory.join(format!("section-panel-{kind}.png"))).unwrap();
     }
 }
+
+#[test]
+fn use_texture_shows_the_texture_rows_and_its_slot() {
+    let (harness, _) = harness_with(false, json!({"generator": "position"}));
+    assert_eq!(count(&harness, "Use texture"), 1);
+    for label in ["Grayscale conversion", "Texture opacity", "Triplanar contrast", "Texture"] {
+        assert_eq!(count(&harness, label), 0, "{label} waits for Use texture");
+    }
+
+    let (harness, _) = harness_with(false, json!({"generator": "position", "useTexture": true}));
+    for label in ["Grayscale conversion", "Texture opacity", "Triplanar", "Triplanar contrast", "Scale"] {
+        assert_eq!(count(&harness, label), 1, "{label}");
+    }
+    assert_eq!(count(&harness, "Texture"), 2, "the Texture section and the Texture slot in Image inputs");
+    assert_eq!(count(&harness, "Blending mode"), 4, "the texture's beside the three axes'");
+
+    let (harness, _) = harness_with(false, json!({"generator": "dirt"}));
+    assert_eq!(count(&harness, "Use texture"), 0, "wear generators have no texture");
+}
+
+#[test]
+fn the_texture_slot_reads_a_uniform_value_until_it_is_given_one() {
+    let (mut harness, effect) = harness_with(false, json!({"generator": "ambientOcclusion", "useTexture": true}));
+    let slot = |harness: &Harness<'_, TextureCraftApp>| {
+        harness.get_all_by_role(Role::ComboBox).filter(|node| node.value().as_deref() == Some("Uniform value")).count()
+    };
+    assert_eq!(slot(&harness), 1, "an empty texture slot is a uniform value");
+    assert_eq!(count(&harness, "Value"), 1, "with its value slider");
+
+    harness.get_all_by_role(Role::ComboBox).find(|node| node.value().as_deref() == Some("Uniform value")).unwrap().scroll_to_me();
+    harness.run_steps(3);
+    harness.get_all_by_role(Role::ComboBox).find(|node| node.value().as_deref() == Some("Uniform value")).unwrap().click();
+    harness.run_steps(2);
+    assert_eq!(count(&harness, "Mesh map"), 0, "the texture has no mesh map to go back to");
+    // The slot's heading also reads "Uniform value": the menu entry is the button
+    harness.get_by_role_and_label(Role::Button, "Uniform value").click();
+    harness.run_steps(3);
+    let texture = generator(&harness, effect).texture.unwrap();
+    assert_eq!(texture.source, Some(Source::Uniform([0.0; 3])));
+}
+
+#[test]
+#[ignore = "requires a GPU adapter and TC_UI_SNAPSHOTS"]
+fn texture_panel_snapshots() {
+    let directory = std::path::PathBuf::from(std::env::var_os("TC_UI_SNAPSHOTS").expect("set TC_UI_SNAPSHOTS"));
+    std::fs::create_dir_all(&directory).unwrap();
+    for kind in ["position", "ambientOcclusion"] {
+        let (mut harness, _) = harness_with(true, json!({"generator": kind, "useTexture": true, "textureOpacity": 0.6, "textureBlend": "normal"}));
+        harness.get_by_label("Use texture").scroll_to_me();
+        harness.run_steps(12);
+        for (brightness, name) in [(Brightness::MediumDark, "medium"), (Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            harness.run_steps(3);
+            harness.render().unwrap().save(directory.join(format!("texture-panel-{kind}-{name}.png"))).unwrap();
+        }
+    }
+}

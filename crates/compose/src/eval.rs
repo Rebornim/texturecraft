@@ -23,6 +23,7 @@ use crate::curvature_sizes::{CurvatureSizes, LEVEL_RADII};
 use crate::pattern::{Coords, decal_uv, image_samples, procedural, world_noise};
 use crate::sections;
 use crate::store::{BakedMaps, ImageStore, PixelStore, decode};
+use crate::texture_layer;
 use crate::wear;
 use crate::wear_inputs::WearInputs;
 
@@ -644,7 +645,7 @@ fn filter_region(
         _ => None,
     };
     let components = match job {
-        Job::Mask(_) if generator.is_some() => 2,
+        Job::Mask(_) if generator.is_some() => GENERATOR_STAGE_COMPONENTS,
         Job::Mask(_) => 1,
         Job::Content(_) => 4,
     };
@@ -687,7 +688,8 @@ fn filter_region(
                     let value = match (&mask, nodes.first()) {
                         (Some(mask_stack), _) => {
                             let ramp = generator.map_or(0.0, |(generator, _)| texel.generator_ramp(generator, generator_sizes.as_deref()));
-                            [texel.mask(mask_stack), ramp, 0.0, 0.0]
+                            let texture = generator.and_then(|(generator, _)| texel.generator_texture(generator)).unwrap_or(0.0);
+                            [texel.mask(mask_stack), ramp, texture, 0.0]
                         }
                         (None, Some(node)) => match node.chans.first().and_then(|channel_plan| texel.content(&node.content, channel_plan)) {
                             Some((color, coverage)) => [color[0] * coverage, color[1] * coverage, color[2] * coverage, coverage],
@@ -798,7 +800,13 @@ fn filter_region(
     Some(Field { x0: region_x, y0: region_y, w: width, h: height, comps: field_components, data: result })
 }
 
-/// The mask over a region after a generator at its own resolution and blur: `stack` is (stack below, generator ramp) per texel, sizes in texels per side.
+/// What a generator's texture reads with nothing in its slot
+const EMPTY_TEXTURE_SLOT: Source = Source::Uniform([0.0; 3]);
+
+/// Values per texel of a generator stage's region: the stack below, the generator's ramp and its texture's gray
+const GENERATOR_STAGE_COMPONENTS: usize = 3;
+
+/// The mask over a region after a generator at its own resolution and blur: `stack` is (stack below, generator ramp, texture gray) per texel, sizes in texels per side
 fn generator_region(
     generator: &Generator,
     blend: BlendMode,
@@ -809,7 +817,7 @@ fn generator_region(
     (uv_tile, texture_set): (u32, u32),
 ) -> Vec<f32> {
     let (columns, rows) = (width as usize, height as usize);
-    let mut ramps: Vec<f32> = stack.par_chunks(2).map(|texel| texel.get(1).copied().unwrap_or(0.0)).collect();
+    let mut ramps: Vec<f32> = stack.par_chunks(GENERATOR_STAGE_COMPONENTS).map(|texel| texel.get(1).copied().unwrap_or(0.0)).collect();
 
     // Coarser than the UV tile: averaged over cells, then the blur around them
     let cell = generator.resolution.cell(uv_tile, texture_set) as usize;
@@ -823,11 +831,18 @@ fn generator_region(
         ramps.par_iter_mut().for_each(|signal| *signal = sections::adjusted(generator.kind, &section, *signal));
     }
 
+    // The texture blends over the adjusted signal, before the global blur
+    if let Some(texture) = generator.texture_in_use() {
+        ramps.par_iter_mut().zip(stack.par_chunks(GENERATOR_STAGE_COMPONENTS)).for_each(|(signal, texel)| {
+            *signal = texture_layer::blended_over(texture, *signal, texel.get(2).copied().unwrap_or(0.0));
+        });
+    }
+
     blur_over_cover(&mut ramps, cover, (columns, rows), generator.applied_global().blur_radius_at(uv_tile).round() as usize);
 
     // Finished and blended over the stack below, like the generator effect itself
     stack
-        .par_chunks(2)
+        .par_chunks(GENERATOR_STAGE_COMPONENTS)
         .zip(ramps.par_iter())
         .map(|(texel, ramp)| {
             let below = texel.first().copied().unwrap_or(0.0);
@@ -1538,7 +1553,38 @@ impl<'a, 'b> Texel<'a, 'b> {
     fn generator(&mut self, generator: &Generator, curvature_sizes: Option<&CurvatureSizes>) -> f32 {
         let ramp = self.generator_ramp(generator, curvature_sizes);
         let adjusted = generator.section_controls().map_or(ramp, |section| sections::adjusted(generator.kind, &section, ramp));
-        finish_generator(generator, adjusted)
+        let textured = match (generator.texture_in_use(), self.generator_texture(generator)) {
+            (Some(texture), Some(gray)) => texture_layer::blended_over(texture, adjusted, gray),
+            _ => adjusted,
+        };
+        finish_generator(generator, textured)
+    }
+
+    /// The gray of the generator's texture at this texel (None when it blends no texture)
+    fn generator_texture(&mut self, generator: &Generator) -> Option<f32> {
+        let texture = generator.texture_in_use()?;
+        let rgb = match texture.source.as_ref().unwrap_or(&EMPTY_TEXTURE_SLOT) {
+            Source::Image { name, .. } => {
+                let image = self.inp.images.get(name)?.clone();
+                let read = |coordinates: Vec2| {
+                    let [red, green, blue, _] = image.sample(coordinates.x, coordinates.y);
+                    Vec3::new(red, green, blue)
+                };
+                if texture.triplanar {
+                    let normal = self
+                        .generator_input_color(generator, BakedMap::WorldNormal)
+                        .map_or_else(|| self.coords().nrm, |encoded| Vec3::from(encoded) * 2.0 - 1.0);
+                    let weights = texture_layer::triplanar_weights(texture, normal);
+                    let coordinates = texture_layer::triplanar_coordinates(texture, self.bounds_position());
+                    weights.iter().zip(coordinates).fold(Vec3::ZERO, |sum, (weight, at)| sum + read(at) * *weight).to_array()
+                } else {
+                    read(texture_layer::uv_coordinates(texture, self.coords().uv)).to_array()
+                }
+            }
+            // A value or an anchor reads the same wherever it is projected
+            other => self.source(other, &Projection::default(), ChannelKind::NormalMap),
+        };
+        Some(texture_layer::texture_gray(texture, rgb))
     }
 
     /// Generator input `map` at this texel: what replaces the mesh map in the generator's inputs, else the mesh map (None when not baked).

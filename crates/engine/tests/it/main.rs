@@ -13,6 +13,7 @@ mod filters;
 mod generator_inputs;
 mod generator_sections;
 mod generator_swap;
+mod generator_texture;
 mod generator_wear;
 mod high_poly_missed;
 mod instances;

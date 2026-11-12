@@ -2,8 +2,9 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    AxisBlend, BakedMap, BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels,
-    LightParameters, Mask, MaskBackground, OutputResolution, Procedural, ProceduralKind, Project, ResolutionMode, SectionParameters, Source, WearParameters,
+    AxisBlend, BakedMap, BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind,
+    GrayscaleConversion, LayerId, Levels, LightParameters, Mask, MaskBackground, OutputResolution, Procedural, ProceduralKind, Project, ResolutionMode,
+    SectionParameters, Source, TextureBlend, WearParameters,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
@@ -49,7 +50,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add generator",
             ["Layers", "Effects"],
             None,
-            "{layer?, name?, generator?: edgeWear|dirt|fiberGlassEdgeWear|thinAreas|curvature|ambientOcclusion|position|worldSpaceNormals|direction, wearLevel?, wearContrast?, grungeAmount?, grungeScale?: 1..16, triplanar?, triplanarContrast?, edgesSmoothness?: 0..16, aoMasking?, curvatureWeight?, edgesMasking? (wear controls: edgeWear, fiberGlassEdgeWear and dirt), sectionInvert?, sectionBlur?: 0..16 (ambientOcclusion, worldSpaceNormals), sectionBalance? (not curvature), sectionContrast?, sectionBrightness?: -1..1 (not ambientOcclusion), rightLeft|topBottom|frontBack + Invert?|Blend?: normal|add|subtract|multiply|addSub|max|Weight? (position, worldSpaceNormals) (section controls: curvature, ambientOcclusion, position, worldSpaceNormals), lightHorizontal?: 0..360, lightVertical?: 0..360, highlightGlossiness?, highlightLevel?, lightAttenuation? (light controls: direction), level?, softness?, noise?, noiseScale?, offset?: -1..1 added to the result, direction? (instead keep edgeWear, dirt, curvature, ambientOcclusion, position and direction on the earlier model), invert?, blur?: 0..1, balance?: 0..1 (0.5 unchanged), contrast?: 0..1, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3 (1/8..x8), mode?: edges|cavities|both|raw, sizes?: [7 weights 0..1, finest first] (curvature and edgeWear)}",
+            "{layer?, name?, generator?: edgeWear|dirt|fiberGlassEdgeWear|thinAreas|curvature|ambientOcclusion|position|worldSpaceNormals|direction, wearLevel?, wearContrast?, grungeAmount?, grungeScale?: 1..16, triplanar?, triplanarContrast?, edgesSmoothness?: 0..16, aoMasking?, curvatureWeight?, edgesMasking? (wear controls: edgeWear, fiberGlassEdgeWear and dirt), sectionInvert?, sectionBlur?: 0..16 (ambientOcclusion, worldSpaceNormals), sectionBalance? (not curvature), sectionContrast?, sectionBrightness?: -1..1 (not ambientOcclusion), rightLeft|topBottom|frontBack + Invert?|Blend?: normal|add|subtract|multiply|addSub|max|Weight? (position, worldSpaceNormals), useTexture?, textureOpacity?, textureInvert?, textureGrayscale?: desaturation|luma|average|max|min|red|green|blue, textureBlend?: normal|add|subtract|multiply|addSub|max|min|overlay|screen|softLight, textureScale?: 0.01..10, textureContrast?: -1..1, textureBrightness?: -1..1, textureTriplanar?, textureTriplanarContrast? (the texture itself: effect.set input: texture) (section controls: curvature, ambientOcclusion, position, worldSpaceNormals), lightHorizontal?: 0..360, lightVertical?: 0..360, highlightGlossiness?, highlightLevel?, lightAttenuation? (light controls: direction), level?, softness?, noise?, noiseScale?, offset?: -1..1 added to the result, direction? (instead keep edgeWear, dirt, curvature, ambientOcclusion, position and direction on the earlier model), invert?, blur?: 0..1, balance?: 0..1 (0.5 unchanged), contrast?: 0..1, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3 (1/8..x8), mode?: edges|cavities|both|raw, sizes?: [7 weights 0..1, finest first] (curvature and edgeWear)}",
             has_layer,
             add_generator
         ),
@@ -94,7 +95,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), generator?: kind (a generator effect only: swaps its kind in place, starting from that kind's defaults), wear, section and light controls (see effect.add.generator), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), generator?: kind (a generator effect only: swaps its kind in place, starting from that kind's defaults), wear, section and light controls (see effect.add.generator), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id or texture + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -412,10 +413,38 @@ const AXIS_SUFFIXES: [&str; 3] = ["Invert", "Blend", "Weight"];
 /// The Light generator's controls
 const LIGHT_KEYS: [&str; 5] = ["lightHorizontal", "lightVertical", "highlightGlossiness", "highlightLevel", "lightAttenuation"];
 
-/// The section controls, the axis keys and the light controls `params` gives
+/// The texture controls (Use Texture); the texture itself is the `texture` input
+const TEXTURE_KEYS: [&str; 10] = [
+    "useTexture",
+    "textureOpacity",
+    "textureInvert",
+    "textureGrayscale",
+    "textureBlend",
+    "textureScale",
+    "textureContrast",
+    "textureBrightness",
+    "textureTriplanar",
+    "textureTriplanarContrast",
+];
+
+/// The input name of a generator's texture, beside the mesh map ids
+const TEXTURE_INPUT: &str = "texture";
+
+/// The section controls, the axis keys, the texture controls and the light controls `params` gives (a texture input counts as `texture`)
 fn given_new_model_keys(params: &Value) -> Vec<String> {
     let axis_keys = AXIS_NAMES.iter().flat_map(|axis| AXIS_SUFFIXES.iter().map(move |suffix| format!("{axis}{suffix}")));
-    SECTION_KEYS.iter().chain(LIGHT_KEYS.iter()).map(|key| key.to_string()).chain(axis_keys).filter(|key| params.get(key).is_some()).collect()
+    let mut keys: Vec<String> = SECTION_KEYS
+        .iter()
+        .chain(TEXTURE_KEYS.iter())
+        .chain(LIGHT_KEYS.iter())
+        .map(|key| key.to_string())
+        .chain(axis_keys)
+        .filter(|key| params.get(key).is_some())
+        .collect();
+    if strp(params, "input") == Some(TEXTURE_INPUT) {
+        keys.push(TEXTURE_INPUT.to_string());
+    }
+    keys
 }
 
 /// The section and light controls in `params`: they move a generator onto them, while level, softness, noise, offset or direction keep it on the earlier model
@@ -524,6 +553,44 @@ fn section_from(command: &str, params: &Value, generator: &mut Generator) -> Res
         }
     }
     generator.section = Some(section.clamped(kind));
+    texture_from(command, params, generator)
+}
+
+/// The texture controls in `params` (the generator is on its section controls already)
+fn texture_from(command: &str, params: &Value, generator: &mut Generator) -> Result<()> {
+    if !TEXTURE_KEYS.iter().any(|key| params.get(*key).is_some()) {
+        return Ok(());
+    }
+    let mut texture = generator.texture.clone().unwrap_or_default();
+    if let Some(enabled) = boolp(params, "useTexture") {
+        texture.enabled = enabled;
+    }
+    for (key, value) in [
+        ("textureOpacity", &mut texture.opacity),
+        ("textureScale", &mut texture.scale),
+        ("textureContrast", &mut texture.contrast),
+        ("textureBrightness", &mut texture.brightness),
+        ("textureTriplanarContrast", &mut texture.triplanar_contrast),
+    ] {
+        if let Some(given) = f32p(params, key) {
+            *value = given;
+        }
+    }
+    if let Some(invert) = boolp(params, "textureInvert") {
+        texture.invert = invert;
+    }
+    if let Some(triplanar) = boolp(params, "textureTriplanar") {
+        texture.triplanar = triplanar;
+    }
+    if let Some(value) = params.get("textureGrayscale") {
+        let name = value.as_str().ok_or_else(|| bad(command, "`textureGrayscale` must be a string"))?;
+        texture.grayscale = GrayscaleConversion::parse(name).ok_or_else(|| bad(command, format!("unknown grayscale conversion `{name}`")))?;
+    }
+    if let Some(value) = params.get("textureBlend") {
+        let name = value.as_str().ok_or_else(|| bad(command, "`textureBlend` must be a string"))?;
+        texture.blend = TextureBlend::parse(name).ok_or_else(|| bad(command, format!("unknown blending mode `{name}`")))?;
+    }
+    generator.texture = Some(texture.clamped());
     Ok(())
 }
 
@@ -531,7 +598,8 @@ fn section_from(command: &str, params: &Value, generator: &mut Generator) -> Res
 pub fn section_key_applies(kind: GeneratorKind, key: &str) -> bool {
     let axis_key = AXIS_NAMES.iter().any(|axis| key.strip_prefix(axis).is_some_and(|suffix| AXIS_SUFFIXES.contains(&suffix)));
     match key {
-        "sectionInvert" | "sectionContrast" => SectionParameters::defaults(kind).is_some(),
+        "sectionInvert" | "sectionContrast" | TEXTURE_INPUT => SectionParameters::defaults(kind).is_some(),
+        _ if TEXTURE_KEYS.contains(&key) => SectionParameters::defaults(kind).is_some(),
         "sectionBlur" => SectionParameters::has_blur(kind),
         "sectionBalance" => SectionParameters::has_balance(kind),
         "sectionBrightness" => SectionParameters::has_brightness(kind),
@@ -625,12 +693,22 @@ fn size_weights(command: &str, value: &Value) -> Result<[f32; CurvatureDetail::S
     Ok(weights)
 }
 
-/// The generator input named by `input` and what replaces it (None: its mesh map again), for a generator on layer `owner`.
-fn generator_input_param(session: &Session, owner: LayerId, params: &Value) -> Result<Option<(BakedMap, Option<Source>)>> {
+/// A generator input a command names: a mesh map it reads, or its texture
+#[derive(Clone, Copy)]
+enum GeneratorInput {
+    Map(BakedMap),
+    Texture,
+}
+
+/// The generator input named by `input` and what replaces it (None: its mesh map again, or an empty texture slot), for a generator on layer `owner`
+fn generator_input_param(session: &Session, owner: LayerId, params: &Value) -> Result<Option<(GeneratorInput, Option<Source>)>> {
     const CMD: &str = "effect.set";
     let Some(name) = params.get("input") else { return Ok(None) };
-    let name = name.as_str().ok_or_else(|| bad(CMD, "`input` must be a mesh map id"))?;
-    let map = BakedMap::parse(name).ok_or_else(|| bad(CMD, format!("unknown input `{name}`")))?;
+    let name = name.as_str().ok_or_else(|| bad(CMD, "`input` must be a mesh map id or `texture`"))?;
+    let input = match name {
+        TEXTURE_INPUT => GeneratorInput::Texture,
+        _ => GeneratorInput::Map(BakedMap::parse(name).ok_or_else(|| bad(CMD, format!("unknown input `{name}`")))?),
+    };
 
     let image = strp(params, "inputImage");
     let value = f32p(params, "inputValue");
@@ -651,7 +729,7 @@ fn generator_input_param(session: &Session, owner: LayerId, params: &Value) -> R
         (None, None, None, true) => None,
         _ => return Err(bad(CMD, "`input` takes exactly one of inputImage, inputValue, inputAnchor or inputBaked")),
     };
-    Ok(Some((map, source)))
+    Ok(Some((input, source)))
 }
 
 fn add_generator(session: &mut Session, params: &Value) -> Result<Value> {
@@ -799,14 +877,19 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         match &mut edited.kind {
             EffectKind::Generator(generator) => {
                 generator_from(CMD, params, generator)?;
-                if let Some((map, source)) = input {
-                    if !generator.inputs_in_use().contains(&map) {
-                        return Err(bad(CMD, format!("this generator does not read a `{}` input", map.id())));
+                match input {
+                    Some((GeneratorInput::Map(map), source)) => {
+                        if !generator.inputs_in_use().contains(&map) {
+                            return Err(bad(CMD, format!("this generator does not read a `{}` input", map.id())));
+                        }
+                        match source {
+                            Some(source) => generator.inputs.insert(map, source),
+                            None => generator.inputs.remove(&map),
+                        };
                     }
-                    match source {
-                        Some(source) => generator.inputs.insert(map, source),
-                        None => generator.inputs.remove(&map),
-                    };
+                    // generator_from refused the texture on kinds without one and moved the generator onto its section controls
+                    Some((GeneratorInput::Texture, source)) => generator.texture.get_or_insert_default().source = source,
+                    None => {}
                 }
             }
             EffectKind::Levels(levels) => levels_from(params, levels),

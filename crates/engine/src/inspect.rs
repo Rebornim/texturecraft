@@ -79,6 +79,9 @@ fn generator_json(generator: &Generator) -> Value {
     if !generator.inputs.is_empty() {
         out["inputs"] = generator.inputs.iter().map(|(map, source)| (map.id().to_string(), json!(source))).collect::<serde_json::Map<_, _>>().into();
     }
+    if let Some(texture) = &generator.texture {
+        out["texture"] = json!(texture);
+    }
     if let Some(detail) = &generator.detail {
         out["mode"] = json!(format!("{:?}", detail.mode));
         out["sizes"] = json!(detail.weights);

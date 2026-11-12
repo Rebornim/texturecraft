@@ -5,9 +5,10 @@ use serde_json::{Value, json};
 use texturecraft_engine::core::{
     Channel, ChannelKind, CookResolution, Fill, LayerId, LinkParam, MaterialLink, NormalFormat, Procedural, ProceduralKind, Source,
 };
-use texturecraft_engine::texel::{linear_to_srgb, srgb_to_linear};
+use texturecraft_engine::texel::linear_to_srgb;
 
 use crate::TextureCraftApp;
+use crate::color_picker::ColorPick;
 use crate::dock::{anchors_below, with};
 use crate::i18n::{tr, trf};
 use crate::material_orb::{OrbLook, material_orb};
@@ -242,9 +243,9 @@ fn pick_source(
 fn uniform_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, channel: Channel, value: [f32; 3], set: &impl Fn(Value) -> Value) {
     let label = tr(channel.label());
     if channel.kind() == ChannelKind::Color {
-        let bar = sheet.color_bar(label, shown_color(value));
-        if let Some(color) = color_popup(&bar, value) {
-            app.run("layer.fill.set", set(json!({"color": color})));
+        let pick = sheet.color_bar(label, value, app.picking_color);
+        if let Some(color) = take_color_pick(app, pick) {
+            app.run("layer.fill.set", set(json!({"color": color, "merge": pick.merge})));
         }
         return;
     }
@@ -259,15 +260,12 @@ fn uniform_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, channe
     }
 }
 
-/// The colour picker hanging from `bar` while it is open; the linear colour picked this frame
-fn color_popup(bar: &egui::Response, linear: [f32; 3]) -> Option<[f32; 3]> {
-    let mut srgb = shown_color(linear);
-    let width = bar.rect.width();
-    let shown = egui::Popup::from_toggle_button_response(bar)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .width(width)
-        .show(|ui| crate::widgets::color_picker(ui, bar.id.with("picker"), &mut srgb, width));
-    shown.is_some_and(|picked| picked.inner).then(|| [srgb.r(), srgb.g(), srgb.b()].map(|c| srgb_to_linear(f32::from(c) / 255.0)))
+/// The colour `pick` picked, after starting or ending an eyedropper pick its eyedropper asked for
+fn take_color_pick(app: &mut TextureCraftApp, pick: ColorPick) -> Option<[f32; 3]> {
+    if pick.eyedropper {
+        app.picking_color = if app.picking_color == Some(pick.id) { None } else { Some(pick.id) };
+    }
+    pick.picked
 }
 
 /// A procedural source: Scale and Contrast, then its Attributes (seed, balance, invert and its two values)
@@ -307,10 +305,10 @@ fn procedural_rows(
         }
         if channel.kind() == ChannelKind::Color {
             for (label, value) in [(tr("Low"), &mut low), (tr("High"), &mut high)] {
-                let bar = sheet.color_bar_led(label, shown_color(*value));
-                if let Some(picked) = color_popup(&bar, *value) {
+                let pick = sheet.color_bar_led(label, *value, app.picking_color);
+                if let Some(picked) = take_color_pick(app, pick) {
                     *value = picked;
-                    merge = merge.or(Some(false));
+                    merge = merge.or(Some(pick.merge));
                 }
             }
         } else {

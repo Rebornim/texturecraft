@@ -3,6 +3,8 @@
 mod axis_rows;
 mod band_response;
 mod choice;
+mod color_bar;
+mod color_picker_rows;
 mod group;
 mod material_rows;
 

@@ -459,7 +459,7 @@ pub(crate) fn color_picker(ui: &mut Ui, id: egui::Id, c: &mut Color32, width: f3
 }
 
 /// Fill `rect` with `rgb(x, y)` (sRGB 0..1 over 0..1 across and down), as a shaded mesh.
-fn gradient(painter: &egui::Painter, rect: egui::Rect, rgb: impl Fn(f32, f32) -> [f32; 3]) {
+pub(crate) fn gradient(painter: &egui::Painter, rect: egui::Rect, rgb: impl Fn(f32, f32) -> [f32; 3]) {
     const N: u32 = 24;
     let mut mesh = egui::Mesh::default();
     for j in 0..=N {

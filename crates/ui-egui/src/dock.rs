@@ -2519,7 +2519,7 @@ fn projection_transform(ui: &mut Ui, projection: &Projection, salt: &str, edit: 
         Projection::Triplanar { uv, .. } | Projection::Planar { uv, .. } | Projection::Spherical { uv, .. } | Projection::Cylindrical { uv, .. } => {
             (uv.tiling, uv.rotation, uv.offset, "uvOffset")
         }
-        Projection::Decal(_) => return,
+        Projection::UvTile | Projection::Decal(_) => return,
     };
     let lock_id = ui.make_persistent_id(("fill_tiling_lock", salt));
     let mut locked = ui.data(|data| data.get_temp::<bool>(lock_id)).unwrap_or(tiling[0] == tiling[1]);
@@ -2546,7 +2546,7 @@ fn projection_transform(ui: &mut Ui, projection: &Projection, salt: &str, edit: 
             }
         }
         Projection::Spherical { scale, .. } | Projection::Cylindrical { scale, .. } => world_scale(ui, *scale, edit),
-        Projection::Uv { .. } | Projection::Decal(_) => {}
+        Projection::Uv { .. } | Projection::UvTile | Projection::Decal(_) => {}
     }
 }
 

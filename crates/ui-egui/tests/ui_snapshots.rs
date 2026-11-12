@@ -675,7 +675,7 @@ fn steel_painted_worn() -> texturecraft_engine::core::MaterialLink {
     }
 }
 
-/// Screen 04: the colour picker open on a uniform base colour, hovered, with its model list open and in RGB; `TC_UI_THEMES` set adds the dark and light themes
+/// Screen 04: the colour picker window open on a uniform base colour, its close and a slider hovered, with its lists open and in RGB; `TC_UI_THEMES` set adds the dark and light themes
 #[test]
 #[ignore]
 fn fill_color_picker_snapshots() {
@@ -698,6 +698,9 @@ fn fill_color_picker_snapshots() {
     harness.get_by_role_and_label(egui::Role::Button, "Base color").click();
     harness.run_steps(2);
     save(&mut harness, &output_dir, "picker-open");
+    let title = harness.get_by_role_and_label(egui::Role::TitleBar, "Base color color").rect();
+    harness.hover_at(egui::pos2(title.right() + 6.0, title.center().y));
+    save(&mut harness, &output_dir, "picker-close-hover");
     harness.get_by_role_and_label(egui::Role::Slider, "S").hover();
     save(&mut harness, &output_dir, "picker-hover");
     harness.get_by_role_and_label(egui::Role::ComboBox, "sRGB").click();

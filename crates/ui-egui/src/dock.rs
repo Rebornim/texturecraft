@@ -2904,9 +2904,11 @@ fn pair_sliders(
 fn projection_transform(ui: &mut Ui, projection: &Projection, salt: &str, edit: &mut impl FnMut(Value)) {
     let (tiling, rotation, offset, offset_key) = match projection {
         Projection::Uv { scale, rotation, offset } => (*scale, *rotation, *offset, "offset"),
-        Projection::Triplanar { uv, .. } | Projection::Planar { uv, .. } | Projection::Spherical { uv, .. } | Projection::Cylindrical { uv, .. } => {
-            (uv.tiling, uv.rotation, uv.offset, "uvOffset")
-        }
+        Projection::Triplanar { uv, .. }
+        | Projection::Planar { uv, .. }
+        | Projection::Spherical { uv, .. }
+        | Projection::Cylindrical { uv, .. }
+        | Projection::Warp { uv, .. } => (uv.tiling, uv.rotation, uv.offset, "uvOffset"),
         Projection::UvTile => return,
     };
     let lock_id = ui.make_persistent_id(("fill_tiling_lock", salt));
@@ -2934,7 +2936,7 @@ fn projection_transform(ui: &mut Ui, projection: &Projection, salt: &str, edit: 
             }
         }
         Projection::Spherical { scale, .. } | Projection::Cylindrical { scale, .. } => world_scale(ui, *scale, edit),
-        Projection::Uv { .. } | Projection::UvTile => {}
+        Projection::Uv { .. } | Projection::UvTile | Projection::Warp { .. } => {}
     }
 }
 

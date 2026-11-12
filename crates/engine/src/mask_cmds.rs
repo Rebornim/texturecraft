@@ -306,7 +306,7 @@ fn add_fill(session: &mut Session, params: &Value) -> Result<Value> {
             fill.sources = session.doc.project.layer(layer)?.channels.keys().map(|channel| (*channel, Source::uniform_of(*channel))).collect();
         }
 
-        fill.projection = projection_from(params, CMD, None)?;
+        fill.projection = projection_from(params, CMD, None, || crate::warp_cmds::fitted_frame(&session.mesh))?;
         return push_effect(session, params, EffectKind::Material(fill), blend);
     }
 
@@ -329,7 +329,7 @@ fn add_fill(session: &mut Session, params: &Value) -> Result<Value> {
 
     // A scalar controls pattern frequency, while a two-axis scale places the new mask
     let pattern_scale = matches!(source, Source::Procedural { .. }) && params.get("scale").is_some_and(Value::is_number);
-    let projection = projection_from_fields(params, CMD, None, !pattern_scale)?;
+    let projection = projection_from_fields(params, CMD, None, !pattern_scale, || crate::warp_cmds::fitted_frame(&session.mesh))?;
 
     push_effect(session, params, EffectKind::Fill { source, projection, sampling }, blend)
 }
@@ -615,6 +615,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
     };
     let swaps_filter = swapped.is_some();
 
+    let fitted = crate::warp_cmds::fitted_frame(&session.mesh);
     session.edit("Edit effect", |session| {
         let edited = session.doc.project.effect_mut(effect).ok_or_else(|| bad(CMD, format!("no effect {}", effect.0)))?;
         if let Some((kind, label)) = swapped {
@@ -686,9 +687,16 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
                     *source = Source::Uniform([value.clamp(0.0, 1.0); 3]);
                 }
 
-                // Pattern edits keep the mask's existing projection scale
-                let read_scale = !matches!(source, Source::Procedural { .. });
-                *projection = projection_from_fields(params, CMD, Some(projection), read_scale)?;
+                // While the fill reads a pattern, `scale` is the pattern's and leaves the projection alone
+                let mut placement = params.clone();
+                if matches!(source, Source::Procedural { .. })
+                    && let Some(fields) = placement.as_object_mut()
+                {
+                    fields.remove("scale");
+                }
+
+                // Preserve projection fields that the edit does not supply
+                *projection = projection_from(&placement, CMD, Some(&*projection), || fitted)?;
             }
             EffectKind::ColorSelection { colors, tolerance } => crate::color_selection_cmds::apply_params(params, colors, tolerance)?,
             EffectKind::Compare { tolerance, .. } => {

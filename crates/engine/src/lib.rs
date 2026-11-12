@@ -76,6 +76,7 @@ mod uv_stroke_state;
 mod uv_symmetry;
 pub mod uv_tile_cmds;
 pub mod view_cmds;
+pub mod warp_cmds;
 
 pub use bake::{BakeMesh, BakeMeshes, BakeTask, StreamedBake, StreamedMap};
 pub use bake_preview::{BakePreview, PreviewShow};

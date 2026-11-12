@@ -28,6 +28,7 @@ pub mod tile_length;
 mod tile_pattern;
 mod tile_random_stream;
 mod timber;
+pub mod warp;
 
 pub use below::{BelowCache, StackKey};
 pub use display::{DisplayKind, kinds_for, tile_bytes};

@@ -9,7 +9,7 @@ use crate::i18n::{tr, trf};
 /// Built-in templates that aren't for one engine or renderer: listed first, apart from the rest, as the reference does
 const GENERAL_TEMPLATES: [&str; 5] = ["Document channels + Normal + AO", "glTF PBR Metal Roughness", "OpenPBR (separate maps)", "Separate maps", "USDZ (AR)"];
 /// File types offered besides the template's own, in menu order
-const FILE_TYPES: [FileFormat; 11] = [
+const FILE_TYPES: [FileFormat; 13] = [
     FileFormat::Bmp,
     FileFormat::Jpeg,
     FileFormat::Jng,
@@ -19,6 +19,8 @@ const FILE_TYPES: [FileFormat; 11] = [
     FileFormat::Tiff,
     FileFormat::Hdr,
     FileFormat::Exr,
+    FileFormat::J2k,
+    FileFormat::Jp2,
     FileFormat::Webp,
     FileFormat::Psd,
 ];

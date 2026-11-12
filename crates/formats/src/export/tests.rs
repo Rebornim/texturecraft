@@ -352,8 +352,8 @@ fn every_format_encodes_and_decodes() {
     };
     let mut preset = builtin_preset("glTF PBR Metal Roughness").unwrap();
     preset.maps.push(gray_alpha);
-    // PGM holds gray only (`pgm_writes_gray_at_8_and_16_bits`); a PSD holds every map (`psd_holds_every_map_as_a_layer_like_its_png`)
-    for format in FileFormat::ALL.into_iter().filter(|format| !matches!(format, FileFormat::Pgm | FileFormat::Psd)) {
+    // PGM, PSD and JPEG 2000 have tests of their own
+    for format in FileFormat::ALL.into_iter().filter(|format| !matches!(format, FileFormat::Pgm | FileFormat::Psd | FileFormat::J2k | FileFormat::Jp2)) {
         for &depth in format.bit_depths() {
             let mut opts = ExportOptions::new(preset.clone());
             opts.format_override = Some(format);
@@ -621,6 +621,58 @@ fn psd_is_one_file_per_uv_tile() {
     assert_eq!(names, [("sphere_Body_Set.1001.psd", Some("sphere_Body_Set.<UDIM>.psd")), ("sphere_Body_Set.1002.psd", Some("sphere_Body_Set.<UDIM>.psd"))]);
     // The tile belongs to the file: its layers are named without it
     assert!(planned[0].layers.iter().all(|layer| !layer.name.contains("1001")), "{:?}", planned[0].layers);
+}
+
+/// A JPEG 2000 file's component planes
+fn jpeg2000_planes(bytes: &[u8]) -> Vec<Vec<u16>> {
+    let mut decoder = j2k::J2kDecoder::new(bytes).unwrap();
+    let decoded = decoder.decode_native_components().unwrap();
+    decoded
+        .planes()
+        .iter()
+        .map(|plane| match plane.bytes_per_sample() {
+            1 => plane.data().iter().map(|byte| u16::from(*byte)).collect(),
+            _ => plane.data().chunks(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect(),
+        })
+        .collect()
+}
+
+#[test]
+fn jpeg2000_is_lossless_at_8_and_16_bits() {
+    let fx = Fx::new(&[Channel::BaseColor, Channel::Opacity, Channel::Roughness, Channel::Metallic, Channel::Normal]);
+    let preset = builtin_preset("glTF PBR Metal Roughness").unwrap();
+    for depth in [8u8, 16] {
+        let mut png_options = ExportOptions::new(preset.clone());
+        png_options.bit_depth_override = Some(depth);
+        let png = fx.render(&png_options);
+        for format in [FileFormat::J2k, FileFormat::Jp2] {
+            let mut options = png_options.clone();
+            options.format_override = Some(format);
+            let files = fx.render(&options);
+            assert_eq!(files.len(), png.len());
+            let jp2_signature = [0, 0, 0, 12, b'j', b'P', b' ', b' '];
+            for (file, reference) in files.iter().zip(&png) {
+                assert!(file.name.ends_with(format.extension()), "{}", file.name);
+                if format == FileFormat::Jp2 {
+                    assert!(file.bytes.starts_with(&jp2_signature), "{}: a JP2 file", file.name);
+                } else {
+                    assert!(file.bytes.starts_with(&[0xFF, 0x4F, 0xFF, 0x51]), "{}: a raw codestream", file.name);
+                }
+                let image = decode(reference);
+                let components = usize::from(image.color().channel_count());
+                let expected = image.to_rgba16();
+                let planes = jpeg2000_planes(&file.bytes);
+                assert_eq!(planes.len(), components, "{}", file.name);
+                for (component, plane) in planes.iter().enumerate() {
+                    let source = if components <= 2 && component == 1 { 3 } else { component };
+                    for (texel, sample) in expected.pixels().zip(plane) {
+                        let want = if depth == 8 { texel[source] / 257 } else { texel[source] };
+                        assert_eq!(*sample, want, "{} component {component}", file.name);
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[test]

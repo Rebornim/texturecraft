@@ -27,6 +27,7 @@ use crate::{FormatError, MAX_IMAGE_SIZE, Result};
 
 mod diffusion;
 mod jng;
+mod jpeg2000;
 mod map_options;
 mod map_preview;
 mod map_renderer;
@@ -110,10 +111,14 @@ pub enum FileFormat {
     Jng,
     /// Photoshop document: every output map of a texture set as a layer of one file
     Psd,
+    /// JPEG 2000 codestream, lossless
+    J2k,
+    /// JPEG 2000 in a JP2 file, lossless
+    Jp2,
 }
 
 impl FileFormat {
-    pub const ALL: [FileFormat; 11] = [
+    pub const ALL: [FileFormat; 13] = [
         FileFormat::Png,
         FileFormat::Jpeg,
         FileFormat::Tga,
@@ -125,6 +130,8 @@ impl FileFormat {
         FileFormat::Pgm,
         FileFormat::Jng,
         FileFormat::Psd,
+        FileFormat::J2k,
+        FileFormat::Jp2,
     ];
 
     pub fn extension(self) -> &'static str {
@@ -140,6 +147,8 @@ impl FileFormat {
             FileFormat::Pgm => "pgm",
             FileFormat::Jng => "jng",
             FileFormat::Psd => "psd",
+            FileFormat::J2k => "j2k",
+            FileFormat::Jp2 => "jp2",
         }
     }
 
@@ -155,7 +164,7 @@ impl FileFormat {
     /// Bit depths this format is written with (16 and 32 are half and full float for EXR).
     pub fn bit_depths(self) -> &'static [u8] {
         match self {
-            FileFormat::Png | FileFormat::Tiff | FileFormat::Pgm | FileFormat::Psd => &[8, 16],
+            FileFormat::Png | FileFormat::Tiff | FileFormat::Pgm | FileFormat::Psd | FileFormat::J2k | FileFormat::Jp2 => &[8, 16],
             FileFormat::Exr => &[16, 32],
             FileFormat::Hdr => &[32],
             _ => &[8],
@@ -989,7 +998,7 @@ fn encode(
     let failed = |error: &dyn std::fmt::Display| FormatError::Invalid(format!("{} encoding failed: {error}", format.extension()));
     // An ICC profile in PNG, JPEG, TIFF and WebP, the chromaticities attribute in EXR; the other formats have no place for it
     if let Some(space) = embed
-        && matches!(format, FileFormat::Tga | FileFormat::Bmp | FileFormat::Hdr)
+        && matches!(format, FileFormat::Tga | FileFormat::Bmp | FileFormat::Hdr | FileFormat::J2k)
     {
         warnings.push(format!("{} files can't record a colour space; the colours are in {}", format.extension().to_ascii_uppercase(), space.name()));
     }
@@ -1025,6 +1034,10 @@ fn encode(
     };
 
     let samples = quantize(&encoded, depth, dithered);
+    if matches!(format, FileFormat::J2k | FileFormat::Jp2) {
+        let icc = embed.and_then(crate::icc::profile);
+        return jpeg2000::write_jpeg2000(&samples, size, component_count, depth, format == FileFormat::Jp2, icc.as_deref()).map_err(|error| failed(&error));
+    }
     let (bytes, colors): (Vec<u8>, [ExtendedColorType; 4]) = if depth == 16 {
         (
             samples.iter().flat_map(|sample| sample.to_ne_bytes()).collect(),
@@ -1144,11 +1157,11 @@ fn write_image(format: FileFormat, bytes: &[u8], (w, h): (u32, u32), color: imag
             enc.write_image(bytes, w, h, color)?;
             return Ok(out.into_inner());
         }
-        // Layers of several maps: `render_psd`
-        FileFormat::Psd => {
+        // Layers of several maps (`render_psd`), and JPEG 2000 samples (`jpeg2000`)
+        FileFormat::Psd | FileFormat::J2k | FileFormat::Jp2 => {
             return Err(image::ImageError::Unsupported(image::error::UnsupportedError::from_format_and_kind(
-                image::error::ImageFormatHint::Name("PSD".into()),
-                image::error::UnsupportedErrorKind::GenericFeature("one image alone".into()),
+                image::error::ImageFormatHint::Name(format.extension().to_uppercase()),
+                image::error::UnsupportedErrorKind::GenericFeature("writing through the image encoders".into()),
             )));
         }
         FileFormat::Jng => return jng::write_jng(bytes, (w, h), color, JPEG_QUALITY, icc),

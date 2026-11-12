@@ -352,8 +352,8 @@ fn every_format_encodes_and_decodes() {
     };
     let mut preset = builtin_preset("glTF PBR Metal Roughness").unwrap();
     preset.maps.push(gray_alpha);
-    // PGM holds gray only: `pgm_writes_gray_at_8_and_16_bits`
-    for format in FileFormat::ALL.into_iter().filter(|format| *format != FileFormat::Pgm) {
+    // PGM holds gray only (`pgm_writes_gray_at_8_and_16_bits`); a PSD holds every map (`psd_holds_every_map_as_a_layer_like_its_png`)
+    for format in FileFormat::ALL.into_iter().filter(|format| !matches!(format, FileFormat::Pgm | FileFormat::Psd)) {
         for &depth in format.bit_depths() {
             let mut opts = ExportOptions::new(preset.clone());
             opts.format_override = Some(format);
@@ -419,6 +419,208 @@ fn jng_keeps_alpha_lossless() {
     let png = fx.render(&ExportOptions::new(builtin_preset("glTF PBR Metal Roughness").unwrap()));
     let alpha = |image: DynamicImage| image.to_rgba8().pixels().map(|texel| texel[3]).collect::<Vec<u8>>();
     assert_eq!(alpha(decode(base)), alpha(decode(find(&png, "_BaseColor."))));
+}
+
+/// PackBits rows decoded
+fn unpackbits(mut packed: &[u8], length: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(length);
+    while out.len() < length {
+        let header = packed[0] as i8;
+        if header >= 0 {
+            let count = header as usize + 1;
+            out.extend_from_slice(&packed[1..1 + count]);
+            packed = &packed[1 + count..];
+        } else if header != -128 {
+            out.extend(std::iter::repeat_n(packed[1], (1 - isize::from(header)) as usize));
+            packed = &packed[2..];
+        } else {
+            packed = &packed[1..];
+        }
+    }
+    out
+}
+
+/// One layer record of a PSD read back: its name, its 'lsct' section type (0 for a pixel layer) and its channels' samples by id
+struct ReadLayer {
+    name: String,
+    section: u32,
+    channels: Vec<(i16, Vec<u16>)>,
+}
+
+/// A PSD's depth and its layer records, bottom of the stack first (the 8-bit layer info or 16-bit 'Lr16' block)
+fn read_psd(bytes: &[u8]) -> (u16, Vec<ReadLayer>) {
+    let u16_at = |at: usize| u16::from_be_bytes([bytes[at], bytes[at + 1]]);
+    let u32_at = |at: usize| u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+    assert_eq!(&bytes[..4], b"8BPS");
+    let depth = u16_at(22);
+    assert_eq!(u16_at(24), 3, "RGB mode");
+    let mut at = 26;
+    at += 4 + u32_at(at);
+    at += 4 + u32_at(at);
+    let section_end = at + 4 + u32_at(at);
+    at += 4;
+    let info_length = u32_at(at);
+    at += 4;
+    if info_length == 0 {
+        at += 4 + u32_at(at);
+        assert_eq!(&bytes[at..at + 8], b"8BIMLr16", "16-bit layers sit in an Lr16 block");
+        at += 12;
+    }
+    let count = u16_at(at) as usize;
+    at += 2;
+
+    let mut records = Vec::new();
+    for _ in 0..count {
+        let rows = u32_at(at + 8) - u32_at(at);
+        let columns = u32_at(at + 12) - u32_at(at + 4);
+        let channel_count = u16_at(at + 16) as usize;
+        let ids: Vec<i16> = (0..channel_count).map(|k| u16_at(at + 18 + k * 6) as i16).collect();
+        at += 18 + channel_count * 6 + 12;
+        let extra_end = at + 4 + u32_at(at);
+        at += 4;
+        at += 4 + u32_at(at);
+        at += 4 + u32_at(at);
+        let name_length = bytes[at] as usize;
+        let mut name = String::from_utf8(bytes[at + 1..at + 1 + name_length].to_vec()).unwrap();
+        at += (1 + name_length).next_multiple_of(4);
+        let mut section = 0;
+        while at < extra_end {
+            let (key, length) = (&bytes[at + 4..at + 8], u32_at(at + 8));
+            let data = &bytes[at + 12..at + 12 + length];
+            match key {
+                b"lsct" => section = u32::from_be_bytes(data[..4].try_into().unwrap()),
+                b"luni" => {
+                    let units: Vec<u16> = data[4..4 + 2 * u32::from_be_bytes(data[..4].try_into().unwrap()) as usize]
+                        .chunks(2)
+                        .map(|unit| u16::from_be_bytes([unit[0], unit[1]]))
+                        .collect();
+                    name = String::from_utf16(&units).unwrap();
+                }
+                _ => {}
+            }
+            at += 12 + length;
+        }
+        records.push((name, section, ids, rows, columns));
+    }
+
+    let mut layers = Vec::new();
+    for (name, section, ids, rows, columns) in records {
+        let sample_bytes = if depth == 16 { 2 } else { 1 };
+        let mut channels = Vec::new();
+        for id in ids {
+            let compression = u16_at(at);
+            at += 2;
+            let mut plane = Vec::new();
+            if compression == 1 {
+                let lengths: Vec<usize> = (0..rows).map(|row| u16_at(at + row * 2) as usize).collect();
+                at += rows * 2;
+                for length in lengths {
+                    plane.extend(unpackbits(&bytes[at..at + length], columns * sample_bytes));
+                    at += length;
+                }
+            } else {
+                plane.extend_from_slice(&bytes[at..at + rows * columns * sample_bytes]);
+                at += rows * columns * sample_bytes;
+            }
+            let samples = if depth == 16 {
+                plane.chunks(2).map(|pair| u16::from_be_bytes([pair[0], pair[1]])).collect()
+            } else {
+                plane.iter().map(|byte| u16::from(*byte)).collect()
+            };
+            channels.push((id, samples));
+        }
+        layers.push(ReadLayer { name, section, channels });
+    }
+    assert!(at <= section_end, "the layers stay inside their section");
+    (depth, layers)
+}
+
+/// `files`' only PSD, read back
+fn only_psd(files: &[ExportedFile]) -> (u16, Vec<ReadLayer>) {
+    assert_eq!(files.len(), 1, "{:?}", files.iter().map(|file| &file.name).collect::<Vec<_>>());
+    assert_eq!(files[0].name, "sphere_Body_Set.psd");
+    read_psd(&files[0].bytes)
+}
+
+#[test]
+fn psd_holds_every_map_as_a_layer_like_its_png() {
+    let fx = Fx::new(&[Channel::BaseColor, Channel::Opacity, Channel::Roughness, Channel::Metallic, Channel::Normal]);
+    let preset = builtin_preset("glTF PBR Metal Roughness").unwrap();
+    let png = fx.render(&ExportOptions::new(preset.clone()));
+    for depth in [8, 16] {
+        let mut opts = ExportOptions::new(preset.clone());
+        opts.format_override = Some(FileFormat::Psd);
+        opts.bit_depth_override = Some(depth);
+        let (written_depth, layers) = only_psd(&fx.render(&opts));
+        assert_eq!(written_depth, u16::from(depth));
+
+        // Bottom of the stack first: the template's first map is the top layer
+        let names: Vec<&str> = layers.iter().map(|layer| layer.name.as_str()).collect();
+        let mut expected: Vec<String> = png.iter().map(|file| file.name.trim_end_matches(".png").to_string()).collect();
+        expected.reverse();
+        assert_eq!(names, expected);
+
+        for file in &png {
+            let layer = layers.iter().find(|layer| file.name.starts_with(&layer.name)).unwrap();
+            let image = decode(file).to_rgba16();
+            let alpha = decode(file).color().has_alpha();
+            for (id, samples) in &layer.channels {
+                let component = if *id < 0 { 3 } else { *id as usize };
+                assert!(*id >= 0 || alpha, "{}: alpha only where the PNG has one", layer.name);
+                let max_error = if depth == 8 { 0 } else { 257 / 2 + 1 };
+                for (texel, sample) in image.pixels().zip(samples) {
+                    let expected = if depth == 8 { texel[component] / 257 } else { texel[component] };
+                    assert!(expected.abs_diff(*sample) <= max_error, "{} channel {id}: {sample} vs {expected}", layer.name);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn psd_rows_pack_long_runs_and_literals() {
+    // 300 texels a row: a 200-long run, then 100 distinct values, at both depths
+    let (width, height) = (300u32, 2u32);
+    for depth in [8u8, 16] {
+        let max = if depth == 8 { 255 } else { 65535 };
+        let samples: Vec<u16> = (0..height).flat_map(|_| (0..width).map(move |x| if x < 200 { max } else { (x * 7 % 256) as u16 })).collect();
+        let layer = psd::PsdLayer { path: vec!["gray".into()], component_count: 1, samples: samples.clone() };
+        let bytes = psd::write_psd((width, height), depth, &[layer]).unwrap();
+        let (_, layers) = read_psd(&bytes);
+        for (id, plane) in &layers[0].channels {
+            assert_eq!(plane, &samples, "{depth} bits, channel {id}");
+        }
+    }
+}
+
+#[test]
+fn psd_folders_become_layer_groups() {
+    let fx = Fx::new(&[Channel::BaseColor, Channel::Roughness, Channel::Metallic, Channel::Normal]);
+    let mut preset = builtin_preset("glTF PBR Metal Roughness").unwrap();
+    preset.maps[1].file = "$textureSet/Packed/ORM".into();
+    preset.maps[2].file = "$textureSet/Normal".into();
+    let mut opts = ExportOptions::new(preset);
+    opts.format_override = Some(FileFormat::Psd);
+    let (_, layers) = only_psd(&fx.render(&opts));
+    let records: Vec<(&str, u32)> = layers.iter().map(|layer| (layer.name.as_str(), layer.section)).collect();
+    // Bottom first: a group's closing marker, its layers, then the group itself
+    assert_eq!(
+        records,
+        [("</Layer group>", 3), ("Normal", 0), ("</Layer group>", 3), ("ORM", 0), ("Packed", 1), ("Body_Set", 1), ("sphere_Body_Set_BaseColor", 0)]
+    );
+}
+
+#[test]
+fn psd_is_one_file_per_uv_tile() {
+    let mut fx = Fx::new(&[Channel::BaseColor, Channel::Roughness]);
+    fx.project.texture_sets[0].uv_tiles = vec![1001, 1002];
+    let mut opts = ExportOptions::new(builtin_preset("glTF PBR Metal Roughness").unwrap());
+    opts.format_override = Some(FileFormat::Psd);
+    let planned = list_outputs(&fx.project, 0, "sphere", &opts).unwrap();
+    let names: Vec<(&str, Option<&str>)> = planned.iter().map(|file| (file.name.as_str(), file.udim_name.as_deref())).collect();
+    assert_eq!(names, [("sphere_Body_Set.1001.psd", Some("sphere_Body_Set.<UDIM>.psd")), ("sphere_Body_Set.1002.psd", Some("sphere_Body_Set.<UDIM>.psd"))]);
+    // The tile belongs to the file: its layers are named without it
+    assert!(planned[0].layers.iter().all(|layer| !layer.name.contains("1001")), "{:?}", planned[0].layers);
 }
 
 #[test]

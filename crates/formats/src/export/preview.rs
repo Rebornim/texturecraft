@@ -13,7 +13,7 @@ pub const MAX_PREVIEW_SIDE: u32 = 512;
 pub fn preview_map(input: &ExportInput, opts: &ExportOptions, map: usize, side: u32) -> Result<Option<MapPreview>> {
     let set = input.project.texture_set(input.ts)?;
     let spec = opts.preset.maps.get(map).ok_or_else(|| FormatError::Invalid(format!("the template has no output map {map}")))?;
-    if !list_outputs(input.project, input.ts, input.mesh_name, opts)?.iter().any(|planned| planned.map == map) {
+    if !list_outputs(input.project, input.ts, input.mesh_name, opts)?.iter().any(|planned| planned.maps().any(|planned_map| planned_map == map)) {
         return Ok(None);
     }
     let (res, height) = (input.composite.resolution, input.composite.height);

@@ -164,6 +164,9 @@ impl Session {
                 inputs.push(Vec::new());
                 continue;
             }
+            if planned.iter().any(|file| file.format == texturecraft_formats::export::FileFormat::Psd) {
+                warnings.push(format!("the USD asset can't read PSD files, so it leaves out the PSD of texture set {ts}"));
+            }
             inputs.push(texturecraft_formats::usd_asset_inputs(&planned, opts, self.doc.project.normal_format));
         }
 
@@ -403,13 +406,14 @@ fn plan(s: &mut Session, p: &Value) -> Result<Value> {
         for ts in sets {
             let set = s.doc.project.texture_set(ts).map_err(|e| bad("export.plan", e.to_string()))?;
             for f in texturecraft_formats::list_outputs(&s.doc.project, ts, &mesh_name, &opts).map_err(fe)? {
-                // A map's own size, else the export's, else the texture set's (a UV tile's own)
-                let own = opts.preset.maps.get(f.map).and_then(|map| map.options.size).or(opts.size);
+                // A map's own size (a PSD's largest), else the export's, else the texture set's (a UV tile's own)
+                let own = f.maps().filter_map(|index| opts.preset.maps.get(index).and_then(|map| map.options.size)).max().or(opts.size);
                 let set_size = f.tile.map_or_else(|| set.size(), |tile| (set.tile_resolution(tile), set.tile_resolution(tile)));
                 let size = own.map_or(set_size, |side| (side, side));
                 names.push(json!({
                     "ts": ts, "map": f.map, "file": f.name, "format": f.format.extension(), "bitDepth": f.bit_depth,
                     "size": [size.0, size.1], "setSize": own.is_none(), "warnings": f.warnings,
+                    "layers": f.layers.iter().map(|layer| json!({ "map": layer.map, "name": layer.name })).collect::<Vec<_>>(),
                 }));
             }
         }
@@ -615,6 +619,10 @@ pub(crate) fn write_materialx(
         let set = s.doc.project.texture_set(ts).map_err(|e| EngineError::Other(e.to_string()))?;
         let mut textures: Vec<Texture> = Vec::new();
         for f in texturecraft_formats::list_outputs(&s.doc.project, ts, &mesh_name, opts).map_err(fe)? {
+            if f.format == texturecraft_formats::export::FileFormat::Psd {
+                warnings.push(format!("MaterialX can't read PSD files, so texture set \"{}\"'s .mtlx leaves out its PSD", set.name));
+                continue;
+            }
             let Some(input) = opts.preset.maps.get(f.map).and_then(|m| materialx::input_of_template(&m.file)) else { continue };
             // The first tile stands for all of them: its number is written as <UDIM>
             let file = f.udim_name.clone().unwrap_or_else(|| f.name.clone());

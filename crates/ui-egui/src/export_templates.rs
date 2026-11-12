@@ -690,8 +690,24 @@ fn planned_files(app: &mut TextureCraftApp, params: &Value) -> Result<Vec<Option
     for entry in plan.as_array().into_iter().flatten() {
         let map = entry.get("map").and_then(Value::as_u64).and_then(|index| usize::try_from(index).ok());
         let size = |axis: usize| entry.get("size").and_then(|sizes| sizes.get(axis)).and_then(Value::as_u64).unwrap_or(0);
-        if let (Some(slot), Some(file)) = (map.and_then(|index| files.get_mut(index)), entry.get("file").and_then(Value::as_str)) {
-            *slot = Some(PlannedOutput { file: file.to_string(), size: [size(0), size(1)] });
+        let Some(file) = entry.get("file").and_then(Value::as_str) else { continue };
+        let layers = entry.get("layers").and_then(Value::as_array).filter(|layers| !layers.is_empty());
+        match layers {
+            // A PSD: each layer's output shows the file and its layer
+            Some(layers) => {
+                for layer in layers {
+                    let index = layer.get("map").and_then(Value::as_u64).and_then(|index| usize::try_from(index).ok());
+                    let name = layer.get("name").and_then(Value::as_str).unwrap_or_default();
+                    if let Some(slot) = index.and_then(|index| files.get_mut(index)) {
+                        *slot = Some(PlannedOutput { file: format!("{file} › {name}"), size: [size(0), size(1)] });
+                    }
+                }
+            }
+            None => {
+                if let Some(slot) = map.and_then(|index| files.get_mut(index)) {
+                    *slot = Some(PlannedOutput { file: file.to_string(), size: [size(0), size(1)] });
+                }
+            }
         }
     }
     Ok(files)

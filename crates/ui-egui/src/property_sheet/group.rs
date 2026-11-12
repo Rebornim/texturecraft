@@ -5,6 +5,9 @@ use super::row::EDGE_GLYPH_INSET;
 use super::{BandResponse, GROUP_GAP, ICON_SIZE, OpenCard, PropertySheet, ROW_HEIGHT, TEXT_SIZE};
 use crate::theme::semibold;
 
+/// Draws a band's picture in its rect
+type BandPicture<'a> = &'a dyn Fn(&egui::Painter, Rect);
+
 /// Height of a top-level band
 const BAND_HEIGHT: f32 = 30.0;
 
@@ -12,7 +15,7 @@ const BAND_HEIGHT: f32 = 30.0;
 const CARD_PADDING: f32 = 10.0;
 
 /// How far a card's face reaches past its rows on both sides
-const CARD_BLEED: f32 = 6.0;
+pub(super) const CARD_BLEED: f32 = 6.0;
 
 /// Corner radius of a card
 const CARD_RADIUS: u8 = 6;
@@ -26,9 +29,22 @@ const BAND_RESET_INSET: f32 = 26.0;
 /// From the right edge to where a band's or folded group's value ends
 const BAND_VALUE_INSET: f32 = 22.0;
 
+/// Side of the picture before a band's value, and the air between them
+const BAND_PICTURE_SIZE: f32 = 16.0;
+const BAND_PICTURE_AIR: f32 = 8.0;
+
 impl PropertySheet<'_> {
     /// A top-level group across the whole panel with a caret and a reset (`Some(changed)`) or a value; a click folds it
     pub(crate) fn band(&mut self, title: &str, default_open: bool, reset: Option<bool>, value: Option<&str>) -> BandResponse {
+        self.band_drawn(title, default_open, reset, value, None)
+    }
+
+    /// [`Self::band`] whose value is led by a picture (Resolution: the size against the texture set's)
+    pub(crate) fn band_pictured(&mut self, title: &str, default_open: bool, value: &str, picture: &dyn Fn(&egui::Painter, Rect)) -> BandResponse {
+        self.band_drawn(title, default_open, None, Some(value), Some(picture))
+    }
+
+    fn band_drawn(&mut self, title: &str, default_open: bool, reset: Option<bool>, value: Option<&str>, picture: Option<BandPicture<'_>>) -> BandResponse {
         if self.card.is_none() {
             self.space(GROUP_GAP);
         }
@@ -65,7 +81,11 @@ impl PropertySheet<'_> {
             painter.text(reset_rect.center(), Align2::CENTER_CENTER, ic::ARROW_COUNTER_CLOCKWISE, FontId::proportional(ICON_SIZE), color);
         }
         if let Some(value) = value {
-            painter.text(pos2(self.right - BAND_VALUE_INSET, center_y), Align2::RIGHT_CENTER, value, FontId::proportional(TEXT_SIZE), t.text_dim);
+            let shown = painter.text(pos2(self.right - BAND_VALUE_INSET, center_y), Align2::RIGHT_CENTER, value, FontId::proportional(TEXT_SIZE), t.text_dim);
+            if let Some(draw) = picture {
+                let left = shown.left() - BAND_PICTURE_AIR - BAND_PICTURE_SIZE;
+                draw(painter, Rect::from_min_size(pos2(left, center_y - BAND_PICTURE_SIZE / 2.0), vec2(BAND_PICTURE_SIZE, BAND_PICTURE_SIZE)));
+            }
         }
         self.caret(pos2(self.right - EDGE_GLYPH_INSET, center_y), open, t.text_dim);
 
@@ -117,7 +137,9 @@ impl PropertySheet<'_> {
         let rect = self.take(ROW_HEIGHT);
         let mut open = self.ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
         let hit = Rect::from_x_y_ranges(self.left..=self.right, rect.y_range());
-        if self.ui.interact(hit, id, Sense::click()).clicked() {
+        let response = self.ui.interact(hit, id, Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, title));
+        if response.clicked() {
             open = !open;
             self.ui.data_mut(|data| data.insert_temp(id, open));
         }

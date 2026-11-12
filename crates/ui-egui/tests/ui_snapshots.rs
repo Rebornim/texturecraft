@@ -646,3 +646,131 @@ fn fill_symmetry_snapshots() {
     harness.get_by_role_and_label(egui::Role::CheckBox, "Symmetry").hover();
     save(&mut harness, &output_dir, "symmetry-uv");
 }
+
+/// A material link as MaterialCraft leaves it on a fill: three float inputs, a preset and five outputs (the maps stay the fill's own sources)
+fn steel_painted_worn() -> texturecraft_engine::core::MaterialLink {
+    use serde_json::json;
+    use texturecraft_engine::core::{LinkParam, LinkPreset, MaterialLink};
+    let float = |id: &str, label: &str, value: f32| LinkParam {
+        id: id.into(),
+        label: label.into(),
+        group: String::new(),
+        value: json!({"t": "float", "v": value}),
+        default: json!({"t": "float", "v": 0.5}),
+        min: 0.0,
+        max: 1.0,
+        options: Vec::new(),
+    };
+    MaterialLink {
+        name: "Steel Painted Worn".into(),
+        package: String::new(),
+        graph: "main".into(),
+        params: vec![float("wear", "Wear", 0.55), float("hue", "Paint hue", 0.3), float("dirt", "Dirt", 0.2)],
+        presets: vec![LinkPreset { name: "Fresh paint".into(), values: Default::default() }],
+        inputs: Vec::new(),
+        size: 1024,
+        resolution: None,
+        mapping: Default::default(),
+        outputs: ["baseColor", "metallic", "roughness", "normal", "height"].map(|output| (output.to_owned(), format!("steel_{output}.png"))).into(),
+    }
+}
+
+/// Screen 04: a fill's Material section in Channels (a procedural base colour with its Attributes open, a uniform metallic, a normal image, a signed height), its source list open with a hover, the picker on the base colour, and the Material side of a linked material; the linked one also in the dark and light themes
+#[test]
+#[ignore]
+fn fill_material_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::core::{LayerId, LayerKind};
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let mut png = Vec::new();
+    image::RgbaImage::from_fn(16, 16, |x, y| image::Rgba([110 + (x * 8) as u8, 110 + (y * 8) as u8, 250, 255]))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    let normal = session.import_resource_bytes("bricks_normal.png", png).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({"color": [0.55, 0.2, 0.08]})).unwrap()["layer"].as_u64().unwrap();
+    for settings in [
+        json!({"channel": "basecolor", "procedural": "Clouds", "low": [0.3, 0.08, 0.02], "high": [0.7, 0.3, 0.12]}),
+        json!({"channel": "normal", "enabled": true}),
+        json!({"channel": "normal", "image": normal}),
+        json!({"channel": "height", "enabled": true}),
+    ] {
+        let mut settings = settings;
+        settings["layer"] = json!(layer);
+        execute(&mut session, "layer.fill.set", &settings).unwrap();
+    }
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1500.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
+    save(&mut harness, &output_dir, "material-channels");
+    // The Base color slot (the lowest "Base color" list: the Layers panel has one too) with its list open
+    harness.get_all_by_role_and_label(egui::Role::ComboBox, "Base color").max_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).unwrap().click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, "Perlin noise").hover();
+    save(&mut harness, &output_dir, "material-source-list");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    harness.get_all_by_role_and_label(egui::Role::Button, "Attributes").next().unwrap().click();
+    save(&mut harness, &output_dir, "material-attributes");
+    harness.get_all_by_role_and_label(egui::Role::Button, "Attributes").next().unwrap().click();
+    harness.run_steps(2);
+    harness.get_all_by_role_and_label(egui::Role::Button, "Invert").next().unwrap().hover();
+    save(&mut harness, &output_dir, "material-invert-hover");
+
+    let session = &mut harness.state_mut().session;
+    if let Some(LayerKind::Fill(fill)) = session.doc.project.layers.get_mut(&LayerId(layer)).map(|layer| &mut layer.kind) {
+        fill.link = Some(Box::new(steel_painted_worn()));
+    }
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
+    save(&mut harness, &output_dir, "material-linked");
+    // The bands sit below the panel's fold: scroll each control into view (the scroll animates for about twenty frames)
+    let reach = |harness: &mut Harness<'_, TextureCraftApp>, role: egui::Role, label: &str| {
+        harness.get_by_role_and_label(role, label).scroll_to_me();
+        harness.run_steps(25);
+    };
+    reach(&mut harness, egui::Role::ComboBox, "normal");
+    harness.get_by_role_and_label(egui::Role::ComboBox, "roughness").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, "normal").hover();
+    save(&mut harness, &output_dir, "material-mapping-list");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    reach(&mut harness, egui::Role::Button, "Resolution");
+    save(&mut harness, &output_dir, "material-resolution-folded");
+    harness.get_by_role_and_label(egui::Role::Button, "Resolution").click();
+    harness.run_steps(2);
+    reach(&mut harness, egui::Role::ComboBox, "Texture set  ·  256");
+    save(&mut harness, &output_dir, "material-resolution");
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Texture set  ·  256").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, "×2  ·  512").hover();
+    save(&mut harness, &output_dir, "material-resolution-relative-list");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::Role::RadioButton, "Fixed").click();
+    harness.run_steps(2);
+    // This link has no package, so the re-cook fails with a toast over the panel
+    harness.state_mut().toasts.clear();
+    harness.get_by_role_and_label(egui::Role::ComboBox, "256 × 256").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, "1024 × 1024").hover();
+    save(&mut harness, &output_dir, "material-resolution-fixed-list");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::Role::Button, "Resolution").click();
+    harness.run_steps(2);
+    save(&mut harness, &output_dir, "material-resolution-fixed-folded");
+    for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+        harness.state_mut().ui.prefs.brightness = brightness;
+        save(&mut harness, &output_dir, &format!("material-linked-{name}"));
+    }
+    harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    harness.get_by_role_and_label(egui::Role::RadioButton, "Channels").click();
+    save(&mut harness, &output_dir, "material-linked-channels");
+}

@@ -4,6 +4,8 @@ mod axis_rows;
 mod band_response;
 mod choice;
 mod group;
+mod material_rows;
+
 mod number_field;
 mod open_card;
 mod preview_block;

@@ -642,6 +642,23 @@ pub struct MaterialLink {
     pub inputs: Vec<String>,
     /// Size the maps were cooked at (pixels across).
     pub size: u32,
+    /// Size to cook at; `None` cooks at the texture set's resolution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<crate::CookResolution>,
+    /// The output a channel reads, where it is not the output named like the channel.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub mapping: BTreeMap<Channel, String>,
+    /// The image resource of each output of the last cook, by output id. Empty in projects saved
+    /// before channels could be mapped: there each channel's source is its own output.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub outputs: BTreeMap<String, String>,
+}
+
+impl MaterialLink {
+    /// The output channel `c` reads.
+    pub fn output_of(&self, c: Channel) -> &str {
+        self.mapping.get(&c).map_or(c.id(), String::as_str)
+    }
 }
 
 /// An exposed input of a linked material. Values keep MaterialCraft's typed form,
@@ -678,6 +695,23 @@ impl Fill {
     /// Value used for `c` when the fill has no source for it: the channel default.
     pub fn source(&self, c: Channel) -> Source {
         self.sources.get(&c).cloned().unwrap_or_else(|| Source::uniform_of(c))
+    }
+
+    /// The image resource of each output of the linked material's last cook, by output id
+    /// (empty without a link). Links saved before channels could be mapped list their channels'
+    /// own outputs.
+    pub fn link_outputs(&self) -> BTreeMap<String, String> {
+        let Some(link) = &self.link else { return BTreeMap::new() };
+        if !link.outputs.is_empty() {
+            return link.outputs.clone();
+        }
+        self.sources
+            .iter()
+            .filter_map(|(c, s)| match s {
+                Source::Image { name, .. } => Some((link.output_of(*c).to_string(), name.clone())),
+                _ => None,
+            })
+            .collect()
     }
 }
 

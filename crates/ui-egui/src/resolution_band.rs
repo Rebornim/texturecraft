@@ -1,0 +1,98 @@
+//! The Resolution band of a cooked source: Relative (follows the texture set) | Fixed, then its Size, each size pictured against the texture set's
+
+use egui::{CornerRadius, Painter, Rect, Stroke, StrokeKind, vec2};
+use texturecraft_engine::core::{CookResolution, MAX_RESOLUTION};
+
+use crate::i18n::tr;
+use crate::property_sheet::PropertySheet;
+use crate::theme::Tokens;
+
+/// Side of the grey square (this source) for factors 1/8 … ×8, as a share of the picture's side
+const RATIO_SIDES: [f32; 7] = [0.12, 0.22, 0.32, 0.46, 0.66, 0.84, 1.0];
+
+/// Side of the accent outline (the texture set) as a share of the picture's side
+const TEXTURE_SET_SIDE: f32 = 0.42;
+
+/// The smallest fixed size the list offers
+const SMALLEST_FIXED: u32 = 256;
+
+/// The Resolution band (folded: picture and size); returns the resolution picked
+pub(crate) fn resolution_band(sheet: &mut PropertySheet<'_>, current: CookResolution, texture_set: u32) -> Option<CookResolution> {
+    let tokens = Tokens::get(sheet.ui.ctx());
+    let size = current.size(texture_set);
+    let relative = matches!(current, CookResolution::Relative(_));
+    let picture = |painter: &Painter, rect: Rect| ratio_picture(painter, rect, factor_of(size, texture_set), relative, &tokens);
+    if !sheet.band_pictured(tr("Resolution"), false, &format!("{size} × {size}"), &picture).open {
+        return None;
+    }
+
+    let modes = [tr("Relative"), tr("Fixed")];
+    let mode_picture = |painter: &Painter, rect: Rect, index: usize| ratio_picture(painter, rect, 0, index == 0, &tokens);
+    let switched = sheet.picture_switch(&modes, usize::from(!relative), &mode_picture).map(|mode| {
+        if mode == 0 {
+            // Fixed → Relative keeps the nearest factor the texture set can cook at
+            let factor = factor_of(size, texture_set);
+            if fits(texture_set, factor) { CookResolution::Relative(factor) } else { CookResolution::TEXTURE_SET }
+        } else {
+            CookResolution::Fixed(size)
+        }
+    });
+
+    let picked = if let CookResolution::Relative(factor) = current {
+        let factors: Vec<i8> = CookResolution::FACTORS.filter(|factor| fits(texture_set, *factor)).collect();
+        let name = |factor: i8| format!("{}  ·  {}", factor_name(factor), CookResolution::Relative(factor).size(texture_set));
+        let draw = |painter: &Painter, rect: Rect, factor: i8| ratio_picture(painter, rect, factor, true, &tokens);
+        sheet.dropdown(tr("Size"), factor, &factors, name, Some(&draw)).0.map(CookResolution::Relative)
+    } else {
+        let sizes: Vec<u32> = std::iter::successors(Some(SMALLEST_FIXED), |size| size.checked_mul(2)).take_while(|size| *size <= MAX_RESOLUTION).collect();
+        let draw = |painter: &Painter, rect: Rect, size: u32| ratio_picture(painter, rect, factor_of(size, texture_set), false, &tokens);
+        sheet.dropdown(tr("Size"), size, &sizes, |size| format!("{size} × {size}"), Some(&draw)).0.map(CookResolution::Fixed)
+    };
+    switched.or(picked)
+}
+
+/// Whether the texture set's size times 2^`factor` can be cooked
+fn fits(texture_set: u32, factor: i8) -> bool {
+    let size = if factor >= 0 { texture_set.checked_mul(1 << factor) } else { texture_set.checked_shr(u32::from(factor.unsigned_abs())) };
+    size.is_some_and(CookResolution::cookable)
+}
+
+/// The factor (a power of two, within the list's) from the texture set's size to `size`
+fn factor_of(size: u32, texture_set: u32) -> i8 {
+    let steps = i64::from(size.max(1).ilog2()) - i64::from(texture_set.max(1).ilog2());
+    let (low, high) = (CookResolution::FACTORS.start(), CookResolution::FACTORS.end());
+    i8::try_from(steps.clamp(i64::from(*low), i64::from(*high))).unwrap_or_default()
+}
+
+/// A factor's name in the list: 1/8 … Texture set … ×8
+fn factor_name(factor: i8) -> String {
+    match factor {
+        0 => tr("Texture set").to_owned(),
+        negative if negative < 0 => format!("1/{}", 1u32 << negative.unsigned_abs()),
+        positive => format!("×{}", 1u32 << positive),
+    }
+}
+
+/// This source (grey square) against the texture set (accent outline, when the size follows it)
+fn ratio_picture(painter: &Painter, rect: Rect, factor: i8, related: bool, tokens: &Tokens) {
+    painter.rect_filled(rect, CornerRadius::ZERO, tokens.field);
+    let step = usize::try_from(i32::from(factor) + 3).unwrap_or_default();
+    let side = RATIO_SIDES.get(step).copied().unwrap_or(1.0) * rect.width();
+    painter.rect_filled(Rect::from_center_size(rect.center(), vec2(side, side)), CornerRadius::ZERO, tokens.text_dim);
+    if related {
+        let side = TEXTURE_SET_SIDE * rect.width();
+        painter.rect_stroke(Rect::from_center_size(rect.center(), vec2(side, side)), CornerRadius::ZERO, Stroke::new(1.0, tokens.accent), StrokeKind::Inside);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{factor_name, factor_of, fits};
+
+    #[test]
+    fn factors_name_and_fit_the_texture_set() {
+        assert_eq!([-3, -1, 1, 3].map(factor_name), ["1/8", "1/2", "×2", "×8"]);
+        assert_eq!((factor_of(1024, 2048), factor_of(8192, 128), factor_of(0, 2048)), (-1, 3, -3));
+        assert!(fits(2048, 2) && !fits(2048, 3) && !fits(256, -2));
+    }
+}

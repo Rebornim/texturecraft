@@ -18,6 +18,7 @@ pub mod docking;
 pub mod export_templates;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_dialogs;
+mod fill_material_panel;
 mod fill_panel;
 mod fill_pictures;
 mod fill_placement;
@@ -33,6 +34,7 @@ mod levels_editor;
 mod levels_handle;
 mod levels_properties;
 mod mask_preview_image;
+mod material_orb;
 mod material_preview_image;
 pub mod menus;
 pub mod new_project_advanced;
@@ -50,11 +52,13 @@ pub mod properties_popup;
 mod property_sheet;
 mod rail_popup;
 pub mod render_mode;
+mod resolution_band;
 mod resource_picker;
 mod resource_picker_item;
 mod running_bake;
 pub mod shelf;
 pub mod shelf_preview;
+mod slot_thumbnail;
 mod soft_box;
 pub mod state;
 pub mod symmetry;
@@ -103,6 +107,8 @@ pub struct LinkCook {
     pub layer: texturecraft_engine::core::LayerId,
     /// The parameter values it cooks: a result whose values are no longer the layer's is redone.
     pub values: serde_json::Map<String, Value>,
+    /// The size it cooks at: a result cooked at another size than the layer's is redone too.
+    pub size: u32,
     pub rx: std::sync::mpsc::Receiver<texturecraft_engine::Result<Vec<u8>>>,
 }
 
@@ -345,9 +351,9 @@ impl TextureCraftApp {
         }
         match self.session.link_job(layer, &serde_json::Map::new()) {
             Ok(job) => {
-                let values = job.values.clone();
+                let (values, size) = (job.values.clone(), job.size);
                 let rx = spawn_worker("texturecraft-link", move || job.run());
-                self.link_cooks.push(LinkCook { layer, values, rx });
+                self.link_cooks.push(LinkCook { layer, values, size, rx });
             }
             Err(e) => self.toast(e.to_string(), true),
         }
@@ -362,20 +368,20 @@ impl TextureCraftApp {
         self.link_cooks.retain(|c| match c.rx.try_recv() {
             Err(std::sync::mpsc::TryRecvError::Empty) => true,
             Ok(r) => {
-                done.push((c.layer, c.values.clone(), r));
+                done.push((c.layer, c.values.clone(), c.size, r));
                 false
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                done.push((c.layer, c.values.clone(), Err(texturecraft_engine::EngineError::Other("the MaterialCraft cook stopped".into()))));
+                done.push((c.layer, c.values.clone(), c.size, Err(texturecraft_engine::EngineError::Other("the MaterialCraft cook stopped".into()))));
                 false
             }
         });
-        for (layer, values, result) in done {
-            let current = self.session.link_values(layer);
+        for (layer, values, size, result) in done {
+            let current = self.session.link_values(layer).and_then(|now| Ok((now, self.session.link_size(layer)?)));
             match (result, current) {
                 // The layer is gone (undone, deleted): nothing to show.
                 (_, Err(_)) => {}
-                (Ok(_), Ok(now)) if now != values => self.cook_link(layer),
+                (Ok(_), Ok(now)) if now != (values, size) => self.cook_link(layer),
                 (Ok(bytes), Ok(_)) => {
                     if let Err(e) = self.session.apply_link_cook(layer, &bytes, true) {
                         self.toast(e.to_string(), true);

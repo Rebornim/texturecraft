@@ -1,8 +1,8 @@
 /// What a slot card's top row did this frame
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub(crate) struct SlotResponse {
-    /// The thumbnail or name was clicked: open the source picker
-    pub(crate) pick: bool,
+    /// The slot's row: a click opens the source list hanging from it (see [`super::PropertySheet::hanging_list`])
+    pub(crate) pick: egui::Response,
 
     /// The × was clicked: back to a uniform source
     pub(crate) clear: bool,

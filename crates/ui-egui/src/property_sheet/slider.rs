@@ -39,6 +39,9 @@ pub(super) struct Track {
     pub(super) end: f32,
     pub(super) center_y: f32,
     pub(super) signed: bool,
+
+    /// The track is a picture of its range (a gray ramp) drawn by the caller: no line and no fill
+    pub(super) ramp: bool,
 }
 
 impl PropertySheet<'_> {
@@ -56,7 +59,7 @@ impl PropertySheet<'_> {
     pub(crate) fn slider_led(&mut self, lead: RowLead<'_>, value: &mut f32, range: RangeInclusive<f32>, decimals: usize, suffix: &str) -> Option<bool> {
         let (control, center_y) = self.row_with(lead);
         let id = self.next_id();
-        let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, signed: false };
+        let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, signed: false, ramp: false };
         let dragged = self.track(id, lead.text(), &track, value, &range);
         let typed = self.value_field(id, center_y, *value, &range, decimals, suffix);
         Self::apply_typed(value, typed, dragged)
@@ -66,7 +69,7 @@ impl PropertySheet<'_> {
     pub(crate) fn signed_slider(&mut self, label: &str, value: &mut f32, range: RangeInclusive<f32>, decimals: usize) -> Option<bool> {
         let (control, center_y) = self.row(label);
         let id = self.next_id();
-        let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, signed: true };
+        let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, signed: true, ramp: false };
         let dragged = self.track(id, label, &track, value, &range);
         let typed = self.value_field(id, center_y, *value, &range, decimals, "");
         Self::apply_typed(value, typed, dragged)
@@ -82,7 +85,7 @@ impl PropertySheet<'_> {
         let (control, center_y) = self.row_with(lead);
         let id = self.next_id();
         let dial_x = self.right - self.used.value_width.max(super::VALUE_MIN_WIDTH) - DIAL_AIR - DIAL_RADIUS;
-        let track = Track { start: control.left() + KNOB_RADIUS, end: dial_x - DIAL_RADIUS - DIAL_AIR, center_y, signed: *range.start() < 0.0 };
+        let track = Track { start: control.left() + KNOB_RADIUS, end: dial_x - DIAL_RADIUS - DIAL_AIR, center_y, signed: *range.start() < 0.0, ramp: false };
         let dragged = self.track(id, lead.text(), &track, degrees, &range);
 
         let t = self.tokens;
@@ -123,7 +126,7 @@ impl PropertySheet<'_> {
         painter.text(pos2(chip_end - 9.0, center_y), Align2::CENTER_CENTER, ic::CARET_DOWN, FontId::proportional(ICON_SIZE), t.text);
         painter.text(pos2(chip_end - 18.0, center_y), Align2::RIGHT_CENTER, chip, semibold(SMALL_TEXT_SIZE), t.text);
 
-        let track = Track { start: control.left() + KNOB_RADIUS, end: chip_rect.left() - DIAL_AIR - KNOB_RADIUS, center_y, signed: false };
+        let track = Track { start: control.left() + KNOB_RADIUS, end: chip_rect.left() - DIAL_AIR - KNOB_RADIUS, center_y, signed: false, ramp: false };
         let dragged = self.track(id, label, &track, value, &range);
         let typed = self.value_field(id, center_y, *value, &range, decimals, "");
         (Self::apply_typed(value, typed, dragged), chip_response)
@@ -165,8 +168,10 @@ impl PropertySheet<'_> {
         let knob_x = at(*value);
         let zero_x = if track.signed { at(0.0_f32.clamp(minimum, maximum)) } else { track.start };
         let painter = self.ui.painter();
-        painter.line_segment([pos2(track.start, track.center_y), pos2(track.end, track.center_y)], Stroke::new(TRACK_WIDTH, t.button_border));
-        painter.line_segment([pos2(zero_x.min(knob_x), track.center_y), pos2(zero_x.max(knob_x), track.center_y)], Stroke::new(TRACK_WIDTH, t.accent));
+        if !track.ramp {
+            painter.line_segment([pos2(track.start, track.center_y), pos2(track.end, track.center_y)], Stroke::new(TRACK_WIDTH, t.button_border));
+            painter.line_segment([pos2(zero_x.min(knob_x), track.center_y), pos2(zero_x.max(knob_x), track.center_y)], Stroke::new(TRACK_WIDTH, t.accent));
+        }
         if track.signed {
             let tick = [pos2(zero_x, track.center_y - ZERO_TICK_HALF), pos2(zero_x, track.center_y + ZERO_TICK_HALF)];
             painter.line_segment(tick, Stroke::new(1.0, t.text_dim));

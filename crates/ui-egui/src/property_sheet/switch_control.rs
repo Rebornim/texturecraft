@@ -6,6 +6,13 @@ use crate::theme::semibold;
 /// Draws a picture row's picture into its square
 type RowPicture<'a> = &'a dyn Fn(&Painter, Rect);
 
+/// Draws option `index`'s picture into its square
+type SegmentPicture<'a> = &'a dyn Fn(&Painter, Rect, usize);
+
+/// Side of a picture beside a switch's word, and the air between them
+const SEGMENT_PICTURE_SIZE: f32 = 14.0;
+const SEGMENT_PICTURE_AIR: f32 = 6.0;
+
 /// Room a switch's word needs in its segment beyond its own width
 const SEGMENT_AIR: f32 = 16.0;
 
@@ -55,6 +62,28 @@ impl PropertySheet<'_> {
         }
 
         let (control, _) = self.row(label);
+        self.segments(control, options, selected, tints, None)
+    }
+
+    /// A boxed switch across the whole panel (a mode switch at the top of a group), each word led by its picture; returns the picked index
+    pub(crate) fn picture_switch(&mut self, options: &[&str], selected: usize, picture: SegmentPicture<'_>) -> Option<usize> {
+        let row = self.take(ROW_HEIGHT);
+        let center_y = row.center().y;
+        self.drawn(center_y + super::CONTROL_HEIGHT / 2.0);
+        let control = Rect::from_x_y_ranges(self.left..=self.right, (center_y - super::CONTROL_HEIGHT / 2.0)..=(center_y + super::CONTROL_HEIGHT / 2.0));
+        self.segments(control, options, selected, &[], Some(picture))
+    }
+
+    /// A boxed switch's box and segments in `control`; returns the segment clicked when it was not the chosen one
+    pub(super) fn segments(
+        &mut self,
+        control: Rect,
+        options: &[&str],
+        selected: usize,
+        tints: &[Color32],
+        picture: Option<SegmentPicture<'_>>,
+    ) -> Option<usize> {
+        let segment = control.width() / options.len().max(1) as f32;
         let t = self.tokens;
         self.ui.painter().rect(control, CornerRadius::same(6), t.field, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
         let mut picked = None;
@@ -76,7 +105,21 @@ impl PropertySheet<'_> {
             }
             let tint = tints.get(index).copied().unwrap_or(t.text);
             let (font, color) = if on { (semibold(SMALL_TEXT_SIZE), tint) } else { (FontId::proportional(SMALL_TEXT_SIZE), t.text_dim) };
-            painter.text(rect.center(), Align2::CENTER_CENTER, *option, font, color);
+            let Some(draw) = picture else {
+                painter.text(rect.center(), Align2::CENTER_CENTER, *option, font, color);
+                continue;
+            };
+
+            // The picture and the word centred together in the segment
+            let word = painter.layout_no_wrap((*option).to_owned(), font, color);
+            let left = rect.center().x - (SEGMENT_PICTURE_SIZE + SEGMENT_PICTURE_AIR + word.size().x) / 2.0;
+            draw(
+                painter,
+                Rect::from_min_size(pos2(left, rect.center().y - SEGMENT_PICTURE_SIZE / 2.0), vec2(SEGMENT_PICTURE_SIZE, SEGMENT_PICTURE_SIZE)),
+                index,
+            );
+            let word_left = left + SEGMENT_PICTURE_SIZE + SEGMENT_PICTURE_AIR;
+            painter.galley(pos2(word_left, rect.center().y - word.size().y / 2.0), word, color);
         }
         picked
     }

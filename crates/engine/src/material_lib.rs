@@ -48,7 +48,10 @@ pub(crate) fn images_used(p: &Project, id: LayerId, out: &mut Vec<String>, depth
                 out.push(name.clone());
             }
         }
-        out.extend(f.link.as_ref().map(|link| link.package.clone()));
+        if let Some(link) = &f.link {
+            out.push(link.package.clone());
+            out.extend(link.outputs.values().cloned());
+        }
     }
     for e in l.mask.iter().flat_map(|m| m.effects.iter()) {
         if let EffectKind::Fill { source: Source::Image { name, .. }, .. } = &e.kind {

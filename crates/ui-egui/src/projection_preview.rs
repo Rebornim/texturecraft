@@ -6,10 +6,11 @@
 //! map and is not previewed
 
 use egui::{Color32, ColorImage, Painter, Rect, TextureHandle, TextureOptions, pos2};
-use texturecraft_engine::compose::pattern::{Coords, image_samples};
+use texturecraft_engine::compose::frame_placement::{folded, upright_turn};
+use texturecraft_engine::compose::pattern::{Coords, decal_axes, image_samples};
 use texturecraft_engine::compose::projector_cover::projector_cover;
-use texturecraft_engine::core::{Projection, ShapeCrop};
-use texturecraft_engine::geom::glam::{Vec2, Vec3};
+use texturecraft_engine::core::{Projection, Projector, ShapeCrop};
+use texturecraft_engine::geom::glam::{EulerRot, Mat3, Vec2, Vec3};
 
 use crate::theme::Tokens;
 
@@ -31,8 +32,6 @@ const SPHERE_RADIUS: f32 = 0.85;
 const CYLINDER_RADIUS: f32 = 0.55;
 const CYLINDER_HALF_HEIGHT: f32 = 0.7;
 const CUBE_HALF: f32 = 0.55;
-/// Half the side of the square a planar projection placed on the surface shows on the sphere, in mesh radii
-const PLACED_HALF: f32 = 0.55;
 /// Checker shades, as fractions of the way from `field` to `text`
 const CHECKER_DARK: f32 = 0.12;
 const CHECKER_LIGHT: f32 = 1.0;
@@ -47,9 +46,9 @@ enum PreviewShape {
     Cube,
 }
 
-/// Draw the preview of `projection` into `rect`, rendered once per projection, size and theme (None for projections without one: UV, warp)
-pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Projection, tokens: &Tokens) -> Option<()> {
-    let shown = shown_projection(projection)?;
+/// Draw the preview of `projection` on a mesh within `bounds` into `rect`, rendered once per projection, size and theme (None for projections without one: UV, warp)
+pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Projection, bounds: (Vec3, Vec3), tokens: &Tokens) -> Option<()> {
+    let shown = shown_projection(projection, bounds)?;
     let ctx = painter.ctx();
     let side = ((rect.width() * ctx.pixels_per_point()).round() as usize).clamp(1, MAX_SIDE_PX);
     let key = format!("{side}{shown:?}{:?}{:?}{:?}", tokens.field, tokens.text, tokens.accent);
@@ -70,15 +69,61 @@ pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Pro
     Some(())
 }
 
-/// The projection the preview renders: a planar placed on the model shows straight onto the sphere's front, cropped to its square
-fn shown_projection(projection: &Projection) -> Option<Projection> {
+/// What the preview square last rendered (tests: a drag re-renders it)
+#[cfg(test)]
+pub(crate) fn shown_key(ctx: &egui::Context) -> Option<String> {
+    ctx.data(|data| data.get_temp::<(String, TextureHandle)>(egui::Id::unique("projection_preview"))).map(|(key, _)| key)
+}
+
+/// The projection the preview renders: a planar placed on the model shows straight onto the sphere's front as big against the sphere as its frame is against the mesh, stretched, turned round its normal and slid across its plane as the frame is, cropped to its rectangle
+fn shown_projection(projection: &Projection, bounds: (Vec3, Vec3)) -> Option<Projection> {
     match projection {
-        Projection::Planar { placed: Some(_), uv, projector, .. } => {
-            let projector = texturecraft_engine::core::Projector { crop: ShapeCrop::Cropped, ..projector.clone() };
-            Some(Projection::Planar { scale: 1.0 / PLACED_HALF, axis: 2, offset: [0.0; 3], uv: *uv, projector, placed: None })
+        Projection::Planar { placed: Some(_), uv, .. } => {
+            let landed = folded(projection)?;
+            let Projection::Planar { placed: Some(frame), projector, .. } = &landed else { return None };
+            // The sphere stands for the model: its radius is the model's largest half size
+            let radius = ((bounds.1 - bounds.0) * 0.5).max_element().max(1e-4);
+            let half = frame.size.map(|side| (SPHERE_RADIUS * side / (2.0 * radius)).max(1e-4));
+            let turn = upright_turn(frame).unwrap_or(0.0);
+            // Slid across its own plane away from the mesh's centre: off the sphere's middle by as much
+            let (origin, across, up, _) = decal_axes(frame)?;
+            let from_center = (origin - (bounds.0 + bounds.1) * 0.5) / radius * SPHERE_RADIUS;
+            let offset = [-from_center.dot(across) / half[0], -from_center.dot(up) / half[1], 0.0];
+            let projector = Projector { rotation: [0.0, 0.0, turn], scale: [half[0], half[1], 1.0], crop: ShapeCrop::Cropped, ..*projector };
+            offset.iter().all(|value| value.is_finite()).then_some(Projection::Planar { scale: 1.0, axis: 2, offset, uv: *uv, projector, placed: None })
         }
         Projection::Planar { .. } | Projection::Spherical { .. } | Projection::Cylindrical { .. } | Projection::Triplanar { .. } => Some(projection.clone()),
         Projection::Warp { .. } | Projection::Uv { .. } | Projection::UvTile => None,
+    }
+}
+
+/// Where a spherical or cylindrical projection's own shape sits: the preview draws its projector (turned, stretched and moved by the 3D projection settings, so its size dot and fields show) rather than a fixed shape its turn-and-scale-blind mapping would look the same on
+#[derive(Clone, Copy, Debug)]
+struct ShapePlace {
+    turn: Mat3,
+    stretch: Vec3,
+    offset: Vec3,
+}
+
+impl ShapePlace {
+    fn of(projection: &Projection) -> ShapePlace {
+        let still = ShapePlace { turn: Mat3::IDENTITY, stretch: Vec3::ONE, offset: Vec3::ZERO };
+        let (Projection::Spherical { offset, projector, .. } | Projection::Cylindrical { offset, projector, .. }) = projection else { return still };
+        let [x, y, z] = projector.rotation.map(f32::to_radians);
+        let stretch = Vec3::from(projector.scale).map(|s| if s.abs() < 1e-6 { 1e-6 } else { s });
+        let place = ShapePlace { turn: Mat3::from_euler(EulerRot::ZYX, z, y, x), stretch, offset: Vec3::from(*offset) };
+        if place.turn.is_finite() && place.stretch.is_finite() && place.offset.is_finite() { place } else { still }
+    }
+
+    /// The nearest hit of the ray from `origin` along unit `dir` on the placed shape, in the compositor's coordinates
+    fn hit(&self, shape: PreviewShape, origin: Vec3, dir: Vec3) -> Option<Coords> {
+        // Into the shape's own space: unturned, unstretched, its centre where the offset puts the projection's
+        let to_shape = |v: Vec3| (self.turn.transpose() * v) / self.stretch;
+        let shape_dir = to_shape(dir).try_normalize()?;
+        let at = intersect(shape, to_shape(origin) + self.offset, shape_dir)?;
+        let pos = self.turn * (self.stretch * (at.pos - self.offset));
+        let nrm = (self.turn * (at.nrm / self.stretch)).try_normalize().unwrap_or(at.nrm);
+        Some(hit(pos, nrm))
     }
 }
 
@@ -93,6 +138,7 @@ fn shape_for(projection: &Projection) -> PreviewShape {
 /// `side²` pixels of the checker on the projection's shape over the `field` background
 fn render(projection: &Projection, side: usize, tokens: &Tokens) -> ColorImage {
     let shape = shape_for(projection);
+    let place = ShapePlace::of(projection);
     let (yaw, pitch) = (CAMERA_YAW.to_radians(), CAMERA_PITCH.to_radians());
     let eye = Vec3::new(pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos());
     let forward = -eye;
@@ -111,7 +157,7 @@ fn render(projection: &Projection, side: usize, tokens: &Tokens) -> ColorImage {
             let across = ((x as f32 + 0.5) / rays as f32 * 2.0 - 1.0) * VIEW_HALF;
             let down = ((y as f32 + 0.5) / rays as f32 * 2.0 - 1.0) * VIEW_HALF;
             let origin = right * across - up * down + eye * 3.0;
-            let hit = intersect(shape, origin, forward)?;
+            let hit = place.hit(shape, origin, forward)?;
             let shade = AMBIENT + (1.0 - AMBIENT) * hit.nrm.dot(light).max(0.0);
             let (color, cover) = surface(projection, &hit, shades);
             Some((color * shade, cover))
@@ -292,8 +338,48 @@ mod tests {
 
     #[test]
     fn projections_without_a_shape_have_no_preview() {
-        assert!(shown_projection(&Projection::UvTile).is_none());
-        assert!(shown_projection(&Projection::Uv { scale: [1.0; 2], rotation: 0.0, offset: [0.0; 2] }).is_none());
-        assert!(shown_projection(&spherical(1.0)).is_some());
+        assert!(shown_projection(&Projection::UvTile, BOUNDS).is_none());
+        assert!(shown_projection(&Projection::Uv { scale: [1.0; 2], rotation: 0.0, offset: [0.0; 2] }, BOUNDS).is_none());
+        assert!(shown_projection(&spherical(1.0), BOUNDS).is_some());
+    }
+
+    const BOUNDS: (Vec3, Vec3) = (Vec3::NEG_ONE, Vec3::ONE);
+
+    fn shown(projection: &Projection) -> Vec<Color32> {
+        render(&shown_projection(projection, BOUNDS).unwrap(), 32, &tokens()).pixels
+    }
+
+    /// What the 3D view's gizmo changes shows here too: a sphere's or cylinder's size, turn and centre, a placed frame's size, stretch and turn
+    #[test]
+    fn the_preview_shows_the_projectors_size_turn_and_place() {
+        let base = shown(&spherical(1.0));
+        let bigger = Projector { scale: [1.15; 3], ..Projector::default() };
+        let Projection::Spherical { uv, .. } = spherical(1.0) else { panic!("spherical() makes a spherical projection") };
+        let sphere = |projector: Projector, offset: [f32; 3]| Projection::Spherical { scale: 1.0, uv, offset, projector };
+        assert_ne!(shown(&sphere(bigger, [0.0; 3])), base, "a bigger sphere fills more of the square");
+        assert_ne!(shown(&sphere(Projector { rotation: [0.0, 0.0, 40.0], ..Projector::default() }, [0.0; 3])), base, "a turned sphere turns its checker");
+        assert_ne!(shown(&sphere(Projector::default(), [0.3, 0.0, 0.0])), base, "an offset moves it");
+        assert_eq!(shown(&sphere(Projector::default(), [0.0; 3])), base, "unmoved: as before");
+        assert_ne!(
+            shown(&cylindrical(Projector { scale: [1.3, 1.0, 1.3], ..Projector::default() })),
+            shown(&cylindrical(Projector::default())),
+            "a wider cylinder"
+        );
+
+        let frame = texturecraft_engine::core::Decal {
+            center: [0.0, 0.0, 1.0],
+            normal: [0.0, 0.0, 1.0],
+            up: [0.0, 1.0, 0.0],
+            size: [1.0, 1.0],
+            rotation: 0.0,
+            offset: [0.0; 2],
+            depth: 1.0,
+        };
+        let placed = |frame| Projection::decal(frame);
+        let square = shown(&placed(frame));
+        assert_ne!(shown(&placed(texturecraft_engine::core::Decal { size: [0.5, 0.5], ..frame })), square, "a smaller frame");
+        assert_ne!(shown(&placed(texturecraft_engine::core::Decal { size: [1.5, 1.0], ..frame })), square, "a stretched frame");
+        assert_ne!(shown(&placed(texturecraft_engine::core::Decal { rotation: 30.0, ..frame })), square, "a turned frame");
+        assert_ne!(shown(&placed(texturecraft_engine::core::Decal { offset: [0.3, 0.0], ..frame })), square, "a slid frame");
     }
 }

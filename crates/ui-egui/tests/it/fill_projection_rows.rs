@@ -67,10 +67,11 @@ fn each_projection_shows_its_own_rows() {
     assert!(!shows(&harness, "Reset frame"), "planar has no frame to reset");
 
     let (harness, _) = app_with_fill("warp");
-    for label in ["Projection Depth", "Reset frame", "Depth culling", "Rotation X", "Scale X"] {
+    // A warp's 3D projection settings are its frame's: where its centre is, its turn and its size
+    for label in ["Projection Depth", "Reset frame", "Depth culling", "Offset X", "Rotation X", "Scale X"] {
         assert!(shows(&harness, label), "warp: {label}");
     }
-    assert!(!shows(&harness, "Backface culling") && !shows(&harness, "Offset X"), "a warp moves with its frame and has no backface culling");
+    assert!(!shows(&harness, "Backface culling"), "a warp has no backface culling");
 
     let (harness, _) = app_with_fill("cylindrical");
     for label in ["Angle", "Backface culling", "Projection Extends Outside Shape", "Offset X"] {

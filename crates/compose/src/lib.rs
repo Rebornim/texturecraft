@@ -16,6 +16,7 @@ pub mod display;
 pub mod eval;
 pub mod fill_copies;
 pub mod fill_copy;
+pub mod frame_placement;
 pub mod pattern;
 pub mod projector_cover;
 pub mod projector_depth;

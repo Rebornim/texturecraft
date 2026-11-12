@@ -5,6 +5,7 @@ use std::ops::RangeInclusive;
 use egui::{Painter, Rect};
 use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
+use texturecraft_engine::compose::frame_placement;
 use texturecraft_engine::compose::tile_length::{MeshSize, tile_length, tiling_for_length};
 use texturecraft_engine::core::{Channel, Fill, Filtering, LayerId, Projection, Projector, ScaleMode, ShapeCrop, UvWrap};
 
@@ -53,6 +54,9 @@ const BACKFACE_ANGLE_RANGE: RangeInclusive<f32> = 0.0..=180.0;
 
 /// What the Projection Depth track spans, in lengths of the frame's longer side
 const PROJECTION_DEPTH_TRACK: RangeInclusive<f32> = 0.0..=1.0;
+
+/// A degenerate warp frame's preview size: its side spans the preview's middle
+const WARP_SPAN_FALLBACK: f32 = 1.7;
 
 /// Change per pixel dragged on a 3D offset field
 const OFFSET_FIELD_SPEED: f32 = 0.01;
@@ -292,15 +296,24 @@ fn placement_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill
         None => PreviewLower::Offset { values: &mut lower_offset, range: OFFSET_TRACK, typed: OFFSET_TYPED },
     };
     let placement = Placement { tiling, rotation, offset };
-    let corners = match &fill.projection {
-        Projection::Warp { corners, .. } => Some(*corners),
+    let bounds = app.session.mesh.bounds();
+    // A warp shows its frame's size and turn as its gizmo leaves them
+    let warp = match &fill.projection {
+        Projection::Warp { corners, .. } => {
+            let landed = frame_placement::folded(&fill.projection);
+            let frame = landed.as_ref().and_then(Projection::frame);
+            let diagonal = (bounds.1 - bounds.0).length().max(f32::EPSILON);
+            let size = frame.map_or([1.0 / WARP_SPAN_FALLBACK; 2], |frame| frame.size.map(|side| side / diagonal));
+            let turn = frame.and_then(frame_placement::upright_turn).unwrap_or(0.0);
+            Some((*corners, size, turn))
+        }
         _ => None,
     };
     let projection = &fill.projection;
-    let picture = |painter: &Painter, rect: Rect| match corners {
-        Some(corners) => warp_preview(painter, rect, corners, &tokens),
+    let picture = |painter: &Painter, rect: Rect| match warp {
+        Some((corners, size, turn)) => warp_preview(painter, rect, corners, size, turn, &tokens),
         None => {
-            if projection_preview(painter, rect, projection, &tokens).is_none() {
+            if projection_preview(painter, rect, projection, bounds, &tokens).is_none() {
                 window_preview(painter, rect, placement, &tokens);
             }
         }
@@ -343,22 +356,40 @@ fn xyz_fields(values: [f32; 3], speed: f32, decimals: usize, suffix: &'static st
     fields
 }
 
-/// The 3D projection settings: the projector's Offset, Rotation and Scale in X, Y and Z; a frame on the surface has no Offset (it moves with the frame)
+/// The 3D projection settings: the projector's Offset, Rotation and Scale in X, Y and Z; a frame on the surface shows its own (where its centre is, how it is turned, how big it is), the same values its gizmo drags
 fn world_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, salt: &str) {
     let Some(projector) = projector_of(&fill.projection) else { return };
-    let offset = match &fill.projection {
-        Projection::Planar { placed: Some(_), .. } | Projection::Warp { .. } => None,
-        Projection::Triplanar { offset, .. }
-        | Projection::Planar { offset, .. }
-        | Projection::Spherical { offset, .. }
-        | Projection::Cylindrical { offset, .. } => Some(*offset),
-        Projection::Uv { .. } | Projection::UvTile => None,
-    };
     if !sheet.band(tr("3D projection settings"), true, None, None).open {
         return;
     }
     let edited = |fields: &[NumberField]| -> Vec<f32> { fields.iter().map(|field| field.value).collect() };
 
+    // A placed planar or a warp: the frame, its projector folded in
+    if let Some(shown) = frame_placement::placement(&fill.projection, app.session.mesh.bounds()) {
+        let run = |app: &mut TextureCraftApp, key: &str, values: Vec<f32>, merge: bool| {
+            app.run("layer.decal.set", with(base, json!({key: values, "merge": merge})));
+        };
+        let mut fields = xyz_fields(shown.offset, OFFSET_FIELD_SPEED, 2, "");
+        if let Some((_, merge)) = sheet.number_fields(tr("Offset"), &mut fields, None, true) {
+            run(app, "frameOffset", edited(&fields), merge);
+        }
+        let mut fields = xyz_fields(shown.rotation, ROTATION_FIELD_SPEED, 0, "°");
+        if let Some((_, merge)) = sheet.number_fields(tr("Rotation"), &mut fields, None, true) {
+            run(app, "frameRotation", edited(&fields), merge);
+        }
+        if let Some((scale, merge)) = scale_row(sheet, shown.scale, salt) {
+            run(app, "frameScale", scale, merge);
+        }
+        return;
+    }
+
+    let offset = match &fill.projection {
+        Projection::Triplanar { offset, .. }
+        | Projection::Planar { offset, .. }
+        | Projection::Spherical { offset, .. }
+        | Projection::Cylindrical { offset, .. } => Some(*offset),
+        Projection::Warp { .. } | Projection::Uv { .. } | Projection::UvTile => None,
+    };
     if let Some(offset) = offset {
         let mut fields = xyz_fields(offset, OFFSET_FIELD_SPEED, 2, "");
         if let Some((_, merge)) = sheet.number_fields(tr("Offset"), &mut fields, None, true) {
@@ -369,20 +400,27 @@ fn world_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &F
     if let Some((_, merge)) = sheet.number_fields(tr("Rotation"), &mut fields, None, true) {
         app.run("layer.fill.projection", with(base, json!({"projectorRotation": edited(&fields), "merge": merge})));
     }
-
-    let link_id = sheet.ui.make_persistent_id(("projector_scale_link", salt));
-    let [x, y, z] = projector.scale;
-    let mut linked = sheet.ui.data(|data| data.get_temp::<bool>(link_id)).unwrap_or(x == y && y == z);
-    let was_linked = linked;
-    let mut fields = xyz_fields(projector.scale, SCALE_FIELD_SPEED, 2, "");
-    if let Some((axis, merge)) = sheet.number_fields(tr("Scale"), &mut fields, Some(&mut linked), false) {
-        let mut scale = edited(&fields);
-        if linked && let Some(&value) = scale.get(axis) {
-            scale = vec![value; 3];
-        }
+    if let Some((scale, merge)) = scale_row(sheet, projector.scale, salt) {
         app.run("layer.fill.projection", with(base, json!({"projectorScale": scale, "merge": merge})));
     }
+}
+
+/// The Scale X, Y, Z row with its link: the new scale and whether it continues the drag's undo step; linked, one field scales all three by the same factor
+fn scale_row(sheet: &mut PropertySheet<'_>, scale: [f32; 3], salt: &str) -> Option<(Vec<f32>, bool)> {
+    let link_id = sheet.ui.make_persistent_id(("projector_scale_link", salt));
+    let [x, y, z] = scale;
+    let mut linked = sheet.ui.data(|data| data.get_temp::<bool>(link_id)).unwrap_or(x == y && y == z);
+    let was_linked = linked;
+    let mut fields = xyz_fields(scale, SCALE_FIELD_SPEED, 2, "");
+    let edit = sheet.number_fields(tr("Scale"), &mut fields, Some(&mut linked), false);
     if linked != was_linked {
         sheet.ui.data_mut(|data| data.insert_temp(link_id, linked));
     }
+    let (axis, merge) = edit?;
+    let mut values: Vec<f32> = fields.iter().map(|field| field.value).collect();
+    if linked && let (Some(&value), Some(&before)) = (values.get(axis), scale.get(axis)) {
+        let factor = if before.abs() > f32::EPSILON { value / before } else { 1.0 };
+        values = scale.iter().map(|old| if before.abs() > f32::EPSILON { old * factor } else { value }).collect();
+    }
+    Some((values, merge))
 }

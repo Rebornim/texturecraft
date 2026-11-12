@@ -95,6 +95,8 @@ pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Respons
             {
                 let params = with_merge(params, drag.stepped);
                 drag.stepped |= texturecraft_engine::execute(&mut app.session, command, &params).is_ok();
+                // The panel drew before this edit: one more frame shows its fields and preview where the projection is now
+                ctx.request_repaint();
             }
             ctx.data_mut(|data| data.insert_temp(drag_id(), drag));
         }

@@ -6,6 +6,7 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::json;
 use texturecraft_engine::core::{Channel, CookResolution, LayerId, LayerKind, LinkParam, MaterialLink, Procedural, ProceduralKind, Source};
 use texturecraft_ui_egui::TextureCraftApp;
+use texturecraft_ui_egui::screen_pick::{PickOutcome, ScreenPick};
 
 /// Tall enough that Properties shows the whole fill and an open source list without scrolling
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1600.0);
@@ -471,4 +472,40 @@ fn a_plain_fill_switches_to_one_whole_material_picks_it_from_its_card_and_clears
     click_in_slot(&mut harness, "Copper Hammered", Role::Button, "Clear");
     assert_eq!(whole_material(&harness, layer), None, "× drops the material");
     assert_eq!(source(&harness, layer, Channel::BaseColor), Source::uniform_of(Channel::BaseColor), "and returns the channels to their defaults");
+}
+
+/// Arms the base colour bar's eyedropper and gives its pick the click outside the app that ended as `outcome`
+fn pick_outside(harness: &mut Harness<'_, TextureCraftApp>, outcome: PickOutcome) {
+    harness.get_all_by_role_and_label(Role::Button, "Pick color").next().unwrap().click();
+    harness.run_steps(SETTLE_FRAMES);
+    let bar = harness.state().picking_color.expect("the eyedropper waits for a click");
+    harness.state_mut().screen_pick = Some(ScreenPick::ended(bar, outcome));
+    harness.run_steps(SETTLE_FRAMES);
+}
+
+#[test]
+fn a_click_outside_the_app_hands_its_screen_colour_to_the_bar_and_a_cancelled_or_impossible_one_changes_nothing() {
+    let (mut harness, layer) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
+    assert!(!harness.state().screen_picking, "tests have no real window: no system hook or grab");
+    let before = base_color(&harness, layer);
+    click(&mut harness, Role::Button, "Base color");
+
+    pick_outside(&mut harness, PickOutcome::Unavailable);
+    assert!(harness.state().picking_color.is_some(), "where the system cannot read the screen the pick stays on the model");
+    assert_eq!(base_color(&harness, layer), before, "nothing changes until a click");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(harness.state().picking_color.is_none() && harness.state().screen_pick.is_none(), "Escape ends the pick and its wait");
+
+    pick_outside(&mut harness, PickOutcome::Cancelled);
+    assert!(harness.state().picking_color.is_none(), "dismissing the desktop's picker ends the pick");
+    assert_eq!(base_color(&harness, layer), before, "a cancelled pick changes nothing");
+
+    let undo_before = harness.state().session.history_labels().len();
+    pick_outside(&mut harness, PickOutcome::Picked([255, 128, 0]));
+    let picked = base_color(&harness, layer);
+    let expected = [1.0, texturecraft_engine::texel::srgb_to_linear(128.0 / 255.0), 0.0];
+    assert!(picked.iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-3), "the screen's sRGB pixel is stored linear: {picked:?}");
+    assert!(harness.state().picking_color.is_none() && harness.state().screen_pick.is_none(), "the click ends the pick");
+    assert_eq!(harness.state().session.history_labels().len(), undo_before + 1, "one undo step");
 }

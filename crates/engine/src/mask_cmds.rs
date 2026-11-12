@@ -297,7 +297,7 @@ fn add_fill(session: &mut Session, params: &Value) -> Result<Value> {
     const MIN_PATTERN_SCALE: f32 = 0.001;
     const MAX_PATTERN_SCALE: f32 = 1000.0;
 
-    let projection = projection_from(params, CMD, None)?;
+    let projection = projection_from(params, CMD, None, || crate::warp_cmds::fitted_frame(&session.mesh))?;
     let sampling = crate::layer_cmds::sampling_from(params, CMD, Sampling::default())?;
     let blend = blend_param(CMD, params, "blend")?.unwrap_or(BlendMode::Normal);
     let layer = layer_param(session, CMD, params)?;
@@ -634,6 +634,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
     };
     let swaps_filter = swapped.is_some();
 
+    let fitted = crate::warp_cmds::fitted_frame(&session.mesh);
     session.edit("Edit effect", |session| {
         let edited = session.doc.project.effect_mut(effect).ok_or_else(|| bad(CMD, format!("no effect {}", effect.0)))?;
         if let Some((kind, label)) = swapped {
@@ -700,7 +701,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
                 }
 
                 // Preserve projection fields that the edit does not supply
-                *projection = projection_from(params, CMD, Some(&*projection))?;
+                *projection = projection_from(params, CMD, Some(&*projection), || fitted)?;
             }
             EffectKind::ColorSelection { colors, tolerance } => crate::color_selection_cmds::apply_params(params, colors, tolerance)?,
             EffectKind::Compare { tolerance, .. } => {

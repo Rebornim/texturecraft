@@ -159,9 +159,11 @@ fn placement_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill
     let tokens = Tokens::get(sheet.ui.ctx());
     let (tiling, rotation, offset, offset_key) = match &fill.projection {
         Projection::Uv { scale, rotation, offset } => (*scale, *rotation, *offset, "offset"),
-        Projection::Triplanar { uv, .. } | Projection::Planar { uv, .. } | Projection::Spherical { uv, .. } | Projection::Cylindrical { uv, .. } => {
-            (uv.tiling, uv.rotation, uv.offset, "uvOffset")
-        }
+        Projection::Triplanar { uv, .. }
+        | Projection::Planar { uv, .. }
+        | Projection::Spherical { uv, .. }
+        | Projection::Cylindrical { uv, .. }
+        | Projection::Warp { uv, .. } => (uv.tiling, uv.rotation, uv.offset, "uvOffset"),
         Projection::UvTile => return,
     };
 
@@ -223,7 +225,8 @@ fn world_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &F
     let (scale, offset) = match &fill.projection {
         Projection::Triplanar { scale, offset, .. } | Projection::Planar { scale, offset, .. } => (*scale, Some(*offset)),
         Projection::Spherical { scale, .. } | Projection::Cylindrical { scale, .. } => (*scale, None),
-        Projection::UvTile | Projection::Uv { .. } => return,
+        // The warp's 3D projection settings come with its panel rows (screen 02)
+        Projection::UvTile | Projection::Uv { .. } | Projection::Warp { .. } => return,
     };
     if !sheet.band(tr("3D projection settings"), true, None, None).open {
         return;

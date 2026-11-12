@@ -3,8 +3,8 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    BlendMode, Channel, ChannelBlend, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Projector, Sampling,
-    ScaleMode, ShapeCrop, Source, UvTransform, UvWrap,
+    BlendMode, Channel, ChannelBlend, Decal, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Projector,
+    Sampling, ScaleMode, ShapeCrop, Source, UvTransform, UvWrap,
 };
 
 use crate::commands::{
@@ -39,7 +39,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill projection",
             [],
             None,
-            "{layer? | effect?: content fill effect id, projection?: uvTile (Fill (Match per UV Tile))|uv|triplanar|planar|spherical|cylindrical (default: the current one), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections: one number), offset?: [u, v] (uv) | [x, y, z] (3D projections), projectorRotation?: [x, y, z] degrees, projectorScale?: number | [x, y, z] (3D projection settings), shapeCrop?: cropped|extendsOutside (3D projections), backfaceCulling?: bool, backfaceAngle?: degrees, backfaceHardness?: 0..1 (planar, cylindrical), sharpness?: 1..64 (triplanar), angle?: 1..360 degrees one repeat spans (cylindrical), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar)} — what is not given keeps its value",
+            "{layer? | effect?: content fill effect id, projection?: uvTile (Fill (Match per UV Tile))|uv|triplanar|planar|spherical|cylindrical|warp (default: the current one; a new warp's frame sits around the mesh, seen from the front), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections: one number), offset?: [u, v] (uv) | [x, y, z] (3D projections), projectorRotation?: [x, y, z] degrees, projectorScale?: number | [x, y, z] (3D projection settings), shapeCrop?: cropped|extendsOutside (3D projections), backfaceCulling?: bool, backfaceAngle?: degrees, backfaceHardness?: 0..1 (planar, cylindrical), sharpness?: 1..64 (triplanar), warpCorners?: [[x, y] × 4] (warp: top left, top right, bottom right, bottom left, across and up in frame sizes from its centre; unpulled = ±0.5), projectionDepth?: lengths of the frame's longer side it reaches in front of and behind it when cropped (warp), angle?: 1..360 degrees one repeat spans (cylindrical), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar)} — what is not given keeps its value",
             has_layer,
             fill_projection
         ),
@@ -284,12 +284,12 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
 /// Which fill `layer.fill.*` edits: a fill layer's (`layer`) or a content fill effect's
 /// (`effect`).
 #[derive(Clone, Copy)]
-enum FillTarget {
+pub(crate) enum FillTarget {
     Layer(LayerId),
     Effect(LayerId),
 }
 
-fn fill_target(s: &Session, p: &Value, cmd: &str) -> Result<FillTarget> {
+pub(crate) fn fill_target(s: &Session, p: &Value, cmd: &str) -> Result<FillTarget> {
     match u64p(p, "effect").map(LayerId) {
         Some(e) => match s.doc.project.effect(e) {
             Some((_, x)) if matches!(x.kind, EffectKind::Material(_)) => Ok(FillTarget::Effect(e)),
@@ -299,7 +299,7 @@ fn fill_target(s: &Session, p: &Value, cmd: &str) -> Result<FillTarget> {
     }
 }
 
-fn fill_mut(s: &mut Session, target: FillTarget) -> Result<&mut Fill> {
+pub(crate) fn fill_mut(s: &mut Session, target: FillTarget) -> Result<&mut Fill> {
     match target {
         FillTarget::Layer(id) => match &mut s.doc.project.layer_mut(id)?.kind {
             LayerKind::Fill(f) => Ok(f),
@@ -403,9 +403,8 @@ fn fill_set(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(Value::Null)
 }
 
-/// The projection `p` asks for. Fields it does not give keep their values from `current` when
-/// that is of the same kind (or `p` names no kind), and the kind's defaults otherwise.
-pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>) -> Result<Projection> {
+/// The projection `p` asks for: fields it does not give keep their values from `current` when that is of the same kind (or `p` names no kind), and the kind's defaults otherwise; a new warp starts from frame `fit`
+pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>, fit: impl FnOnce() -> Decal) -> Result<Projection> {
     let named = match strp(p, "projection") {
         None => None,
         Some("uv") => Some(Projection::default()),
@@ -420,6 +419,8 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
         Some("cylindrical") => {
             Some(Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default(), offset: [0.0; 3], projector: Default::default(), angle: 360.0 })
         }
+        Some("warp") if !matches!(current, Some(Projection::Warp { .. })) => Some(Projection::warp(fit())),
+        Some("warp") => current.cloned(),
         Some(other) => return Err(bad(cmd, format!("unknown projection `{other}`"))),
     };
     let mut proj = match (named, current) {
@@ -487,9 +488,34 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
             place(uv);
             turn(projector);
         }
+        Projection::Warp { corners, depth, uv, projector, .. } => {
+            *corners = warp_corners(p).unwrap_or(*corners);
+            *depth = f32p(p, "projectionDepth").map_or(*depth, |v| v.clamp(0.0, MAX_PROJECTION_DEPTH));
+            place(uv);
+            turn(projector);
+        }
     }
     Ok(proj)
 }
+
+/// The `warpCorners` param: four [across, up] corners in frame sizes from the frame's centre, finite and within reach of the frame
+fn warp_corners(p: &Value) -> Option<[[f32; 2]; 4]> {
+    let list = p.get("warpCorners")?.as_array().filter(|list| list.len() == 4)?;
+    let mut corners = Projection::FRAME_CORNERS;
+    for (corner, value) in corners.iter_mut().zip(list) {
+        let pair = value.as_array().filter(|pair| pair.len() == 2)?;
+        for (axis, v) in corner.iter_mut().zip(pair) {
+            *axis = v.as_f64().map(|v| v as f32).filter(|v| v.is_finite())?.clamp(-MAX_CORNER_REACH, MAX_CORNER_REACH);
+        }
+    }
+    Some(corners)
+}
+
+/// How far a warp's corner may be pulled from the frame's centre, in frame sizes
+const MAX_CORNER_REACH: f32 = 100.0;
+
+/// The largest Projection Depth, in lengths of the frame's longer side
+const MAX_PROJECTION_DEPTH: f32 = 100.0;
 
 /// `current` with the `filtering`, `wrap` and `scaleMode` params applied
 pub(crate) fn sampling_from(p: &Value, cmd: &str, current: Sampling) -> Result<Sampling> {
@@ -523,9 +549,10 @@ fn floats<const N: usize>(p: &Value, key: &str, lo: f32, hi: f32) -> Option<[f32
 
 fn fill_projection(s: &mut Session, p: &Value) -> Result<Value> {
     let target = fill_target(s, p, "layer.fill.projection")?;
+    let mesh = s.mesh.clone();
     s.edit("Fill projection", |s| {
         let fill = fill_mut(s, target)?;
-        fill.projection = projection_from(p, "layer.fill.projection", Some(&fill.projection))?;
+        fill.projection = projection_from(p, "layer.fill.projection", Some(&fill.projection), || crate::warp_cmds::fitted_frame(&mesh))?;
         fill.sampling = sampling_from(p, "layer.fill.projection", fill.sampling)?;
         Ok(())
     })?;

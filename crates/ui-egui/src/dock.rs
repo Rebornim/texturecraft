@@ -1151,7 +1151,7 @@ fn properties_has_fill_tabs(app: &TextureCraftApp) -> bool {
     let layer = app.session.selected_layer().and_then(|id| app.session.doc.project.layers.get(&id));
     app.session.tool.tool != Tool::PolygonFill
         && app.session.target == StackTarget::Content
-        && layer.is_some_and(|layer| matches!(&layer.kind, LayerKind::Fill(fill) if !matches!(fill.projection, Projection::Decal(_))))
+        && layer.is_some_and(|layer| matches!(&layer.kind, LayerKind::Fill(fill) if fill.projection.placed().is_none()))
 }
 
 /// Room around the Properties rows not yet laid out by the property sheet, as every other panel has

@@ -859,7 +859,7 @@ impl DecalFrame {
         let (layer, effect, decal) = match app.session.target {
             StackTarget::Content => {
                 let layer = layers.content_layer(selected)?;
-                let LayerKind::Fill(Fill { projection: Projection::Decal(decal), .. }) = &layer.kind else { return None };
+                let LayerKind::Fill(Fill { projection: Projection::Planar { placed: Some(decal), .. }, .. }) = &layer.kind else { return None };
 
                 (layer.id, None, decal)
             }
@@ -868,7 +868,7 @@ impl DecalFrame {
                 let owner = layers.mask_owner(selected);
                 let mask = layers.layer(owner).ok()?.mask.as_ref()?;
                 let mask_effect = mask.effects.iter().find(|candidate| candidate.id == effect)?;
-                let EffectKind::Fill { projection: Projection::Decal(decal), .. } = &mask_effect.kind else { return None };
+                let EffectKind::Fill { projection: Projection::Planar { placed: Some(decal), .. }, .. } = &mask_effect.kind else { return None };
 
                 (owner, Some(effect), decal)
             }
@@ -964,7 +964,7 @@ fn decal_overlay(app: &mut TextureCraftApp, ui: &Ui, rect: Rect) {
     use texturecraft_engine::core::{Fill, LayerKind, Projection};
     let p = &app.session.doc.project;
     let sel = app.session.selected_layer().and_then(|id| p.content_layer(id));
-    let is_decal = matches!(sel.map(|l| &l.kind), Some(LayerKind::Fill(Fill { projection: Projection::Decal(_), .. })));
+    let is_decal = matches!(sel.map(|l| &l.kind), Some(LayerKind::Fill(Fill { projection: Projection::Planar { placed: Some(_), .. }, .. })));
     // Placing follows the selection: another layer selected stops it.
     if app.placing_decal.is_some() && app.placing_decal != sel.map(|l| l.id).filter(|_| is_decal) {
         app.placing_decal = None;
@@ -2055,7 +2055,7 @@ mod tests {
 
             let effect = &harness.state().session.doc.project.effect(effect).unwrap().1.kind;
             assert!(
-                matches!(effect, texturecraft_engine::core::EffectKind::Fill { projection: texturecraft_engine::core::Projection::Decal(decal), .. } if *decal == original.decal)
+                matches!(effect, texturecraft_engine::core::EffectKind::Fill { projection: texturecraft_engine::core::Projection::Planar { placed: Some(decal), .. }, .. } if *decal == original.decal)
             );
         }
     }

@@ -61,7 +61,7 @@ pub(crate) fn fill_sheet(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_
     let salt = base.to_string();
     sheet.section(tr("Fill"), false);
     match &fill.projection {
-        Projection::Decal(decal) => legacy(sheet, |ui| decal_editor(app, ui, decal, reader)),
+        Projection::Planar { placed: Some(decal), .. } => legacy(sheet, |ui| decal_editor(app, ui, decal, reader)),
         _ => projection_rows(app, sheet, fill, base, &salt),
     }
 
@@ -162,7 +162,7 @@ fn placement_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill
         Projection::Triplanar { uv, .. } | Projection::Planar { uv, .. } | Projection::Spherical { uv, .. } | Projection::Cylindrical { uv, .. } => {
             (uv.tiling, uv.rotation, uv.offset, "uvOffset")
         }
-        Projection::UvTile | Projection::Decal(_) => return,
+        Projection::UvTile => return,
     };
 
     let link_id = sheet.ui.make_persistent_id(("fill_tiling_link", salt));
@@ -223,7 +223,7 @@ fn world_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &F
     let (scale, offset) = match &fill.projection {
         Projection::Triplanar { scale, offset, .. } | Projection::Planar { scale, offset, .. } => (*scale, Some(*offset)),
         Projection::Spherical { scale, .. } | Projection::Cylindrical { scale, .. } => (*scale, None),
-        Projection::UvTile | Projection::Uv { .. } | Projection::Decal(_) => return,
+        Projection::UvTile | Projection::Uv { .. } => return,
     };
     if !sheet.band(tr("3D projection settings"), true, None, None).open {
         return;

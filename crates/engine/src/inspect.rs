@@ -28,8 +28,8 @@ fn fill_json(f: &Fill) -> Value {
         "scaleMode": f.sampling.scale.id(),
         "sources": f.sources.iter().map(|(c, s)| (c.id().to_string(), source_json(s))).collect::<serde_json::Map<_, _>>(),
     });
-    if let Projection::Decal(d) = &f.projection {
-        v["decal"] = json!(d);
+    if let Some(frame) = f.projection.placed() {
+        v["decal"] = json!(frame);
     }
     if let Some(link) = &f.link {
         v["link"] = json!(link);

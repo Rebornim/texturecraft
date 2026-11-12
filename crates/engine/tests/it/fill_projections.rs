@@ -175,3 +175,19 @@ fn backface_culling_keeps_a_planar_projection_off_faces_turned_away() {
     let sideways = facing_z(&s, 0.1, 0.6);
     assert!(sideways.iter().all(|&i| narrow[i] == empty[i]), "past 45 degrees nothing is left");
 }
+
+/// A decal saved before decals were planar projections loads as a planar projection placed on its frame, cropped to it and off faces turned away
+#[test]
+fn saved_decals_load_as_planar_projections_placed_on_the_surface() {
+    use texturecraft_engine::core::{Backface, Decal, Fill, ShapeCrop};
+    let frame =
+        Decal { center: [0.0, 0.0, 1.0], normal: [0.0, 0.0, 1.0], up: [0.0, 1.0, 0.0], size: [0.5, 0.4], rotation: 10.0, offset: [0.1, 0.0], depth: 0.3 };
+    let mut saved = serde_json::to_value(Fill::default()).unwrap();
+    saved["projection"] = json!({ "Decal": frame });
+    let fill: Fill = serde_json::from_value(saved).unwrap();
+    let Projection::Planar { placed: Some(placed), projector, .. } = fill.projection else { panic!("{:?}", fill.projection) };
+    assert_eq!(placed, frame);
+    assert_eq!(projector.crop, ShapeCrop::Cropped);
+    assert_eq!(projector.backface, Backface { on: true, angle: 90.0, hardness: 0.5 });
+    assert_eq!(serde_json::to_value(&fill.projection).unwrap()["Planar"]["placed"], json!(frame), "it saves as a planar projection");
+}

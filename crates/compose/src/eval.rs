@@ -11,8 +11,8 @@ use std::sync::Arc;
 use rayon::prelude::*;
 use texturecraft_core::{
     BakedMap, BlendMode, BlockScales, Channel, ChannelKind, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter, Filtering, Generator,
-    GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, NormalFormat, Project, Projection, Sampling, Source, TextureSet, TileGrid,
-    blend1, blend3, lum, mix3, per_unit,
+    GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, NormalFormat, Project, Projection, Sampling, ShapeCrop, Source, TextureSet,
+    TileGrid, blend1, blend3, lum, mix3, per_unit,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, UvGBuffer};
@@ -20,8 +20,8 @@ use texturecraft_texel::{DilationMap, TILE, TILE_AREA, TileImage, from_u16, nois
 
 use crate::below::{Band, BelowCache, Level};
 use crate::curvature_sizes::CurvatureSizes;
-use crate::pattern::{Coords, decal_uv, image_samples, procedural, world_noise};
-use crate::projector_cover::projector_cover;
+use crate::pattern::{Coords, image_samples, procedural, world_noise};
+use crate::projector_cover::{placed_cover, projector_cover};
 use crate::store::{BakedMaps, ImageRes, ImageStore, PixelStore, decode};
 
 const NCH: usize = Channel::ALL.len();
@@ -1013,9 +1013,6 @@ fn over(c: &ChanPlan, mode: BlendMode, v: [f32; 3], cov: f32, p: [f32; 3], a: f3
     (mix3(v, b, a / nc.max(1e-5)), nc)
 }
 
-/// The plain UV projection a decal's frame coordinates are sampled through.
-const DECAL_UV: Projection = Projection::Uv { scale: [1.0, 1.0], rotation: 0.0, offset: [0.0, 0.0] };
-
 /// Per-texel context.
 struct Texel<'a, 'b> {
     inp: &'b Inputs<'a>,
@@ -1135,7 +1132,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         c
     }
 
-    /// The coordinates of texel (`x`, `y`) through `proj`, uncached (None when uncovered or outside a decal)
+    /// The coordinates of texel (`x`, `y`) through `proj`, uncached (None when uncovered)
     fn projected_at(&self, proj: &Projection, x: u32, y: u32) -> Option<Coords> {
         let g = self.inp.gbuf;
         if x >= g.width || y >= g.height {
@@ -1152,7 +1149,7 @@ impl<'a, 'b> Texel<'a, 'b> {
             c.uv = Vec2::from(set.from_atlas(&grid, c.uv.to_array()));
         }
         match proj {
-            Projection::Decal(d) => decal_uv(d, s.pos, s.nrm).map(|(uv, _)| Coords { uv, ..c }),
+            Projection::Planar { projector, placed: Some(frame), .. } => placed_cover(frame, projector, s.pos, s.nrm).map(|(uv, _)| Coords { uv, ..c }),
             _ => Some(c),
         }
     }
@@ -1161,10 +1158,9 @@ impl<'a, 'b> Texel<'a, 'b> {
     fn footprints(&self, proj: &Projection, samples: &[(Vec2, f32); 3], image: &ImageRes) -> [f32; 3] {
         let size = Vec2::new(image.width as f32, image.height as f32);
         let mut out = [1.0f32; 3];
-        let sampled = |c: &Coords| image_samples(if matches!(proj, Projection::Decal(_)) { &DECAL_UV } else { proj }, c);
         for (dx, dy) in [(1, 0), (0, 1)] {
             let Some(next) = self.projected_at(proj, self.x + dx, self.y + dy) else { continue };
-            for ((footprint, (uv, _)), (next_uv, _)) in out.iter_mut().zip(samples).zip(sampled(&next)) {
+            for ((footprint, (uv, _)), (next_uv, _)) in out.iter_mut().zip(samples).zip(image_samples(proj, &next)) {
                 let span = ((next_uv - *uv) * size).length();
                 // A jump of more than a quarter of the image is a UV seam, not the texel's size
                 if span.is_finite() && span < size.max_element() * 0.25 {
@@ -1175,7 +1171,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         out
     }
 
-    /// World position of this texel (None when uncovered).
+    /// World position of this texel (None when uncovered)
     fn world(&self) -> Option<Vec3> {
         let i = (self.y * self.inp.gbuf.width + self.x) as usize;
         self.inp.gbuf.surface(self.inp.mesh, i).map(|s| s.pos)
@@ -1189,61 +1185,64 @@ impl<'a, 'b> Texel<'a, 'b> {
         self.inp.baked.sample_working(map, self.x, self.y, (self.res, self.inp.gbuf.height), &self.inp.block_scales)
     }
 
-    /// Where projection `proj` samples this texel: the texel's coordinates, or for a decal its
-    /// position in the decal's frame (then sampled as UVs) and the decal's coverage.
-    fn projected<'p>(&mut self, proj: &'p Projection) -> (Coords, &'p Projection, f32) {
+    /// Where `proj` samples this texel: its coordinates, or for a planar projection placed on the surface its place in the frame, and how much backface culling and the shape crop let through
+    fn projected(&mut self, proj: &Projection) -> (Coords, f32) {
         let c = self.coords();
         match proj {
-            Projection::Decal(d) => match self.world().and_then(|p| decal_uv(d, p, c.nrm)) {
-                Some((uv, w)) => (Coords { uv, ..c }, &DECAL_UV, w),
-                None => (c, &DECAL_UV, 0.0),
+            Projection::Planar { projector, placed: Some(frame), .. } => match self.world().and_then(|p| placed_cover(frame, projector, p, c.nrm)) {
+                Some((uv, cover)) => (Coords { uv, ..c }, cover),
+                None => (c, 0.0),
             },
-            _ => (c, proj, 1.0),
+            _ => (c, 1.0),
         }
     }
 
-    /// How much a fill projected by `proj` covers this texel (wrap, shape crop, backface culling; decals: frame × image alpha)
+    /// How much a fill projected by `proj` covers this texel: wrap, shape crop and backface culling, and a cropped placed planar's image alpha
     fn cover<'s>(&mut self, mut sources: impl Iterator<Item = &'s Source>, proj: &Projection, sampling: Sampling) -> f32 {
-        if !matches!(proj, Projection::Decal(_)) {
+        let Projection::Planar { projector, placed: Some(_), .. } = proj else {
             let coords = self.coords();
-            return self.tile_cover(proj, sampling) * projector_cover(proj, &coords);
+            return self.tile_cover(proj, &coords, sampling) * projector_cover(proj, &coords);
+        };
+
+        let (c, cover) = self.projected(proj);
+        if projector.crop == ShapeCrop::ExtendsOutside {
+            return cover * self.tile_cover(proj, &c, sampling);
         }
-        let (c, _, w) = self.projected(proj);
+        // Cropped to its shape, a placed planar takes the shape of its image too
         let image = sources.find_map(|s| match s {
             Source::Image { name, .. } => self.inp.images.get(name),
             _ => None,
         });
-        w * image.map_or(1.0, |img| img.sample(c.uv.x, c.uv.y)[3].clamp(0.0, 1.0))
+        cover * image.map_or(1.0, |img| img.sample(c.uv.x, c.uv.y)[3].clamp(0.0, 1.0))
     }
 
-    /// 1 where a fill placed by `proj` lands inside its 0..1 tile on every axis `sampling.wrap` does not repeat, else 0
-    fn tile_cover(&mut self, proj: &Projection, sampling: Sampling) -> f32 {
+    /// 1 where a fill placed by `proj` at `coords` lands inside its 0..1 tile on every axis `sampling.wrap` does not repeat, else 0
+    fn tile_cover(&self, proj: &Projection, coords: &Coords, sampling: Sampling) -> f32 {
         let (across, down) = sampling.wrap.repeats();
         if (across && down) || matches!(proj, Projection::Triplanar { .. }) {
             return 1.0;
         }
-        let coords = self.coords();
-        let [(uv, _), ..] = image_samples(proj, &coords);
+        let [(uv, _), ..] = image_samples(proj, coords);
         let inside = |t: f32, repeats: bool| repeats || (0.0..1.0).contains(&t);
         if inside(uv.x, across) && inside(uv.y, down) { 1.0 } else { 0.0 }
     }
+
     /// The value `source` gives this texel through `projection`, read as a channel of `kind`
     fn source(&mut self, source: &Source, projection: &Projection, sampling: Sampling, kind: ChannelKind) -> [f32; 3] {
         match source {
             Source::Uniform(value) => *value,
             Source::Procedural { pattern, low, high } => {
-                let (coords, projection, _) = self.projected(projection);
+                let (coords, _) = self.projected(projection);
                 let amount = procedural(pattern, projection, &coords);
                 mix3(*low, *high, amount)
             }
             Source::Image { name, normal_format } => {
                 let Some(image) = self.inp.images.get(name) else { return [0.5; 3] };
 
-                let original = projection;
-                let (coords, projection, _) = self.projected(projection);
+                let (coords, _) = self.projected(projection);
                 let samples = image_samples(projection, &coords);
                 let footprints = match sampling.filtering {
-                    Filtering::BilinearHq => self.footprints(original, &samples, image),
+                    Filtering::BilinearHq => self.footprints(projection, &samples, image),
                     Filtering::BilinearSharp | Filtering::Nearest => [1.0; 3],
                 };
                 let mut sum = [0.0f32; 4];
@@ -3022,7 +3021,7 @@ soft {soft:?}"
             depth: 0.5,
         };
         let id = f.project.alloc_id();
-        let mut fill = Fill { projection: Projection::Decal(d), ..Fill::default() };
+        let mut fill = Fill { projection: Projection::decal(d), ..Fill::default() };
         fill.sources.insert(Channel::BaseColor, Source::image("decal"));
         f.project.insert_layer(0, Layer::new(id, "Decal", LayerKind::Fill(fill), &[Channel::BaseColor]), None, false).unwrap();
         let composite = |alpha: f32| {

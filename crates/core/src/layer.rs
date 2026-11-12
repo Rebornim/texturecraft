@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BlendMode, Channel, ChannelKind, Projector, lum};
+use crate::{Backface, BlendMode, Channel, ChannelKind, Projector, ShapeCrop, lum};
 
 mod curvature_detail;
 mod curvature_mode;
@@ -279,7 +279,7 @@ pub enum Projection {
         #[serde(default)]
         projector: Projector,
     },
-    /// World-space planar projection along an axis (0 = X, 1 = Y, 2 = Z).
+    /// World-space planar projection along an axis (0 = X, 1 = Y, 2 = Z), or from a frame placed on the surface
     Planar {
         scale: f32,
         axis: u8,
@@ -288,8 +288,11 @@ pub enum Projection {
         uv: UvTransform,
         #[serde(default)]
         projector: Projector,
+        /// The frame it projects from when placed on the surface (scale, axis and offset then unused)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        placed: Option<Decal>,
     },
-    /// Spherical projection around the mesh center.
+    /// Spherical projection around the mesh center
     Spherical {
         scale: f32,
         #[serde(default)]
@@ -299,7 +302,7 @@ pub enum Projection {
         #[serde(default)]
         projector: Projector,
     },
-    /// Cylindrical projection around an axis.
+    /// Cylindrical projection around an axis
     Cylindrical {
         scale: f32,
         axis: u8,
@@ -313,9 +316,6 @@ pub enum Projection {
         #[serde(default = "full_turn")]
         angle: f32,
     },
-    /// A geometry decal: the image projected from a frame placed on the surface (outside the
-    /// frame, behind it or beyond its depth the fill does not cover).
-    Decal(Decal),
 }
 
 /// Tiling, rotation (degrees) and offset a 3D projection lays on the surface; the default changes nothing
@@ -332,7 +332,7 @@ impl Default for UvTransform {
     }
 }
 
-/// The frame a decal projects from (world space).
+/// The frame a planar projection placed on the surface (a decal) projects from, in world space
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Decal {
     /// The surface point the decal was placed on.
@@ -363,6 +363,20 @@ impl Default for Projection {
 }
 
 impl Projection {
+    /// A planar projection from `frame` with a decal's look: cropped to its frame, depth and image alpha, off faces turned away
+    pub fn decal(frame: Decal) -> Projection {
+        let projector = Projector { crop: ShapeCrop::Cropped, backface: Backface { on: true, ..Backface::default() }, ..Projector::default() };
+        Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: UvTransform::default(), projector, placed: Some(frame) }
+    }
+
+    /// The frame on the surface a placed planar projection projects from
+    pub fn placed(&self) -> Option<&Decal> {
+        match self {
+            Projection::Planar { placed, .. } => placed.as_ref(),
+            _ => None,
+        }
+    }
+
     pub fn label(&self) -> &'static str {
         match self {
             Projection::UvTile => "Fill (Match per UV Tile)",
@@ -371,7 +385,6 @@ impl Projection {
             Projection::Planar { .. } => "Planar projection",
             Projection::Spherical { .. } => "Spherical projection",
             Projection::Cylindrical { .. } => "Cylindrical projection",
-            Projection::Decal(_) => "Decal projection",
         }
     }
 }
@@ -548,6 +561,7 @@ impl Source {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct Fill {
     pub sources: BTreeMap<Channel, Source>,
+    #[serde(deserialize_with = "crate::saved_projection::load")]
     pub projection: Projection,
     #[serde(default = "Sampling::saved_before")]
     pub sampling: Sampling,
@@ -1134,6 +1148,7 @@ pub enum EffectKind {
     /// A uniform or procedural grayscale fill.
     Fill {
         source: Source,
+        #[serde(deserialize_with = "crate::saved_projection::load")]
         projection: Projection,
         #[serde(default = "Sampling::saved_before")]
         sampling: Sampling,

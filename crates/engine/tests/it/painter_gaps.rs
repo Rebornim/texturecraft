@@ -181,7 +181,7 @@ fn decals_project_an_image_from_a_frame_placed_on_the_surface() {
     let layer = id(r.clone(), "layer");
     assert!((r["decal"]["size"][1].as_f64().unwrap() - 0.5).abs() < 1e-6);
     let LayerKind::Fill(f) = &s.doc.project.layer(layer).unwrap().kind else { panic!("a fill layer") };
-    assert!(matches!(f.projection, Projection::Decal(_)));
+    assert!(matches!(f.projection, Projection::Planar { placed: Some(_), .. }));
     assert!(red(at(&mut s, Channel::BaseColor, 200.0, 200.0)), "the decal shows where it was placed");
     assert!(!red(at(&mut s, Channel::BaseColor, 120.0, 200.0)), "and only there");
     // The image's transparent corners leave the surface as it was.
@@ -195,7 +195,7 @@ fn decals_project_an_image_from_a_frame_placed_on_the_surface() {
     assert_eq!(r["decal"]["offset"], json!([0.0, 0.0]), "re-placing resets the offset");
     assert!(red(at(&mut s, Channel::BaseColor, 170.0, 180.0)));
     let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap().to_string();
-    assert!(inspect.contains("Decal projection") && inspect.contains("\"rotation\":45"), "inspect shows the decal");
+    assert!(inspect.contains("Planar projection") && inspect.contains("\"decal\"") && inspect.contains("\"rotation\":45"), "inspect shows the decal");
     // Not a decal; one undo step per edit.
     let plain = id(execute(&mut s, "layer.add.fill", &Value::Null).unwrap(), "layer");
     assert!(execute(&mut s, "layer.decal.set", &json!({"layer": plain.0, "size": 1})).is_err());
@@ -397,7 +397,9 @@ fn a_decal_image_fills_a_chosen_channel_or_a_mask() {
     let added = execute(&mut s, "layer.add.decal", &place("mask")).unwrap();
     let masked = id(added.clone(), "layer");
     let mask = s.doc.project.layer(masked).unwrap().mask.as_ref().unwrap();
-    assert!(matches!(mask.effects.as_slice(), [effect] if matches!(effect.kind, EffectKind::Fill { projection: Projection::Decal(_), .. })));
+    assert!(
+        matches!(mask.effects.as_slice(), [effect] if matches!(effect.kind, EffectKind::Fill { projection: Projection::Planar { placed: Some(_), .. }, .. }))
+    );
     assert_eq!(added["maskEffect"], json!(mask.effects[0].id.0));
     execute(&mut s, "layer.fill.set", &json!({"layer": masked.0, "channel": "baseColor", "color": [1.0, 0.0, 0.0]})).unwrap();
     assert!(red(at(&mut s, Channel::BaseColor, 200.0, 200.0)), "the mask shows the layer under the decal");
@@ -563,7 +565,7 @@ fn fill_projection_edits_keep_what_they_do_not_change() {
     set(&mut s, json!({"projection": "planar", "axis": 7, "offset": [1e9, 0, 0]})).unwrap();
     assert_eq!(
         proj(&s),
-        Projection::Planar { scale: 1.0, axis: 2, offset: [1000.0, 0.0, 0.0], uv: Default::default(), projector: Default::default() },
+        Projection::Planar { scale: 1.0, axis: 2, offset: [1000.0, 0.0, 0.0], uv: Default::default(), projector: Default::default(), placed: None },
         "hostile values are clamped"
     );
     assert!(set(&mut s, json!({"projection": "hexagonal"})).is_err());

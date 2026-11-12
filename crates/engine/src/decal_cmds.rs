@@ -141,7 +141,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
             let mut mask = Mask::new(MaskBackground::Black);
             mask.effects.push(Effect::new(
                 effect_id,
-                EffectKind::Fill { source: Source::image(image.clone()), projection: Projection::Decal(decal), sampling: Default::default() },
+                EffectKind::Fill { source: Source::image(image.clone()), projection: Projection::decal(decal), sampling: Default::default() },
             ));
             layer.mask = Some(mask);
             crate::layer_cmds::insert_selected(s, layer)?;
@@ -149,7 +149,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok((id, Some(effect_id)));
         };
 
-        let mut fill = Fill { projection: Projection::Decal(decal), ..Fill::default() };
+        let mut fill = Fill { projection: Projection::decal(decal), ..Fill::default() };
         fill.sources.insert(channel, Source::image(image.clone()));
         crate::layer_cmds::insert_selected(s, Layer::new(id, name, LayerKind::Fill(fill), &[channel]))?;
         Ok((id, None))
@@ -161,14 +161,21 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
 fn decal_of(s: &Session, cmd: &str, id: LayerId, effect: Option<LayerId>) -> Result<Decal> {
     if let Some(effect) = effect {
         return match s.doc.project.effect(effect).map(|(_, effect)| &effect.kind) {
-            Some(EffectKind::Fill { projection: Projection::Decal(decal), .. }) => Ok(*decal),
+            Some(EffectKind::Fill { projection: Projection::Planar { placed: Some(decal), .. }, .. }) => Ok(*decal),
             _ => Err(bad(cmd, "the effect is not a decal (layer.add.decal with channel mask)")),
         };
     }
 
     match &s.doc.project.layer(id)?.kind {
-        LayerKind::Fill(Fill { projection: Projection::Decal(decal), .. }) => Ok(*decal),
-        _ => Err(bad(cmd, "the layer is not a decal (layer.add.decal)")),
+        LayerKind::Fill(Fill { projection: Projection::Planar { placed: Some(decal), .. }, .. }) => Ok(*decal),
+        _ => Err(bad(cmd, "the layer is not a decal (a planar projection placed on the surface: layer.add.decal)")),
+    }
+}
+
+/// Places a placed planar projection's frame at `frame`, keeping its other settings
+fn move_frame(projection: &mut Projection, frame: Decal) {
+    if let Projection::Planar { placed: Some(placed), .. } = projection {
+        *placed = frame;
     }
 }
 
@@ -226,13 +233,13 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
     session.edit("Edit decal", |session| {
         if let Some(effect) = effect {
             if let Some(EffectKind::Fill { source, projection, .. }) = session.doc.project.effect_mut(effect).map(|effect| &mut effect.kind) {
-                *projection = Projection::Decal(decal);
+                move_frame(projection, decal);
                 if let Some(image) = image {
                     *source = Source::image(image);
                 }
             }
         } else if let LayerKind::Fill(fill) = &mut session.doc.project.layer_mut(layer_id)?.kind {
-            fill.projection = Projection::Decal(decal);
+            move_frame(&mut fill.projection, decal);
 
             // The new image goes where the decal's image is (the channel it was placed in)
             let placed = fill.sources.values().find_map(|source| match source {

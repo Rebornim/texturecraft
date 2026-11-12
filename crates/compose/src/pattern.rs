@@ -151,7 +151,7 @@ fn raw(kind: ProceduralKind, p: Vec3, seed: u32) -> f32 {
     }
 }
 
-fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
+pub(crate) fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
     let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
@@ -179,7 +179,7 @@ fn place_uv(q: Vec2, uv: &UvTransform) -> Vec2 {
 
 /// `c` inside a projector turned and scaled by `projector`; the default projector returns `c` unchanged
 pub fn projector_local(projector: &Projector, c: &Coords) -> Coords {
-    if *projector == Projector::default() {
+    if !projector.turns() {
         return *c;
     }
     let [x, y, z] = projector.rotation.map(f32::to_radians);
@@ -192,7 +192,7 @@ pub fn projector_local(projector: &Projector, c: &Coords) -> Coords {
 /// Evaluate a procedural through a projection.
 pub fn procedural(pr: &Procedural, proj: &Projection, c: &Coords) -> f32 {
     let s = pr.scale.max(1e-4);
-    // 2D patterns sample a slice of the 3D pattern.
+    // 2D patterns sample a slice of the 3D pattern
     let flat = |q: Vec2| raw(pr.kind, q.extend(0.0), pr.seed);
     let v = match proj {
         Projection::UvTile => flat((c.uv - c.uv.floor()) * s),
@@ -204,7 +204,9 @@ pub fn procedural(pr: &Procedural, proj: &Projection, c: &Coords) -> f32 {
             let w = w / (w.x + w.y + w.z).max(1e-6);
             flat(place_uv(Vec2::new(p.z, p.y), uv)) * w.x + flat(place_uv(Vec2::new(p.x, p.z), uv)) * w.y + flat(place_uv(Vec2::new(p.x, p.y), uv)) * w.z
         }
-        Projection::Planar { scale, axis, offset, uv, projector } => {
+        // `c.uv` is already in the placed frame (see [`placed_uv`])
+        Projection::Planar { uv, placed: Some(_), .. } => flat(place_uv(c.uv, uv) * s),
+        Projection::Planar { scale, axis, offset, uv, projector, .. } => {
             let p = projector_local(projector, c).pos * *scale * s + Vec3::from(*offset);
             let q = match axis {
                 0 => Vec2::new(p.z, p.y),
@@ -229,8 +231,6 @@ pub fn procedural(pr: &Procedural, proj: &Projection, c: &Coords) -> f32 {
             let u = around(a, b, *angle);
             flat(place_uv(Vec2::new(u * 4.0, h) * *scale * s, uv))
         }
-        // `c.uv` is already in the decal's frame (see [`decal_uv`]).
-        Projection::Decal(_) => flat(c.uv * s),
     };
     shape(pr, v)
 }
@@ -249,7 +249,8 @@ pub fn image_samples(proj: &Projection, c: &Coords) -> [(Vec2, f32); 3] {
             let w = w / (w.x + w.y + w.z).max(1e-6);
             [(place_uv(Vec2::new(p.z, -p.y), uv), w.x), (place_uv(Vec2::new(p.x, p.z), uv), w.y), (place_uv(Vec2::new(p.x, -p.y), uv), w.z)]
         }
-        Projection::Planar { scale, axis, offset, uv, projector } => {
+        Projection::Planar { uv, placed: Some(_), .. } => one(place_uv(c.uv, uv)),
+        Projection::Planar { scale, axis, offset, uv, projector, .. } => {
             let p = projector_local(projector, c).pos * *scale + Vec3::from(*offset);
             let q = match axis {
                 0 => Vec2::new(p.z, -p.y),
@@ -274,7 +275,6 @@ pub fn image_samples(proj: &Projection, c: &Coords) -> [(Vec2, f32); 3] {
             let u = around(a, b, *angle);
             one(place_uv(Vec2::new(u, 0.5 - h * 0.5) * *scale, uv))
         }
-        Projection::Decal(_) => one(c.uv),
     }
 }
 
@@ -300,20 +300,40 @@ pub fn decal_corners(d: &Decal) -> Option<[Vec3; 4]> {
     Some([o - r * hw + u * hh, o + r * hw + u * hh, o + r * hw - u * hh, o - r * hw - u * hh])
 }
 
-/// Where world point `p` with surface normal `nrm` falls in the decal: texture coordinates
-/// (v down) and how much the decal covers it, None outside the frame, behind it, beyond its
-/// depth or on faces turned away. Coverage fades on grazing faces and near the depth limit.
-pub fn decal_uv(d: &Decal, p: Vec3, nrm: Vec3) -> Option<(Vec2, f32)> {
+/// World point `p` in frame `d` turned and scaled by `projector`: across and up in frame sizes, out along its normal in world units
+pub fn frame_local(d: &Decal, projector: &Projector, p: Vec3) -> Option<Vec3> {
     let (o, r, u, n) = decal_axes(d)?;
-    let facing = nrm.dot(n);
     let q = p - o;
-    let (lx, ly, lz) = (q.dot(r) / d.size[0].max(1e-6), q.dot(u) / d.size[1].max(1e-6), q.dot(n).abs());
-    let depth = d.depth.max(1e-6);
-    if facing <= 0.0 || lx.abs() > 0.5 || ly.abs() > 0.5 || lz > depth || !(lx.is_finite() && ly.is_finite()) {
-        return None;
+    let mut local = Vec3::new(q.dot(r), q.dot(u), q.dot(n));
+    if projector.turns() {
+        local = projector_local(projector, &Coords { uv: Vec2::ZERO, pos: local, nrm: Vec3::Z }).pos;
     }
-    let w = smoothstep(0.0, 0.3, facing) * (1.0 - smoothstep(0.75 * depth, depth, lz));
-    Some((Vec2::new(lx + 0.5, 0.5 - ly), w))
+    let local = Vec3::new(local.x / d.size[0].max(1e-6), local.y / d.size[1].max(1e-6), local.z);
+    local.is_finite().then_some(local)
+}
+
+/// How squarely a surface with normal `nrm` faces frame `d` turned by `projector` (the cosine of the turn)
+pub fn frame_facing(d: &Decal, projector: &Projector, nrm: Vec3) -> f32 {
+    let Some((_, r, u, n)) = decal_axes(d) else { return 0.0 };
+    if !projector.turns() {
+        return nrm.dot(n);
+    }
+    let turned = Vec3::new(nrm.dot(r), nrm.dot(u), nrm.dot(n));
+    projector_local(projector, &Coords { uv: Vec2::ZERO, pos: Vec3::ZERO, nrm: turned }).nrm.z
+}
+
+/// Texture coordinates (v down) of a point at `local` in its frame (see [`frame_local`])
+pub fn placed_uv(local: Vec3) -> Vec2 {
+    Vec2::new(local.x + 0.5, 0.5 - local.y)
+}
+
+/// How much frame `d` covers a point at `local` when cropped to its shape: 0 outside the frame or past its depth, fading near the depth
+pub fn frame_crop(d: &Decal, local: Vec3) -> f32 {
+    let (lz, depth) = (local.z.abs(), d.depth.max(1e-6));
+    if local.x.abs() > 0.5 || local.y.abs() > 0.5 || lz > depth {
+        return 0.0;
+    }
+    1.0 - smoothstep(0.75 * depth, depth, lz)
 }
 
 /// World-space noise used by generators (seamless across UV islands).
@@ -330,10 +350,10 @@ mod tests {
         let projs = [
             Projection::default(),
             Projection::Triplanar { scale: 1.0, sharpness: 4.0, offset: [0.0; 3], uv: Default::default(), projector: Default::default() },
-            Projection::Planar { scale: 1.0, axis: 1, offset: [0.0; 3], uv: Default::default(), projector: Default::default() },
+            Projection::Planar { scale: 1.0, axis: 1, offset: [0.0; 3], uv: Default::default(), projector: Default::default(), placed: None },
             Projection::Spherical { scale: 1.0, uv: Default::default(), offset: [0.0; 3], projector: Default::default() },
             Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default(), offset: [0.0; 3], projector: Default::default(), angle: 360.0 },
-            Projection::Decal(Decal {
+            Projection::decal(Decal {
                 center: [0.0; 3],
                 normal: [0.0, 0.0, 1.0],
                 up: [0.0, 1.0, 0.0],
@@ -358,6 +378,12 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Where a decal's planar projection lands at `p` facing `nrm`, None where it does not cover
+    fn decal_uv(d: &Decal, p: Vec3, nrm: Vec3) -> Option<(Vec2, f32)> {
+        let Projection::Planar { projector, .. } = Projection::decal(*d) else { return None };
+        crate::projector_cover::placed_cover(d, &projector, p, nrm).filter(|(_, cover)| *cover > 0.0)
     }
 
     #[test]

@@ -2,8 +2,8 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    BakedMap, BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask,
-    MaskBackground, OutputResolution, Procedural, ProceduralKind, Project, ResolutionMode, Source, WearParameters,
+    AxisBlend, BakedMap, BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels,
+    Mask, MaskBackground, OutputResolution, Procedural, ProceduralKind, Project, ResolutionMode, SectionParameters, Source, WearParameters,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
@@ -49,7 +49,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add generator",
             ["Layers", "Effects"],
             None,
-            "{layer?, name?, generator?: edgeWear|dirt|fiberGlassEdgeWear|thinAreas|curvature|ambientOcclusion|position|direction, wearLevel?, wearContrast?, grungeAmount?, grungeScale?: 1..16, triplanar?, triplanarContrast?, edgesSmoothness?: 0..16, aoMasking?, curvatureWeight?, edgesMasking? (wear controls: edgeWear, fiberGlassEdgeWear and dirt), level?, softness?, noise?, offset?: -1..1 added to the result (instead keep edgeWear and dirt on the earlier model), invert?, blur?: 0..1, balance?: 0..1 (0.5 unchanged), contrast?: 0..1, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3 (1/8..x8), mode?: edges|cavities|both|raw, sizes?: [7 weights 0..1, finest first] (curvature and edgeWear)}",
+            "{layer?, name?, generator?: edgeWear|dirt|fiberGlassEdgeWear|thinAreas|curvature|ambientOcclusion|position|worldSpaceNormals|direction, wearLevel?, wearContrast?, grungeAmount?, grungeScale?: 1..16, triplanar?, triplanarContrast?, edgesSmoothness?: 0..16, aoMasking?, curvatureWeight?, edgesMasking? (wear controls: edgeWear, fiberGlassEdgeWear and dirt), sectionInvert?, sectionBlur?: 0..16 (ambientOcclusion, worldSpaceNormals), sectionBalance? (not curvature), sectionContrast?, sectionBrightness?: -1..1 (not ambientOcclusion), rightLeft|topBottom|frontBack + Invert?|Blend?: normal|add|subtract|multiply|addSub|max|Weight? (position, worldSpaceNormals) (section controls: curvature, ambientOcclusion, position, worldSpaceNormals), level?, softness?, noise?, noiseScale?, offset?: -1..1 added to the result, direction? (instead keep edgeWear, dirt, curvature, ambientOcclusion, position and direction on the earlier model), invert?, blur?: 0..1, balance?: 0..1 (0.5 unchanged), contrast?: 0..1, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3 (1/8..x8), mode?: edges|cavities|both|raw, sizes?: [7 weights 0..1, finest first] (curvature and edgeWear)}",
             has_layer,
             add_generator
         ),
@@ -94,7 +94,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), generator?: kind (a generator effect only: swaps its kind in place, starting from that kind's defaults), wear controls (see effect.add.generator), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), generator?: kind (a generator effect only: swaps its kind in place, starting from that kind's defaults), wear and section controls (see effect.add.generator), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -399,8 +399,111 @@ pub fn wear_key_applies(kind: GeneratorKind, key: &str) -> bool {
     }
 }
 
+/// The parameters that drive the earlier model of the kinds with section controls
+const EARLIER_SECTION_KEYS: [&str; 6] = ["level", "softness", "noise", "noiseScale", "offset", "direction"];
+
+/// The section controls `effect.add.generator` and `effect.set` take, beside the axis keys made of [`AXIS_NAMES`] and [`AXIS_SUFFIXES`]
+const SECTION_KEYS: [&str; 5] = ["sectionInvert", "sectionBlur", "sectionBalance", "sectionContrast", "sectionBrightness"];
+
+/// The name of each axis in its keys, in the order of [`SectionParameters::axes`], and what follows it
+const AXIS_NAMES: [&str; 3] = ["rightLeft", "topBottom", "frontBack"];
+const AXIS_SUFFIXES: [&str; 3] = ["Invert", "Blend", "Weight"];
+
+/// The section controls and the axis keys `params` gives
+fn given_new_model_keys(params: &Value) -> Vec<String> {
+    let axis_keys = AXIS_NAMES.iter().flat_map(|axis| AXIS_SUFFIXES.iter().map(move |suffix| format!("{axis}{suffix}")));
+    SECTION_KEYS.iter().map(|key| key.to_string()).chain(axis_keys).filter(|key| params.get(key).is_some()).collect()
+}
+
+/// The section controls in `params`: they move a generator onto them, while level, softness, noise, offset or direction keep it on the earlier model
+fn section_from(command: &str, params: &Value, generator: &mut Generator) -> Result<()> {
+    let kind = generator.kind;
+    let new_keys = given_new_model_keys(params);
+    let earlier = EARLIER_SECTION_KEYS.iter().any(|key| params.get(*key).is_some());
+    let Some(defaults) = SectionParameters::defaults(kind) else {
+        return match new_keys.first() {
+            Some(key) => {
+                Err(bad(command, format!("{} has no `{key}`: only Curvature, Ambient Occlusion, Position and World Space Normals have it", kind.label())))
+            }
+            None => Ok(()),
+        };
+    };
+    if let Some(unused) = new_keys.iter().find(|key| !section_key_applies(kind, key)) {
+        return Err(bad(command, format!("{} has no `{unused}`", kind.label())));
+    }
+
+    if earlier {
+        if !new_keys.is_empty() {
+            return Err(bad(command, "level, softness, noise, offset and direction drive the earlier model: give them or the section controls, not both"));
+        }
+        if kind == GeneratorKind::WorldSpaceNormals {
+            return Err(bad(
+                command,
+                "World Space Normals has section controls only (sectionBalance, topBottomWeight…), no level, softness, noise, offset or direction",
+            ));
+        }
+        generator.section = None;
+        return Ok(());
+    }
+    if new_keys.is_empty() {
+        return Ok(());
+    }
+
+    // Moving onto the reference's controls starts from the kind's defaults: the earlier model's values no longer apply
+    if generator.on_earlier_model() {
+        let defaults = Generator::new(kind);
+        (generator.level, generator.softness, generator.noise_amount, generator.noise_scale) =
+            (defaults.level, defaults.softness, defaults.noise_amount, defaults.noise_scale);
+        (generator.offset, generator.direction) = (defaults.offset, defaults.direction);
+    }
+
+    let mut section = generator.section_controls().unwrap_or(defaults);
+    for (key, value) in [
+        ("sectionBlur", &mut section.blur),
+        ("sectionBalance", &mut section.balance),
+        ("sectionContrast", &mut section.contrast),
+        ("sectionBrightness", &mut section.brightness),
+    ] {
+        if let Some(given) = f32p(params, key) {
+            *value = given;
+        }
+    }
+    if let Some(invert) = boolp(params, "sectionInvert") {
+        section.invert = invert;
+    }
+    for (axis, name) in section.axes.iter_mut().zip(AXIS_NAMES) {
+        if let Some(invert) = boolp(params, &format!("{name}Invert")) {
+            axis.invert = invert;
+        }
+        if let Some(weight) = f32p(params, &format!("{name}Weight")) {
+            axis.weight = weight;
+        }
+        let blend_key = format!("{name}Blend");
+        if let Some(blend) = params.get(&blend_key) {
+            let blend_name = blend.as_str().ok_or_else(|| bad(command, format!("`{blend_key}` must be a string")))?;
+            axis.blend = AxisBlend::parse(blend_name).ok_or_else(|| bad(command, format!("unknown blending mode `{blend_name}`")))?;
+        }
+    }
+    generator.section = Some(section.clamped(kind));
+    Ok(())
+}
+
+/// Whether section control `key` changes a generator of `kind`
+pub fn section_key_applies(kind: GeneratorKind, key: &str) -> bool {
+    let axis_key = AXIS_NAMES.iter().any(|axis| key.strip_prefix(axis).is_some_and(|suffix| AXIS_SUFFIXES.contains(&suffix)));
+    match key {
+        "sectionInvert" | "sectionContrast" => SectionParameters::defaults(kind).is_some(),
+        "sectionBlur" => SectionParameters::has_blur(kind),
+        "sectionBalance" => SectionParameters::has_balance(kind),
+        "sectionBrightness" => SectionParameters::has_brightness(kind),
+        _ if axis_key => SectionParameters::has_axes(kind),
+        _ => false,
+    }
+}
+
 fn generator_from(command: &str, params: &Value, generator: &mut Generator) -> Result<()> {
     wear_from(command, params, generator)?;
+    section_from(command, params, generator)?;
     if let Some(level) = f32p(params, "level") {
         generator.level = level.clamp(0.0, 1.0);
     }

@@ -4,7 +4,7 @@ use egui::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
-use texturecraft_engine::core::{BakedMap, EffectKind, Generator, GeneratorKind, LayerId, Source, WearParameters};
+use texturecraft_engine::core::{AxisBlend, BakedMap, EffectKind, Generator, GeneratorKind, LayerId, SectionParameters, Source, WearParameters};
 use texturecraft_engine::{ViewMode, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::docking::Panel;
@@ -122,6 +122,67 @@ fn an_input_can_read_a_uniform_value_and_the_mesh_map_again() {
     assert!(generator(&harness, effect).inputs.is_empty());
 }
 
+/// How many nodes carry `label`
+fn count(harness: &Harness<'_, TextureCraftApp>, label: &str) -> usize {
+    harness.query_all_by_label(label).count()
+}
+
+#[test]
+fn each_kind_shows_its_section_rows_and_no_earlier_ones() {
+    let rows = [
+        ("curvature", &["Sharp", "Huge", "Brightness", "Global contrast"][..], &["Balance", "Blending mode", "Level"][..]),
+        ("ambientOcclusion", &["Blur", "Balance", "Global contrast"][..], &["Brightness", "Blending mode", "Level"][..]),
+        ("position", &["Balance", "Brightness", "Right to left", "Front to back"][..], &["Blur", "Level", "Sharp"][..]),
+        ("worldSpaceNormals", &["Blur", "Balance", "Brightness", "Top to bottom"][..], &["Level", "Softness"][..]),
+    ];
+    for (kind, shown, hidden) in rows {
+        let (harness, _) = harness_with(false, json!({"generator": kind}));
+        for label in shown {
+            assert!(count(&harness, label) > 0, "{kind} shows {label}");
+        }
+        for label in hidden {
+            assert_eq!(count(&harness, label), 0, "{kind} hides {label}");
+        }
+    }
+
+    let (harness, _) = harness_with(false, json!({"generator": "worldSpaceNormals"}));
+    assert_eq!(count(&harness, "Blending mode"), 3);
+    let (harness, _) = harness_with(false, json!({"generator": "position", "level": 0.4}));
+    assert!(count(&harness, "Level") > 0 && count(&harness, "Balance") > 0, "the earlier model keeps its level beside the section at its defaults");
+}
+
+#[test]
+fn each_axis_has_its_own_blending_mode_dropdown() {
+    let (mut harness, effect) = harness_with(false, json!({"generator": "worldSpaceNormals"}));
+    let added = |harness: &Harness<'_, TextureCraftApp>| {
+        harness.get_all_by_role(Role::ComboBox).filter(|node| node.value().as_deref() == Some("Linear Dodge (Add)")).count()
+    };
+    assert_eq!(added(&harness), 3);
+    harness.get_all_by_role(Role::ComboBox).filter(|node| node.value().as_deref() == Some("Linear Dodge (Add)")).nth(2).unwrap().scroll_to_me();
+    harness.run_steps(3);
+    harness.get_all_by_role(Role::ComboBox).filter(|node| node.value().as_deref() == Some("Linear Dodge (Add)")).nth(2).unwrap().click();
+    harness.run_steps(2);
+    harness.get_by_label("Multiply").click();
+    harness.run_steps(3);
+
+    let axes = generator(&harness, effect).section.unwrap().axes;
+    assert_eq!(axes.map(|axis| axis.blend), [AxisBlend::Add, AxisBlend::Add, AxisBlend::Multiply], "only front to back changed");
+}
+
+#[test]
+fn a_section_control_moves_an_earlier_generator_onto_the_section_controls() {
+    let (mut harness, effect) = harness_with(false, json!({"generator": "position", "level": 0.4}));
+    assert_eq!(generator(&harness, effect).section, None);
+
+    drag_slider(&mut harness, "Balance");
+
+    let section = generator(&harness, effect).section.expect("on the section controls now");
+    let defaults = SectionParameters::defaults(GeneratorKind::Position).unwrap();
+    assert_ne!(section.balance, defaults.balance, "the drag set the balance");
+    assert_eq!(SectionParameters { balance: defaults.balance, ..section }, defaults, "the other controls start at their defaults");
+    assert_eq!(count(&harness, "Level"), 0, "the earlier rows are gone");
+}
+
 #[test]
 #[ignore = "requires a GPU adapter and TC_UI_SNAPSHOTS"]
 fn generator_panel_snapshots() {
@@ -164,5 +225,17 @@ fn wear_panel_snapshots() {
         let (mut harness, _) = harness_with(true, json!({"generator": kind}));
         harness.run_steps(12);
         harness.render().unwrap().save(directory.join(format!("wear-panel-{kind}.png"))).unwrap();
+    }
+}
+
+#[test]
+#[ignore = "requires a GPU adapter and TC_UI_SNAPSHOTS"]
+fn section_panel_snapshots() {
+    let directory = std::path::PathBuf::from(std::env::var_os("TC_UI_SNAPSHOTS").expect("set TC_UI_SNAPSHOTS"));
+    std::fs::create_dir_all(&directory).unwrap();
+    for kind in ["curvature", "ambientOcclusion", "position", "worldSpaceNormals"] {
+        let (mut harness, _) = harness_with(true, json!({"generator": kind}));
+        harness.run_steps(12);
+        harness.render().unwrap().save(directory.join(format!("section-panel-{kind}.png"))).unwrap();
     }
 }

@@ -4,13 +4,14 @@ use egui::{RichText, Ui};
 use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::core::{
-    BakedMap, CurvatureDetail, CurvatureMode, Generator, GeneratorKind, LayerId, OutputResolution, ResolutionMode, Source, WearParameters,
+    AxisBlend, BakedMap, CurvatureDetail, CurvatureMode, Generator, GeneratorKind, LayerId, OutputResolution, ResolutionMode, SectionParameters, Source,
+    WearParameters,
 };
 
 use crate::TextureCraftApp;
 use crate::dock::{anchor_label, anchors_below, image_drop, image_menu, mesh_map_color};
 use crate::i18n::{baked_map_label, tr, trf};
-use crate::theme::{Tokens, caption};
+use crate::theme::Tokens;
 use crate::widgets::{combo, section, slider_edit};
 
 /// Random seeds stay below this, short enough to read and type.
@@ -45,9 +46,12 @@ pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer
             wear_parameters(app, ui, id, generator, generator.wear.unwrap_or(defaults));
         } else {
             global_adjustments(app, ui, id, generator);
-            ramp_parameters(app, ui, id, generator);
-            if generator.kind == GeneratorKind::Curvature {
-                curvature_detail_properties(app, ui, id, generator.detail.as_ref());
+            if generator.on_earlier_model() {
+                ramp_parameters(app, ui, id, generator);
+            }
+            // Saved before the section controls, a generator shows them at their defaults: editing one moves it onto them
+            if let Some(defaults) = SectionParameters::defaults(generator.kind) {
+                section_parameters(app, ui, id, generator, generator.section_controls().unwrap_or(defaults));
             }
         }
         ui.horizontal(|ui| {
@@ -58,9 +62,9 @@ pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer
             });
         });
     });
-    if !generator.kind.inputs().is_empty() {
+    if !inputs_in_use(generator).is_empty() {
         section(ui, "generator_inputs", tr("Image inputs"), true, |ui| {
-            for map in generator.kind.inputs() {
+            for map in inputs_in_use(generator) {
                 input_slot(app, ui, (layer, id), *map, generator.inputs.get(map), generator.detail.is_some());
             }
         });
@@ -70,6 +74,12 @@ pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer
             RichText::new(format!("{} {}", ic::WARNING, tr("Bake mesh maps (F8) for curvature, AO and thickness based generators."))).color(tokens.warning),
         );
     }
+}
+
+/// The inputs `generator` reads: none for Position on its earlier model, which reads the mesh itself
+fn inputs_in_use(generator: &Generator) -> &'static [BakedMap] {
+    let reads_geometry = generator.on_earlier_model() && generator.kind == GeneratorKind::Position;
+    if reads_geometry { &[] } else { generator.kind.inputs() }
 }
 
 /// What a generator kind makes, its category and its tags (read only).
@@ -84,6 +94,7 @@ fn attributes(ui: &mut Ui, kind: GeneratorKind) {
         GeneratorKind::AmbientOcclusion => (tr("Occluded areas."), [tr("mask"), tr("generator"), tr("grayscale"), tr("ambient occlusion")]),
         GeneratorKind::Position => (tr("A gradient across the mesh."), [tr("mask"), tr("generator"), tr("grayscale"), tr("position")]),
         GeneratorKind::Direction => (tr("Surfaces facing a light."), [tr("mask"), tr("generator"), tr("grayscale"), tr("normal")]),
+        GeneratorKind::WorldSpaceNormals => (tr("Surfaces facing along the world's axes."), [tr("mask"), tr("generator"), tr("grayscale"), tr("normal")]),
     };
 
     // Wrapped rows: a long line must not widen the panel past its edge
@@ -151,7 +162,7 @@ fn factor_label(factor: i8) -> String {
 /// Global invert, blur, balance and contrast: what every generator applies to its finished value.
 fn global_adjustments(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, generator: &Generator) {
     let (mut invert, mut global) = (generator.invert, generator.global);
-    let invert_edit = ui.checkbox(&mut invert, tr("Global invert")).changed().then_some(false);
+    let invert_edit = true_false(ui, tr("Global invert"), &mut invert).then_some(false);
     let blur_edit = slider_edit(ui, tr("Global blur"), &mut global.blur, 0.0..=1.0, 2);
     let balance_edit = slider_edit(ui, tr("Global balance"), &mut global.balance, 0.0..=1.0, 2);
     let contrast_edit = slider_edit(ui, tr("Global contrast"), &mut global.contrast, 0.0..=1.0, 2);
@@ -288,7 +299,7 @@ fn random_seed(current: u32) -> u32 {
 /// The `effect.set` params that put generator effect `id` back to the defaults of its kind.
 fn defaults_of(id: u64, kind: GeneratorKind) -> Value {
     let defaults = Generator::new(kind);
-    let mut params = json!({
+    let params = json!({
         "effect": id,
         "seed": defaults.seed,
         "invert": defaults.invert,
@@ -297,10 +308,12 @@ fn defaults_of(id: u64, kind: GeneratorKind) -> Value {
         "resolutionFactor": defaults.resolution.factor,
     });
 
-    // A wear generator restores its wear controls only: the earlier model's keys would move it back onto that model
-    let own = match &defaults.wear {
-        Some(wear) => wear_params(kind, wear),
-        None => json!({
+    // A generator on the reference's controls restores those only: the earlier model's keys would move it back onto that model
+    let global = json!({"blur": defaults.global.blur, "balance": defaults.global.balance, "contrast": defaults.global.contrast});
+    let own = match (&defaults.wear, &defaults.section) {
+        (Some(wear), _) => wear_params(kind, wear),
+        (None, Some(section)) => merged(section_params(kind, section), global),
+        (None, None) => json!({
             "level": defaults.level,
             "softness": defaults.softness,
             "noise": defaults.noise_amount,
@@ -312,9 +325,7 @@ fn defaults_of(id: u64, kind: GeneratorKind) -> Value {
             "contrast": defaults.global.contrast,
         }),
     };
-    if let (Some(params), Value::Object(own)) = (params.as_object_mut(), own) {
-        params.extend(own);
-    }
+    let mut params = merged(params, own);
     if let (None, Some(detail)) = (&defaults.wear, defaults.detail) {
         params["mode"] = json!(format!("{:?}", detail.mode));
         params["sizes"] = json!(detail.weights);
@@ -322,9 +333,99 @@ fn defaults_of(id: u64, kind: GeneratorKind) -> Value {
     params
 }
 
+/// The keys of `extra` added to the object `params`
+fn merged(mut params: Value, extra: Value) -> Value {
+    if let (Some(params), Value::Object(extra)) = (params.as_object_mut(), extra) {
+        params.extend(extra);
+    }
+    params
+}
+
+/// The section controls of generator effect `id` under the kind's own heading, showing `shown`
+fn section_parameters(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, generator: &Generator, shown: SectionParameters) {
+    let kind = generator.kind;
+    let title = match kind {
+        GeneratorKind::Curvature => tr("Curvature"),
+        GeneratorKind::AmbientOcclusion => tr("Ambient occlusion"),
+        GeneratorKind::Position => tr("Position"),
+        _ => tr("World space normal"),
+    };
+    section(ui, "generator_section", title, true, |ui| {
+        let mut edited = shown;
+        let mut edit = true_false(ui, tr("Invert"), &mut edited.invert).then_some(false);
+        if kind == GeneratorKind::Curvature {
+            curvature_detail_properties(app, ui, id, generator.detail.as_ref());
+        }
+        if SectionParameters::has_blur(kind) {
+            edit = edit.or(slider_edit(ui, tr("Blur"), &mut edited.blur, SectionParameters::BLUR_RANGE, 2));
+        }
+        if SectionParameters::has_balance(kind) {
+            edit = edit.or(slider_edit(ui, tr("Balance"), &mut edited.balance, 0.0..=1.0, 2));
+        }
+        edit = edit.or(slider_edit(ui, tr("Contrast"), &mut edited.contrast, 0.0..=1.0, 2));
+        if SectionParameters::has_brightness(kind) {
+            edit = edit.or(slider_edit(ui, tr("Brightness"), &mut edited.brightness, SectionParameters::BRIGHTNESS_RANGE, 2));
+        }
+        if SectionParameters::has_axes(kind) {
+            let titles = [tr("Right to left"), tr("Top to bottom"), tr("Front to back")];
+            for (index, (axis, title)) in edited.axes.iter_mut().zip(titles).enumerate() {
+                // Each axis's dropdown needs its own id: the dropdown's id comes from its label
+                ui.push_id(("generator_axis", index), |ui| {
+                    section(ui, "generator_axis", title, true, |ui| {
+                        edit = edit.or(true_false(ui, tr("Invert"), &mut axis.invert).then_some(false));
+                        combo(ui, tr("Blending mode"), axis_blend_label(axis.blend), |ui| {
+                            for blend in AxisBlend::ALL {
+                                if ui.selectable_label(blend == axis.blend, axis_blend_label(blend)).clicked() {
+                                    axis.blend = blend;
+                                    edit = Some(false);
+                                }
+                            }
+                        });
+                    });
+                    edit = edit.or(slider_edit(ui, title, &mut axis.weight, 0.0..=1.0, 2));
+                });
+            }
+        }
+        if let Some(merge) = edit {
+            app.run("effect.set", merged(json!({"effect": id, "merge": merge}), section_params(kind, &edited)));
+        }
+    });
+}
+
+/// The `effect.set` params that set every section control a generator of `kind` has to `section`
+fn section_params(kind: GeneratorKind, section: &SectionParameters) -> Value {
+    let mut params = json!({
+        "sectionInvert": section.invert,
+        "sectionBlur": section.blur,
+        "sectionBalance": section.balance,
+        "sectionContrast": section.contrast,
+        "sectionBrightness": section.brightness,
+    });
+    if let Some(params) = params.as_object_mut() {
+        for (name, axis) in ["rightLeft", "topBottom", "frontBack"].into_iter().zip(&section.axes) {
+            params.insert(format!("{name}Invert"), json!(axis.invert));
+            params.insert(format!("{name}Blend"), json!(axis.blend.id()));
+            params.insert(format!("{name}Weight"), json!(axis.weight));
+        }
+        params.retain(|key, _| texturecraft_engine::mask_cmds::section_key_applies(kind, key));
+    }
+    params
+}
+
+/// The translated name of axis blending mode `blend`
+fn axis_blend_label(blend: AxisBlend) -> &'static str {
+    match blend {
+        AxisBlend::Normal => tr("Normal"),
+        AxisBlend::Add => tr("Linear Dodge (Add)"),
+        AxisBlend::Subtract => tr("Subtract"),
+        AxisBlend::Multiply => tr("Multiply"),
+        AxisBlend::AddSub => tr("Add/Sub"),
+        AxisBlend::Max => tr("Max (Lighten)"),
+    }
+}
+
 /// The curvature mode and detail size weights of generator effect `id` (`detail` None: saved before detail sizes).
 fn curvature_detail_properties(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, detail: Option<&CurvatureDetail>) {
-    let tokens = Tokens::get(ui.ctx());
     let shown = detail.cloned().unwrap_or_default();
     combo(ui, tr("Mode"), curvature_mode_label(shown.mode), |ui| {
         for mode in CurvatureMode::ALL {
@@ -334,17 +435,14 @@ fn curvature_detail_properties(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, 
         }
     });
 
-    ui.label(caption(tr("Detail sizes")));
+    let names = [tr("Sharp"), tr("Fine"), tr("Soft"), tr("Medium"), tr("Large"), tr("Big"), tr("Huge")];
     let mut weights = shown.weights;
     let mut edit = None;
-    for (weight, size) in weights.iter_mut().zip(CurvatureDetail::SIZES) {
-        edit = edit.or(slider_edit(ui, &format!("{size} px"), weight, 0.0..=1.0, 2));
+    for (weight, name) in weights.iter_mut().zip(names) {
+        edit = edit.or(slider_edit(ui, name, weight, 0.0..=1.0, 2));
     }
     if let Some(merge) = edit {
         app.run("effect.set", json!({"effect": id, "sizes": weights, "merge": merge}));
-    }
-    if detail.is_none() {
-        ui.label(RichText::new(tr("Reads the curvature map as baked: changing the mode or a size turns detail sizes on.")).color(tokens.text_dim));
     }
 }
 
@@ -353,8 +451,8 @@ fn curvature_mode_label(mode: CurvatureMode) -> &'static str {
     match mode {
         CurvatureMode::Edges => tr("Edges"),
         CurvatureMode::Cavities => tr("Cavities"),
-        CurvatureMode::Both => tr("Edges and cavities"),
-        CurvatureMode::Raw => tr("Raw curvature"),
+        CurvatureMode::Both => tr("Dual"),
+        CurvatureMode::Raw => tr("Unprocessed"),
     }
 }
 

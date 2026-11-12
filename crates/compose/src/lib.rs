@@ -14,6 +14,7 @@ pub mod curvature_sizes;
 pub mod display;
 pub mod eval;
 pub mod pattern;
+mod sections;
 pub mod store;
 pub mod thumb;
 mod wear;

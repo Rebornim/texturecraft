@@ -11,8 +11,8 @@ use std::sync::Arc;
 use rayon::prelude::*;
 use texturecraft_core::{
     BakedMap, BlendMode, BlockScales, Channel, ChannelKind, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter, Generator,
-    GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, NormalFormat, Project, Projection, Source, TextureSet, TileGrid,
-    WearParameters, blend1, blend3, lum, mix3, per_unit,
+    GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, NormalFormat, Project, Projection, SectionParameters, Source, TextureSet,
+    TileGrid, WearParameters, blend1, blend3, lum, mix3, per_unit,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, UvGBuffer};
@@ -21,11 +21,15 @@ use texturecraft_texel::{DilationMap, TILE, TILE_AREA, TileImage, from_u16, nois
 use crate::below::{Band, BelowCache, Level};
 use crate::curvature_sizes::{CurvatureSizes, LEVEL_RADII};
 use crate::pattern::{Coords, decal_uv, image_samples, procedural, world_noise};
+use crate::sections;
 use crate::store::{BakedMaps, ImageStore, PixelStore, decode};
 use crate::wear;
 use crate::wear_inputs::WearInputs;
 
 const NCH: usize = Channel::ALL.len();
+
+/// Narrowest extent of the mesh's bounds a position is normalised across
+const MIN_BOUNDS_EXTENT: f32 = 1e-6;
 
 /// Stack values being composited, per channel.
 type Acc = [[f32; 3]; NCH];
@@ -312,8 +316,13 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
         EffectKind::Filter(Filter::Glow { radius, amount }) => Some((index, texels(*radius), Op::Glow(*amount))),
         EffectKind::Filter(Filter::Mosaic { size }) => Some((index, texels(*size), Op::Mosaic)),
         // Independent of `res`, so every caller agrees on which effects are stages; the reach covers the cells, then the blur around them
-        EffectKind::Generator(generator) if generator.applied_global().blur > 0.0 || generator.resolution.can_reduce() => {
-            Some((index, texels(generator.applied_global().blur_radius()) + generator.resolution.largest_cell(res) as f32, Op::Blur(None)))
+        EffectKind::Generator(generator)
+            if generator.applied_global().blur > 0.0 || generator.resolution.can_reduce() || sections::generator_blur_sigma(generator) > 0.0 =>
+        {
+            let section_blur = sections::generator_blur_sigma(generator);
+            let section_reach = if section_blur > 0.0 { texels(section_blur) } else { 0.0 };
+            let reach = texels(generator.applied_global().blur_radius()) + section_reach + generator.resolution.largest_cell(res) as f32;
+            Some((index, reach, Op::Blur(None)))
         }
         EffectKind::Filter(Filter::SlopeBlur { radius, scale, seed }) if *radius > 0.0 => {
             Some((index, texels(*radius), Op::Slope { scale: *scale, seed: *seed }))
@@ -808,18 +817,13 @@ fn generator_region(
         ramps = resampled_by_cells(&ramps, cover, (region_x as usize, region_y as usize, columns, rows), cell);
     }
 
-    let blur_radius = generator.applied_global().blur_radius_at(uv_tile).round() as usize;
-    if blur_radius > 0 {
-        let mut weights = cover.to_vec();
-        blur(&mut weights, columns, rows, blur_radius);
-        let mut sums: Vec<f32> = ramps.iter().zip(cover).map(|(ramp, covered)| ramp * covered).collect();
-        blur(&mut sums, columns, rows, blur_radius);
-        ramps.par_iter_mut().zip(sums.par_iter().zip(weights.par_iter())).for_each(|(ramp, (sum, weight))| {
-            if *weight > MIN_COVERAGE_WEIGHT {
-                *ramp = sum / weight;
-            }
-        });
+    // The section controls act on the signal before the global blur, their own blur first
+    if let Some(section) = generator.section_controls() {
+        blur_over_cover(&mut ramps, cover, (columns, rows), sections::blur_radius_at(generator.kind, &section, uv_tile));
+        ramps.par_iter_mut().for_each(|signal| *signal = sections::adjusted(generator.kind, &section, *signal));
     }
+
+    blur_over_cover(&mut ramps, cover, (columns, rows), generator.applied_global().blur_radius_at(uv_tile).round() as usize);
 
     // Finished and blended over the stack below, like the generator effect itself
     stack
@@ -831,6 +835,22 @@ fn generator_region(
             below + (blend1(blend, below, generated) - below) * opacity
         })
         .collect()
+}
+
+/// `values` blurred by three box passes of `radius`, weighted by `cover` so uncovered texels don't bleed in
+fn blur_over_cover(values: &mut [f32], cover: &[f32], (columns, rows): (usize, usize), radius: usize) {
+    if radius == 0 {
+        return;
+    }
+    let mut weights = cover.to_vec();
+    blur(&mut weights, columns, rows, radius);
+    let mut sums: Vec<f32> = values.iter().zip(cover).map(|(value, covered)| value * covered).collect();
+    blur(&mut sums, columns, rows, radius);
+    values.par_iter_mut().zip(sums.par_iter().zip(weights.par_iter())).for_each(|(value, (sum, weight))| {
+        if *weight > MIN_COVERAGE_WEIGHT {
+            *value = sum / weight;
+        }
+    });
 }
 
 /// `values` averaged over `cell` × `cell` texel cells on the mesh (`cover`), read back bilinearly between cell centers.
@@ -972,8 +992,14 @@ fn curvature_sizes_in_use(generator: &Generator) -> [bool; LEVEL_RADII.len()] {
         return wear::levels_in_use(generator.kind, &wear);
     }
 
-    let detail = generator.detail.as_ref().map(CurvatureDetail::blurred_sizes_in_use).unwrap_or_default();
+    let detail = curvature_detail_in_use(generator).as_ref().map(CurvatureDetail::blurred_sizes_in_use).unwrap_or_default();
     std::array::from_fn(|level| detail.get(level).copied().unwrap_or(false))
+}
+
+/// The mode and detail sizes `generator` reads its curvature with: its own, the defaults on Curvature's section controls, else None
+fn curvature_detail_in_use(generator: &Generator) -> Option<CurvatureDetail> {
+    let on_section = generator.kind == GeneratorKind::Curvature && generator.section_controls().is_some();
+    generator.detail.clone().or_else(|| on_section.then(CurvatureDetail::default))
 }
 
 /// The wear controls `generator` computes with: its own, Fiber Glass Edge Wear's defaults when it has none (it has no earlier model), else None
@@ -1387,10 +1413,13 @@ impl<'a, 'b> Texel<'a, 'b> {
         }
     }
 
-    /// The generator's ramp at this texel, before its global blur, balance, contrast and invert.
+    /// The generator's ramp at this texel, before its global blur, balance, contrast and invert (on the section controls, before those too).
     fn generator_ramp(&mut self, generator: &Generator, curvature_sizes: Option<&CurvatureSizes>) -> f32 {
         if let Some(wear) = wear_parameters(generator) {
             return self.wear_ramp(generator, &wear, curvature_sizes);
+        }
+        if let Some(section) = generator.section_controls() {
+            return self.section_signal(generator, &section, curvature_sizes);
         }
 
         let coords = self.coords();
@@ -1410,6 +1439,7 @@ impl<'a, 'b> Texel<'a, 'b> {
             (GeneratorKind::ThinAreas, _) => 1.0 - self.generator_input(generator, BakedMap::Thickness).unwrap_or(1.0),
             (GeneratorKind::Position, _) => coords.pos.dot(Vec3::from(generator.direction).try_normalize().unwrap_or(Vec3::Y)) * 0.5 + 0.5,
             (GeneratorKind::Direction, _) => coords.nrm.dot(Vec3::from(generator.direction).try_normalize().unwrap_or(Vec3::Y)) * 0.5 + 0.5,
+            (GeneratorKind::WorldSpaceNormals, _) => coords.nrm.y * 0.5 + 0.5,
         };
         let signal = if generator.noise_amount > 0.0 {
             let noise = world_noise(coords.pos, generator.noise_scale, generator.seed);
@@ -1429,6 +1459,34 @@ impl<'a, 'b> Texel<'a, 'b> {
         let softness = generator.softness.max(Generator::MIN_SOFTNESS);
         let ramp = ((signal - (threshold - softness)) / (2.0 * softness)).clamp(0.0, 1.0);
         ramp * ramp * (3.0 - 2.0 * ramp)
+    }
+
+    /// The signal a generator on its section controls adjusts at this texel: the axes of its map, its curvature or its occlusion
+    fn section_signal(&mut self, generator: &Generator, section: &SectionParameters, curvature_sizes: Option<&CurvatureSizes>) -> f32 {
+        match generator.kind {
+            GeneratorKind::Curvature => {
+                let detail = curvature_detail_in_use(generator).unwrap_or_default();
+                let sizes = if generator.inputs.contains_key(&BakedMap::Curvature) { None } else { curvature_sizes };
+                let curvature = self.generator_input(generator, BakedMap::Curvature);
+                self.curvature_detail(&detail, sizes, curvature)
+            }
+            GeneratorKind::AmbientOcclusion => self.generator_input(generator, BakedMap::AmbientOcclusion).unwrap_or(1.0),
+            GeneratorKind::Position => {
+                let position = self.generator_input_color(generator, BakedMap::Position).unwrap_or_else(|| self.bounds_position().to_array());
+                sections::axes_signal(position, &section.axes)
+            }
+            GeneratorKind::WorldSpaceNormals => {
+                let normal = self.generator_input_color(generator, BakedMap::WorldNormal).unwrap_or_else(|| (self.coords().nrm * 0.5 + 0.5).to_array());
+                sections::axes_signal(normal, &section.axes)
+            }
+            GeneratorKind::EdgeWear | GeneratorKind::Dirt | GeneratorKind::ThinAreas | GeneratorKind::Direction | GeneratorKind::FiberGlassEdgeWear => 0.0,
+        }
+    }
+
+    /// This texel's world position across the mesh's bounds, 0..1 on each axis (0 where uncovered)
+    fn bounds_position(&self) -> Vec3 {
+        let (low, high) = self.inp.bounds;
+        self.world().map_or(Vec3::ZERO, |position| ((position - low) / (high - low).max(Vec3::splat(MIN_BOUNDS_EXTENT))).clamp(Vec3::ZERO, Vec3::ONE))
     }
 
     /// A wear generator's value at this texel from its curvature, occlusion and grunge, before its global adjustments and invert
@@ -1469,7 +1527,8 @@ impl<'a, 'b> Texel<'a, 'b> {
     /// The generator's value at this texel: its ramp finished by balance, contrast, invert and offset (its blur and resolution need neighbours: see [`generator_region`]).
     fn generator(&mut self, generator: &Generator, curvature_sizes: Option<&CurvatureSizes>) -> f32 {
         let ramp = self.generator_ramp(generator, curvature_sizes);
-        finish_generator(generator, ramp)
+        let adjusted = generator.section_controls().map_or(ramp, |section| sections::adjusted(generator.kind, &section, ramp));
+        finish_generator(generator, adjusted)
     }
 
     /// Generator input `map` at this texel: what replaces the mesh map in the generator's inputs, else the mesh map (None when not baked).
@@ -1477,6 +1536,14 @@ impl<'a, 'b> Texel<'a, 'b> {
         match generator.inputs.get(&map) {
             Some(source) => Some(self.source(source, &Projection::default(), ChannelKind::Scalar)[0]),
             None => self.baked(map),
+        }
+    }
+
+    /// Generator input `map` at this texel as three channels (an encoded normal or position): what replaces the mesh map, else the mesh map (None when not baked)
+    fn generator_input_color(&mut self, generator: &Generator, map: BakedMap) -> Option<[f32; 3]> {
+        match generator.inputs.get(&map) {
+            Some(source) => Some(self.source(source, &Projection::default(), ChannelKind::NormalMap)),
+            None => self.baked_color(map),
         }
     }
 
@@ -2954,7 +3021,8 @@ mod tests {
         for kind in [GeneratorKind::Curvature, GeneratorKind::EdgeWear] {
             for mode in CurvatureMode::ALL {
                 let detail = CurvatureDetail { mode, weights: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] };
-                let generator = Generator { level: 0.5, softness: 0.5, noise_amount: 2.0, detail: Some(detail), wear: None, ..Generator::new(kind) };
+                let generator =
+                    Generator { level: 0.5, softness: 0.5, noise_amount: 2.0, detail: Some(detail), wear: None, section: None, ..Generator::new(kind) };
                 let mut mask = Mask::new(MaskBackground::Black);
                 mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Generator(generator)));
                 fixture.project.layer_mut(layer).unwrap().mask = Some(mask);

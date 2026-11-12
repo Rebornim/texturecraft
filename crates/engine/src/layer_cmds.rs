@@ -3,8 +3,8 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    BlendMode, Channel, ChannelBlend, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Sampling, Source,
-    UvTransform, UvWrap,
+    BlendMode, Channel, ChannelBlend, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Procedural, ProceduralKind, Projection, Sampling, ScaleMode,
+    Source, UvTransform, UvWrap,
 };
 
 use crate::commands::{
@@ -463,7 +463,7 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
     Ok(proj)
 }
 
-/// `current` with the `filtering` and `wrap` params applied.
+/// `current` with the `filtering`, `wrap` and `scaleMode` params applied
 pub(crate) fn sampling_from(p: &Value, cmd: &str, current: Sampling) -> Result<Sampling> {
     let mut sampling = current;
     if let Some(id) = strp(p, "filtering") {
@@ -471,6 +471,9 @@ pub(crate) fn sampling_from(p: &Value, cmd: &str, current: Sampling) -> Result<S
     }
     if let Some(id) = strp(p, "wrap") {
         sampling.wrap = UvWrap::from_id(id).ok_or_else(|| bad(cmd, format!("unknown wrap `{id}`: repeat, repeatHorizontally, repeatVertically or none")))?;
+    }
+    if let Some(id) = strp(p, "scaleMode") {
+        sampling.scale = ScaleMode::from_id(id).ok_or_else(|| bad(cmd, format!("unknown scaleMode `{id}`: tiling or physicalSize")))?;
     }
     Ok(sampling)
 }

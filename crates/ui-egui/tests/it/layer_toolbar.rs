@@ -3,7 +3,7 @@
 
 use egui::accesskit::Role;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::{Value, json};
 use texturecraft_engine::core::{EffectKind, LayerId, Source};
 use texturecraft_engine::paint::alphas;
@@ -85,4 +85,16 @@ fn bitmap_opens_the_texture_picker_and_adds_the_mask_only_once_one_is_picked() {
     let kinds = mask_kinds(&harness, layer);
     let name = texturecraft_engine::fill_alpha::resource_name(alpha);
     assert!(matches!(kinds.as_slice(), [EffectKind::Fill { source: Source::Image { name: read, .. }, .. }] if *read == name), "{kinds:?}");
+}
+
+#[test]
+fn a_toolbar_tooltip_shows_above_its_button_off_the_layer_rows() {
+    let (mut harness, _) = app();
+    let button = harness.get_by_role_and_label(Role::Button, "Add effect").rect();
+    harness.hover_at(button.center());
+    // Past the tooltip delay
+    harness.run_steps(60);
+    let tip =
+        harness.get_all_by_label("Add effect").find(|node| node.accesskit_node().role() == Role::Label).map(|node| node.rect()).expect("the button's tooltip");
+    assert!(tip.bottom() <= button.top(), "the tooltip sits above the toolbar: {tip:?} {button:?}");
 }

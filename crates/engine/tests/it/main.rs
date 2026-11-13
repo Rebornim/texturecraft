@@ -22,6 +22,7 @@ mod fill_projections;
 mod fill_sampling;
 mod filter_swap;
 mod filters;
+mod folder_contents;
 mod frame_selection;
 mod generator_inputs;
 mod gradient_map;

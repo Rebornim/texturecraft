@@ -37,6 +37,7 @@ mod fill_pictures;
 mod fill_placement;
 mod fill_symmetry_panel;
 mod filter_slot;
+mod folder_properties;
 pub mod fonts;
 mod frame_gizmo;
 mod generator_panel;

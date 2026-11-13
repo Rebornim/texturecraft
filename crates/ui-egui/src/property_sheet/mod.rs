@@ -6,6 +6,7 @@ mod choice;
 mod color_bar;
 mod color_picker_rows;
 mod group;
+mod info_icon;
 mod material_rows;
 
 mod number_field;
@@ -100,6 +101,8 @@ pub(crate) struct PropertySheet<'u> {
     drawn_bottom: f32,
     empty: bool,
     sections: Vec<(String, f32)>,
+    info: Option<String>,
+    child_shift: f32,
 }
 
 impl<'u> PropertySheet<'u> {
@@ -121,6 +124,8 @@ impl<'u> PropertySheet<'u> {
             drawn_bottom: rect.top(),
             empty: true,
             sections: Vec::new(),
+            info: None,
+            child_shift: 0.0,
             ui,
         };
         let result = body(&mut sheet);

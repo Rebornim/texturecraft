@@ -248,6 +248,7 @@ fn culling_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: 
     if !matches!(fill.projection, Projection::Cylindrical { .. }) {
         let mut culling = projector.depth;
         let picture = |painter: &Painter, rect: Rect| depth_picture(painter, rect, &tokens);
+        sheet.info(tr("Paints only the surface the projector sees first; parts hidden behind it stay unpainted."));
         if sheet.picture_toggle(Some(&picture), tr("Depth culling"), &mut culling.on, false) {
             run(app, json!({"depthCulling": culling.on}));
         }
@@ -260,6 +261,7 @@ fn culling_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: 
         let mut backface = projector.backface;
         let culled = backface.on;
         let picture = |painter: &Painter, rect: Rect| backface_picture(painter, rect, culled, &tokens);
+        sheet.info(tr("Leaves out faces turned away from the projector, so the fill doesn't run onto their back."));
         if sheet.picture_toggle(Some(&picture), tr("Backface culling"), &mut backface.on, false) {
             run(app, json!({"backfaceCulling": backface.on}));
         }

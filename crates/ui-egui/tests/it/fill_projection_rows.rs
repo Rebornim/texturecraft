@@ -97,6 +97,44 @@ fn culling_toggles_change_the_projection() {
     assert!(projector.backface.on);
 }
 
+/// What the culling rows' i says on hover
+const DEPTH_CULLING_TIP: &str = "Paints only the surface the projector sees first; parts hidden behind it stay unpainted.";
+const BACKFACE_CULLING_TIP: &str = "Leaves out faces turned away from the projector, so the fill doesn't run onto their back.";
+
+/// Frames for the pointer to rest long enough for a tooltip
+const TOOLTIP_FRAMES: usize = 60;
+
+/// Room the i's tooltip leaves at the panel's right edge for the values
+const TIP_VALUE_ROOM: f32 = 70.0;
+
+#[test]
+fn the_culling_rows_i_explains_the_row_on_hover_without_covering_its_values() {
+    let (mut harness, layer) = app_with_fill("planar");
+    let panel_right = harness.get_by_label("Move on model").rect().right();
+    for (tip, row) in [(DEPTH_CULLING_TIP, "Depth culling"), (BACKFACE_CULLING_TIP, "Backface culling")] {
+        let info = harness.get_by_label(tip).rect();
+        let switch = harness.get_by_label(row).rect();
+        assert!(info.right() <= switch.left() && (info.center().y - switch.center().y).abs() < 1.0, "{row}: the i sits left of its row");
+        assert_eq!(harness.query_all_by_label(tip).count(), 1, "{row}: no tooltip before the hover");
+
+        harness.hover_at(info.center());
+        harness.run_steps(TOOLTIP_FRAMES);
+        let shown = harness.query_all_by_label(tip).map(|node| node.rect()).find(|rect| *rect != info);
+        let Some(shown) = shown else { panic!("{row}: hovering the i shows its tooltip") };
+        assert!(shown.top() >= info.bottom() - 2.0, "{row}: the tooltip hangs under the row");
+        assert!(shown.right() <= panel_right - TIP_VALUE_ROOM, "{row}: the tooltip ends before the value column");
+
+        harness.hover_at(egui::pos2(800.0, 500.0));
+        harness.run_steps(SETTLE_FRAMES);
+    }
+
+    // The i only explains: a click on it changes nothing
+    let before = projection(&harness, layer);
+    let info = harness.get_by_label(DEPTH_CULLING_TIP).rect().center();
+    click_at(&mut harness, info);
+    assert_eq!(projection(&harness, layer), before);
+}
+
 #[test]
 fn shape_crop_is_picked_from_its_list() {
     // Tri-planar's Shape crop sits highest in the panel, in view

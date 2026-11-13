@@ -133,7 +133,10 @@ impl PropertySheet<'_> {
     pub(crate) fn picture_toggle(&mut self, picture: Option<RowPicture<'_>>, label: &str, on: &mut bool, child: bool) -> bool {
         let rect = self.take(ROW_HEIGHT);
         let center_y = rect.center().y;
-        let label_x = if picture.is_some() || child { self.left + ROW_PICTURE_SIZE + ROW_PICTURE_AIR } else { self.left };
+        let shift = self.lead_shift(child);
+        self.paint_info(center_y);
+        let lead_x = self.left + shift;
+        let label_x = if picture.is_some() || child { lead_x + ROW_PICTURE_SIZE + ROW_PICTURE_AIR } else { lead_x };
         let font = FontId::proportional(TEXT_SIZE);
         let label_end = label_x - self.left + self.text_width(label, font.clone()) + TOGGLE_LABEL_AIR;
         self.seen.toggle_label_end = self.seen.toggle_label_end.max(label_end);
@@ -151,7 +154,7 @@ impl PropertySheet<'_> {
         let t = self.tokens;
         let painter = self.ui.painter();
         if let Some(draw) = picture {
-            draw(painter, Rect::from_center_size(pos2(self.left + ROW_PICTURE_SIZE / 2.0, center_y), vec2(ROW_PICTURE_SIZE, ROW_PICTURE_SIZE)));
+            draw(painter, Rect::from_center_size(pos2(lead_x + ROW_PICTURE_SIZE / 2.0, center_y), vec2(ROW_PICTURE_SIZE, ROW_PICTURE_SIZE)));
         }
         painter.text(pos2(label_x, center_y), Align2::LEFT_CENTER, label, font, if child { t.text_dim } else { t.text });
         self.pill(pill.center(), *on, true);

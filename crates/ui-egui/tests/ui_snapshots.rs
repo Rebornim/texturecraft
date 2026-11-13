@@ -1130,3 +1130,41 @@ fn source_picker_snapshots() {
     harness.hover_at(blur);
     save(&mut harness, &output_dir, "filter-picker-v4");
 }
+
+/// The culling rows' i on a planar fill: each one hovered with its tooltip, in the medium theme, then the Depth culling one in the dark and light themes
+#[test]
+#[ignore]
+fn info_icon_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1]})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.fill.projection", &json!({"layer": layer, "projection": "planar"})).unwrap();
+    execute(&mut session, "layer.fill.projection", &json!({"layer": layer, "scaleMode": "physicalSize", "backfaceCulling": true})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1500.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    // The test's stand-in arrow would hide the hovered i
+    harness.set_render_cursor(false);
+    harness.run_steps(4);
+    let tips = [
+        ("Paints only the surface the projector sees first; parts hidden behind it stay unpainted.", "depth"),
+        ("Leaves out faces turned away from the projector, so the fill doesn't run onto their back.", "backface"),
+    ];
+    for (tip, name) in tips {
+        let info = harness.get_by_label(tip).rect().center();
+        harness.hover_at(info);
+        harness.run_steps(60);
+        save(&mut harness, &output_dir, &format!("info-{name}-medium"));
+    }
+    let info = harness.get_by_label(tips[0].0).rect().center();
+    for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+        harness.state_mut().ui.prefs.brightness = brightness;
+        harness.hover_at(info);
+        harness.run_steps(60);
+        save(&mut harness, &output_dir, &format!("info-depth-{name}"));
+    }
+}

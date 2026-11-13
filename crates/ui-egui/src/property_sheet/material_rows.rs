@@ -2,11 +2,11 @@
 
 use std::ops::RangeInclusive;
 
-use egui::{Align2, Color32, FontId, Mesh, Painter, Rect, Sense, pos2, vec2};
-use egui_phosphor::regular as ic;
+use egui::{Color32, Mesh, Painter, Rect, Sense, pos2, vec2};
 
 use super::slider::{KNOB_RADIUS, Track};
 use super::{CONTROL_HEIGHT, PropertySheet, ROW_HEIGHT};
+use crate::drawn_icon::DrawnIcon;
 
 /// Side of the material's orb
 const ORB_SIZE: f32 = 90.0;
@@ -31,7 +31,7 @@ const RAMP_VALUE_WIDTH: f32 = 34.0;
 const RAMP_HEIGHT: f32 = 4.0;
 
 /// Size of the invert glyph
-const INVERT_GLYPH_SIZE: f32 = 13.0;
+const INVERT_GLYPH_SIZE: f32 = 14.0;
 
 /// What a uniform channel's ramp row did this frame
 pub(crate) struct RampEdit {
@@ -77,7 +77,7 @@ impl PropertySheet<'_> {
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
         let t = self.tokens;
         let color = if response.hovered() { t.text } else { t.text_dim };
-        self.ui.painter().text(glyph.center(), Align2::CENTER_CENTER, ic::CIRCLE_HALF_TILT, FontId::proportional(INVERT_GLYPH_SIZE), color);
+        DrawnIcon::Invert.paint(self.ui.painter(), glyph.center(), INVERT_GLYPH_SIZE, color);
         self.drawn(center_y + KNOB_RADIUS);
         RampEdit { changed: Self::apply_typed(value, typed, dragged), invert: response.clicked() }
     }

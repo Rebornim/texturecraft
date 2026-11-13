@@ -25,6 +25,7 @@ mod decal_drop;
 mod display_settings;
 pub mod dock;
 pub mod docking;
+mod drawn_icon;
 mod export_panel;
 pub mod export_templates;
 #[cfg(not(target_arch = "wasm32"))]

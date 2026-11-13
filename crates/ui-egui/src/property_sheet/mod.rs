@@ -5,6 +5,7 @@ mod action_row_response;
 mod attribute_rows;
 mod axis_rows;
 mod band_response;
+mod button_icon;
 mod choice;
 mod color_bar;
 mod color_picker_rows;
@@ -44,6 +45,7 @@ mod tests;
 
 pub(crate) use action_row_response::ActionRowResponse;
 pub(crate) use band_response::BandResponse;
+pub(crate) use button_icon::ButtonIcon;
 pub(crate) use compare_row_response::CompareRowResponse;
 pub(crate) use id_color_row_response::IdColorRowResponse;
 pub(crate) use number_field::NumberField;

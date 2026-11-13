@@ -1,16 +1,9 @@
-//! The eyedropper pointer an armed pick shows everywhere: drawn in code (a pipette from its tip at the bottom left to its bulb at
-//! the top right, white with a dark outline so it reads on any colour), the same picture in the app and, where the system lets
-//! the app set the pointer, over other apps; its hotspot is the tip's last pixel, so the pixel under the tip is the one picked
+//! The eyedropper pointer an armed pick shows everywhere: the panels' pipette icon (tip at the bottom left, bulb at the top
+//! right) in white with a dark outline so it reads on any colour, its glass tube's inside dark like the glyph's, the same picture
+//! in the app and, where the system lets the app set the pointer, over other apps; its hotspot is the tip's last pixel, so the
+//! pixel under the tip is the one picked
 
-/// The pipette's parts as capsules `(from, to, radius at from, radius at to)` in a unit square, y down
-const PARTS: [([f32; 2], [f32; 2], f32, f32); 3] = [
-    // The glass tube, thin at the tip
-    ([0.07, 0.93], [0.52, 0.48], 0.03, 0.07),
-    // The collar between the tube and the bulb
-    ([0.43, 0.39], [0.61, 0.57], 0.065, 0.065),
-    // The rubber bulb
-    ([0.58, 0.42], [0.80, 0.20], 0.13, 0.13),
-];
+use crate::drawn_icon::pipette;
 
 /// The outline's width in pixels at the smallest pointer; larger pointers scale it
 const OUTLINE_PX: f32 = 1.0;
@@ -45,8 +38,8 @@ impl CursorImage {
         for y in 0..size {
             for x in 0..size {
                 let point = [(x as f32 + 0.5) / scale, (y as f32 + 0.5) / scale];
-                let inside = PARTS.iter().map(|&(from, to, r0, r1)| cone_distance(point, from, to, r0, r1)).fold(f32::INFINITY, f32::min) * scale;
-                let fill = (0.5 - inside).clamp(0.0, 1.0);
+                let inside = pipette::silhouette(point) * scale;
+                let fill = (0.5 - inside).clamp(0.0, 1.0).min((0.5 - pipette::glyph(point) * scale).clamp(0.0, 1.0));
                 let alpha = (0.5 - (inside - outline)).clamp(0.0, 1.0);
                 let grey = (fill * 255.0).round() as u8;
                 rgba.extend_from_slice(&[grey, grey, grey, (alpha * 255.0).round() as u8]);
@@ -119,16 +112,6 @@ fn tip(rgba: &[u8], size: u32) -> [u32; 2] {
     corner.unwrap_or([0, size.saturating_sub(1)])
 }
 
-/// The signed distance from `point` to a capsule from `from` (radius `r0`) to `to` (radius `r1`), negative inside
-fn cone_distance(point: [f32; 2], from: [f32; 2], to: [f32; 2], r0: f32, r1: f32) -> f32 {
-    let along = [to[0] - from[0], to[1] - from[1]];
-    let offset = [point[0] - from[0], point[1] - from[1]];
-    let length = along[0] * along[0] + along[1] * along[1];
-    let h = ((offset[0] * along[0] + offset[1] * along[1]) / length).clamp(0.0, 1.0);
-    let closest = [offset[0] - along[0] * h, offset[1] - along[1] * h];
-    (closest[0] * closest[0] + closest[1] * closest[1]).sqrt() - (r0 + (r1 - r0) * h)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,6 +144,27 @@ mod tests {
         let [hx, hy] = image.hotspot;
         assert!(pixel(hx, hy).and_then(|pixel| pixel.first().copied()).is_some_and(|grey| grey < 128), "the tip's edge is the dark outline");
         assert_eq!(CursorImage::eyedropper(0).size, 8, "a degenerate size is clamped");
+    }
+
+    #[test]
+    fn the_pointer_is_the_panels_pipette_white_with_its_glass_tube_hollow() {
+        let size = 48;
+        let image = CursorImage::eyedropper(size);
+        let glyph = crate::drawn_icon::DrawnIcon::Pipette.coverage(size);
+        let at = |[x, y]: [f32; 2]| ((y * size as f32) as u32, (x * size as f32) as u32);
+        let grey = |point: [f32; 2]| {
+            let (row, column) = at(point);
+            image.rgba.get(((row * size + column) * 4) as usize).copied()
+        };
+
+        let tube = pipette::square(0.4, 0.0);
+        assert!(grey(tube).is_some_and(|grey| grey < 64), "the tube's inside is dark, as the glyph leaves it clear");
+        assert!(image.alpha(at(tube).1, at(tube).0).is_some_and(|alpha| alpha == u8::MAX), "and still opaque, so the pointer reads");
+        assert_eq!(grey(pipette::square(0.85, 0.0)), Some(u8::MAX), "the bulb is white");
+        for (index, coverage) in glyph.iter().enumerate() {
+            let alpha = image.rgba.get(index * 4 + 3).copied().unwrap_or(0);
+            assert!(*coverage == 0 || alpha > 0, "every pixel of the glyph's ink is part of the pointer ({index})");
+        }
     }
 
     #[test]

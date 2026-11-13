@@ -9,7 +9,7 @@ use crate::gradient_input::{GradientInput, ramp, shape};
 use crate::{
     AnisotropicKuwahara, Backface, Bevel, BevelSmooth, BlendMode, Channel, ChannelKind, ColorMatch, CompareSource, ContentsOffset, DepthCulling,
     DirectionalDistance, DirectionalLight, FillSymmetry, GrayscaleConversion, HeightToNormal, HighpassSpace, MaskOutline, Mirror, PbrValidate, Projector,
-    ShapeCrop, SourceSlopeBlur, SourceWarp, StylizedLighting, SunAndSky, ThresholdMode, lum,
+    RandomizedSeed, ShapeCrop, SourceSlopeBlur, SourceWarp, StylizedLighting, SunAndSky, ThresholdMode, lum,
 };
 
 mod curvature_detail;
@@ -102,6 +102,9 @@ pub enum LayerKind {
         /// Scale and Rotation laid on every fill inside (none in folders saved before folders had one)
         #[serde(default, skip_serializing_if = "ContentsOffset::is_none")]
         contents: ContentsOffset,
+        /// The seeds inside that its Randomize seeds changed, until its Contents reset puts them back (none in folders saved before)
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        randomized: Vec<RandomizedSeed>,
     },
     /// A linked instance of `source` (possibly in another texture set): renders the source's
     /// content, content effects and channel blending, and its mask unless the instance has its

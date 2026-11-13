@@ -46,6 +46,7 @@ pub mod outline_position;
 pub mod pbr_validate;
 pub mod project;
 pub mod projector;
+pub mod randomized_seed;
 mod saved_projection;
 pub mod selection_background;
 pub mod shape_crop;
@@ -114,6 +115,7 @@ pub use project::{
     Project, TextureSet, TileGrid, ToneMapping, UDIM_RANGE, udim_at,
 };
 pub use projector::Projector;
+pub use randomized_seed::RandomizedSeed;
 pub use selection_background::SelectionBackground;
 pub use shape_crop::ShapeCrop;
 pub use slope_blending::SlopeBlending;

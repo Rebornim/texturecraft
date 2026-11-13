@@ -96,6 +96,7 @@ pub mod ui_state_store;
 pub(crate) mod updates_ui;
 pub mod uv_paint_point;
 pub mod viewport;
+mod warp_checker;
 pub mod web_files;
 pub mod widgets;
 pub mod windows;

@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::project::MAX_DEPTH;
-use texturecraft_core::{ContentsOffset, EffectKind, Filter, Layer, LayerId, LayerKind, Project, Source};
+use texturecraft_core::{ContentsOffset, EffectKind, Filter, Layer, LayerId, LayerKind, Project, RandomizedSeed, Source};
 
 use crate::commands::{CommandSpec, bad, f32p, has_layer, layer_param};
 use crate::{Result, Session, cmd};
@@ -23,7 +23,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Reset folder contents",
             [],
             None,
-            "{layer?: folder (default selected)} — drop the folder's Scale and Rotation: every fill inside back to its own, in one undo step",
+            "{layer?: folder (default selected)} — drop the folder's Scale and Rotation: every fill inside back to its own, and put back the seeds its Randomize seeds changed (a seed changed since, or a layer moved out, keeps its own), in one undo step",
             has_layer,
             reset_contents
         ),
@@ -32,7 +32,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Randomize seeds",
             [],
             None,
-            "{layer?: folder (default selected)} — a new seed for every pattern, generator and noise filter inside the folder (fills, masks, effects, nested folders; instanced sources stay), in one undo step; seeds that were equal stay equal. Returns {seeds: how many changed}",
+            "{layer?: folder (default selected)} — a new seed for every pattern, generator and noise filter inside the folder (fills, masks, effects, nested folders; instanced sources stay), in one undo step; seeds that were equal stay equal; the folder keeps each seed's value from before so its Contents reset can put it back. Returns {seeds: how many changed}",
             has_layer,
             randomize_seeds
         ),
@@ -56,6 +56,22 @@ fn contents_mut(project: &mut Project, id: LayerId) -> Option<&mut ContentsOffse
     }
 }
 
+/// The seeds inside folder `id` that its Randomize seeds changed
+fn randomized_mut(project: &mut Project, id: LayerId) -> Option<&mut Vec<RandomizedSeed>> {
+    match &mut project.layers.get_mut(&id)?.kind {
+        LayerKind::Group { randomized, .. } => Some(randomized),
+        _ => None,
+    }
+}
+
+/// Whether folder `id`'s Contents differ from a new folder's: a Scale or Rotation laid on its fills, or seeds its Randomize seeds changed
+pub fn contents_changed(project: &Project, id: LayerId) -> bool {
+    match project.layers.get(&id).map(|layer| &layer.kind) {
+        Some(LayerKind::Group { contents, randomized, .. }) => !contents.is_none() || !randomized.is_empty(),
+        _ => false,
+    }
+}
+
 fn set_contents(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "folder.contents.set";
     let id = folder_param(s, CMD, p)?;
@@ -76,19 +92,30 @@ fn set_contents(s: &mut Session, p: &Value) -> Result<Value> {
 fn reset_contents(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "folder.contents.reset";
     let id = folder_param(s, CMD, p)?;
-    if s.doc.project.contents_offset(id).is_none() {
+    if !contents_changed(&s.doc.project, id) {
         return Ok(Value::Null);
     }
+    let mut inside = Vec::new();
+    descendants(&s.doc.project, id, 0, &mut inside);
     s.edit("Reset folder contents", |s| {
         let contents = contents_mut(&mut s.doc.project, id).ok_or_else(|| bad(CMD, format!("layer {} is not a folder", id.0)))?;
         *contents = ContentsOffset::NONE;
+        let randomized = randomized_mut(&mut s.doc.project, id).map(std::mem::take).unwrap_or_default();
+        for record in randomized.iter().filter(|record| inside.contains(&record.layer)) {
+            let Some(layer) = s.doc.project.layers.get_mut(&record.layer) else { continue };
+            // Only a seed still at the value Randomize seeds gave it goes back: one changed since keeps the artist's pick
+            if let Some(seed) = layer_seeds(layer).into_iter().nth(record.index as usize).filter(|seed| **seed == record.after) {
+                *seed = record.before;
+            }
+        }
         Ok(())
     })?;
     Ok(Value::Null)
 }
 
 fn randomize_seeds(s: &mut Session, p: &Value) -> Result<Value> {
-    let folder = folder_param(s, "folder.randomizeSeeds", p)?;
+    const CMD: &str = "folder.randomizeSeeds";
+    let folder = folder_param(s, CMD, p)?;
     let mut inside = Vec::new();
     descendants(&s.doc.project, folder, 0, &mut inside);
     let seeds: usize = inside.iter().filter_map(|id| s.doc.project.layers.get(id)).map(|layer| layer_seeds(&mut layer.clone()).len()).sum();
@@ -98,16 +125,28 @@ fn randomize_seeds(s: &mut Session, p: &Value) -> Result<Value> {
     // One mixing key per folder: a seed maps to the same new seed wherever it is, so patterns that lined up still do
     let key = mix(folder.0 as u32 ^ (folder.0 >> 32) as u32);
     s.edit("Randomize seeds", |s| {
+        let mut randomized = randomized_mut(&mut s.doc.project, folder).map(std::mem::take).unwrap_or_default();
         for id in &inside {
-            if let Some(layer) = s.doc.project.layers.get_mut(id) {
-                for seed in layer_seeds(layer) {
-                    *seed = mix(*seed ^ key);
-                }
+            let Some(layer) = s.doc.project.layers.get_mut(id) else { continue };
+            for (index, seed) in (0u32..).zip(layer_seeds(layer)) {
+                let after = mix(*seed ^ key);
+                remember(&mut randomized, RandomizedSeed { layer: *id, index, before: *seed, after });
+                *seed = after;
             }
         }
+        *randomized_mut(&mut s.doc.project, folder).ok_or_else(|| bad(CMD, format!("layer {} is not a folder", folder.0)))? = randomized;
         Ok(())
     })?;
     Ok(json!({ "seeds": seeds }))
+}
+
+/// Adds `change` to the folder's randomized seeds; a seed randomized again keeps its first `before` (what the reset puts back), unless it was changed by hand in between
+fn remember(randomized: &mut Vec<RandomizedSeed>, change: RandomizedSeed) {
+    match randomized.iter_mut().find(|record| record.layer == change.layer && record.index == change.index) {
+        Some(record) if record.after == change.before => record.after = change.after,
+        Some(record) => *record = change,
+        None => randomized.push(change),
+    }
 }
 
 /// Whether folder `id` holds anything its Contents act on: a fill (layer, content or mask fill) or a seed

@@ -329,7 +329,7 @@ fn placement_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill
     };
     let projection = &fill.projection;
     let picture = |painter: &Painter, rect: Rect| match warp {
-        Some((corners, size, turn)) => warp_preview(painter, rect, corners, size, turn, &tokens),
+        Some((corners, size, turn)) => warp_preview(painter, rect, corners, size, turn, placement, &tokens),
         None => {
             if projection_preview(painter, rect, projection, bounds, &tokens).is_none() {
                 window_preview(painter, rect, placement, &tokens);

@@ -763,7 +763,12 @@ mod tests {
         let b = paint(&mut p, "b");
         let b = p.insert_layer(0, b, None, false).unwrap();
         let gid = p.alloc_id();
-        let g = Layer::new(gid, "g", LayerKind::Group { children: vec![], collapsed: false, contents: Default::default() }, &Channel::DEFAULT_SET);
+        let g = Layer::new(
+            gid,
+            "g",
+            LayerKind::Group { children: vec![], collapsed: false, contents: Default::default(), randomized: Vec::new() },
+            &Channel::DEFAULT_SET,
+        );
         p.insert_layer(0, g, Some(a), false).unwrap();
         assert_eq!(p.texture_sets[0].stack, vec![a, gid, b]);
         p.move_above(b, Some(gid), true).unwrap();
@@ -869,8 +874,13 @@ mod tests {
         p.validate().unwrap();
         // A folder holding an instance of itself draws itself.
         let gid = p.alloc_id();
-        p.insert_layer(1, Layer::new(gid, "g", LayerKind::Group { children: vec![], collapsed: false, contents: Default::default() }, &[]), None, false)
-            .unwrap();
+        p.insert_layer(
+            1,
+            Layer::new(gid, "g", LayerKind::Group { children: vec![], collapsed: false, contents: Default::default(), randomized: Vec::new() }, &[]),
+            None,
+            false,
+        )
+        .unwrap();
         let loop_id = p.alloc_id();
         p.insert_layer(1, Layer::new(loop_id, "g", LayerKind::Instance { source: gid }, &[]), Some(gid), true).unwrap();
         assert_eq!(p.instance_cycle(), Some(loop_id));
@@ -881,8 +891,9 @@ mod tests {
     #[test]
     fn folder_offsets_load_as_none_from_old_saves_save_only_when_set_and_combine_inward() {
         let mut p = project();
-        let folder =
-            |p: &mut Project, contents: ContentsOffset| Layer::new(p.alloc_id(), "g", LayerKind::Group { children: vec![], collapsed: false, contents }, &[]);
+        let folder = |p: &mut Project, contents: ContentsOffset| {
+            Layer::new(p.alloc_id(), "g", LayerKind::Group { children: vec![], collapsed: false, contents, randomized: Vec::new() }, &[])
+        };
         let outer = folder(&mut p, ContentsOffset::new(2.0, 30.0));
         let outer = p.insert_layer(0, outer, None, false).unwrap();
         let inner = folder(&mut p, ContentsOffset::new(1.5, -10.0));
@@ -899,7 +910,7 @@ mod tests {
         );
         // A folder saved before folders had an offset has none, and one without an offset saves as before
         let old: LayerKind = serde_json::from_str(r#"{"Group":{"children":[],"collapsed":true}}"#).unwrap();
-        assert_eq!(old, LayerKind::Group { children: vec![], collapsed: true, contents: ContentsOffset::NONE });
+        assert_eq!(old, LayerKind::Group { children: vec![], collapsed: true, contents: ContentsOffset::NONE, randomized: Vec::new() });
         assert_eq!(serde_json::to_string(&old).unwrap(), r#"{"Group":{"children":[],"collapsed":true}}"#);
         let saved = serde_json::to_string(&p).unwrap();
         assert_eq!(serde_json::from_str::<Project>(&saved).unwrap().contents_around(a), p.contents_around(a));

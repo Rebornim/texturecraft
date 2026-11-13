@@ -188,7 +188,7 @@ fn fill(harness: &Harness<'_, TextureCraftApp>, layer: u64) -> texturecraft_engi
 }
 
 #[test]
-fn the_fill_caption_resets_the_whole_fill_section_in_one_undo_step() {
+fn the_fill_caption_resets_the_whole_fill_section_to_its_projections_defaults_in_one_undo_step() {
     use texturecraft_engine::core::{Filtering, Sampling};
     let (mut harness, layer) = app_with_fill("planar");
     harness.state_mut().run("layer.fill.projection", json!({"layer": layer, "tiling": 3, "filtering": "nearest", "shapeCrop": "cropped", "symmetry": true}));
@@ -207,7 +207,11 @@ fn the_fill_caption_resets_the_whole_fill_section_in_one_undo_step() {
     // The caption's reset puts back the whole section
     click_at(&mut harness, reset);
     let after = fill(&harness, layer);
-    assert_eq!(after.projection, Projection::default(), "a UV projection at tiling 1");
+    assert!(
+        matches!(after.projection, Projection::Planar { scale, uv, placed: None, .. } if scale == 1.0 && uv == Default::default()),
+        "still planar, at a new planar's defaults: {:?}",
+        after.projection
+    );
     assert_eq!(after.sampling, Sampling { symmetry: changed.sampling.symmetry, ..Sampling::default() }, "the symmetry stays");
     assert!(harness.get_by_label("Fill: Reset to defaults").accesskit_node().is_disabled(), "at the defaults it is faint and inert");
     click_at(&mut harness, reset);

@@ -682,6 +682,8 @@ fn fill_properties_snapshots() {
         ("triplanar", json!({"scaleMode": "physicalSize"}), "fill-triplanar"),
         ("planar", json!({"scaleMode": "physicalSize", "backfaceCulling": true, "shapeCrop": "cropped"}), "fill-planar"),
         ("warp", json!({"scaleMode": "physicalSize", "warpCorners": [[-0.55, 0.48], [0.56, 0.6], [0.48, -0.55], [-0.45, -0.45]]}), "fill-warp"),
+        // The image's Rotation turns the checker inside the frame
+        ("warp", json!({"scaleMode": "tiling", "tiling": [2.0, 2.0], "rotation": 30.0}), "fill-warp-rotated"),
         ("uvTile", json!({}), "fill-uvtile"),
     ];
     for (kind, settings, name) in cases {

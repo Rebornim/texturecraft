@@ -81,8 +81,8 @@ fn add_filter_adds_a_filter_selects_it_and_opens_its_picker() {
     add_filter_from_the_wand(&mut harness);
 
     let StackTarget::Effect(added) = harness.state().session.target else { panic!("the new filter is selected") };
-    assert!(matches!(kind(&harness, added), EffectKind::Filter(Filter::Hsl { .. })), "{:?}", kind(&harness, added));
-    assert!(harness.query_by_role_and_label(Role::ComboBox, "HSL Perceptive").is_some(), "Properties shows the new filter's slot");
+    assert!(matches!(kind(&harness, added), EffectKind::Filter(Filter::Empty)), "{:?}", kind(&harness, added));
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "Filter").is_some(), "Properties shows the new filter's slot");
     assert!(egui::Popup::is_any_open(&harness.ctx), "the new filter's picker is open to choose the real filter");
 
     // The search field has the focus, and a search brings Sharpen into view
@@ -94,7 +94,7 @@ fn add_filter_adds_a_filter_selects_it_and_opens_its_picker() {
 }
 
 #[test]
-fn escape_after_add_filter_keeps_the_neutral_filter() {
+fn escape_after_add_filter_keeps_the_empty_filter() {
     let (mut harness, _) = app_with_invert();
     add_filter_from_the_wand(&mut harness);
     assert!(harness.query_by_label("Sharpen").is_some(), "Add filter opened the picker");
@@ -104,10 +104,10 @@ fn escape_after_add_filter_keeps_the_neutral_filter() {
 
     let StackTarget::Effect(added) = harness.state().session.target else { panic!("the new filter stays selected") };
     assert!(!egui::Popup::is_any_open(&harness.ctx));
-    assert!(matches!(kind(&harness, added), EffectKind::Filter(Filter::Hsl { .. })), "{:?}", kind(&harness, added));
+    assert!(matches!(kind(&harness, added), EffectKind::Filter(Filter::Empty)), "{:?}", kind(&harness, added));
 
     harness.state_mut().run("edit.undo", Value::Null);
-    assert!(harness.state().session.doc.project.effect(added).is_none(), "one undo removes the neutral filter");
+    assert!(harness.state().session.doc.project.effect(added).is_none(), "one undo removes the empty filter");
 }
 
 #[test]
@@ -123,7 +123,7 @@ fn add_filter_on_a_mask_adds_it_to_the_mask() {
     let StackTarget::Effect(added) = harness.state().session.target else { panic!("the new filter is selected") };
     let mask = harness.state().session.doc.project.layer(layer).unwrap().mask.clone().unwrap();
     assert!(mask.effects.iter().any(|effect| effect.id == added), "the filter went on the mask");
-    assert!(matches!(kind(&harness, added), EffectKind::Filter(Filter::Hsl { .. })), "{:?}", kind(&harness, added));
+    assert!(matches!(kind(&harness, added), EffectKind::Filter(Filter::Empty)), "{:?}", kind(&harness, added));
     assert!(harness.query_by_label("Sharpen").is_some(), "the mask filter's picker is open");
     assert!(harness.query_by_label("Grayscale").is_none(), "the picker leaves out content-only filters");
 }
@@ -137,7 +137,7 @@ fn add_filter_reopens_closed_properties_to_show_its_picker() {
 
     add_filter_from_the_wand(&mut harness);
 
-    assert!(harness.query_by_role_and_label(Role::ComboBox, "HSL Perceptive").is_some(), "Add filter reveals Properties");
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "Filter").is_some(), "Add filter reveals Properties");
     assert!(harness.query_by_label("Sharpen").is_some(), "the picker opens immediately");
 }
 

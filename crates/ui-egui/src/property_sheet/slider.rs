@@ -133,6 +133,7 @@ impl PropertySheet<'_> {
         let chip_width = self.text_width(widest_chip, FontId::proportional(TEXT_SIZE)) + CHIP_PADDING;
         let chip_rect = Rect::from_min_max(pos2(chip_end - chip_width, center_y - CHIP_HALF_HEIGHT), pos2(chip_end, center_y + CHIP_HALF_HEIGHT));
         let chip_response = self.ui.interact(chip_rect, id.with("chip"), Sense::click());
+        chip_response.widget_info(|| WidgetInfo::labeled(egui::Role::ComboBox, true, chip));
 
         let t = self.tokens;
         let open = egui::Popup::is_id_open(self.ui.ctx(), egui::Popup::default_response_id(&chip_response));

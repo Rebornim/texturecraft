@@ -47,4 +47,5 @@ mod split_divider;
 mod start_window;
 mod toolbar;
 
+mod filter_card;
 mod symmetry;

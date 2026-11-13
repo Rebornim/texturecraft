@@ -304,11 +304,11 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
         EffectKind::Filter(Filter::Blur { radius }) if *radius > 0.0 => Some((index, texels(*radius), Op::Blur(None))),
         EffectKind::Filter(Filter::Sharpen { amount }) => Some((index, (1.5 * res as f32 / 2048.0).max(0.75), Op::Blur(Some(*amount)))),
         EffectKind::Filter(Filter::DirectionalBlur { radius, angle }) if *radius > 0.0 => Some((index, texels(*radius), Op::Line(direction(*angle)))),
-        EffectKind::Filter(Filter::Warp { intensity, scale, seed }) if *intensity > 0.0 => {
-            Some((index, texels(*intensity), Op::Warp { scale: *scale, seed: *seed, dir: None }))
+        EffectKind::Filter(Filter::Warp { intensity, scale, seed, divider }) if *intensity > 0.0 => {
+            Some((index, texels(divided(*intensity, *divider)), Op::Warp { scale: *scale, seed: *seed, dir: None }))
         }
-        EffectKind::Filter(Filter::DirectionalWarp { intensity, angle, scale, seed }) if *intensity > 0.0 => {
-            Some((index, texels(*intensity), Op::Warp { scale: *scale, seed: *seed, dir: Some(direction(*angle)) }))
+        EffectKind::Filter(Filter::DirectionalWarp { intensity, angle, scale, seed, divider }) if *intensity > 0.0 => {
+            Some((index, texels(divided(*intensity, *divider)), Op::Warp { scale: *scale, seed: *seed, dir: Some(direction(*angle)) }))
         }
         EffectKind::Filter(Filter::HighPass { radius }) => Some((index, texels(*radius), Op::HighPass)),
         EffectKind::Filter(Filter::EdgeDetect { width }) => Some((index, texels(*width), Op::Edge)),
@@ -316,11 +316,16 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
         EffectKind::Filter(Filter::Bevel { width }) => Some((index, texels(*width * 0.5), Op::Bevel)),
         EffectKind::Filter(Filter::Glow { radius, amount }) => Some((index, texels(*radius), Op::Glow(*amount))),
         EffectKind::Filter(Filter::Mosaic { size }) => Some((index, texels(*size), Op::Mosaic)),
-        EffectKind::Filter(Filter::SlopeBlur { radius, scale, seed }) if *radius > 0.0 => {
-            Some((index, texels(*radius), Op::Slope { scale: *scale, seed: *seed }))
+        EffectKind::Filter(Filter::SlopeBlur { radius, scale, seed, divider }) if *radius > 0.0 => {
+            Some((index, texels(divided(*radius, *divider)), Op::Slope { scale: *scale, seed: *seed }))
         }
         _ => None,
     })
+}
+
+/// `size` over its intensity divider (a divider of 0 from a hostile file counts as 1)
+fn divided(size: f32, divider: u16) -> f32 {
+    size / f32::from(divider.max(1))
 }
 
 /// Unit texel-space vector of `angle` degrees. Texel rows run down: positive angles turn
@@ -638,7 +643,7 @@ fn filter_region(
         Job::Mask(_) => None,
         Job::Content(channel) => Some(channel),
     };
-    let opacity = effects.iter().filter(|effect| effect.visible).nth(index).map(|effect| effect.blend_of(channel).opacity.clamp(0.0, 1.0)).unwrap_or(1.0);
+    let opacity = effects.iter().filter(|effect| effect.visible).nth(index).map(|effect| effect.applied_blend(channel).opacity.clamp(0.0, 1.0)).unwrap_or(1.0);
     let (radius_texels, _) = filter_extent(radius, op, inp.gbuf.width.max(inp.gbuf.height));
     let comps = match job {
         Job::Mask(_) => 1,
@@ -896,7 +901,7 @@ fn effect_plans<'a>(
                 EffectKind::Fill { projection, .. } | EffectKind::Material(Fill { projection, .. }) => ProjectorDepth::of(inp.mesh, inp.bounds, projection),
                 _ => None,
             };
-            let blend = effect.blend_of(channel);
+            let blend = effect.applied_blend(channel);
             EffectPlan {
                 id: effect.id,
                 kind: offset_effect(&effect.kind, around),
@@ -2882,7 +2887,7 @@ mod tests {
         let original = assert_sparse_mask_matches_image(&fixture, upper, &texels).unwrap();
         assert!(original.iter().any(|value| *value > 0.99) && original.iter().any(|value| *value < 0.01), "the anchor supplies the checker");
 
-        for filter in [Filter::Blur { radius: 64.0 }, Filter::DirectionalWarp { intensity: 256.0, angle: 90.0, scale: 4.0, seed: 3 }] {
+        for filter in [Filter::Blur { radius: 64.0 }, Filter::DirectionalWarp { intensity: 256.0, angle: 90.0, scale: 4.0, seed: 3, divider: 1 }] {
             let mut filtered = mask.clone();
             filtered.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Filter(filter)));
             fixture.project.layer_mut(upper).unwrap().mask = Some(filtered);
@@ -2898,7 +2903,7 @@ mod tests {
         fixture.project.texture_sets[0].resolution = 128;
         let layer = fill_layer(&mut fixture.project, [1.0; 3], 1.0);
         let checker = Source::Procedural { pattern: Procedural::new(ProceduralKind::Checker), low: [0.0; 3], high: [1.0; 3] };
-        let warp = Filter::DirectionalWarp { intensity: 256.0, angle: 90.0, scale: 4.0, seed: 3 };
+        let warp = Filter::DirectionalWarp { intensity: 256.0, angle: 90.0, scale: 4.0, seed: 3, divider: 1 };
         let texels: Vec<_> = (0..128).map(|x| (x, 63)).collect();
         let mut masked = |filters: &[Filter]| {
             let mut mask = Mask::new(MaskBackground::Black);
@@ -2926,7 +2931,7 @@ mod tests {
         let LayerKind::Fill(fill) = &mut fixture.project.layer_mut(layer).unwrap().kind else { panic!("expected a fill layer") };
 
         fill.sources.insert(Channel::BaseColor, Source::Procedural { pattern: Procedural::new(ProceduralKind::Checker), low: [0.0; 3], high: [1.0; 3] });
-        let warp = Filter::DirectionalWarp { intensity: 256.0, angle: 90.0, scale: 4.0, seed: 3 };
+        let warp = Filter::DirectionalWarp { intensity: 256.0, angle: 90.0, scale: 4.0, seed: 3, divider: 1 };
         let warp_effect = content_fx(&mut fixture, layer, EffectKind::Filter(warp));
         let row = |fixture: &Fixture| -> Vec<f32> {
             let composite = run(fixture, None);
@@ -3155,7 +3160,7 @@ soft {soft:?}"
         assert!(vals.iter().all(|v| (0.0..=1.0).contains(v)));
         assert!(vals.iter().filter(|v| **v > 0.5).count() > 64 && vals.iter().filter(|v| **v < 0.01).count() > 64, "{vals:?}");
         f.project.layer_mut(id).unwrap().content_effects.retain(|e| e.id != edges);
-        content_fx(&mut f, id, EffectKind::Filter(Filter::DirectionalWarp { intensity: 256.0, angle: 90.0, scale: 4.0, seed: 3 }));
+        content_fx(&mut f, id, EffectKind::Filter(Filter::DirectionalWarp { intensity: 256.0, angle: 90.0, scale: 4.0, seed: 3, divider: 1 }));
         let warped = run(&f, None);
         let differs = (0..64).any(|y| (0..64).any(|x| (warped.value(Channel::Roughness, x, y)[0] - plain.value(Channel::Roughness, x, y)[0]).abs() > 0.2));
         assert!(differs, "the warp moves the checker");

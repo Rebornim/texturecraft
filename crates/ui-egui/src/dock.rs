@@ -6,10 +6,9 @@ use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::compose::ThumbTarget;
 use texturecraft_engine::core::{
-    BakedMap, BlendMode, Channel, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, Layer, LayerId, LayerKind, LinkParam,
+    BakedMap, BlendMode, Channel, CurvatureDetail, CurvatureMode, Effect, EffectKind, Generator, GeneratorKind, Layer, LayerId, LayerKind, LinkParam,
     MaterialLink, Sampling, Source,
 };
-use texturecraft_engine::filter_lib::scalar_params;
 use texturecraft_engine::paint::{BrushAlpha, BrushSettings, alphas};
 use texturecraft_engine::{CloneFrom, StackTarget, Tool};
 
@@ -22,11 +21,6 @@ use crate::state::PropsTab;
 use crate::theme::{Tokens, caption};
 use crate::toolbar::{MAX_BRUSH_SIZE, MIN_BRUSH_SIZE};
 use crate::widgets::{chip, color_swatch, combo, dnd_release, elided, icon_button, section, section_with_reset, slider, slider_edit};
-
-const FILTER_SWATCH_WIDTH: f32 = 36.0;
-const FILTER_HINT_SIZE: f32 = 10.5;
-/// The most colors `effect.set {colors}` takes for a gradient map
-const MAX_GRADIENT_STOPS: usize = 16;
 
 const TAG_COLORS: [Color32; 8] = [
     Color32::from_rgb(0xc0, 0x40, 0x40),
@@ -1974,7 +1968,7 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, eid:
             }
             tool_properties(app, ui);
         }
-        EffectKind::Filter(filter) => filter_properties(app, ui, id, filter),
+        EffectKind::Filter(filter) => crate::filter_properties::filter_properties(app, ui, eid, filter),
         EffectKind::ColorSelection(selection) => crate::color_selection_editor::color_selection_properties(app, ui, eid, selection),
         EffectKind::Compare { op, value, tolerance, left, right, channel, hardness } => {
             let settings = crate::compare_properties::CompareSettings {
@@ -2061,101 +2055,6 @@ fn curvature_mode_label(mode: CurvatureMode) -> &'static str {
         CurvatureMode::Cavities => tr("Cavities"),
         CurvatureMode::Both => tr("Edges and cavities"),
         CurvatureMode::Raw => tr("Raw curvature"),
-    }
-}
-
-/// The filter slot and the parameters of filter effect `id`
-fn filter_properties(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, filter: &Filter) {
-    let tk = Tokens::get(ui.ctx());
-    let set = |app: &mut TextureCraftApp, key: &str, value: Value, merge: bool| {
-        let mut params = json!({ "effect": id, "merge": merge });
-        params[key] = value;
-        app.run("effect.set", params);
-    };
-    crate::filter_slot::show(app, ui, id, filter);
-
-    if let Filter::Hsl { hue, .. } = filter {
-        let mut degrees = hue * 360.0;
-        if let Some(merge) = slider_edit(ui, tr("Hue shift (degrees)"), &mut degrees, -180.0..=180.0, 0) {
-            set(app, "hue", json!(degrees / 360.0), merge);
-        }
-    }
-
-    for (key, label, mut value, min, max) in scalar_params(filter) {
-        let decimals = if matches!(key, "seed" | "levels") {
-            0
-        } else if max - min > 10.0 {
-            1
-        } else {
-            2
-        };
-        if let Some(merge) = slider_edit(ui, tr(label), &mut value, min..=max, decimals) {
-            set(app, key, json!(value), merge);
-        }
-    }
-
-    match filter {
-        Filter::ColorBalance { shadows, midtones, highlights } => {
-            for (key, label, rgb) in [("shadows", tr("Shadows"), shadows), ("midtones", tr("Midtones"), midtones), ("highlights", tr("Highlights"), highlights)]
-            {
-                ui.label(RichText::new(label).strong());
-                let mut balance = *rgb;
-                let mut edit = None;
-                for (component, name) in balance.iter_mut().zip([tr("Cyan / red"), tr("Magenta / green"), tr("Yellow / blue")]) {
-                    edit = edit.or(slider_edit(ui, name, component, -1.0..=1.0, 2));
-                }
-                if let Some(merge) = edit {
-                    set(app, key, json!(balance), merge);
-                }
-            }
-        }
-        Filter::ReplaceColor { from, to, .. } => {
-            for (key, label, rgb) in [("from", tr("Color to replace"), from), ("to", tr("Replacement color"), to)] {
-                let mut color = *rgb;
-                ui.horizontal(|ui| {
-                    if color_swatch(ui, &format!("replace_{key}_{id}"), &mut color, FILTER_SWATCH_WIDTH) {
-                        set(app, key, json!(color), false);
-                    }
-                    ui.label(label);
-                });
-            }
-            ui.label(RichText::new(tr("Colors near the first shift towards the second, keeping their shading.")).size(FILTER_HINT_SIZE).color(tk.text_dim));
-        }
-        Filter::GradientMap { colors } => {
-            let mut stops = colors.clone();
-            let mut changed = false;
-            ui.horizontal_wrapped(|ui| {
-                for (i, stop) in stops.iter_mut().enumerate() {
-                    changed |= color_swatch(ui, &format!("gradient_{id}_{i}"), stop, FILTER_SWATCH_WIDTH);
-                }
-            });
-            ui.horizontal(|ui| {
-                if ui.add_enabled(stops.len() < MAX_GRADIENT_STOPS, egui::Button::new(format!("{} {}", ic::PLUS, tr("Add color")))).clicked() {
-                    stops.push(stops.last().copied().unwrap_or([1.0; 3]));
-                    changed = true;
-                }
-                if ui.add_enabled(stops.len() > 1, egui::Button::new(format!("{} {}", ic::MINUS, tr("Remove last")))).clicked() {
-                    stops.pop();
-                    changed = true;
-                }
-            });
-            if changed {
-                set(app, "colors", json!(stops), false);
-            }
-            ui.label(RichText::new(tr("Dark to light: the content's luminance picks a color along these stops.")).size(FILTER_HINT_SIZE).color(tk.text_dim));
-        }
-        Filter::Warp { .. }
-        | Filter::DirectionalBlur { .. }
-        | Filter::SlopeBlur { .. }
-        | Filter::DirectionalWarp { .. }
-        | Filter::HighPass { .. }
-        | Filter::EdgeDetect { .. }
-        | Filter::Bevel { .. }
-        | Filter::Mosaic { .. }
-        | Filter::Glow { .. } => {
-            ui.label(RichText::new(tr("Works in texture space, like the blur: it does not cross UV seams.")).size(FILTER_HINT_SIZE).color(tk.text_dim));
-        }
-        _ => {}
     }
 }
 

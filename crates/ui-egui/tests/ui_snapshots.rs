@@ -1711,3 +1711,53 @@ fn layer_toolbar_snapshots() {
         }
     }
 }
+
+/// Screen 12: the Filter effect: empty, Blur on a mask, Slope Blur on the content (pills, Seed, Intensity's chip), its Divider list open, Restore defaults hovered
+#[test]
+#[ignore]
+fn filter_card_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::core::LayerId;
+    use texturecraft_engine::{StackTarget, execute};
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    let add = |session: &mut texturecraft_engine::Session, params: serde_json::Value| {
+        LayerId(execute(session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap())
+    };
+    let empty = add(&mut session, json!({"layer": layer, "target": "content", "filter": "none"}));
+    let blur = add(&mut session, json!({"layer": layer, "target": "mask", "filter": "blur"}));
+    let slope = add(&mut session, json!({"layer": layer, "target": "content", "filter": "slopeBlur", "seed": 12, "radius": 3.0}));
+    execute(&mut session, "effect.set", &json!({"effect": slope.0, "divider": 10, "channels": {"metallic": false, "normal": false}})).unwrap();
+    execute(&mut session, "layer.select", &json!({"layer": layer})).unwrap();
+    session.target = StackTarget::Effect(empty);
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    // Add filter opens the picker; a filter selected from its row does not
+    save(&mut harness, &output_dir, "filter-empty");
+    harness.state_mut().session.target = StackTarget::Effect(blur);
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "filter-blur-mask");
+    harness.state_mut().session.target = StackTarget::Effect(slope);
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "filter-slope");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("filter-slope-{name}"));
+        }
+        harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    }
+    let reset = harness.get_by_role_and_label(egui::Role::Button, "Restore defaults").rect().center();
+    harness.hover_at(reset);
+    save(&mut harness, &output_dir, "filter-reset-hovered");
+    harness.get_by_role_and_label(egui::Role::ComboBox, "÷10").click();
+    harness.run_steps(3);
+    let option = harness.get_by_role_and_label(egui::Role::ListBoxOption, "÷100").rect().center();
+    harness.hover_at(option);
+    save(&mut harness, &output_dir, "filter-divider-open");
+}

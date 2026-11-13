@@ -67,7 +67,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add filter",
             ["Layers", "Effects"],
             None,
-            "{layer?, target?: mask|content, name?, filter?: id from filter.list (invert, threshold, blur, sharpen, hsl, levels, contrastLuminosity, colorBalance, gradientMap, posterize, clamp, histogramScan|Range|Shift, warp, blurDirectional, slopeBlur, matFinishGrind|Raw|Sanded|Hammered), level?, radius?, amount?, hue?: turns -1..1, saturation?, lightness?, contrast?, luminosity?, shadows?|midtones?|highlights?: [r,g,b] -1..1, colors?: [[r,g,b]|\"#rrggbb\", ...], levels?, min?, max?, position?, range?, offset?, intensity?, scale?, seed?, angle?} — material finishes go on the content",
+            "{layer?, target?: mask|content, name?, filter?: id from filter.list or \"none\" for an empty filter that changes nothing (invert, threshold, blur, sharpen, hsl, levels, contrastLuminosity, colorBalance, gradientMap, posterize, clamp, histogramScan|Range|Shift, warp, blurDirectional, slopeBlur, matFinishGrind|Raw|Sanded|Hammered), level?, radius?, amount?, hue?: turns -1..1, saturation?, lightness?, contrast?, luminosity?, shadows?|midtones?|highlights?: [r,g,b] -1..1, colors?: [[r,g,b]|\"#rrggbb\", ...], levels?, min?, max?, position?, range?, offset?, intensity?, scale?, seed?, angle?} — material finishes go on the content",
             has_layer,
             add_filter
         ),
@@ -94,7 +94,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, channel?: the content channel blend and opacity set (default: every channel), name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, offset?, invert?, mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, affects?, clamp? (levels), tolerance?, left?, op?, right?, compareChannel?, hardness? (compare; value is its constant), colors?: [[r,g,b], ...] (a color selection's ID colors, may be empty), output?, background?: transparent | black | white | gray, idMap?: an image resource name read as the ID map, null for the texture set's ID mesh map (a color selection; tolerance and hardness too), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, channel?: the content channel blend and opacity set (default: every channel), name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place; \"none\" empties it), channels?: {channelId: bool} a content effect's channels on or off, divider?: 1|10|100|1000 (warp, slope blur: divides the intensity), level?, softness?, noise?, noiseScale?, offset?, invert?, mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, affects?, clamp? (levels), tolerance?, left?, op?, right?, compareChannel?, hardness? (compare; value is its constant), colors?: [[r,g,b], ...] (a color selection's ID colors, may be empty), output?, background?: transparent | black | white | gray, idMap?: an image resource name read as the ID map, null for the texture set's ID mesh map (a color selection; tolerance and hardness too), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -472,7 +472,8 @@ fn add_levels(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn add_filter(s: &mut Session, p: &Value) -> Result<Value> {
     let id = strp(p, "filter").unwrap_or("invert");
-    let kind = crate::filter_lib::build(id, p)?;
+    // An empty filter changes nothing until one is picked into it
+    let kind = if id == EMPTY_FILTER { EffectKind::Filter(Filter::Empty) } else { crate::filter_lib::build(id, p)? };
     // Library filters are named after their shelf entry (material finishes are fill effects).
     let mut p = p.clone();
     if name_param(&p).is_none()
@@ -586,6 +587,10 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
     if on_mask && params.get("affects").is_some() {
         return Err(bad(CMD, "a mask's levels remap its one value: leave out `affects`"));
     }
+    let switched = switched_channels(params)?;
+    if !switched.is_empty() && on_mask {
+        return Err(bad(CMD, "a mask effect has one value: leave out `channels`"));
+    }
 
     // `anchor` picks a fill's anchor point, `anchorChannel` alone re-targets the current one
     let anchor = match session.doc.project.effect(effect) {
@@ -605,6 +610,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
 
     // Naming the filter the effect already is edits its parameters like a plain effect.set
     let swapped = match strp(params, "filter") {
+        Some(EMPTY_FILTER) => Some(emptied_filter(session, effect)?),
         Some(filter) if crate::filter_lib::find(filter).is_some_and(|def| current_filter_id(session, effect) == Some(def.id)) => None,
         Some(filter) => Some(swapped_filter(session, effect, filter, params)?),
         None => None,
@@ -625,6 +631,13 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
 
         if let Some(visible) = boolp(params, "visible") {
             edited.visible = visible;
+        }
+        for (channel, on) in &switched {
+            if *on {
+                edited.off_channels.remove(channel);
+            } else {
+                edited.off_channels.insert(*channel);
+            }
         }
         crate::effect_blending_cmds::set_blending(edited, channel, blend, f32p(params, "opacity"));
         if let Some(name) = name_param(params) {
@@ -653,6 +666,33 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         Ok(())
     })?;
     Ok(Value::Null)
+}
+
+/// The content channels `channels` switches on (true) or off for an effect, e.g. {"roughness": false}
+fn switched_channels(params: &Value) -> Result<Vec<(Channel, bool)>> {
+    const CMD: &str = "effect.set";
+    let Some(given) = params.get("channels") else { return Ok(Vec::new()) };
+    let given = given.as_object().ok_or_else(|| bad(CMD, "`channels` must be an object of channel ids to true (on) or false (off)"))?;
+    given
+        .iter()
+        .map(|(id, on)| {
+            let channel = Channel::parse(id).ok_or_else(|| bad(CMD, format!("unknown channel `{id}`")))?;
+            let on = on.as_bool().ok_or_else(|| bad(CMD, format!("`channels.{id}` must be true or false")))?;
+            Ok((channel, on))
+        })
+        .collect()
+}
+
+/// The `filter` id of a filter effect with no filter picked
+const EMPTY_FILTER: &str = "none";
+
+/// An empty filter and its label, to replace filter effect `effect`'s
+fn emptied_filter(s: &Session, effect: LayerId) -> Result<(EffectKind, &'static str)> {
+    match s.doc.project.effect(effect) {
+        Some((_, Effect { kind: EffectKind::Filter(_), .. })) => Ok((EffectKind::Filter(Filter::Empty), Filter::Empty.label())),
+        Some((_, other)) => Err(bad("effect.set", format!("`filter` changes filter effects only, not {}", other.kind.name().to_ascii_lowercase()))),
+        None => Err(bad("effect.set", format!("no effect {}", effect.0))),
+    }
 }
 
 /// The library id of the filter effect `effect` is, if it is one

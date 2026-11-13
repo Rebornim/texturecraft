@@ -561,12 +561,12 @@ fn gathering_filters_composite_identically_in_any_grouping_and_cached() {
         &mut f,
         EffectKind::Fill { source: procedural(ProceduralKind::Checker, 0.0, 1.0), projection: Projection::default(), sampling: Default::default() },
     ));
-    slope.effects.push(effect(&mut f, EffectKind::Filter(Filter::SlopeBlur { radius: 24.0, scale: 3.0, seed: 1 })));
+    slope.effects.push(effect(&mut f, EffectKind::Filter(Filter::SlopeBlur { radius: 24.0, scale: 3.0, seed: 1, divider: 1 })));
     let streaks = add(&mut f, 0, fill(&[(Channel::Metallic, procedural(ProceduralKind::Stripes, 0.0, 1.0))]), Some(slope));
     let top = add(&mut f, 0, LayerKind::Paint, None);
     paint_rect(&mut f, top, (30, 40), (150, 100), 0.4);
     let plain = reference(&f, 0);
-    let warp = effect(&mut f, EffectKind::Filter(Filter::Warp { intensity: 30.0, scale: 4.0, seed: 3 }));
+    let warp = effect(&mut f, EffectKind::Filter(Filter::Warp { intensity: 30.0, scale: 4.0, seed: 3, divider: 1 }));
     f.project.layer_mut(base).unwrap().content_effects.push(warp);
     let line = effect(&mut f, EffectKind::Filter(Filter::DirectionalBlur { radius: 40.0, angle: 30.0 }));
     f.project.layer_mut(streaks).unwrap().content_effects.push(line);

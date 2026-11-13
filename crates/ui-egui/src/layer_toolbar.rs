@@ -66,7 +66,7 @@ const WHITE_SWATCH: u8 = 235;
 const BLACK_SWATCH: u8 = 10;
 
 /// The filter Add filter adds: at its defaults it changes nothing, and its slot opens the picker to swap it
-pub(crate) const NEW_FILTER: &str = "hsl";
+pub(crate) const NEW_FILTER: &str = "none";
 
 /// What an Add menu item shows at its left
 #[derive(Clone, Copy)]

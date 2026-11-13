@@ -39,5 +39,6 @@ mod udim;
 mod uv_strokes;
 
 mod fill_whole_material;
+mod filter_card;
 mod swatches;
 mod symmetry;

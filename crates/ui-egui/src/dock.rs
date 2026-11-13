@@ -1113,34 +1113,13 @@ pub(crate) fn properties_contents(app: &mut TextureCraftApp, ui: &mut Ui) {
         (Some(layer), StackTarget::Effect(effect)) => legacy_body(ui, |ui| effect_properties(app, ui, layer, effect)),
         (Some(layer), StackTarget::Content) if matches!(layer.kind, LayerKind::Fill(_)) => fill_properties(app, ui, layer),
         (Some(layer), StackTarget::Content) if layer.is_group() => crate::folder_properties::folder_properties(app, ui, layer.id),
-        (Some(layer), StackTarget::Content) if layer.instance_source().is_some() => legacy_body(ui, |ui| instance_properties(app, ui, layer)),
+        (Some(layer), StackTarget::Content) if layer.instance_source().is_some() => crate::instance_properties::instance_properties(app, ui, layer),
         (Some(layer), StackTarget::Mask) => legacy_body(ui, |ui| {
             height_mask_section(app, ui, layer);
             ui.separator();
             tool_properties(app, ui);
         }),
         _ => legacy_body(ui, |ui| tool_properties(app, ui)),
-    }
-}
-
-/// An instance draws its source: point there for edits.
-fn instance_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer) {
-    let tk = Tokens::get(ui.ctx());
-    let Some(src) = layer.instance_source() else { return };
-    let p = &app.session.doc.project;
-    let name = p.layers.get(&src).map_or_else(|| tr("a missing layer").to_string(), |l| format!("\"{}\"", l.name));
-    let set = p.locate(src).and_then(|(ts, _, _)| p.texture_sets.get(ts)).map(|t| t.name.clone()).unwrap_or_default();
-    ui.label(caption(tr("Instance")));
-    ui.label(
-        RichText::new(format!(
-            "{} {}",
-            ic::LINK,
-            trf("Draws {name} of texture set \"{set}\". Edits to the source show in every instance.", &[("name", &name), ("set", &set)])
-        ))
-        .color(tk.text_dim),
-    );
-    if ui.button(tr("Select source")).clicked() {
-        app.run("layer.select", json!({"layer": src.0}));
     }
 }
 

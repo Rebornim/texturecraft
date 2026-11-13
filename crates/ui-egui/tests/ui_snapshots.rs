@@ -1442,6 +1442,45 @@ fn folder_snapshots() {
     save(&mut harness, &output_dir, "folder-empty");
 }
 
+/// Screen 16: an instance of an orange fill named Steel (at rest, its card hovered), then one whose source is gone
+#[test]
+#[ignore]
+fn instance_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::core::{LayerId, LayerKind};
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let source = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.rename", &json!({"layer": source, "name": "Steel"})).unwrap();
+    execute(&mut session, "layer.fill.set", &json!({"layer": source, "channel": "baseColor", "color": [0.78, 0.29, 0.09]})).unwrap();
+    let instance = execute(&mut session, "layer.instance", &json!({"layer": source})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.select", &json!({"layer": instance, "target": "content"})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "instance-rest");
+    let set = harness.state().session.doc.project.texture_sets[0].name.clone();
+    let card = harness.get_by_role_and_label(egui::Role::Button, &format!("Steel {set}")).rect().center();
+    harness.hover_at(card);
+    save(&mut harness, &output_dir, "instance-hovered");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("instance-{name}"));
+        }
+        harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    }
+
+    let id = LayerId(instance.as_u64().unwrap());
+    harness.state_mut().session.doc.project.layers.get_mut(&id).unwrap().kind = LayerKind::Instance { source: LayerId(999_999) };
+    harness.hover_at(egui::pos2(10.0, 10.0));
+    save(&mut harness, &output_dir, "instance-missing");
+}
+
 /// Screen 10: a new color selection without an ID map, then three colors on the ID mesh map (a row hovered, a row picking again, the Background list open)
 #[test]
 #[ignore]

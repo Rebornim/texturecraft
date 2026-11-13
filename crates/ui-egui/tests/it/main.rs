@@ -20,6 +20,7 @@ mod fill_symmetry_rows;
 mod filter_picker;
 mod folder_properties;
 mod history_panel;
+mod instance_properties;
 mod layer_clipboard;
 mod layer_rename;
 mod layer_toolbar;

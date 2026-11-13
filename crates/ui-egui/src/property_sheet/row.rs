@@ -199,7 +199,7 @@ impl PropertySheet<'_> {
     pub(crate) fn empty_note(&mut self, text: &str) {
         let rect = self.take(ROW_HEIGHT);
         let response = self.ui.interact(rect, self.id.with(("empty_note", text)), egui::Sense::hover());
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, text));
         let dim = self.tokens.text_dim;
         self.ui.painter().text(rect.center(), Align2::CENTER_CENTER, text, FontId::proportional(TEXT_SIZE), dim);
         self.drawn(rect.center().y + 7.0);

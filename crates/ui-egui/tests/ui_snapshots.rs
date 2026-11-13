@@ -1960,6 +1960,92 @@ fn light_filter_snapshots() {
 }
 
 #[test]
+#[ignore = "writes the shape filters (screen 21) to TC_UI_SNAPSHOTS; run with --ignored"]
+/// Screen 21: Mirror in each mode (its Mode list open), Mask Outline, Threshold (its Mode hovered)
+fn shape_filter_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::core::LayerId;
+    use texturecraft_engine::{StackTarget, execute};
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "mask.add.white", &json!({"layer": layer.clone()})).unwrap();
+    let mut add = |filter: &str, settings: serde_json::Value| {
+        let params = json!({"layer": layer.clone(), "target": "mask", "filter": filter});
+        let effect = execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap();
+        let mut settings = settings;
+        settings["effect"] = json!(effect);
+        execute(&mut session, "effect.set", &settings).unwrap();
+        LayerId(effect)
+    };
+    let effects = [
+        ("mirror-axis-x", add("mirror", json!({}))),
+        ("mirror-axis-y", add("mirror", json!({"mode": "axisY"}))),
+        ("mirror-corner", add("mirror", json!({"mode": "corner"}))),
+        ("mask-outline", add("maskOutline", json!({}))),
+        ("bevel", add("bevel", json!({}))),
+        ("bevel-smooth", add("bevelSmooth", json!({}))),
+        ("directional-distance", add("directionalDistance", json!({}))),
+        ("threshold", add("threshold", json!({}))),
+        ("warp", add("warp", json!({}))),
+        ("warp-directional", add("warp", json!({"warpMode": "directional"}))),
+        ("warp-multi-directional", add("warp", json!({"warpMode": "multiDirectional"}))),
+    ];
+    execute(&mut session, "layer.select", &json!({"layer": layer})).unwrap();
+    session.target = StackTarget::Effect(effects[0].1);
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    for (name, effect) in effects {
+        harness.state_mut().session.target = StackTarget::Effect(effect);
+        harness.run_steps(6);
+        save(&mut harness, &output_dir, &format!("filter-{name}"));
+    }
+    let shown = |name: &str| effects.iter().find(|(shown, _)| *shown == name).map(|(_, effect)| *effect).unwrap();
+    harness.state_mut().session.target = StackTarget::Effect(shown("threshold"));
+    harness.run_steps(4);
+    let mode = harness.get_by_role_and_label(egui::Role::RadioButton, "≥").rect();
+    harness.hover_at(mode.center());
+    save(&mut harness, &output_dir, "filter-threshold-hovered");
+    harness.state_mut().session.target = StackTarget::Effect(effects[0].1);
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Mirror Axis X").click();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "filter-mirror-mode-list");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(4);
+
+    // Warp's mode list (under the filter card, also named Warp) and Multi Directional Warp's Blending Mode list, open
+    harness.state_mut().session.target = StackTarget::Effect(shown("warp"));
+    harness.run_steps(4);
+    let lists = harness.query_all_by_role_and_label(egui::Role::ComboBox, "Warp");
+    lists.max_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).unwrap().click();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "filter-warp-mode-list");
+    harness.key_press(egui::Key::Escape);
+    harness.state_mut().session.target = StackTarget::Effect(shown("warp-multi-directional"));
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Average").click();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "filter-warp-blending-list");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(4);
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, theme) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            for name in ["mirror-axis-x", "mask-outline", "bevel", "bevel-smooth", "warp-multi-directional"] {
+                harness.state_mut().session.target = StackTarget::Effect(shown(name));
+                harness.run_steps(6);
+                save(&mut harness, &output_dir, &format!("filter-{name}-{theme}"));
+            }
+        }
+    }
+}
+
+#[test]
 #[ignore = "writes the filter picker states (screen 13) to TC_UI_SNAPSHOTS; run with --ignored"]
 /// Screen 13: the filter picker opened from an empty card, swapping (current outlined), searching, and in a mask
 fn filter_picker_snapshots() {

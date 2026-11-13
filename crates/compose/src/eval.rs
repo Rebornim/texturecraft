@@ -10,9 +10,9 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 use texturecraft_core::{
-    BakedMap, BlendMode, BlockScales, Channel, ChannelKind, CompareSource, ContentsOffset, CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter,
-    Filtering, Generator, GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, NormalFormat, Project, Projection, Sampling, ShapeCrop,
-    Source, StylizedLighting, TextureSet, TileGrid, blend1, blend3, lum, mix3, per_unit,
+    BakedMap, Bevel, BevelSmooth, BlendMode, BlockScales, Channel, ChannelKind, CompareSource, ContentsOffset, CurvatureDetail, CurvatureMode, Effect,
+    EffectKind, Fill, Filter, Filtering, Generator, GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, MaskOutline, Mirror,
+    NormalFormat, Project, Projection, Sampling, ShapeCrop, Source, SourceWarp, StylizedLighting, TextureSet, TileGrid, blend1, blend3, lum, mix3, per_unit,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, Surface, UvGBuffer};
@@ -28,7 +28,9 @@ use crate::mask_gray::MaskGray;
 use crate::pattern::{Coords, image_samples, procedural_sized, world_noise};
 use crate::projector_cover::{framed_cover, projector_cover};
 use crate::projector_depth::ProjectorDepth;
+use crate::shape_distance::distance_filter;
 use crate::store::{BakedMaps, ImageRes, ImageStore, PixelStore, decode};
+use crate::warp_texel::warp_texel;
 
 const NCH: usize = Channel::ALL.len();
 
@@ -284,26 +286,26 @@ pub enum FieldKey {
 
 pub type Fields = HashMap<FieldKey, Field>;
 
-/// How a neighbourhood filter reads around a texel.
+/// How a neighbourhood filter reads around a texel
 #[derive(Clone, Copy)]
 enum Op {
-    /// Box blurs (≈ Gaussian), sharpening by the amount when given.
+    /// Box blurs (≈ Gaussian), sharpening by the amount when given
     Blur(Option<f32>),
-    /// The value minus its box blur, around the channel's mid value.
+    /// The value minus its box blur, around the channel's mid value
     HighPass,
-    /// Values ramped down towards their shape's edge, from the box blur.
+    /// Values ramped down towards their shape's edge, from the box blur
     Bevel,
-    /// The value plus its box blur times the amount.
+    /// The value plus its box blur times the amount
     Glow(f32),
-    /// The value at the center of its cell (`r` texels across).
+    /// The value at the center of its cell (`r` texels across)
     Mosaic,
-    /// Average along a direction (unit vector in texels).
+    /// Average along a direction (unit vector in texels)
     Line([f32; 2]),
-    /// Read at an offset given by a noise vector field, or by noise along a direction.
+    /// Read at an offset given by a noise vector field, or by noise along a direction
     Warp { scale: f32, seed: u32, dir: Option<[f32; 2]> },
-    /// Gradient magnitude from central differences.
+    /// Gradient magnitude from central differences
     Edge,
-    /// Average downhill along a noise height field.
+    /// Average downhill along a noise height field
     Slope { scale: f32, seed: u32 },
     /// Box blurs, then the effect's own point filter on the blurred value (a gradient's Blur Intensity)
     PreBlur,
@@ -311,14 +313,22 @@ enum Op {
     Halo,
     /// The shapes moved by `offset` (whole texels), box blurred and laid under them
     Shadow { offset: [i32; 2] },
+    /// Each UV tile's texels read from where `mirror` sends them in their tile (`block` texels across the set's atlas blocks)
+    Mirror { mirror: Mirror, block: u32 },
+    /// A band along the edge of the shapes past a threshold, from the box blur of the shapes
+    Outline(MaskOutline),
+    /// Drawn from the distance to the shapes' edge (see [`distance_filter`])
+    Distance,
+    /// Read from where a warp's source sends each texel (see [`warp_texel`])
+    SourceWarp(SourceWarp),
 }
 
-/// The last neighbourhood filter of an effect stack (see [`neighbourhood_filters`]).
+/// The last neighbourhood filter of an effect stack (see [`neighbourhood_filters`])
 fn neighbourhood(effects: &[Effect], res: u32) -> Option<(usize, f32, Op)> {
     neighbourhood_filters(effects, res).last()
 }
 
-/// The neighbourhood filters of an effect stack, bottom → top: index among the visible effects, radius in texels (`res` texels per UV tile across) and what it does.
+/// The neighbourhood filters of an effect stack, bottom → top: index among the visible effects, radius in texels (`res` texels per UV tile across) and what it does
 fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (usize, f32, Op)> + '_ {
     let texels = move |size: f32| (size * res as f32 / 2048.0).max(0.5);
     effects.iter().filter(|effect| effect.visible).enumerate().filter_map(move |(index, effect)| match &effect.kind {
@@ -331,12 +341,21 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
         EffectKind::Filter(Filter::DirectionalWarp { intensity, angle, scale, seed, divider }) if *intensity > 0.0 => {
             Some((index, texels(divided(*intensity, *divider)), Op::Warp { scale: *scale, seed: *seed, dir: Some(direction(*angle)) }))
         }
+        EffectKind::Filter(Filter::SourceWarp(warp)) if warp.move_texels(res) > 0.0 => Some((index, warp.reach(res).max(0.5), Op::SourceWarp(*warp))),
         EffectKind::Filter(Filter::HighPass { radius }) => Some((index, texels(*radius), Op::HighPass)),
         EffectKind::Filter(Filter::EdgeDetect { width }) => Some((index, texels(*width), Op::Edge)),
         // Three box passes ramp an edge over about twice their radius
         EffectKind::Filter(Filter::Bevel { width, .. }) => Some((index, texels(*width * 0.5), Op::Bevel)),
         EffectKind::Filter(Filter::Glow { radius, amount }) => Some((index, texels(*radius), Op::Glow(*amount))),
         EffectKind::Filter(Filter::Mosaic { size }) => Some((index, texels(*size), Op::Mosaic)),
+        // A mirror reads anywhere in its UV tile
+        EffectKind::Filter(Filter::Mirror(mirror)) => Some((index, res as f32, Op::Mirror { mirror: *mirror, block: res })),
+        // Three box passes reach the band's width
+        EffectKind::Filter(Filter::MaskOutline(outline)) => Some((index, (outline.width * res as f32 / 3.0).max(0.5), Op::Outline(*outline))),
+        // Three box passes' reach covers the distance and its smoothing
+        EffectKind::Filter(filter @ (Filter::DistanceBevel(_) | Filter::BevelSmooth(_) | Filter::DirectionalDistance(_))) => {
+            Some((index, distance_reach(filter, res) / 3.0 + 1.0, Op::Distance))
+        }
         EffectKind::Filter(Filter::HaloGlow { width, .. }) => Some((index, texels(width.abs() * Filter::HALO_REACH), Op::Halo)),
         EffectKind::Filter(Filter::DropShadow { angle, distance, size, .. }) => {
             // Cast away from the light: `distance` of a UV tile, against the light's direction
@@ -353,6 +372,16 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
     })
 }
 
+/// How many texels around a texel distance filter `filter` reads at `res` texels across a UV tile: its reach and its smoothing's three box passes
+fn distance_reach(filter: &Filter, res: u32) -> f32 {
+    match filter {
+        Filter::DistanceBevel(bevel) => bevel.reach(res) + 3.0 * bevel.smoothing_texels(res),
+        Filter::BevelSmooth(smooth) => smooth.reach(res) + 3.0 * smooth.smoothing_texels(res),
+        Filter::DirectionalDistance(trail) => trail.reach(res),
+        _ => 0.0,
+    }
+}
+
 /// `size` over its intensity divider (a divider of 0 from a hostile file counts as 1)
 fn divided(size: f32, divider: u16) -> f32 {
     size / f32::from(divider.max(1))
@@ -360,7 +389,7 @@ fn divided(size: f32, divider: u16) -> f32 {
 
 /// Unit texel-space vector of `angle` degrees. Texel rows run down: positive angles turn
 /// counterclockwise on screen.
-fn direction(angle: f32) -> [f32; 2] {
+pub(crate) fn direction(angle: f32) -> [f32; 2] {
     let (sn, cs) = angle.to_radians().sin_cos();
     [cs, -sn]
 }
@@ -376,15 +405,12 @@ const LINE_SAMPLES: i32 = 24;
 
 /// Fractal noise over texel position `(x, y)` (`res` texels per UV unit, `scale` features per
 /// UV unit), shifted by `d` in noise space.
-fn texel_noise(x: f32, y: f32, d: [f32; 2], res: u32, scale: f32, seed: u32) -> f32 {
+pub(crate) fn texel_noise(x: f32, y: f32, d: [f32; 2], res: u32, scale: f32, seed: u32) -> f32 {
     let k = if scale.is_finite() { scale.clamp(0.01, 1000.0) } else { 1.0 } / res.max(1) as f32;
     noise::fbm([x * k + d[0], y * k + d[1], 0.0], 3, seed, noise::perlin)
 }
 
-/// The neighbourhood filters that gather samples (directional and slope blur, warp) over a
-/// field region `(x0, y0, w, h)` of premultiplied `orig` texels (`comps` each) and their
-/// `cover`: bilinear samples weighted by coverage, so uncovered texels don't bleed in.
-/// Positions are absolute texel coordinates, so a texel's result does not depend on the region.
+/// The neighbourhood filters that gather samples (directional and slope blur, warp) over a field region `(x0, y0, w, h)` of premultiplied `orig` texels (`comps` each) and their `cover`: bilinear samples weighted by coverage, so uncovered texels don't bleed in; positions are absolute texel coordinates, so a texel's result does not depend on the region
 #[allow(clippy::too_many_arguments)]
 fn gather(op: Op, orig: &[f32], cover: &[f32], comps: usize, (x0, y0, w, h): (u32, u32, u32, u32), r: f32, res: u32, opacity: f32) -> Vec<f32> {
     let mut data = orig.to_vec();
@@ -470,7 +496,11 @@ fn gather(op: Op, orig: &[f32], cover: &[f32], comps: usize, (x0, y0, w, h): (u3
                     let center = |v: f32| ((v / r).floor() + 0.5) * r - 0.5;
                     sample(center(x), center(y), &mut acc);
                 }
-                Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) | Op::PreBlur | Op::Halo | Op::Shadow { .. } => {}
+                Op::Mirror { mirror, block } => {
+                    mirror_texel(&mirror, (x, y), (block, res), comps, orig.get((row * wu + col) * comps + comps - 1), &mut acc, &sample)
+                }
+                Op::SourceWarp(warp) => warp_texel(&warp, (x, y), (res, comps), &mut acc, &sample),
+                Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) | Op::PreBlur | Op::Halo | Op::Shadow { .. } | Op::Outline(_) | Op::Distance => {}
             }
             if acc[4] > 1e-6
                 && let Some(px) = line.get_mut(col * comps..(col + 1) * comps)
@@ -482,6 +512,39 @@ fn gather(op: Op, orig: &[f32], cover: &[f32], comps: usize, (x0, y0, w, h): (u3
         }
     });
     data
+}
+
+/// Mirror `mirror` at texel `(x, y)` into `acc`: the texel it reads in its UV tile (`res` texels from its `block`'s top left), or white on a debug axis
+fn mirror_texel(
+    mirror: &Mirror,
+    (x, y): (f32, f32),
+    (block, res): (u32, u32),
+    comps: usize,
+    alpha: Option<&f32>,
+    acc: &mut [f32; 5],
+    sample: &dyn Fn(f32, f32, &mut [f32; 5]),
+) {
+    let (block, size) = (block.max(1) as f32, res.max(1) as f32);
+    let (origin_x, origin_y) = ((x / block).floor() * block, (y / block).floor() * block);
+    let (local_x, local_y) = (x - origin_x, y - origin_y);
+    if local_x >= size || local_y >= size {
+        return;
+    }
+    let uv = [(local_x + 0.5) / size, (local_y + 0.5) / size];
+    let line = (Mirror::DEBUG_HALF_WIDTH * size / 2048.0).max(0.5) / size;
+    if mirror.debug && mirror.on_axis(uv, line) {
+        // Content stays premultiplied by its own coverage; masks are one value
+        let cover = if comps == 4 { alpha.copied().unwrap_or(0.0) } else { 1.0 };
+        for slot in acc.iter_mut().take(comps) {
+            *slot = cover;
+        }
+        acc[4] = 1.0;
+        return;
+    }
+    let [u, v] = mirror.source(uv);
+    // Whole texels, so an even mirror copies texels exactly
+    let at = |origin: f32, along: f32| origin + (along * size - 0.5).round().clamp(0.0, size - 1.0);
+    sample(at(origin_x, u), at(origin_y, v), acc);
 }
 
 /// Fixed-point scale of the blur. Integer running sums make a texel's result independent of
@@ -658,7 +721,12 @@ fn region_around(inp: &Inputs, tiles: &[(u32, u32)], margin: u32, wrap: bool) ->
 fn wraps(effects: &[Effect], index: usize) -> bool {
     matches!(
         effects.iter().filter(|effect| effect.visible).nth(index).map(|effect| &effect.kind),
-        Some(EffectKind::Filter(Filter::Blur { wrap: true, .. } | Filter::Bevel { wrap: true, .. }))
+        Some(EffectKind::Filter(
+            Filter::Blur { wrap: true, .. }
+                | Filter::Bevel { wrap: true, .. }
+                | Filter::DistanceBevel(Bevel { wrap: true, .. })
+                | Filter::BevelSmooth(BevelSmooth { wrap: true, .. })
+        ))
     )
 }
 
@@ -701,12 +769,12 @@ fn filter_extent(radius: f32, op: Op, longest_side: u32) -> (u32, u32) {
     (radius_texels, reach + moved)
 }
 
-/// Whether neighbourhood filter `op` is computed from box blurs (the others gather samples).
+/// Whether neighbourhood filter `op` is computed from box blurs (the others gather samples)
 fn is_box_blur(op: Op) -> bool {
-    matches!(op, Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) | Op::PreBlur | Op::Halo | Op::Shadow { .. })
+    matches!(op, Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) | Op::PreBlur | Op::Halo | Op::Shadow { .. } | Op::Outline(_) | Op::Distance)
 }
 
-/// The stack up to and including neighbourhood filter `filter` over texel `region`, continued from `start` (the filter below's field) when given.
+/// The stack up to and including neighbourhood filter `filter` over texel `region`, continued from `start` (the filter below's field) when given
 #[allow(clippy::too_many_arguments)]
 fn filter_region(
     inp: &Inputs,
@@ -826,6 +894,18 @@ fn filter_region(
             let kind = channel.map_or(ChannelKind::Scalar, Channel::kind);
             let mut data = orig.to_vec();
             halo(&mut data, &cover, comps, (width, height, blur_radius), (scaled_op, filter, kind), opacity);
+            return if pad == (0, 0) { data } else { unpad(&data, comps, (w as usize, h as usize), pad) };
+        }
+        if let (Some((_, _, Op::Distance)), Some(Effect { kind: EffectKind::Filter(filter), .. })) =
+            (scaled, effects.iter().filter(|effect| effect.visible).nth(index))
+        {
+            let mut data = orig.to_vec();
+            distance_filter(&mut data, &cover, comps, (width, height), filter, res, opacity);
+            return if pad == (0, 0) { data } else { unpad(&data, comps, (w as usize, h as usize), pad) };
+        }
+        if let Some((_, _, Op::Outline(outline))) = scaled {
+            let mut data = orig.to_vec();
+            mask_outline(&mut data, &cover, comps, (width, height, blur_radius), &outline, opacity);
             return if pad == (0, 0) { data } else { unpad(&data, comps, (w as usize, h as usize), pad) };
         }
         // A pre-blur takes the blur whole; the effect's opacity mixes its mapped result below
@@ -966,6 +1046,36 @@ fn halo(
         }
     });
 }
+
+/// Lay Mask Outline `outline` over premultiplied `data` (shapes of content from its luminance), mixed in by `opacity`
+fn mask_outline(data: &mut [f32], cover: &[f32], comps: usize, (width, height, radius): (usize, usize, usize), outline: &MaskOutline, opacity: f32) {
+    let value = |pixel: &[f32]| match pixel {
+        [r, g, b, alpha] if *alpha > 1e-5 => lum([r / alpha, g / alpha, b / alpha]),
+        [value] => *value,
+        _ => 0.0,
+    };
+    let inside: Vec<bool> = data.par_chunks(comps).zip(cover.par_iter()).map(|(pixel, covered)| *covered > 0.0 && outline.inside(value(pixel))).collect();
+    let mut weights = cover.to_vec();
+    let mut sums: Vec<f32> = inside.par_iter().zip(cover.par_iter()).map(|(inside, covered)| if *inside { *covered } else { 0.0 }).collect();
+    blur(&mut weights, width, height, radius);
+    blur(&mut sums, width, height, radius);
+    data.par_chunks_mut(comps).zip(inside.par_iter()).zip(sums.par_iter().zip(weights.par_iter())).for_each(|((pixel, inside), (sum, weight))| {
+        // The shapes' share around a texel is a half at their edge and none (outside) or all (inside) past the band
+        let share = if *weight > 1e-6 { (sum / weight).clamp(0.0, 1.0) } else { 0.0 };
+        let closeness = if *inside { (1.0 - share) / OUTLINE_EDGE_SHARE } else { share / OUTLINE_EDGE_SHARE };
+        let band = outline.band(*inside, closeness);
+        // Content is premultiplied by its coverage, which stays
+        let cov = if comps == 4 { pixel.get(3).copied().unwrap_or(0.0) } else { 1.0 };
+        for slot in pixel.iter_mut().take(comps.min(3)) {
+            let before = if comps == 4 { if cov > 1e-5 { *slot / cov } else { 0.0 } } else { *slot };
+            let result = outline.apply(before, band);
+            *slot = (before + (result - before) * opacity) * cov;
+        }
+    });
+}
+
+/// The shapes' blurred share at their edge
+const OUTLINE_EDGE_SHARE: f32 = 0.5;
 
 /// The blurred value a precise halo is solid from, and how soft a full spread leaves it
 const PRECISE_EDGE: f32 = 0.5;

@@ -4,7 +4,7 @@ use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, EffectKind, Filter, LayerId};
+use texturecraft_engine::core::{Channel, EffectKind, Filter, LayerId, SourceWarp};
 use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 
@@ -37,12 +37,12 @@ fn a_pill_switches_its_channel_and_the_chip_picks_the_divider() {
     harness.run_steps(3);
     assert!(harness.state().session.doc.project.effect(effect).unwrap().1.off_channels.contains(&Channel::Roughness));
 
-    harness.get_by_role_and_label(Role::ComboBox, "÷1").click();
+    harness.get_by_role_and_label(Role::ComboBox, "÷10").click();
     harness.run_steps(3);
     assert!(egui::Popup::is_any_open(&harness.ctx), "the chip opens its list");
-    harness.get_by_role_and_label(Role::ListBoxOption, "÷10").click();
+    harness.get_by_role_and_label(Role::ListBoxOption, "÷100").click();
     harness.run_steps(3);
-    assert!(matches!(filter_of(&harness, effect), Filter::Warp { divider: 10, .. }), "{:?}", filter_of(&harness, effect));
+    assert!(matches!(filter_of(&harness, effect), Filter::SourceWarp(SourceWarp { divider: 100, .. })), "{:?}", filter_of(&harness, effect));
     assert!(!egui::Popup::is_any_open(&harness.ctx), "picking closes the list");
 }
 

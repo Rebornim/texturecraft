@@ -63,7 +63,6 @@ fn filter_library_adds_every_filter_and_edits_its_parameters() {
         "matFinishGrind",
         "highPass",
         "edgeDetect",
-        "warpDirectional",
         "grayscale",
         "normalInvert",
         "bevel",

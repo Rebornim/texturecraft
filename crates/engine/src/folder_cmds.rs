@@ -150,6 +150,7 @@ fn layer_seeds(layer: &mut Layer) -> Vec<&mut u32> {
             EffectKind::Material(fill) => seeds.extend(fill.sources.values_mut().filter_map(source_seed)),
             EffectKind::Generator(generator) => seeds.push(&mut generator.seed),
             EffectKind::Filter(Filter::Warp { seed, .. } | Filter::SlopeBlur { seed, .. } | Filter::DirectionalWarp { seed, .. }) => seeds.push(seed),
+            EffectKind::Filter(Filter::SourceWarp(warp)) => seeds.push(&mut warp.seed),
             _ => {}
         }
     }

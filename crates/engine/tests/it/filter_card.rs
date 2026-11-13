@@ -1,7 +1,7 @@
 //! The Filter effect card: an empty filter, its content channels switched on and off, Intensity's divider and Restore defaults
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, EffectKind, Filter, LayerId};
+use texturecraft_engine::core::{Channel, EffectKind, Filter, LayerId, SourceWarp};
 use texturecraft_engine::geom::glam::Vec2;
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute};
@@ -89,7 +89,7 @@ fn a_content_filter_leaves_the_channels_switched_off() {
     assert!(execute(&mut s, "effect.set", &json!({"effect": masked, "channels": {"roughness": false}})).is_err());
 }
 
-/// Intensity ÷ Divider: warp 16 ÷ 10 renders as warp 1.6; only 1, 10, 100 and 1000 are taken; a divider of 1 is not saved
+/// Intensity ÷ Divider: warp 0.5 ÷ 10 renders as warp 0.05; only 1, 10, 100 and 1000 are taken; a divider of 1 is not saved
 #[test]
 fn the_divider_divides_the_intensity() {
     let warp = |intensity: f32, divider: u16| {
@@ -102,9 +102,9 @@ fn the_divider_divides_the_intensity() {
         s.update();
         (0..SIZE).step_by(7).map(|x| s.caches[0].composite.value(Channel::BaseColor, x, SIZE / 2)[0]).collect::<Vec<f32>>()
     };
-    let divided = warp(64.0, 10);
-    assert_eq!(divided, warp(6.4, 1), "64 ÷ 10 = 6.4");
-    assert_ne!(divided, warp(64.0, 1), "the divider changes the warp");
+    let divided = warp(0.5, 10);
+    assert_eq!(divided, warp(0.05, 1), "0.5 ÷ 10 = 0.05");
+    assert_ne!(divided, warp(0.5, 1), "the divider changes the warp");
 
     let mut s = session();
     let (_, effect) = filtered_layer(&mut s, json!({"filter": "slopeBlur"}));
@@ -126,7 +126,7 @@ fn restore_defaults_puts_the_filters_parameters_back() {
     let defaults = filter_of(&s, effect);
     assert_eq!(execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap(), json!({"changed": false}));
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "intensity": 3.0, "seed": 9, "divider": 10, "channels": {"height": false}})).unwrap();
+    execute(&mut s, "effect.set", &json!({"effect": effect.0, "intensity": 0.5, "seed": 9, "divider": 100, "channels": {"height": false}})).unwrap();
     assert_eq!(execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap(), json!({"changed": true}));
     assert_eq!(filter_of(&s, effect), defaults);
     let restored = s.doc.project.effect(effect).unwrap().1.clone();
@@ -134,7 +134,7 @@ fn restore_defaults_puts_the_filters_parameters_back() {
     assert!(restored.off_channels.contains(&Channel::Height));
 
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
-    assert!(matches!(filter_of(&s, effect), Filter::Warp { divider: 10, seed: 9, .. }), "one undo step");
+    assert!(matches!(filter_of(&s, effect), Filter::SourceWarp(SourceWarp { divider: 100, seed: 9, .. })), "one undo step");
 
     let empty = filtered_layer(&mut s, json!({"filter": "none"})).1;
     assert_eq!(execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": empty.0})).unwrap(), json!({"changed": false}));

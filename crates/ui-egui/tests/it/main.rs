@@ -51,4 +51,5 @@ mod filter_card;
 mod filter_colour;
 mod filter_gradient;
 mod filter_light;
+mod filter_shape;
 mod symmetry;

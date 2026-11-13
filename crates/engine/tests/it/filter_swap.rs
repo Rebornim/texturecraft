@@ -65,7 +65,7 @@ fn one_undo_restores_the_old_filter() {
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
 
     let restored = effect(&s, id);
-    assert!(matches!(restored.kind, EffectKind::Filter(Filter::Threshold { level }) if level == 0.3), "{:?}", restored.kind);
+    assert!(matches!(restored.kind, EffectKind::Filter(Filter::Threshold { level, .. }) if level == 0.3), "{:?}", restored.kind);
     assert_eq!(restored.name, "Threshold");
 }
 

@@ -259,7 +259,7 @@ fn take_color_pick(app: &mut TextureCraftApp, pick: ColorPick) -> Option<[f32; 3
     pick.picked
 }
 
-/// A procedural source: Scale and Contrast, then its Attributes (seed, balance, invert and its two values)
+/// A procedural source: Scale and Contrast, then its Attributes (seed, balance, invert and its two values), each sending only its own parameter
 fn procedural_rows(
     app: &mut TextureCraftApp,
     sheet: &mut PropertySheet<'_>,
@@ -269,52 +269,57 @@ fn procedural_rows(
     reset: bool,
     set: &impl Fn(Value) -> Value,
 ) {
-    let send = |app: &mut TextureCraftApp, pattern: &Procedural, low: [f32; 3], high: [f32; 3], merge: bool| {
+    let kind = pattern.kind.label();
+    if reset {
+        let fresh = Procedural::new(pattern.kind);
         let settings = json!({
-            "procedural": pattern.kind.label(), "scale": pattern.scale, "contrast": pattern.contrast, "seed": pattern.seed,
-            "balance": pattern.balance, "invert": pattern.invert, "low": low, "high": high, "merge": merge,
+            "procedural": kind, "scale": fresh.scale, "contrast": fresh.contrast, "seed": fresh.seed,
+            "balance": fresh.balance, "invert": fresh.invert, "low": low, "high": high, "merge": false,
         });
         app.run("layer.fill.set", set(settings));
-    };
-    if reset {
-        send(app, &Procedural::new(pattern.kind), low, high, false);
         return;
     }
 
     let mut edited = pattern.clone();
-    let mut merge = None;
-    merge = merge.or(sheet.slider(tr("Scale"), &mut edited.scale, PATTERN_SCALE, 2));
-    merge = merge.or(sheet.slider(tr("Contrast"), &mut edited.contrast, PATTERN_CONTRAST, 2));
-    let (mut low, mut high) = (low, high);
+    let mut edit: Option<(&str, Value, bool)> = None;
+    if let Some(merge) = sheet.slider(tr("Scale"), &mut edited.scale, PATTERN_SCALE, 2) {
+        edit = Some(("scale", json!(edited.scale), merge));
+    }
+    if let Some(merge) = sheet.slider(tr("Contrast"), &mut edited.contrast, PATTERN_CONTRAST, 2) {
+        edit = edit.or(Some(("contrast", json!(edited.contrast), merge)));
+    }
     if sheet.fold(tr("Attributes"), None, false) {
         if sheet.seed(tr("Seed"), &mut edited.seed) {
-            merge = merge.or(Some(false));
+            edit = edit.or(Some(("seed", json!(edited.seed), false)));
         }
-        merge = merge.or(sheet.signed_slider(tr("Balance"), &mut edited.balance, -1.0..=1.0, 2));
+        if let Some(merge) = sheet.signed_slider(tr("Balance"), &mut edited.balance, -1.0..=1.0, 2) {
+            edit = edit.or(Some(("balance", json!(edited.balance), merge)));
+        }
         if sheet.toggle(tr("Invert"), &mut edited.invert) {
-            merge = merge.or(Some(false));
+            edit = edit.or(Some(("invert", json!(edited.invert), false)));
         }
+        let ends = [("low", tr("Low"), low), ("high", tr("High"), high)];
         if channel.kind() == ChannelKind::Color {
-            for (label, value) in [(tr("Low"), &mut low), (tr("High"), &mut high)] {
-                let pick = sheet.color_bar_led(label, *value, app.picking_color, &app.session.doc.project.swatches);
+            for (key, label, value) in ends {
+                let pick = sheet.color_bar_led(label, value, app.picking_color, &app.session.doc.project.swatches);
                 if let Some(picked) = take_color_pick(app, pick) {
-                    *value = picked;
-                    merge = merge.or(Some(pick.merge));
+                    edit = edit.or(Some((key, json!(picked), pick.merge)));
                 }
             }
         } else {
             let range = if channel.kind() == ChannelKind::Signed { -1.0..=1.0 } else { 0.0..=1.0 };
-            for (label, value) in [(tr("Low"), &mut low), (tr("High"), &mut high)] {
+            for (key, label, value) in ends {
                 let mut gray = value[0];
-                if let Some(step) = sheet.slider(label, &mut gray, range.clone(), 2) {
-                    *value = [gray; 3];
-                    merge = merge.or(Some(step));
+                if let Some(merge) = sheet.slider(label, &mut gray, range.clone(), 2) {
+                    edit = edit.or(Some((key, json!([gray, gray, gray]), merge)));
                 }
             }
         }
     }
-    if let Some(merge) = merge {
-        send(app, &edited, low, high, merge);
+    if let Some((key, value, merge)) = edit {
+        let mut settings = json!({"procedural": kind, "merge": merge});
+        settings[key] = value;
+        app.run("layer.fill.set", set(settings));
     }
 }
 

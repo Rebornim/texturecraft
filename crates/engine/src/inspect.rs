@@ -11,7 +11,8 @@ fn source_json(s: &Source) -> Value {
     match s {
         Source::Uniform(v) => json!({ "uniform": v }),
         Source::Procedural { pattern, low, high } => json!({
-            "procedural": pattern.kind.label(), "scale": pattern.scale, "seed": pattern.seed, "contrast": pattern.contrast, "low": low, "high": high
+            "procedural": pattern.kind.label(), "scale": pattern.scale, "seed": pattern.seed, "contrast": pattern.contrast,
+            "balance": pattern.balance, "invert": pattern.invert, "low": low, "high": high
         }),
         Source::Image { name, normal_format: NormalFormat::OpenGl } => json!({ "image": name }),
         Source::Image { name, normal_format: NormalFormat::DirectX } => json!({ "image": name, "normalFormat": "directX" }),

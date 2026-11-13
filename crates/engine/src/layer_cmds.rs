@@ -30,7 +30,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill source",
             [],
             None,
-            "{layer? | effect?: content fill effect id, channel, color?|value?|procedural?: kind, scale?, seed?, contrast?, balance?, invert?, low?, high?|image?, normalFormat?: openGl|directX (the image's normal map convention; alone, it changes the channel's image)|anchor?: anchor effect id, anchorChannel?, enabled?, solo?: true (this channel on, every other one off)}",
+            "{layer? | effect?: content fill effect id, channel, color?|value?|procedural?: kind, scale?, seed?, contrast?, balance?, invert?, low?, high? (the same kind keeps what is not given)|image?, normalFormat?: openGl|directX (the image's normal map convention; alone, it changes the channel's image)|anchor?: anchor effect id, anchorChannel?, enabled?, solo?: true (this channel on, every other one off)}",
             has_layer,
             fill_set
         ),
@@ -319,27 +319,14 @@ fn fill_set(s: &mut Session, p: &Value) -> Result<Value> {
     let solo = boolp(p, "solo") == Some(true);
     let enabled = if solo { Some(true) } else { boolp(p, "enabled") };
     let normal_format = normal_format_param("layer.fill.set", p)?;
-    let low = color_param("layer.fill.set", p, "low")?.unwrap_or([0.0; 3]);
-    let high = color_param("layer.fill.set", p, "high")?.unwrap_or([1.0; 3]);
+    let low = color_param("layer.fill.set", p, "low")?;
+    let high = color_param("layer.fill.set", p, "high")?;
     let color = color_param("layer.fill.set", p, "color")?;
     let value = color_param("layer.fill.set", p, "value")?;
     let source = if let Some(kind) = strp(p, "procedural") {
         let kind = ProceduralKind::parse(kind).ok_or_else(|| bad("layer.fill.set", format!("unknown procedural `{kind}`")))?;
-        let mut pr = Procedural::new(kind);
-        if let Some(v) = f32p(p, "scale") {
-            pr.scale = v.clamp(0.001, 1000.0);
-        }
-        if let Some(v) = u64p(p, "seed") {
-            pr.seed = v as u32;
-        }
-        if let Some(v) = f32p(p, "contrast") {
-            pr.contrast = v.clamp(0.0, 20.0);
-        }
-        if let Some(v) = f32p(p, "balance") {
-            pr.balance = v.clamp(-1.0, 1.0);
-        }
-        pr.invert = boolp(p, "invert").unwrap_or(false);
-        Some(Source::Procedural { pattern: pr, low, high })
+        let current = fill_mut(s, target)?.sources.get(&ch).cloned();
+        Some(procedural_source(p, kind, current, low, high))
     } else if let Some(c) = color.or(value) {
         Some(Source::Uniform(c))
     } else if let Some(name) = strp(p, "image") {
@@ -405,6 +392,30 @@ fn fill_set(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     Ok(Value::Null)
+}
+
+/// The procedural source `p` asks for, with its already parsed `low`/`high` colours: the channel's pattern keeps what `p` does not give; another kind starts from its defaults
+fn procedural_source(p: &Value, kind: ProceduralKind, current: Option<Source>, new_low: Option<[f32; 3]>, new_high: Option<[f32; 3]>) -> Source {
+    let (mut pattern, low, high) = match current {
+        Some(Source::Procedural { pattern, low, high }) if pattern.kind == kind => (pattern, low, high),
+        _ => (Procedural::new(kind), [0.0; 3], [1.0; 3]),
+    };
+    if let Some(scale) = f32p(p, "scale") {
+        pattern.scale = scale.clamp(0.001, 1000.0);
+    }
+    if let Some(seed) = u64p(p, "seed") {
+        pattern.seed = seed as u32;
+    }
+    if let Some(contrast) = f32p(p, "contrast") {
+        pattern.contrast = contrast.clamp(0.0, 20.0);
+    }
+    if let Some(balance) = f32p(p, "balance") {
+        pattern.balance = balance.clamp(-1.0, 1.0);
+    }
+    if let Some(invert) = boolp(p, "invert") {
+        pattern.invert = invert;
+    }
+    Source::Procedural { pattern, low: new_low.unwrap_or(low), high: new_high.unwrap_or(high) }
 }
 
 /// The projection `p` asks for: fields it does not give keep their values from `current` when that is of the same kind (or `p` names no kind), and the kind's defaults otherwise; a new warp starts from frame `fit`

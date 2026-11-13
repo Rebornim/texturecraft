@@ -47,7 +47,7 @@ enum Shape {
 /// The projector of the fill Move on model moves, as the 3D view shows it
 #[derive(Clone, Debug)]
 pub(crate) struct RoundGizmo {
-    target: MoveOnModel,
+    pub(crate) target: MoveOnModel,
     /// Mesh centre and radius: the projector reads positions around it in radii
     mesh_center: Vec3,
     radius: f32,
@@ -371,7 +371,8 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
     let tokens = Tokens::get(ui.ctx());
     let painter = ui.painter_at(rect);
     let active = ui.ctx().data(|data| data.get_temp::<RoundDrag>(drag_id())).map(|drag| drag.grab);
-    let hovered = ui.ctx().pointer_hover_pos().filter(|hover| rect.contains(*hover)).and_then(|hover| gizmo.grab(hover));
+    // A held Move on model button owns the cursor
+    let hovered = ui.ctx().pointer_hover_pos().filter(|hover| rect.contains(*hover) && app.moving_on_model.is_none()).and_then(|hover| gizmo.grab(hover));
     if let Some(grab) = active.or(hovered) {
         ui.ctx().set_cursor_icon(grab.cursor(active.is_some()));
     }
@@ -401,13 +402,6 @@ mod tests {
 
     use super::*;
     use crate::frame_gizmo::tests::{drag, drag_frames, fill_app, panel_xyz, projection};
-
-    fn moving(projection_id: &str) -> (egui_kittest::Harness<'static, TextureCraftApp>, LayerId) {
-        let (mut harness, layer) = fill_app(projection_id);
-        harness.state_mut().moving_on_model = Some(MoveOnModel::layer(layer));
-        harness.run_steps(2);
-        (harness, layer)
-    }
 
     fn gizmo(harness: &egui_kittest::Harness<'_, TextureCraftApp>) -> RoundGizmo {
         RoundGizmo::of(harness.state(), harness.state().viewport_rect).unwrap()
@@ -441,14 +435,14 @@ mod tests {
             };
             assert_eq!(shown.dots.len(), size_dots, "{kind}: size dots");
         }
-        let (harness, _) = moving("planar");
+        let (harness, _) = fill_app("planar");
         assert!(RoundGizmo::of(harness.state(), harness.state().viewport_rect).is_none(), "planar projections show their frame instead");
     }
 
     #[test]
     fn the_arrows_move_the_rings_turn_and_the_dots_scale_the_projector_one_step_per_drag() {
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let (mut harness, layer) = moving("spherical");
+        let (mut harness, layer) = fill_app("spherical");
         let steps = harness.state().session.history_labels().len();
 
         let start = gizmo(&harness);
@@ -482,7 +476,7 @@ mod tests {
     #[test]
     fn a_cylinders_top_dot_stretches_its_height_and_a_tri_planar_box_moves_by_its_texture_offset() {
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let (mut harness, layer) = moving("cylindrical");
+        let (mut harness, layer) = fill_app("cylindrical");
         let cylinder = gizmo(&harness);
         let (top, axes) = cylinder.dots[0];
         assert_eq!(axes, [false, true, false], "the top dot works along the axis");
@@ -490,7 +484,7 @@ mod tests {
         let (projector, _) = projector_and_offset(&projection(&harness, layer));
         assert!(projector.scale[1] < 0.7 && projector.scale[0] == 1.0 && projector.scale[2] == 1.0, "{:?}", projector.scale);
 
-        let (mut harness, layer) = moving("triplanar");
+        let (mut harness, layer) = fill_app("triplanar");
         harness.state_mut().run("layer.fill.projection", json!({"layer": layer.0, "scale": 4})).unwrap();
         harness.run_steps(2);
         let box_gizmo = gizmo(&harness);
@@ -505,7 +499,7 @@ mod tests {
     fn the_panel_and_its_preview_follow_every_frame_of_a_projector_drag() {
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         for kind in ["spherical", "cylindrical"] {
-            let (mut harness, layer) = moving(kind);
+            let (mut harness, layer) = fill_app(kind);
             let steps = harness.state().session.history_labels().len();
             let read = |harness: &egui_kittest::Harness<'_, TextureCraftApp>| {
                 let (projector, offset) = projector_and_offset(&projection(harness, layer));
@@ -619,13 +613,13 @@ mod tests {
         }
     }
 
-    /// A plain left press on the model while a colour picker is open only closes the picker: no stroke, no slide (Move on model is on), and the press after it works again
+    /// A plain left press on the projector's handle while a colour picker is open only closes the picker: no stroke, no slide, and the press after it works again
     #[test]
     fn a_press_that_closes_the_colour_picker_neither_paints_nor_slides() {
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let (mut harness, layer) = moving("triplanar");
+        let (mut harness, layer) = fill_app("triplanar");
         let before = projection(&harness, layer);
-        let from = on_the_model_off_the_handles(&harness);
+        let from = gizmo(&harness).center;
         harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
         harness.run_steps(25);
         harness.get_by_role_and_label(egui::Role::Button, "Base color").click();

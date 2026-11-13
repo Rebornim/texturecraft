@@ -134,10 +134,20 @@ impl PropertySheet<'_> {
 
     /// [`Self::button_lit`] that answers no clicks and dims its words while not `enabled`
     pub(crate) fn button_enabled(&mut self, icon: &str, text: &str, lit: bool, enabled: bool) -> egui::Response {
+        self.button_sensing(icon, text, lit, if enabled { Sense::click() } else { Sense::hover() })
+    }
+
+    /// [`Self::button_lit`] for a press-and-hold control: it also follows a drag that starts on it, wherever the pointer goes
+    pub(crate) fn hold_button(&mut self, icon: &str, text: &str, lit: bool) -> egui::Response {
+        self.button_sensing(icon, text, lit, Sense::click_and_drag())
+    }
+
+    fn button_sensing(&mut self, icon: &str, text: &str, lit: bool, sense: Sense) -> egui::Response {
+        let enabled = sense != Sense::hover();
         let rect = self.take(ROW_HEIGHT);
         let button = self.control_box(self.left, rect.center().y);
         let id = self.next_id();
-        let response = self.ui.interact(button, id, if enabled { Sense::click() } else { Sense::hover() });
+        let response = self.ui.interact(button, id, sense);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, text));
 
         let t = self.tokens;

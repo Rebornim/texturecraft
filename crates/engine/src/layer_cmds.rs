@@ -104,7 +104,12 @@ fn add_group(s: &mut Session, p: &Value) -> Result<Value> {
     let name = strp(p, "name").map(str::to_string).unwrap_or_else(|| s.doc.project.next_layer_name(ts, "Folder"));
     let id = s.edit("Add folder", |s| {
         let id = s.doc.project.alloc_id();
-        let mut l = Layer::new(id, name, LayerKind::Group { children: Vec::new(), collapsed: false, contents: Default::default() }, &channels_of(s));
+        let mut l = Layer::new(
+            id,
+            name,
+            LayerKind::Group { children: Vec::new(), collapsed: false, contents: Default::default(), randomized: Vec::new() },
+            &channels_of(s),
+        );
         for b in l.channels.values_mut() {
             b.mode = BlendMode::Passthrough;
         }
@@ -157,7 +162,8 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
         let gid = s.doc.project.alloc_id();
         let name = s.doc.project.next_layer_name(ts, "Folder");
         let channels = s.doc.project.texture_set(ts)?.channel_list();
-        let mut gl = Layer::new(gid, name, LayerKind::Group { children: Vec::new(), collapsed: false, contents: Default::default() }, &channels);
+        let mut gl =
+            Layer::new(gid, name, LayerKind::Group { children: Vec::new(), collapsed: false, contents: Default::default(), randomized: Vec::new() }, &channels);
         for b in gl.channels.values_mut() {
             b.mode = BlendMode::Passthrough;
         }
@@ -543,25 +549,36 @@ fn procedural_source(p: &Value, kind: ProceduralKind, current: Option<Source>, n
     Ok(Source::Procedural { pattern, low: new_low.unwrap_or(low), high: new_high.unwrap_or(high) })
 }
 
+/// A new fill's projection of kind `id` (`uv`, `uvTile`, `triplanar`, `planar`, `spherical`, `cylindrical`, or a `warp` from frame `fit`)
+pub(crate) fn new_projection(id: &str, fit: impl FnOnce() -> Decal) -> Option<Projection> {
+    match id {
+        "warp" => Some(Projection::warp(fit())),
+        _ => new_unframed_projection(id),
+    }
+}
+
+/// A new fill's projection of kind `id`, any kind but a warp (which needs a frame)
+pub(crate) fn new_unframed_projection(id: &str) -> Option<Projection> {
+    let projection = match id {
+        "uv" => Projection::default(),
+        "uvTile" => Projection::UvTile,
+        "triplanar" | "tri-planar" => {
+            Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: Default::default(), projector: Default::default() }
+        }
+        "planar" => Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: Default::default(), projector: Projector::depth_culled(), placed: None },
+        "spherical" => Projection::Spherical { scale: 1.0, uv: Default::default(), offset: [0.0; 3], projector: Default::default() },
+        "cylindrical" => Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default(), offset: [0.0; 3], projector: Default::default(), angle: 360.0 },
+        _ => return None,
+    };
+    Some(projection)
+}
+
 /// The projection `p` asks for: fields it does not give keep their values from `current` when that is of the same kind (or `p` names no kind), and the kind's defaults otherwise; a new warp starts from frame `fit`
 pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>, fit: impl FnOnce() -> Decal) -> Result<Projection> {
     let named = match strp(p, "projection") {
         None => None,
-        Some("uv") => Some(Projection::default()),
-        Some("uvTile") => Some(Projection::UvTile),
-        Some("triplanar" | "tri-planar") => {
-            Some(Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: Default::default(), projector: Default::default() })
-        }
-        Some("planar") => {
-            Some(Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: Default::default(), projector: Projector::depth_culled(), placed: None })
-        }
-        Some("spherical") => Some(Projection::Spherical { scale: 1.0, uv: Default::default(), offset: [0.0; 3], projector: Default::default() }),
-        Some("cylindrical") => {
-            Some(Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default(), offset: [0.0; 3], projector: Default::default(), angle: 360.0 })
-        }
-        Some("warp") if !matches!(current, Some(Projection::Warp { .. })) => Some(Projection::warp(fit())),
-        Some("warp") => current.cloned(),
-        Some(other) => return Err(bad(cmd, format!("unknown projection `{other}`"))),
+        Some("warp") if matches!(current, Some(Projection::Warp { .. })) => current.cloned(),
+        Some(id) => Some(new_projection(id, fit).ok_or_else(|| bad(cmd, format!("unknown projection `{id}`")))?),
     };
     let mut proj = match (named, current) {
         (Some(n), Some(c)) if std::mem::discriminant(&n) == std::mem::discriminant(c) => c.clone(),

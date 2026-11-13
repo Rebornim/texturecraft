@@ -1,8 +1,8 @@
-//! The folder in Properties: CONTENTS with Scale and Rotation over every fill inside (a drag is one undo step, the round reset drops them) and Randomize seeds; an empty folder has no properties
+//! The folder in Properties: CONTENTS with Scale and Rotation over every fill inside (a drag is one undo step, the round reset drops them) and Randomize seeds (the reset also puts back the seeds it changed); an empty folder has no properties
 
 use egui::accesskit::Role;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::json;
 use texturecraft_engine::core::{Channel, ContentsOffset, LayerId, LayerKind, Source};
 use texturecraft_engine::execute;
@@ -65,7 +65,7 @@ fn scale_and_rotation_drags_are_one_undo_step_each_and_the_reset_drops_them() {
 }
 
 #[test]
-fn randomize_seeds_is_one_undo_step_and_an_empty_folder_has_no_properties() {
+fn randomize_seeds_is_one_undo_step_the_contents_reset_puts_them_back_and_an_empty_folder_has_no_properties() {
     let (mut harness, _, fill) = folder_harness(true);
     let seed = |harness: &Harness<'_, TextureCraftApp>| match &harness.state().session.doc.project.layer(fill).unwrap().kind {
         LayerKind::Fill(f) => match f.sources.get(&Channel::BaseColor) {
@@ -79,6 +79,15 @@ fn randomize_seeds_is_one_undo_step_and_an_empty_folder_has_no_properties() {
     harness.run_steps(3);
     assert_ne!(seed(&harness), 7);
     assert_eq!(harness.state().session.history_labels().len(), steps + 1);
+
+    // The Contents reset lights up and puts the seed back, in one undo step
+    let reset = harness.get_by_role_and_label(Role::Button, "Contents: Reset to defaults");
+    assert!(!reset.accesskit_node().is_disabled(), "randomized seeds light the reset");
+    reset.click();
+    harness.run_steps(3);
+    assert_eq!(seed(&harness), 7, "the seed from before Randomize seeds");
+    assert_eq!(harness.state().session.history_labels().len(), steps + 2);
+    assert!(harness.get_by_role_and_label(Role::Button, "Contents: Reset to defaults").accesskit_node().is_disabled(), "nothing left to reset");
 
     let (harness, _, _) = folder_harness(false);
     assert!(harness.query_by_label("No properties found").is_some());

@@ -14,6 +14,8 @@ use texturecraft_engine::compose::projector_cover::projector_cover;
 use texturecraft_engine::core::{Projection, Projector, ShapeCrop};
 use texturecraft_engine::geom::glam::{Vec2, Vec3};
 
+use rayon::prelude::*;
+
 use crate::preview_outline::ProjectorOutline;
 use crate::theme::Tokens;
 
@@ -21,6 +23,8 @@ use crate::theme::Tokens;
 const MAX_SIDE_PX: usize = 256;
 /// Rays per pixel along each axis (smooth outline)
 const SUPERSAMPLE: usize = 2;
+/// Rays per pixel along each axis while a drag is held: a quarter of the rays, so the square keeps up with the pointer; the full picture follows on release
+const DRAG_SUPERSAMPLE: usize = 1;
 /// Checker cells across one repeat of the source along each axis
 const CHECKER_CELLS: f32 = 4.0;
 /// Half the view's width and height, in mesh radii: as near as the view comes, and as far as it zooms out (the shape at half its size)
@@ -55,6 +59,14 @@ const CHECKER_LIGHT: f32 = 1.0;
 /// The shape where the projection does not reach, as a fraction of the way from `field` to `text`
 const UNCOVERED: f32 = 0.45;
 
+/// The preview square's last picture: what it shows (`key`), how many rays per pixel along each axis it was cast with, and the texture holding it
+#[derive(Clone)]
+struct RenderedPreview {
+    key: String,
+    supersample: usize,
+    texture: TextureHandle,
+}
+
 /// What the preview wraps the checker around
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PreviewShape {
@@ -63,7 +75,7 @@ enum PreviewShape {
     Cube,
 }
 
-/// Draw the preview of `projection` on a mesh within `bounds` into `rect`, rendered once per projection, size and theme (None for projections without one: UV, warp)
+/// Draw the preview of `projection` on a mesh within `bounds` into `rect`, rendered once per projection, size and theme, with a quarter of the rays while a drag is held (None for projections without one: UV, warp)
 pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Projection, bounds: (Vec3, Vec3), tokens: &Tokens) -> Option<()> {
     let shown = shown_projection(projection, bounds)?;
     let ctx = painter.ctx();
@@ -72,15 +84,24 @@ pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Pro
     let outline = ProjectorOutline::of(&shown, shape.half_size());
     let half = view_half(outline.as_ref());
     let key = format!("{side}{half}{shown:?}{:?}{:?}{:?}", tokens.field, tokens.text, tokens.accent);
+    let held = ctx.input(|input| input.pointer.any_down());
     let id = egui::Id::unique("projection_preview");
-    // The picture and the key it was rendered for
-    let cached = ctx.data(|data| data.get_temp::<(String, TextureHandle)>(id)).filter(|(rendered, _)| *rendered == key);
+    // The picture, the key and the rays per pixel it was rendered with; a drag's lighter picture is redone in full once the pointer is let go
+    let cached = ctx.data(|data| data.get_temp::<RenderedPreview>(id));
+    let up_to_date = cached.as_ref().is_some_and(|cached| cached.key == key && (held || cached.supersample == SUPERSAMPLE));
     let texture = match cached {
-        Some((_, texture)) => texture,
-        None => {
-            let image = render(&shown, side, half, tokens);
-            let texture = ctx.load_texture("projection-preview", image, TextureOptions::LINEAR);
-            ctx.data_mut(|data| data.insert_temp(id, (key, texture.clone())));
+        Some(cached) if up_to_date => cached.texture,
+        cached => {
+            let supersample = if held { DRAG_SUPERSAMPLE } else { SUPERSAMPLE };
+            let image = render(&shown, side, half, supersample, tokens);
+            let texture = match cached {
+                Some(RenderedPreview { mut texture, .. }) => {
+                    texture.set(image, TextureOptions::LINEAR);
+                    texture
+                }
+                None => ctx.load_texture("projection-preview", image, TextureOptions::LINEAR),
+            };
+            ctx.data_mut(|data| data.insert_temp(id, RenderedPreview { key, supersample, texture: texture.clone() }));
             texture
         }
     };
@@ -98,7 +119,13 @@ pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Pro
 /// What the preview square last rendered (tests: a drag re-renders it)
 #[cfg(test)]
 pub(crate) fn shown_key(ctx: &egui::Context) -> Option<String> {
-    ctx.data(|data| data.get_temp::<(String, TextureHandle)>(egui::Id::unique("projection_preview"))).map(|(key, _)| key)
+    ctx.data(|data| data.get_temp::<RenderedPreview>(egui::Id::unique("projection_preview"))).map(|rendered| rendered.key)
+}
+
+/// How the preview square was last rendered, with rays per pixel (tests: a drag renders it lighter, the release in full)
+#[cfg(test)]
+pub(crate) fn shown_supersample(ctx: &egui::Context) -> Option<usize> {
+    ctx.data(|data| data.get_temp::<RenderedPreview>(egui::Id::unique("projection_preview"))).map(|rendered| rendered.supersample)
 }
 
 /// The projection the preview renders: a planar placed on the model shows straight onto the sphere's front as big against the sphere as its frame is against the mesh, stretched, turned round its normal and slid across its plane as the frame is, cropped to its rectangle
@@ -271,8 +298,8 @@ fn shape_for(projection: &Projection) -> PreviewShape {
     }
 }
 
-/// `side²` pixels of the checker on the projection's shape over the `field` background, the view `half` mesh radii across each way from the middle
-fn render(projection: &Projection, side: usize, half: f32, tokens: &Tokens) -> ColorImage {
+/// `side²` pixels of the checker on the projection's shape over the `field` background, the view `half` mesh radii across each way from the middle, `supersample²` rays per pixel cast on every core
+fn render(projection: &Projection, side: usize, half: f32, supersample: usize, tokens: &Tokens) -> ColorImage {
     let shape = shape_for(projection);
     let View { eye, forward, right, up } = View::new();
     let light = (-0.5 * right + 0.6 * up + 0.6 * eye).normalize_or_zero();
@@ -280,9 +307,11 @@ fn render(projection: &Projection, side: usize, half: f32, tokens: &Tokens) -> C
     let field = tokens.field;
     let (background, text) = (linear(field), linear(tokens.text));
     let shades = [CHECKER_DARK, CHECKER_LIGHT, UNCOVERED].map(|t| background.lerp(text, t));
-    let rays = side * SUPERSAMPLE;
+    let supersample = supersample.max(1);
+    let rays = side * supersample;
     // Per ray: the lit colour and how much of the projection lands there (None = the background)
     let samples: Vec<Option<(Vec3, f32)>> = (0..rays * rays)
+        .into_par_iter()
         .map(|ray| {
             let (x, y) = (ray % rays, ray / rays);
             let across = ((x as f32 + 0.5) / rays as f32 * 2.0 - 1.0) * half;
@@ -297,11 +326,11 @@ fn render(projection: &Projection, side: usize, half: f32, tokens: &Tokens) -> C
 
     let edge = linear(tokens.accent);
     let mut image = ColorImage::new([side, side], vec![field; side * side]);
-    for (pixel, out) in image.pixels.iter_mut().enumerate() {
+    image.pixels.par_iter_mut().enumerate().for_each(|(pixel, out)| {
         let (x, y) = (pixel % side, pixel / side);
         let mut sum = Vec3::ZERO;
-        for sub in 0..SUPERSAMPLE * SUPERSAMPLE {
-            let (rx, ry) = (x * SUPERSAMPLE + sub % SUPERSAMPLE, y * SUPERSAMPLE + sub / SUPERSAMPLE);
+        for sub in 0..supersample * supersample {
+            let (rx, ry) = (x * supersample + sub % supersample, y * supersample + sub / supersample);
             let color = match samples.get(ry * rays + rx).copied().flatten() {
                 Some((color, cover)) if on_edge(&samples, rays, rx, ry, cover) => edge.lerp(color, 0.5),
                 Some((color, _)) => color,
@@ -309,8 +338,8 @@ fn render(projection: &Projection, side: usize, half: f32, tokens: &Tokens) -> C
             };
             sum += color;
         }
-        *out = from_linear(sum / (SUPERSAMPLE * SUPERSAMPLE) as f32);
-    }
+        *out = from_linear(sum / (supersample * supersample) as f32);
+    });
     image
 }
 
@@ -447,7 +476,7 @@ mod tests {
             cylindrical(Projector::default()),
             Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: UvTransform::default(), projector: Projector::default() },
         ] {
-            let image = render(&projection, 32, VIEW_HALF, &tokens);
+            let image = render(&projection, 32, VIEW_HALF, SUPERSAMPLE, &tokens);
             assert_eq!(image.pixels[0], tokens.field, "{projection:?}: the corner is background");
             assert_ne!(image.pixels[16 * 32 + 16], tokens.field, "{projection:?}: the middle shows the shape");
         }
@@ -457,16 +486,16 @@ mod tests {
     fn the_preview_follows_the_fill_settings() {
         let tokens = tokens();
         assert_ne!(
-            render(&spherical(1.0), 32, VIEW_HALF, &tokens).pixels,
-            render(&spherical(3.0), 32, VIEW_HALF, &tokens).pixels,
+            render(&spherical(1.0), 32, VIEW_HALF, SUPERSAMPLE, &tokens).pixels,
+            render(&spherical(3.0), 32, VIEW_HALF, SUPERSAMPLE, &tokens).pixels,
             "tiling changes the checker"
         );
 
         let culled =
             Projector { backface: texturecraft_engine::core::Backface { on: true, ..Default::default() }, crop: ShapeCrop::Cropped, ..Projector::default() };
         assert_ne!(
-            render(&cylindrical(Projector::default()), 32, VIEW_HALF, &tokens).pixels,
-            render(&cylindrical(culled), 32, VIEW_HALF, &tokens).pixels,
+            render(&cylindrical(Projector::default()), 32, VIEW_HALF, SUPERSAMPLE, &tokens).pixels,
+            render(&cylindrical(culled), 32, VIEW_HALF, SUPERSAMPLE, &tokens).pixels,
             "culling shows on the cylinder"
         );
     }
@@ -483,7 +512,7 @@ mod tests {
     fn shown(projection: &Projection) -> Vec<Color32> {
         let shown = shown_projection(projection, BOUNDS).unwrap();
         let half = view_half(ProjectorOutline::of(&shown, shape_for(&shown).half_size()).as_ref());
-        render(&shown, 32, half, &tokens()).pixels
+        render(&shown, 32, half, SUPERSAMPLE, &tokens()).pixels
     }
 
     /// What the 3D view's gizmo changes shows here too: a sphere's or cylinder's size, turn and centre, a placed frame's size, stretch and turn
@@ -562,7 +591,7 @@ mod tests {
     #[test]
     fn a_huge_sphere_keeps_the_shape_in_the_square() {
         let tokens = tokens();
-        let image = render(&sized(3.0), 32, fitted_half(&sized(3.0)), &tokens);
+        let image = render(&sized(3.0), 32, fitted_half(&sized(3.0)), SUPERSAMPLE, &tokens);
         assert_eq!(image.pixels[0], tokens.field, "the corner is background");
         assert_eq!(image.pixels[16 * 32 + 4], tokens.field, "the shape is half its size: its side is background");
         assert_ne!(image.pixels[16 * 32 + 16], tokens.field, "the shape is in the middle");
@@ -632,5 +661,61 @@ mod tests {
         let (mut harness, _) = crate::frame_gizmo::tests::fill_app_rendered(serde_json::json!({"projection": "spherical", "projectorScale": [3, 3, 3]}), true);
         harness.run_steps(4);
         harness.render().unwrap().save(directory.join("preview-fit-in-panel-spherical-x3.png")).unwrap();
+    }
+
+    /// One frame of `projection`'s preview square, with `events` as the frame's input
+    fn preview_frame(ctx: &egui::Context, projection: &Projection, events: Vec<egui::Event>) {
+        let tokens = tokens();
+        let input = egui::RawInput { events, ..Default::default() };
+        let mut output = ctx.run_ui(input, |ui| {
+            projection_preview(ui.painter(), Rect::from_min_size(pos2(0.0, 0.0), vec2(64.0, 64.0)), projection, BOUNDS, &tokens);
+        });
+        // No renderer takes the uploads here
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn a_drag_renders_the_square_lighter_and_the_release_renders_it_in_full() {
+        let ctx = egui::Context::default();
+        let at = pos2(10.0, 10.0);
+        let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        preview_frame(&ctx, &spherical(1.0), Vec::new());
+        assert_eq!(shown_supersample(&ctx), Some(SUPERSAMPLE), "at rest: in full");
+
+        preview_frame(&ctx, &spherical(1.0), vec![egui::Event::PointerMoved(at), button(true)]);
+        assert_eq!(shown_supersample(&ctx), Some(SUPERSAMPLE), "a press alone keeps the full picture: nothing changed");
+        preview_frame(&ctx, &spherical(2.0), Vec::new());
+        assert_eq!(shown_supersample(&ctx), Some(DRAG_SUPERSAMPLE), "a change while held renders lighter");
+        let dragged = shown_key(&ctx);
+
+        preview_frame(&ctx, &spherical(2.0), vec![button(false)]);
+        assert_eq!(shown_supersample(&ctx), Some(SUPERSAMPLE), "let go: the same picture in full");
+        assert_eq!(shown_key(&ctx), dragged);
+    }
+
+    /// Render times of the preview square (prints ms per render at its largest side; run with --ignored --nocapture)
+    #[test]
+    #[ignore]
+    fn preview_render_timings() {
+        let tokens = tokens();
+        let kinds = [
+            ("sphere", spherical(2.0)),
+            ("cylinder", cylindrical(Projector::default())),
+            ("cube", Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: UvTransform::default(), projector: Projector::default() }),
+        ];
+        for (name, projection) in kinds {
+            let start = std::time::Instant::now();
+            const RUNS: u32 = 10;
+            for _ in 0..RUNS {
+                std::hint::black_box(render(&projection, MAX_SIDE_PX, VIEW_HALF, SUPERSAMPLE, &tokens));
+            }
+            let full = start.elapsed().as_secs_f64() * 1000.0 / f64::from(RUNS);
+            let start = std::time::Instant::now();
+            for _ in 0..RUNS {
+                std::hint::black_box(render(&projection, MAX_SIDE_PX, VIEW_HALF, DRAG_SUPERSAMPLE, &tokens));
+            }
+            let dragged = start.elapsed().as_secs_f64() * 1000.0 / f64::from(RUNS);
+            println!("preview {name}: {full:.1} ms at rest, {dragged:.1} ms while dragged");
+        }
     }
 }

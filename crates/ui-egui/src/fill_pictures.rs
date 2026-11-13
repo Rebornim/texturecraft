@@ -5,6 +5,7 @@ use texturecraft_engine::core::{Filtering, ShapeCrop, UvWrap};
 
 use crate::fill_placement::Placement;
 use crate::projection_kind::ProjectionKind;
+use crate::warp_checker::warp_checker;
 
 use crate::theme::Tokens;
 
@@ -180,9 +181,6 @@ pub(crate) fn angle_picture(painter: &Painter, rect: Rect, degrees: f32, tokens:
     painter.circle_stroke(center, radius, Stroke::new(1.0, tokens.button_border));
 }
 
-/// Checker cells across a warp preview's frame
-const WARP_CELLS: usize = 4;
-
 /// How much of the preview an unpulled frame spans per mesh diagonal of its side (a new warp's frame round a ball spans about 0.62)
 const WARP_SPAN_PER_DIAGONAL: f32 = 1.07;
 /// The least and most of the preview a frame's side spans
@@ -191,8 +189,8 @@ const WARP_SPAN_RANGE: std::ops::RangeInclusive<f32> = 0.05..=0.95;
 /// Radius of a warp preview's corner handle
 const WARP_HANDLE_RADIUS: f32 = 3.5;
 
-/// A warp's frame with its corners where they are pulled, the checker bending with them; `size` is the frame's width and height in mesh diagonals, `turn` its turn round its normal (degrees), so resizing or turning the frame shows
-pub(crate) fn warp_preview(painter: &Painter, rect: Rect, corners: [[f32; 2]; 4], size: [f32; 2], turn: f32, tokens: &Tokens) {
+/// A warp's frame with its corners where they are pulled, the checker bending with them and laid as `placement` lays the image (tiling, rotation, offset); `size` is the frame's width and height in mesh diagonals, `turn` its turn round its normal (degrees), so resizing or turning the frame shows
+pub(crate) fn warp_preview(painter: &Painter, rect: Rect, corners: [[f32; 2]; 4], size: [f32; 2], turn: f32, placement: Placement, tokens: &Tokens) {
     let painter = painter.with_clip_rect(rect);
     painter.rect_filled(rect, 0, tokens.field);
     let span = size.map(|side| (side * WARP_SPAN_PER_DIAGONAL).clamp(*WARP_SPAN_RANGE.start(), *WARP_SPAN_RANGE.end()));
@@ -203,20 +201,9 @@ pub(crate) fn warp_preview(painter: &Painter, rect: Rect, corners: [[f32; 2]; 4]
         let (x, y) = (x * cos - y * sin, x * sin + y * cos);
         pos2(rect.center().x + x * rect.width(), rect.center().y - y * rect.height())
     });
-    let at = |u: f32, v: f32| -> Pos2 {
-        let top = top_left + (top_right - top_left) * u;
-        let bottom = bottom_left + (bottom_right - bottom_left) * u;
-        top + (bottom - top) * v
-    };
     let (dark, light) = (lerp_color(tokens.field, tokens.text, PREVIEW_DARK), lerp_color(tokens.field, tokens.text, PREVIEW_LIGHT));
-    let cells = WARP_CELLS as f32;
-    for i in 0..WARP_CELLS {
-        for j in 0..WARP_CELLS {
-            let (u0, v0, u1, v1) = (i as f32 / cells, j as f32 / cells, (i + 1) as f32 / cells, (j + 1) as f32 / cells);
-            let outline = vec![at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)];
-            let color = if (i + j) % 2 == 0 { light } else { dark };
-            painter.add(Shape::convex_polygon(outline, color, Stroke::NONE));
-        }
+    for (outline, lit) in warp_checker([top_left, top_right, bottom_right, bottom_left], placement) {
+        painter.add(Shape::convex_polygon(outline, if lit { light } else { dark }, Stroke::NONE));
     }
     let edge = vec![top_left, top_right, bottom_right, bottom_left];
     painter.add(Shape::closed_line(edge.clone(), Stroke::new(1.5, tokens.accent)));

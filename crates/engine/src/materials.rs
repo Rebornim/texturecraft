@@ -755,7 +755,12 @@ pub fn apply_at(s: &mut Session, id: &str, place: Place) -> Result<LayerId> {
             crate::layer_cmds::insert_selected(s, l)?
         } else {
             let gid = s.doc.project.alloc_id();
-            let mut group = Layer::new(gid, m.label, LayerKind::Group { children: Vec::new(), collapsed: false, contents: Default::default() }, &channels);
+            let mut group = Layer::new(
+                gid,
+                m.label,
+                LayerKind::Group { children: Vec::new(), collapsed: false, contents: Default::default(), randomized: Vec::new() },
+                &channels,
+            );
             for c in group.channels.values_mut() {
                 *c = ChannelBlend { mode: BlendMode::Passthrough, opacity: 1.0 };
             }

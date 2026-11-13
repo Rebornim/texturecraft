@@ -13,7 +13,7 @@ use texturecraft_core::{
     AnisotropicKuwahara, BakedMap, Bevel, BevelSmooth, BlendMode, BlockScales, Channel, ChannelKind, ColorMatch, CompareSource, ContentsOffset,
     CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter, Filtering, Generator, GeneratorKind, HeightMask, HeightToNormal, HighpassSpace,
     ImageInput, Layer, LayerId, LayerKind, Mask, MaskBackground, MaskOutline, Mirror, NormalFormat, Project, Projection, Sampling, ShapeCrop, Source,
-    SourceColorMode, SourceWarp, StylizedLighting, TargetColorMode, TextureSet, TileGrid, blend1, blend3, lum, mix3, per_unit, posterize,
+    SourceColorMode, SourceSlopeBlur, SourceWarp, StylizedLighting, TargetColorMode, TextureSet, TileGrid, blend1, blend3, lum, mix3, per_unit, posterize,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, Surface, UvGBuffer};
@@ -30,6 +30,7 @@ use crate::pattern::{Coords, image_samples, procedural_sized, world_noise};
 use crate::projector_cover::{framed_cover, projector_cover};
 use crate::projector_depth::ProjectorDepth;
 use crate::shape_distance::distance_filter;
+use crate::slope_texel::slope_texel;
 use crate::store::{BakedMaps, ImageRes, ImageStore, PixelStore, decode};
 use crate::warp_texel::warp_texel;
 
@@ -328,6 +329,8 @@ enum Op {
     Distance,
     /// Read from where a warp's source sends each texel (see [`warp_texel`])
     SourceWarp(SourceWarp),
+    /// The values downhill of each texel along a source's slope, blended (see [`slope_texel`])
+    SourceSlopeBlur(SourceSlopeBlur),
     /// The normal of the slopes of the layer's Height (see [`height_to_normal_texel`])
     HeightToNormal(HeightToNormal),
     /// Colors moved from a source color to a target color; the source the whole set's mean in Source Color Mode Average (see [`color_match`])
@@ -353,6 +356,9 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
             Some((index, texels(divided(*intensity, *divider)), Op::Warp { scale: *scale, seed: *seed, dir: Some(direction(*angle)) }))
         }
         EffectKind::Filter(Filter::SourceWarp(warp)) if warp.move_texels(res) > 0.0 => Some((index, warp.reach(res).max(0.5), Op::SourceWarp(*warp))),
+        EffectKind::Filter(Filter::SourceSlopeBlur(slope)) if slope.move_texels(res) > 0.0 => {
+            Some((index, slope.reach(res).max(0.5), Op::SourceSlopeBlur(*slope)))
+        }
         EffectKind::Filter(Filter::HighPass { radius, space, alpha }) => Some((index, texels(*radius), Op::HighPass { space: *space, alpha: *alpha })),
         EffectKind::Filter(Filter::EdgeDetect { width }) => Some((index, texels(*width), Op::Edge)),
         // Three box passes ramp an edge over about twice their radius
@@ -426,7 +432,7 @@ const MAP_GAIN: f32 = 2.0;
 const GAIN_PER_DETAIL_TEXEL: f32 = 2.0 * std::f32::consts::SQRT_2;
 
 /// Samples along a directional or slope blur at most (beyond, samples spread out).
-const LINE_SAMPLES: i32 = 24;
+pub(crate) const LINE_SAMPLES: i32 = 24;
 
 /// Fractal noise over texel position `(x, y)` (`res` texels per UV unit, `scale` features per
 /// UV unit), shifted by `d` in noise space.
@@ -566,6 +572,7 @@ fn gather(
                     mirror_texel(&mirror, (x, y), (block, res), comps, orig.get((row * wu + col) * comps + comps - 1), &mut acc, &sample)
                 }
                 Op::SourceWarp(warp) => warp_texel(&warp, (x, y), (res, comps), &mut acc, (&sample, &input)),
+                Op::SourceSlopeBlur(slope) => slope_texel(&slope, (x, y), (res, comps), &mut acc, (&sample, &input)),
                 Op::HeightToNormal(filter) => {
                     let center = orig.get((row * wu + col) * comps..(row * wu + col + 1) * comps).unwrap_or(&[]);
                     height_to_normal_texel(&filter, (x, y), (res, center), &mut acc, &input);

@@ -26,6 +26,7 @@ pub mod projector_cover;
 pub mod projector_depth;
 pub mod projector_view;
 mod shape_distance;
+mod slope_texel;
 mod soft_box;
 pub mod store;
 pub mod thumb;

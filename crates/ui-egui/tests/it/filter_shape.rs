@@ -1,12 +1,12 @@
-//! The shape filters in Properties: Threshold's Mode switch, Mirror's mode-dependent rows, Mask Outline's, Bevel's, Bevel Smooth's, Directional Distance's and Warp's rows
+//! The shape filters in Properties: Threshold's Mode switch, Mirror's mode-dependent rows, Mask Outline's, Bevel's, Bevel Smooth's, Directional Distance's, Warp's and Blur Slope's rows
 
 use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::{Value, json};
 use texturecraft_engine::core::{
-    BevelBlur, BevelCorner, BevelDirection, EffectKind, Filter, LayerId, MirrorCorner, MirrorMode, OutlinePosition, ThresholdMode, WarpBlending, WarpMode,
-    WarpSourceMode,
+    BevelBlur, BevelCorner, BevelDirection, EffectKind, Filter, LayerId, MirrorCorner, MirrorMode, OutlinePosition, SlopeBlending, ThresholdMode, WarpBlending,
+    WarpMode, WarpSourceMode,
 };
 use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
@@ -187,4 +187,35 @@ fn warp_rows_follow_the_mode() {
     );
     assert!(warp.source.tiling > 15.9 && warp.intensity > 0.95, "{warp:?}");
     assert_eq!((warp.seed, warp.divider, warp.source.balance), (1, 10, 0.5), "the others stay");
+}
+
+/// Blur Slope shows the reference's rows in order (no Slope scale); Blending Mode, Source Type and Quality set their own setting
+#[test]
+fn slope_blur_rows_set_the_smear() {
+    let (mut harness, effect) = app_with("slopeBlur");
+    assert!(harness.query_by_label("Slope scale").is_none());
+    let top = |harness: &Harness<'_, TextureCraftApp>, role: Role, label: &str| harness.get_by_role_and_label(role, label).rect().top();
+    let order = [
+        top(&harness, Role::Slider, "Intensity"),
+        top(&harness, Role::ComboBox, "Blur"),
+        top(&harness, Role::Slider, "Quality"),
+        harness.get_by_label("Source Parameters").rect().top(),
+        top(&harness, Role::ComboBox, "Default Noise"),
+        top(&harness, Role::Slider, "Blur"),
+        top(&harness, Role::Slider, "Position"),
+        top(&harness, Role::Slider, "Contrast"),
+        top(&harness, Role::Slider, "Source Tiling"),
+    ];
+    assert!(order.windows(2).all(|pair| pair[0] < pair[1]), "{order:?}");
+
+    pick(&mut harness, "Blur", "Max");
+    pick(&mut harness, "Default Noise", "Custom Noise");
+    let quality = harness.get_by_role_and_label(Role::Slider, "Quality").rect();
+    click_at(&mut harness, egui::pos2(quality.left() + 1.0, quality.center().y));
+
+    let Filter::SourceSlopeBlur(slope) = filter_of(&harness, effect) else { panic!() };
+    assert_eq!((slope.blending, slope.source.mode), (SlopeBlending::Max, WarpSourceMode::CustomNoise));
+    assert!(slope.quality < 0.05, "{slope:?}");
+    assert_eq!((slope.seed, slope.divider, slope.source.balance), (1, 10, 0.5), "the others stay");
+    assert!(harness.query_all_by_label("Custom Noise").count() >= 1, "the Custom Noise input shows under Source Type");
 }

@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 use texturecraft_engine::core::{
     AnisotropicKuwahara, Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, ColorMatch, ConversionMode, CurvePreset, DirectionalLight,
     EffectKind, Filter, GrayscaleConversion, GrayscaleMode, HeightToNormal, HighpassSpace, ImageInput, LayerId, LightingOutput, MaskOutline, Mirror,
-    MirrorCorner, MirrorMode, OutlinePosition, PbrValidate, SourceColorMode, SourceWarp, StylizedLighting, TargetColorMode, ThresholdMode, ValidationMode,
-    WarpBlending, WarpMode, WarpSourceMode,
+    MirrorCorner, MirrorMode, OutlinePosition, PbrValidate, SlopeBlending, SourceColorMode, SourceSlopeBlur, SourceWarp, StylizedLighting, TargetColorMode,
+    ThresholdMode, ValidationMode, WarpBlending, WarpMode, WarpSourceMode,
 };
 use texturecraft_engine::filter_lib::{build, find, scalar_params};
 
@@ -150,6 +150,7 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
         Filter::DistanceBevel(bevel) => return bevel_rows(app, sheet, id, bevel),
         Filter::BevelSmooth(smooth) => return bevel_smooth(app, sheet, id, smooth),
         Filter::SourceWarp(warp) => return source_warp(app, sheet, id, warp),
+        Filter::SourceSlopeBlur(slope) => return slope_blur(app, sheet, id, slope),
         Filter::HighPass { radius, space, alpha } => return highpass(app, sheet, id, *radius, *space, *alpha),
         Filter::GrayscaleConversion(conversion) => return grayscale_conversion(app, sheet, id, conversion),
         Filter::Grayscale => return grayscale_conversion(app, sheet, id, &GrayscaleConversion::of_luminance()),
@@ -560,6 +561,82 @@ fn source_warp(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64
     }
     sheet.close_card();
 }
+
+/// Blur Slope: Seed, Intensity with its Divider, Blending Mode (each drawn as what it does to a bar), Quality, then Source Parameters
+fn slope_blur(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, slope: &SourceSlopeBlur) {
+    let set = |app: &mut TextureCraftApp, key: &str, value: Value, merge: bool| {
+        app.run("effect.set", json!({"effect": id, key: value, "merge": merge}));
+    };
+    let mut seed = slope.seed;
+    if sheet.seed(tr("Seed"), &mut seed) {
+        set(app, "seed", json!(seed), false);
+    }
+    let mut intensity = slope.intensity;
+    if let Some(merge) = intensity_row(app, sheet, id, &mut intensity, 0.0..=1.0, slope.divider) {
+        set(app, "intensity", json!(intensity), merge);
+    }
+    let tokens = Tokens::get(sheet.ui.ctx());
+    let picture = |painter: &Painter, rect: Rect, blending: SlopeBlending| slope_blending_picture(painter, rect, blending, &tokens);
+    let name = |blending: SlopeBlending| tr(blending.label()).to_owned();
+    if let (Some(picked), _) = sheet.dropdown(tr("Blending Mode"), slope.blending, &SlopeBlending::ALL, name, Some(&picture)) {
+        set(app, "blendingMode", json!(picked.id()), false);
+    }
+    slider_rows(app, sheet, id, &[("quality", tr("Quality"), slope.quality, 0.0..=1.0)]);
+    if sheet.card(tr("Source Parameters"), Some(true)) {
+        let source = &slope.source;
+        let name = |mode: WarpSourceMode| tr(mode.label()).to_owned();
+        if let (Some(picked), _) = sheet.dropdown(tr("Source Type"), source.mode, &WarpSourceMode::ALL, name, None) {
+            set(app, "sourceMode", json!(picked.id()), false);
+        }
+        if source.mode == WarpSourceMode::CustomNoise {
+            input_slot(app, sheet, LayerId(id), ImageInput::CUSTOM_NOISE, true);
+        }
+        slider_rows(
+            app,
+            sheet,
+            id,
+            &[
+                ("sourceBlur", tr("Blur"), source.blur, 0.0..=1.0),
+                ("sourceBalance", tr("Position"), source.balance, 0.0..=1.0),
+                ("sourceContrast", tr("Contrast"), source.contrast, 0.0..=1.0),
+                ("sourceTiling", tr("Source Tiling"), source.tiling, 0.01..=16.0),
+            ],
+        );
+    }
+    sheet.close_card();
+}
+
+/// A light bar on the field after the slope pass: smeared (Blur), eaten away (Min) or grown (Max)
+fn slope_blending_picture(painter: &Painter, rect: Rect, blending: SlopeBlending, tokens: &Tokens) {
+    painter.rect_filled(rect, 0, tokens.field);
+    let bar = |left: f32, right: f32| {
+        let (top, bottom) = (rect.top() + rect.height() * SLOPE_BAR_TOP, rect.top() + rect.height() * (1.0 - SLOPE_BAR_TOP));
+        Rect::from_min_max(egui::pos2(rect.left() + rect.width() * left, top), egui::pos2(rect.left() + rect.width() * right, bottom))
+    };
+    match blending {
+        SlopeBlending::Blur => {
+            for (step, spread) in SLOPE_BLUR_SPREADS.iter().enumerate() {
+                let share = (step + 1) as f32 / SLOPE_BLUR_SPREADS.len() as f32;
+                let tint = tokens.text.gamma_multiply(share * SLOPE_BLUR_LAYER_ALPHA);
+                painter.rect_filled(bar(0.3 - spread, 0.62 + spread).expand2(egui::vec2(0.0, spread * rect.height() * 0.5)), 1, tint);
+            }
+        }
+        SlopeBlending::Min => {
+            painter.rect_filled(bar(0.42, 0.58), 0, tokens.text);
+        }
+        SlopeBlending::Max => {
+            painter.rect_filled(bar(0.18, 0.82), 0, tokens.text);
+        }
+    }
+    painter.rect_stroke(rect, 0, Stroke::new(1.0, tokens.field_border), StrokeKind::Inside);
+}
+
+/// Where a blending picture's bar starts down its square (and ends as far from the bottom)
+const SLOPE_BAR_TOP: f32 = 0.25;
+
+/// How far each soft layer of the Blur picture's bar spreads past the bar (shares of the square), widest first, and how opaque the layers stack up to
+const SLOPE_BLUR_SPREADS: [f32; 4] = [0.12, 0.08, 0.04, 0.0];
+const SLOPE_BLUR_LAYER_ALPHA: f32 = 0.45;
 
 /// The tone groups' names and the `effect.set` keys they edit, in the order a panel shows them
 const SHADOWS: (&str, &str) = ("Shadows", "shadows");

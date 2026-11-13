@@ -1,7 +1,7 @@
 //! The Filter effect card: an empty filter, its content channels switched on and off, Intensity's divider, Restore defaults and the Attributes it lists
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, EffectKind, Filter, LayerId, SourceWarp};
+use texturecraft_engine::core::{Channel, EffectKind, Filter, LayerId, SourceSlopeBlur, SourceWarp};
 use texturecraft_engine::geom::glam::Vec2;
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute};
@@ -110,7 +110,7 @@ fn the_divider_divides_the_intensity() {
     let (_, effect) = filtered_layer(&mut s, json!({"filter": "slopeBlur"}));
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "divider": 7})).is_err());
     execute(&mut s, "effect.set", &json!({"effect": effect.0, "divider": 100})).unwrap();
-    assert!(matches!(filter_of(&s, effect), Filter::SlopeBlur { divider: 100, .. }));
+    assert!(matches!(filter_of(&s, effect), Filter::SourceSlopeBlur(SourceSlopeBlur { divider: 100, .. })));
 
     let saved = serde_json::to_value(Filter::Warp { intensity: 1.0, scale: 2.0, seed: 3, divider: 1 }).unwrap();
     assert_eq!(saved, json!({"Warp": {"intensity": 1.0, "scale": 2.0, "seed": 3}}), "saved as before dividers");

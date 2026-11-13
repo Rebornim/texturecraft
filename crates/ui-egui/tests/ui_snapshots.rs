@@ -1734,7 +1734,7 @@ fn filter_card_snapshots() {
     };
     let empty = add(&mut session, json!({"layer": layer, "target": "content", "filter": "none"}));
     let blur = add(&mut session, json!({"layer": layer, "target": "mask", "filter": "blur"}));
-    let slope = add(&mut session, json!({"layer": layer, "target": "content", "filter": "slopeBlur", "seed": 12, "radius": 3.0}));
+    let slope = add(&mut session, json!({"layer": layer, "target": "content", "filter": "slopeBlur", "seed": 12}));
     execute(&mut session, "effect.set", &json!({"effect": slope.0, "divider": 10, "channels": {"metallic": false, "normal": false}})).unwrap();
     execute(&mut session, "layer.select", &json!({"layer": layer})).unwrap();
     session.target = StackTarget::Effect(empty);
@@ -1757,6 +1757,13 @@ fn filter_card_snapshots() {
         }
         harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
     }
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Blur").click();
+    harness.run_steps(3);
+    let option = harness.get_by_role_and_label(egui::Role::ListBoxOption, "Max").rect().center();
+    harness.hover_at(option);
+    save(&mut harness, &output_dir, "filter-slope-blending-open");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
     let reset = harness.get_by_role_and_label(egui::Role::Button, "Restore defaults").rect().center();
     harness.hover_at(reset);
     save(&mut harness, &output_dir, "filter-reset-hovered");

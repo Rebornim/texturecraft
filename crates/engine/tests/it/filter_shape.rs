@@ -1,9 +1,9 @@
-//! The shape filters: Threshold's modes, Mirror, Mask Outline, Bevel, Bevel Smooth, Directional Distance and Warp's modes
+//! The shape filters: Threshold's modes, Mirror, Mask Outline, Bevel, Bevel Smooth, Directional Distance, Warp's modes and Blur Slope's source
 
 use serde_json::{Value, json};
 use texturecraft_engine::core::{
     Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, DirectionalDistance, EffectKind, Filter, LayerId, MaskOutline, Mirror, MirrorCorner,
-    MirrorMode, OutlinePosition, SourceWarp, ThresholdMode, WarpBlending, WarpMode,
+    MirrorMode, OutlinePosition, SlopeBlending, SourceSlopeBlur, SourceWarp, ThresholdMode, WarpBlending, WarpMode, WarpSource, WarpSourceMode,
 };
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute};
@@ -326,4 +326,58 @@ fn warp_modes_move_texels_their_way() {
     s.doc.project.effect_mut(former).unwrap().kind = EffectKind::Filter(old);
     execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": former.0})).unwrap();
     assert_eq!(filter_of(&s, former), Filter::SourceWarp(directional));
+}
+
+/// Blur Slope: library defaults, Min under Blur under Max, reading downhill of its Previous Input, Quality, one undo, old saves
+#[test]
+fn slope_blur_reads_downhill_of_its_source() {
+    let mut s = session();
+    execute(&mut s, "layer.add.fill", &json!({"color": [0.5, 0.5, 0.5], "roughness": 0.25})).unwrap();
+    execute(&mut s, "layer.fill.set", &json!({"channel": "roughness", "procedural": "gradient"})).unwrap();
+    let row = SIZE / 2;
+    let before: Vec<f32> = (0..SIZE).map(|x| roughness(&mut s, (x, row))).collect();
+    let after = |s: &mut Session| -> Vec<f32> { (0..SIZE).map(|x| roughness(s, (x, row))).collect() };
+    let moved = |values: &[f32]| values.iter().zip(&before).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+
+    let effect = add_filter(&mut s, json!({"filter": "slopeBlur"}));
+    assert_eq!(filter_of(&s, effect), Filter::SourceSlopeBlur(SourceSlopeBlur::LIBRARY), "the library defaults");
+    assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Blur Slope");
+    set(&mut s, effect, json!({"intensity": 0.05, "divider": 1}));
+    let blur = after(&mut s);
+    assert!(moved(&blur) > 0.005 && blur.iter().all(|v| v.is_finite()), "the noise's slope smears: {}", moved(&blur));
+    set(&mut s, effect, json!({"blendingMode": "min"}));
+    let min = after(&mut s);
+    set(&mut s, effect, json!({"blendingMode": "max"}));
+    let max = after(&mut s);
+    assert!(max.iter().zip(&min).all(|(max, min)| max + 1e-4 >= *min) && max.iter().zip(&min).any(|(max, min)| max - min > 0.01), "Max over Min");
+    assert!(blur.iter().zip(max.iter().zip(&min)).all(|(blur, (max, min))| *blur <= max + 2e-3 && *blur >= min - 2e-3), "Blur between");
+    execute(&mut s, "edit.undo", &Value::Null).unwrap();
+    let Filter::SourceSlopeBlur(slope) = filter_of(&s, effect) else { panic!() };
+    assert_eq!(slope.blending, SlopeBlending::Min, "one undo step");
+
+    // Read downhill of the gradient itself: every texel where it rises reads darker values
+    set(&mut s, effect, json!({"blendingMode": "blur", "sourceMode": "previousInput"}));
+    let downhill = after(&mut s);
+    let rising = (8..SIZE as usize - 8).find(|x| (x - 8..x + 8).all(|k| before[k + 1] > before[k] + 1e-4)).unwrap();
+    assert!(downhill[rising] < before[rising] - 0.005, "{} -> {}", before[rising], downhill[rising]);
+    set(&mut s, effect, json!({"quality": 0.0}));
+    let coarse = after(&mut s);
+    assert!(coarse.iter().all(|v| v.is_finite()) && coarse != downhill, "fewer reads, another smear");
+    set(&mut s, effect, json!({"sourceMode": "customNoise"}));
+    assert!(moved(&after(&mut s)) < 2e-3, "an unlinked custom noise is flat: nothing smears");
+
+    refused(&mut s, effect, &[json!({"blendingMode": "average"}), json!({"sourceMode": "image"}), json!({"divider": 7})]);
+    set(&mut s, effect, json!({"intensity": 5.0, "quality": -1.0, "sourceTiling": 99.0, "sourceBlur": 2.0, "sourceBalance": 0.25, "seed": 7}));
+    let Filter::SourceSlopeBlur(slope) = filter_of(&s, effect) else { panic!() };
+    let source = WarpSource { mode: WarpSourceMode::CustomNoise, blur: 1.0, balance: 0.25, contrast: 0.0, tiling: 16.0 };
+    assert_eq!((slope.intensity, slope.quality, slope.source, slope.seed), (1.0, 0.0, source, 7), "values clamp");
+
+    // Saved before its source settings: loads and saves as it was, and Restore defaults gives today's Blur Slope
+    let saved = json!({"SlopeBlur": {"radius": 16.0, "scale": 4.0, "seed": 1}});
+    let old: Filter = serde_json::from_value(saved.clone()).unwrap();
+    assert_eq!(old, Filter::SlopeBlur { radius: 16.0, scale: 4.0, seed: 1, divider: 1 });
+    assert_eq!(serde_json::to_value(&old).unwrap(), saved, "saves as before");
+    s.doc.project.effect_mut(effect).unwrap().kind = EffectKind::Filter(old);
+    execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap();
+    assert_eq!(filter_of(&s, effect), Filter::SourceSlopeBlur(SourceSlopeBlur::LIBRARY));
 }

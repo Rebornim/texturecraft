@@ -3,6 +3,7 @@
 use egui::{PointerButton, Pos2, Rect, Ui};
 
 use crate::TextureCraftApp;
+use crate::property_sheet::SectionScope;
 use crate::state::Mode;
 use crate::theme::Tokens;
 
@@ -74,7 +75,14 @@ pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
             ui.set_max_height(bounds.height() * PROPERTIES_POPUP_MAX_HEIGHT_SHARE);
             // A floating bar would cover the sliders' right-aligned values
             ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
-            egui::ScrollArea::vertical().id_salt("properties_popup_scroll").show(ui, |ui| crate::dock::properties_contents(app, ui));
+            // The docked panel's jump tabs on the top edge stay put while the sections scroll under them
+            let scope = SectionScope::Popup;
+            if crate::dock::properties_has_fill_tabs(app) {
+                crate::property_sheet::section_tabs(ui, scope, ui.style().visuals.menu_corner_radius.nw, &crate::fill_panel::fill_tabs());
+            }
+            crate::property_sheet::in_scope(ui, scope, |ui| {
+                egui::ScrollArea::vertical().id_salt("properties_popup_scroll").show(ui, |ui| crate::dock::properties_contents(app, ui));
+            });
         });
     });
 }

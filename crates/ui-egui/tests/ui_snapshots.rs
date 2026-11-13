@@ -1168,3 +1168,67 @@ fn info_icon_snapshots() {
         save(&mut harness, &output_dir, &format!("info-depth-{name}"));
     }
 }
+
+/// The right-click Properties popup on a UV fill: its jump tabs with Symmetry hovered, Material clicked, then wheeled up to Symmetry; `TC_UI_THEMES` set adds the dark and light themes
+#[test]
+#[ignore]
+fn popup_tabs_snapshots() {
+    use egui::{Event, Modifiers, PointerButton};
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1]})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.fill.projection", &json!({"layer": layer, "projection": "uv"})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1000.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.set_render_cursor(false);
+    harness.run_steps(4);
+
+    let at = harness.state().viewport_rect.center() - egui::vec2(200.0, 250.0);
+    harness.hover_at(at);
+    for pressed in [true, false] {
+        harness.event(Event::PointerButton { pos: at, button: PointerButton::Secondary, pressed, modifiers: Modifiers::NONE });
+        harness.run_steps(2);
+    }
+    harness.run_steps(4);
+    let popup = harness.ctx.memory(|memory| memory.area_rect(texturecraft_ui_egui::properties_popup::area_id())).unwrap();
+    let tab = |harness: &Harness<'_, TextureCraftApp>, name: &str| {
+        harness.get_all_by_role_and_label(egui::accesskit::Role::Tab, name).map(|tab| tab.rect()).find(|tab| popup.contains_rect(*tab)).unwrap().center()
+    };
+    let symmetry = tab(&harness, "Symmetry");
+    harness.hover_at(symmetry);
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "popup-tabs-fill-medium");
+
+    let material = tab(&harness, "Material");
+    harness.hover_at(material);
+    for pressed in [true, false] {
+        harness.event(Event::PointerButton { pos: material, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.run_steps(2);
+    }
+    harness.run_steps(60);
+    save(&mut harness, &output_dir, "popup-tabs-material-medium");
+
+    harness.hover_at(popup.center());
+    harness.event(Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, 260.0),
+        modifiers: Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+    });
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "popup-tabs-symmetry-medium");
+
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            harness.run_steps(6);
+            save(&mut harness, &output_dir, &format!("popup-tabs-symmetry-{name}"));
+        }
+    }
+}

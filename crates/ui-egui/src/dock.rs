@@ -16,7 +16,7 @@ use texturecraft_engine::{CloneFrom, StackTarget, Tool};
 use crate::TextureCraftApp;
 use crate::i18n::{tr, trf};
 use crate::layer_panel::{effect_preview_size, effect_row_height, layer_preview_size, layer_row_height};
-use crate::property_sheet::PropertySheet;
+use crate::property_sheet::{PropertySheet, SectionScope};
 use crate::shelf::{Asset, ShelfDrag};
 use crate::state::PropsTab;
 use crate::theme::{Tokens, caption};
@@ -1149,14 +1149,17 @@ fn effect_type_label(kind: &EffectKind) -> &'static str {
 pub(crate) fn properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     // A floating scroll bar would cover the right-aligned slider values and section reset icons
     ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+    let scope = SectionScope::Docked;
     if properties_has_fill_tabs(app) {
-        crate::property_sheet::section_tabs(ui, &crate::fill_panel::fill_tabs());
+        crate::property_sheet::section_tabs(ui, scope, 0, &crate::fill_panel::fill_tabs());
     }
-    egui::ScrollArea::vertical().id_salt("props").auto_shrink([false, false]).show(ui, |ui| properties_contents(app, ui));
+    crate::property_sheet::in_scope(ui, scope, |ui| {
+        egui::ScrollArea::vertical().id_salt("props").auto_shrink([false, false]).show(ui, |ui| properties_contents(app, ui));
+    });
 }
 
 /// Whether the panel shows a fill layer's sections, which the tabs jump between
-fn properties_has_fill_tabs(app: &TextureCraftApp) -> bool {
+pub(crate) fn properties_has_fill_tabs(app: &TextureCraftApp) -> bool {
     let layer = app.session.selected_layer().and_then(|id| app.session.doc.project.layers.get(&id));
     app.session.tool.tool != Tool::PolygonFill
         && app.session.target == StackTarget::Content

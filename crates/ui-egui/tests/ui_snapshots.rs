@@ -1813,6 +1813,64 @@ fn colour_filter_snapshots() {
 }
 
 #[test]
+#[ignore = "writes the gradient filters (screen 19) to TC_UI_SNAPSHOTS; run with --ignored"]
+/// Screen 19: Gradient, Gradient Curve (and its Preset list open, Bump hovered) and Gradient Dynamic
+fn gradient_filter_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::core::LayerId;
+    use texturecraft_engine::{StackTarget, execute};
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "mask.add.white", &json!({"layer": layer.clone()})).unwrap();
+    let mut add = |params: serde_json::Value| {
+        let mut params = params;
+        params["layer"] = layer.clone();
+        params["target"] = json!("mask");
+        LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap())
+    };
+    let stops =
+        json!([[0.009, 0.008, 0.013], [0.55, 0.105, 0.021], [0.87, 0.67, 0.35], [1, 1, 1], [1, 1, 1], [1, 1, 1], [1, 1, 1], [1, 1, 1], [1, 1, 1], [1, 1, 1]]);
+    let effects = [
+        ("gradient", add(json!({"filter": "gradientMap", "colors": stops, "positions": [0.0, 0.45, 1.0]}))),
+        ("gradient-curve", add(json!({"filter": "gradientCurve"}))),
+        ("gradient-dynamic", add(json!({"filter": "gradientDynamic", "color": [0.578, 0.578, 0.578]}))),
+    ];
+    execute(&mut session, "layer.select", &json!({"layer": layer})).unwrap();
+    session.target = StackTarget::Effect(effects[0].1);
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    for (name, effect) in effects {
+        harness.state_mut().session.target = StackTarget::Effect(effect);
+        harness.run_steps(4);
+        save(&mut harness, &output_dir, &format!("filter-{name}"));
+    }
+    harness.state_mut().session.target = StackTarget::Effect(effects[1].1);
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Round").click();
+    harness.run_steps(3);
+    let bump = harness.get_by_label("Bump").rect();
+    harness.hover_at(bump.center());
+    save(&mut harness, &output_dir, "filter-gradient-curve-presets");
+    harness.key_press(egui::Key::Escape);
+    harness.state_mut().session.target = StackTarget::Effect(effects[0].1);
+    harness.run_steps(4);
+    let marker = harness.get_all_by_role_and_label(egui::Role::Slider, "Color 2").next().unwrap().rect();
+    harness.hover_at(marker.center());
+    save(&mut harness, &output_dir, "filter-gradient-marker-hovered");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, theme) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("filter-gradient-{theme}"));
+        }
+    }
+}
+
+#[test]
 #[ignore = "writes the filter picker states (screen 13) to TC_UI_SNAPSHOTS; run with --ignored"]
 /// Screen 13: the filter picker opened from an empty card, swapping (current outlined), searching, and in a mask
 fn filter_picker_snapshots() {

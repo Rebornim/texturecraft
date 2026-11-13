@@ -41,5 +41,6 @@ mod uv_strokes;
 mod fill_whole_material;
 mod filter_card;
 mod filter_colour;
+mod filter_gradient;
 mod swatches;
 mod symmetry;

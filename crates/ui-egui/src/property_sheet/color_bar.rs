@@ -67,7 +67,7 @@ impl PropertySheet<'_> {
     pub(crate) fn color_bar(&mut self, label: &str, linear: [f32; 3], eyedropping: Option<Id>, swatches: &[[f32; 3]]) -> ColorPick {
         let center_y = self.take(super::ROW_HEIGHT).center().y;
         let bar = Rect::from_min_max(pos2(self.left, center_y - COLOR_BAR_HEIGHT / 2.0), pos2(self.right - EYEDROPPER_ROOM, center_y + COLOR_BAR_HEIGHT / 2.0));
-        self.color_bar_at(bar, label, linear, eyedropping, swatches)
+        self.color_bar_at(bar, self.right - EYEDROPPER_INSET, label, linear, eyedropping, swatches)
     }
 
     /// [`Self::color_bar`] in the controls column, beside `label`
@@ -77,10 +77,19 @@ impl PropertySheet<'_> {
             pos2(control.left(), center_y - COLOR_BAR_HEIGHT / 2.0),
             pos2(control.right() - EYEDROPPER_ROOM, center_y + COLOR_BAR_HEIGHT / 2.0),
         );
-        self.color_bar_at(bar, label, linear, eyedropping, swatches)
+        self.color_bar_at(bar, self.right - EYEDROPPER_INSET, label, linear, eyedropping, swatches)
     }
 
-    fn color_bar_at(&mut self, bar: Rect, label: &str, linear: [f32; 3], eyedropping: Option<Id>, swatches: &[[f32; 3]]) -> ColorPick {
+    /// A colour bar drawn in `bar`, its eyedropper centred at `eyedropper_x`
+    pub(super) fn color_bar_at(
+        &mut self,
+        bar: Rect,
+        eyedropper_x: f32,
+        label: &str,
+        linear: [f32; 3],
+        eyedropping: Option<Id>,
+        swatches: &[[f32; 3]],
+    ) -> ColorPick {
         let id = self.next_id();
         let response = self.ui.interact(bar, id, Sense::click());
         response.widget_info(|| WidgetInfo::labeled(Role::Button, true, label));
@@ -89,7 +98,7 @@ impl PropertySheet<'_> {
         self.ui.painter().rect(bar, CornerRadius::same(3), shown_color(linear), Stroke::new(1.0, border), StrokeKind::Inside);
 
         let waiting = eyedropping == Some(id);
-        let glyph = Rect::from_center_size(pos2(self.right - EYEDROPPER_INSET, bar.center().y), vec2(EYEDROPPER_TARGET, EYEDROPPER_TARGET));
+        let glyph = Rect::from_center_size(pos2(eyedropper_x, bar.center().y), vec2(EYEDROPPER_TARGET, EYEDROPPER_TARGET));
         let mut pick = ColorPick::none(id);
         pick.eyedropper = self.eyedropper_at(glyph, waiting, t.text_dim);
         self.drawn(bar.bottom());

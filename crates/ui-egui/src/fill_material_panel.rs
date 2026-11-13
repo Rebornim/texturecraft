@@ -291,7 +291,7 @@ fn uniform_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, slot_o
 }
 
 /// The colour `pick` picked, after starting or ending an eyedropper pick its eyedropper asked for and making the change its Swatches row asked for
-fn take_color_pick(app: &mut TextureCraftApp, pick: ColorPick) -> Option<[f32; 3]> {
+pub(crate) fn take_color_pick(app: &mut TextureCraftApp, pick: ColorPick) -> Option<[f32; 3]> {
     if pick.eyedropper {
         app.picking_color = if app.picking_color == Some(pick.id) { None } else { Some(pick.id) };
     }

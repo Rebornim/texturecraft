@@ -4,6 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::curve_preset::CurvePreset;
+use crate::gradient_input::{GradientInput, ramp, shape};
 use crate::{Backface, BlendMode, Channel, ChannelKind, CompareSource, ContentsOffset, DepthCulling, FillSymmetry, Projector, ShapeCrop, lum};
 
 mod curvature_detail;
@@ -937,9 +939,37 @@ pub enum Filter {
         midtones: [f32; 3],
         highlights: [f32; 3],
     },
-    /// Luminance mapped through evenly spaced colors (linear RGB; scalars read their gray).
+    /// The texel's gray (after `input`) mapped through a ramp of colors (scalars read the ramp's gray)
     GradientMap {
         colors: Vec<[f32; 3]>,
+        /// Where each color sits on the ramp (0..1); evenly spaced in projects saved before
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        positions: Vec<f32>,
+        /// How many of `colors` the ramp uses (2..10), the rest kept for later; all of them in projects saved before
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        quantity: Option<u8>,
+        /// How a texel becomes the position it reads; luma, untouched, in projects saved before
+        #[serde(default, skip_serializing_if = "GradientInput::is_unchanged")]
+        input: GradientInput,
+        /// Blends neighbouring colors in linear RGB (off: in sRGB, as a color picker shows them); on in projects saved before
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        linear: bool,
+        /// Shows the ramp itself across the texture (left to right) in place of the mapped values
+        #[serde(default, skip_serializing_if = "is_false")]
+        debug: bool,
+    },
+    /// Values remapped through a preset curve, after balance, contrast and invert like a gradient's input
+    GradientCurve {
+        preset: CurvePreset,
+        invert: bool,
+        balance: f32,
+        contrast: f32,
+    },
+    /// A color read off a gradient source at `position` across it (`vertical`: down it); the source is a uniform color
+    GradientDynamic {
+        vertical: bool,
+        position: f32,
+        color: [f32; 3],
     },
     /// Quantize to `levels` steps (2..64).
     Posterize {
@@ -1058,6 +1088,14 @@ fn unit_divider() -> u16 {
 }
 
 /// Whether a switch is off (not saved then)
+fn yes() -> bool {
+    true
+}
+
+fn is_true(on: &bool) -> bool {
+    *on
+}
+
 fn is_false(on: &bool) -> bool {
     !*on
 }
@@ -1159,6 +1197,30 @@ impl Filter {
     /// The choices of an intensity's divider
     pub const DIVIDERS: [u16; 4] = [1, 10, 100, 1000];
 
+    /// A gradient as projects saved before the Input Transformation read it: `colors` evenly spaced, luma, linear blending
+    pub fn even_gradient(colors: Vec<[f32; 3]>) -> Filter {
+        Filter::GradientMap { colors, positions: Vec::new(), quantity: None, input: GradientInput::default(), linear: true, debug: false }
+    }
+
+    /// The most colors a gradient's Color Quantity uses
+    pub const MAX_GRADIENT_COLORS: u8 = 10;
+
+    /// The colors a gradient's ramp uses: the first Color Quantity of them (all of them where it has none)
+    pub fn ramp_colors(&self) -> &[[f32; 3]] {
+        match self {
+            Filter::GradientMap { colors, quantity, .. } => colors.get(..quantity.map_or(colors.len(), usize::from).min(colors.len())).unwrap_or(colors),
+            _ => &[],
+        }
+    }
+
+    /// A gradient's color at ramp position `t` (None for other filters and an empty ramp)
+    pub fn ramp_at(&self, t: f32) -> Option<[f32; 3]> {
+        let Filter::GradientMap { positions, linear, .. } = self else { return None };
+        let colors = self.ramp_colors();
+        // Evenly spaced linear ramps take the path projects saved before took, so they render bit for bit as before
+        if positions.is_empty() && *linear { gradient(colors, t) } else { ramp(colors, positions, *linear, t) }
+    }
+
     /// Whether the filter reads neighbouring texels (the compositor runs it over a region).
     pub fn is_neighbourhood(&self) -> bool {
         matches!(
@@ -1224,9 +1286,21 @@ impl Filter {
                     _ => per_unit(kind, v, |x| unit(x + (shift(0, x) + shift(1, x) + shift(2, x)) / 3.0)),
                 }
             }
-            Filter::GradientMap { colors } => match kind {
-                ChannelKind::Color => gradient(colors, lum(v))?,
-                _ => per_unit(kind, v, |x| gradient(colors, x).map_or(x, lum)),
+            Filter::GradientMap { input, .. } => {
+                let gray = match kind {
+                    ChannelKind::Color => input.mode.gray(v),
+                    _ => v[0],
+                };
+                let mapped = self.ramp_at(input.shape(gray))?;
+                match kind {
+                    ChannelKind::Color => mapped,
+                    _ => per_unit(kind, v, |_| lum(mapped)),
+                }
+            }
+            Filter::GradientCurve { preset, invert, balance, contrast } => per_unit(kind, v, |x| preset.at(shape(x, *balance, *contrast, *invert))),
+            Filter::GradientDynamic { color, .. } => match kind {
+                ChannelKind::Color => color.map(unit),
+                _ => per_unit(kind, v, |_| unit(lum(*color))),
             },
             Filter::Posterize { levels } => {
                 let steps = (levels.clamp(2.0, 64.0).round() - 1.0).max(1.0);
@@ -1304,7 +1378,9 @@ impl Filter {
             Filter::ContrastLuminosity { .. } => "Contrast Luminosity",
             Filter::ColorBalance { .. } => "Color Balance",
             Filter::ColorCorrect { .. } => "Color Correct",
-            Filter::GradientMap { .. } => "Gradient Map",
+            Filter::GradientMap { .. } => "Gradient",
+            Filter::GradientCurve { .. } => "Gradient Curve",
+            Filter::GradientDynamic { .. } => "Gradient Dynamic",
             Filter::Posterize { .. } => "Posterize",
             Filter::Clamp { .. } => "Clamp",
             Filter::HistogramScan { .. } => "Histogram Scan",
@@ -1334,6 +1410,7 @@ impl Filter {
             Filter::SlopeBlur { .. } => Some("Slope Blur"),
             Filter::HighPass { .. } => Some("High Pass"),
             Filter::Grayscale => Some("Grayscale"),
+            Filter::GradientMap { .. } => Some("Gradient Map"),
             _ => None,
         }
     }
@@ -1687,10 +1764,10 @@ mod tests {
         let cl = Filter::ContrastLuminosity { contrast: 1.0, luminosity: 0.0 };
         assert!(close(cl.point(c, [0.25, 0.5, 0.75]).unwrap(), [0.0, 0.5, 1.0]));
         assert!(close(Filter::ContrastLuminosity { contrast: 0.0, luminosity: 0.2 }.point(ChannelKind::Scalar, [0.5; 3]).unwrap(), [0.7; 3]));
-        let gm = Filter::GradientMap { colors: vec![[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]] };
+        let gm = Filter::even_gradient(vec![[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]);
         assert!(close(gm.point(c, [0.0; 3]).unwrap(), [1.0, 0.0, 0.0]));
         assert!(close(gm.point(c, [1.0; 3]).unwrap(), [0.0, 0.0, 1.0]));
-        assert_eq!(Filter::GradientMap { colors: vec![] }.point(c, [0.3; 3]), None, "an empty gradient changes nothing");
+        assert_eq!(Filter::even_gradient(vec![]).point(c, [0.3; 3]), None, "an empty gradient changes nothing");
         assert!(close(Filter::Posterize { levels: 2.0 }.point(c, [0.2, 0.6, 0.9]).unwrap(), [0.0, 1.0, 1.0]));
         assert!(close(Filter::Clamp { min: 0.8, max: 0.3 }.point(c, [0.1, 0.5, 0.9]).unwrap(), [0.3, 0.5, 0.8]), "swapped bounds never panic");
         let scan = |position, contrast| Filter::HistogramScan { position, contrast }.point(c, [0.2, 0.5, 0.9]).unwrap();

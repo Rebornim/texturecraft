@@ -290,6 +290,8 @@ enum Op {
     Edge,
     /// Average downhill along a noise height field.
     Slope { scale: f32, seed: u32 },
+    /// Box blurs, then the effect's own point filter on the blurred value (a gradient's Blur Intensity)
+    PreBlur,
 }
 
 /// The last neighbourhood filter of an effect stack (see [`neighbourhood_filters`]).
@@ -316,6 +318,7 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
         EffectKind::Filter(Filter::Bevel { width, .. }) => Some((index, texels(*width * 0.5), Op::Bevel)),
         EffectKind::Filter(Filter::Glow { radius, amount }) => Some((index, texels(*radius), Op::Glow(*amount))),
         EffectKind::Filter(Filter::Mosaic { size }) => Some((index, texels(*size), Op::Mosaic)),
+        EffectKind::Filter(Filter::GradientMap { input, debug: false, .. }) if input.blur > 0.0 => Some((index, texels(input.blur), Op::PreBlur)),
         EffectKind::Filter(Filter::SlopeBlur { radius, scale, seed, divider }) if *radius > 0.0 => {
             Some((index, texels(divided(*radius, *divider)), Op::Slope { scale: *scale, seed: *seed }))
         }
@@ -440,7 +443,7 @@ fn gather(op: Op, orig: &[f32], cover: &[f32], comps: usize, (x0, y0, w, h): (u3
                     let center = |v: f32| ((v / r).floor() + 0.5) * r - 0.5;
                     sample(center(x), center(y), &mut acc);
                 }
-                Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) => {}
+                Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) | Op::PreBlur => {}
             }
             if acc[4] > 1e-6
                 && let Some(px) = line.get_mut(col * comps..(col + 1) * comps)
@@ -667,7 +670,7 @@ fn filter_extent(radius: f32, op: Op, longest_side: u32) -> (u32, u32) {
 
 /// Whether neighbourhood filter `op` is computed from box blurs (the others gather samples).
 fn is_box_blur(op: Op) -> bool {
-    matches!(op, Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_))
+    matches!(op, Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) | Op::PreBlur)
 }
 
 /// The stack up to and including neighbourhood filter `filter` over texel `region`, continued from `start` (the filter below's field) when given.
@@ -785,6 +788,8 @@ fn filter_region(
             (Cow::Owned(wrap_pad(&orig, comps, (w as usize, h as usize), pad)), Cow::Owned(wrap_pad(&cover, 1, (w as usize, h as usize), pad)))
         };
         let (width, height, blur_radius) = (w as usize + 2 * pad.0, h as usize + 2 * pad.1, scaled_radius as usize);
+        // A pre-blur takes the blur whole; the effect's opacity mixes its mapped result below
+        let blurred_opacity = if matches!(op, Op::PreBlur) { 1.0 } else { opacity };
         let mut weights = cover.to_vec();
         blur(&mut weights, width, height, blur_radius);
         let mut data = orig.to_vec();
@@ -807,9 +812,15 @@ fn filter_region(
                         Op::HighPass | Op::Bevel | Op::Glow(_) => original,
                         _ => blurred,
                     };
-                    *slot = original + (result - original) * opacity;
+                    *slot = original + (result - original) * blurred_opacity;
                 }
             });
+        }
+        if matches!(op, Op::PreBlur)
+            && let Some(Effect { kind: EffectKind::Filter(filter), .. }) = effects.iter().filter(|effect| effect.visible).nth(index)
+        {
+            let kind = channel.map_or(ChannelKind::Scalar, Channel::kind);
+            map_blurred(&mut data, &orig, comps, filter, kind, opacity);
         }
         if pad == (0, 0) { data } else { unpad(&data, comps, (w as usize, h as usize), pad) }
     };
@@ -836,6 +847,24 @@ fn filter_region(
 
     unpremultiply(&mut data, comps);
     Some(Field { x0: rx0, y0: ry0, w, h, comps, data })
+}
+
+/// Run point filter `filter` on blurred texels `data` (premultiplied content or masks) and mix the result over the unblurred `orig` by `opacity`
+fn map_blurred(data: &mut [f32], orig: &[f32], comps: usize, filter: &Filter, kind: ChannelKind, opacity: f32) {
+    let straight = |value: f32, cover: f32| if cover > 1e-5 { value / cover } else { 0.0 };
+    data.par_chunks_mut(comps).zip(orig.par_chunks(comps)).for_each(|(pixel, original)| match (pixel, original) {
+        ([value], [before]) => {
+            let mapped = filter.point(kind, [*value; 3]).map_or(*value, |gray| gray[0]);
+            *value = before + (mapped - before) * opacity;
+        }
+        ([r, g, b, cover], [r0, g0, b0, cover0]) => {
+            let before = [straight(*r0, *cover0), straight(*g0, *cover0), straight(*b0, *cover0)];
+            let blurred = [straight(*r, *cover), straight(*g, *cover), straight(*b, *cover)];
+            let mixed = mix3(before, filter.point(kind, blurred).unwrap_or(before), opacity);
+            [*r, *g, *b, *cover] = [mixed[0] * cover0, mixed[1] * cover0, mixed[2] * cover0, *cover0];
+        }
+        _ => {}
+    });
 }
 
 /// Clamp filtered masks to 0..1, and turn filtered content back into straight values.
@@ -1648,6 +1677,10 @@ impl<'a, 'b> Texel<'a, 'b> {
                     value += (blend1(effect.blend, value, generated) - value) * opacity;
                 }
                 EffectKind::Levels(levels) => value += (levels.apply(value) - value) * opacity,
+                EffectKind::Filter(filter @ Filter::GradientMap { debug: true, .. }) => {
+                    let ramp = filter.ramp_at(self.coords().uv.x.rem_euclid(1.0)).map_or(value, lum);
+                    value += (ramp - value) * opacity;
+                }
                 EffectKind::Filter(filter) => {
                     // A mask is gray (HSL only changes its lightness); neighbourhood filters come precomputed through `MaskPlan::start`
                     let filtered = filter.point(ChannelKind::Scalar, [value; 3]).map_or(value, |gray| gray[0]);
@@ -1977,6 +2010,11 @@ impl<'a, 'b> Texel<'a, 'b> {
                 }
                 _ => (v, cov),
             },
+            // A gradient's debug view shows its ramp left to right across each UV tile
+            EffectKind::Filter(f @ Filter::GradientMap { debug: true, .. }) => {
+                let ramp = f.ramp_at(self.coords().uv.x.rem_euclid(1.0)).map(|color| if c.kind == ChannelKind::Color { color } else { [lum(color); 3] });
+                (ramp.map_or(v, |ramp| mix3(v, ramp, o)), cov)
+            }
             // Neighbourhood filters come precomputed through `ChanPlan::start`.
             EffectKind::Filter(f) => (f.point(c.kind, v).map_or(v, |out| mix3(v, out, o)), cov),
             // Anchors are recorded by `eval`; mask-only effects leave content as it is.
@@ -3216,6 +3254,34 @@ soft {soft:?}"
         let clipped = row(Some(false));
         assert!((clipped[0] - clipped[period]).abs() > 0.05, "{clipped:?}");
         assert!((12..52).all(|x| (clipped[x] - wrapped[x]).abs() < 0.02), "away from the edges, wrap changes nothing");
+    }
+
+    #[test]
+    fn a_gradients_blur_intensity_blurs_what_it_looks_up() {
+        let row = |filter: Option<Filter>| {
+            let mut f = fixture();
+            let id = f.project.alloc_id();
+            let mut fill = Fill::default();
+            fill.sources.insert(Channel::Roughness, Source::Procedural { pattern: Procedural::new(ProceduralKind::Checker), low: [0.0; 3], high: [1.0; 3] });
+            f.project.insert_layer(0, Layer::new(id, "F", LayerKind::Fill(fill), &[Channel::Roughness]), None, false).unwrap();
+            if let Some(filter) = filter {
+                content_fx(&mut f, id, EffectKind::Filter(filter));
+            }
+            let out = run(&f, None);
+            (16..48).map(|x| out.value(Channel::Roughness, x, 20)[0]).collect::<Vec<f32>>()
+        };
+        let mut gradient = Filter::even_gradient(vec![[0.0; 3], [1.0; 3]]);
+        let hard = row(Some(gradient.clone()));
+        assert!(hard.iter().zip(row(None)).all(|(a, b)| (a - b).abs() < 1e-3), "a black to white ramp keeps a scalar as it is");
+
+        // Blurred first, then looked up: the same as a blur of that size
+        if let Filter::GradientMap { input, .. } = &mut gradient {
+            input.blur = 8.0;
+        }
+        let blurred = row(Some(gradient));
+        let reference = row(Some(Filter::Blur { radius: 8.0, wrap: false }));
+        assert!(blurred.iter().zip(&reference).all(|(a, b)| (a - b).abs() < 0.02), "{blurred:?} vs {reference:?}");
+        assert!(blurred.iter().zip(&hard).any(|(a, b)| (a - b).abs() > 0.1), "{blurred:?}");
     }
 
     #[test]

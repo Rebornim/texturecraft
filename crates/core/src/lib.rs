@@ -16,8 +16,11 @@ pub mod color_selection;
 pub mod compare_source;
 pub mod contents_offset;
 pub mod cook_resolution;
+pub mod curve_preset;
 pub mod depth_culling;
 pub mod fill_symmetry;
+pub mod gradient_input;
+pub mod grayscale_mode;
 pub mod layer;
 pub mod oklab;
 pub mod project;
@@ -41,8 +44,11 @@ pub use color_selection::ColorSelection;
 pub use compare_source::CompareSource;
 pub use contents_offset::ContentsOffset;
 pub use cook_resolution::CookResolution;
+pub use curve_preset::CurvePreset;
 pub use depth_culling::DepthCulling;
 pub use fill_symmetry::FillSymmetry;
+pub use gradient_input::GradientInput;
+pub use grayscale_mode::GrayscaleMode;
 pub use layer::{
     ChannelBlend, CompareOp, CurvatureDetail, CurvatureMode, Decal, Effect, EffectKind, Fill, Filter, Filtering, Generator, GeneratorKind, HeightMask, Layer,
     LayerId, LayerKind, Levels, LinkParam, LinkPreset, Mask, MaskBackground, MaterialLink, PathShape, Procedural, ProceduralKind, Projection, Sampling,

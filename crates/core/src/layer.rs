@@ -9,7 +9,7 @@ use crate::gradient_input::{GradientInput, ramp, shape};
 use crate::{
     AnisotropicKuwahara, Backface, BakedMap, Bevel, BevelSmooth, BlendMode, Channel, ChannelKind, ColorMatch, CompareSource, ContentsOffset, DepthCulling,
     DirectionalDistance, DirectionalLight, FillSymmetry, GrayscaleConversion, HeightToNormal, HighpassSpace, MaskOutline, Mirror, PbrValidate, Projector,
-    ShapeCrop, SourceWarp, StylizedLighting, SunAndSky, ThresholdMode, lum,
+    ShapeCrop, SourceSlopeBlur, SourceWarp, StylizedLighting, SunAndSky, ThresholdMode, lum,
 };
 
 mod curvature_detail;
@@ -1089,8 +1089,7 @@ pub enum Filter {
         radius: f32,
         angle: f32,
     },
-    /// Smear values downhill along a noise height field ("slope blur"): `radius` in texels at
-    /// 2K, `scale` noise features per UV unit.
+    /// Values smeared downhill along a noise height field: `radius` in texels at 2K, `scale` noise features per UV unit (projects saved before its source settings)
     SlopeBlur {
         radius: f32,
         scale: f32,
@@ -1141,6 +1140,8 @@ pub enum Filter {
     DistanceBevel(Bevel),
     /// Texels read from where a source sends them, in one of the warp modes (projects saved before keep [`Filter::Warp`] and [`Filter::DirectionalWarp`])
     SourceWarp(SourceWarp),
+    /// Values read downhill along a source's slope, blended (projects saved before keep [`Filter::SlopeBlur`])
+    SourceSlopeBlur(SourceSlopeBlur),
     /// A smooth ramp from the shapes' edge, outwards, inwards or across it
     BevelSmooth(BevelSmooth),
     /// A trail fading away from the shapes in one direction
@@ -1452,6 +1453,7 @@ impl Filter {
                 | Filter::ColorMatch(_)
                 | Filter::DistanceBevel(_)
                 | Filter::SourceWarp(_)
+                | Filter::SourceSlopeBlur(_)
                 | Filter::BevelSmooth(_)
                 | Filter::DirectionalDistance(_)
                 | Filter::Mirror(_)
@@ -1604,6 +1606,7 @@ impl Filter {
             | Filter::ColorMatch(_)
             | Filter::DistanceBevel(_)
             | Filter::SourceWarp(_)
+            | Filter::SourceSlopeBlur(_)
             | Filter::BevelSmooth(_)
             | Filter::DirectionalDistance(_)
             | Filter::Mirror(_)
@@ -1654,6 +1657,7 @@ impl Filter {
             Filter::ColorMatch(_) => "Color Match",
             Filter::DistanceBevel(_) => "Bevel",
             Filter::SourceWarp(_) => "Warp",
+            Filter::SourceSlopeBlur(_) => "Blur Slope",
             Filter::BevelSmooth(_) => "Bevel Smooth",
             Filter::DirectionalDistance(_) => "Directional Distance",
             Filter::Mirror(_) => "Mirror",
@@ -1671,7 +1675,7 @@ impl Filter {
     pub fn former_label(&self) -> Option<&'static str> {
         match self {
             Filter::ContrastLuminosity { .. } => Some("Contrast/Luminosity"),
-            Filter::SlopeBlur { .. } => Some("Slope Blur"),
+            Filter::SlopeBlur { .. } | Filter::SourceSlopeBlur(_) => Some("Slope Blur"),
             Filter::HighPass { .. } => Some("High Pass"),
             Filter::Mosaic { .. } => Some("Mosaic"),
             Filter::Grayscale => Some("Grayscale"),

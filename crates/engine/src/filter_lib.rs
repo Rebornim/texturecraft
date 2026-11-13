@@ -6,8 +6,8 @@ use serde_json::{Value, json};
 use texturecraft_core::{
     AnisotropicKuwahara, Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, ColorMatch, ConversionMode, CurvePreset, DirectionalDistance,
     EffectKind, Fill, Filter, GradientInput, GrayscaleConversion, GrayscaleMode, HeightToNormal, HighpassSpace, Levels, MaskOutline, Mirror, MirrorCorner,
-    MirrorMode, OutlinePosition, PbrValidate, Procedural, ProceduralKind, Projection, Source, SourceColorMode, SourceWarp, StylizedLighting, TargetColorMode,
-    ThresholdMode, ValidationMode, WarpBlending, WarpMode, WarpSourceMode,
+    MirrorMode, OutlinePosition, PbrValidate, Procedural, ProceduralKind, Projection, SlopeBlending, Source, SourceColorMode, SourceSlopeBlur, SourceWarp,
+    StylizedLighting, TargetColorMode, ThresholdMode, ValidationMode, WarpBlending, WarpMode, WarpSourceMode,
 };
 
 use crate::commands::{CommandSpec, always, bad, boolp, color_of, color_param, f32p, has_layer, strp, u64p};
@@ -229,7 +229,7 @@ pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
         "histogramShift" => Filter::HistogramShift { offset: 0.0 },
         "warp" => Filter::SourceWarp(SourceWarp::LIBRARY),
         "blurDirectional" => Filter::DirectionalBlur { radius: 16.0, angle: 0.0 },
-        "slopeBlur" => Filter::SlopeBlur { radius: 16.0, scale: 4.0, seed: 1, divider: 1 },
+        "slopeBlur" => Filter::SourceSlopeBlur(SourceSlopeBlur::LIBRARY),
         "highPass" => Filter::HighPass { radius: 3.0 * Filter::BLUR_INTENSITY, space: HighpassSpace::Working, alpha: false },
         "edgeDetect" => Filter::EdgeDetect { width: 2.0 },
         "grayscale" => Filter::GrayscaleConversion(GrayscaleConversion::LIBRARY),
@@ -374,6 +374,15 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
             ]);
             params
         }
+        Filter::SourceSlopeBlur(slope) => vec![
+            ("seed", "Seed", slope.seed as f32, 0.0, 999.0),
+            ("intensity", "Intensity", slope.intensity, 0.0, 1.0),
+            ("quality", "Quality", slope.quality, 0.0, 1.0),
+            ("sourceBlur", "Blur", slope.source.blur, 0.0, 1.0),
+            ("sourceBalance", "Position", slope.source.balance, 0.0, 1.0),
+            ("sourceContrast", "Contrast", slope.source.contrast, 0.0, 1.0),
+            ("sourceTiling", "Source Tiling", slope.source.tiling, 0.01, 16.0),
+        ],
         Filter::BevelSmooth(smooth) => vec![
             ("distance", "Distance", smooth.distance, 0.0, 0.3),
             ("smoothing", "Smoothing", smooth.smoothing, 0.0, 10.0),
@@ -691,6 +700,18 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             set(&mut warp.source.balance, "sourceBalance", 0.0, 1.0);
             set(&mut warp.source.contrast, "sourceContrast", 0.0, 1.0);
             set(&mut warp.source.tiling, "sourceTiling", 0.01, 16.0);
+        }
+        Filter::SourceSlopeBlur(slope) => {
+            seed(&mut slope.seed);
+            set(&mut slope.intensity, "intensity", 0.0, 1.0);
+            divider(&mut slope.divider)?;
+            slope.blending = choice(p, "blendingMode", &SlopeBlending::ALL, SlopeBlending::id, cmd)?.unwrap_or(slope.blending);
+            set(&mut slope.quality, "quality", 0.0, 1.0);
+            slope.source.mode = choice(p, "sourceMode", &WarpSourceMode::ALL, WarpSourceMode::id, cmd)?.unwrap_or(slope.source.mode);
+            set(&mut slope.source.blur, "sourceBlur", 0.0, 1.0);
+            set(&mut slope.source.balance, "sourceBalance", 0.0, 1.0);
+            set(&mut slope.source.contrast, "sourceContrast", 0.0, 1.0);
+            set(&mut slope.source.tiling, "sourceTiling", 0.01, 16.0);
         }
         Filter::DistanceBevel(bevel) => {
             set(&mut bevel.distance, "distance", -1.0, 1.0);

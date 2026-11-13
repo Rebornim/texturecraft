@@ -3,9 +3,9 @@
 //! by id; `filter.list` lists them with their default parameters.
 
 use serde_json::{Value, json};
-use texturecraft_core::{Channel, EffectKind, Fill, Filter, Levels, Procedural, ProceduralKind, Projection, Source};
+use texturecraft_core::{Channel, CurvePreset, EffectKind, Fill, Filter, GradientInput, GrayscaleMode, Levels, Procedural, ProceduralKind, Projection, Source};
 
-use crate::commands::{CommandSpec, always, bad, color_of, color_param, f32p, has_layer, u64p};
+use crate::commands::{CommandSpec, always, bad, boolp, color_of, color_param, f32p, has_layer, strp, u64p};
 use crate::{Result, Session, cmd};
 
 /// A filter of the library.
@@ -43,7 +43,9 @@ pub const FILTERS: &[FilterDef] = &[
     def("contrastLuminosity", "Contrast Luminosity", "Adjustments", true),
     def("colorBalance", "Color Balance", "Adjustments", true),
     def("colorCorrect", "Color Correct", "Adjustments", true),
-    def("gradientMap", "Gradient Map", "Adjustments", true),
+    def("gradientMap", "Gradient", "Adjustments", true),
+    def("gradientCurve", "Gradient Curve", "Adjustments", true),
+    def("gradientDynamic", "Gradient Dynamic", "Adjustments", true),
     def("posterize", "Posterize", "Adjustments", true),
     def("clamp", "Clamp", "Adjustments", true),
     def("histogramScan", "Histogram Scan", "Adjustments", true),
@@ -148,6 +150,19 @@ fn restore_defaults(s: &mut Session, p: &Value) -> Result<Value> {
 /// A Color Correct tone that changes nothing: no contrast, no luminosity, saturation as it is
 const NEUTRAL_TONE: [f32; 3] = [0.0, 0.0, 0.5];
 
+/// Mid gray as a color picker shows it (sRGB 0.5), in linear RGB
+const MID_GRAY: f32 = 0.214;
+
+/// The Gradient filter as the library adds it: black, mid gray and white at 0, 0.5 and 1 (the other seven colors wait white at 1)
+fn library_gradient() -> Filter {
+    let quantity = 3;
+    let mut colors = vec![[0.0; 3], [MID_GRAY; 3]];
+    colors.resize(usize::from(Filter::MAX_GRADIENT_COLORS), [1.0; 3]);
+    let mut positions = vec![0.0, 0.5];
+    positions.resize(colors.len(), 1.0);
+    Filter::GradientMap { colors, positions, quantity: Some(quantity), input: GradientInput::LIBRARY, linear: true, debug: false }
+}
+
 /// The effect for library filter `id` with its defaults, then the parameters in `p`.
 pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
     let cmd = "effect.add.filter";
@@ -161,7 +176,9 @@ pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
         "contrastLuminosity" => Filter::ContrastLuminosity { contrast: 0.0, luminosity: 0.0 },
         "colorCorrect" => Filter::ColorCorrect { shadows: NEUTRAL_TONE, midtones: NEUTRAL_TONE, highlights: NEUTRAL_TONE },
         "colorBalance" => Filter::ColorBalance { shadows: [0.0; 3], midtones: [0.0; 3], highlights: [0.0; 3] },
-        "gradientMap" => Filter::GradientMap { colors: vec![[0.02, 0.02, 0.04], [0.45, 0.16, 0.05], [1.0, 0.85, 0.55]] },
+        "gradientMap" => library_gradient(),
+        "gradientCurve" => Filter::GradientCurve { preset: CurvePreset::Round, invert: false, balance: 0.5, contrast: 0.0 },
+        "gradientDynamic" => Filter::GradientDynamic { vertical: false, position: 0.0, color: [0.6; 3] },
         "posterize" => Filter::Posterize { levels: 4.0 },
         "clamp" => Filter::Clamp { min: 0.2, max: 0.8 },
         "histogramScan" => Filter::HistogramScan { position: 0.5, contrast: 0.5 },
@@ -270,14 +287,33 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         Filter::ReplaceColor { tolerance, softness, .. } => {
             vec![("tolerance", "Tolerance", *tolerance, 0.0, 1.0), ("softness", "Softness", *softness, 0.0, 1.0)]
         }
-        Filter::Invert
-        | Filter::ColorBalance { .. }
-        | Filter::ColorCorrect { .. }
-        | Filter::GradientMap { .. }
-        | Filter::Grayscale
-        | Filter::NormalInvert
-        | Filter::Empty => Vec::new(),
+        Filter::GradientMap { input, .. } => vec![
+            ("blur", "Blur Intensity", input.blur, 0.0, 16.0),
+            ("balance", "Balance", input.balance, 0.0, 1.0),
+            ("contrast", "Contrast", input.contrast, 0.0, 1.0),
+        ],
+        Filter::GradientCurve { balance, contrast, .. } => vec![("balance", "Balance", *balance, 0.0, 1.0), ("contrast", "Contrast", *contrast, 0.0, 1.0)],
+        Filter::GradientDynamic { position, .. } => vec![("position", "Gradient Input Position", *position, 0.0, 1.0)],
+        Filter::Invert | Filter::ColorBalance { .. } | Filter::ColorCorrect { .. } | Filter::Grayscale | Filter::NormalInvert | Filter::Empty => Vec::new(),
     }
+}
+
+/// Make a gradient use its first `wanted` colors: an evenly spaced ramp keeps its places from now on, and each added color starts as the last one at 1
+fn set_quantity(colors: &mut Vec<[f32; 3]>, positions: &mut Vec<f32>, quantity: &mut Option<u8>, wanted: u8) {
+    let used = quantity.map_or(colors.len(), usize::from).min(colors.len());
+    if positions.is_empty() {
+        let last = used.saturating_sub(1).max(1) as f32;
+        *positions = (0..used).map(|index| index as f32 / last).collect();
+    }
+    let wanted_len = usize::from(wanted);
+    let fill = colors.get(used.saturating_sub(1)).copied().unwrap_or([1.0; 3]);
+    if colors.len() < wanted_len {
+        colors.resize(wanted_len, fill);
+    }
+    if positions.len() < wanted_len {
+        positions.resize(wanted_len, 1.0);
+    }
+    *quantity = Some(wanted);
 }
 
 /// Set the parameters of `f` given in `p` (clamped to their ranges); `effect.set` uses it too.
@@ -350,13 +386,65 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
                 }
             }
         }
-        Filter::GradientMap { colors } => {
+        Filter::GradientMap { colors, positions, quantity, input, linear, debug } => {
             if let Some(list) = p.get("colors") {
                 let parsed: Option<Vec<[f32; 3]>> = list.as_array().and_then(|a| a.iter().map(|c| color_of(c).map(|v| v.map(|x| x.clamp(0.0, 1.0)))).collect());
                 match parsed {
                     Some(c) if (1..=16).contains(&c.len()) => *colors = c,
                     _ => return Err(bad(cmd, "`colors` must be 1 to 16 colors ([r, g, b] linear or \"#rrggbb\")")),
                 }
+            }
+            if let Some(list) = p.get("positions") {
+                let parsed: Option<Vec<f32>> = list.as_array().and_then(|a| a.iter().map(|v| v.as_f64().map(|v| (v as f32).clamp(0.0, 1.0))).collect());
+                match parsed {
+                    Some(parsed) if parsed.len() <= colors.len() => *positions = parsed,
+                    _ => return Err(bad(cmd, "`positions` must be numbers in 0..1, at most one per color")),
+                }
+            }
+            if p.get("quantity").is_some() {
+                let wanted = u64p(p, "quantity").and_then(|q| u8::try_from(q).ok()).filter(|q| (2..=Filter::MAX_GRADIENT_COLORS).contains(q));
+                let wanted = wanted.ok_or_else(|| bad(cmd, "`quantity` must be a whole number from 2 to 10"))?;
+                set_quantity(colors, positions, quantity, wanted);
+            }
+            if let Some(mode) = p.get("grayscaleMode") {
+                let id = mode.as_str().unwrap_or_default();
+                input.mode = GrayscaleMode::ALL
+                    .into_iter()
+                    .find(|m| m.id() == id)
+                    .ok_or_else(|| bad(cmd, "`grayscaleMode` must be desaturation, luma, average, max or min"))?;
+            }
+            set(&mut input.blur, "blur", 0.0, 16.0);
+            set(&mut input.balance, "balance", 0.0, 1.0);
+            set(&mut input.contrast, "contrast", 0.0, 1.0);
+            for (key, slot) in [("invert", &mut input.invert), ("linear", linear), ("debug", debug)] {
+                if p.get(key).is_some() {
+                    *slot = boolp(p, key).ok_or_else(|| bad(cmd, format!("`{key}` must be true or false")))?;
+                }
+            }
+        }
+        Filter::GradientCurve { preset, invert, balance, contrast } => {
+            if p.get("preset").is_some() {
+                let id = strp(p, "preset").unwrap_or_default();
+                *preset = CurvePreset::ALL.into_iter().find(|c| c.id() == id).ok_or_else(|| bad(cmd, format!("unknown `preset` `{id}`")))?;
+            }
+            if p.get("invert").is_some() {
+                *invert = boolp(p, "invert").ok_or_else(|| bad(cmd, "`invert` must be true or false"))?;
+            }
+            set(balance, "balance", 0.0, 1.0);
+            set(contrast, "contrast", 0.0, 1.0);
+        }
+        Filter::GradientDynamic { vertical, position, color } => {
+            if p.get("orientation").is_some() {
+                *vertical = match strp(p, "orientation") {
+                    Some("horizontal") => false,
+                    Some("vertical") => true,
+                    _ => return Err(bad(cmd, "`orientation` must be \"horizontal\" or \"vertical\"")),
+                };
+            }
+            set(position, "position", 0.0, 1.0);
+            if p.get("color").is_some() {
+                let v = color_param(cmd, p, "color")?.ok_or_else(|| bad(cmd, "`color` must be a color ([r, g, b] linear or \"#rrggbb\")"))?;
+                *color = v.map(|x| x.clamp(0.0, 1.0));
             }
         }
         Filter::Posterize { levels } => set(levels, "levels", 2.0, 64.0),
@@ -447,7 +535,9 @@ mod tests {
         assert_eq!(levels, 64.0);
         assert!(build("gradientMap", &json!({"colors": []})).is_err());
         assert!(build("colorBalance", &json!({"shadows": "x"})).is_err());
-        let EffectKind::Filter(Filter::GradientMap { colors }) = build("gradientMap", &json!({"colors": [[0, 0, 0], "#ffffff"]})).unwrap() else { panic!() };
+        let EffectKind::Filter(Filter::GradientMap { colors, .. }) = build("gradientMap", &json!({"colors": [[0, 0, 0], "#ffffff"]})).unwrap() else {
+            panic!()
+        };
         assert_eq!(colors.len(), 2);
     }
 }

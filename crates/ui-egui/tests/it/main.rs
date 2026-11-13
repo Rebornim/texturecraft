@@ -54,4 +54,5 @@ mod toolbar;
 
 mod filter_card;
 mod filter_colour;
+mod filter_gradient;
 mod symmetry;

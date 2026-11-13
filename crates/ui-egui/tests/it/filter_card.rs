@@ -62,3 +62,26 @@ fn restore_defaults_and_clear_on_the_card() {
     assert!(harness.query_by_label("Parameters").is_none(), "an empty filter has no parameters");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Filter").is_some(), "the card reads Filter over None");
 }
+
+/// The rect of the band button named `title`
+fn band_rect(harness: &Harness<'_, TextureCraftApp>, title: &str) -> egui::Rect {
+    harness.get_by_role_and_label(Role::Button, title).rect()
+}
+
+#[test]
+fn the_filter_bands_span_the_panel_like_the_fills() {
+    let (mut harness, effect) = app_with("blur");
+    let attributes = band_rect(&harness, "Attributes");
+
+    // The fill under the filter lays its bands out on the same sheet edges
+    harness.state_mut().session.target = StackTarget::Content;
+    harness.run_steps(3);
+    let filtering = band_rect(&harness, "Filtering and edges");
+    // The fill's rows overflow and take a scroll bar, so only the left edges must be equal
+    assert_eq!(attributes.left(), filtering.left(), "a filter's bands start at the panel edge like a fill's");
+    assert!(attributes.right() >= filtering.right(), "and reach its right edge: {attributes:?} {filtering:?}");
+
+    harness.state_mut().session.target = StackTarget::Effect(effect);
+    harness.run_steps(3);
+    assert_eq!(band_rect(&harness, "Attributes").left(), filtering.left());
+}

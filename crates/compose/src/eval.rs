@@ -3978,6 +3978,28 @@ soft {soft:?}"
     }
 
     #[test]
+    fn folder_mask_anchor_points_record_even_where_the_folder_is_masked_out() {
+        let mut fixture = fixture();
+        let group_id = fixture.project.alloc_id();
+        let folder = Layer::new(group_id, "G", LayerKind::Group { children: vec![], collapsed: false }, &[Channel::BaseColor, Channel::Roughness]);
+        fixture.project.insert_layer(0, folder, None, false).unwrap();
+        let child = fixture.project.alloc_id();
+        let mut fill = Fill::default();
+        fill.sources.insert(Channel::BaseColor, Source::Uniform([0.0; 3]));
+        fixture.project.insert_layer(0, Layer::new(child, "C", LayerKind::Fill(fill), &[Channel::BaseColor]), Some(group_id), true).unwrap();
+        let (gray, anchor, last) = (fixture.project.alloc_id(), fixture.project.alloc_id(), fixture.project.alloc_id());
+        let uniform = |value: f32| EffectKind::Fill { source: Source::Uniform([value; 3]), projection: Projection::default(), sampling: Default::default() };
+        let mut mask = Mask::new(MaskBackground::Black);
+        mask.effects = vec![Effect::new(gray, uniform(0.4)), Effect::new(anchor, EffectKind::Anchor), Effect::new(last, uniform(0.0))];
+        fixture.project.layer_mut(group_id).unwrap().mask = Some(mask);
+        anchor_reader(&mut fixture, anchor);
+
+        // The folder's mask ends at 0 (its black child hides), the reader above shows at 0.4 over the 0.5 base
+        let color = run(&fixture, None).value(Channel::BaseColor, 5, 5);
+        assert!(close(color, [0.7; 3]), "{color:?}");
+    }
+
+    #[test]
     fn decal_fills_cover_only_their_frame_and_image_alpha() {
         let mut f = fixture();
         let s = f.gbuf.surface(&f.mesh, 32 * 64 + 32).unwrap();

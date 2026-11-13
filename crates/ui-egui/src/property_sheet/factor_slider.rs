@@ -11,7 +11,7 @@ impl PropertySheet<'_> {
     pub(crate) fn factor_slider(&mut self, label: &str, factor: &mut f32, doublings: f32, typed: RangeInclusive<f32>) -> Option<bool> {
         let (control, center_y) = self.row(label);
         let id = self.next_id();
-        let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, signed: true, ramp: false };
+        let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, zero: Some(0.0), ramp: false };
         let mut along = factor.max(f32::MIN_POSITIVE).log2().clamp(-doublings, doublings);
         let dragged = self.track(id, label, &track, &mut along, &(-doublings..=doublings));
         if dragged.is_some() {

@@ -20,6 +20,7 @@ pub mod depth_culling;
 mod env_alignment;
 pub mod fill_symmetry;
 pub mod layer;
+pub mod oklab;
 pub mod project;
 pub mod projector;
 mod saved_projection;

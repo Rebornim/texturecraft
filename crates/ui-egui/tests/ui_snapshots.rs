@@ -23,6 +23,11 @@ fn select_map(harness: &mut Harness<'_, TextureCraftApp>, name: &str) {
     harness.run_steps(3);
 }
 
+/// The lowest list showing `label`: Properties' (the Layers panel above it has a channel list showing "Base color" too)
+fn lowest_list<'a>(harness: &'a Harness<'_, TextureCraftApp>, label: &'a str) -> egui_kittest::Node<'a> {
+    harness.get_all_by_role_and_label(egui::Role::ComboBox, label).max_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).unwrap()
+}
+
 fn save(h: &mut Harness<'_, TextureCraftApp>, dir: &Path, name: &str) {
     h.run_steps(6);
     // Material orbs render off the UI thread: wait for their full pictures
@@ -1148,7 +1153,7 @@ fn fill_material_snapshots() {
     harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
     save(&mut harness, &output_dir, "material-channels");
     // The Base color slot (the lowest "Base color" list: the Layers panel has one too) with its list open
-    harness.get_all_by_role_and_label(egui::Role::ComboBox, "Base color").max_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).unwrap().click();
+    lowest_list(&harness, "Base color").click();
     harness.run_steps(2);
     harness.get_by_role_and_label(egui::Role::ListBoxOption, "Perlin noise").hover();
     save(&mut harness, &output_dir, "material-source-list");
@@ -1311,7 +1316,7 @@ fn source_picker_snapshots() {
         source["channel"] = json!("baseColor");
         execute(&mut harness.state_mut().session, "layer.fill.set", &source).unwrap();
         harness.run_steps(3);
-        harness.get_by_role_and_label(egui::Role::ComboBox, "Base color").click();
+        lowest_list(harness, "Base color").click();
         harness.run_steps(30);
         if let Some(text) = search {
             harness.event(egui::Event::Text(text.into()));
@@ -1351,7 +1356,7 @@ fn source_picker_snapshots() {
     save(&mut harness, &output_dir, "source-picker-picked");
     execute(&mut harness.state_mut().session, "layer.fill.set", &json!({"layer": layer, "channel": "baseColor", "color": [0.45, 0.13, 0.05]})).unwrap();
     harness.run_steps(3);
-    harness.get_by_role_and_label(egui::Role::ComboBox, "Base color").click();
+    lowest_list(&harness, "Base color").click();
     settle_thumbnails(&mut harness);
     for (brightness, name) in [(Brightness::MediumDark, "medium"), (Brightness::Dark, "dark"), (Brightness::Light, "light")] {
         harness.state_mut().ui.prefs.brightness = brightness;
@@ -1869,7 +1874,7 @@ fn levels_snapshots() {
     save(&mut harness, &output_dir, "levels-red-clamp");
     harness.get_by_role_and_label(egui::Role::CheckBox, "Clamp").click();
     switch(&mut harness, "Colors");
-    harness.get_by_role_and_label(egui::Role::ComboBox, "Base color").click();
+    lowest_list(&harness, "Base color").click();
     harness.run_steps(3);
     let hovered = harness.get_by_role_and_label(egui::Role::ListBoxOption, "Roughness").rect().center();
     harness.hover_at(hovered);

@@ -57,6 +57,7 @@ mod path_list;
 mod pen_pressure;
 mod polygon_fill;
 mod project_config;
+mod properties_min_width;
 mod properties_popup;
 mod rail;
 mod reference_order;

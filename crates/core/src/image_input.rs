@@ -17,7 +17,7 @@ impl ImageInput {
     /// Bevel Smooth's and Directional Distance's Distance Map: scales the distance per texel
     pub const DISTANCE_MAP: ImageInput = ImageInput { id: "distanceMap", label: "Distance Map", default: 1.0, by_mode: false };
 
-    /// Warp's Custom Noise (Source Mode Custom Noise): the source its texels move by; mid gray moves nothing
+    /// Warp's and Blur Slope's Custom Noise (Source Type Custom Noise): the source its texels move or read along; mid gray moves nothing
     pub const CUSTOM_NOISE: ImageInput = ImageInput { id: "customNoise", label: "Custom Noise", default: 0.5, by_mode: true };
 
     /// The Custom Input of Grayscale Conversion (the color it reads instead of the channel) and Anisotropic Kuwahara (its direction's gray); mid gray until set
@@ -34,6 +34,7 @@ impl ImageInput {
         match filter {
             Filter::BevelSmooth(_) | Filter::DirectionalDistance(_) => vec![Self::DISTANCE_MAP],
             Filter::SourceWarp(warp) if warp.source.mode == WarpSourceMode::CustomNoise => vec![Self::CUSTOM_NOISE],
+            Filter::SourceSlopeBlur(slope) if slope.source.mode == WarpSourceMode::CustomNoise => vec![Self::CUSTOM_NOISE],
             Filter::GrayscaleConversion(conversion) if conversion.custom_input => vec![Self::CUSTOM_INPUT],
             Filter::AnisotropicKuwahara(kuwahara) if kuwahara.custom_input => vec![Self::CUSTOM_INPUT],
             Filter::ColorMatch(matcher) => [
@@ -51,7 +52,7 @@ impl ImageInput {
     pub fn named(filter: &Filter, id: &str) -> Option<ImageInput> {
         let inputs = match filter {
             Filter::BevelSmooth(_) | Filter::DirectionalDistance(_) => &[Self::DISTANCE_MAP][..],
-            Filter::SourceWarp(_) => &[Self::CUSTOM_NOISE][..],
+            Filter::SourceWarp(_) | Filter::SourceSlopeBlur(_) => &[Self::CUSTOM_NOISE][..],
             Filter::GrayscaleConversion(_) | Filter::AnisotropicKuwahara(_) => &[Self::CUSTOM_INPUT][..],
             Filter::ColorMatch(_) => &[Self::SOURCE_INPUT, Self::TARGET_INPUT][..],
             _ => &[],

@@ -108,7 +108,7 @@ fn filter_library_adds_every_filter_and_edits_its_parameters() {
     // A directional blur, slope blur and warp composite without trouble on a sphere.
     for (fid, extra) in [
         ("blurDirectional", json!({"radius": 40, "angle": 45})),
-        ("slopeBlur", json!({"radius": 30})),
+        ("slopeBlur", json!({"intensity": 0.5, "divider": 1})),
         ("warp", json!({"intensity": 50})),
         ("warpDirectional", json!({"intensity": 50, "angle": 30})),
         ("highPass", json!({"radius": 20})),

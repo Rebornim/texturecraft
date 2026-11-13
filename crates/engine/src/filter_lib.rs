@@ -4,7 +4,9 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    Channel, CurvePreset, EffectKind, Fill, Filter, GradientInput, GrayscaleMode, Levels, Procedural, ProceduralKind, Projection, Source, StylizedLighting,
+    Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, CurvePreset, DirectionalDistance, EffectKind, Fill, Filter, GradientInput,
+    GrayscaleMode, Levels, MaskOutline, Mirror, MirrorCorner, MirrorMode, OutlinePosition, Procedural, ProceduralKind, Projection, Source, SourceWarp,
+    StylizedLighting, ThresholdMode, WarpBlending, WarpMode, WarpSourceMode,
 };
 
 use crate::commands::{CommandSpec, always, bad, boolp, color_of, color_param, f32p, has_layer, strp, u64p};
@@ -67,11 +69,14 @@ pub const FILTERS: &[FilterDef] = &[
     def("sharpen", "Sharpen", "Blur and sharpen", true),
     def("highPass", "Highpass", "Blur and sharpen", true),
     def("bevel", "Bevel", "Blur and sharpen", true),
+    def("bevelSmooth", "Bevel Smooth", "Blur and sharpen", true),
+    def("directionalDistance", "Directional Distance", "Blur and sharpen", true),
     def("glow", "Glow", "Blur and sharpen", true),
     def("dropShadow", "Drop Shadow", "Blur and sharpen", true),
+    def("maskOutline", "Mask Outline", "Blur and sharpen", true),
     def("warp", "Warp", "Distort", true),
-    def("warpDirectional", "Warp Directional", "Distort", true),
     def("mosaic", "Mosaic", "Distort", true),
+    def("mirror", "Mirror", "Distort", true),
     def("matFinishGrind", "MatFinish Grind", "Material finish", false),
     def("matFinishRaw", "MatFinish Raw", "Material finish", false),
     def("matFinishSanded", "MatFinish Sanded", "Material finish", false),
@@ -82,10 +87,15 @@ fn norm(s: &str) -> String {
     s.to_ascii_lowercase().replace([' ', '_', '-', '/'], "")
 }
 
-/// The library filter `id` (case and separators ignored; labels work too).
+/// The library filter `id` (case and separators ignored; labels work too). Directional Warp's former id and labels find Warp, whose mode it is now.
 pub fn find(id: &str) -> Option<&'static FilterDef> {
-    let n = norm(id);
+    let n = if is_directional_warp(id) { norm("warp") } else { norm(id) };
     FILTERS.iter().find(|f| norm(f.id) == n || norm(f.label) == n)
+}
+
+/// Whether `id` names Directional Warp, a filter of its own before the warp modes (`warpDirectional`, "Warp Directional", "Directional Warp")
+fn is_directional_warp(id: &str) -> bool {
+    matches!(norm(id).as_str(), "warpdirectional" | "directionalwarp")
 }
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -126,7 +136,7 @@ fn filter_defaults(s: &Session, p: &Value) -> Result<(texturecraft_core::LayerId
         None => return Err(bad(CMD, format!("no effect {}", effect.0))),
     };
     let defaults = match find(filter.label()) {
-        Some(def) => match build(def.id, &Value::Null)? {
+        Some(_) => match build(filter.label(), &Value::Null)? {
             EffectKind::Filter(defaults) => Some(defaults),
             _ => None,
         },
@@ -175,8 +185,9 @@ pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
     let cmd = "effect.add.filter";
     let d = find(id).ok_or_else(|| bad(cmd, format!("unknown filter `{id}` (see filter.list)")))?;
     let mut f = match d.id {
+        "warp" if is_directional_warp(id) => Filter::SourceWarp(SourceWarp { mode: WarpMode::Directional, ..SourceWarp::LIBRARY }),
         "invert" => Filter::Invert,
-        "threshold" => Filter::Threshold { level: 0.5 },
+        "threshold" => Filter::Threshold { level: 0.01, mode: ThresholdMode::Greater },
         "blur" => Filter::Blur { radius: 2.0, wrap: false },
         "sharpen" => Filter::Sharpen { amount: 1.0 },
         "hsl" => Filter::Hsl { hue: 0.0, saturation: 0.0, lightness: 0.0, perceptive: true },
@@ -191,16 +202,19 @@ pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
         "histogramScan" => Filter::HistogramScan { position: 0.5, contrast: 0.5 },
         "histogramRange" => Filter::HistogramRange { range: 0.5, position: 0.5 },
         "histogramShift" => Filter::HistogramShift { offset: 0.25 },
-        "warp" => Filter::Warp { intensity: 16.0, scale: 4.0, seed: 1, divider: 1 },
+        "warp" => Filter::SourceWarp(SourceWarp::LIBRARY),
         "blurDirectional" => Filter::DirectionalBlur { radius: 16.0, angle: 0.0 },
         "slopeBlur" => Filter::SlopeBlur { radius: 16.0, scale: 4.0, seed: 1, divider: 1 },
         "highPass" => Filter::HighPass { radius: 8.0 },
         "edgeDetect" => Filter::EdgeDetect { width: 2.0 },
-        "warpDirectional" => Filter::DirectionalWarp { intensity: 16.0, angle: 0.0, scale: 4.0, seed: 1, divider: 1 },
         "grayscale" => Filter::Grayscale,
         "normalInvert" => Filter::NormalInvert,
-        "bevel" => Filter::Bevel { width: 16.0, wrap: false },
+        "bevel" => Filter::DistanceBevel(Bevel::LIBRARY),
+        "bevelSmooth" => Filter::BevelSmooth(BevelSmooth::LIBRARY),
+        "directionalDistance" => Filter::DirectionalDistance(DirectionalDistance::LIBRARY),
         "mosaic" => Filter::Mosaic { size: 32.0 },
+        "mirror" => Filter::Mirror(Mirror::LIBRARY),
+        "maskOutline" => Filter::MaskOutline(MaskOutline::LIBRARY),
         "glow" => Filter::HaloGlow { on_mask: false, precise: false, width: 0.15, spread: 0.0, opacity: 1.0, color: GLOW_COLOR },
         "dropShadow" => Filter::DropShadow { angle: 90.0, distance: 0.1, size: 0.2, spread: 0.0, opacity: 0.5, color: [0.0; 3] },
         "replaceColor" => Filter::ReplaceColor { from: [0.5, 0.05, 0.05], to: [0.05, 0.15, 0.5], tolerance: 0.2, softness: 0.15 },
@@ -250,13 +264,12 @@ fn mat_finish(id: &str) -> Option<Fill> {
     Some(fill)
 }
 
-/// Scalar parameters of a filter for editors: (param key, label, value, min, max). Colors
-/// (color balance, gradient map) and the HSL hue have their own editors.
+/// Scalar parameters of a filter for editors: (param key, label, value, min, max); colors (color balance, gradient map) and the HSL hue have their own editors
 pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f32)> {
     match f {
         Filter::Blur { radius, .. } => vec![("radius", "Intensity (texels at 2K)", *radius, 0.0, 128.0)],
         Filter::Sharpen { amount } => vec![("amount", "Amount", *amount, 0.0, 5.0)],
-        Filter::Threshold { level } => vec![("level", "Level", *level, 0.0, 1.0)],
+        Filter::Threshold { level, .. } => vec![("level", "Threshold", *level, 0.0, 1.0)],
         Filter::Hsl { saturation, lightness, .. } => {
             vec![("saturation", "Saturation", *saturation, -1.0, 1.0), ("lightness", "Lightness", *lightness, -1.0, 1.0)]
         }
@@ -297,6 +310,46 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         }
         Filter::Bevel { width, .. } => vec![("width", "Width (texels at 2K)", *width, 0.0, 128.0)],
         Filter::Mosaic { size } => vec![("size", "Cell size (texels at 2K)", *size, 1.0, 256.0)],
+        Filter::DistanceBevel(bevel) => vec![("distance", "Distance", bevel.distance, -1.0, 1.0), ("smoothing", "Smoothing", bevel.smoothing, 0.0, 5.0)],
+        Filter::SourceWarp(warp) => {
+            let mut params = vec![("seed", "Seed", warp.seed as f32, 0.0, 999.0), ("intensity", "Intensity", warp.intensity, 0.0, 1.0)];
+            if warp.mode != WarpMode::Warp {
+                params.push(("angle", "Angle", warp.angle, 0.0, 360.0));
+            }
+            params.extend([
+                ("sourceBlur", "Source Blur", warp.source.blur, 0.0, 1.0),
+                ("sourceBalance", "Source Balance", warp.source.balance, 0.0, 1.0),
+                ("sourceContrast", "Source Contrast", warp.source.contrast, 0.0, 1.0),
+                ("sourceTiling", "Source Tiling", warp.source.tiling, 0.01, 16.0),
+            ]);
+            params
+        }
+        Filter::BevelSmooth(smooth) => vec![
+            ("distance", "Distance", smooth.distance, 0.0, 0.3),
+            ("smoothing", "Smoothing", smooth.smoothing, 0.0, 10.0),
+            ("curveOffset", "Curve Offset", smooth.curve_offset, -1.0, 1.0),
+            ("curveShape", "Curve Shape", smooth.curve_shape, -1.0, 1.0),
+            ("maskThreshold", "Mask Threshold", smooth.threshold, 0.0, 1.0),
+            ("distanceMapMultiplier", "Distance Map Multiplier", smooth.multiplier, 0.0, 1.0),
+        ],
+        Filter::DirectionalDistance(trail) => vec![
+            ("distance", "Distance", trail.distance, 0.0, 0.3),
+            ("angle", "Angle", trail.angle, 0.0, 360.0),
+            ("contrast", "Contrast", trail.contrast, 0.0, 1.0),
+            ("distanceMapMultiplier", "Distance Map Multiplier", trail.multiplier, 0.0, 1.0),
+        ],
+        // Only the offset of the axis the mode mirrors across shows
+        Filter::Mirror(mirror) => match mirror.mode {
+            MirrorMode::AxisX => vec![("axisXOffset", "Axis X Offset", mirror.offset[0], 0.0, 1.0)],
+            MirrorMode::AxisY => vec![("axisYOffset", "Axis Y Offset", mirror.offset[1], 0.0, 1.0)],
+            MirrorMode::Corner => Vec::new(),
+        },
+        Filter::MaskOutline(outline) => vec![
+            ("threshold", "Threshold", outline.threshold, 0.0, 1.0),
+            ("width", "Width", outline.width, 0.0, 1.0),
+            ("blur", "Blur", outline.blur, 0.0, 1.0),
+            ("curveShape", "Curve Shape", outline.curve, -1.0, 1.0),
+        ],
         Filter::Glow { radius, amount } => {
             vec![("radius", "Radius (texels at 2K)", *radius, 0.0, 128.0), ("amount", "Amount", *amount, 0.0, 5.0)]
         }
@@ -357,7 +410,48 @@ fn set_quantity(colors: &mut Vec<[f32; 3]>, positions: &mut Vec<f32>, quantity: 
     *quantity = Some(wanted);
 }
 
-/// Set the parameters of `f` given in `p` (clamped to their ranges); `effect.set` uses it too.
+/// Set the Mirror settings given in `p`: displayDebug, mode, axisXOffset, axisYOffset, invertAxisX, invertAxisY and cornerType
+fn apply_mirror(p: &Value, mirror: &mut Mirror, cmd: &str) -> Result<()> {
+    if p.get("mode").is_some() {
+        let id = strp(p, "mode").unwrap_or_default();
+        mirror.mode = MirrorMode::ALL.into_iter().find(|m| m.id() == id).ok_or_else(|| bad(cmd, "`mode` must be axisX, axisY or corner"))?;
+    }
+    if p.get("cornerType").is_some() {
+        let id = strp(p, "cornerType").unwrap_or_default();
+        mirror.corner = MirrorCorner::ALL
+            .into_iter()
+            .find(|c| c.id() == id)
+            .ok_or_else(|| bad(cmd, "`cornerType` must be topLeft, topRight, bottomLeft or bottomRight"))?;
+    }
+    let [offset_x, offset_y] = &mut mirror.offset;
+    for (key, slot) in [("axisXOffset", offset_x), ("axisYOffset", offset_y)] {
+        if let Some(v) = f32p(p, key) {
+            *slot = v.clamp(0.0, 1.0);
+        }
+    }
+    let [invert_x, invert_y] = &mut mirror.invert;
+    for (key, slot) in [("displayDebug", &mut mirror.debug), ("invertAxisX", invert_x), ("invertAxisY", invert_y)] {
+        if p.get(key).is_some() {
+            *slot = boolp(p, key).ok_or_else(|| bad(cmd, format!("`{key}` must be true or false")))?;
+        }
+    }
+    Ok(())
+}
+
+/// The choice among `all` whose id (`id`) `p` gives under `key`, if it gives one; an unknown id is refused
+fn choice<T: Copy>(p: &Value, key: &str, all: &[T], id: fn(T) -> &'static str, cmd: &str) -> Result<Option<T>> {
+    if p.get(key).is_none() {
+        return Ok(None);
+    }
+    let given = strp(p, key).unwrap_or_default();
+    let found = all.iter().copied().find(|choice| id(*choice) == given);
+    found.map(Some).ok_or_else(|| {
+        let ids: Vec<&str> = all.iter().map(|choice| id(*choice)).collect();
+        bad(cmd, format!("`{key}` must be {}", ids.join(", ")))
+    })
+}
+
+/// Set the parameters of `f` given in `p` (clamped to their ranges); `effect.set` uses it too
 pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
     let set = |slot: &mut f32, key: &str, lo: f32, hi: f32| {
         if let Some(v) = f32p(p, key) {
@@ -396,7 +490,73 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
     };
     match f {
         Filter::Invert | Filter::Grayscale | Filter::NormalInvert | Filter::Empty => {}
-        Filter::Threshold { level } => set(level, "level", 0.0, 1.0),
+        Filter::Threshold { level, mode } => {
+            set(level, "level", 0.0, 1.0);
+            if p.get("mode").is_some() {
+                let id = strp(p, "mode").unwrap_or_default();
+                *mode = ThresholdMode::ALL
+                    .into_iter()
+                    .find(|m| m.id() == id)
+                    .ok_or_else(|| bad(cmd, "`mode` must be greater, greaterOrEqual, lower or lowerOrEqual"))?;
+            }
+        }
+        Filter::Mirror(mirror) => apply_mirror(p, mirror, cmd)?,
+        Filter::SourceWarp(warp) => {
+            seed(&mut warp.seed);
+            warp.mode = choice(p, "warpMode", &WarpMode::ALL, WarpMode::id, cmd)?.unwrap_or(warp.mode);
+            set(&mut warp.intensity, "intensity", 0.0, 1.0);
+            divider(&mut warp.divider)?;
+            angle(&mut warp.angle);
+            if p.get("directions").is_some() {
+                let count = u64p(p, "directions").and_then(|count| u8::try_from(count).ok()).filter(|count| SourceWarp::DIRECTIONS.contains(count));
+                warp.directions = count.ok_or_else(|| bad(cmd, "`directions` must be 1, 2 or 4"))?;
+            }
+            warp.blending = choice(p, "blendingMode", &WarpBlending::ALL, WarpBlending::id, cmd)?.unwrap_or(warp.blending);
+            warp.source.mode = choice(p, "sourceMode", &WarpSourceMode::ALL, WarpSourceMode::id, cmd)?.unwrap_or(warp.source.mode);
+            set(&mut warp.source.blur, "sourceBlur", 0.0, 1.0);
+            set(&mut warp.source.balance, "sourceBalance", 0.0, 1.0);
+            set(&mut warp.source.contrast, "sourceContrast", 0.0, 1.0);
+            set(&mut warp.source.tiling, "sourceTiling", 0.01, 16.0);
+        }
+        Filter::DistanceBevel(bevel) => {
+            set(&mut bevel.distance, "distance", -1.0, 1.0);
+            set(&mut bevel.smoothing, "smoothing", 0.0, 5.0);
+            bevel.corner = choice(p, "cornerType", &BevelCorner::ALL, BevelCorner::id, cmd)?.unwrap_or(bevel.corner);
+            bevel.blur = choice(p, "blurMode", &BevelBlur::ALL, BevelBlur::id, cmd)?.unwrap_or(bevel.blur);
+            wrap(&mut bevel.wrap)?;
+        }
+        Filter::BevelSmooth(smooth) => {
+            smooth.direction = choice(p, "direction", &BevelDirection::ALL, BevelDirection::id, cmd)?.unwrap_or(smooth.direction);
+            set(&mut smooth.distance, "distance", 0.0, 0.3);
+            set(&mut smooth.smoothing, "smoothing", 0.0, 10.0);
+            set(&mut smooth.curve_offset, "curveOffset", -1.0, 1.0);
+            set(&mut smooth.curve_shape, "curveShape", -1.0, 1.0);
+            set(&mut smooth.threshold, "maskThreshold", 0.0, 1.0);
+            set(&mut smooth.multiplier, "distanceMapMultiplier", 0.0, 1.0);
+            wrap(&mut smooth.wrap)?;
+        }
+        Filter::DirectionalDistance(trail) => {
+            set(&mut trail.distance, "distance", 0.0, 0.3);
+            angle(&mut trail.angle);
+            set(&mut trail.contrast, "contrast", 0.0, 1.0);
+            set(&mut trail.multiplier, "distanceMapMultiplier", 0.0, 1.0);
+        }
+        Filter::MaskOutline(outline) => {
+            if p.get("maskPosition").is_some() {
+                let id = strp(p, "maskPosition").unwrap_or_default();
+                outline.position = OutlinePosition::ALL
+                    .into_iter()
+                    .find(|position| position.id() == id)
+                    .ok_or_else(|| bad(cmd, "`maskPosition` must be outside, inside or both"))?;
+            }
+            if p.get("startFromBlack").is_some() {
+                outline.from_black = boolp(p, "startFromBlack").ok_or_else(|| bad(cmd, "`startFromBlack` must be true or false"))?;
+            }
+            set(&mut outline.threshold, "threshold", 0.0, 1.0);
+            set(&mut outline.width, "width", 0.0, 1.0);
+            set(&mut outline.blur, "blur", 0.0, 1.0);
+            set(&mut outline.curve, "curveShape", -1.0, 1.0);
+        }
         Filter::Blur { radius, wrap: w } => {
             set(radius, "radius", 0.0, 256.0);
             wrap(w)?;

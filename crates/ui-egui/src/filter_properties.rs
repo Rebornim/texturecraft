@@ -2,7 +2,11 @@
 
 use egui::{Painter, Rect, Stroke, StrokeKind, Ui};
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, CurvePreset, DirectionalLight, EffectKind, Filter, GrayscaleMode, LayerId, LightingOutput, StylizedLighting};
+use texturecraft_engine::core::{
+    Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, CurvePreset, DirectionalLight, EffectKind, Filter, GrayscaleMode, LayerId,
+    LightingOutput, MaskOutline, Mirror, MirrorCorner, MirrorMode, OutlinePosition, SourceWarp, StylizedLighting, ThresholdMode, WarpBlending, WarpMode,
+    WarpSourceMode,
+};
 use texturecraft_engine::filter_lib::{build, find, scalar_params};
 
 use crate::TextureCraftApp;
@@ -105,6 +109,12 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
         Filter::HaloGlow { on_mask, precise, color, .. } => return glow(app, sheet, id, filter, (*on_mask, *precise), *color),
         Filter::DropShadow { color, .. } => return drop_shadow(app, sheet, id, filter, *color),
         Filter::BakedLighting { .. } => return baked_lighting_stylized(app, sheet, id, filter),
+        Filter::Threshold { level, mode } => return threshold(app, sheet, id, *level, *mode),
+        Filter::Mirror(mirror) => return mirror_rows(app, sheet, id, mirror),
+        Filter::MaskOutline(outline) => return mask_outline(app, sheet, id, outline),
+        Filter::DistanceBevel(bevel) => return bevel_rows(app, sheet, id, bevel),
+        Filter::BevelSmooth(smooth) => return bevel_smooth(app, sheet, id, smooth),
+        Filter::SourceWarp(warp) => return source_warp(app, sheet, id, warp),
         _ => {}
     }
     let params = scalar_params(filter);
@@ -145,6 +155,198 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
 
     // The color editors keep their swatches until their own screens
     sheet.embed(|ui| color_editors(app, ui, id, filter));
+}
+
+/// Threshold: its level, then the Mode comparing a value with it (>, ≥, <, ≤)
+fn threshold(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, level: f32, mode: ThresholdMode) {
+    let mut level = level;
+    if let Some(merge) = sheet.slider(tr("Threshold"), &mut level, 0.0..=1.0, 2) {
+        app.run("effect.set", json!({"effect": id, "level": level, "merge": merge}));
+    }
+    let signs = ThresholdMode::ALL.map(ThresholdMode::sign);
+    let current = ThresholdMode::ALL.iter().position(|candidate| *candidate == mode).unwrap_or_default();
+    if let Some(picked) = sheet.switch(tr("Mode"), &signs, current).and_then(|index| ThresholdMode::ALL.get(index)) {
+        app.run("effect.set", json!({"effect": id, "mode": picked.id()}));
+    }
+}
+
+/// Mirror: Display Debug and Mode, then the axis's offset and Invert switch, or the Corner Type of a corner mirror
+fn mirror_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, mirror: &Mirror) {
+    let set = |app: &mut TextureCraftApp, key: &str, value: Value, merge: bool| {
+        app.run("effect.set", json!({"effect": id, key: value, "merge": merge}));
+    };
+    let mut debug = mirror.debug;
+    if sheet.toggle(tr("Display Debug"), &mut debug) {
+        set(app, "displayDebug", json!(debug), false);
+    }
+    if let (Some(picked), _) = sheet.dropdown(tr("Mode"), mirror.mode, &MirrorMode::ALL, |mode| tr(mode.label()).to_owned(), None) {
+        set(app, "mode", json!(picked.id()), false);
+    }
+    let (offset_key, offset_label, invert_key, invert_label, axis) = match mirror.mode {
+        MirrorMode::AxisX => ("axisXOffset", tr("Axis X Offset"), "invertAxisX", tr("Invert Axis X"), 0),
+        MirrorMode::AxisY => ("axisYOffset", tr("Axis Y Offset"), "invertAxisY", tr("Invert Axis Y"), 1),
+        MirrorMode::Corner => {
+            let name = |corner: MirrorCorner| tr(corner.label()).to_owned();
+            if let (Some(picked), _) = sheet.dropdown(tr("Corner Type"), mirror.corner, &MirrorCorner::ALL, name, None) {
+                set(app, "cornerType", json!(picked.id()), false);
+            }
+            return;
+        }
+    };
+    let mut offset = mirror.offset.get(axis).copied().unwrap_or(0.5);
+    if let Some(merge) = sheet.slider(offset_label, &mut offset, 0.0..=1.0, 2) {
+        set(app, offset_key, json!(offset), merge);
+    }
+    let mut invert = mirror.invert.get(axis).copied().unwrap_or_default();
+    if sheet.toggle(invert_label, &mut invert) {
+        set(app, invert_key, json!(invert), false);
+    }
+}
+
+/// Mask Outline: Mask Position and Start From Black, then the band's Threshold, Width, Blur and Curve Shape
+fn mask_outline(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, outline: &MaskOutline) {
+    let names = OutlinePosition::ALL.map(|position| tr(position.label()));
+    let current = OutlinePosition::ALL.iter().position(|position| *position == outline.position).unwrap_or_default();
+    if let Some(picked) = sheet.switch(tr("Mask Position"), &names, current).and_then(|index| OutlinePosition::ALL.get(index)) {
+        app.run("effect.set", json!({"effect": id, "maskPosition": picked.id()}));
+    }
+    let mut from_black = outline.from_black;
+    if sheet.toggle(tr("Start From Black"), &mut from_black) {
+        app.run("effect.set", json!({"effect": id, "startFromBlack": from_black}));
+    }
+    for (key, label, value) in [("threshold", tr("Threshold"), outline.threshold), ("width", tr("Width"), outline.width), ("blur", tr("Blur"), outline.blur)] {
+        let mut value = value;
+        if let Some(merge) = sheet.slider(label, &mut value, 0.0..=1.0, 2) {
+            app.run("effect.set", json!({"effect": id, key: value, "merge": merge}));
+        }
+    }
+    let mut curve = outline.curve;
+    if let Some(merge) = sheet.signed_slider(tr("Curve Shape"), &mut curve, -1.0..=1.0, 2) {
+        app.run("effect.set", json!({"effect": id, "curveShape": curve, "merge": merge}));
+    }
+}
+
+/// A choice's shown name and the id the command takes for it
+type ChoiceNames<T> = (fn(T) -> &'static str, fn(T) -> &'static str);
+
+/// A switch among `all` (named by `label`) setting `key` to the picked one's `id`
+fn choice_switch<T: Copy + PartialEq>(
+    app: &mut TextureCraftApp,
+    sheet: &mut PropertySheet<'_>,
+    id: u64,
+    (label, key): (&str, &str),
+    all: &[T],
+    current: T,
+    (name, id_of): ChoiceNames<T>,
+) {
+    let names: Vec<&str> = all.iter().map(|choice| tr(name(*choice))).collect();
+    let at = all.iter().position(|choice| *choice == current).unwrap_or_default();
+    if let Some(picked) = sheet.switch(label, &names, at).and_then(|index| all.get(index)) {
+        app.run("effect.set", json!({"effect": id, key: id_of(*picked)}));
+    }
+}
+
+/// Sliders setting `effect.set` keys: (key, label, value, range), signed ranges filling from their middle
+fn slider_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, rows: &[(&str, &str, f32, std::ops::RangeInclusive<f32>)]) {
+    for (key, label, value, range) in rows {
+        let mut value = *value;
+        let edit =
+            if *range.start() < 0.0 { sheet.signed_slider(label, &mut value, range.clone(), 2) } else { sheet.slider(label, &mut value, range.clone(), 2) };
+        if let Some(merge) = edit {
+            app.run("effect.set", json!({"effect": id, *key: value, "merge": merge}));
+        }
+    }
+}
+
+/// The Bevel Wrap switch of a bevel
+fn bevel_wrap(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, wrap: bool) {
+    let mut wrap = wrap;
+    if sheet.toggle(tr("Bevel Wrap"), &mut wrap) {
+        app.run("effect.set", json!({"effect": id, "wrap": wrap}));
+    }
+}
+
+/// Bevel: Bevel Wrap, the signed Distance (inwards below 0), Corner Type, Smoothing and Blur Mode
+fn bevel_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, bevel: &Bevel) {
+    bevel_wrap(app, sheet, id, bevel.wrap);
+    slider_rows(app, sheet, id, &[("distance", tr("Distance"), bevel.distance, -1.0..=1.0)]);
+    choice_switch(app, sheet, id, (tr("Corner Type"), "cornerType"), &BevelCorner::ALL, bevel.corner, (BevelCorner::label, BevelCorner::id));
+    slider_rows(app, sheet, id, &[("smoothing", tr("Smoothing"), bevel.smoothing, 0.0..=5.0)]);
+    choice_switch(app, sheet, id, (tr("Blur Mode"), "blurMode"), &BevelBlur::ALL, bevel.blur, (BevelBlur::label, BevelBlur::id));
+}
+
+/// Bevel Smooth: Direction, the ramp's Distance, Smoothing, Curve Offset and Shape, Mask Threshold, Distance Map Multiplier and Bevel Wrap
+fn bevel_smooth(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, smooth: &BevelSmooth) {
+    choice_switch(app, sheet, id, (tr("Direction"), "direction"), &BevelDirection::ALL, smooth.direction, (BevelDirection::label, BevelDirection::id));
+    slider_rows(
+        app,
+        sheet,
+        id,
+        &[
+            ("distance", tr("Distance"), smooth.distance, 0.0..=0.3),
+            ("smoothing", tr("Smoothing"), smooth.smoothing, 0.0..=10.0),
+            ("curveOffset", tr("Curve Offset"), smooth.curve_offset, -1.0..=1.0),
+            ("curveShape", tr("Curve Shape"), smooth.curve_shape, -1.0..=1.0),
+            ("maskThreshold", tr("Mask Threshold"), smooth.threshold, 0.0..=1.0),
+            ("distanceMapMultiplier", tr("Distance Map Multiplier"), smooth.multiplier, 0.0..=1.0),
+        ],
+    );
+    bevel_wrap(app, sheet, id, smooth.wrap);
+}
+
+/// Warp: Seed, Warp Mode, Intensity with its Divider, the directional modes' Angle (Multi Directional's Directions, Blending Mode), then Source Parameters
+fn source_warp(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, warp: &SourceWarp) {
+    let set = |app: &mut TextureCraftApp, key: &str, value: Value, merge: bool| {
+        app.run("effect.set", json!({"effect": id, key: value, "merge": merge}));
+    };
+    let mut seed = warp.seed;
+    if sheet.seed(tr("Seed"), &mut seed) {
+        set(app, "seed", json!(seed), false);
+    }
+    if let (Some(picked), _) = sheet.dropdown(tr("Warp Mode"), warp.mode, &WarpMode::ALL, |mode| tr(mode.label()).to_owned(), None) {
+        set(app, "warpMode", json!(picked.id()), false);
+    }
+    let mut intensity = warp.intensity;
+    if let Some(merge) = intensity_row(app, sheet, id, &mut intensity, 0.0..=1.0, warp.divider) {
+        set(app, "intensity", json!(intensity), merge);
+    }
+    if warp.mode != WarpMode::Warp {
+        let mut angle = warp.angle;
+        if let Some(merge) = sheet.angle(tr("Angle"), &mut angle, 0.0..=360.0) {
+            set(app, "angle", json!(angle), merge);
+        }
+    }
+    if warp.mode == WarpMode::MultiDirectional {
+        let counts = SourceWarp::DIRECTIONS.map(|count| count.to_string());
+        let names: Vec<&str> = counts.iter().map(String::as_str).collect();
+        let at = SourceWarp::DIRECTIONS.iter().position(|count| *count == warp.directions).unwrap_or_default();
+        if let Some(picked) = sheet.switch(tr("Directions"), &names, at).and_then(|index| SourceWarp::DIRECTIONS.get(index)) {
+            set(app, "directions", json!(picked), false);
+        }
+        let name = |blending: WarpBlending| tr(blending.label()).to_owned();
+        if let (Some(picked), _) = sheet.dropdown(tr("Blending Mode"), warp.blending, &WarpBlending::ALL, name, None) {
+            set(app, "blendingMode", json!(picked.id()), false);
+        }
+    }
+    if sheet.card(tr("Source Parameters"), Some(true)) {
+        let source = &warp.source;
+        let name = |mode: WarpSourceMode| tr(mode.label()).to_owned();
+        if let (Some(picked), _) = sheet.dropdown(tr("Source Mode"), source.mode, &WarpSourceMode::ALL, name, None) {
+            set(app, "sourceMode", json!(picked.id()), false);
+        }
+        slider_rows(
+            app,
+            sheet,
+            id,
+            &[
+                ("sourceBlur", tr("Source Blur"), source.blur, 0.0..=1.0),
+                ("sourceBalance", tr("Source Balance"), source.balance, 0.0..=1.0),
+                ("sourceContrast", tr("Source Contrast"), source.contrast, 0.0..=1.0),
+                ("sourceTiling", tr("Source Tiling"), source.tiling, 0.01..=16.0),
+            ],
+        );
+    }
+    sheet.close_card();
 }
 
 /// The tone groups' names and the `effect.set` keys they edit, in the order a panel shows them

@@ -27,11 +27,13 @@ pub mod pattern;
 pub mod projector_cover;
 pub mod projector_depth;
 pub mod projector_view;
+mod shape_distance;
 mod soft_box;
 pub mod store;
 pub mod thumb;
 pub mod tile_length;
 pub mod warp;
+mod warp_texel;
 
 pub use below::{BelowCache, StackKey};
 pub use display::{DisplayKind, kinds_for, tile_bytes};

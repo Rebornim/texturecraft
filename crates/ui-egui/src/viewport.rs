@@ -732,7 +732,9 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     let (alt, shift, snap) = ui.input(|input| (input.modifiers.alt, input.modifiers.shift, input.modifiers.shift && input.modifiers.command));
     let local = |pointer: egui::Pos2| Vec2::new(pointer.x - rect.left(), pointer.y - rect.top());
     let adjusting = brush_drag(app, ui, &response);
-    let navigating = !adjusting && (alt || ui.input(|input| input.pointer.middle_down() || input.pointer.secondary_down()));
+    // A held Move on model button owns the pointer and the wheel until it lets go: the camera, brush and gizmos keep still
+    let holding = crate::move_on_model::holding(app, ui.ctx());
+    let navigating = !adjusting && !holding && (alt || ui.input(|input| input.pointer.middle_down() || input.pointer.secondary_down()));
 
     // Navigation; S + drag moves the projection stencil instead, below
     let delta = ui.input(|input| input.pointer.delta());
@@ -741,8 +743,8 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     // Only an equipped Projection tool that can act moves its stencil: it isn't drawn otherwise
     let stencil_moves = tool_acts(app) && app.session.tool.tool == Tool::Projection;
     let stencil_drag = s_held && stencil_moves && app.session.tool.stencil.is_some();
-    if stencil_drag || adjusting {
-        // The stencil or the brush changes instead of the camera
+    if stencil_drag || adjusting || holding {
+        // The stencil, the brush or the held Move on model button changes instead of the camera
     } else if response.dragged_by(PointerButton::Middle) {
         app.camera_glide = None;
         app.session.camera.pan(delta.x / size.y, delta.y / size.y);
@@ -771,7 +773,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         app.orbit_snap = None;
     }
 
-    if response.hovered() {
+    if response.hovered() && !holding {
         size_brush_by_ctrl_wheel(app, ui);
         if ui.input(|input| input.multi_touch().is_none()) {
             let pinch = trackpad_pinch(ui);
@@ -890,10 +892,9 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     }
 
     // The selected fill's frame (planar, warp) or round projector (tri-planar, spherical, cylindrical): only a press on one of its handles moves it
-    let gizmo_free = !alt && !s_held && !v_held && !focus_pick && !popup && !picking && touch.is_none() && !DecalDrop::blocks_input(ui.ctx());
+    let gizmo_free = !alt && !holding && !s_held && !v_held && !focus_pick && !popup && !picking && touch.is_none() && !DecalDrop::blocks_input(ui.ctx());
     let frame_drag = gizmo_free && (crate::frame_gizmo::input(app, ui, &response, rect) || crate::round_gizmo::input(app, ui, &response, rect));
-    let moving = crate::move_on_model::input(app, ui, &response, rect, !gizmo_free || frame_drag);
-    let decal_drag = frame_drag || moving;
+    let decal_drag = frame_drag || holding;
     let plane_pick = !popup
         && !s_held
         && !v_held
@@ -1937,7 +1938,8 @@ fn view_2d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         app.ui.uv_pan[0] += delta.x / size.x * 2.0;
         app.ui.uv_pan[1] -= delta.y / size.y * 2.0;
     }
-    if response.hovered() {
+    // A held Move on model button takes the wheel
+    if response.hovered() && app.moving_on_model.is_none() {
         size_brush_by_ctrl_wheel(app, ui);
         let scroll = wheel_scroll(ui, shift);
         if scroll != 0.0 && shift && wheel_sizes_brush(app) {

@@ -107,6 +107,32 @@ fn a_slot_lists_its_sources_restores_a_procedural_and_clears_back_to_uniform() {
     assert_eq!(source(&harness, layer, Channel::Metallic), Source::uniform_of(Channel::Metallic), "× goes back to a uniform value");
 }
 
+/// Dragging the pattern's Contrast changes only the contrast: the pattern keeps its balance, invert, seed, scale and values
+#[test]
+fn dragging_a_pattern_slider_changes_only_its_own_parameter() {
+    let (mut harness, layer) = app_with_fill(json!({}));
+    let pattern = json!({
+        "layer": layer.0, "channel": "metallic", "procedural": "Clouds", "scale": 9.0, "contrast": 1.0, "seed": 7,
+        "balance": 0.25, "invert": true, "low": [0.2, 0.2, 0.2], "high": [0.8, 0.8, 0.8],
+    });
+    texturecraft_engine::execute(&mut harness.state_mut().session, "layer.fill.set", &pattern).unwrap();
+    harness.run_steps(SETTLE_FRAMES);
+    let Source::Procedural { pattern: before, low, high } = source(&harness, layer, Channel::Metallic) else { panic!("a procedural") };
+
+    harness.get_by_role_and_label(Role::Slider, "Contrast").scroll_to_me();
+    harness.run_steps(SCROLL_FRAMES);
+    let track = harness.get_by_role_and_label(Role::Slider, "Contrast").rect();
+    mouse_drag(&mut harness, track.center(), egui::vec2(track.width() / 4.0, 0.0));
+
+    let Source::Procedural { pattern: after, low: after_low, high: after_high } = source(&harness, layer, Channel::Metallic) else {
+        panic!("still a procedural")
+    };
+
+    assert_ne!(after.contrast, before.contrast, "the drag changes the contrast");
+    assert_eq!(Procedural { contrast: before.contrast, ..after }, before, "the rest of the pattern stays");
+    assert_eq!((after_low, after_high), (low, high), "the pattern's values stay");
+}
+
 #[test]
 fn a_uniform_gray_ramp_inverts_its_value() {
     let (mut harness, layer) = app_with_fill(json!({"roughness": 0.3}));

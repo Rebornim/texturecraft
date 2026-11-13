@@ -1628,10 +1628,18 @@ impl EffectKind {
 
     /// Whether a source of this effect (a fill, a material or a generator input) reads an anchor point.
     fn reads_anchor(&self) -> bool {
+        self.reads(None)
+    }
+
+    /// Whether a source of this effect reads anchor point `anchor` (any anchor point when None)
+    pub fn reads(&self, anchor: Option<LayerId>) -> bool {
+        let hit = |s: &Source| s.anchor().is_some_and(|a| anchor.is_none_or(|wanted| wanted == a));
         match self {
-            EffectKind::Fill { source, .. } => source.anchor().is_some(),
-            EffectKind::Material(fill) => fill.sources.values().any(|source| source.anchor().is_some()),
-            EffectKind::Generator(generator) => generator.micro.is_some() || generator.inputs.values().any(|source| source.anchor().is_some()),
+            EffectKind::Fill { source, .. } => hit(source),
+            EffectKind::Material(fill) => fill.sources.values().any(hit),
+            EffectKind::Generator(generator) => {
+                generator.micro.is_some_and(|micro| anchor.is_none_or(|wanted| wanted == micro.anchor)) || generator.inputs.values().any(hit)
+            }
             _ => false,
         }
     }
@@ -1964,12 +1972,15 @@ mod tests {
             ..Mask::new(MaskBackground::Black)
         });
         assert!(fill_layer.reads_anchor());
+        let reader = fill_layer.mask.as_ref().map(|mask| &mask.effects[0].kind);
+        assert!(reader.is_some_and(|reader| reader.reads(Some(LayerId(9))) && reader.reads(None) && !reader.reads(Some(LayerId(8)))));
 
         // A generator with micro detail reads its anchor too
         let mut generator_layer = Layer::new(LayerId(3), "g", LayerKind::Paint, &[Channel::BaseColor]);
         let mut generator = Generator::new(GeneratorKind::Dirt);
         generator.micro = Some(MicroDetail { anchor: LayerId(9), amount: 0.5 });
         assert_eq!(EffectKind::Generator(generator.clone()).anchors_read(), [(LayerId(9), Channel::Height)]);
+        assert!(EffectKind::Generator(generator.clone()).reads(Some(LayerId(9))) && !EffectKind::Generator(generator.clone()).reads(Some(LayerId(8))));
         generator_layer.mask = Some(Mask { effects: vec![Effect::new(LayerId(4), EffectKind::Generator(generator))], ..Mask::new(MaskBackground::Black) });
         assert!(generator_layer.reads_anchor());
     }

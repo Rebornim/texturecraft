@@ -85,7 +85,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add anchor point",
             ["Layers", "Effects"],
             None,
-            "{layer?, target?: content|mask (content), name?} (on the content it records the stack up to this layer, in a mask the mask value at that point; fills, masks and generators above read it: effect.add.fill {anchor}, effect.add.generator {microAnchor})",
+            "{layer?, target?: content|mask (default content), name? (default the layer's name, \"<layer> mask\" in a mask)} (on the content it records the stack up to this layer, in a mask the mask value at that point: every channel reads that gray; fills, masks and generators above read it: effect.add.fill {anchor}, effect.add.generator {microAnchor})",
             has_layer,
             add_anchor
         ),
@@ -411,12 +411,18 @@ fn size_weights(command: &str, value: &Value) -> Result<[f32; CurvatureDetail::S
     Ok(weights)
 }
 
-/// An anchor point on the layer content by default, preserving previous placement, or in its mask with `target: "mask"`.
+/// An anchor point on the layer content by default, preserving previous placement, or in its mask with `target: "mask"`; named after the layer ("<layer> mask" in a mask) unless given a name
 fn add_anchor(session: &mut Session, params: &Value) -> Result<Value> {
     // Params may be null or an object without a target: both default to the content
-    let mut params = params.as_object().cloned().unwrap_or_default();
-    params.entry("target").or_insert_with(|| json!("content"));
-    push_effect(session, &Value::Object(params), EffectKind::Anchor, BlendMode::Normal)
+    let content = strp(params, "target").is_none() || content_target(params, "effect.add.anchor")?;
+    let mut fields = params.as_object().cloned().unwrap_or_default();
+    fields.insert("target".into(), json!(if content { "content" } else { "mask" }));
+    if name_param(params).is_none() {
+        let layer = session.doc.project.layer(layer_param(session, "effect.add.anchor", params)?)?;
+        let name = if content { layer.name.clone() } else { format!("{} mask", layer.name) };
+        fields.insert("name".into(), json!(name));
+    }
+    push_effect(session, &Value::Object(fields), EffectKind::Anchor, BlendMode::Normal)
 }
 
 /// A generator's micro detail from `microAnchor` / `microAmount` for a generator on layer

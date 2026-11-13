@@ -2,6 +2,7 @@
 //! Keep feature tests in their own modules; the standalone ui_snapshots.rs target remains available.
 
 mod alpha_parameters;
+mod anchor_point;
 mod bake_job_mesh;
 mod bake_mode;
 mod bake_presets;

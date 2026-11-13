@@ -125,7 +125,8 @@ fn add_filter_on_a_mask_adds_it_to_the_mask() {
     assert!(mask.effects.iter().any(|effect| effect.id == added), "the filter went on the mask");
     assert!(matches!(kind(&harness, added), EffectKind::Filter(Filter::Empty)), "{:?}", kind(&harness, added));
     assert!(harness.query_by_label("Sharpen").is_some(), "the mask filter's picker is open");
-    assert!(harness.query_by_label("Grayscale").is_none(), "the picker leaves out content-only filters");
+    assert!(harness.query_by_label("Normal Invert").is_none(), "the picker leaves out content-only filters");
+    assert!(harness.query_by_label("Grayscale Conversion").is_some(), "masks take Grayscale Conversion");
 }
 
 #[test]

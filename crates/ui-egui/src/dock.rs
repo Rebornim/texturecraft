@@ -1487,7 +1487,8 @@ pub(crate) fn properties_title(app: &TextureCraftApp) -> String {
     let what = match (app.session.selected_layer().and_then(|id| project.layers.get(&id)), app.session.target) {
         // Polygon fill keeps its own properties wherever it can fill
         _ if tool == Tool::PolygonFill && tool_usable => tr(tool.label()).to_string(),
-        (Some(_), StackTarget::Effect(effect)) => project.effect(effect).map(|(_, found)| found.name.clone()).unwrap_or_default(),
+        // The effect's type, not its own name (every filter reads "Filter")
+        (Some(_), StackTarget::Effect(effect)) => project.effect(effect).map(|(_, found)| tr(effect_type_label(&found.kind)).to_string()).unwrap_or_default(),
         (Some(layer), StackTarget::Content) if matches!(layer.kind, LayerKind::Fill(_)) => tr("Fill").to_string(),
         (Some(layer), StackTarget::Content) if layer.is_group() => tr("Folder").to_string(),
         (Some(layer), StackTarget::Content) if layer.instance_source().is_some() => tr("Instance").to_string(),
@@ -1496,6 +1497,14 @@ pub(crate) fn properties_title(app: &TextureCraftApp) -> String {
         _ => tr(tool.label()).to_string(),
     };
     format!("{} - {what}", tr("Properties"))
+}
+
+/// The name of effect type `kind` in the Properties title
+fn effect_type_label(kind: &EffectKind) -> &'static str {
+    match kind {
+        EffectKind::Filter(_) => "Filter",
+        other => other.name(),
+    }
 }
 
 pub(crate) fn properties(app: &mut TextureCraftApp, ui: &mut Ui) {
@@ -1510,7 +1519,8 @@ pub(crate) fn properties(app: &mut TextureCraftApp, ui: &mut Ui) {
 /// Whether the panel shows a fill layer's sections, which the tabs jump between
 fn properties_has_fill_tabs(app: &TextureCraftApp) -> bool {
     let layer = app.session.selected_layer().and_then(|id| app.session.doc.project.layers.get(&id));
-    app.session.tool.tool != Tool::PolygonFill
+    let polygon_fill_shown = app.session.tool.tool == Tool::PolygonFill && app.session.tool_usable(Tool::PolygonFill);
+    !polygon_fill_shown
         && app.session.target == StackTarget::Content
         && layer.is_some_and(|layer| matches!(&layer.kind, LayerKind::Fill(fill) if fill.projection.placed().is_none()))
 }

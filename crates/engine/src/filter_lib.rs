@@ -40,7 +40,7 @@ const fn def(id: &'static str, label: &'static str, group: &'static str, mask: b
 pub const FILTERS: &[FilterDef] = &[
     def("hsl", "HSL Perceptive", "Adjustments", true),
     def("levels", "Levels", "Adjustments", true),
-    def("contrastLuminosity", "Contrast/Luminosity", "Adjustments", true),
+    def("contrastLuminosity", "Contrast Luminosity", "Adjustments", true),
     def("colorBalance", "Color Balance", "Adjustments", true),
     def("gradientMap", "Gradient Map", "Adjustments", true),
     def("posterize", "Posterize", "Adjustments", true),
@@ -50,16 +50,16 @@ pub const FILTERS: &[FilterDef] = &[
     def("histogramShift", "Histogram Shift", "Adjustments", true),
     def("invert", "Invert", "Adjustments", true),
     def("threshold", "Threshold", "Adjustments", true),
-    def("grayscale", "Grayscale", "Adjustments", false),
+    def("grayscale", "Grayscale Conversion", "Adjustments", true),
     def("edgeDetect", "Edge Detect", "Adjustments", true),
     def("normalInvert", "Normal Invert", "Adjustments", false),
     def("bakedLighting", "Baked Lighting", "Adjustments", false),
     def("replaceColor", "Replace Color", "Adjustments", false),
     def("blur", "Blur", "Blur and sharpen", true),
     def("blurDirectional", "Blur Directional", "Blur and sharpen", true),
-    def("slopeBlur", "Slope Blur", "Blur and sharpen", true),
+    def("slopeBlur", "Blur Slope", "Blur and sharpen", true),
     def("sharpen", "Sharpen", "Blur and sharpen", true),
-    def("highPass", "High Pass", "Blur and sharpen", true),
+    def("highPass", "Highpass", "Blur and sharpen", true),
     def("bevel", "Bevel", "Blur and sharpen", true),
     def("glow", "Glow", "Blur and sharpen", true),
     def("warp", "Warp", "Distort", true),
@@ -399,7 +399,7 @@ mod tests {
         for f in FILTERS {
             let kind = build(f.id, &Value::Null).unwrap_or_else(|e| panic!("{}: {e}", f.id));
             // Material finishes are content only; other filters also run on masks, where some
-            // (grayscale, normal invert) change nothing and are not offered.
+            // (normal invert) change nothing and are not offered.
             assert_eq!(kind.content_only().is_none(), f.mask || matches!(kind, EffectKind::Filter(_)), "{}", f.id);
             assert_eq!(find(f.label).map(|d| d.id), Some(f.id));
         }

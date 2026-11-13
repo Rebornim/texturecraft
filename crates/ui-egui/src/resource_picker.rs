@@ -24,7 +24,7 @@ const PICTURE_TOP: f32 = 6.0;
 const PICTURE_ROUNDING: u8 = 3;
 const TILE_ROUNDING: u8 = 5;
 const NAME_SIZE: f32 = 10.0;
-/// From the picture's top to the first name line's centre, and between the two lines
+/// From the tile's top to the first name line's centre, and between the two lines: both lines sit inside the tile's box
 const NAME_CENTER: f32 = PICTURE_SIZE + 14.0;
 const NAME_LINE: f32 = 12.0;
 const NAME_MARGIN: f32 = 4.0;
@@ -409,7 +409,7 @@ fn name_lines(ui: &Ui, rect: Rect, label: &str, bright: bool, bold: bool) {
         let mut job = egui::text::LayoutJob::simple_singleline(line.clone(), font.clone(), color);
         job.wrap = egui::text::TextWrapping::truncate_at_width(room);
         let galley = painter.layout_job(job);
-        let center = pos2(rect.center().x, rect.top() + PICTURE_TOP + NAME_CENTER + index as f32 * NAME_LINE);
+        let center = pos2(rect.center().x, rect.top() + NAME_CENTER + index as f32 * NAME_LINE);
         painter.galley(center - galley.size() / 2.0, galley, color);
     }
 }

@@ -1301,7 +1301,7 @@ impl Filter {
             Filter::Invert => "Invert",
             Filter::Threshold { .. } => "Threshold",
             Filter::Hsl { .. } => "HSL Perceptive",
-            Filter::ContrastLuminosity { .. } => "Contrast/Luminosity",
+            Filter::ContrastLuminosity { .. } => "Contrast Luminosity",
             Filter::ColorBalance { .. } => "Color Balance",
             Filter::GradientMap { .. } => "Gradient Map",
             Filter::Posterize { .. } => "Posterize",
@@ -1311,11 +1311,11 @@ impl Filter {
             Filter::HistogramShift { .. } => "Histogram Shift",
             Filter::Warp { .. } => "Warp",
             Filter::DirectionalBlur { .. } => "Blur Directional",
-            Filter::SlopeBlur { .. } => "Slope Blur",
-            Filter::HighPass { .. } => "High Pass",
+            Filter::SlopeBlur { .. } => "Blur Slope",
+            Filter::HighPass { .. } => "Highpass",
             Filter::EdgeDetect { .. } => "Edge Detect",
             Filter::DirectionalWarp { .. } => "Warp Directional",
-            Filter::Grayscale => "Grayscale",
+            Filter::Grayscale => "Grayscale Conversion",
             Filter::NormalInvert => "Normal Invert",
             Filter::Bevel { .. } => "Bevel",
             Filter::Mosaic { .. } => "Mosaic",
@@ -1323,6 +1323,17 @@ impl Filter {
             Filter::BakedLighting { .. } => "Baked Lighting",
             Filter::ReplaceColor { .. } => "Replace Color",
             Filter::Empty => "Filter (empty)",
+        }
+    }
+
+    /// The label this filter had before it took the reference workflow's name: effects named after it still follow a swap
+    pub fn former_label(&self) -> Option<&'static str> {
+        match self {
+            Filter::ContrastLuminosity { .. } => Some("Contrast/Luminosity"),
+            Filter::SlopeBlur { .. } => Some("Slope Blur"),
+            Filter::HighPass { .. } => Some("High Pass"),
+            Filter::Grayscale => Some("Grayscale"),
+            _ => None,
         }
     }
 

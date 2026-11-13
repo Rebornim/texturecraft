@@ -1,10 +1,9 @@
 //! The source slot of a fill: a mask fill's grayscale or one channel of a fill. It shows what the fill reads and opens the source picker: the patterns, the project's images and a uniform value, or the anchor points below the layer
 
-use std::sync::{Arc, LazyLock};
-
-use egui::{Sense, Ui, vec2};
+use egui::{Color32, Sense, Ui, vec2};
+use egui_phosphor::regular as ic;
 use serde_json::json;
-use texturecraft_engine::compose::{ImageRes, ThumbTarget};
+use texturecraft_engine::compose::{ImageStore, ThumbTarget};
 use texturecraft_engine::core::{Channel, LayerId, ProceduralKind, Source};
 
 use crate::TextureCraftApp;
@@ -12,23 +11,20 @@ use crate::dock::with;
 use crate::fill_source_target::FillSourceTarget;
 use crate::filter_slot::{SLOT_HEIGHT, paint};
 use crate::i18n::tr;
+use crate::picker_group::PickerGroup;
+use crate::picker_tab::PickerTab;
 use crate::resource_picker;
-use crate::resource_picker_anchor::ResourcePickerAnchor;
 use crate::resource_picker_choice::ResourcePickerChoice;
-use crate::resource_picker_tile::ResourcePickerTile;
-use crate::shelf_preview::ShelfPreview;
+use crate::resource_picker_item::ResourcePickerItem;
+use crate::thumbs::Thumbs;
+use crate::tile_picture::TilePicture;
 
 /// The key of the uniform value tile, and the prefixes of the pattern and image tiles' keys
 const UNIFORM_KEY: &str = "uniform";
 const PATTERN_PREFIX: &str = "pattern:";
 const IMAGE_PREFIX: &str = "image:";
 /// The gray the uniform value tile shows
-const UNIFORM_TILE_GRAY: f32 = 0.8;
-/// The swatch's name among the image previews, prefixed like the stencil previews so it is not taken for a project image
-const UNIFORM_SWATCH_NAME: &str = "swatch:uniform";
-/// One swatch for every frame, so its preview stays cached
-static UNIFORM_SWATCH: LazyLock<Arc<ImageRes>> =
-    LazyLock::new(|| Arc::new(ImageRes::new(1, 1, vec![[UNIFORM_TILE_GRAY, UNIFORM_TILE_GRAY, UNIFORM_TILE_GRAY, 1.0]], false)));
+const UNIFORM_TILE: Color32 = Color32::from_gray(204);
 
 /// The slot of `fill`, which reads `source`; `anchors` are the anchor points below its layer and `caption` names what it fills
 pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui, fill: &FillSourceTarget, source: &Source, (anchors, caption): (&[(LayerId, String)], &str)) {
@@ -47,30 +43,20 @@ pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui, fill: &FillSourceTarg
     if response.clicked() {
         resource_picker::toggle(&ctx, popup);
     }
-    let highlighted = response.hovered() || resource_picker::is_open(&ctx, popup);
+    let highlighted = response.hovered() || egui::Popup::is_id_open(&ctx, popup);
     paint(ui, rect, (highlighted, response.has_focus()), picture, (caption, &name));
-    if !resource_picker::is_open(&ctx, popup) {
+    if !egui::Popup::is_id_open(&ctx, popup) {
         return;
     }
 
-    let tiles = tiles(app, &ctx);
-    let anchors: Vec<ResourcePickerAnchor> = anchors
-        .iter()
-        .map(|(anchor, name)| ResourcePickerAnchor {
-            anchor: *anchor,
-            name: name.clone(),
-            layer: layer_name(app, *anchor),
-            channel: read_label(app, *anchor, channel),
-        })
-        .collect();
-    let current = current_key(source);
-    let picked = resource_picker::show_sources(&response, popup, &mut app.thumbs, (current.as_deref(), source.anchor()), tiles, anchors, |ui, anchor| {
-        app.layer_panel.texture_outside(ui.ctx(), &app.session, ThumbTarget::Stage { effect: anchor, channel })
-    });
-    match picked {
-        Some(ResourcePickerChoice::Resource(key)) if Some(&key) != current.as_ref() => pick_resource(app, fill, &key),
-        Some(ResourcePickerChoice::Anchor(anchor)) if source.anchor() != Some(anchor) => pick_anchor(app, fill, anchor, channel),
-        _ => {}
+    let current = current_choice(source);
+    let images = &app.session.images;
+    let tabs = |thumbs: &mut Thumbs| source_tabs(thumbs, &ctx, images, anchors);
+    let picked = resource_picker::show(&response, popup, &mut app.thumbs, current.as_ref(), current.is_some(), tabs);
+    match picked.filter(|choice| Some(choice) != current.as_ref()) {
+        Some(ResourcePickerChoice::Resource(key)) => pick_resource(app, fill, &key),
+        Some(ResourcePickerChoice::Anchor(anchor)) => pick_anchor(app, fill, anchor, channel),
+        None => {}
     }
 }
 
@@ -118,53 +104,53 @@ fn fill_key(fill: &FillSourceTarget) -> String {
     }
 }
 
-/// The key of the tile `source` is, outlined in the picker
-fn current_key(source: &Source) -> Option<String> {
-    match source {
-        Source::Uniform(_) => Some(UNIFORM_KEY.to_string()),
-        Source::Procedural { pattern, .. } => Some(format!("{PATTERN_PREFIX}{}", pattern.kind.label())),
-        Source::Image { name, .. } => Some(format!("{IMAGE_PREFIX}{name}")),
-        Source::Anchor { .. } => None,
-    }
+/// The tile `source` is, outlined in the picker
+fn current_choice(source: &Source) -> Option<ResourcePickerChoice> {
+    Some(match source {
+        Source::Uniform(_) => ResourcePickerChoice::Resource(UNIFORM_KEY.to_string()),
+        Source::Procedural { pattern, .. } => ResourcePickerChoice::Resource(format!("{PATTERN_PREFIX}{}", pattern.kind.label())),
+        Source::Image { name, .. } => ResourcePickerChoice::Resource(format!("{IMAGE_PREFIX}{name}")),
+        Source::Anchor { anchor, .. } => ResourcePickerChoice::Anchor(*anchor),
+    })
 }
 
-/// The Resources tab: the patterns, the project's images and a uniform value
-fn tiles(app: &mut TextureCraftApp, ctx: &egui::Context) -> Vec<ResourcePickerTile<'static>> {
-    let mut tiles = Vec::with_capacity(ProceduralKind::ALL.len() + app.session.images.len() + 1);
-    tiles.extend(ProceduralKind::ALL.into_iter().map(|kind| ResourcePickerTile {
-        key: format!("{PATTERN_PREFIX}{}", kind.label()),
-        label: tr(kind.label()).to_string(),
-        group: tr("Patterns"),
-        thumbnail: None,
-        image: None,
-        preview: Box::new(move || ShelfPreview::Procedural(kind)),
-    }));
+/// The picker's tabs: Resources (the patterns, the project's images and a uniform value) and the anchor points `anchors`
+fn source_tabs(thumbs: &mut Thumbs, ctx: &egui::Context, images: &ImageStore, anchors: &[(LayerId, String)]) -> Vec<PickerTab<ResourcePickerChoice>> {
+    let patterns = ProceduralKind::ALL
+        .into_iter()
+        .map(|kind| resource(format!("{PATTERN_PREFIX}{}", kind.label()), tr(kind.label()), TilePicture::Texture(thumbs.procedural(ctx, kind))))
+        .collect();
+    let mut names: Vec<&String> = images.keys().collect();
+    names.sort();
+    // A project image's thumbnail is made only once its tile is drawn, so opening the picker does not resample every image
+    let images = names
+        .into_iter()
+        .filter_map(|name| images.get(name).map(|image| resource(format!("{IMAGE_PREFIX}{name}"), name, TilePicture::Image(name.clone(), image.clone()))))
+        .collect();
+    let uniform = vec![resource(UNIFORM_KEY.to_string(), tr("Uniform value"), TilePicture::Swatch(UNIFORM_TILE))];
+    let resources = [("Patterns", patterns), ("Images", images), ("Uniform", uniform)]
+        .into_iter()
+        .map(|(header, items)| PickerGroup { header: Some(tr(header)), items })
+        .collect();
+    let anchors = anchors
+        .iter()
+        .map(|(anchor, label)| ResourcePickerItem {
+            id: ResourcePickerChoice::Anchor(*anchor),
+            label: label.clone(),
+            caption: None,
+            picture: TilePicture::Glyph(ic::ANCHOR),
+        })
+        .collect();
 
-    let first_image = tiles.len();
-    for (name, image) in &app.session.images {
-        let preview_name = name.clone();
-        let preview_image = image.clone();
-        tiles.push(ResourcePickerTile {
-            key: format!("{IMAGE_PREFIX}{name}"),
-            label: name.clone(),
-            group: tr("Images"),
-            thumbnail: None,
-            image: Some(image.clone()),
-            preview: Box::new(move || ShelfPreview::Image(preview_name.clone(), preview_image.clone())),
-        });
-    }
-    tiles[first_image..].sort_unstable_by(|left, right| left.label.cmp(&right.label));
+    vec![
+        PickerTab { icon: ic::SQUARES_FOUR, name: tr("Resources"), groups: resources },
+        PickerTab { icon: ic::ANCHOR, name: tr("Anchor points"), groups: vec![PickerGroup { header: None, items: anchors }] },
+    ]
+}
 
-    tiles.push(ResourcePickerTile {
-        key: UNIFORM_KEY.to_string(),
-        label: tr("Uniform value").to_string(),
-        group: tr("Uniform"),
-        thumbnail: Some(app.thumbs.image(ctx, UNIFORM_SWATCH_NAME, &UNIFORM_SWATCH)),
-        image: None,
-        preview: Box::new(|| ShelfPreview::Image(UNIFORM_SWATCH_NAME.to_string(), UNIFORM_SWATCH.clone())),
-    });
-
-    tiles
+/// One tile of the Resources tab, `key` naming what it sets
+fn resource(key: String, label: &str, picture: TilePicture) -> ResourcePickerItem<ResourcePickerChoice> {
+    ResourcePickerItem { id: ResourcePickerChoice::Resource(key), label: label.to_owned(), caption: None, picture }
 }
 
 /// Sets the fill to the resource whose tile key is `key`
@@ -217,7 +203,10 @@ fn pattern_range(channel: Channel) -> ([f32; 3], [f32; 3]) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use egui_kittest::{Harness, kittest::Queryable};
+    use texturecraft_engine::compose::ImageRes;
     use texturecraft_engine::core::LayerKind;
     use texturecraft_engine::{Session, execute, geom::primitives};
 
@@ -296,10 +285,10 @@ mod tests {
         assert_eq!(image_preview_count(&harness.ctx), initial_previews, "warm frames reuse image previews");
 
         let first_name = "picker-image-000.png";
-        harness.get_by_role_and_label(egui::Role::Button, first_name).scroll_to_me();
+        harness.get_by_role_and_label(egui::Role::ListBoxOption, first_name).scroll_to_me();
         harness.run_steps(30);
         let scrolled_previews = image_preview_count(&harness.ctx);
-        harness.get_by_role_and_label(egui::Role::Button, first_name).click();
+        harness.get_by_role_and_label(egui::Role::ListBoxOption, first_name).click();
         harness.run_steps(3);
 
         assert!(scrolled_previews > initial_previews, "scrolling must render newly visible image tiles");
@@ -326,10 +315,12 @@ mod tests {
         let mut app = TextureCraftApp::new(&creation_context, session);
         let context = egui::Context::default();
 
-        let tiles = tiles(&mut app, &context);
+        let tabs = source_tabs(&mut app.thumbs, &context, &app.session.images, &[]);
         let image_previews = context.tex_manager().read().allocated().filter(|(_, metadata)| metadata.name.starts_with("res_picker-")).count();
 
-        assert_eq!(tiles.iter().filter(|tile| tile.key.starts_with(IMAGE_PREFIX)).count(), 128);
+        let image_tiles =
+            tabs.iter().flat_map(PickerTab::items).filter(|item| matches!(&item.id, ResourcePickerChoice::Resource(key) if key.starts_with(IMAGE_PREFIX)));
+        assert_eq!(image_tiles.count(), 128);
         assert_eq!(image_previews, 0, "opening the picker must not resample all project images");
     }
 }

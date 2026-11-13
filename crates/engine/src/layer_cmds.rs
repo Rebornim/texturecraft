@@ -6,6 +6,7 @@ use texturecraft_core::{
     BlendMode, Channel, ChannelBlend, ChannelKind, Decal, EffectKind, Fill, FillSymmetry, Filtering, Layer, LayerId, LayerKind, NormalFormat, Procedural,
     ProceduralKind, Project, Projection, Projector, Sampling, ScaleMode, ShapeCrop, Source, SymmetryKind, UvTransform, UvWrap,
 };
+use texturecraft_paint::alphas;
 
 use crate::commands::{
     CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, content_param, f32p, has_layer, layer_param, normal_format_param, strp, u64p,
@@ -96,7 +97,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill source",
             [],
             None,
-            "{layer? | effect?: content fill effect id, channel, color?: ([r,g,b] linear or \"#rrggbb\" sRGB)|value?|procedural?: kind, scale?, seed?, contrast?, balance?, invert?, low?, high? (the same kind keeps what is not given), resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3, tile?: {Tile Generator settings in camelCase, as project.inspect shows them}, tileDefaults?: true (alone, they edit the channel's pattern)|image?, normalFormat?: openGl|directX (the image's normal map convention; alone, it changes the channel's image)|anchor?: anchor effect id, anchorChannel?, colors?: gradient map of a color channel's procedural or anchor, 1 to 16 colors dark to light ([r, g, b] linear or \"#rrggbb\" sRGB; [] removes it; absent keeps it; alone, it changes the channel's source)|gradientMap?: true (turns the color stops on from the channel's current procedural or anchor: a procedural's low, their midpoint and high; an anchor's black, gray and white; stops already there stay), enabled?, solo?: true (this channel on, every other one off)}",
+            "{layer? | effect?: content fill effect id, channel, color?: ([r,g,b] linear or \"#rrggbb\" sRGB)|value?|procedural?: kind, scale?, seed?, contrast?, balance?, invert?, low?, high? (the same kind keeps what is not given), resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3, tile?: {Tile Generator settings in camelCase, as project.inspect shows them}, tileDefaults?: true (alone, they edit the channel's pattern)|image?|alpha?: library alpha id or name (its picture becomes the image resource alpha_<id>.png), normalFormat?: openGl|directX (the image's normal map convention; alone, it changes the channel's image)|anchor?: anchor effect id, anchorChannel?, colors?: gradient map of a color channel's procedural or anchor, 1 to 16 colors dark to light ([r, g, b] linear or \"#rrggbb\" sRGB; [] removes it; absent keeps it; alone, it changes the channel's source)|gradientMap?: true (turns the color stops on from the channel's current procedural or anchor: a procedural's low, their midpoint and high; an anchor's black, gray and white; stops already there stay), enabled?, solo?: true (this channel on, every other one off)}",
             has_layer,
             fill_set
         ),
@@ -538,10 +539,15 @@ fn fill_set(session: &mut Session, params: &Value) -> Result<Value> {
     }
 
     let source = fill_source_from(session, params, (target, channel), normal_format)?;
+    // A library alpha that became the source joins the project's images
+    let library_alpha = match &source {
+        Some(Source::Image { name, .. }) => crate::fill_alpha::library_alpha_of(name).filter(|_| strp(params, "image").is_none()),
+        _ => None,
+    };
     if source.is_none() && enabled.is_none() && normal_format.is_none() && colors.is_none() && !init_ramp {
         return Err(bad(
             CMD,
-            "give `color`, `value`, `procedural`, `image`, `anchor`, pattern settings (`tile`, `resolution`…), `colors`, `gradientMap`, `normalFormat`, `enabled` or `solo`",
+            "give `color`, `value`, `procedural`, `image`, `alpha`, `anchor`, pattern settings (`tile`, `resolution`…), `colors`, `gradientMap`, `normalFormat`, `enabled` or `solo`",
         ));
     }
 
@@ -552,6 +558,9 @@ fn fill_set(session: &mut Session, params: &Value) -> Result<Value> {
     // Changing only the normal format or gradient stops leaves the layer channel on or off
     let touches_channel = source.is_some() || enabled.is_some();
     session.edit("Set fill", |session| {
+        if let Some(alpha) = library_alpha {
+            session.add_library_alpha(alpha)?;
+        }
         let fill = fill_mut(session, target)?;
 
         // `normalFormat` alone: the convention of the channel's image
@@ -637,6 +646,11 @@ fn fill_source_from(
 
     if let Some(name) = strp(params, "image") {
         return Ok(Some(Source::Image { name: name.to_string(), normal_format: normal_format.unwrap_or_default() }));
+    }
+
+    if let Some(name) = strp(params, "alpha") {
+        let alpha = alphas::find(name).ok_or_else(|| bad(CMD, format!("unknown alpha `{name}`")))?;
+        return Ok(Some(Source::Image { name: crate::fill_alpha::resource_name(alpha), normal_format: normal_format.unwrap_or_default() }));
     }
 
     if let Some(anchor) = u64p(params, "anchor") {

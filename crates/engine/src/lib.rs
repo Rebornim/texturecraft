@@ -18,6 +18,7 @@ pub mod decal_cmds;
 pub mod effect_blending_cmds;
 pub mod effect_clipboard;
 pub mod file_cmds;
+pub mod fill_alpha;
 pub mod fill_hit_test;
 pub mod fill_material_cmds;
 pub mod fill_mode;

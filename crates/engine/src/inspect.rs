@@ -172,6 +172,11 @@ fn layer_json(s: &Session, l: &Layer, depth: usize) -> Value {
     if !l.content_effects.is_empty() {
         v["contentEffects"] = json!(l.content_effects.iter().map(|e| effect_json(s, e, true)).collect::<Vec<_>>());
     }
+    if let LayerKind::Group { contents, .. } = &l.kind
+        && !contents.is_none()
+    {
+        v["contents"] = json!({ "scale": contents.scale, "rotation": contents.rotation });
+    }
     if depth < texturecraft_core::project::MAX_DEPTH {
         let kids: Vec<Value> = l.children().iter().rev().filter_map(|c| s.doc.project.layers.get(c)).map(|c| layer_json(s, c, depth + 1)).collect();
         if l.is_group() {

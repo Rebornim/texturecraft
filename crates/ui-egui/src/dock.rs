@@ -227,7 +227,7 @@ fn layer_tree(app: &mut TextureCraftApp, ui: &mut Ui, id: LayerId, depth: usize,
     let tk = Tokens::get(ui.ctx());
     let r = ui.available_rect_before_wrap();
     ui.painter().hline(r.x_range(), r.top() - 0.5, Stroke::new(1.0, tk.separator));
-    if let LayerKind::Group { children, collapsed } = &layer.kind
+    if let LayerKind::Group { children, collapsed, .. } = &layer.kind
         && !collapsed
         && depth < 12
     {
@@ -1104,7 +1104,6 @@ fn legacy_body(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
 
 /// What the Properties panel edits: polygon fill's own settings, the selected effect, fill, folder or instance, else the tool
 pub(crate) fn properties_contents(app: &mut TextureCraftApp, ui: &mut Ui) {
-    let tokens = Tokens::get(ui.ctx());
     let selected = app.session.selected_layer().and_then(|id| app.session.doc.project.layers.get(&id).cloned());
 
     match (&selected, app.session.target) {
@@ -1113,9 +1112,7 @@ pub(crate) fn properties_contents(app: &mut TextureCraftApp, ui: &mut Ui) {
         (Some(layer), StackTarget::Effect(effect)) if mask_fill_of(&app.session.doc.project, effect).is_some() => mask_fill_properties(app, ui, layer, effect),
         (Some(layer), StackTarget::Effect(effect)) => legacy_body(ui, |ui| effect_properties(app, ui, layer, effect)),
         (Some(layer), StackTarget::Content) if matches!(layer.kind, LayerKind::Fill(_)) => fill_properties(app, ui, layer),
-        (Some(layer), StackTarget::Content) if layer.is_group() => legacy_body(ui, |ui| {
-            ui.label(RichText::new(tr("A folder blends its children (pass-through). Set per-channel opacity in the layer rows.")).color(tokens.text_dim));
-        }),
+        (Some(layer), StackTarget::Content) if layer.is_group() => crate::folder_properties::folder_properties(app, ui, layer.id),
         (Some(layer), StackTarget::Content) if layer.instance_source().is_some() => legacy_body(ui, |ui| instance_properties(app, ui, layer)),
         (Some(layer), StackTarget::Mask) => legacy_body(ui, |ui| {
             height_mask_section(app, ui, layer);

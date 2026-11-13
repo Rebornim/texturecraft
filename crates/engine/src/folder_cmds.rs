@@ -1,0 +1,172 @@
+//! A folder's actions on everything inside it: the Scale and Rotation laid on its fills, and new seeds for its patterns
+
+use serde_json::{Value, json};
+use texturecraft_core::project::MAX_DEPTH;
+use texturecraft_core::{ContentsOffset, EffectKind, Filter, Layer, LayerId, LayerKind, Project, Source};
+
+use crate::commands::{CommandSpec, bad, f32p, has_layer, layer_param};
+use crate::{Result, Session, cmd};
+
+pub fn specs() -> Vec<CommandSpec> {
+    vec![
+        cmd!(
+            "folder.contents.set",
+            "Folder contents",
+            [],
+            None,
+            "{layer?: folder (default selected), scale?: 0.01..100 multiplying every fill's tiling inside, rotation?: degrees added to every fill's angle inside (wrapped to -180..180), merge?} — relative to each fill's own and never written into the fills; one undo step",
+            has_layer,
+            set_contents
+        ),
+        cmd!(
+            "folder.contents.reset",
+            "Reset folder contents",
+            [],
+            None,
+            "{layer?: folder (default selected)} — drop the folder's Scale and Rotation: every fill inside back to its own, in one undo step",
+            has_layer,
+            reset_contents
+        ),
+        cmd!(
+            "folder.randomizeSeeds",
+            "Randomize seeds",
+            [],
+            None,
+            "{layer?: folder (default selected)} — a new seed for every pattern, generator and noise filter inside the folder (fills, masks, effects, nested folders; instanced sources stay), in one undo step; seeds that were equal stay equal. Returns {seeds: how many changed}",
+            has_layer,
+            randomize_seeds
+        ),
+    ]
+}
+
+/// The folder a command acts on: the `layer` param or the selected layer, refused unless it is a folder
+fn folder_param(s: &Session, cmd: &str, p: &Value) -> Result<LayerId> {
+    let id = layer_param(s, cmd, p)?;
+    match s.doc.project.layers.get(&id) {
+        Some(layer) if layer.is_group() => Ok(id),
+        _ => Err(bad(cmd, format!("layer {} is not a folder", id.0))),
+    }
+}
+
+/// The Scale and Rotation folder `id` lays on its fills
+fn contents_mut(project: &mut Project, id: LayerId) -> Option<&mut ContentsOffset> {
+    match &mut project.layers.get_mut(&id)?.kind {
+        LayerKind::Group { contents, .. } => Some(contents),
+        _ => None,
+    }
+}
+
+fn set_contents(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "folder.contents.set";
+    let id = folder_param(s, CMD, p)?;
+    let (scale, rotation) = (f32p(p, "scale"), f32p(p, "rotation"));
+    if scale.is_none() && rotation.is_none() {
+        return Err(bad(CMD, "give `scale` and/or `rotation`"));
+    }
+    let current = s.doc.project.contents_offset(id);
+    let offset = ContentsOffset::new(scale.unwrap_or(current.scale), rotation.unwrap_or(current.rotation));
+    s.edit("Folder contents", |s| {
+        let contents = contents_mut(&mut s.doc.project, id).ok_or_else(|| bad(CMD, format!("layer {} is not a folder", id.0)))?;
+        *contents = offset;
+        Ok(())
+    })?;
+    Ok(json!({ "scale": offset.scale, "rotation": offset.rotation }))
+}
+
+fn reset_contents(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "folder.contents.reset";
+    let id = folder_param(s, CMD, p)?;
+    if s.doc.project.contents_offset(id).is_none() {
+        return Ok(Value::Null);
+    }
+    s.edit("Reset folder contents", |s| {
+        let contents = contents_mut(&mut s.doc.project, id).ok_or_else(|| bad(CMD, format!("layer {} is not a folder", id.0)))?;
+        *contents = ContentsOffset::NONE;
+        Ok(())
+    })?;
+    Ok(Value::Null)
+}
+
+fn randomize_seeds(s: &mut Session, p: &Value) -> Result<Value> {
+    let folder = folder_param(s, "folder.randomizeSeeds", p)?;
+    let mut inside = Vec::new();
+    descendants(&s.doc.project, folder, 0, &mut inside);
+    let seeds: usize = inside.iter().filter_map(|id| s.doc.project.layers.get(id)).map(|layer| layer_seeds(&mut layer.clone()).len()).sum();
+    if seeds == 0 {
+        return Ok(json!({ "seeds": 0 }));
+    }
+    // One mixing key per folder: a seed maps to the same new seed wherever it is, so patterns that lined up still do
+    let key = mix(folder.0 as u32 ^ (folder.0 >> 32) as u32);
+    s.edit("Randomize seeds", |s| {
+        for id in &inside {
+            if let Some(layer) = s.doc.project.layers.get_mut(id) {
+                for seed in layer_seeds(layer) {
+                    *seed = mix(*seed ^ key);
+                }
+            }
+        }
+        Ok(())
+    })?;
+    Ok(json!({ "seeds": seeds }))
+}
+
+/// Whether folder `id` holds anything its Contents act on: a fill (layer, content or mask fill) or a seed
+pub fn has_contents(project: &Project, id: LayerId) -> bool {
+    let mut inside = Vec::new();
+    descendants(project, id, 0, &mut inside);
+    inside.iter().filter_map(|id| project.layers.get(id)).any(|layer| {
+        let fills = matches!(layer.kind, LayerKind::Fill(_))
+            || layer
+                .content_effects
+                .iter()
+                .chain(layer.mask.iter().flat_map(|m| m.effects.iter()))
+                .any(|e| matches!(e.kind, EffectKind::Fill { .. } | EffectKind::Material(_)));
+        fills || !layer_seeds(&mut layer.clone()).is_empty()
+    })
+}
+
+/// Every layer inside folder `id`, nested folders' children too (instances' sources are not followed: they live elsewhere)
+fn descendants(project: &Project, id: LayerId, depth: usize, out: &mut Vec<LayerId>) {
+    if depth > MAX_DEPTH {
+        return;
+    }
+    for child in project.layers.get(&id).map(|l| l.children().to_vec()).unwrap_or_default() {
+        out.push(child);
+        descendants(project, child, depth + 1, out);
+    }
+}
+
+/// The seeds of a layer's fill, content effects and mask effects
+fn layer_seeds(layer: &mut Layer) -> Vec<&mut u32> {
+    let Layer { kind, content_effects, mask, .. } = layer;
+    let mut seeds = Vec::new();
+    if let LayerKind::Fill(fill) = kind {
+        seeds.extend(fill.sources.values_mut().filter_map(source_seed));
+    }
+    let effects = content_effects.iter_mut().chain(mask.iter_mut().flat_map(|m| m.effects.iter_mut()));
+    for effect in effects {
+        match &mut effect.kind {
+            EffectKind::Fill { source, .. } => seeds.extend(source_seed(source)),
+            EffectKind::Material(fill) => seeds.extend(fill.sources.values_mut().filter_map(source_seed)),
+            EffectKind::Generator(generator) => seeds.push(&mut generator.seed),
+            EffectKind::Filter(Filter::Warp { seed, .. } | Filter::SlopeBlur { seed, .. } | Filter::DirectionalWarp { seed, .. }) => seeds.push(seed),
+            _ => {}
+        }
+    }
+    seeds
+}
+
+fn source_seed(source: &mut Source) -> Option<&mut u32> {
+    match source {
+        Source::Procedural { pattern, .. } => Some(&mut pattern.seed),
+        _ => None,
+    }
+}
+
+/// A new seed that looks random but follows from `seed` (SplitMix32's mixing step), so replays get the same seeds
+fn mix(seed: u32) -> u32 {
+    let mut z = seed.wrapping_add(0x9e37_79b9);
+    z = (z ^ (z >> 16)).wrapping_mul(0x85eb_ca6b);
+    z = (z ^ (z >> 13)).wrapping_mul(0xc2b2_ae35);
+    z ^ (z >> 16)
+}

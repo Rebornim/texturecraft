@@ -9,6 +9,7 @@ mod color_bar;
 mod color_picker_rows;
 mod compare_row;
 mod compare_row_response;
+mod factor_slider;
 mod group;
 mod id_color_row;
 mod id_color_row_response;
@@ -33,6 +34,7 @@ mod slot_response;
 mod stack_slider;
 mod switch_control;
 mod tooltip;
+mod value_text;
 
 #[cfg(test)]
 mod tests;

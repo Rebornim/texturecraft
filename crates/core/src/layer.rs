@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Backface, BlendMode, Channel, ChannelKind, CompareSource, DepthCulling, FillSymmetry, Projector, ShapeCrop, lum};
+use crate::{Backface, BlendMode, Channel, ChannelKind, CompareSource, ContentsOffset, DepthCulling, FillSymmetry, Projector, ShapeCrop, lum};
 
 mod curvature_detail;
 mod curvature_mode;
@@ -90,7 +90,13 @@ pub enum LayerKind {
     /// A procedural or uniform material applied everywhere (shaped by the mask).
     Fill(Fill),
     /// A folder of layers, bottom → top.
-    Group { children: Vec<LayerId>, collapsed: bool },
+    Group {
+        children: Vec<LayerId>,
+        collapsed: bool,
+        /// Scale and Rotation laid on every fill inside (none in folders saved before folders had one)
+        #[serde(default, skip_serializing_if = "ContentsOffset::is_none")]
+        contents: ContentsOffset,
+    },
     /// A linked instance of `source` (possibly in another texture set): renders the source's
     /// content, content effects and channel blending, and its mask unless the instance has its
     /// own. Edits to the source show in every instance.

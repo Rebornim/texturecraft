@@ -1402,6 +1402,46 @@ fn anchor_snapshots() {
     }
 }
 
+/// Screen 15: a folder of fills at rest, scaled x1.5 and turned +30 with the reset hovered, and an empty folder
+#[test]
+#[ignore]
+fn folder_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let empty = execute(&mut session, "layer.add.group", &json!({})).unwrap()["layer"].clone();
+    let fill = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.move", &json!({"layer": fill, "above": empty, "inside": false})).unwrap();
+    execute(&mut session, "layer.fill.set", &json!({"layer": fill, "channel": "baseColor", "procedural": "Clouds"})).unwrap();
+    let folder = execute(&mut session, "layer.group", &json!({"layer": fill})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.select", &json!({"layer": folder, "target": "content"})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "folder-rest");
+
+    execute(&mut harness.state_mut().session, "folder.contents.set", &json!({"layer": folder, "scale": 1.5, "rotation": 30.0})).unwrap();
+    harness.run_steps(4);
+    let reset = harness.get_by_role_and_label(egui::Role::Button, "Contents: Reset to defaults").rect().center();
+    harness.hover_at(reset);
+    save(&mut harness, &output_dir, "folder-offset-reset-hovered");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("folder-offset-{name}"));
+        }
+        harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    }
+
+    execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": empty, "target": "content"})).unwrap();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "folder-empty");
+}
+
 /// Screen 10: a new color selection without an ID map, then three colors on the ID mesh map (a row hovered, a row picking again, the Background list open)
 #[test]
 #[ignore]

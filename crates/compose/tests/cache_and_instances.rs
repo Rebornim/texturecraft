@@ -69,7 +69,7 @@ fn heavy_stack(f: &mut Fixture) -> LayerId {
     mask.effects.push(effect(f, EffectKind::Generator(Generator::new(GeneratorKind::Position))));
     mask.effects.push(effect(f, EffectKind::Filter(Filter::Blur { radius: 40.0 })));
     add(f, 0, fill(&[(Channel::Roughness, procedural(ProceduralKind::Grunge, 0.0, 1.0))]), Some(mask));
-    let group = add(f, 0, LayerKind::Group { children: vec![], collapsed: false }, None);
+    let group = add(f, 0, LayerKind::Group { children: vec![], collapsed: false, contents: Default::default() }, None);
     for b in f.project.layer_mut(group).unwrap().channels.values_mut() {
         b.mode = BlendMode::Passthrough;
     }
@@ -223,7 +223,7 @@ fn mask_with_height_follows_the_layer_height() {
 }
 
 fn group(f: &mut Fixture, folder: Option<LayerId>, mode: BlendMode, opacity: f32, mask: Option<Mask>) -> LayerId {
-    let id = put(f, 0, folder, LayerKind::Group { children: vec![], collapsed: false }, mask);
+    let id = put(f, 0, folder, LayerKind::Group { children: vec![], collapsed: false, contents: Default::default() }, mask);
     blend(f, id, mode, opacity);
     id
 }

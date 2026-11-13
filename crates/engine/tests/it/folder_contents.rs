@@ -1,0 +1,115 @@
+//! A folder's Scale and Rotation over the fills inside it (stored on the folder, reset drops it) and Randomize seeds as one undo step
+
+use serde_json::{Value, json};
+use texturecraft_engine::core::{Channel, ContentsOffset, EffectKind, Filter, LayerId, LayerKind, Projection, Source};
+use texturecraft_engine::geom::primitives;
+use texturecraft_engine::{Session, execute};
+
+fn id(v: Value, key: &str) -> LayerId {
+    LayerId(v[key].as_u64().unwrap())
+}
+
+/// A folder holding a Clouds fill (base color and roughness on one seed) with a warp filter in its mask; returns (session, folder, fill)
+fn folder_with_fill() -> (Session, LayerId, LayerId) {
+    let mut s = Session::new_project("t", primitives::sphere(1.0, 16, 8), "builtin:sphere", None, 128).unwrap();
+    let fill = id(execute(&mut s, "layer.add.fill", &Value::Null).unwrap(), "layer");
+    for channel in ["baseColor", "roughness"] {
+        execute(&mut s, "layer.fill.set", &json!({"layer": fill.0, "channel": channel, "procedural": "Clouds", "seed": 7})).unwrap();
+    }
+    execute(&mut s, "layer.fill.projection", &json!({"layer": fill.0, "projection": "uv", "scale": [2.0, 2.0], "rotation": 10.0})).unwrap();
+    execute(&mut s, "mask.add.white", &json!({"layer": fill.0})).unwrap();
+    execute(&mut s, "effect.add.filter", &json!({"layer": fill.0, "target": "mask", "filter": "warp"})).unwrap();
+    let folder = id(execute(&mut s, "layer.group", &json!({"layer": fill.0})).unwrap(), "layer");
+    s.update();
+    (s, folder, fill)
+}
+
+fn projection(s: &Session, fill: LayerId) -> Projection {
+    match &s.doc.project.layer(fill).unwrap().kind {
+        LayerKind::Fill(f) => f.projection.clone(),
+        other => panic!("not a fill: {other:?}"),
+    }
+}
+
+fn base_colors(s: &Session) -> Vec<[f32; 3]> {
+    let c = &s.caches[0].composite;
+    (0..128).step_by(9).flat_map(|y| (0..128).step_by(9).map(move |x| (x, y))).map(|(x, y)| c.value(Channel::BaseColor, x, y)).collect()
+}
+
+#[test]
+fn a_folders_scale_and_rotation_lay_on_its_fills_without_changing_them_and_reset_drops_them() {
+    let (mut s, folder, fill) = folder_with_fill();
+    let own = projection(&s, fill);
+    let before = base_colors(&s);
+    let steps = s.history_labels().len();
+
+    let set = execute(&mut s, "folder.contents.set", &json!({"layer": folder.0, "scale": 1.5, "rotation": 30.0})).unwrap();
+    assert_eq!(set, json!({"scale": 1.5, "rotation": 30.0}));
+    assert_eq!(s.history_labels().len(), steps + 1, "one undo step");
+    assert_eq!(s.doc.project.contents_around(fill), ContentsOffset::new(1.5, 30.0));
+    assert_eq!(projection(&s, fill), own, "the fill keeps its own values");
+    s.update();
+    let turned = base_colors(&s);
+    assert_ne!(turned, before, "the fill renders scaled and turned");
+    let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap().to_string();
+    assert!(inspect.contains(r#""contents":{"rotation":30.0,"scale":1.5}"#), "{inspect}");
+
+    // A drag continues its step; one value given keeps the other
+    execute(&mut s, "folder.contents.set", &json!({"layer": folder.0, "rotation": 400.0, "merge": true})).unwrap();
+    assert_eq!(s.history_labels().len(), steps + 1);
+    assert_eq!(s.doc.project.contents_offset(folder), ContentsOffset::new(1.5, 40.0));
+
+    execute(&mut s, "folder.contents.reset", &json!({"layer": folder.0})).unwrap();
+    assert!(s.doc.project.contents_offset(folder).is_none());
+    s.update();
+    assert_eq!(base_colors(&s), before, "reset gives every fill its own back");
+    let steps = s.history_labels().len();
+    execute(&mut s, "folder.contents.reset", &json!({"layer": folder.0})).unwrap();
+    assert_eq!(s.history_labels().len(), steps, "nothing to drop, no step");
+
+    execute(&mut s, "edit.undo", &Value::Null).unwrap();
+    assert_eq!(s.doc.project.contents_offset(folder), ContentsOffset::new(1.5, 40.0));
+
+    // Only folders take an offset, and it needs a value
+    assert!(execute(&mut s, "folder.contents.set", &json!({"layer": fill.0, "scale": 2.0})).is_err());
+    assert!(execute(&mut s, "folder.contents.set", &json!({"layer": folder.0})).is_err());
+    assert!(execute(&mut s, "folder.randomizeSeeds", &json!({"layer": fill.0})).is_err());
+}
+
+#[test]
+fn randomize_seeds_gives_every_pattern_inside_a_new_seed_in_one_undo_step() {
+    let (mut s, folder, fill) = folder_with_fill();
+    // The folder inside another: its seeds are inside that one too
+    let outer = id(execute(&mut s, "layer.group", &json!({"layer": folder.0})).unwrap(), "layer");
+    let seeds = |s: &Session| {
+        let layer = s.doc.project.layer(fill).unwrap();
+        let LayerKind::Fill(f) = &layer.kind else { panic!("not a fill") };
+        let pattern = |c| match f.sources.get(&c) {
+            Some(Source::Procedural { pattern, .. }) => pattern.seed,
+            other => panic!("not a pattern: {other:?}"),
+        };
+        let warp = layer.mask.as_ref().unwrap().effects.iter().find_map(|e| match e.kind {
+            EffectKind::Filter(Filter::Warp { seed, .. }) => Some(seed),
+            _ => None,
+        });
+        (pattern(Channel::BaseColor), pattern(Channel::Roughness), warp.unwrap())
+    };
+    let before = seeds(&s);
+    let steps = s.history_labels().len();
+
+    let out = execute(&mut s, "folder.randomizeSeeds", &json!({"layer": outer.0})).unwrap();
+    assert_eq!(out["seeds"], 3);
+    assert_eq!(s.history_labels().len(), steps + 1, "one undo step");
+    let after = seeds(&s);
+    assert!(after.0 != before.0 && after.2 != before.2, "{before:?} -> {after:?}");
+    assert_eq!(after.0, after.1, "channels on one seed stay on one seed");
+
+    execute(&mut s, "edit.undo", &Value::Null).unwrap();
+    assert_eq!(seeds(&s), before, "one undo takes every seed back");
+
+    // A folder with nothing seeded inside adds no step
+    let empty = id(execute(&mut s, "layer.add.group", &Value::Null).unwrap(), "layer");
+    let steps = s.history_labels().len();
+    assert_eq!(execute(&mut s, "folder.randomizeSeeds", &json!({"layer": empty.0})).unwrap()["seeds"], 0);
+    assert_eq!(s.history_labels().len(), steps);
+}

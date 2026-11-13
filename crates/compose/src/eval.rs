@@ -10,9 +10,9 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 use texturecraft_core::{
-    BakedMap, BlendMode, BlockScales, Channel, ChannelKind, CompareSource, CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter, Filtering,
-    Generator, GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, NormalFormat, Project, Projection, Sampling, ShapeCrop, Source,
-    TextureSet, TileGrid, blend1, blend3, lum, mix3, per_unit,
+    BakedMap, BlendMode, BlockScales, Channel, ChannelKind, CompareSource, ContentsOffset, CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter,
+    Filtering, Generator, GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, NormalFormat, Project, Projection, Sampling, ShapeCrop,
+    Source, TextureSet, TileGrid, blend1, blend3, lum, mix3, per_unit,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, Surface, UvGBuffer};
@@ -209,15 +209,16 @@ enum Content<'a> {
     Paint {
         preview: bool,
     },
-    /// A fill, with its projector's depth map when it culls by depth
-    Fill(&'a Fill, Option<Arc<ProjectorDepth>>),
+    /// A fill (with the Scale and Rotation of the folders around it laid on), with its projector's depth map when it culls by depth
+    Fill(Box<Cow<'a, Fill>>, Option<Arc<ProjectorDepth>>),
     Group(Vec<Node<'a>>),
 }
 
 struct EffectPlan<'a> {
     /// The effect's id (an anchor point records under it)
     id: LayerId,
-    kind: &'a EffectKind,
+    /// The effect, a fill's with the Scale and Rotation of the folders around its layer laid on
+    kind: Cow<'a, EffectKind>,
     blend: BlendMode,
     opacity: f32,
     data: Option<Cow<'a, [u16]>>,
@@ -655,7 +656,7 @@ fn filter_region(
             let mut nodes = Vec::new();
             match job {
                 Job::Mask(layer_mask) => {
-                    let Some(mut mask_stack) = mask_plan(inp, id, layer_mask, tx, ty, None) else { return Vec::new() };
+                    let Some(mut mask_stack) = mask_plan(inp, id, layer_mask, tx, ty, None, inp.project.contents_around(id)) else { return Vec::new() };
 
                     mask_stack.effects.truncate(index);
                     mask_stack.start = start;
@@ -869,7 +870,15 @@ struct Node<'a> {
 
 /// Plans of the visible effects of a stack: mask effects (`channel` None) or the content
 /// effects of one channel (paint effects then read that channel's pixels).
-fn effect_plans<'a>(inp: &Inputs<'a>, effects: &'a [Effect], tile_x: u32, tile_y: u32, channel: Option<Channel>) -> Vec<EffectPlan<'a>> {
+#[allow(clippy::too_many_arguments)]
+fn effect_plans<'a>(
+    inp: &Inputs<'a>,
+    effects: &'a [Effect],
+    tile_x: u32,
+    tile_y: u32,
+    channel: Option<Channel>,
+    around: ContentsOffset,
+) -> Vec<EffectPlan<'a>> {
     effects
         .iter()
         .filter(|effect| effect.visible)
@@ -889,7 +898,7 @@ fn effect_plans<'a>(inp: &Inputs<'a>, effects: &'a [Effect], tile_x: u32, tile_y
             let blend = effect.blend_of(channel);
             EffectPlan {
                 id: effect.id,
-                kind: &effect.kind,
+                kind: offset_effect(&effect.kind, around),
                 blend: blend.mode,
                 opacity: blend.opacity,
                 data: if effect.kind.painted() { tile_of(inp, image, tile_x, tile_y, channel) } else { None },
@@ -899,6 +908,25 @@ fn effect_plans<'a>(inp: &Inputs<'a>, effects: &'a [Effect], tile_x: u32, tile_y
             }
         })
         .collect()
+}
+
+/// `kind` with the folders' Scale and Rotation `around` laid on its projection (borrowed where that changes nothing)
+fn offset_effect(kind: &EffectKind, around: ContentsOffset) -> Cow<'_, EffectKind> {
+    match kind {
+        EffectKind::Fill { source, projection, sampling } if !around.is_none() => {
+            Cow::Owned(EffectKind::Fill { source: source.clone(), projection: around.apply(projection), sampling: *sampling })
+        }
+        EffectKind::Material(fill) if !around.is_none() => Cow::Owned(EffectKind::Material(offset_fill(fill, around).into_owned())),
+        _ => Cow::Borrowed(kind),
+    }
+}
+
+/// `fill` with the folders' Scale and Rotation `around` laid on its projection (borrowed where that changes nothing)
+fn offset_fill(fill: &Fill, around: ContentsOffset) -> Cow<'_, Fill> {
+    if around.is_none() {
+        return Cow::Borrowed(fill);
+    }
+    Cow::Owned(Fill { projection: around.apply(&fill.projection), ..fill.clone() })
 }
 
 /// Whether the live stroke paints `target` in this composite (a stroke on a layer instanced in a
@@ -924,12 +952,14 @@ fn tile_of<'a>(inp: &Inputs, img: Option<&'a TileImage>, tx: u32, ty: u32, chann
     img.resampled_tile(w, h, tx, ty, &empty).map(Cow::Owned)
 }
 
-fn mask_plan<'a>(inp: &Inputs<'a>, id: LayerId, mask: &'a Mask, tx: u32, ty: u32, fields: Option<&'a Fields>) -> Option<MaskPlan<'a>> {
+/// The plan of layer `id`'s `mask` for tile (tx, ty), its fills under the Scale and Rotation `around` of the folders holding the layer
+#[allow(clippy::too_many_arguments)]
+fn mask_plan<'a>(inp: &Inputs<'a>, id: LayerId, mask: &'a Mask, tx: u32, ty: u32, fields: Option<&'a Fields>, around: ContentsOffset) -> Option<MaskPlan<'a>> {
     if !mask.enabled {
         return None;
     }
     let background = if mask.background == MaskBackground::White { 1.0 } else { 0.0 };
-    let effects = effect_plans(inp, &mask.effects, tx, ty, None);
+    let effects = effect_plans(inp, &mask.effects, tx, ty, None, around);
     let start = fields.and_then(|f| f.get(&FieldKey::Mask(id))).and_then(|field| neighbourhood(&mask.effects, inp.gbuf.width).map(|(k, _, _)| (k, field)));
     let mut compared: Vec<Channel> = Vec::new();
     for effect in mask.effects.iter().filter(|e| e.visible) {
@@ -941,20 +971,39 @@ fn mask_plan<'a>(inp: &Inputs<'a>, id: LayerId, mask: &'a Mask, tx: u32, ty: u32
         }
     }
     // A folder's own content is its children: its compare sides read the stack below it
-    let layer =
-        if compared.is_empty() { None } else { inp.project.content_layer(id).and_then(|l| plan_content(inp, id, l, &compared, tx, ty, 0, fields, false)) };
+    let layer = if compared.is_empty() {
+        None
+    } else {
+        inp.project.content_layer(id).and_then(|l| plan_content(inp, id, l, &compared, tx, ty, 0, fields, false, around))
+    };
     Some(MaskPlan { background, effects, layer, start })
 }
 
+/// The plans of sibling layers `list` (under the Scale and Rotation of the folders holding them)
 fn plan<'a>(inp: &Inputs<'a>, list: &[LayerId], channels: &[Channel], tx: u32, ty: u32, depth: usize, fields: Option<&'a Fields>) -> Vec<Node<'a>> {
+    let around = list.first().map_or(ContentsOffset::NONE, |id| inp.project.contents_around(*id));
+    plan_in(inp, list, channels, tx, ty, depth, fields, around)
+}
+
+/// [`plan`] of sibling layers held by folders whose Scale and Rotation make `around`
+#[allow(clippy::too_many_arguments)]
+fn plan_in<'a>(
+    inp: &Inputs<'a>,
+    list: &[LayerId],
+    channels: &[Channel],
+    tx: u32,
+    ty: u32,
+    depth: usize,
+    fields: Option<&'a Fields>,
+    around: ContentsOffset,
+) -> Vec<Node<'a>> {
     if depth > texturecraft_core::project::MAX_DEPTH {
         return Vec::new();
     }
-    list.iter().filter_map(|id| plan_node(inp, *id, channels, tx, ty, depth, fields, true)).collect()
+    list.iter().filter_map(|id| plan_node(inp, *id, channels, tx, ty, depth, fields, true, around)).collect()
 }
 
-/// The plan of layer `id` at `depth` (None where it draws nothing); a folder's children are
-/// planned when `kids`.
+/// The plan of layer `id` at `depth` (None where it draws nothing), its fills under the Scale and Rotation `around` of the folders holding it; a folder's children are planned when `kids`
 #[allow(clippy::too_many_arguments)]
 fn plan_node<'a>(
     inp: &Inputs<'a>,
@@ -965,6 +1014,7 @@ fn plan_node<'a>(
     depth: usize,
     fields: Option<&'a Fields>,
     kids: bool,
+    around: ContentsOffset,
 ) -> Option<Node<'a>> {
     let own: &'a Layer = inp.project.layers.get(&id)?;
     // Instances draw their source's content (a missing source draws nothing).
@@ -972,10 +1022,10 @@ fn plan_node<'a>(
     if !own.visible {
         return None;
     }
-    let (content, chans) = plan_content(inp, id, layer, channels, tx, ty, depth, fields, kids)?;
-    let mask = layer_mask(inp.project, id).and_then(|m| mask_plan(inp, id, m, tx, ty, fields));
+    let (content, chans) = plan_content(inp, id, layer, channels, tx, ty, depth, fields, kids, around)?;
+    let mask = layer_mask(inp.project, id).and_then(|m| mask_plan(inp, id, m, tx, ty, fields, around));
     // Anchor points in the mask record even where the layer draws nothing
-    let mask_anchor = mask.as_ref().is_some_and(|m| m.effects.iter().any(|e| matches!(e.kind, EffectKind::Anchor)));
+    let mask_anchor = mask.as_ref().is_some_and(|m| m.effects.iter().any(|e| matches!(*e.kind, EffectKind::Anchor)));
     // A paint layer with nothing painted (and not being painted) or added by its content effects contributes nothing
     if let Content::Paint { preview: false } = content
         && chans.iter().all(|c| c.data.is_none() && c.effects.is_empty())
@@ -994,7 +1044,7 @@ fn plan_node<'a>(
     Some(Node { id, content, chans, mask, anchors, has_anchor, height_mask: layer.height_mask, parts })
 }
 
-/// The content of `layer` (layer `id`'s own, or its instance source's; None for an unfollowed instance) and its plan per drawn channel of `channels`; a folder's children are planned when `kids`
+/// The content of `layer` (layer `id`'s own, or its instance source's; None for an unfollowed instance) and its plan per drawn channel of `channels`, its fills under the Scale and Rotation `around` of the folders holding `id`; a folder's children are planned when `kids`
 #[allow(clippy::too_many_arguments)]
 fn plan_content<'a>(
     inp: &Inputs<'a>,
@@ -1006,6 +1056,7 @@ fn plan_content<'a>(
     depth: usize,
     fields: Option<&'a Fields>,
     kids: bool,
+    around: ContentsOffset,
 ) -> Option<(Content<'a>, Vec<ChanPlan<'a>>)> {
     let paint = matches!(layer.kind, LayerKind::Paint);
     let fx = !layer.is_group() && layer.content_effects.iter().any(|e| e.visible);
@@ -1018,15 +1069,17 @@ fn plan_content<'a>(
                 return None;
             }
             let data = if paint { tile_of(inp, inp.pixels.layer(layer.id, *c), tx, ty, Some(*c)) } else { None };
-            let effects = if fx { effect_plans(inp, &layer.content_effects, tx, ty, Some(*c)) } else { Vec::new() };
+            let effects = if fx { effect_plans(inp, &layer.content_effects, tx, ty, Some(*c), around) } else { Vec::new() };
             let start = fx_start.zip(fields.and_then(|f| f.get(&FieldKey::Content(id, *c))));
             Some(ChanPlan { ch: c.index(), kind: c.kind(), comps: c.components(), blend: b.mode, opacity: b.opacity.clamp(0.0, 1.0), data, effects, start })
         })
         .collect::<Vec<_>>();
     let content = match &layer.kind {
         LayerKind::Paint => Content::Paint { preview: previews(inp, PaintTarget::Layer(layer.id)) },
-        LayerKind::Fill(f) => Content::Fill(f, ProjectorDepth::of(inp.mesh, inp.bounds, &f.projection)),
-        LayerKind::Group { children, .. } => Content::Group(if kids { plan(inp, children, channels, tx, ty, depth + 1, fields) } else { Vec::new() }),
+        LayerKind::Fill(f) => Content::Fill(Box::new(offset_fill(f, around)), ProjectorDepth::of(inp.mesh, inp.bounds, &f.projection)),
+        LayerKind::Group { children, contents, .. } => {
+            Content::Group(if kids { plan_in(inp, children, channels, tx, ty, depth + 1, fields, around.then(*contents)) } else { Vec::new() })
+        }
         // `content_layer` already followed instance links.
         LayerKind::Instance { .. } => return None,
     };
@@ -1059,7 +1112,7 @@ fn plan_levels<'a>(inp: &Inputs<'a>, levels: &[Level], channels: &[Channel], tx:
         .enumerate()
         .map(|(d, l)| LevelPlan {
             below: if warm { Vec::new() } else { plan(inp, &l.below, channels, tx, ty, d, Some(fields)) },
-            at: plan_node(inp, l.at, channels, tx, ty, d, Some(fields), d == last),
+            at: plan_node(inp, l.at, channels, tx, ty, d, Some(fields), d == last, inp.project.contents_around(l.at)),
             above: plan(inp, &l.above, channels, tx, ty, d, Some(fields)),
         })
         .collect()
@@ -1489,7 +1542,7 @@ impl<'a, 'b> Texel<'a, 'b> {
             skip = filtered_index + 1;
         }
         // Anchor points under the precomputed filter: the mask up to the last of them, only to record them
-        if let Some(last) = plan.effects.iter().take(skip).rposition(|e| matches!(e.kind, EffectKind::Anchor)) {
+        if let Some(last) = plan.effects.iter().take(skip).rposition(|e| matches!(*e.kind, EffectKind::Anchor)) {
             self.mask_effects(plan, plan.background, 0, last + 1);
         }
         self.mask_effects(plan, value, skip, plan.effects.len())
@@ -1499,7 +1552,7 @@ impl<'a, 'b> Texel<'a, 'b> {
     fn mask_effects(&mut self, plan: &MaskPlan, mut value: f32, from: usize, to: usize) -> f32 {
         for effect in plan.effects.iter().take(to).skip(from) {
             let opacity = effect.opacity.clamp(0.0, 1.0);
-            match effect.kind {
+            match &*effect.kind {
                 EffectKind::Paint | EffectKind::Path(_) => {
                     let (mut painted, mut cov) = match effect.data.as_deref() {
                         Some(data) => (from_u16(data.get(self.o * 2).copied().unwrap_or(0)), from_u16(data.get(self.o * 2 + 1).copied().unwrap_or(0))),
@@ -1836,7 +1889,7 @@ impl<'a, 'b> Texel<'a, 'b> {
     /// Apply one content effect to a channel's straight value and coverage.
     fn content_effect(&mut self, e: &EffectPlan, c: &ChanPlan, v: [f32; 3], cov: f32) -> ([f32; 3], f32) {
         let o = e.opacity.clamp(0.0, 1.0);
-        match e.kind {
+        match &*e.kind {
             EffectKind::Paint | EffectKind::Path(_) => {
                 let (p, pc) = self.painted(e.data.as_deref(), c, e.preview);
                 over(c, e.blend, v, cov, p, pc * o)
@@ -2322,7 +2375,7 @@ fn mask_tile<'a>(
     (tile_x, tile_y): (u32, u32),
     offsets: impl Iterator<Item = usize> + 'a,
 ) -> impl Iterator<Item = (usize, f32)> + 'a {
-    let plan = mask_plan(inputs, id, mask, tile_x, tile_y, Some(fields));
+    let plan = mask_plan(inputs, id, mask, tile_x, tile_y, Some(fields), inputs.project.contents_around(id));
     let anchor_stack = anchor_plan(inputs, id, channels, tile_x, tile_y, Some(fields));
     offsets.map(move |offset| {
         let Some(plan) = plan.as_ref() else { return (offset, 0.0) };
@@ -2382,7 +2435,11 @@ pub fn effect_histogram(inp: &Inputs, effect: LayerId, channel: Channel, bins: u
             };
             let mut h = EffectHistogram::new(bins, color);
             // The mask is planned on its own: a layer with nothing drawn plans no node.
-            let mask = if in_mask { layer_mask(&cut, owner).and_then(|m| mask_plan(&cut_inp, owner, m, tx, ty, Some(fields))) } else { None };
+            let mask = if in_mask {
+                layer_mask(&cut, owner).and_then(|m| mask_plan(&cut_inp, owner, m, tx, ty, Some(fields), cut.contents_around(owner)))
+            } else {
+                None
+            };
             let nodes = if in_mask { Vec::new() } else { plan(&cut_inp, &[owner], &channels, tx, ty, 0, Some(fields)) };
             let content = nodes.first().and_then(|n| n.chans.iter().find(|c| Channel::ALL.get(c.ch) == Some(&channel)).map(|c| (n, c)));
             if mask.is_none() && content.is_none() {
@@ -2467,9 +2524,13 @@ pub fn compare_histograms(inp: &Inputs, effect: LayerId, bins: usize) -> Option<
             };
             let mut counts = empty();
             // The mask under the compare, and (sides reading layers) the layer's content and the stack below it
-            let Some(mut mask) = layer_mask(&cut, owner).and_then(|m| mask_plan(&cut_inp, owner, m, tx, ty, Some(fields))) else { return counts };
+            let Some(mut mask) = layer_mask(&cut, owner).and_then(|m| mask_plan(&cut_inp, owner, m, tx, ty, Some(fields), cut.contents_around(owner))) else {
+                return counts;
+            };
             let full = if reads_stack {
-                mask.layer = cut.content_layer(owner).and_then(|l| plan_content(&cut_inp, owner, l, &[channel], tx, ty, 0, Some(fields), false));
+                mask.layer = cut
+                    .content_layer(owner)
+                    .and_then(|l| plan_content(&cut_inp, owner, l, &[channel], tx, ty, 0, Some(fields), false, cut.contents_around(owner)));
                 plan(&cut_inp, &set.stack, &channels, tx, ty, 0, Some(fields))
             } else {
                 Vec::new()
@@ -2988,7 +3049,7 @@ soft {soft:?}"
     fn groups_pass_through_with_opacity() {
         let mut f = fixture();
         let gid = f.project.alloc_id();
-        let g = Layer::new(gid, "G", LayerKind::Group { children: vec![], collapsed: false }, &[Channel::BaseColor]);
+        let g = Layer::new(gid, "G", LayerKind::Group { children: vec![], collapsed: false, contents: Default::default() }, &[Channel::BaseColor]);
         f.project.insert_layer(0, g, None, false).unwrap();
         f.project.layer_mut(gid).unwrap().channels.insert(Channel::BaseColor, ChannelBlend { mode: BlendMode::Passthrough, opacity: 0.5 });
         let cid = f.project.alloc_id();
@@ -3294,10 +3355,48 @@ soft {soft:?}"
     }
 
     #[test]
+    fn fills_inside_folders_take_the_folders_scale_and_rotation_on_top_of_their_own() {
+        // Nested folders (x2 turned 30, then x1.5 turned -10) around a procedural fill with a procedural mask fill
+        let build = |outer: ContentsOffset, inner: ContentsOffset, projection: Projection| {
+            let mut f = fixture();
+            let folder = |f: &mut Fixture, contents: ContentsOffset| {
+                let id = f.project.alloc_id();
+                Layer::new(id, "G", LayerKind::Group { children: vec![], collapsed: false, contents }, &[Channel::BaseColor])
+            };
+            let outer = folder(&mut f, outer);
+            let outer = f.project.insert_layer(0, outer, None, false).unwrap();
+            let inner = folder(&mut f, inner);
+            let inner = f.project.insert_layer(0, inner, Some(outer), true).unwrap();
+            let pattern = |seed| Source::Procedural { pattern: Procedural { seed, ..Procedural::new(ProceduralKind::Perlin) }, low: [0.0; 3], high: [1.0; 3] };
+            let mut fill = Fill { projection: projection.clone(), ..Fill::default() };
+            fill.sources.insert(Channel::BaseColor, pattern(3));
+            let id = f.project.alloc_id();
+            let mut layer = Layer::new(id, "C", LayerKind::Fill(fill), &[Channel::BaseColor]);
+            let mut mask = Mask::new(MaskBackground::Black);
+            mask.effects.push(Effect::new(f.project.alloc_id(), EffectKind::Fill { source: pattern(9), projection, sampling: Default::default() }));
+            layer.mask = Some(mask);
+            f.project.insert_layer(0, layer, Some(inner), true).unwrap();
+            run(&f, None)
+        };
+        let own = Projection::Uv { scale: [2.0, 1.0], rotation: 15.0, offset: [0.1, 0.0] };
+        let (outer, inner) = (ContentsOffset::new(2.0, 30.0), ContentsOffset::new(1.5, -10.0));
+        let none = ContentsOffset::NONE;
+        let offset = build(outer, inner, own.clone());
+        let written = build(none, none, Projection::Uv { scale: [6.0, 3.0], rotation: 35.0, offset: [0.1, 0.0] });
+        assert_eq!(offset, written, "the folders' offset renders as if it were written into the fills");
+        assert_ne!(offset, build(none, none, own), "without the offset every fill keeps its own");
+    }
+
+    #[test]
     fn folder_mask_anchor_points_record_even_where_the_folder_is_masked_out() {
         let mut f = fixture();
         let gid = f.project.alloc_id();
-        let folder = Layer::new(gid, "G", LayerKind::Group { children: vec![], collapsed: false }, &[Channel::BaseColor, Channel::Roughness]);
+        let folder = Layer::new(
+            gid,
+            "G",
+            LayerKind::Group { children: vec![], collapsed: false, contents: Default::default() },
+            &[Channel::BaseColor, Channel::Roughness],
+        );
         f.project.insert_layer(0, folder, None, false).unwrap();
         let child = f.project.alloc_id();
         let mut fill = Fill::default();

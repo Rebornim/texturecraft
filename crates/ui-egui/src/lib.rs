@@ -34,6 +34,7 @@ pub mod i18n;
 pub mod id_color_pick;
 pub mod keymap;
 pub mod layer_panel;
+mod layer_toolbar;
 mod levels_display;
 mod levels_editor;
 mod levels_handle;

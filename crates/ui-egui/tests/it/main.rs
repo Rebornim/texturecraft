@@ -21,6 +21,7 @@ mod filter_picker;
 mod history_panel;
 mod layer_clipboard;
 mod layer_rename;
+mod layer_toolbar;
 mod layers_panel;
 mod levels_editor;
 mod mask_fill_rows;

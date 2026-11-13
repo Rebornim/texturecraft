@@ -20,7 +20,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add mask with color selection",
             ["Layers", "Mask"],
             None,
-            "{layer?, color?: [r,g,b] a first ID color (default: none, pick them with effect.colorSelection.pick), tolerance?}",
+            "{layer?, color?: [r,g,b] a first ID color (default: none, pick them with effect.colorSelection.pick), tolerance?} → {effect} (in the layer's mask, a new black one if it has none; selected)",
             has_layer,
             add_color_mask
         ),
@@ -141,16 +141,21 @@ fn add_mask(s: &mut Session, p: &Value, bg: MaskBackground) -> Result<Value> {
 }
 
 fn add_color_mask(s: &mut Session, p: &Value) -> Result<Value> {
-    let colors: Vec<[f32; 3]> = color_param("mask.add.colorSelection", p, "color")?.into_iter().collect();
+    push_effect_as(s, &mask_target(p), color_selection("mask.add.colorSelection", p)?, BlendMode::Normal, "Add mask with color selection")
+}
+
+/// A colour selection with the `color` and `tolerance` params of command `cmd`
+pub(crate) fn color_selection(cmd: &str, p: &Value) -> Result<EffectKind> {
+    let colors: Vec<[f32; 3]> = color_param(cmd, p, "color")?.into_iter().collect();
     let tolerance = f32p(p, "tolerance").unwrap_or(0.1).clamp(0.0, 1.0);
-    with_mask(s, p, "mask.add.colorSelection", "Add mask with color selection", |s, id| {
-        let eid = s.doc.project.alloc_id();
-        let l = s.doc.project.layer_mut(s.doc.project.mask_owner(id))?;
-        let m = l.mask.get_or_insert_with(|| Mask::new(MaskBackground::Black));
-        m.effects.push(Effect::new(eid, EffectKind::ColorSelection(ColorSelection::new(colors, tolerance))));
-        Ok(())
-    })?;
-    Ok(Value::Null)
+    Ok(EffectKind::ColorSelection(ColorSelection::new(colors, tolerance)))
+}
+
+/// `p` aimed at the layer's mask, whatever `target` it names
+pub(crate) fn mask_target(p: &Value) -> Value {
+    let mut params = p.as_object().cloned().unwrap_or_default();
+    params.insert("target".into(), json!("mask"));
+    Value::Object(params)
 }
 
 /// The mask layer `id` draws with (an instance's source's unless it has its own).
@@ -234,7 +239,25 @@ fn name_param(p: &Value) -> Option<&str> {
 
 /// Add an effect to the selected layer's mask (creating a mask if there is none) or, with
 /// `target: "content"` or a content-only effect, to its content stack.
-fn push_effect(s: &mut Session, p: &Value, mut kind: EffectKind, blend: BlendMode) -> Result<Value> {
+fn push_effect(s: &mut Session, p: &Value, kind: EffectKind, blend: BlendMode) -> Result<Value> {
+    let label = format!("Add {}", kind.name().to_ascii_lowercase());
+    push_effect_as(s, p, kind, blend, &label)
+}
+
+/// [`push_effect`] as the undo step `label`
+pub(crate) fn push_effect_as(s: &mut Session, p: &Value, kind: EffectKind, blend: BlendMode, label: &str) -> Result<Value> {
+    push_effect_with(s, p, kind, blend, label, |_| Ok(()))
+}
+
+/// [`push_effect_as`] that makes the change `first` in the same undo step before adding the effect
+pub(crate) fn push_effect_with(
+    s: &mut Session,
+    p: &Value,
+    mut kind: EffectKind,
+    blend: BlendMode,
+    label: &str,
+    first: impl FnOnce(&mut Session) -> Result<()>,
+) -> Result<Value> {
     let content = kind.content_only() == Some(true) || content_target(p, "effect.add")?;
     if kind.content_only().is_some_and(|c| c != content) {
         return Err(bad("effect.add", format!("{} effects go on masks, not on layer content", kind.name())));
@@ -242,13 +265,17 @@ fn push_effect(s: &mut Session, p: &Value, mut kind: EffectKind, blend: BlendMod
     if let EffectKind::Levels(levels) = &mut kind {
         levels_target(levels, content)?;
     }
-    let label = format!("Add {}", kind.name().to_ascii_lowercase());
-    let eid = with_mask(s, p, "effect.add", &label, |s, id| {
+    let eid = with_mask(s, p, "effect.add", label, |s, id| {
+        first(s)?;
         let eid = s.doc.project.alloc_id();
         // An instance's content and (unless it has its own) mask belong to its source.
         let id = if content { s.doc.project.content_layer(id).map_or(id, |l| l.id) } else { s.doc.project.mask_owner(id) };
         let l = s.doc.project.layer_mut(id)?;
-        let bg = if matches!(kind, EffectKind::Generator(_) | EffectKind::Fill { .. }) { MaskBackground::Black } else { MaskBackground::White };
+        let bg = if matches!(kind, EffectKind::Generator(_) | EffectKind::Fill { .. } | EffectKind::ColorSelection(_)) {
+            MaskBackground::Black
+        } else {
+            MaskBackground::White
+        };
         let mut e = Effect::new(eid, kind);
         e.blend = blend;
         if let Some(n) = name_param(p) {
@@ -457,7 +484,14 @@ fn add_filter(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn add_compare(s: &mut Session, p: &Value) -> Result<Value> {
-    let mut kind = EffectKind::Compare {
+    let mut kind = new_compare();
+    compare_from("effect.add.compare", p, &mut kind)?;
+    push_effect(s, p, kind, BlendMode::Normal)
+}
+
+/// A new compare mask: this layer's height over the layers below it, hardness 0.9
+pub(crate) fn new_compare() -> EffectKind {
+    EffectKind::Compare {
         op: CompareOp::GreaterThan,
         value: 0.5,
         tolerance: 0.1,
@@ -465,9 +499,7 @@ fn add_compare(s: &mut Session, p: &Value) -> Result<Value> {
         right: CompareSource::LayersBelow,
         channel: Channel::Height,
         hardness: 0.9,
-    };
-    compare_from("effect.add.compare", p, &mut kind)?;
-    push_effect(s, p, kind, BlendMode::Normal)
+    }
 }
 
 /// Apply the compare parameters of `p` to `kind` (a compare effect)

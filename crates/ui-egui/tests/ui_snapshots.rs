@@ -1526,3 +1526,65 @@ fn levels_snapshots() {
         }
     }
 }
+
+/// Screen 14: the Layers panel's top row (Add fill layer hovered), Add effect on a layer and on its mask, Add mask, and Bitmap's texture
+/// picker; the panel's left edge goes to stderr for cropping
+#[test]
+#[ignore]
+fn layer_toolbar_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let dirt = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.rename", &json!({"layer": dirt, "name": "Dirt"})).unwrap();
+    execute(&mut session, "effect.add.generator", &json!({"layer": dirt, "generator": "dirt"})).unwrap();
+    let fill = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.select", &json!({"layer": fill})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    harness.state_mut().ui.dock.focus(Panel::Layers);
+    harness.run_steps(3);
+    eprintln!("toolbar at {:?}", harness.get_by_role_and_label(egui::Role::Button, "Add effect").rect());
+    let hover = |harness: &mut Harness<'_, TextureCraftApp>, label: &str| {
+        let at = harness.get_by_role_and_label(egui::Role::Button, label).rect().center();
+        harness.hover_at(at);
+    };
+    let open = |harness: &mut Harness<'_, TextureCraftApp>, menu: &str| {
+        harness.get_by_role_and_label(egui::Role::Button, menu).click();
+        harness.run_steps(3);
+    };
+    hover(&mut harness, "Add fill layer");
+    save(&mut harness, &output_dir, "toolbar-rest");
+    open(&mut harness, "Add effect");
+    hover(&mut harness, "Filter");
+    save(&mut harness, &output_dir, "toolbar-effect-content");
+    harness.key_press(egui::Key::Escape);
+    execute(&mut harness.state_mut().session, "mask.add.white", &json!({"layer": fill})).unwrap();
+    harness.run_steps(3);
+    open(&mut harness, "Add effect");
+    hover(&mut harness, "Compare mask");
+    save(&mut harness, &output_dir, "toolbar-effect-mask");
+    harness.key_press(egui::Key::Escape);
+    execute(&mut harness.state_mut().session, "edit.undo", &json!({})).unwrap();
+    harness.run_steps(3);
+    open(&mut harness, "Add mask");
+    hover(&mut harness, "Height combination");
+    save(&mut harness, &output_dir, "toolbar-mask");
+    harness.get_by_role_and_label(egui::Role::Button, "Bitmap").click();
+    harness.run_steps(3);
+    save(&mut harness, &output_dir, "toolbar-bitmap");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        harness.key_press(egui::Key::Escape);
+        open(&mut harness, "Add effect");
+        hover(&mut harness, "Filter");
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("toolbar-effect-content-{name}"));
+        }
+    }
+}

@@ -1,6 +1,7 @@
 //! One integration-test executable avoids linking the same dependencies for every feature.
 //! Keep feature tests in their own modules; the standalone session.rs target remains available.
 
+mod add_mask_items;
 mod bake;
 mod bake_resolution;
 mod bake_settings;

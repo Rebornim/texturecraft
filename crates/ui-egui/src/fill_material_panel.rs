@@ -128,7 +128,7 @@ pub(crate) fn shown_color(linear: [f32; 3]) -> Color32 {
 }
 
 /// What the slot's source line says
-fn source_line(app: &TextureCraftApp, source: &Source) -> String {
+pub(crate) fn source_line(app: &TextureCraftApp, source: &Source) -> String {
     match source {
         Source::Uniform(_) => tr("Uniform").to_owned(),
         Source::Procedural { pattern, .. } => format!("{} · {}", tr(pattern.kind.label()), tr("procedural")),

@@ -69,7 +69,7 @@ fn heavy_stack(f: &mut Fixture) -> LayerId {
     );
     let mut mask = Mask::new(MaskBackground::Black);
     mask.effects.push(effect(f, EffectKind::Generator(Generator::new(GeneratorKind::Position))));
-    mask.effects.push(effect(f, EffectKind::Filter(Filter::Blur { radius: 40.0 })));
+    mask.effects.push(effect(f, EffectKind::Filter(Filter::Blur { radius: 40.0, wrap: false })));
     add(f, 0, fill(&[(Channel::Roughness, procedural(ProceduralKind::Grunge, 0.0, 1.0))]), Some(mask));
     let group = add(f, 0, LayerKind::Group { children: vec![], collapsed: false, contents: Default::default() }, None);
     for b in f.project.layer_mut(group).unwrap().channels.values_mut() {
@@ -83,7 +83,7 @@ fn heavy_stack(f: &mut Fixture) -> LayerId {
         f,
         EffectKind::Fill { source: procedural(ProceduralKind::Checker, 0.0, 1.0), projection: Projection::default(), sampling: Default::default() },
     ));
-    blurred.effects.push(effect(f, EffectKind::Filter(Filter::Blur { radius: 24.0 })));
+    blurred.effects.push(effect(f, EffectKind::Filter(Filter::Blur { radius: 24.0, wrap: false })));
     let top = add(f, 0, LayerKind::Paint, Some(blurred));
     let img = f.pixels.layer_mut(top, Channel::BaseColor, (RES, RES));
     for y in 40..200 {
@@ -245,7 +245,7 @@ fn generator_mask(f: &mut Fixture, kind: GeneratorKind, blur: Option<f32>) -> Ma
     let mut mask = Mask::new(MaskBackground::Black);
     mask.effects.push(effect(f, EffectKind::Generator(g)));
     if let Some(radius) = blur {
-        mask.effects.push(effect(f, EffectKind::Filter(Filter::Blur { radius })));
+        mask.effects.push(effect(f, EffectKind::Filter(Filter::Blur { radius, wrap: false })));
     }
     mask
 }
@@ -309,8 +309,8 @@ fn nested_stack(f: &mut Fixture) -> Nested {
     blend(f, g2_above, BlendMode::Overlay, 0.7);
     put(f, 0, Some(g2), LayerKind::Instance { source: base }, Some(Mask::new(MaskBackground::White)));
     let g1_above = put(f, 0, Some(g1), fill(&[(Channel::BaseColor, procedural(ProceduralKind::Wood, 0.2, 0.8))]), None);
-    let hsl = effect(f, EffectKind::Filter(Filter::Hsl { hue: 0.2, saturation: 0.1, lightness: 0.0 }));
-    let blur = effect(f, EffectKind::Filter(Filter::Blur { radius: 20.0 }));
+    let hsl = effect(f, EffectKind::Filter(Filter::Hsl { hue: 0.2, saturation: 0.1, lightness: 0.0, perceptive: false }));
+    let blur = effect(f, EffectKind::Filter(Filter::Blur { radius: 20.0, wrap: false }));
     f.project.layer_mut(g1_above).unwrap().content_effects.extend([hsl, blur]);
     blend(f, g1_above, BlendMode::Screen, 0.5);
     let mask = generator_mask(f, GeneratorKind::Position, Some(30.0));
@@ -535,7 +535,7 @@ fn anchors_inside_a_content_stack_record_the_content_up_to_them() {
     assert!((at(Channel::Height) - 0.4).abs() < 2e-3);
     assert!(check_cached(&f, 0, top).is_empty(), "anchor readers evaluate everything");
     // Behind a blur the cut reads the filtered field; before it, the unfiltered content.
-    let blur = effect(&mut f, EffectKind::Filter(Filter::Blur { radius: 30.0 }));
+    let blur = effect(&mut f, EffectKind::Filter(Filter::Blur { radius: 30.0, wrap: false }));
     f.project.layer_mut(low).unwrap().content_effects.insert(0, blur);
     let blurred = reference(&f, 0);
     assert!((blurred.value(Channel::Roughness, 128, 128)[0] - 0.2).abs() < 2e-3, "a flat height stays flat");

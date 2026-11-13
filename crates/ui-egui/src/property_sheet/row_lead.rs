@@ -14,6 +14,9 @@ pub(crate) enum RowLead<'a> {
 
     /// A setting of the row above, dim, its label under its parent's label
     Child(&'a str),
+
+    /// A label beside the controls column in a color of its own (Color Balance's color names)
+    Tinted { text: &'a str, color: egui::Color32 },
 }
 
 impl<'a> RowLead<'a> {
@@ -25,7 +28,7 @@ impl<'a> RowLead<'a> {
     /// The row's name, as assistive tech reads it
     pub(crate) fn text(self) -> &'a str {
         match self {
-            RowLead::Label { text, .. } | RowLead::Loose(text) | RowLead::Picture { text, .. } | RowLead::Child(text) => text,
+            RowLead::Label { text, .. } | RowLead::Loose(text) | RowLead::Picture { text, .. } | RowLead::Child(text) | RowLead::Tinted { text, .. } => text,
         }
     }
 }

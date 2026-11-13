@@ -898,6 +898,9 @@ impl Generator {
 pub enum Filter {
     Blur {
         radius: f32,
+        /// Reads past the texture's edges from its opposite side, so tiling textures stay seamless; off in projects saved before it
+        #[serde(default, skip_serializing_if = "is_false")]
+        wrap: bool,
     },
     Sharpen {
         amount: f32,
@@ -912,11 +915,21 @@ pub enum Filter {
         hue: f32,
         saturation: f32,
         lightness: f32,
+        /// Shifts in a perceptual color space (OKLCh), so a hue turn keeps the colors' lightness; plain HSL in projects saved before it
+        #[serde(default, skip_serializing_if = "is_false")]
+        perceptive: bool,
     },
     /// Contrast around mid gray and a luminosity shift, both −1..1 (0 = unchanged).
     ContrastLuminosity {
         contrast: f32,
         luminosity: f32,
+    },
+    /// Contrast, luminosity (both −1..1, 0 = unchanged) and saturation (0..1, 0.5 = unchanged) for the shadows, midtones and
+    /// highlights, each `[contrast, luminosity, saturation]`, weighted by the texel's lightness as [`Filter::ColorBalance`].
+    ColorCorrect {
+        shadows: [f32; 3],
+        midtones: [f32; 3],
+        highlights: [f32; 3],
     },
     /// Color offsets (−1..1 per component) weighted towards the shadows, midtones and highlights.
     ColorBalance {
@@ -1003,6 +1016,9 @@ pub enum Filter {
     /// level over about `width` texels at 2K (a mask's or height's bevel).
     Bevel {
         width: f32,
+        /// Reads past the texture's edges like [`Filter::Blur`]'s wrap
+        #[serde(default, skip_serializing_if = "is_false")]
+        wrap: bool,
     },
     /// Square cells `size` texels at 2K across, each the value at its center.
     Mosaic {
@@ -1039,6 +1055,11 @@ pub enum Filter {
 /// The divider of projects saved before intensities had one
 fn unit_divider() -> u16 {
     1
+}
+
+/// Whether a switch is off (not saved then)
+fn is_false(on: &bool) -> bool {
+    !*on
 }
 
 /// Whether `divider` leaves its intensity as it is (not saved then)
@@ -1094,6 +1115,24 @@ pub fn hsl_adjust(rgb: [f32; 3], hue: f32, saturation: f32, lightness: f32) -> [
     [hue_to_rgb(p, q, h + 1.0 / 3.0), hue_to_rgb(p, q, h), hue_to_rgb(p, q, h - 1.0 / 3.0)]
 }
 
+/// Smooth weights of the shadows, midtones and highlights at lightness `l` (0..1), summing to 1: shadows fade out and
+/// highlights in with lightness
+fn tone_weights(l: f32) -> (f32, f32, f32) {
+    ((1.0 - l) * (1.0 - l), 2.0 * l * (1.0 - l), l * l)
+}
+
+/// [`hsl_adjust`] in OKLCh: the hue turns and the chroma scales (`saturation` −1 = gray, 1 = twice as vivid) at the color's
+/// own perceived lightness, which `lightness` then pushes towards white or black (linear 0..1 colors)
+pub fn perceptive_adjust(rgb: [f32; 3], hue: f32, saturation: f32, lightness: f32) -> [f32; 3] {
+    let clean = |x: f32| if x.is_finite() { x } else { 0.0 };
+    let [l, a, b] = crate::oklab::from_linear(rgb.map(|v| clean(v).clamp(0.0, 1.0)));
+    let (sin, cos) = (clean(hue) * std::f32::consts::TAU).sin_cos();
+    let chroma = 1.0 + clean(saturation).clamp(-1.0, 1.0);
+    let (a, b) = ((a * cos - b * sin) * chroma, (a * sin + b * cos) * chroma);
+    let l = shift_unit(l.clamp(0.0, 1.0), clean(lightness));
+    crate::oklab::to_linear([l, a, b]).map(|v| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 })
+}
+
 /// Apply a 0..1 function to each component of a channel value: signed values map through
 /// 0..1, normals are left alone.
 pub fn per_unit(kind: ChannelKind, v: [f32; 3], f: impl Fn(f32) -> f32) -> [f32; 3] {
@@ -1145,7 +1184,8 @@ impl Filter {
         Some(match self {
             Filter::Invert => per_unit(kind, v, |x| 1.0 - x),
             Filter::Threshold { level } => per_unit(kind, v, |x| if x >= *level { 1.0 } else { 0.0 }),
-            Filter::Hsl { hue, saturation, lightness } => match kind {
+            Filter::Hsl { hue, saturation, lightness, perceptive } => match kind {
+                ChannelKind::Color if *perceptive => perceptive_adjust(v, *hue, *saturation, *lightness),
                 ChannelKind::Color => hsl_adjust(v, *hue, *saturation, *lightness),
                 _ => per_unit(kind, v, |x| hsl_adjust([x; 3], 0.0, 0.0, *lightness)[0]),
             },
@@ -1153,14 +1193,27 @@ impl Filter {
                 let k = 1.0 + contrast.clamp(-1.0, 1.0);
                 per_unit(kind, v, |x| unit((x - 0.5) * k + 0.5 + luminosity))
             }
-            Filter::ColorBalance { shadows, midtones, highlights } => {
-                // Smooth weights summing to 1: shadows fade out and highlights in with lightness.
-                let weights = |l: f32| {
-                    let l = unit(l);
-                    ((1.0 - l) * (1.0 - l), 2.0 * l * (1.0 - l), l * l)
+            Filter::ColorCorrect { shadows, midtones, highlights } => {
+                // [contrast, luminosity, saturation] at the texel's lightness, weighted as color balance
+                let at = |l: f32| -> [f32; 3] {
+                    let (s, m, h) = tone_weights(unit(l));
+                    std::array::from_fn(|k| shadows[k] * s + midtones[k] * m + highlights[k] * h)
                 };
+                let correct = |x: f32, [contrast, luminosity, _]: [f32; 3]| (x - 0.5) * (1.0 + contrast.clamp(-1.0, 1.0)) + 0.5 + luminosity.clamp(-1.0, 1.0);
+                match kind {
+                    ChannelKind::Color => {
+                        let tone = at(lum(v));
+                        let corrected = v.map(|x| correct(x, tone));
+                        let gray = lum(corrected);
+                        let gain = 2.0 * tone[2].clamp(0.0, 1.0);
+                        corrected.map(|x| unit(gray + (x - gray) * gain))
+                    }
+                    _ => per_unit(kind, v, |x| unit(correct(x, at(x)))),
+                }
+            }
+            Filter::ColorBalance { shadows, midtones, highlights } => {
                 let shift = |k: usize, l: f32| {
-                    let (s, m, h) = weights(l);
+                    let (s, m, h) = tone_weights(unit(l));
                     shadows.get(k).copied().unwrap_or(0.0) * s + midtones.get(k).copied().unwrap_or(0.0) * m + highlights.get(k).copied().unwrap_or(0.0) * h
                 };
                 match kind {
@@ -1250,6 +1303,7 @@ impl Filter {
             Filter::Hsl { .. } => "HSL Perceptive",
             Filter::ContrastLuminosity { .. } => "Contrast Luminosity",
             Filter::ColorBalance { .. } => "Color Balance",
+            Filter::ColorCorrect { .. } => "Color Correct",
             Filter::GradientMap { .. } => "Gradient Map",
             Filter::Posterize { .. } => "Posterize",
             Filter::Clamp { .. } => "Clamp",
@@ -1655,7 +1709,7 @@ mod tests {
         assert!(close(Filter::Invert.point(ChannelKind::Signed, [0.5; 3]).unwrap(), [-0.5; 3]));
         assert_eq!(Filter::Invert.point(ChannelKind::NormalMap, [0.5, 0.5, 1.0]), Some([0.5, 0.5, 1.0]));
         for f in [
-            Filter::Blur { radius: 1.0 },
+            Filter::Blur { radius: 1.0, wrap: false },
             Filter::Warp { intensity: 1.0, scale: 1.0, seed: 0, divider: 1 },
             Filter::DirectionalBlur { radius: 1.0, angle: 0.0 },
         ] {

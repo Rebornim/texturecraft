@@ -33,7 +33,7 @@ fn id(v: Value, key: &str) -> u64 {
 fn content_effects_commands_inspect_and_round_trip() {
     let mut s = session();
     let layer = id(execute(&mut s, "layer.add.fill", &json!({"color": [1.0, 0.0, 0.0], "roughness": 0.2})).unwrap(), "layer");
-    let hsl = id(execute(&mut s, "effect.add.filter", &json!({"target": "content", "filter": "hsl", "hue": 1.0 / 3.0})).unwrap(), "effect");
+    let hsl = id(execute(&mut s, "effect.add.filter", &json!({"target": "content", "filter": "hsl", "mode": "regular", "hue": 1.0 / 3.0})).unwrap(), "effect");
     assert!(close(center(&mut s, Channel::BaseColor), [0.0, 1.0, 0.0]), "{:?}", center(&mut s, Channel::BaseColor));
     assert!(s.doc.project.layer(LayerId(layer)).unwrap().mask.is_none(), "content effects don't create a mask");
     assert_eq!(s.target, StackTarget::Effect(LayerId(hsl)));

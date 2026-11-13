@@ -9,7 +9,7 @@ use crate::TextureCraftApp;
 use crate::fill_material_panel::pill_name;
 use crate::i18n::tr;
 use crate::property_sheet::PropertySheet;
-use crate::theme::Tokens;
+use crate::theme::{AXIS_COLORS, OPPOSITE_COLORS, Tokens};
 use crate::widgets::color_swatch;
 
 const SWATCH_WIDTH: f32 = 36.0;
@@ -97,6 +97,12 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
         params[key] = value;
         app.run("effect.set", params);
     };
+    match filter {
+        Filter::ColorBalance { shadows, midtones, highlights } => return color_balance(app, sheet, id, [highlights, midtones, shadows]),
+        Filter::ColorCorrect { shadows, midtones, highlights } => return color_correct(app, sheet, id, [shadows, midtones, highlights]),
+        Filter::Hsl { hue, saturation, lightness, perceptive } => return hsl(app, sheet, id, [*hue, *saturation, *lightness], *perceptive),
+        _ => {}
+    }
     let params = scalar_params(filter);
 
     if let Some(&(_, label, value, _, _)) = params.iter().find(|(key, ..)| *key == "seed") {
@@ -105,13 +111,6 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
             set(app, "seed", json!(seed), false);
         }
     }
-    if let Filter::Hsl { hue, .. } = filter {
-        let mut degrees = hue * 360.0;
-        if let Some(merge) = sheet.signed_slider(tr("Hue shift (degrees)"), &mut degrees, -180.0..=180.0, 0) {
-            set(app, "hue", json!(degrees / 360.0), merge);
-        }
-    }
-
     let divided = divided_key(filter);
     for (key, label, mut value, min, max) in params.into_iter().filter(|(key, ..)| *key != "seed") {
         let edit = if Some(key) == divided.map(|(key, _)| key) {
@@ -128,8 +127,87 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
         }
     }
 
+    // Blur and Bevel read past the texture's edges when they wrap
+    let wrap = match filter {
+        Filter::Blur { wrap, .. } => Some((tr("Blur Wrap"), *wrap)),
+        Filter::Bevel { wrap, .. } => Some((tr("Bevel Wrap"), *wrap)),
+        _ => None,
+    };
+    if let Some((label, mut on)) = wrap
+        && sheet.toggle(label, &mut on)
+    {
+        set(app, "wrap", json!(on), false);
+    }
+
     // The color editors keep their swatches until their own screens
     sheet.embed(|ui| color_editors(app, ui, id, filter));
+}
+
+/// The tone groups' names and the `effect.set` keys they edit, in the order a panel shows them
+const SHADOWS: (&str, &str) = ("Shadows", "shadows");
+const MIDTONES: (&str, &str) = ("Midtones", "midtones");
+const HIGHLIGHTS: (&str, &str) = ("Highlights", "highlights");
+
+/// Color Balance: a card per tone (Highlights, Midtones, Shadows), each with Cyan ↔ Red, Magenta ↔ Green and Yellow ↔ Blue
+fn color_balance(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, tones: [&[f32; 3]; 3]) {
+    let ends = [(tr("Cyan"), tr("Red")), (tr("Magenta"), tr("Green")), (tr("Yellow"), tr("Blue"))];
+    let rights = ends.map(|(_, right)| right);
+    for ((name, key), values) in [HIGHLIGHTS, MIDTONES, SHADOWS].into_iter().zip(tones) {
+        if !sheet.card(tr(name), Some(true)) {
+            sheet.close_card();
+            continue;
+        }
+        let mut balance = *values;
+        let mut edit = None;
+        for (component, (value, (left, right))) in balance.iter_mut().zip(ends).enumerate() {
+            let (left_tint, right_tint) =
+                (OPPOSITE_COLORS.get(component).copied().unwrap_or_default(), AXIS_COLORS.get(component).copied().unwrap_or_default());
+            edit = edit.or(sheet.tinted_slider((left, left_tint), (right, right_tint), &rights, value));
+        }
+        sheet.close_card();
+        if let Some(merge) = edit {
+            app.run("effect.set", json!({"effect": id, key: balance, "merge": merge}));
+        }
+    }
+}
+
+/// Color Correct: a card per tone (Shadows, Midtones, Highlights), each with Contrast, Luminosity and Saturation
+fn color_correct(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, tones: [&[f32; 3]; 3]) {
+    for ((name, key), values) in [SHADOWS, MIDTONES, HIGHLIGHTS].into_iter().zip(tones) {
+        if !sheet.card(tr(name), Some(true)) {
+            sheet.close_card();
+            continue;
+        }
+        let [mut contrast, mut luminosity, mut saturation] = *values;
+        let edit = sheet
+            .signed_slider(tr("Contrast"), &mut contrast, -1.0..=1.0, 2)
+            .or(sheet.signed_slider(tr("Luminosity"), &mut luminosity, -1.0..=1.0, 2))
+            .or(sheet.slider(tr("Saturation"), &mut saturation, 0.0..=1.0, 2));
+        sheet.close_card();
+        if let Some(merge) = edit {
+            app.run("effect.set", json!({"effect": id, key: [contrast, luminosity, saturation], "merge": merge}));
+        }
+    }
+}
+
+/// HSL Perceptive: Mode (Regular | Perceptive), then Hue, Saturation and Lightness on 0..1 with 0.5 leaving them as they are
+fn hsl(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, [hue, saturation, lightness]: [f32; 3], perceptive: bool) {
+    if let Some(mode) = sheet.switch(tr("Mode"), &[tr("Regular"), tr("Perceptive")], usize::from(perceptive)) {
+        app.run("effect.set", json!({"effect": id, "mode": if mode == 1 { "perceptive" } else { "regular" }}));
+    }
+
+    // Shown around 0.5: the hue as half a turn either way, saturation and lightness as −1..1 halved
+    let rows = [
+        ("hue", tr("Hue"), 0.5 + hue, 1.0),
+        ("saturation", tr("Saturation"), 0.5 + saturation / 2.0, 2.0),
+        ("lightness", tr("Lightness"), 0.5 + lightness / 2.0, 2.0),
+    ];
+    for (key, label, shown, scale) in rows {
+        let mut value = shown.clamp(0.0, 1.0);
+        if let Some(merge) = sheet.centered_slider(label, &mut value, 0.0..=1.0, 0.5, 2) {
+            app.run("effect.set", json!({"effect": id, key: (value - 0.5) * scale, "merge": merge}));
+        }
+    }
 }
 
 /// The parameter a filter's Divider divides and the divider it has
@@ -170,7 +248,7 @@ fn decimals(key: &str, min: f32, max: f32) -> usize {
     }
 }
 
-/// The swatches of color balance, replace color and gradient map
+/// The swatches of replace color and gradient map
 fn color_editors(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, filter: &Filter) {
     let set = |app: &mut TextureCraftApp, key: &str, value: Value, merge: bool| {
         let mut params = json!({ "effect": id, "merge": merge });
@@ -178,20 +256,6 @@ fn color_editors(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, filter: &Filte
         app.run("effect.set", params);
     };
     match filter {
-        Filter::ColorBalance { shadows, midtones, highlights } => {
-            for (key, label, rgb) in [("shadows", tr("Shadows"), shadows), ("midtones", tr("Midtones"), midtones), ("highlights", tr("Highlights"), highlights)]
-            {
-                ui.label(egui::RichText::new(label).strong());
-                let mut balance = *rgb;
-                let mut edit = None;
-                for (component, name) in balance.iter_mut().zip([tr("Cyan / red"), tr("Magenta / green"), tr("Yellow / blue")]) {
-                    edit = edit.or(crate::widgets::slider_edit(ui, name, component, -1.0..=1.0, 2));
-                }
-                if let Some(merge) = edit {
-                    set(app, key, json!(balance), merge);
-                }
-            }
-        }
         Filter::ReplaceColor { from, to, .. } => {
             for (key, label, rgb) in [("from", tr("Color to replace"), from), ("to", tr("Replacement color"), to)] {
                 let mut color = *rgb;

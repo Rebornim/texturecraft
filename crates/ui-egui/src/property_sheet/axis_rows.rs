@@ -67,7 +67,7 @@ impl PropertySheet<'_> {
             let center_y = first + index as f32 * PART_LINE;
             self.ui.painter().text(pos2(control.left(), center_y), Align2::LEFT_CENTER, *letter, semibold(TEXT_SIZE), *color);
             let id = self.next_id();
-            let track = Track { start: control.left() + LETTER_TO_TRACK + KNOB_RADIUS, end: self.track_end(), center_y, signed: true, ramp: false };
+            let track = Track { start: control.left() + LETTER_TO_TRACK + KNOB_RADIUS, end: self.track_end(), center_y, zero: Some(0.0), ramp: false };
             let dragged = self.track(id, &format!("{label} {letter}"), &track, value, &range);
             let typed = self.value_field(id, center_y, *value, &range, decimals, "");
             if let Some(merge) = Self::apply_typed(value, typed, dragged) {
@@ -98,7 +98,7 @@ impl PropertySheet<'_> {
             self.ui.painter().text(caption, Align2::LEFT_CENTER, slider.label, FontId::proportional(SMALL_TEXT_SIZE), dim);
             let center_y = y + STACK_CAPTION_LINE + STACK_PART_LINE / 2.0;
             let id = self.next_id();
-            let track = Track { start: x0 + KNOB_RADIUS, end: self.track_end(), center_y, signed: false, ramp: false };
+            let track = Track { start: x0 + KNOB_RADIUS, end: self.track_end(), center_y, zero: None, ramp: false };
             let dragged = self.track(id, slider.label, &track, slider.value, &slider.range);
             let typed = self.value_field(id, center_y, *slider.value, &slider.range, slider.decimals, slider.suffix);
             if let Some(merge) = Self::apply_typed(slider.value, typed, dragged) {

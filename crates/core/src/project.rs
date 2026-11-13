@@ -826,7 +826,7 @@ mod tests {
         material.sources.insert(Channel::Roughness, Source::Uniform([0.2; 3]));
         l.content_effects = vec![
             Effect::new(fill, EffectKind::Material(material)),
-            Effect::new(hsl, EffectKind::Filter(Filter::Hsl { hue: 0.25, saturation: -0.5, lightness: 0.1 })),
+            Effect::new(hsl, EffectKind::Filter(Filter::Hsl { hue: 0.25, saturation: -0.5, lightness: 0.1, perceptive: false })),
             Effect::new(anchor, EffectKind::Anchor),
         ];
         let id = p.insert_layer(0, l, None, false).unwrap();

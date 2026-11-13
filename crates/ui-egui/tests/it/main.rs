@@ -48,4 +48,5 @@ mod start_window;
 mod toolbar;
 
 mod filter_card;
+mod filter_colour;
 mod symmetry;

@@ -1763,6 +1763,56 @@ fn filter_card_snapshots() {
 }
 
 #[test]
+#[ignore = "writes the colour filters (screen 18) to TC_UI_SNAPSHOTS; run with --ignored"]
+/// Screen 18: Color Balance, Color Correct, HSL Perceptive and Contrast Luminosity with the mock's values, one knob hovered
+fn colour_filter_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::core::LayerId;
+    use texturecraft_engine::{StackTarget, execute};
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    let mut add = |params: serde_json::Value| {
+        let mut params = params;
+        params["layer"] = layer.clone();
+        params["target"] = json!("content");
+        LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap())
+    };
+    let effects = [
+        ("colour-balance", add(json!({"filter": "colorBalance", "highlights": [0.0, 0.0, -0.2], "midtones": [0.25, 0.0, 0.0], "shadows": [0.0, -0.1, 0.0]}))),
+        ("colour-correct", add(json!({"filter": "colorCorrect", "shadows": [0.0, 0.1, 0.5], "midtones": [0.2, 0.0, 0.6], "highlights": [0.0, -0.1, 0.5]}))),
+        ("hsl", add(json!({"filter": "hsl", "hue": 0.12, "saturation": 0.0, "lightness": -0.1}))),
+        ("contrast-luminosity", add(json!({"filter": "contrastLuminosity", "contrast": 0.3}))),
+    ];
+    execute(&mut session, "layer.select", &json!({"layer": layer})).unwrap();
+    session.target = StackTarget::Effect(effects[0].1);
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    for (name, effect) in effects {
+        harness.state_mut().session.target = StackTarget::Effect(effect);
+        harness.run_steps(4);
+        save(&mut harness, &output_dir, &format!("filter-{name}"));
+    }
+    harness.state_mut().session.target = StackTarget::Effect(effects[2].1);
+    harness.run_steps(4);
+    let hue = harness.get_by_role_and_label(egui::Role::Slider, "Hue").rect();
+    harness.hover_at(egui::pos2(hue.left() + hue.width() * 0.62, hue.center().y));
+    save(&mut harness, &output_dir, "filter-hsl-hovered");
+    harness.state_mut().session.target = StackTarget::Effect(effects[0].1);
+    harness.run_steps(4);
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, theme) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("filter-colour-balance-{theme}"));
+        }
+    }
+}
+
+#[test]
 #[ignore = "writes the filter picker states (screen 13) to TC_UI_SNAPSHOTS; run with --ignored"]
 /// Screen 13: the filter picker opened from an empty card, swapping (current outlined), searching, and in a mask
 fn filter_picker_snapshots() {

@@ -30,16 +30,16 @@ impl ColorMatch {
     /// Mid gray (128 sRGB) in linear
     const GRAY: [f32; 3] = [0.215_860_5; 3];
 
-    /// A new Color Match
+    /// A new Color Match: the texture's mean moves to the target and every texel keeps all of its difference from the mean (Color Variation at its widest), so the layer keeps its pattern until a variation is lowered
     pub const LIBRARY: ColorMatch = ColorMatch {
         source_mode: SourceColorMode::Average,
         source_color: Self::GRAY,
         target_mode: TargetColorMode::Parameter,
         target_color: Self::GRAY,
         custom_variation: true,
-        hue: 0.0,
-        chroma: 0.0,
-        luma: 0.0,
+        hue: 180.0,
+        chroma: 1.0,
+        luma: 1.0,
     };
 
     /// Linear `color` moved by the step from `source` to `target`; without Custom Color Variation it keeps all of its difference from the source, with it at most Hue, Chroma and Luma of it (all 0: the target color itself). Hostile values give the color back
@@ -86,10 +86,10 @@ mod tests {
         assert!(moved[2] > moved[0], "and turns blue");
 
         // Custom Color Variation at 0: every color is the target; wide limits keep the lightness difference again
-        let flat = ColorMatch::LIBRARY;
+        let flat = ColorMatch { luma: 0.0, chroma: 0.0, hue: 0.0, ..ColorMatch::LIBRARY };
         assert!(near(flat.apply(lighter_red, red, blue), blue));
-        let luma = ColorMatch { luma: 1.0, chroma: 1.0, hue: 180.0, ..flat };
-        assert!(oklab::from_linear(luma.apply(lighter_red, red, blue))[0] > oklab::from_linear(blue)[0] + 0.05);
+        let new = ColorMatch::LIBRARY;
+        assert!(oklab::from_linear(new.apply(lighter_red, red, blue))[0] > oklab::from_linear(blue)[0] + 0.05, "a new Color Match keeps the variation");
         let some = ColorMatch { luma: 0.02, ..flat };
         let limited = oklab::from_linear(some.apply(lighter_red, red, blue))[0] - oklab::from_linear(blue)[0];
         assert!((limited - 0.02).abs() < 1e-3, "lightness kept up to Luma: {limited}");

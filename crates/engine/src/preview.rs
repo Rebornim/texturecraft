@@ -106,13 +106,20 @@ pub fn filter(id: &str, size: usize) -> Option<Vec<Option<Sample>>> {
         EffectKind::Filter(f) => EffectKind::Filter(magnified(f, 2048.0 / res as f32)),
         k => k,
     };
+    // The filters that shape a mask's edge read where values cross 0.5: they get black and white shapes, where the clouds would leave them black
+    let shapes = matches!(kind, EffectKind::Filter(Filter::BevelSmooth(_) | Filter::DirectionalDistance(_)));
     let mesh = texturecraft_geom::primitives::plane(2.0, 2);
     let gbuf = texturecraft_geom::UvGBuffer::new(&mesh, 0, res, res);
     let mut p = Project::new("preview", "");
     p.texture_sets.push(TextureSet::new("preview", 0, res));
     let procedural = |kind, scale, low: [f32; 3], high: [f32; 3]| Source::Procedural { pattern: Procedural { scale, ..Procedural::new(kind) }, low, high };
     let mut fill = Fill::default();
-    fill.sources.insert(Channel::BaseColor, procedural(ProceduralKind::Clouds, 2.0, [0.05, 0.2, 0.55], [0.95, 0.55, 0.1]));
+    let base = if shapes {
+        procedural(ProceduralKind::Checker, 3.0, [0.0; 3], [1.0; 3])
+    } else {
+        procedural(ProceduralKind::Clouds, 2.0, [0.05, 0.2, 0.55], [0.95, 0.55, 0.1])
+    };
+    fill.sources.insert(Channel::BaseColor, base);
     fill.sources.insert(Channel::Roughness, procedural(ProceduralKind::Checker, 4.0, [0.25; 3], [0.7; 3]));
     fill.sources.insert(Channel::Height, procedural(ProceduralKind::Cells, 3.0, [-0.12; 3], [0.12; 3]));
     let mut layer = Layer::new(p.alloc_id(), "sample", LayerKind::Fill(fill), &CHANNELS);
@@ -185,5 +192,15 @@ mod tests {
         }
         let (plain, warped) = (filter("levels", size).unwrap(), filter("warp", size).unwrap());
         assert!(plain != warped, "the warp shows in its preview");
+    }
+
+    #[test]
+    fn the_edge_shaping_filters_show_their_shapes_not_black() {
+        let size = 32;
+        for id in ["bevelSmooth", "directionalDistance"] {
+            let lit: Vec<f32> = filter(id, size).unwrap().into_iter().flatten().map(|sample| sample.base.iter().sum::<f32>() / 3.0).collect();
+            let bright = lit.iter().filter(|value| **value > 0.25).count();
+            assert!(bright * 5 > lit.len(), "{id}: {bright} of {} texels lit", lit.len());
+        }
     }
 }

@@ -190,8 +190,16 @@ pub(crate) fn source_card(
         app.run("layer.fill.set", set(json!({"image": name})));
     }
 
-    // A slot in a mode's card is its row only (its source's own rows and Resolution band would split the card)
+    // A slot in a mode's card shows a pattern's Scale and Contrast like every slot; its other rows and Resolution band would split the card
     if in_card {
+        if let Source::Procedural { pattern, .. } = source {
+            let mut edited = pattern.clone();
+            if let Some((key, value, merge)) = scale_and_contrast(sheet, &mut edited) {
+                let mut settings = json!({"procedural": pattern.kind.label(), "merge": merge});
+                settings[key] = value;
+                app.run("layer.fill.set", set(settings));
+            }
+        }
         return;
     }
     match source {
@@ -317,6 +325,30 @@ pub(crate) fn take_color_pick(app: &mut TextureCraftApp, pick: ColorPick) -> Opt
     pick.picked
 }
 
+/// A pattern's Scale and Contrast rows; returns the edit (key, value, whether it continues a drag)
+fn scale_and_contrast(sheet: &mut PropertySheet<'_>, edited: &mut Procedural) -> Option<(&'static str, Value, bool)> {
+    let mut edit = None;
+    if let Some(merge) = sheet.slider(tr("Scale"), &mut edited.scale, PATTERN_SCALE, 2) {
+        edit = Some(("scale", json!(edited.scale), merge));
+    }
+    if let Some(merge) = sheet.slider(tr("Contrast"), &mut edited.contrast, PATTERN_CONTRAST, 2) {
+        edit = edit.or(Some(("contrast", json!(edited.contrast), merge)));
+    }
+    edit
+}
+
+/// A pattern's Balance and Seed rows; returns the edit like [`scale_and_contrast`]
+fn balance_and_seed(sheet: &mut PropertySheet<'_>, edited: &mut Procedural) -> Option<(&'static str, Value, bool)> {
+    let mut edit = None;
+    if let Some(merge) = sheet.signed_slider(tr("Balance"), &mut edited.balance, -1.0..=1.0, 2) {
+        edit = Some(("balance", json!(edited.balance), merge));
+    }
+    if sheet.seed(tr("Seed"), &mut edited.seed) {
+        edit = edit.or(Some(("seed", json!(edited.seed), false)));
+    }
+    edit
+}
+
 /// A procedural source: Scale and Contrast, then its Attributes (seed, balance, invert and its two values), each sending only its own parameter
 fn procedural_rows(
     app: &mut TextureCraftApp,
@@ -340,19 +372,15 @@ fn procedural_rows(
     }
 
     let mut edited = pattern.clone();
-    let mut edit: Option<(&str, Value, bool)> = None;
-    if let Some(merge) = sheet.slider(tr("Scale"), &mut edited.scale, PATTERN_SCALE, 2) {
-        edit = Some(("scale", json!(edited.scale), merge));
-    }
-    if let Some(merge) = sheet.slider(tr("Contrast"), &mut edited.contrast, PATTERN_CONTRAST, 2) {
-        edit = edit.or(Some(("contrast", json!(edited.contrast), merge)));
+    let mut edit = scale_and_contrast(sheet, &mut edited);
+    // A grayscale's card (a mask fill's, a filter input's) shows its Balance and Seed with Scale and Contrast; a material channel's keeps them in Attributes
+    let gray = matches!(slot_of, SourceSlot::Grayscale | SourceSlot::Input(_));
+    if gray {
+        edit = edit.or(balance_and_seed(sheet, &mut edited));
     }
     if sheet.fold(tr("Attributes"), None, false) {
-        if sheet.seed(tr("Seed"), &mut edited.seed) {
-            edit = edit.or(Some(("seed", json!(edited.seed), false)));
-        }
-        if let Some(merge) = sheet.signed_slider(tr("Balance"), &mut edited.balance, -1.0..=1.0, 2) {
-            edit = edit.or(Some(("balance", json!(edited.balance), merge)));
+        if !gray {
+            edit = edit.or(balance_and_seed(sheet, &mut edited));
         }
         if sheet.toggle(tr("Invert"), &mut edited.invert) {
             edit = edit.or(Some(("invert", json!(edited.invert), false)));

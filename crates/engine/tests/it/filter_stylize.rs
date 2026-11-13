@@ -76,7 +76,7 @@ fn pbr_validate_marks_implausible_base_colors() {
     let effect = add_filter(&mut s, json!({"filter": "pbrValidate"}));
     assert_eq!(filter_of(&s, effect), Filter::PbrValidate(PbrValidate::LIBRARY));
     let off = &s.doc.project.effect(effect).unwrap().1.off_channels;
-    assert!(!off.contains(&Channel::BaseColor) && !off.contains(&Channel::Metallic) && off.contains(&Channel::Roughness), "{off:?}");
+    assert!(!off.contains(&Channel::BaseColor) && off.contains(&Channel::Metallic) && off.contains(&Channel::Roughness), "{off:?}");
     assert_eq!(base_color(&mut s, texel), PbrValidate::INVALID, "too dark");
     assert_eq!(s.caches[0].composite.value(Channel::Metallic, texel.0, texel.1)[0], 0.0, "the metal is left as it is");
 
@@ -150,7 +150,7 @@ fn height_to_normal_turns_the_height_into_the_normal() {
     assert!(inspect.contains("Height To Normal"));
 }
 
-/// Color Match starts with the Color pill only and moves every color to its target: all of it at the Color Variation's 0, keeping each texel's difference from the whole texture's mean without Custom Color Variation; Parameter and Image Input modes read their colors
+/// Color Match starts with the Color pill only and moves the colors to its target keeping their pattern, all of them at the Color Variation's 0, keeping each texel's difference from the whole texture's mean without Custom Color Variation; Parameter and Image Input modes read their colors
 #[test]
 fn color_match_moves_the_colors_to_the_target() {
     let size = 128;
@@ -167,6 +167,13 @@ fn color_match_moves_the_colors_to_the_target() {
     assert_eq!(filter_of(&s, effect), Filter::ColorMatch(ColorMatch::LIBRARY));
     let off = &s.doc.project.effect(effect).unwrap().1.off_channels;
     assert!(!off.contains(&Channel::BaseColor) && off.contains(&Channel::Roughness), "{off:?}");
+    let new: Vec<[f32; 3]> = texels.iter().map(|t| base_color(&mut s, *t)).collect();
+    assert!(spread(&new) > 0.02, "a new Color Match keeps the pattern: {new:?}");
+    let redness = new.iter().map(|c| c[0] - c[2]).sum::<f32>() / new.len() as f32;
+    assert!(redness.abs() < 0.05, "around the gray target: {redness} {new:?}");
+
+    // Color Variation at 0: every texel is the target itself
+    execute(&mut s, "effect.set", &json!({"effect": effect.0, "hue": 0.0, "chroma": 0.0, "luma": 0.0})).unwrap();
     let gray = ColorMatch::LIBRARY.target_color;
     for texel in &texels {
         let color = base_color(&mut s, *texel);

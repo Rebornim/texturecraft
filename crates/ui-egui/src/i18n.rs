@@ -201,6 +201,10 @@ mod tests {
         keys.extend(texturecraft_engine::geom::primitives::BUILTINS.iter().map(|(_, label)| *label));
         for filter in FILTERS {
             keys.extend([filter.label, filter.group]);
+            if let Some(about) = filter.about() {
+                keys.push(about.description);
+                keys.extend(about.tags);
+            }
             if let Ok(EffectKind::Filter(effect)) = build(filter.id, &serde_json::Value::Null) {
                 keys.push(effect.label());
                 keys.extend(scalar_params(&effect).into_iter().map(|parameter| parameter.1));
@@ -307,6 +311,15 @@ mod tests",
     }
 
     const UNTRANSLATED: &[&str] = &["RGB", "RGBA"];
+
+    #[test]
+    fn filter_descriptions_and_tags_are_keys() {
+        let keys = keys();
+        for about in texturecraft_engine::filter_lib::FILTERS.iter().filter_map(|filter| filter.about()) {
+            assert!(keys.iter().any(|key| key == about.description), "{}", about.description);
+            assert!(about.tags.iter().all(|tag| keys.iter().any(|key| key == tag)), "{:?}", about.tags);
+        }
+    }
 
     #[test]
     fn lookup_formatting_and_fallbacks() {

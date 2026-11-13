@@ -314,21 +314,13 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         Filter::HistogramRange { range, position } => vec![("range", "Range", *range, 0.0, 1.0), ("position", "Position", *position, 0.0, 1.0)],
         Filter::HistogramShift { offset } => vec![("position", "Position", Filter::shift_position(*offset), 0.0, 1.0)],
         Filter::Warp { intensity, scale, seed, .. } => {
-            vec![
-                ("intensity", "Intensity (texels at 2K)", *intensity, 0.0, 128.0),
-                ("scale", "Noise scale", *scale, 0.5, 64.0),
-                ("seed", "Seed", *seed as f32, 0.0, 999.0),
-            ]
+            vec![("intensity", "Intensity", *intensity, 0.0, 128.0), ("scale", "Source Tiling", *scale, 0.5, 64.0), ("seed", "Seed", *seed as f32, 0.0, 999.0)]
         }
         Filter::DirectionalBlur { radius, angle } => {
             vec![("intensity", "Intensity", *radius / Filter::BLUR_INTENSITY, 0.0, 16.0), ("angle", "Angle", *angle, 0.0, 360.0)]
         }
         Filter::SlopeBlur { radius, scale, seed, .. } => {
-            vec![
-                ("radius", "Intensity (texels at 2K)", *radius, 0.0, 128.0),
-                ("scale", "Slope scale", *scale, 0.5, 64.0),
-                ("seed", "Seed", *seed as f32, 0.0, 999.0),
-            ]
+            vec![("radius", "Intensity", *radius, 0.0, 128.0), ("scale", "Source Tiling", *scale, 0.5, 64.0), ("seed", "Seed", *seed as f32, 0.0, 999.0)]
         }
         Filter::HighPass { radius, .. } => vec![("intensity", "Radius", *radius / Filter::BLUR_INTENSITY, 0.0, 16.0)],
         Filter::GrayscaleConversion(conversion) => conversion_params(conversion),
@@ -349,16 +341,16 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         Filter::ColorMatch(matcher) => {
             vec![("hue", "Hue", matcher.hue, 0.0, 360.0), ("chroma", "Chroma", matcher.chroma, 0.0, 1.0), ("luma", "Luma", matcher.luma, 0.0, 1.0)]
         }
-        Filter::EdgeDetect { width } => vec![("width", "Width (texels at 2K)", *width, 0.0, 64.0)],
+        Filter::EdgeDetect { width } => vec![("width", "Width", *width, 0.0, 64.0)],
         Filter::DirectionalWarp { intensity, angle, scale, seed, .. } => {
             vec![
-                ("intensity", "Intensity (texels at 2K)", *intensity, 0.0, 128.0),
-                ("angle", "Angle (degrees)", *angle, 0.0, 360.0),
-                ("scale", "Noise scale", *scale, 0.5, 64.0),
+                ("intensity", "Intensity", *intensity, 0.0, 128.0),
+                ("angle", "Angle", *angle, 0.0, 360.0),
+                ("scale", "Source Tiling", *scale, 0.5, 64.0),
                 ("seed", "Seed", *seed as f32, 0.0, 999.0),
             ]
         }
-        Filter::Bevel { width, .. } => vec![("width", "Width (texels at 2K)", *width, 0.0, 128.0)],
+        Filter::Bevel { width, .. } => vec![("width", "Distance", *width, 0.0, 128.0)],
         Filter::Mosaic { size, .. } => vec![("pixelsAmount", "Pixels Amount", Filter::pixels_amount(*size), 1.0, 128.0)],
         Filter::DistanceBevel(bevel) => vec![("distance", "Distance", bevel.distance, -1.0, 1.0), ("smoothing", "Smoothing", bevel.smoothing, 0.0, 5.0)],
         Filter::SourceWarp(warp) => {
@@ -410,7 +402,7 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
             ("curveShape", "Curve Shape", outline.curve, -1.0, 1.0),
         ],
         Filter::Glow { radius, amount } => {
-            vec![("radius", "Radius (texels at 2K)", *radius, 0.0, 128.0), ("amount", "Amount", *amount, 0.0, 5.0)]
+            vec![("radius", "Width", *radius, 0.0, 128.0), ("amount", "Amount", *amount, 0.0, 5.0)]
         }
         Filter::HaloGlow { width, spread, opacity, .. } => {
             vec![("width", "Width", *width, -1.0, 1.0), ("spread", "Spread", *spread, 0.0, 1.0), ("opacity", "Opacity", *opacity, 0.0, 1.0)]
@@ -1009,5 +1001,27 @@ mod tests {
             panic!()
         };
         assert_eq!(colors.len(), 2);
+    }
+
+    #[test]
+    fn every_filter_row_reads_a_reference_name_without_an_internal_unit() {
+        let old_saves = [
+            Filter::Warp { intensity: 8.0, scale: 4.0, seed: 1, divider: 1 },
+            Filter::SlopeBlur { radius: 8.0, scale: 4.0, seed: 1, divider: 1 },
+            Filter::DirectionalWarp { intensity: 8.0, angle: 0.0, scale: 4.0, seed: 1, divider: 1 },
+            Filter::EdgeDetect { width: 2.0 },
+            Filter::Bevel { width: 8.0, wrap: false },
+            Filter::Glow { radius: 16.0, amount: 1.0 },
+        ];
+        let library = FILTERS.iter().filter_map(|def| match build(def.id, &Value::Null) {
+            Ok(EffectKind::Filter(filter)) => Some(filter),
+            _ => None,
+        });
+        for filter in old_saves.into_iter().chain(library) {
+            for (key, label, ..) in scalar_params(&filter) {
+                let title_case = label.split([' ', '/']).filter(|word| !word.is_empty()).all(|word| word.starts_with(|c: char| !c.is_lowercase()));
+                assert!(title_case && !label.contains("texels") && !label.contains("degrees"), "{key}: {label}");
+            }
+        }
     }
 }

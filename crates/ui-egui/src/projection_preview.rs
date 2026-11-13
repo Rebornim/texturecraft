@@ -3,15 +3,18 @@
 //! Each pixel casts a ray at the shape and samples the checker with the compositor's projection math
 //! ([`image_samples`] and [`projector_cover`]), so tiling, offset, rotation, Hardness, Angle, the 3D projection
 //! settings, Shape crop and Backface culling show as they will on the model. Depth culling needs the model's depth
-//! map and is not previewed
+//! map and is not previewed. The projector is drawn round the shape as the 3D view's gizmo draws it round the model, and the
+//! view zooms out until both fit, down to half the shape's size; a projector bigger than that runs off the square, marked on
+//! each side it passes
 
-use egui::{Color32, ColorImage, Painter, Rect, TextureHandle, TextureOptions, pos2};
+use egui::{Color32, ColorImage, Painter, Pos2, Rect, Shape, Stroke, TextureHandle, TextureOptions, pos2, vec2};
 use texturecraft_engine::compose::frame_placement::{folded, upright_turn};
 use texturecraft_engine::compose::pattern::{Coords, decal_axes, image_samples};
 use texturecraft_engine::compose::projector_cover::projector_cover;
 use texturecraft_engine::core::{Projection, Projector, ShapeCrop};
-use texturecraft_engine::geom::glam::{EulerRot, Mat3, Vec2, Vec3};
+use texturecraft_engine::geom::glam::{Vec2, Vec3};
 
+use crate::preview_outline::ProjectorOutline;
 use crate::theme::Tokens;
 
 /// Largest preview side in pixels; the square is never drawn bigger than this
@@ -20,8 +23,22 @@ const MAX_SIDE_PX: usize = 256;
 const SUPERSAMPLE: usize = 2;
 /// Checker cells across one repeat of the source along each axis
 const CHECKER_CELLS: f32 = 4.0;
-/// Half the view's width and height, in mesh radii
+/// Half the view's width and height, in mesh radii: as near as the view comes, and as far as it zooms out (the shape at half its size)
 const VIEW_HALF: f32 = 1.0;
+const MAX_VIEW_HALF: f32 = 2.0;
+/// Room left round the projector when the view zooms out to it
+const FIT_MARGIN: f32 = 1.12;
+/// How far in front of the middle the rays start, in mesh radii (past every shape and every outline point tested for cover)
+const CAMERA_DISTANCE: f32 = 3.0;
+/// Screen length of the pieces an outline is split into to find its hidden parts (points)
+const OUTLINE_STEP: f32 = 3.0;
+/// The outline's dashes where the shape hides it, and the edge marker's dashes (points)
+const HIDDEN_DASH: f32 = 3.0;
+const EDGE_DASH: f32 = 6.0;
+/// The edge marker's inset from the square's side, its chevron's arm and the dot at a planar's direction tip (points)
+const EDGE_INSET: f32 = 2.0;
+const CHEVRON_ARM: f32 = 5.0;
+const TIP_DOT: f32 = 2.2;
 /// Camera turn around the up axis and down from level (degrees): three faces of the cube and the cylinder's top show
 const CAMERA_YAW: f32 = 35.0;
 const CAMERA_PITCH: f32 = 25.0;
@@ -51,20 +68,29 @@ pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Pro
     let shown = shown_projection(projection, bounds)?;
     let ctx = painter.ctx();
     let side = ((rect.width() * ctx.pixels_per_point()).round() as usize).clamp(1, MAX_SIDE_PX);
-    let key = format!("{side}{shown:?}{:?}{:?}{:?}", tokens.field, tokens.text, tokens.accent);
+    let shape = shape_for(&shown);
+    let outline = ProjectorOutline::of(&shown, shape.half_size());
+    let half = view_half(outline.as_ref());
+    let key = format!("{side}{half}{shown:?}{:?}{:?}{:?}", tokens.field, tokens.text, tokens.accent);
     let id = egui::Id::unique("projection_preview");
     // The picture and the key it was rendered for
     let cached = ctx.data(|data| data.get_temp::<(String, TextureHandle)>(id)).filter(|(rendered, _)| *rendered == key);
     let texture = match cached {
         Some((_, texture)) => texture,
         None => {
-            let image = render(&shown, side, tokens);
+            let image = render(&shown, side, half, tokens);
             let texture = ctx.load_texture("projection-preview", image, TextureOptions::LINEAR);
             ctx.data_mut(|data| data.insert_temp(id, (key, texture.clone())));
             texture
         }
     };
     painter.image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    if let Some(outline) = &outline {
+        let painter = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
+        let screen = Screen { view: View::new(), rect, half };
+        draw_outline(&painter, &screen, shape, outline, tokens);
+        edge_markers(&painter, rect, passed_sides(outline.points().map(|point| screen.at(point)), rect), tokens);
+    }
     painter.rect_stroke(rect, 0, egui::Stroke::new(1.0, tokens.field_border), egui::StrokeKind::Inside);
     Some(())
 }
@@ -97,33 +123,143 @@ fn shown_projection(projection: &Projection, bounds: (Vec3, Vec3)) -> Option<Pro
     }
 }
 
-/// Where a spherical or cylindrical projection's own shape sits: the preview draws its projector (turned, stretched and moved by the 3D projection settings, so its size dot and fields show) rather than a fixed shape its turn-and-scale-blind mapping would look the same on
-#[derive(Clone, Copy, Debug)]
-struct ShapePlace {
-    turn: Mat3,
-    stretch: Vec3,
-    offset: Vec3,
+impl PreviewShape {
+    /// Half the shape's size along X, Y and Z, in mesh radii
+    fn half_size(self) -> Vec3 {
+        match self {
+            PreviewShape::Sphere => Vec3::splat(SPHERE_RADIUS),
+            PreviewShape::Cylinder => Vec3::new(CYLINDER_RADIUS, CYLINDER_HALF_HEIGHT, CYLINDER_RADIUS),
+            PreviewShape::Cube => Vec3::splat(CUBE_HALF),
+        }
+    }
 }
 
-impl ShapePlace {
-    fn of(projection: &Projection) -> ShapePlace {
-        let still = ShapePlace { turn: Mat3::IDENTITY, stretch: Vec3::ONE, offset: Vec3::ZERO };
-        let (Projection::Spherical { offset, projector, .. } | Projection::Cylindrical { offset, projector, .. }) = projection else { return still };
-        let [x, y, z] = projector.rotation.map(f32::to_radians);
-        let stretch = Vec3::from(projector.scale).map(|s| if s.abs() < 1e-6 { 1e-6 } else { s });
-        let place = ShapePlace { turn: Mat3::from_euler(EulerRot::ZYX, z, y, x), stretch, offset: Vec3::from(*offset) };
-        if place.turn.is_finite() && place.stretch.is_finite() && place.offset.is_finite() { place } else { still }
+/// The preview camera's directions: towards the eye, the view direction, and the view's right and up
+#[derive(Clone, Copy, Debug)]
+struct View {
+    eye: Vec3,
+    forward: Vec3,
+    right: Vec3,
+    up: Vec3,
+}
+
+impl View {
+    fn new() -> View {
+        let (yaw, pitch) = (CAMERA_YAW.to_radians(), CAMERA_PITCH.to_radians());
+        let eye = Vec3::new(pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos());
+        let forward = -eye;
+        let right = forward.cross(Vec3::Y).normalize_or_zero();
+        View { eye, forward, right, up: right.cross(forward) }
+    }
+}
+
+/// Which way the preview camera looks
+pub(crate) fn view_direction() -> Vec3 {
+    View::new().forward
+}
+
+/// How far the view reaches each way from the middle so the shape and the projector `outline` both fit: never nearer than today's framing, never so far the shape drops below half its size
+fn view_half(outline: Option<&ProjectorOutline>) -> f32 {
+    let view = View::new();
+    let reach =
+        outline.into_iter().flat_map(ProjectorOutline::points).map(|point| point.dot(view.right).abs().max(point.dot(view.up).abs())).fold(0.0, f32::max);
+    if reach.is_finite() { (reach * FIT_MARGIN).clamp(VIEW_HALF, MAX_VIEW_HALF) } else { MAX_VIEW_HALF }
+}
+
+/// The preview's view laid on the square `rect`, `half` mesh radii each way from its middle
+struct Screen {
+    view: View,
+    rect: Rect,
+    half: f32,
+}
+
+impl Screen {
+    fn at(&self, point: Vec3) -> Pos2 {
+        let per_radius = self.rect.width() * 0.5 / self.half;
+        self.rect.center() + vec2(point.dot(self.view.right), -point.dot(self.view.up)) * per_radius
     }
 
-    /// The nearest hit of the ray from `origin` along unit `dir` on the placed shape, in the compositor's coordinates
-    fn hit(&self, shape: PreviewShape, origin: Vec3, dir: Vec3) -> Option<Coords> {
-        // Into the shape's own space: unturned, unstretched, its centre where the offset puts the projection's
-        let to_shape = |v: Vec3| (self.turn.transpose() * v) / self.stretch;
-        let shape_dir = to_shape(dir).try_normalize()?;
-        let at = intersect(shape, to_shape(origin) + self.offset, shape_dir)?;
-        let pos = self.turn * (self.stretch * (at.pos - self.offset));
-        let nrm = (self.turn * (at.nrm / self.stretch)).try_normalize().unwrap_or(at.nrm);
-        Some(hit(pos, nrm))
+    /// Whether `shape` hides `point` from the camera
+    fn hidden(&self, shape: PreviewShape, point: Vec3) -> bool {
+        let origin = point + self.view.eye * CAMERA_DISTANCE;
+        intersect(shape, origin, self.view.forward).is_some_and(|hit| (hit.pos - point).dot(self.view.eye) > 1e-3)
+    }
+}
+
+/// The outline's line in the text colour and the field-coloured line under it that keeps it readable on the checker, as the 3D view's gizmo draws its white outline on a dark shadow (the square's field is light in the light themes); fainter where the shape hides it
+fn outline_strokes(hidden: bool, tokens: &Tokens) -> [Stroke; 2] {
+    let (under, over) = if hidden { (0.35, 0.65) } else { (0.55, 1.0) };
+    [Stroke::new(2.5, tokens.field.gamma_multiply(under)), Stroke::new(1.2, tokens.text.gamma_multiply(over))]
+}
+
+/// The projector outline over the preview: solid where the camera sees it, dashed where the shape hides it, a dot where a planar's image travels to
+fn draw_outline(painter: &Painter, screen: &Screen, shape: PreviewShape, outline: &ProjectorOutline, tokens: &Tokens) {
+    for line in &outline.lines {
+        // Runs of the line that are all seen or all hidden
+        let mut runs: Vec<(bool, Vec<Pos2>)> = Vec::new();
+        for pair in line.windows(2) {
+            let [from, to] = [pair[0], pair[1]];
+            let pieces = ((screen.at(to) - screen.at(from)).length() / OUTLINE_STEP).ceil().clamp(1.0, 256.0) as usize;
+            for piece in 0..pieces {
+                let (start, end) = (from.lerp(to, piece as f32 / pieces as f32), from.lerp(to, (piece + 1) as f32 / pieces as f32));
+                let hidden = screen.hidden(shape, start.lerp(end, 0.5));
+                match runs.last_mut() {
+                    Some((run_hidden, points)) if *run_hidden == hidden => points.push(screen.at(end)),
+                    _ => runs.push((hidden, vec![screen.at(start), screen.at(end)])),
+                }
+            }
+        }
+        for (hidden, points) in runs {
+            for stroke in outline_strokes(hidden, tokens) {
+                if hidden {
+                    painter.extend(Shape::dashed_line(&points, stroke, HIDDEN_DASH, HIDDEN_DASH));
+                } else {
+                    painter.add(Shape::line(points.clone(), stroke));
+                }
+            }
+        }
+    }
+    if let Some(tip) = outline.tip {
+        let [under, over] = outline_strokes(false, tokens);
+        painter.circle_filled(screen.at(tip), TIP_DOT + 0.8, under.color);
+        painter.circle_filled(screen.at(tip), TIP_DOT, over.color);
+    }
+}
+
+/// The sides of `rect` some of `points` lie past: left, right, top, bottom
+fn passed_sides(points: impl Iterator<Item = Pos2>, rect: Rect) -> [bool; 4] {
+    let past = 0.5;
+    points.fold([false; 4], |[left, right, top, bottom], p| {
+        [left || p.x < rect.left() - past, right || p.x > rect.right() + past, top || p.y < rect.top() - past, bottom || p.y > rect.bottom() + past]
+    })
+}
+
+/// A dashed line just inside each side of `rect` the projector runs past, with a chevron pointing out at its middle
+fn edge_markers(painter: &Painter, rect: Rect, sides: [bool; 4], tokens: &Tokens) {
+    let inner = rect.shrink(EDGE_INSET);
+    let center = rect.center();
+    // Per side: its two ends, the chevron's point and the way into the square
+    let edges = [
+        ([inner.left_top(), inner.left_bottom()], pos2(inner.left(), center.y), vec2(1.0, 0.0)),
+        ([inner.right_top(), inner.right_bottom()], pos2(inner.right(), center.y), vec2(-1.0, 0.0)),
+        ([inner.left_top(), inner.right_top()], pos2(center.x, inner.top()), vec2(0.0, 1.0)),
+        ([inner.left_bottom(), inner.right_bottom()], pos2(center.x, inner.bottom()), vec2(0.0, -1.0)),
+    ];
+    for (passed, (ends, point, inward)) in sides.into_iter().zip(edges) {
+        if !passed {
+            continue;
+        }
+        let along = vec2(inward.y, inward.x);
+        let chevron = vec![point + (inward - along) * CHEVRON_ARM, point, point + (inward + along) * CHEVRON_ARM];
+        for stroke in outline_strokes(false, tokens) {
+            painter.extend(Shape::dashed_line(&ends, stroke, EDGE_DASH, EDGE_DASH));
+        }
+        // The chevron on a clear patch, so the dashes and the shape do not run through it
+        let patch = Rect::from_points(&chevron).expand(1.5);
+        painter.rect_filled(patch, 0, tokens.field);
+        for stroke in outline_strokes(false, tokens) {
+            painter.add(Shape::line(chevron.clone(), stroke));
+        }
     }
 }
 
@@ -135,15 +271,10 @@ fn shape_for(projection: &Projection) -> PreviewShape {
     }
 }
 
-/// `side²` pixels of the checker on the projection's shape over the `field` background
-fn render(projection: &Projection, side: usize, tokens: &Tokens) -> ColorImage {
+/// `side²` pixels of the checker on the projection's shape over the `field` background, the view `half` mesh radii across each way from the middle
+fn render(projection: &Projection, side: usize, half: f32, tokens: &Tokens) -> ColorImage {
     let shape = shape_for(projection);
-    let place = ShapePlace::of(projection);
-    let (yaw, pitch) = (CAMERA_YAW.to_radians(), CAMERA_PITCH.to_radians());
-    let eye = Vec3::new(pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos());
-    let forward = -eye;
-    let right = forward.cross(Vec3::Y).normalize_or_zero();
-    let up = right.cross(forward);
+    let View { eye, forward, right, up } = View::new();
     let light = (-0.5 * right + 0.6 * up + 0.6 * eye).normalize_or_zero();
 
     let field = tokens.field;
@@ -154,10 +285,10 @@ fn render(projection: &Projection, side: usize, tokens: &Tokens) -> ColorImage {
     let samples: Vec<Option<(Vec3, f32)>> = (0..rays * rays)
         .map(|ray| {
             let (x, y) = (ray % rays, ray / rays);
-            let across = ((x as f32 + 0.5) / rays as f32 * 2.0 - 1.0) * VIEW_HALF;
-            let down = ((y as f32 + 0.5) / rays as f32 * 2.0 - 1.0) * VIEW_HALF;
-            let origin = right * across - up * down + eye * 3.0;
-            let hit = place.hit(shape, origin, forward)?;
+            let across = ((x as f32 + 0.5) / rays as f32 * 2.0 - 1.0) * half;
+            let down = ((y as f32 + 0.5) / rays as f32 * 2.0 - 1.0) * half;
+            let origin = right * across - up * down + eye * CAMERA_DISTANCE;
+            let hit = intersect(shape, origin, forward)?;
             let shade = AMBIENT + (1.0 - AMBIENT) * hit.nrm.dot(light).max(0.0);
             let (color, cover) = surface(projection, &hit, shades);
             Some((color * shade, cover))
@@ -316,7 +447,7 @@ mod tests {
             cylindrical(Projector::default()),
             Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: UvTransform::default(), projector: Projector::default() },
         ] {
-            let image = render(&projection, 32, &tokens);
+            let image = render(&projection, 32, VIEW_HALF, &tokens);
             assert_eq!(image.pixels[0], tokens.field, "{projection:?}: the corner is background");
             assert_ne!(image.pixels[16 * 32 + 16], tokens.field, "{projection:?}: the middle shows the shape");
         }
@@ -325,13 +456,17 @@ mod tests {
     #[test]
     fn the_preview_follows_the_fill_settings() {
         let tokens = tokens();
-        assert_ne!(render(&spherical(1.0), 32, &tokens).pixels, render(&spherical(3.0), 32, &tokens).pixels, "tiling changes the checker");
+        assert_ne!(
+            render(&spherical(1.0), 32, VIEW_HALF, &tokens).pixels,
+            render(&spherical(3.0), 32, VIEW_HALF, &tokens).pixels,
+            "tiling changes the checker"
+        );
 
         let culled =
             Projector { backface: texturecraft_engine::core::Backface { on: true, ..Default::default() }, crop: ShapeCrop::Cropped, ..Projector::default() };
         assert_ne!(
-            render(&cylindrical(Projector::default()), 32, &tokens).pixels,
-            render(&cylindrical(culled), 32, &tokens).pixels,
+            render(&cylindrical(Projector::default()), 32, VIEW_HALF, &tokens).pixels,
+            render(&cylindrical(culled), 32, VIEW_HALF, &tokens).pixels,
             "culling shows on the cylinder"
         );
     }
@@ -346,7 +481,9 @@ mod tests {
     const BOUNDS: (Vec3, Vec3) = (Vec3::NEG_ONE, Vec3::ONE);
 
     fn shown(projection: &Projection) -> Vec<Color32> {
-        render(&shown_projection(projection, BOUNDS).unwrap(), 32, &tokens()).pixels
+        let shown = shown_projection(projection, BOUNDS).unwrap();
+        let half = view_half(ProjectorOutline::of(&shown, shape_for(&shown).half_size()).as_ref());
+        render(&shown, 32, half, &tokens()).pixels
     }
 
     /// What the 3D view's gizmo changes shows here too: a sphere's or cylinder's size, turn and centre, a placed frame's size, stretch and turn
@@ -356,7 +493,7 @@ mod tests {
         let bigger = Projector { scale: [1.15; 3], ..Projector::default() };
         let Projection::Spherical { uv, .. } = spherical(1.0) else { panic!("spherical() makes a spherical projection") };
         let sphere = |projector: Projector, offset: [f32; 3]| Projection::Spherical { scale: 1.0, uv, offset, projector };
-        assert_ne!(shown(&sphere(bigger, [0.0; 3])), base, "a bigger sphere fills more of the square");
+        assert_ne!(shown(&sphere(bigger, [0.0; 3])), base, "a bigger sphere zooms the view out");
         assert_ne!(shown(&sphere(Projector { rotation: [0.0, 0.0, 40.0], ..Projector::default() }, [0.0; 3])), base, "a turned sphere turns its checker");
         assert_ne!(shown(&sphere(Projector::default(), [0.3, 0.0, 0.0])), base, "an offset moves it");
         assert_eq!(shown(&sphere(Projector::default(), [0.0; 3])), base, "unmoved: as before");
@@ -381,5 +518,119 @@ mod tests {
         assert_ne!(shown(&placed(texturecraft_engine::core::Decal { size: [1.5, 1.0], ..frame })), square, "a stretched frame");
         assert_ne!(shown(&placed(texturecraft_engine::core::Decal { rotation: 30.0, ..frame })), square, "a turned frame");
         assert_ne!(shown(&placed(texturecraft_engine::core::Decal { offset: [0.3, 0.0], ..frame })), square, "a slid frame");
+    }
+
+    fn fitted_half(projection: &Projection) -> f32 {
+        let shown = shown_projection(projection, BOUNDS).unwrap();
+        view_half(ProjectorOutline::of(&shown, shape_for(&shown).half_size()).as_ref())
+    }
+
+    fn sized(scale: f32) -> Projection {
+        let Projection::Spherical { uv, .. } = spherical(1.0) else { panic!("spherical() makes a spherical projection") };
+        Projection::Spherical { scale: 1.0, uv, offset: [0.0; 3], projector: Projector { scale: [scale; 3], ..Projector::default() } }
+    }
+
+    /// The view zooms out until the projector fits, never nearer than the plain framing and never past half the shape's size; past that the projector runs off the square and each side it passes is marked
+    #[test]
+    fn the_view_fits_the_projector_down_to_half_the_shape() {
+        assert_eq!(fitted_half(&sized(0.4)), VIEW_HALF, "a small projector keeps the plain framing");
+        let default = fitted_half(&sized(1.0));
+        assert!(default > VIEW_HALF && default < MAX_VIEW_HALF, "{default}");
+        assert_eq!(fitted_half(&sized(3.0)), MAX_VIEW_HALF, "x3 stops at half the shape's size");
+
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0));
+        let sides = |scale: f32| {
+            let shown = sized(scale);
+            let outline = ProjectorOutline::of(&shown, PreviewShape::Sphere.half_size()).unwrap();
+            let screen = Screen { view: View::new(), rect, half: fitted_half(&shown) };
+            passed_sides(outline.points().map(|point| screen.at(point)), rect)
+        };
+        assert_eq!(sides(1.0), [false; 4], "a fitted projector stays inside the square");
+        assert_eq!(sides(3.0), [true; 4], "an x3 sphere runs past every side");
+
+        let triplanar = Projection::Triplanar {
+            scale: 1.0,
+            sharpness: 8.0,
+            offset: [0.0; 3],
+            uv: UvTransform::default(),
+            projector: Projector { scale: [10.0; 3], ..Projector::default() },
+        };
+        assert_eq!(fitted_half(&triplanar), MAX_VIEW_HALF, "every kind fits the same way");
+    }
+
+    /// A huge spherical projector no longer fills the square with its own ball: the shape keeps half its size in the middle with background round it
+    #[test]
+    fn a_huge_sphere_keeps_the_shape_in_the_square() {
+        let tokens = tokens();
+        let image = render(&sized(3.0), 32, fitted_half(&sized(3.0)), &tokens);
+        assert_eq!(image.pixels[0], tokens.field, "the corner is background");
+        assert_eq!(image.pixels[16 * 32 + 4], tokens.field, "the shape is half its size: its side is background");
+        assert_ne!(image.pixels[16 * 32 + 16], tokens.field, "the shape is in the middle");
+    }
+
+    /// The outline is dashed where the shape hides it: the equator's back half runs behind the ball
+    #[test]
+    fn the_shape_hides_the_back_of_the_outline() {
+        let screen = Screen { view: View::new(), rect: Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0)), half: 1.2 };
+        let outline = ProjectorOutline::of(&sized(1.0), PreviewShape::Sphere.half_size()).unwrap();
+        let hidden = |line: &Vec<Vec3>| line.iter().filter(|point| screen.hidden(PreviewShape::Sphere, **point)).count();
+        assert_eq!(hidden(&outline.lines[0]), 0, "the rim is all seen");
+        let equator = hidden(&outline.lines[1]);
+        assert!(equator > 0 && equator < outline.lines[1].len(), "the equator is half hidden: {equator}");
+    }
+
+    /// Every kind at x0.4, x1, x2, x3 and x10 (projector scale), as the panel's square draws it
+    #[test]
+    #[ignore = "requires an offscreen GPU adapter and TC_UI_SNAPSHOTS"]
+    fn preview_fit_snapshots() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        use crate::theme::Brightness;
+        let Some(directory) = std::env::var_os("TC_UI_SNAPSHOTS").map(std::path::PathBuf::from) else { return };
+        std::fs::create_dir_all(&directory).unwrap();
+        const SIZES: [f32; 5] = [0.4, 1.0, 2.0, 3.0, 10.0];
+        const SQUARE: f32 = 104.0;
+        const MARGIN: f32 = 4.0;
+        type Kind = (&'static str, fn(f32) -> Projection);
+        let kinds: [Kind; 4] = [
+            ("planar", |s| Projection::Planar {
+                scale: 1.0,
+                axis: 2,
+                offset: [0.0; 3],
+                uv: UvTransform::default(),
+                projector: Projector { scale: [s, s, 1.0], ..Projector::default() },
+                placed: None,
+            }),
+            ("spherical", sized),
+            ("cylindrical", |s| cylindrical(Projector { scale: [s; 3], ..Projector::default() })),
+            ("triplanar", |s| Projection::Triplanar {
+                scale: 1.0,
+                sharpness: 8.0,
+                offset: [0.0; 3],
+                uv: UvTransform::default(),
+                projector: Projector { scale: [s; 3], ..Projector::default() },
+            }),
+        ];
+        // One square per picture: the preview keeps one rendered texture. The medium theme at every size, the others at two
+        let themes = [(Brightness::MediumDark, "", &SIZES[..]), (Brightness::Dark, "-dark", &[1.0, 3.0][..]), (Brightness::Light, "-light", &[1.0, 3.0][..])];
+        for ((brightness, theme, sizes), (name, make)) in themes.into_iter().flat_map(|theme| kinds.map(|kind| (theme, kind))) {
+            for &scale in sizes {
+                let projection = make(scale);
+                let rect = Rect::from_min_size(pos2(MARGIN, MARGIN), vec2(SQUARE, SQUARE));
+                let mut harness =
+                    egui_kittest::Harness::builder().with_size(vec2(SQUARE + 2.0 * MARGIN, SQUARE + 2.0 * MARGIN)).with_pixels_per_point(2.0).wgpu().build_ui(
+                        move |ui| {
+                            let tokens = Tokens::for_brightness(brightness);
+                            ui.painter().rect_filled(ui.ctx().content_rect(), 0, tokens.panel);
+                            projection_preview(ui.painter(), rect, &projection, BOUNDS, &tokens);
+                        },
+                    );
+                harness.run_steps(2);
+                harness.render().unwrap().save(directory.join(format!("preview-fit-{name}-x{scale}{theme}.png"))).unwrap();
+            }
+        }
+        // In the panel: a x3 sphere zoomed out to its floor, marked on every side
+        let (mut harness, _) = crate::frame_gizmo::tests::fill_app_rendered(serde_json::json!({"projection": "spherical", "projectorScale": [3, 3, 3]}), true);
+        harness.run_steps(4);
+        harness.render().unwrap().save(directory.join("preview-fit-in-panel-spherical-x3.png")).unwrap();
     }
 }

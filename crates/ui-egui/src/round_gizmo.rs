@@ -69,10 +69,10 @@ pub(crate) struct RoundGizmo {
 }
 
 /// How far round the model each shape reaches, in the mesh's half sizes: the box, the sphere, the cylinder's radius and half height
-const BOX_REACH: f32 = 1.08;
-const SPHERE_REACH: f32 = 1.2;
-const CYLINDER_REACH: f32 = 1.1;
-const CYLINDER_HEIGHT: f32 = 1.15;
+pub(crate) const BOX_REACH: f32 = 1.08;
+pub(crate) const SPHERE_REACH: f32 = 1.2;
+pub(crate) const CYLINDER_REACH: f32 = 1.1;
+pub(crate) const CYLINDER_HEIGHT: f32 = 1.15;
 /// Screen radius of the turn rings, their width and how near one a press grabs it (points)
 const RING: f32 = 30.0;
 const RING_WIDTH: f32 = 2.0;

@@ -365,7 +365,7 @@ pub(crate) mod tests {
         fill_app_rendered(fields, false)
     }
 
-    fn fill_app_rendered(mut fields: serde_json::Value, render: bool) -> (egui_kittest::Harness<'static, TextureCraftApp>, LayerId) {
+    pub(crate) fn fill_app_rendered(mut fields: serde_json::Value, render: bool) -> (egui_kittest::Harness<'static, TextureCraftApp>, LayerId) {
         let session = Session::new_project("Frame", texturecraft_engine::geom::primitives::sphere(1.0, 48, 24), "builtin:sphere", None, 128).unwrap();
         let builder = egui_kittest::Harness::builder().with_size(vec2(1600.0, 960.0));
         let builder = if render { builder.wgpu() } else { builder };

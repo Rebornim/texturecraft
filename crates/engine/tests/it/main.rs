@@ -18,6 +18,7 @@ mod fill_projections;
 mod fill_sampling;
 mod filter_swap;
 mod filters;
+mod folder_contents;
 mod generator_inputs;
 mod high_poly_missed;
 mod instances;

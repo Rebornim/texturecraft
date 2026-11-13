@@ -3,6 +3,7 @@ use std::ops::RangeInclusive;
 use egui::{Align2, CornerRadius, FontId, Id, Rect, Response, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
 use egui_phosphor::regular as ic;
 
+use super::value_text::ValueText;
 use super::{ICON_SIZE, PropertySheet, RowLead, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
 
@@ -82,6 +83,16 @@ impl PropertySheet<'_> {
 
     /// [`Self::angle`] led by `lead`
     pub(crate) fn angle_led(&mut self, lead: RowLead<'_>, degrees: &mut f32, range: RangeInclusive<f32>) -> Option<bool> {
+        self.angle_shown(lead, degrees, range, false)
+    }
+
+    /// An angle added to others: a signed track from −180 to 180 with its zero tick, the dial, and the value with its sign ("+30°")
+    pub(crate) fn relative_angle(&mut self, label: &str, degrees: &mut f32) -> Option<bool> {
+        self.angle_shown(RowLead::label(label), degrees, -180.0..=180.0, true)
+    }
+
+    /// [`Self::angle_led`], the value shown with its sign when `plus`
+    fn angle_shown(&mut self, lead: RowLead<'_>, degrees: &mut f32, range: RangeInclusive<f32>, plus: bool) -> Option<bool> {
         let (control, center_y) = self.row_with(lead);
         let id = self.next_id();
         let dial_x = self.right - self.used.value_width.max(super::VALUE_MIN_WIDTH) - DIAL_AIR - DIAL_RADIUS;
@@ -95,7 +106,14 @@ impl PropertySheet<'_> {
         let hand = pos2(dial_x + DIAL_RADIUS * turn.cos(), center_y + DIAL_RADIUS * turn.sin());
         painter.line_segment([pos2(dial_x, center_y), hand], Stroke::new(TRACK_WIDTH, t.text));
 
-        let typed = self.value_field(id, center_y, *degrees, &range, 0, "°");
+        let typed = if plus {
+            let shown = format!("{:+.0}°", *degrees);
+            self.measure_value(&shown);
+            let width = self.used.value_width.max(super::VALUE_MIN_WIDTH);
+            self.value_text_field(id, ValueText { right: self.right, width, center_y, shown: &shown, suffix: "°" }, *degrees, &range, 0)
+        } else {
+            self.value_field(id, center_y, *degrees, &range, 0, "°")
+        };
         Self::apply_typed(degrees, typed, dragged)
     }
 
@@ -203,6 +221,12 @@ impl PropertySheet<'_> {
         suffix: &str,
     ) -> Option<f32> {
         let shown = format!("{value:.decimals$}{suffix}");
+        self.value_text_field(id, ValueText { right, width, center_y, shown: &shown, suffix }, value, range, decimals)
+    }
+
+    /// A value drawn as `text.shown` that turns into a field when clicked; returns the typed value (its `text.suffix` and a leading "×" or "x" allowed), kept in `range`
+    pub(super) fn value_text_field(&mut self, id: Id, text: ValueText<'_>, value: f32, range: &RangeInclusive<f32>, decimals: usize) -> Option<f32> {
+        let ValueText { right, width, center_y, shown, suffix } = text;
         let rect = Rect::from_min_max(pos2(right - width, center_y - 10.0), pos2(right, center_y + 10.0));
         let field_id = id.with("typed");
         let editing = self.ui.data(|data| data.get_temp::<String>(field_id));
@@ -210,7 +234,7 @@ impl PropertySheet<'_> {
         let t = self.tokens;
         let Some(mut text) = editing else {
             let response = self.ui.interact(rect, id.with("value"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
-            self.ui.painter().text(pos2(right, center_y), Align2::RIGHT_CENTER, &shown, semibold(TEXT_SIZE), t.text);
+            self.ui.painter().text(pos2(right, center_y), Align2::RIGHT_CENTER, shown, semibold(TEXT_SIZE), t.text);
             if response.clicked() {
                 self.ui.data_mut(|data| data.insert_temp(field_id, format!("{value:.decimals$}")));
                 self.ui.memory_mut(|memory| memory.request_focus(field_id));
@@ -229,7 +253,7 @@ impl PropertySheet<'_> {
         if self.ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             return None;
         }
-        let typed: f32 = text.trim().trim_end_matches(suffix).trim().parse().ok()?;
+        let typed: f32 = text.trim().trim_end_matches(suffix).trim_start_matches(['×', 'x']).trim().parse().ok()?;
         typed.is_finite().then(|| typed.clamp(*range.start(), *range.end()))
     }
 }

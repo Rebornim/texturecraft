@@ -25,6 +25,7 @@ pub mod fill_material_cmds;
 pub mod fill_mode;
 pub mod fill_reset_cmds;
 pub mod filter_lib;
+pub mod folder_cmds;
 pub mod inspect;
 pub mod instance_cmds;
 pub mod layer_cmds;

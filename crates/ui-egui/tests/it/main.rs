@@ -19,6 +19,7 @@ mod fill_material_rows;
 mod fill_projection_rows;
 mod fill_symmetry_rows;
 mod filter_picker;
+mod folder_properties;
 mod generator_panel;
 mod history_panel;
 mod layer_clipboard;

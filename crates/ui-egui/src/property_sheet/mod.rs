@@ -2,6 +2,7 @@
 
 mod action_row;
 mod action_row_response;
+mod attribute_rows;
 mod axis_rows;
 mod band_response;
 mod choice;

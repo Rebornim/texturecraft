@@ -10,6 +10,7 @@ use texturecraft_core::{
 };
 
 use crate::commands::{CommandSpec, always, bad, boolp, color_of, color_param, f32p, has_layer, strp, u64p};
+use crate::filter_about::FilterAbout;
 use crate::{Result, Session, cmd};
 
 /// A filter of the library.
@@ -24,6 +25,11 @@ pub struct FilterDef {
 }
 
 impl FilterDef {
+    /// What it does and the words it is found by (its Attributes)
+    pub fn about(&self) -> Option<FilterAbout> {
+        crate::filter_about::of(self.id)
+    }
+
     /// Whether it builds a filter effect (levels and material finishes are effect types of their own)
     pub fn is_filter_effect(&self) -> bool {
         matches!(build(self.id, &Value::Null), Ok(EffectKind::Filter(_)))
@@ -114,16 +120,25 @@ pub fn specs() -> Vec<CommandSpec> {
             "List filters",
             [],
             None,
-            "{} — the filter library: id, label, group, whether masks take it, default parameters",
+            "{} — the filter library: id, label, group, whether masks take it, default parameters, what it does (description) and its tags",
             always,
-            |_, _| Ok(Value::Array(
-                FILTERS
-                    .iter()
-                    .map(|f| json!({"id": f.id, "label": f.label, "group": f.group, "mask": f.mask, "defaults": build(f.id, &Value::Null).ok()}))
-                    .collect()
-            ))
+            |_, _| Ok(Value::Array(FILTERS.iter().map(listed).collect()))
         ),
     ]
+}
+
+/// `filter.list`'s entry for `def`
+fn listed(def: &FilterDef) -> Value {
+    let about = def.about();
+    json!({
+        "id": def.id,
+        "label": def.label,
+        "group": def.group,
+        "mask": def.mask,
+        "defaults": build(def.id, &Value::Null).ok(),
+        "description": about.map(|about| about.description),
+        "tags": about.map(|about| about.tags),
+    })
 }
 
 /// The filter `effect.filter.restoreDefaults` works on: its id and the library defaults of the filter it is (None: an empty filter)

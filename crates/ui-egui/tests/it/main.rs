@@ -27,6 +27,7 @@ mod layer_toolbar;
 mod layers_panel;
 mod levels_editor;
 mod mask_fill_rows;
+mod mask_paint_grayscale;
 mod mask_value_swap;
 mod new_project_baked_maps;
 mod panel_header;

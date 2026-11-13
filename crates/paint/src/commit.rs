@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use rayon::prelude::*;
-use texturecraft_compose::PixelStore;
+use texturecraft_compose::{MaskGray, PixelStore};
 use texturecraft_core::{Channel, ChannelKind, LayerId};
 use texturecraft_texel::{TILE, TILE_AREA, TileData, TileImage, from_u16, from_u16_signed, to_u16, to_u16_signed};
 
@@ -21,12 +21,13 @@ pub(crate) fn enc(kind: ChannelKind, v: f32) -> u16 {
 
 /// What one image receives: its channel kind, the painted value (unused when erasing or for
 /// coverage images), whether a stencil's color replaces it (base color) and the values a clone
-/// or smudge stroke carries for it.
+/// or smudge stroke carries for it, and the image whose gray a mask stroke paints in place of `value`
 struct Blend<'a> {
     kind: ChannelKind,
     value: &'a [f32],
     stencil_color: bool,
     carried: Option<&'a TileImage>,
+    gray: Option<&'a MaskGray>,
 }
 
 /// Blend `alpha × opacity` into one image of `n` value components plus coverage. With a
@@ -80,8 +81,8 @@ fn blend_tile(dst: &mut [u16], comps: usize, a: &[u16], (tx, ty): (u32, u32), b:
             continue;
         }
         let mut color = None;
+        let (x, y) = (tx * TILE + i as u32 % TILE, ty * TILE + i as u32 / TILE);
         if let Some(f) = src.per_texel {
-            let (x, y) = (tx * TILE + i as u32 % TILE, ty * TILE + i as u32 / TILE);
             match f(x, y) {
                 Some((c, af)) => {
                     m *= af;
@@ -94,11 +95,13 @@ fn blend_tile(dst: &mut [u16], comps: usize, a: &[u16], (tx, ty): (u32, u32), b:
             }
         }
         let Some(px) = dst.get_mut(i * comps..(i + 1) * comps) else { continue };
+        let gray = b.gray.map(|gray| gray.at(x, y, (src.alpha.width(), src.alpha.height())));
         let cov = from_u16(px[n]);
         for k in 0..n {
             let p = dec(b.kind, px[k]);
             let target = match (carried, color) {
                 (Some(t), _) => dec(b.kind, t.get(i * n + k).copied().unwrap_or(0)),
+                (None, _) if let Some(gray) = gray => gray,
                 (None, Some(c)) if b.stencil_color => c.get(k).copied().unwrap_or(0.0),
                 _ => b.value.get(k).copied().unwrap_or(0.0),
             };
@@ -134,13 +137,15 @@ fn fill_from(dst: &mut Vec<u16>, from: Option<&[u16]>, empty: &[u16]) {
 #[derive(Clone, Debug, PartialEq)]
 struct BlendKey {
     value: Vec<f32>,
+    image: Option<String>,
     opacity: f32,
     erase: bool,
 }
 
 impl BlendKey {
     fn new(b: &Blend, src: &CommitSource) -> BlendKey {
-        BlendKey { value: b.value.to_vec(), opacity: src.opacity, erase: src.erase }
+        let image = b.gray.and_then(MaskGray::image_name).map(str::to_owned);
+        BlendKey { value: b.value.to_vec(), image, opacity: src.opacity, erase: src.erase }
     }
 }
 
@@ -242,9 +247,9 @@ impl Staging {
 
     /// Prepare tiles `src.tiles` of the mask paint effect a [`commit_mask`] of `effect` with
     /// the same arguments will write.
-    pub fn stage_mask(&mut self, pixels: &PixelStore, effect: LayerId, value: f32, src: &CommitSource) {
-        let value = [value.clamp(0.0, 1.0)];
-        let b = Blend { kind: ChannelKind::Scalar, value: &value, stencil_color: false, carried: None };
+    pub fn stage_mask(&mut self, pixels: &PixelStore, effect: LayerId, gray: &MaskGray, src: &CommitSource) {
+        let value = mask_value(gray);
+        let b = mask_blend(gray, &value);
         self.images.entry(None).or_default().stage(pixels.masks.get(&effect), 2, &b, src);
     }
 
@@ -273,7 +278,22 @@ fn layer_blend<'a>(c: Channel, values: &'a BTreeMap<Channel, [f32; 3]>, src: &Co
         value: value.get(..c.components()).unwrap_or(value),
         stencil_color: c == Channel::BaseColor,
         carried: src.carried.and_then(|m| m.get(&c)),
+        gray: None,
     }
+}
+
+/// The one value a mask stroke painting `gray` blends (0 under an image, which gives its own per texel)
+fn mask_value(gray: &MaskGray) -> [f32; 1] {
+    match gray {
+        MaskGray::Value(value) => [value.clamp(0.0, 1.0)],
+        MaskGray::Image { .. } => [0.0],
+    }
+}
+
+/// How a mask stroke painting `gray` blends (`value` from [`mask_value`])
+fn mask_blend<'a>(gray: &'a MaskGray, value: &'a [f32; 1]) -> Blend<'a> {
+    let gray = matches!(gray, MaskGray::Image { .. }).then_some(gray);
+    Blend { kind: ChannelKind::Scalar, value, stencil_color: false, carried: None, gray }
 }
 
 /// Per-texel override of a stroke: `(x, y)` → (base color, alpha factor), None = no paint.
@@ -306,16 +326,16 @@ pub fn commit_layer(pixels: &mut PixelStore, layer: LayerId, size: (u32, u32), v
     images.into_par_iter().for_each(|(c, img, staged)| over(img, &layer_blend(c, values, &src), &src, staged));
 }
 
-/// Commit a stroke into the paint effect `effect` of a mask, painting gray `value`.
-pub fn commit_mask(pixels: &mut PixelStore, effect: LayerId, size: (u32, u32), value: f32, src: CommitSource, staging: &mut Staging) {
+/// Commit a stroke into the paint effect `effect` of a mask, painting `gray`
+pub fn commit_mask(pixels: &mut PixelStore, effect: LayerId, size: (u32, u32), gray: &MaskGray, src: CommitSource, staging: &mut Staging) {
     let img = pixels.mask_mut(effect, size);
-    let value = [value.clamp(0.0, 1.0)];
-    over(img, &Blend { kind: ChannelKind::Scalar, value: &value, stencil_color: false, carried: None }, &src, staging.take(None));
+    let value = mask_value(gray);
+    over(img, &mask_blend(gray, &value), &src, staging.take(None));
 }
 
 /// Commit a stroke into a coverage-only image (1 component), e.g. the quick mask.
 pub fn commit_coverage(img: &mut TileImage, src: CommitSource) {
-    over(img, &Blend { kind: ChannelKind::Scalar, value: &[], stencil_color: false, carried: None }, &src, None);
+    over(img, &Blend { kind: ChannelKind::Scalar, value: &[], stencil_color: false, carried: None, gray: None }, &src, None);
 }
 
 #[cfg(test)]
@@ -368,9 +388,9 @@ mod tests {
     fn mask_commit_and_untouched_tiles_stay_shared() {
         let mut px = PixelStore::default();
         let (a, tiles) = alpha(1.0);
-        commit_mask(&mut px, LayerId(9), (64, 64), 1.0, src(&a, &tiles, 1.0, false), &mut Staging::default());
+        commit_mask(&mut px, LayerId(9), (64, 64), &MaskGray::Value(1.0), src(&a, &tiles, 1.0, false), &mut Staging::default());
         let before = px.clone();
-        commit_mask(&mut px, LayerId(9), (64, 64), 0.0, src(&a, &tiles, 1.0, true), &mut Staging::default());
+        commit_mask(&mut px, LayerId(9), (64, 64), &MaskGray::Value(0.0), src(&a, &tiles, 1.0, true), &mut Staging::default());
         assert_eq!(from_u16(before.masks[&LayerId(9)].get(5, 5)[1]), 1.0);
         assert_eq!(px.masks[&LayerId(9)].get(5, 5)[1], 0);
     }
@@ -400,7 +420,7 @@ mod tests {
         let (a, tiles) = alpha(0.7);
         let mut base = PixelStore::default();
         commit_layer(&mut base, LayerId(1), (64, 64), &vals, src(&a, &tiles, 1.0, false), &mut Staging::default());
-        commit_mask(&mut base, LayerId(2), (64, 64), 0.5, src(&a, &tiles, 1.0, false), &mut Staging::default());
+        commit_mask(&mut base, LayerId(2), (64, 64), &MaskGray::Value(0.5), src(&a, &tiles, 1.0, false), &mut Staging::default());
         let carried: BTreeMap<Channel, TileImage> = vals.keys().map(|c| (*c, a.clone())).collect();
         // Staged when the stroke started, then again after the alpha changed (pre-blended
         // tiles re-blend), and staged once more with its last alpha change left out (that
@@ -411,20 +431,20 @@ mod tests {
             let mut staging = Staging::default();
             let c = carry.then_some(&carried);
             staging.stage_layer(&staged, LayerId(1), &vals, &source(&a, &tiles, c, erase));
-            staging.stage_mask(&staged, LayerId(2), 1.0, &source(&a, &tiles, c, erase));
+            staging.stage_mask(&staged, LayerId(2), &MaskGray::Value(1.0), &source(&a, &tiles, c, erase));
             a.set(7, 9, &[to_u16(0.3)]);
             staging.stage_layer(&staged, LayerId(1), &vals, &source(&a, &tiles, c, erase));
-            staging.stage_mask(&staged, LayerId(2), 1.0, &source(&a, &tiles, c, erase));
+            staging.stage_mask(&staged, LayerId(2), &MaskGray::Value(1.0), &source(&a, &tiles, c, erase));
             a.set(8, 9, &[to_u16(0.9)]);
             if stage_last {
                 staging.stage_layer(&staged, LayerId(1), &vals, &source(&a, &tiles, c, erase));
-                staging.stage_mask(&staged, LayerId(2), 1.0, &source(&a, &tiles, c, erase));
+                staging.stage_mask(&staged, LayerId(2), &MaskGray::Value(1.0), &source(&a, &tiles, c, erase));
             }
             let mut plain = base.clone();
             commit_layer(&mut plain, LayerId(1), (64, 64), &vals, source(&a, &tiles, c, erase), &mut Staging::default());
-            commit_mask(&mut plain, LayerId(2), (64, 64), 1.0, source(&a, &tiles, c, erase), &mut Staging::default());
+            commit_mask(&mut plain, LayerId(2), (64, 64), &MaskGray::Value(1.0), source(&a, &tiles, c, erase), &mut Staging::default());
             commit_layer(&mut staged, LayerId(1), (64, 64), &vals, source(&a, &tiles, c, erase), &mut staging);
-            commit_mask(&mut staged, LayerId(2), (64, 64), 1.0, source(&a, &tiles, c, erase), &mut staging);
+            commit_mask(&mut staged, LayerId(2), (64, 64), &MaskGray::Value(1.0), source(&a, &tiles, c, erase), &mut staging);
             assert_eq!((&staged.layers, &staged.masks), (&plain.layers, &plain.masks), "erase {erase}, carried {carry}, staged last {stage_last}");
         }
         // Tiles staged before the layer changed or with another value are stale: the commit
@@ -432,13 +452,40 @@ mod tests {
         let mut px = base.clone();
         let mut staging = Staging::default();
         staging.stage_layer(&px, LayerId(1), &vals, &src(&a, &tiles, 1.0, false));
-        staging.stage_mask(&px, LayerId(2), 0.25, &src(&a, &tiles, 1.0, false));
+        staging.stage_mask(&px, LayerId(2), &MaskGray::Value(0.25), &src(&a, &tiles, 1.0, false));
         commit_layer(&mut px, LayerId(1), (64, 64), &vals, src(&a, &tiles, 1.0, false), &mut Staging::default());
         let mut expected = px.clone();
         commit_layer(&mut expected, LayerId(1), (64, 64), &vals, src(&a, &tiles, 1.0, false), &mut Staging::default());
-        commit_mask(&mut expected, LayerId(2), (64, 64), 1.0, src(&a, &tiles, 1.0, false), &mut Staging::default());
+        commit_mask(&mut expected, LayerId(2), (64, 64), &MaskGray::Value(1.0), src(&a, &tiles, 1.0, false), &mut Staging::default());
         commit_layer(&mut px, LayerId(1), (64, 64), &vals, src(&a, &tiles, 1.0, false), &mut staging);
-        commit_mask(&mut px, LayerId(2), (64, 64), 1.0, src(&a, &tiles, 1.0, false), &mut staging);
+        commit_mask(&mut px, LayerId(2), (64, 64), &MaskGray::Value(1.0), src(&a, &tiles, 1.0, false), &mut staging);
         assert_eq!((&px.layers, &px.masks), (&expected.layers, &expected.masks));
+    }
+
+    #[test]
+    fn a_mask_stroke_paints_an_images_gray_per_texel_staged_or_not() {
+        use std::sync::Arc;
+        use texturecraft_compose::ImageRes;
+
+        // A 2 × 1 image: black on the left half of the texture, white on the right
+        let image = |name: &str, left: f32| MaskGray::Image { name: name.into(), image: Arc::new(ImageRes::new(2, 1, vec![[left; 4], [1.0; 4]], false)) };
+        let mut a = TileImage::new(64, 64, 1);
+        for (x, y) in [(16, 5), (48, 5)] {
+            a.set(x, y, &[to_u16(1.0)]);
+        }
+        let tiles: BTreeSet<(u32, u32)> = [(0, 0)].into_iter().collect();
+        let gray_at = |px: &PixelStore, x| from_u16(px.masks[&LayerId(4)].get(x, 5)[0]);
+
+        let mut plain = PixelStore::default();
+        commit_mask(&mut plain, LayerId(4), (64, 64), &image("scratches", 0.0), src(&a, &tiles, 1.0, false), &mut Staging::default());
+        assert!(gray_at(&plain, 16) < 0.05 && gray_at(&plain, 48) > 0.95, "left {} right {}", gray_at(&plain, 16), gray_at(&plain, 48));
+
+        // Staged with another image first: the commit blends the image it is given
+        let mut staged = PixelStore::default();
+        let mut staging = Staging::default();
+        staging.stage_mask(&staged, LayerId(4), &image("other", 0.5), &src(&a, &tiles, 1.0, false));
+        staging.stage_mask(&staged, LayerId(4), &image("scratches", 0.0), &src(&a, &tiles, 1.0, false));
+        commit_mask(&mut staged, LayerId(4), (64, 64), &image("scratches", 0.0), src(&a, &tiles, 1.0, false), &mut staging);
+        assert_eq!(staged.masks, plain.masks);
     }
 }

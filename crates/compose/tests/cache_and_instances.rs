@@ -4,7 +4,9 @@
 
 use std::collections::BTreeMap;
 
-use texturecraft_compose::{BelowCache, Composite, Inputs, PaintTarget, PixelStore, StrokePreview, all_tiles, composite_tiles, composite_tiles_cached};
+use texturecraft_compose::{
+    BelowCache, Composite, Inputs, MaskGray, PaintTarget, PixelStore, StrokePreview, all_tiles, composite_tiles, composite_tiles_cached,
+};
 use texturecraft_core::{
     BlendMode, Channel, Effect, EffectKind, Fill, Filter, Generator, GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, Procedural,
     ProceduralKind, Project, Projection, Source, TextureSet,
@@ -335,7 +337,7 @@ fn stroke(target: LayerId) -> StrokePreview {
         opacity: 0.9,
         erase: false,
         values: [(Channel::BaseColor, [1.0, 0.1, 0.1]), (Channel::Roughness, [0.2; 3])].into_iter().collect(),
-        mask_value: 1.0,
+        mask_gray: MaskGray::Value(1.0),
         stencil: None,
         carried: BTreeMap::new(),
     }

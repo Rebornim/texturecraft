@@ -18,6 +18,7 @@ pub mod eval;
 pub mod fill_copies;
 pub mod fill_copy;
 pub mod frame_placement;
+mod mask_gray;
 pub mod pattern;
 pub mod projector_cover;
 pub mod projector_depth;
@@ -34,5 +35,6 @@ pub use eval::{
     Composite, Inputs, PaintTarget, Stencil, StrokePreview, all_tiles, compare_histograms, composite_tiles, composite_tiles_cached, covered_tiles,
     effect_histogram, flatten_layer, mask_at, mask_image, pad_tiles,
 };
+pub use mask_gray::MaskGray;
 pub use store::{BakedMaps, ImageRes, ImageStore, PixelStore};
 pub use thumb::{THUMB_TEXELS, ThumbImage, ThumbTarget};

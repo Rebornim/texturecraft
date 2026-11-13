@@ -133,6 +133,8 @@ struct PathPaint {
     values: BTreeMap<Channel, [f32; 3]>,
     enabled: BTreeSet<Channel>,
     mask_value: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mask_image: Option<String>,
     camera: OrbitCamera,
 }
 
@@ -247,6 +249,7 @@ fn edit_path(s: &mut Session, p: &Value) -> Result<Value> {
     s.tool.values = paint.values;
     s.tool.enabled = paint.enabled;
     s.tool.mask_value = paint.mask_value;
+    s.tool.mask_image = paint.mask_image;
     s.tool.path = PathState { editing: Some((eid, index)), ..state_of(&shape) };
     s.path_steps = Default::default();
     s.target = StackTarget::Effect(eid);
@@ -355,7 +358,14 @@ impl Session {
     /// The Path tool's curve with the current brush and material, as painted from `camera`.
     fn path_shape(&self, camera: OrbitCamera, viewport: Vec2) -> PathShape {
         let (t, path) = (&self.tool, &self.tool.path);
-        let paint = PathPaint { brush: t.brush.clone(), values: t.values.clone(), enabled: t.enabled.clone(), mask_value: t.mask_value, camera };
+        let paint = PathPaint {
+            brush: t.brush.clone(),
+            values: t.values.clone(),
+            enabled: t.enabled.clone(),
+            mask_value: t.mask_value,
+            mask_image: t.mask_image.clone(),
+            camera,
+        };
         PathShape {
             points: path.points.iter().map(|p| p.to_array()).collect(),
             uv: path.uv,
@@ -841,6 +851,7 @@ impl Session {
         self.tool.values = paint.values;
         self.tool.enabled = paint.enabled;
         self.tool.mask_value = paint.mask_value;
+        self.tool.mask_image = paint.mask_image;
         self.camera = camera;
         self.tool.path = state_of(shape);
         self.paint_path(viewport)

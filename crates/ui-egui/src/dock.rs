@@ -1110,17 +1110,36 @@ pub(crate) fn properties_contents(app: &mut TextureCraftApp, ui: &mut Ui) {
         // Polygon fill shows its own settings and says what it fills into, whatever is selected
         _ if app.session.tool.tool == Tool::PolygonFill => legacy_body(ui, |ui| polygon_fill_properties(app, ui)),
         (Some(layer), StackTarget::Effect(effect)) if mask_fill_of(&app.session.doc.project, effect).is_some() => mask_fill_properties(app, ui, layer, effect),
-        (Some(layer), StackTarget::Effect(effect)) => legacy_body(ui, |ui| effect_properties(app, ui, layer, effect)),
+        (Some(layer), StackTarget::Effect(effect)) => {
+            legacy_body(ui, |ui| effect_properties(app, ui, layer, effect));
+            let painted = app.session.doc.project.effect(effect).is_some_and(|(_, effect)| matches!(effect.kind, EffectKind::Paint | EffectKind::Path(_)));
+            if painted && grayscale_tab_open(app) {
+                crate::mask_paint_panel::grayscale_sheet(app, ui);
+            }
+        }
         (Some(layer), StackTarget::Content) if matches!(layer.kind, LayerKind::Fill(_)) => fill_properties(app, ui, layer),
         (Some(layer), StackTarget::Content) if layer.is_group() => crate::folder_properties::folder_properties(app, ui, layer.id),
         (Some(layer), StackTarget::Content) if layer.instance_source().is_some() => crate::instance_properties::instance_properties(app, ui, layer),
-        (Some(layer), StackTarget::Mask) => legacy_body(ui, |ui| {
-            height_mask_section(app, ui, layer);
-            ui.separator();
-            tool_properties(app, ui);
-        }),
+        (Some(layer), StackTarget::Mask) => {
+            legacy_body(ui, |ui| {
+                // Add mask > Height combination took its place; a layer saved with it on can still turn it off here
+                if app.session.doc.project.content_layer(layer.id).is_some_and(|content| content.height_mask.enabled) {
+                    height_mask_section(app, ui, layer);
+                    ui.separator();
+                }
+                tool_properties(app, ui);
+            });
+            if grayscale_tab_open(app) {
+                crate::mask_paint_panel::grayscale_sheet(app, ui);
+            }
+        }
         _ => legacy_body(ui, |ui| tool_properties(app, ui)),
     }
+}
+
+/// Whether the tool panel's third tab is open while a mask is painted: its Grayscale tab, drawn under the tool's rows
+fn grayscale_tab_open(app: &TextureCraftApp) -> bool {
+    app.ui.props_tab == PropsTab::Material && !targets_content(app)
 }
 
 /// Mask with height: the layer's height shapes its mask transitions.
@@ -1164,15 +1183,25 @@ fn tool_properties(app: &mut TextureCraftApp, ui: &mut Ui) {
 
     let stroke_width = (brush.size / 0.25 * 60.0).clamp(2.0, 30.0);
     let alpha = (brush.flow * brush.opacity * 255.0) as u8;
-    painter.add(egui::Shape::line(points, Stroke::new(stroke_width, Color32::from_white_alpha(alpha.max(30)))));
-    let base_color = app.session.tool.values.get(&Channel::BaseColor).copied().unwrap_or([0.8; 3]);
-    crate::thumbs::paint_sphere(painter, pos2(rect.left() + half_width * 1.5, rect.center().y), 36.0, base_color);
+    // A mask stroke shows the gray it lays down and no material
+    let gray = match (targets_content(app), &app.session.tool.mask_image) {
+        (false, None) => (app.session.tool.mask_value.clamp(0.0, 1.0) * 255.0).round() as u8,
+        _ => u8::MAX,
+    };
+    let stroke_color = Color32::from_rgba_unmultiplied(gray, gray, gray, alpha.max(30));
+    painter.add(egui::Shape::line(points, Stroke::new(stroke_width, stroke_color)));
+    if targets_content(app) {
+        let base_color = app.session.tool.values.get(&Channel::BaseColor).copied().unwrap_or([0.8; 3]);
+        crate::thumbs::paint_sphere(painter, pos2(rect.left() + half_width * 1.5, rect.center().y), 36.0, base_color);
+    }
     ui.add_space(4.0);
 
     ui.horizontal(|ui| {
         let button_size = ui.spacing().interact_size.y;
+        // Painting a mask, the material tab becomes the Grayscale tab
+        let material = if targets_content(app) { (ic::SPHERE, tr("Material")) } else { (ic::SQUARE_HALF, tr("Grayscale")) };
         for (tab, icon, tip) in
-            [(PropsTab::Brush, ic::PAINT_BRUSH, tr("Brush")), (PropsTab::Alpha, ic::CIRCLE_HALF, tr("Alpha")), (PropsTab::Material, ic::SPHERE, tr("Material"))]
+            [(PropsTab::Brush, ic::PAINT_BRUSH, tr("Brush")), (PropsTab::Alpha, ic::CIRCLE_HALF, tr("Alpha")), (PropsTab::Material, material.0, material.1)]
         {
             if icon_button(ui, icon, tip, app.ui.props_tab == tab, button_size).clicked() {
                 app.ui.props_tab = tab;
@@ -1202,7 +1231,9 @@ fn tool_properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     match app.ui.props_tab {
         PropsTab::Brush => brush_section(app, ui),
         PropsTab::Alpha => alpha_section(app, ui),
-        PropsTab::Material => material_section(app, ui),
+        PropsTab::Material if targets_content(app) => material_section(app, ui),
+        // A mask's Grayscale tab is a property sheet, drawn by the caller past this panel's margins
+        PropsTab::Material => {}
     }
 }
 
@@ -1649,7 +1680,7 @@ fn material_section(app: &mut TextureCraftApp, ui: &mut Ui) {
     material_controls(app, ui);
 }
 
-/// The tool's material: channel chips, then each enabled channel's value (or the mask gray while painting a mask)
+/// The tool's material: channel chips, then each enabled channel's value
 fn material_controls(app: &mut TextureCraftApp, ui: &mut Ui) {
     use texturecraft_engine::core::ChannelKind;
 
@@ -1665,14 +1696,6 @@ fn material_controls(app: &mut TextureCraftApp, ui: &mut Ui) {
         }
     });
     ui.add_space(4.0);
-
-    if !targets_content(app) {
-        let mut gray = app.session.tool.mask_value;
-        if slider(ui, tr("Mask value (gray)"), &mut gray, 0.0..=1.0, 2).changed() {
-            app.session.tool.mask_value = gray;
-        }
-        return;
-    }
 
     for channel in channels {
         if !app.session.tool.enabled.contains(&channel) {
@@ -1923,7 +1946,7 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, eid:
             let hint = if layer.content_effects.iter().any(|content| content.id == eid) {
                 tr("Paint on the mesh to edit the layer content.")
             } else {
-                tr("Paint on the mesh to edit this mask. Use the Material tab's mask value for gray.")
+                tr("Paint on the mesh to edit this mask.")
             };
             ui.label(RichText::new(hint).color(tk.text_dim));
             tool_properties(app, ui);

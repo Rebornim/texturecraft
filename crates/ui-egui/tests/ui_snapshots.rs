@@ -1481,6 +1481,50 @@ fn instance_snapshots() {
     save(&mut harness, &output_dir, "instance-missing");
 }
 
+/// Screen 17: a folder's mask selected with the paint tool's Grayscale tab open: painting white, black, then an image (the slot hovered), then the slot's picker open
+#[test]
+#[ignore]
+fn folder_mask_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let scratches = image::RgbaImage::from_fn(64, 64, |x, y| {
+        let value = (((x * 7 + y * 13) ^ (x * y)) % 200 + 40) as u8;
+        image::Rgba([value, value, value, 255])
+    });
+    let mut bytes = Vec::new();
+    scratches.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).unwrap();
+    let image = session.import_resource_bytes("scratches.png", bytes).unwrap();
+    let folder = execute(&mut session, "layer.add.group", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "mask.add.white", &json!({"layer": folder})).unwrap();
+    execute(&mut session, "layer.select", &json!({"layer": folder, "target": "mask"})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.state_mut().ui.props_tab = texturecraft_ui_egui::state::PropsTab::Material;
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "foldermask-white");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("foldermask-{name}"));
+        }
+        harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    }
+    execute(&mut harness.state_mut().session, "tool.material", &json!({"maskValue": 0.0})).unwrap();
+    save(&mut harness, &output_dir, "foldermask-black");
+    execute(&mut harness.state_mut().session, "tool.material", &json!({"maskImage": image})).unwrap();
+    let slot = harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").rect().center();
+    harness.hover_at(slot);
+    save(&mut harness, &output_dir, "foldermask-image");
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").click();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "foldermask-picker");
+}
+
 /// Screen 10: a new color selection without an ID map, then three colors on the ID mesh map (a row hovered, a row picking again, the Background list open)
 #[test]
 #[ignore]

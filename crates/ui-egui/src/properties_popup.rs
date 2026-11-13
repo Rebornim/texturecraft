@@ -81,7 +81,7 @@ pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
                 crate::property_sheet::section_tabs(ui, scope, ui.style().visuals.menu_corner_radius.nw, &tabs);
             }
             crate::property_sheet::in_scope(ui, scope, |ui| {
-                egui::ScrollArea::vertical().id_salt("properties_popup_scroll").show(ui, |ui| crate::dock::properties_contents(app, ui));
+                crate::dock::properties_scrolled(app, ui, egui::ScrollArea::vertical().id_salt("properties_popup_scroll"));
             });
         });
     });

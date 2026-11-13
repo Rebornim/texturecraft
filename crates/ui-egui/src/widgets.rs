@@ -4,6 +4,7 @@
 use craft_ui::buttons::{ButtonVisuals, IconButton, IconButtonStyle};
 use egui::{Color32, CornerRadius, Response, RichText, Sense, Stroke, Ui, vec2};
 
+use crate::drawn_icon::DrawnIcon;
 use crate::i18n::tr;
 use crate::theme::Tokens;
 
@@ -153,6 +154,15 @@ pub fn elided(painter: &egui::Painter, text: impl Into<String>, size: f32, color
 /// A square Phosphor icon button with a tooltip and an accent well when selected
 pub fn icon_button(ui: &mut Ui, icon: &str, tooltip: &str, selected: bool, size: f32) -> Response {
     icon_button_without_tooltip(ui, icon, tooltip, selected, size).on_hover_text(tooltip)
+}
+
+/// An `icon_button` showing an icon drawn in code
+pub(crate) fn drawn_icon_button(ui: &mut Ui, icon: DrawnIcon, tooltip: &str, selected: bool, size: f32) -> Response {
+    let style = icon_button_style(&Tokens::get(ui.ctx()));
+    IconButton::new(tooltip, vec2(size, size), &style)
+        .selected(selected)
+        .show(ui, |ui, rect, color| icon.paint(ui.painter(), rect.center(), size * ICON_SCALE, color))
+        .on_hover_text(tooltip)
 }
 
 /// Icon glyph size as a fraction of the button height

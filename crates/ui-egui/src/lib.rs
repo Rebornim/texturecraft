@@ -49,6 +49,7 @@ pub mod id_color_pick;
 #[cfg(not(target_arch = "wasm32"))]
 mod import_resources;
 mod inactive_set_hint;
+mod instance_properties;
 pub mod keymap;
 pub mod layer_panel;
 mod layer_toolbar;

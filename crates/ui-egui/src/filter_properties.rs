@@ -15,9 +15,6 @@ use crate::fill_material_panel::pill_name;
 use crate::i18n::tr;
 use crate::property_sheet::PropertySheet;
 use crate::theme::{AXIS_COLORS, OPPOSITE_COLORS, Tokens};
-use crate::widgets::color_swatch;
-
-const SWATCH_WIDTH: f32 = 36.0;
 
 /// Where TextureCraft's filters come from: the repository, without its scheme
 const AUTHOR_URL: &str = "github.com/storytold/texturecraft";
@@ -213,8 +210,9 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
         set(app, key, json!(on), false);
     }
 
-    // The color editors keep their swatches until their own screens
-    sheet.embed(|ui| color_editors(app, ui, id, filter));
+    if let Filter::ReplaceColor { from, to, .. } = filter {
+        replace_colors(app, sheet, id, *from, *to);
+    }
 }
 
 /// Highpass: Color Space, Radius (in Blur Intensity's unit) and Apply To Alpha
@@ -981,25 +979,13 @@ fn decimals(key: &str, min: f32, max: f32) -> usize {
     }
 }
 
-/// The swatches of replace color
-fn color_editors(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, filter: &Filter) {
-    let set = |app: &mut TextureCraftApp, key: &str, value: Value, merge: bool| {
-        let mut params = json!({ "effect": id, "merge": merge });
-        params[key] = value;
-        app.run("effect.set", params);
-    };
-    match filter {
-        Filter::ReplaceColor { from, to, .. } => {
-            for (key, label, rgb) in [("from", tr("Color to replace"), from), ("to", tr("Replacement color"), to)] {
-                let mut color = *rgb;
-                ui.horizontal(|ui| {
-                    if color_swatch(ui, &format!("replace_{key}_{id}"), &mut color, SWATCH_WIDTH) {
-                        set(app, key, json!(color), false);
-                    }
-                    ui.label(label);
-                });
-            }
+/// Replace Color's two colors: each bar opens the colour picker, its eyedropper picks from the screen
+fn replace_colors(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, from: [f32; 3], to: [f32; 3]) {
+    let swatches = app.session.doc.project.swatches.clone();
+    for (key, label, linear) in [("from", tr("Color to replace"), from), ("to", tr("Replacement color"), to)] {
+        let pick = sheet.color_bar_led(label, linear, app.picking_color, &swatches);
+        if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
+            app.run("effect.set", json!({"effect": id, key: picked, "merge": pick.merge}));
         }
-        _ => {}
     }
 }

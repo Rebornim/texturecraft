@@ -75,13 +75,13 @@ pub fn ramp(colors: &[[f32; 3]], positions: &[f32], linear: bool, t: f32) -> Opt
 }
 
 /// sRGB transfer of a linear component
-fn linear_to_srgb(v: f32) -> f32 {
+pub(crate) fn linear_to_srgb(v: f32) -> f32 {
     let v = v.clamp(0.0, 1.0);
     if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
 }
 
 /// Linear value of an sRGB component
-fn srgb_to_linear(v: f32) -> f32 {
+pub(crate) fn srgb_to_linear(v: f32) -> f32 {
     let v = v.clamp(0.0, 1.0);
     if v <= 0.040_45 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
 }

@@ -69,7 +69,7 @@ fn drop_shadow_distance_goes_both_ways() {
 }
 
 /// The app with lighting filter `filter` on a fill layer's content, selected so Properties shows it
-fn app_with_lighting(filter: &str) -> (Harness<'static, TextureCraftApp>, LayerId) {
+pub(crate) fn app_with_lighting(filter: &str) -> (Harness<'static, TextureCraftApp>, LayerId) {
     let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
     let layer = execute(&mut session, "layer.add.fill", &Value::Null).unwrap();
     let effect = execute(&mut session, "effect.add.filter", &json!({"target": "content", "filter": filter})).unwrap();

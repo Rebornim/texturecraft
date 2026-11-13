@@ -15,6 +15,12 @@ const STARTUP_FRAMES: usize = 4;
 const SETTLE_FRAMES: usize = 3;
 /// Frames for the grid's scroll to the current tile to finish its animation
 const SCROLL_FRAMES: usize = 25;
+/// A channel slot low in the Material card, with too little room under it for the picker in [`WINDOW_SIZE`]
+const SLOT_LOW_IN_THE_CARD: &str = "Height";
+/// The tile the picker shows first on its Resources tab
+const FIRST_TILE: &str = "Clouds";
+/// A window with room for the picker under every slot
+const TALL_WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 3200.0);
 
 /// The app with a new fill layer selected on its Material tab, the layer's id; `prepare` runs on the session first
 fn app_with_fill(prepare: impl FnOnce(&mut texturecraft_engine::Session, LayerId)) -> (Harness<'static, TextureCraftApp>, LayerId) {
@@ -103,9 +109,8 @@ fn the_picker_opens_on_the_current_sources_tab_scrolled_to_it() {
     // The last alpha sits far below the picker's first rows; it shows, outlined as the current
     let tile = harness.get_by_role_and_label(Role::ListBoxOption, "Stencil Z");
     assert_eq!(tile.accesskit_node().toggled(), Some(egui::accesskit::Toggled::True), "the current tile is outlined");
-    let slot = harness.get_by_role_and_label(Role::ComboBox, "Roughness").rect();
-    let grid_bottom = slot.max.y + 500.0;
-    assert!(tile.rect().min.y > slot.max.y && tile.rect().max.y < grid_bottom, "the current tile is scrolled into view: {:?}", tile.rect());
+    let picker = picker_rect(&harness, "Stencil Z");
+    assert!(picker.contains_rect(tile.rect()), "the current tile is scrolled into view: {:?} in {picker:?}", tile.rect());
 }
 
 #[test]
@@ -180,9 +185,9 @@ fn escape_or_a_click_outside_closes_it_and_the_wheel_still_zooms_the_view() {
 
     // Opened again from Uniform after a scroll down, it starts at the top
     click_slot(&mut harness, "Roughness");
-    let slot = harness.get_by_role_and_label(Role::ComboBox, "Roughness").rect();
-    let first_tile = harness.get_by_role_and_label(Role::ListBoxOption, "Clouds").rect().center();
-    harness.hover_at(first_tile);
+    let clouds = |harness: &Harness<'_, TextureCraftApp>| harness.get_by_role_and_label(Role::ListBoxOption, "Clouds").rect();
+    let first_tile = clouds(&harness);
+    harness.hover_at(first_tile.center());
     harness.event(egui::Event::MouseWheel {
         unit: egui::MouseWheelUnit::Point,
         delta: egui::vec2(0.0, -400.0),
@@ -191,10 +196,55 @@ fn escape_or_a_click_outside_closes_it_and_the_wheel_still_zooms_the_view() {
         modifiers: egui::Modifiers::NONE,
     });
     harness.run_steps(SCROLL_FRAMES);
-    let clouds = |harness: &Harness<'_, TextureCraftApp>| harness.get_by_role_and_label(Role::ListBoxOption, "Clouds").rect().min.y;
-    assert!(clouds(&harness) < slot.max.y, "the wheel over the picker scrolls its grid");
+    assert!(clouds(&harness).top() < first_tile.top(), "the wheel over the picker scrolls its grid");
     click_slot(&mut harness, "Roughness");
     click_slot(&mut harness, "Roughness");
-    assert!(clouds(&harness) > slot.max.y, "the first tile shows again");
+    assert_eq!(clouds(&harness), first_tile, "the first tile shows again");
     assert_eq!(source(&harness, layer, Channel::Roughness), Source::uniform_of(Channel::Roughness), "nothing changed");
+}
+
+/// The open picker's popup: the area under its shown tile `label`
+fn picker_rect(harness: &Harness<'_, TextureCraftApp>, label: &str) -> egui::Rect {
+    let tile = harness.get_by_role_and_label(Role::ListBoxOption, label).rect().center();
+    let layer = harness.ctx.layer_id_at(tile).expect("a layer under the tile");
+    harness.ctx.memory(|memory| memory.area_rect(layer.id)).expect("the picker's area")
+}
+
+#[test]
+fn near_the_windows_bottom_the_picker_opens_above_its_slot_at_full_size() {
+    let (mut harness, _) = app_with_fill(|_, _| {});
+    click_slot(&mut harness, SLOT_LOW_IN_THE_CARD);
+    let slot = harness.get_by_role_and_label(Role::ComboBox, SLOT_LOW_IN_THE_CARD).rect();
+    let shown = picker_rect(&harness, FIRST_TILE);
+    assert!(shown.bottom() <= slot.top(), "with no room under the slot it opens above it, never over it: {shown:?} {slot:?}");
+    assert!(harness.ctx.content_rect().contains_rect(shown), "inside the window: {shown:?}");
+    click_slot(&mut harness, SLOT_LOW_IN_THE_CARD);
+
+    harness.set_size(TALL_WINDOW_SIZE);
+    harness.run_steps(SETTLE_FRAMES);
+    click_slot(&mut harness, SLOT_LOW_IN_THE_CARD);
+    let slot = harness.get_by_role_and_label(Role::ComboBox, SLOT_LOW_IN_THE_CARD).rect();
+    let roomy = picker_rect(&harness, FIRST_TILE);
+    assert!(roomy.top() >= slot.bottom(), "a tall window has room under the slot: {roomy:?} {slot:?}");
+    assert!((shown.height() - roomy.height()).abs() < 0.5, "above the slot the picker keeps its full height: {shown:?} vs {roomy:?}");
+}
+
+#[test]
+#[ignore = "requires a GPU adapter; set TC_UI_SNAPSHOTS to save the rendered view"]
+fn picker_above_its_slot_snapshot() {
+    let mut session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();
+    texturecraft_engine::execute(&mut session, "layer.add.fill", &json!({})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1000.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(STARTUP_FRAMES);
+    harness.get_by_role_and_label(Role::Tab, "Material").click();
+    harness.run_steps(SETTLE_FRAMES);
+    click_slot(&mut harness, "Roughness");
+    harness.hover_at(harness.get_by_role_and_label(Role::ListBoxOption, FIRST_TILE).rect().center());
+    harness.run_steps(8);
+    let image = harness.render().unwrap();
+    if let Some(directory) = std::env::var_os("TC_UI_SNAPSHOTS") {
+        image.save(std::path::Path::new(&directory).join("picker-above-slot.png")).unwrap();
+    }
 }

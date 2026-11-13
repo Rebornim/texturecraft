@@ -228,12 +228,34 @@ pub fn projector_local(projector: &Projector, c: &Coords) -> Coords {
     Coords { pos: to_local * c.pos / scale, nrm, ..*c }
 }
 
-/// Evaluate a procedural through a projection.
+/// Evaluate a procedural through a projection, at every texel (its resolution aside).
 pub fn procedural(pattern: &Procedural, projection: &Projection, coords: &Coords) -> f32 {
+    evaluate(pattern, projection, coords, None)
+}
+
+/// Evaluate a procedural through a projection on a texture set `set` texels across a tile: a pattern with a resolution is read between the samples of that grid, as a texture cooked at that size
+pub fn procedural_sized(pattern: &Procedural, projection: &Projection, coords: &Coords, set: u32) -> f32 {
+    evaluate(pattern, projection, coords, pattern.resolution.map(|resolution| resolution.size(set.max(1))))
+}
+
+/// The 2D pattern at `q`, bilinear between the centres of a `grid` × `grid` sampling of each `scale` × `scale` cell of pattern space (one projection tile)
+fn flat_on_grid(kind: ProceduralKind, seed: u32, q: Vec2, scale: f32, grid: u32) -> f32 {
+    let n = grid as f32;
+    let g = q / scale * n - Vec2::splat(0.5);
+    let (i, f) = (g.floor(), g - g.floor());
+    let at = |dx: f32, dy: f32| raw(kind, ((i + Vec2::new(dx, dy) + Vec2::splat(0.5)) / n * scale).extend(0.0), seed);
+    let (top, bottom) = (at(0.0, 0.0) * (1.0 - f.x) + at(1.0, 0.0) * f.x, at(0.0, 1.0) * (1.0 - f.x) + at(1.0, 1.0) * f.x);
+    top * (1.0 - f.y) + bottom * f.y
+}
+
+fn evaluate(pattern: &Procedural, projection: &Projection, coords: &Coords, grid: Option<u32>) -> f32 {
     let pattern_scale = pattern.scale.max(1e-4);
 
     // Evaluate two-dimensional patterns on a slice of the volume
-    let flat = |q: Vec2| raw(pattern.kind, q.extend(0.0), pattern.seed);
+    let flat = |q: Vec2| match grid {
+        Some(grid) if grid > 0 => flat_on_grid(pattern.kind, pattern.seed, q, pattern_scale, grid),
+        _ => raw(pattern.kind, q.extend(0.0), pattern.seed),
+    };
     let value = match projection {
         Projection::UvTile => flat((coords.uv - coords.uv.floor()) * pattern_scale),
         Projection::Uv { scale, rotation, offset } => flat(place(coords.uv, Vec2::from(*scale), *rotation, Vec2::from(*offset)) * pattern_scale),

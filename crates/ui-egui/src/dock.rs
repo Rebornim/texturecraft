@@ -6,7 +6,7 @@ use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::compose::ThumbTarget;
 use texturecraft_engine::core::{
-    BakedMap, BlendMode, Channel, Effect, EffectKind, Filter, Layer, LayerId, LayerKind, LinkParam, MaterialLink, Projection, Source,
+    BakedMap, BlendMode, Channel, Effect, EffectKind, Filter, Layer, LayerId, LayerKind, LinkParam, MaterialLink, Projection, Sampling, Source,
 };
 use texturecraft_engine::filter_lib::scalar_params;
 use texturecraft_engine::paint::{BrushAlpha, BrushSettings, alphas};
@@ -1511,21 +1511,36 @@ pub(crate) fn properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     // A floating scroll bar would cover the right-aligned slider values and section reset icons
     ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
     let scope = SectionScope::Docked;
-    if properties_has_fill_tabs(app) {
-        crate::property_sheet::section_tabs(ui, scope, 0, &crate::fill_panel::fill_tabs());
+    if let Some(tabs) = properties_fill_tabs(app) {
+        crate::property_sheet::section_tabs(ui, scope, 0, &tabs);
     }
     crate::property_sheet::in_scope(ui, scope, |ui| {
         egui::ScrollArea::vertical().id_salt("props").auto_shrink([false, false]).show(ui, |ui| properties_contents(app, ui));
     });
 }
 
-/// Whether the panel shows a fill layer's sections, which the tabs jump between
-pub(crate) fn properties_has_fill_tabs(app: &TextureCraftApp) -> bool {
-    let layer = app.session.selected_layer().and_then(|id| app.session.doc.project.layers.get(&id));
-    let polygon_fill_shown = app.session.tool.tool == Tool::PolygonFill && app.session.tool_usable(Tool::PolygonFill);
-    !polygon_fill_shown
-        && app.session.target == StackTarget::Content
-        && layer.is_some_and(|layer| matches!(&layer.kind, LayerKind::Fill(fill) if fill.projection.placed().is_none()))
+/// The tabs over the panel when it shows a fill layer's or a mask fill effect's sections, which they jump between
+pub(crate) fn properties_fill_tabs(app: &TextureCraftApp) -> Option<[(&'static str, &'static str); 3]> {
+    if app.session.tool.tool == Tool::PolygonFill && app.session.tool_usable(Tool::PolygonFill) {
+        return None;
+    }
+    let project = &app.session.doc.project;
+    match app.session.target {
+        StackTarget::Content => {
+            let layer = app.session.selected_layer().and_then(|id| project.layers.get(&id))?;
+            matches!(&layer.kind, LayerKind::Fill(fill) if fill.projection.placed().is_none()).then(|| crate::fill_panel::fill_tabs(false))
+        }
+        StackTarget::Effect(effect) => mask_fill_of(project, effect).map(|_| crate::fill_panel::fill_tabs(true)),
+        _ => None,
+    }
+}
+
+/// Effect `effect`'s source, projection and sampling when it is a mask fill the Properties panel lays out like a fill (a decal's placed fill keeps its own rows)
+fn mask_fill_of(project: &texturecraft_engine::core::Project, effect: LayerId) -> Option<(&Source, &texturecraft_engine::core::Projection, Sampling)> {
+    match &project.effect(effect)?.1.kind {
+        EffectKind::Fill { source, projection, sampling } if projection.placed().is_none() => Some((source, projection, *sampling)),
+        _ => None,
+    }
 }
 
 /// Room around the Properties rows not yet laid out by the property sheet, as every other panel has
@@ -1546,6 +1561,7 @@ pub(crate) fn properties_contents(app: &mut TextureCraftApp, ui: &mut Ui) {
     match (&selected, app.session.target) {
         // Polygon fill shows its own settings and says what it fills into, wherever it can fill
         _ if tool == Tool::PolygonFill && tool_usable => legacy_body(ui, |ui| polygon_fill_properties(app, ui)),
+        (Some(layer), StackTarget::Effect(effect)) if mask_fill_of(&app.session.doc.project, effect).is_some() => mask_fill_properties(app, ui, layer, effect),
         (Some(layer), StackTarget::Effect(effect)) => legacy_body(ui, |ui| effect_properties(app, ui, layer, effect)),
         (Some(layer), StackTarget::Content) if matches!(layer.kind, LayerKind::Fill(_)) => fill_properties(app, ui, layer),
         (Some(layer), StackTarget::Content) if layer.is_group() => legacy_body(ui, |ui| {
@@ -2373,6 +2389,18 @@ pub(crate) fn anchor_label(app: &TextureCraftApp, anchor: LayerId, channel: Chan
     let name = app.session.doc.project.effect(anchor).map(|(_, e)| e.name.clone()).unwrap_or_else(|| tr("missing").into());
     let label = trf("Anchor: {name} ({channel})", &[("name", &name), ("channel", &tr(channel.label()))]);
     if mask_anchor_enabled(app, anchor) == Some(false) { format!("{label} ({})", tr("Off")) } else { label }
+}
+
+/// A mask fill effect: its Fill, Symmetry and Grayscale sections as one sheet (its blending is on its row)
+fn mask_fill_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, eid: LayerId) {
+    let Some((source, projection, sampling)) =
+        mask_fill_of(&app.session.doc.project, eid).map(|(source, projection, sampling)| (source.clone(), projection.clone(), sampling))
+    else {
+        return;
+    };
+    PropertySheet::show(ui, ("mask_fill_sheet", eid.0), |sheet| {
+        crate::mask_fill_panel::mask_fill_sheet(app, sheet, eid, source, projection, sampling, layer.id);
+    });
 }
 
 /// Slider range of a fill's scale or tiling

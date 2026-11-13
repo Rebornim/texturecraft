@@ -23,7 +23,7 @@ use crate::curvature_sizes::CurvatureSizes;
 use crate::fill_copies::FillCopies;
 use crate::fill_copy::FillCopy;
 use crate::held_fields::HeldFields;
-use crate::pattern::{Coords, image_samples, procedural, world_noise};
+use crate::pattern::{Coords, image_samples, procedural_sized, world_noise};
 use crate::projector_cover::{framed_cover, projector_cover};
 use crate::projector_depth::ProjectorDepth;
 use crate::store::{BakedMaps, ImageRes, ImageStore, PixelStore, decode};
@@ -1561,7 +1561,7 @@ impl<'a, 'b> Texel<'a, 'b> {
             Source::Uniform(value) => *value,
             Source::Procedural { pattern, low, high } => {
                 let (coords, _) = self.projected(projection);
-                let amount = procedural(pattern, projection, &coords);
+                let amount = procedural_sized(pattern, projection, &coords, self.inp.tile_res());
                 mix3(*low, *high, amount)
             }
             Source::Image { name, normal_format } => {

@@ -84,6 +84,7 @@ mod tool_settings_saved;
 mod toolbar;
 mod user_smart_mask;
 
+mod filter_card;
 mod stencil;
 mod symmetry;
 mod symmetry_2d;

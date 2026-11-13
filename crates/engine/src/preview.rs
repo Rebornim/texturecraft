@@ -85,14 +85,14 @@ fn magnified(f: Filter, k: f32) -> Filter {
     match f {
         Filter::Blur { radius } => Filter::Blur { radius: radius * k },
         Filter::DirectionalBlur { radius, angle } => Filter::DirectionalBlur { radius: radius * k, angle },
-        Filter::SlopeBlur { radius, scale, seed } => Filter::SlopeBlur { radius: radius * k, scale, seed },
-        Filter::Warp { intensity, scale, seed } => Filter::Warp { intensity: intensity * k, scale, seed },
+        Filter::SlopeBlur { radius, scale, seed, divider } => Filter::SlopeBlur { radius: radius * k, scale, seed, divider },
+        Filter::Warp { intensity, scale, seed, divider } => Filter::Warp { intensity: intensity * k, scale, seed, divider },
         Filter::HighPass { radius } => Filter::HighPass { radius: radius * k },
         Filter::EdgeDetect { width } => Filter::EdgeDetect { width: width * k },
         Filter::Bevel { width } => Filter::Bevel { width: width * k },
         Filter::Mosaic { size } => Filter::Mosaic { size: size * k },
         Filter::Glow { radius, amount } => Filter::Glow { radius: radius * k, amount },
-        Filter::DirectionalWarp { intensity, angle, scale, seed } => Filter::DirectionalWarp { intensity: intensity * k, angle, scale, seed },
+        Filter::DirectionalWarp { intensity, angle, scale, seed, divider } => Filter::DirectionalWarp { intensity: intensity * k, angle, scale, seed, divider },
         f => f,
     }
 }

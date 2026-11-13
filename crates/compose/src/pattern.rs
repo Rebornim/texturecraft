@@ -189,11 +189,33 @@ pub fn projector_local(projector: &Projector, c: &Coords) -> Coords {
     Coords { pos: to_local * c.pos / scale, nrm, ..*c }
 }
 
-/// Evaluate a procedural through a projection.
+/// Evaluate a procedural through a projection, at every texel (its resolution aside).
 pub fn procedural(pr: &Procedural, proj: &Projection, c: &Coords) -> f32 {
+    evaluate(pr, proj, c, None)
+}
+
+/// Evaluate a procedural through a projection on a texture set `set` texels across a tile: a pattern with a resolution is read between the samples of that grid, as a texture cooked at that size
+pub fn procedural_sized(pr: &Procedural, proj: &Projection, c: &Coords, set: u32) -> f32 {
+    evaluate(pr, proj, c, pr.resolution.map(|r| r.size(set.max(1))))
+}
+
+/// The 2D pattern at `q`, bilinear between the centres of a `grid` × `grid` sampling of each `scale` × `scale` cell of pattern space (one projection tile)
+fn flat_on_grid(kind: ProceduralKind, seed: u32, q: Vec2, scale: f32, grid: u32) -> f32 {
+    let n = grid as f32;
+    let g = q / scale * n - Vec2::splat(0.5);
+    let (i, f) = (g.floor(), g - g.floor());
+    let at = |dx: f32, dy: f32| raw(kind, ((i + Vec2::new(dx, dy) + Vec2::splat(0.5)) / n * scale).extend(0.0), seed);
+    let (top, bottom) = (at(0.0, 0.0) * (1.0 - f.x) + at(1.0, 0.0) * f.x, at(0.0, 1.0) * (1.0 - f.x) + at(1.0, 1.0) * f.x);
+    top * (1.0 - f.y) + bottom * f.y
+}
+
+fn evaluate(pr: &Procedural, proj: &Projection, c: &Coords, grid: Option<u32>) -> f32 {
     let s = pr.scale.max(1e-4);
     // 2D patterns sample a slice of the 3D pattern
-    let flat = |q: Vec2| raw(pr.kind, q.extend(0.0), pr.seed);
+    let flat = |q: Vec2| match grid {
+        Some(grid) if grid > 0 => flat_on_grid(pr.kind, pr.seed, q, s, grid),
+        _ => raw(pr.kind, q.extend(0.0), pr.seed),
+    };
     let v = match proj {
         Projection::UvTile => flat((c.uv - c.uv.floor()) * s),
         Projection::Uv { scale, rotation, offset } => flat(place(c.uv, Vec2::from(*scale), *rotation, Vec2::from(*offset)) * s),

@@ -21,6 +21,7 @@ mod layer_clipboard;
 mod layer_rename;
 mod layers_panel;
 mod levels_editor;
+mod mask_fill_rows;
 mod mask_value_swap;
 mod new_project_baked_maps;
 mod panel_header;

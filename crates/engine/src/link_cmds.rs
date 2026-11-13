@@ -214,8 +214,8 @@ fn map(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"layer": id.0, "channel": channel.id(), "output": output}))
 }
 
-/// The `relative` or `fixed` param of `material.link.resolution`; `Some(None)` is the texture set's own size.
-fn picked_resolution(p: &Value) -> Option<Option<CookResolution>> {
+/// The `relative` or `fixed` param of `material.link.resolution`; `Some(None)` is the texture set's own size
+pub(crate) fn picked_resolution(p: &Value) -> Option<Option<CookResolution>> {
     let integer = |key: &str| p.get(key).and_then(Value::as_i64);
     match (integer("relative"), integer("fixed")) {
         (Some(factor), None) => {

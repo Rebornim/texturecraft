@@ -5,7 +5,7 @@ use texturecraft_core::{Decal, Projection};
 use texturecraft_geom::Mesh;
 
 use crate::commands::{CommandSpec, bad, has_layer};
-use crate::layer_cmds::{fill_mut, fill_target};
+use crate::layer_cmds::{fill_target, placement_mut};
 use crate::{Result, Session, cmd};
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -14,7 +14,7 @@ pub fn specs() -> Vec<CommandSpec> {
         "Reset frame",
         [],
         None,
-        "{layer? | effect?: content fill effect id} — a warp projection's frame back around the mesh, seen from the front, with its corners unpulled (Projection Depth and the other settings stay)",
+        "{layer? | effect?: content or mask fill effect id} — a warp projection's frame back around the mesh, seen from the front, with its corners unpulled (Projection Depth and the other settings stay)",
         has_layer,
         reset_frame
     )]
@@ -36,7 +36,7 @@ fn reset_frame(s: &mut Session, p: &Value) -> Result<Value> {
     let target = fill_target(s, p, command)?;
     let fitted = fitted_frame(&s.mesh);
     s.edit("Reset frame", |s| {
-        let Projection::Warp { frame, corners, .. } = &mut fill_mut(s, target)?.projection else {
+        let (Projection::Warp { frame, corners, .. }, _) = placement_mut(s, target)? else {
             return Err(bad(command, "the fill's projection is not a warp projection"));
         };
 

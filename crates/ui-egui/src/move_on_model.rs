@@ -34,6 +34,7 @@ impl MoveOnModel {
         match self.effect {
             Some(effect) => match &project.effect(effect)?.1.kind {
                 EffectKind::Material(fill) => Some(fill.projection.clone()),
+                EffectKind::Fill { projection, .. } => Some(projection.clone()),
                 _ => None,
             },
             None => match &project.layer(self.layer).ok()?.kind {

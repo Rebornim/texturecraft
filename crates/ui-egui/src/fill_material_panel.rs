@@ -26,6 +26,7 @@ use crate::resolution_band::resolution_band;
 use crate::resource_picker;
 use crate::resource_picker_item::ResourcePickerItem;
 use crate::slot_thumbnail::{paint_thumbnail, thumbnail};
+use crate::source_slot::SourceSlot;
 use crate::theme::Tokens;
 use crate::thumbs::Thumbs;
 use crate::tile_picture::TilePicture;
@@ -101,7 +102,7 @@ pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
         _ => {
             let anchors = anchors_below(app, reader);
             for channel in channels.into_iter().filter(|channel| on.contains(channel)) {
-                channel_card(app, sheet, fill, base, channel, &anchors);
+                source_card(app, sheet, fill.source(channel), base, SourceSlot::Channel(channel), &anchors);
             }
         }
     }
@@ -142,18 +143,24 @@ fn source_line(app: &TextureCraftApp, source: &Source) -> String {
     }
 }
 
-/// One channel's card: its slot (the row opens the source list), then the source's own settings
-fn channel_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, channel: Channel, anchors: &[(LayerId, String)]) {
-    let set = |extra: Value| with(base, with(&json!({"channel": channel.id()}), extra));
-    let source = fill.source(channel);
+/// One source's card (a channel's, or a mask fill's grayscale): its slot (the row opens the source picker), then the source's own settings
+pub(crate) fn source_card(
+    app: &mut TextureCraftApp,
+    sheet: &mut PropertySheet<'_>,
+    source: Source,
+    base: &Value,
+    slot_of: SourceSlot,
+    anchors: &[(LayerId, String)],
+) {
+    let set = |extra: Value| with(base, with(&slot_of.fields(), extra));
     let tokens = Tokens::get(sheet.ui.ctx());
     let picture = thumbnail(app, &sheet.ui.ctx().clone(), &source);
     let line = source_line(app, &source);
     let uniform = matches!(source, Source::Uniform(_));
     let procedural = matches!(source, Source::Procedural { .. });
-    let slot = sheet.slot(&|painter, rect| paint_thumbnail(painter, rect, &picture, &tokens), tr(channel.label()), &line, None, !uniform, procedural);
+    let slot = sheet.slot(&|painter, rect| paint_thumbnail(painter, rect, &picture, &tokens), slot_of.name(), &line, None, !uniform, procedural);
 
-    let popup = sheet.ui.make_persistent_id(("source_picker", base.to_string(), channel.id()));
+    let popup = sheet.ui.make_persistent_id(("source_picker", base.to_string(), slot_of.key()));
     if slot.pick.clicked() {
         resource_picker::toggle(sheet.ui.ctx(), popup);
     }
@@ -162,25 +169,25 @@ fn channel_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: 
     let reveal = current != SourceChoice::Uniform;
     let uniform = match source {
         Source::Uniform(value) => value,
-        _ => channel.default_value(),
+        _ => slot_of.default_value(),
     };
     let ctx = sheet.ui.ctx().clone();
     let tabs = |thumbs: &mut Thumbs| source_tabs(thumbs, &ctx, &app.session.images, anchors, shown_color(uniform));
     let picked = resource_picker::show(&slot.pick, popup, &mut app.thumbs, Some(&current), reveal, tabs);
     if let Some(choice) = picked.filter(|choice| *choice != current) {
-        pick_source(app, sheet.ui.ctx(), channel, choice, &set);
+        pick_source(app, sheet.ui.ctx(), slot_of, choice, &set);
     }
     if slot.clear {
-        app.run("layer.fill.set", set(json!({"value": channel.default_value()})));
+        app.run("layer.fill.set", set(json!({"value": slot_of.default_value()})));
     }
     if let Some(name) = crate::dock::image_drop(sheet.ui, &slot.pick) {
         app.run("layer.fill.set", set(json!({"image": name})));
     }
 
     match source {
-        Source::Uniform(value) => uniform_rows(app, sheet, channel, value, &set),
-        Source::Procedural { pattern, low, high } => procedural_rows(app, sheet, channel, &pattern, [low, high], slot.reset, &set),
-        Source::Image { normal_format, .. } if channel.kind() == ChannelKind::NormalMap => {
+        Source::Uniform(value) => uniform_rows(app, sheet, slot_of, value, &set),
+        Source::Procedural { pattern, low, high } => procedural_rows(app, sheet, slot_of, &pattern, [low, high], slot.reset, &set),
+        Source::Image { normal_format, .. } if slot_of.kind() == ChannelKind::NormalMap => {
             if sheet.fold(tr("Attributes"), None, false) {
                 let formats = [tr("OpenGL"), tr("DirectX")];
                 let chosen = usize::from(normal_format == NormalFormat::DirectX);
@@ -194,17 +201,13 @@ fn channel_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: 
     sheet.close_card();
 }
 
-fn pick_source(app: &mut TextureCraftApp, ctx: &egui::Context, channel: Channel, choice: SourceChoice, set: &impl Fn(Value) -> Value) {
+fn pick_source(app: &mut TextureCraftApp, ctx: &egui::Context, slot_of: SourceSlot, choice: SourceChoice, set: &impl Fn(Value) -> Value) {
     match choice {
         SourceChoice::Uniform => {
-            app.run("layer.fill.set", set(json!({"value": channel.default_value()})));
+            app.run("layer.fill.set", set(json!({"value": slot_of.default_value()})));
         }
         SourceChoice::Procedural(kind) => {
-            let (low, high) = match channel {
-                Channel::BaseColor => ([0.15; 3], [0.85; 3]),
-                Channel::Height => ([-0.05; 3], [0.05; 3]),
-                _ => ([0.2; 3], [0.8; 3]),
-            };
+            let (low, high) = slot_of.procedural_ends();
             app.run("layer.fill.set", set(json!({"procedural": kind.label(), "low": low, "high": high})));
         }
         SourceChoice::Image(name) => {
@@ -268,20 +271,19 @@ fn tile(id: SourceChoice, label: &str, caption: Option<&'static str>, picture: T
 }
 
 /// A uniform source: the colour bar (a click opens the picker) or the gray ramp with its invert glyph
-fn uniform_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, channel: Channel, value: [f32; 3], set: &impl Fn(Value) -> Value) {
-    let label = tr(channel.label());
-    if channel.kind() == ChannelKind::Color {
+fn uniform_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, slot_of: SourceSlot, value: [f32; 3], set: &impl Fn(Value) -> Value) {
+    let label = slot_of.name();
+    if slot_of.kind() == ChannelKind::Color {
         let pick = sheet.color_bar(label, value, app.picking_color, &app.session.doc.project.swatches);
         if let Some(color) = take_color_pick(app, pick) {
             app.run("layer.fill.set", set(json!({"color": color, "merge": pick.merge})));
         }
         return;
     }
-    let range = if channel.kind() == ChannelKind::Signed { -1.0..=1.0 } else { 0.0..=1.0 };
     let mut gray = value[0];
-    let edit = sheet.ramp(label, &mut gray, range);
+    let edit = sheet.ramp(label, &mut gray, slot_of.range());
     if edit.invert {
-        let inverted = if channel.kind() == ChannelKind::Signed { -gray } else { 1.0 - gray };
+        let inverted = if slot_of.kind() == ChannelKind::Signed { -gray } else { 1.0 - gray };
         app.run("layer.fill.set", set(json!({"value": inverted})));
     } else if let Some(merge) = edit.changed {
         app.run("layer.fill.set", set(json!({"value": gray, "merge": merge})));
@@ -309,7 +311,7 @@ fn take_color_pick(app: &mut TextureCraftApp, pick: ColorPick) -> Option<[f32; 3
 fn procedural_rows(
     app: &mut TextureCraftApp,
     sheet: &mut PropertySheet<'_>,
-    channel: Channel,
+    slot_of: SourceSlot,
     pattern: &Procedural,
     [low, high]: [[f32; 3]; 2],
     reset: bool,
@@ -321,6 +323,7 @@ fn procedural_rows(
         let settings = json!({
             "procedural": kind, "scale": fresh.scale, "contrast": fresh.contrast, "seed": fresh.seed,
             "balance": fresh.balance, "invert": fresh.invert, "low": low, "high": high, "merge": false,
+            "resolution": {"relative": 0},
         });
         app.run("layer.fill.set", set(settings));
         return;
@@ -345,7 +348,7 @@ fn procedural_rows(
             edit = edit.or(Some(("invert", json!(edited.invert), false)));
         }
         let ends = [("low", tr("Low"), low), ("high", tr("High"), high)];
-        if channel.kind() == ChannelKind::Color {
+        if slot_of.kind() == ChannelKind::Color {
             for (key, label, value) in ends {
                 let pick = sheet.color_bar_led(label, value, app.picking_color, &app.session.doc.project.swatches);
                 if let Some(picked) = take_color_pick(app, pick) {
@@ -353,14 +356,22 @@ fn procedural_rows(
                 }
             }
         } else {
-            let range = if channel.kind() == ChannelKind::Signed { -1.0..=1.0 } else { 0.0..=1.0 };
             for (key, label, value) in ends {
                 let mut gray = value[0];
-                if let Some(merge) = sheet.slider(label, &mut gray, range.clone(), 2) {
+                if let Some(merge) = sheet.slider(label, &mut gray, slot_of.range(), 2) {
                     edit = edit.or(Some((key, json!([gray, gray, gray]), merge)));
                 }
             }
         }
+    }
+    // The size the pattern is made at, as a cooked texture would be (the texture set's own by default)
+    let texture_set = app.session.doc.project.texture_set(app.session.ts()).map_or(2048, |texture_set| texture_set.resolution);
+    if let Some(picked) = resolution_band(sheet, pattern.resolution.unwrap_or(CookResolution::TEXTURE_SET), texture_set) {
+        let size = match picked {
+            CookResolution::Relative(factor) => json!({"relative": factor}),
+            CookResolution::Fixed(size) => json!({"fixed": size}),
+        };
+        edit = edit.or(Some(("resolution", size, false)));
     }
     if let Some((key, value, merge)) = edit {
         let mut settings = json!({"procedural": kind, "merge": merge});

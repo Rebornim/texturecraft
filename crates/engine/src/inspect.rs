@@ -10,10 +10,16 @@ use crate::session::StackTarget;
 fn source_json(s: &Source) -> Value {
     match s {
         Source::Uniform(v) => json!({ "uniform": v }),
-        Source::Procedural { pattern, low, high } => json!({
-            "procedural": pattern.kind.label(), "scale": pattern.scale, "seed": pattern.seed, "contrast": pattern.contrast,
-            "balance": pattern.balance, "invert": pattern.invert, "low": low, "high": high
-        }),
+        Source::Procedural { pattern, low, high } => {
+            let mut v = json!({
+                "procedural": pattern.kind.label(), "scale": pattern.scale, "seed": pattern.seed, "contrast": pattern.contrast,
+                "balance": pattern.balance, "invert": pattern.invert, "low": low, "high": high
+            });
+            if let Some(resolution) = pattern.resolution {
+                v["resolution"] = json!(resolution);
+            }
+            v
+        }
         Source::Image { name, normal_format: NormalFormat::OpenGl } => json!({ "image": name }),
         Source::Image { name, normal_format: NormalFormat::DirectX } => json!({ "image": name, "normalFormat": "directX" }),
         Source::Anchor { anchor, channel } => json!({ "anchor": anchor.0, "channel": channel.id() }),
@@ -68,8 +74,10 @@ fn effect_json(session: &Session, effect: &Effect, content: bool) -> Value {
         }
         EffectKind::Paint if content => out["tiles"] = json!(content_tiles()),
         EffectKind::Paint => out["tiles"] = json!(mask_tiles()),
-        EffectKind::Fill { source, sampling, .. } => {
+        EffectKind::Fill { source, projection, sampling } => {
             out["source"] = source_json(source);
+            out["projection"] = json!(projection.label());
+            out["projectionSettings"] = json!(projection);
             out["filtering"] = json!(sampling.filtering.id());
             out["wrap"] = json!(sampling.wrap.id());
             out["scaleMode"] = json!(sampling.scale.id());

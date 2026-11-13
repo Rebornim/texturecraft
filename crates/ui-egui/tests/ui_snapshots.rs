@@ -1232,3 +1232,79 @@ fn popup_tabs_snapshots() {
         }
     }
 }
+
+/// Screen 07: a mask fill effect's Grayscale section from each kind of source (Uniform, image, procedural, anchor), its picker open with a tile hovered, and its Fill section; `TC_UI_THEMES` set adds the dark and light themes
+#[test]
+#[ignore]
+fn mask_fill_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let mut png = Vec::new();
+    let scratches = image::RgbaImage::from_fn(64, 64, |x, y| {
+        let gray = 90 + ((x * 13 + y * 7) % 90) as u8;
+        image::Rgba([gray, gray, gray, 255])
+    });
+    scratches.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let scratches = session.import_resource_bytes("scratches.png", png).unwrap();
+    let below = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    let anchor = execute(&mut session, "effect.add.anchor", &json!({"layer": below, "name": "Cavity Dirt"})).unwrap()["effect"].clone();
+    let layer = execute(&mut session, "layer.add.paint", &json!({})).unwrap()["layer"].clone();
+    let effect = execute(&mut session, "effect.add.fill", &json!({"layer": layer, "target": "mask"})).unwrap()["effect"].clone();
+    execute(&mut session, "layer.select", &json!({"layer": layer, "target": effect})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "mask-fill-fill");
+    harness.get_by_role_and_label(egui::Role::Tab, "Grayscale").click();
+    harness.run_steps(30);
+
+    let shot = |harness: &mut Harness<'_, TextureCraftApp>, mut source: serde_json::Value, name: &str| {
+        source["effect"] = effect.clone();
+        execute(&mut harness.state_mut().session, "layer.fill.set", &source).unwrap();
+        harness.run_steps(3);
+        settle_thumbnails(harness);
+        save(harness, &output_dir, name);
+    };
+    shot(&mut harness, json!({"value": 1.0}), "mask-fill-uniform");
+    shot(&mut harness, json!({"image": scratches}), "mask-fill-image");
+    shot(&mut harness, json!({"procedural": "Clouds", "scale": 4.0, "seed": 12}), "mask-fill-procedural");
+    // The procedural's Resolution band open, then its Size list open with a size hovered
+    let click_in_view = |harness: &mut Harness<'_, TextureCraftApp>, role: egui::Role, label: &str| {
+        harness.get_by_role_and_label(role, label).scroll_to_me();
+        harness.run_steps(3);
+        harness.get_by_role_and_label(role, label).click();
+        harness.run_steps(3);
+    };
+    click_in_view(&mut harness, egui::Role::Button, "Resolution");
+    save(&mut harness, &output_dir, "mask-fill-resolution");
+    click_in_view(&mut harness, egui::Role::ComboBox, "Texture set  ·  256");
+    let hovered = harness.get_by_role_and_label(egui::Role::ListBoxOption, "×2  ·  512").rect().center();
+    harness.hover_at(hovered);
+    save(&mut harness, &output_dir, "mask-fill-resolution-list");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+    // The picker opened from the slot in view (Properties still scrolled to the card), a tile hovered
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").click();
+    harness.run_steps(3);
+    settle_thumbnails(&mut harness);
+    let hovered = harness.get_by_role_and_label(egui::Role::ListBoxOption, "Clouds").rect().center();
+    harness.hover_at(hovered);
+    save(&mut harness, &output_dir, "mask-fill-picker");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("mask-fill-picker-{name}"));
+        }
+    }
+    harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+    shot(&mut harness, json!({"anchor": anchor}), "mask-fill-anchor");
+
+    shot(&mut harness, json!({"value": 1.0}), "mask-fill-uniform-again");
+}

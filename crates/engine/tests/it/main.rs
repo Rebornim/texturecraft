@@ -10,6 +10,7 @@ mod content_effects;
 mod effect_blending;
 mod export_colour_space;
 mod fill_alpha_source;
+mod mask_fill_source;
 mod fill_patterns;
 mod fill_projections;
 mod fill_sampling;

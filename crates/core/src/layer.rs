@@ -565,11 +565,14 @@ pub struct Procedural {
     /// Shifts the pattern brighter (+) or darker (−).
     pub balance: f32,
     pub invert: bool,
+    /// Samples across one projection tile the pattern is made at, as a cooked texture (`None`: every texel, the texture set's own size)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<crate::CookResolution>,
 }
 
 impl Procedural {
     pub fn new(kind: ProceduralKind) -> Procedural {
-        Procedural { kind, scale: 4.0, seed: 1, contrast: 1.0, balance: 0.0, invert: false }
+        Procedural { kind, scale: 4.0, seed: 1, contrast: 1.0, balance: 0.0, invert: false, resolution: None }
     }
 }
 

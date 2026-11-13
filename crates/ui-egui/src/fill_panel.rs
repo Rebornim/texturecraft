@@ -67,9 +67,10 @@ const ROTATION_FIELD_SPEED: f32 = 0.5;
 /// Change per pixel dragged on a 3D scale field
 const SCALE_FIELD_SPEED: f32 = 0.01;
 
-/// The tabs over a fill's Properties: each jumps to its section
-pub(crate) fn fill_tabs() -> [(&'static str, &'static str); 3] {
-    [(ic::SLIDERS_HORIZONTAL, tr("Fill")), (ic::FLIP_HORIZONTAL, tr("Symmetry")), (ic::CIRCLE_HALF, tr("Material"))]
+/// The tabs over a fill's Properties, each jumping to its section: a mask fill's last section is its Grayscale, a fill layer's its Material
+pub(crate) fn fill_tabs(grayscale: bool) -> [(&'static str, &'static str); 3] {
+    let last = if grayscale { (ic::SQUARE_HALF, tr("Grayscale")) } else { (ic::CIRCLE_HALF, tr("Material")) };
+    [(ic::SLIDERS_HORIZONTAL, tr("Fill")), (ic::FLIP_HORIZONTAL, tr("Symmetry")), last]
 }
 
 /// The mesh's size for the texture set being painted, as the projections see it
@@ -81,6 +82,12 @@ fn mesh_size(app: &TextureCraftApp) -> MeshSize {
 
 /// A fill's whole Properties: the Fill section, the Symmetry section, then the Material section with one slot per channel that is on
 pub(crate) fn fill_sheet(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, on: &[Channel], reader: LayerId) {
+    placement_sections(app, sheet, fill, base, reader);
+    crate::fill_material_panel::material_section(app, sheet, fill, base, on, reader);
+}
+
+/// The Fill section (with its reset) and the Symmetry section of the fill at `base`: a fill layer's, a content fill effect's or a mask fill's
+pub(crate) fn placement_sections(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, reader: LayerId) {
     let salt = base.to_string();
     // The section reset: projection, placement, sampling and culling back to a new fill's in one undo step
     if sheet.section_reset(tr("Fill"), !texturecraft_engine::fill_reset_cmds::at_defaults(&fill.projection, fill.sampling)) {
@@ -88,8 +95,6 @@ pub(crate) fn fill_sheet(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_
     }
     projection_rows(app, sheet, fill, base, &salt, reader);
     crate::fill_symmetry_panel::symmetry_section(app, sheet, &fill.projection, fill.sampling, base);
-
-    crate::fill_material_panel::material_section(app, sheet, fill, base, on, reader);
 }
 
 /// Projection, Move on model, Scale, the preview with size and offset, Rotation, the culling rows, then the Filtering and edges and 3D projection settings bands

@@ -80,17 +80,20 @@ pub(crate) struct FrameGizmo {
     steps: [Option<egui::Vec2>; 3],
 }
 
-/// Screen length of the axis arrows, and their heads (points)
-pub(crate) const ARROW: f32 = 46.0;
-const ARROW_HEAD: f32 = 9.0;
-const ARROW_WIDTH: f32 = 2.5;
+/// Screen length of the axis arrows, and their heads (points): long enough to grab each one apart from the others
+pub(crate) const ARROW: f32 = 56.0;
+const ARROW_HEAD: f32 = 14.0;
+/// The shafts as the symmetry axis manipulator draws them: a coloured line over a dark halo
+pub(crate) const SHAFT_WIDTH: f32 = 2.2;
+pub(crate) const HALO: Color32 = Color32::from_black_alpha(128);
+pub(crate) const HALO_EXTRA_WIDTH: f32 = 3.0;
 /// The centre square's side, the corner and edge dot radii, a warp corner's radius (points)
-pub(crate) const CENTER_SQUARE: f32 = 12.0;
-const CORNER_DOT: f32 = 5.0;
-const SIDE_DOT: f32 = 4.0;
-const WARP_DOT: f32 = 7.0;
+pub(crate) const CENTER_SQUARE: f32 = 16.0;
+const CORNER_DOT: f32 = 6.5;
+const SIDE_DOT: f32 = 5.5;
+const WARP_DOT: f32 = 8.0;
 /// How near a handle or arrow a press grabs it (points)
-pub(crate) const GRAB: f32 = 8.0;
+pub(crate) const GRAB: f32 = 11.0;
 /// The smallest share of its size a dragged side keeps
 const MIN_STRETCH: f32 = 0.02;
 
@@ -149,22 +152,21 @@ impl FrameGizmo {
         Some(FrameGizmo { layer, effect, decal, warp, corners, sides, center, arrows, origin, axes, steps })
     }
 
-    /// The handle under screen point `p`
+    /// The handle under screen point `p`: the nearest one within reach, so a small frame's corners stay grabbable beside its arrows
     pub(crate) fn grab(&self, p: Pos2) -> Option<FrameGrab> {
-        let center_box = Rect::from_center_size(self.center, egui::Vec2::splat(CENTER_SQUARE)).expand(2.0);
-        if center_box.contains(p) {
-            return Some(FrameGrab::Slide);
-        }
-        if let Some(axis) = (0..3).find(|&axis| self.arrows[axis].is_some_and(|tip| distance_to_segment(p, self.center, tip) <= GRAB)) {
-            return Some(FrameGrab::Axis(axis));
-        }
-        let near = |points: &[Pos2; 4]| (0..4).find(|&index| points[index].distance(p) <= GRAB);
+        let mut handles = vec![(FrameGrab::Slide, center_distance(self.center, p))];
+        handles.extend((0..3).filter_map(|axis| Some((FrameGrab::Axis(axis), arrow_distance(p, self.center, self.arrows[axis]?)))));
+        let near = |points: [Pos2; 4], grab: fn(usize) -> FrameGrab| (0..4).map(move |index| (grab(index), points[index].distance(p)));
         match self.warp {
             // A mask effect's warp corners have no command to pull them
-            Some(_) if self.effect.is_none() => near(&self.corners).map(FrameGrab::Corner),
-            Some(_) => None,
-            None => near(&self.corners).map(|_| FrameGrab::Scale).or_else(|| near(&self.sides).map(FrameGrab::Side)),
+            Some(_) if self.effect.is_none() => handles.extend(near(self.corners, FrameGrab::Corner)),
+            Some(_) => {}
+            None => {
+                handles.extend(near(self.corners, |_| FrameGrab::Scale));
+                handles.extend(near(self.sides, FrameGrab::Side));
+            }
         }
+        nearest(handles)
     }
 
     /// The frame's offset after sliding it across its plane by screen movement `delta` (None when the frame is edge-on)
@@ -242,6 +244,27 @@ fn solve(a: egui::Vec2, b: egui::Vec2, delta: egui::Vec2) -> Option<[f32; 2]> {
     Some([(delta.x * b.y - delta.y * b.x) / det, (a.x * delta.y - a.y * delta.x) / det])
 }
 
+/// How far `p` is from the centre square (0 inside it)
+pub(crate) fn center_distance(center: Pos2, p: Pos2) -> f32 {
+    Rect::from_center_size(center, egui::Vec2::splat(CENTER_SQUARE)).distance_to_pos(p)
+}
+
+/// How far `p` is from the arrow from `center` to `tip`, its head included
+pub(crate) fn arrow_distance(p: Pos2, center: Pos2, tip: Pos2) -> f32 {
+    distance_to_segment(p, center, tip + (tip - center).normalized() * ARROW_HEAD)
+}
+
+/// The handle nearest its distance, if one is within `GRAB` (the first listed wins a tie)
+pub(crate) fn nearest<T: Copy>(handles: impl IntoIterator<Item = (T, f32)>) -> Option<T> {
+    let mut best: Option<(T, f32)> = None;
+    for (handle, distance) in handles {
+        if distance <= GRAB && best.is_none_or(|(_, nearest)| distance < nearest) {
+            best = Some((handle, distance));
+        }
+    }
+    best.map(|(handle, _)| handle)
+}
+
 pub(crate) fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let ab = b - a;
     let t = ((p - a).dot(ab) / ab.length_sq().max(f32::MIN_POSITIVE)).clamp(0.0, 1.0);
@@ -252,6 +275,11 @@ pub(crate) fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
 pub(crate) fn hovered(app: &TextureCraftApp, ui: &Ui, rect: Rect) -> bool {
     let dragging = ui.ctx().data(|data| data.get_temp::<FrameDrag>(drag_id())).is_some();
     dragging || ui.ctx().pointer_hover_pos().is_some_and(|hover| FrameGizmo::of(app, rect).is_some_and(|gizmo| gizmo.grab(hover).is_some()))
+}
+
+/// Whether screen point `at` is on one of the selected frame's handles
+pub(crate) fn handle_at(app: &TextureCraftApp, rect: Rect, at: Pos2) -> bool {
+    rect.contains(at) && FrameGizmo::of(app, rect).is_some_and(|gizmo| gizmo.grab(at).is_some())
 }
 
 /// Drags on the selected frame's handles (one undo step per drag, the projection updates live); returns whether a frame drag owns the pointer
@@ -302,7 +330,6 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
     let hovered = ui.ctx().pointer_hover_pos().filter(|hover| rect.contains(*hover)).and_then(|hover| gizmo.grab(hover));
     let lit = |grab: FrameGrab| active == Some(grab) || (active.is_none() && hovered == Some(grab));
     let shadow = Stroke::new(3.0, Color32::from_black_alpha(140));
-    let edge = Stroke::new(1.0, Color32::from_black_alpha(200));
     let dot_fill = |grab: FrameGrab| if lit(grab) { tokens.viewport_accent } else { Color32::WHITE };
 
     let mut outline = gizmo.corners.to_vec();
@@ -313,15 +340,15 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
     match gizmo.warp {
         Some(_) => {
             for (index, corner) in gizmo.corners.into_iter().enumerate() {
-                painter.circle(corner, WARP_DOT, dot_fill(FrameGrab::Corner(index)), edge);
+                handle_dot(&painter, corner, WARP_DOT, dot_fill(FrameGrab::Corner(index)));
             }
         }
         None => {
             for corner in gizmo.corners {
-                painter.circle(corner, CORNER_DOT, dot_fill(FrameGrab::Scale), edge);
+                handle_dot(&painter, corner, CORNER_DOT, dot_fill(FrameGrab::Scale));
             }
             for (index, side) in gizmo.sides.into_iter().enumerate() {
-                painter.circle(side, SIDE_DOT, dot_fill(FrameGrab::Side(index)), edge);
+                handle_dot(&painter, side, SIDE_DOT, dot_fill(FrameGrab::Side(index)));
             }
         }
     }
@@ -330,20 +357,28 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
     move_handles(&painter, gizmo.center, gizmo.arrows, arrow_color, dot_fill(FrameGrab::Slide));
 }
 
-/// The centre square (filled `square`) with its X/Y/Z arrows to `arrows`, coloured by `arrow_color`
+/// The centre square (filled `square`) with its X/Y/Z arrows to `arrows`, coloured by `arrow_color`; shafts and heads over a dark halo like the symmetry manipulator's
 pub(crate) fn move_handles(painter: &egui::Painter, center: Pos2, arrows: [Option<Pos2>; 3], arrow_color: impl Fn(usize) -> Color32, square: Color32) {
+    let edge = Stroke::new(1.0, Color32::from_black_alpha(200));
     for (axis, tip) in arrows.into_iter().enumerate() {
         let Some(tip) = tip else { continue };
 
         let color = arrow_color(axis);
         let direction = (tip - center).normalized();
-        let side = direction.rot90() * ARROW_HEAD * 0.55;
-        painter.line_segment([center, tip], Stroke::new(ARROW_WIDTH, color));
-        painter.add(egui::Shape::convex_polygon(vec![tip + direction * ARROW_HEAD, tip + side, tip - side], color, Stroke::NONE));
+        let side = direction.rot90() * ARROW_HEAD * 0.45;
+        let start = center + direction * CENTER_SQUARE * 0.5;
+        painter.line_segment([start, tip], Stroke::new(SHAFT_WIDTH + HALO_EXTRA_WIDTH, HALO));
+        painter.line_segment([start, tip], Stroke::new(SHAFT_WIDTH, color));
+        painter.add(egui::Shape::convex_polygon(vec![tip + direction * ARROW_HEAD, tip + side, tip - side], color, edge));
     }
-    let edge = Stroke::new(1.0, Color32::from_black_alpha(200));
     let square_rect = Rect::from_center_size(center, vec2(CENTER_SQUARE, CENTER_SQUARE));
-    painter.rect(square_rect, 1.0, square, edge, egui::StrokeKind::Middle);
+    painter.rect(square_rect, 2.0, square, edge, egui::StrokeKind::Middle);
+}
+
+/// A handle dot of `radius`: `fill` over a dark rim, so it reads on a light or dark model
+pub(crate) fn handle_dot(painter: &egui::Painter, at: Pos2, radius: f32, fill: Color32) {
+    painter.circle_filled(at, radius + 1.5, HALO);
+    painter.circle(at, radius, fill, Stroke::new(1.0, Color32::from_black_alpha(200)));
 }
 
 #[cfg(test)]
@@ -568,14 +603,14 @@ pub(crate) mod tests {
         harness.run_steps(3);
         harness.render().unwrap().save(directory.join("sync-sphere-mid-drag.png")).unwrap();
 
-        // The round projections while moved on the model: the shape round it, a ring hovered
+        // The round projections with their fill selected: the shape round it, a ring hovered (a sphere: its bottom dot)
         for kind in ["triplanar", "spherical", "cylindrical"] {
             let (mut harness, layer) = fill_app_rendered(json!({"projection": kind}), true);
             checker(&mut harness, layer);
-            harness.get_by_label("Move on model").click();
             harness.run_steps(4);
             let round = crate::round_gizmo::RoundGizmo::of(harness.state(), harness.state().viewport_rect).unwrap();
-            harness.hover_at(round.rings[2][crate::round_gizmo::CIRCLE_POINTS / 8]);
+            let hover = if kind == "spherical" { round.dots[2].0 } else { round.rings[2][crate::round_gizmo::CIRCLE_POINTS / 8] };
+            harness.hover_at(hover);
             harness.run_steps(4);
             harness.render().unwrap().save(directory.join(format!("move-{kind}.png"))).unwrap();
         }

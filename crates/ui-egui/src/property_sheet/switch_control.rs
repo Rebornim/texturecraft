@@ -1,6 +1,6 @@
 use egui::{Align2, Color32, CornerRadius, FontId, Painter, Rect, Role, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
 
-use super::{PropertySheet, ROW_HEIGHT, ROW_PICTURE_AIR, ROW_PICTURE_SIZE, SMALL_TEXT_SIZE, TEXT_SIZE};
+use super::{PropertySheet, ROW_HEIGHT, ROW_PICTURE_AIR, ROW_PICTURE_SIZE, RowLead, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Draws a picture row's picture into its square
@@ -64,6 +64,18 @@ impl PropertySheet<'_> {
         let (control, _) = self.row(label);
         let runs: Vec<&[Color32]> = tints.iter().map(std::slice::from_ref).collect();
         self.segments(control, options, selected, &runs, None)
+    }
+
+    /// [`Self::switch`] with its label always above it, the switch across the whole panel (long choices in a set of such switches); returns the picked index
+    pub(crate) fn stacked_switch(&mut self, label: &str, options: &[&str], selected: usize) -> Option<usize> {
+        let segment = (self.right - self.left) / options.len().max(1) as f32;
+        if !options.iter().all(|option| self.text_width(option, semibold(SMALL_TEXT_SIZE)) + SEGMENT_AIR <= segment) {
+            let indices: Vec<usize> = (0..options.len()).collect();
+            let name = |index: usize| options.get(index).copied().unwrap_or_default().to_owned();
+            return self.dropdown(label, selected, &indices, name, None).0;
+        }
+        let (control, _) = self.row_with(RowLead::Label { text: label, stack: true });
+        self.segments(control, options, selected, &[], None)
     }
 
     /// A boxed switch across the whole panel; the chosen word takes its colours from `tints` (several colours split the word between them)

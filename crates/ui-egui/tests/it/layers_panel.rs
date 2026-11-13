@@ -114,6 +114,8 @@ fn deeply_nested_effect_visibility_is_reachable_in_a_narrow_panel() {
     let Node::Split { size: layers_share, .. } = below_sets.as_mut() else { panic!("layers and properties") };
     *layers_share = SplitSize::Ratio(0.9);
     h.state_mut().ui.dock = Dock::from_value(serde_json::to_value(workspace).unwrap());
+    // Properties holds its column at its minimum width: without it the column narrows as far as Layers allows
+    h.state_mut().ui.dock.close(texturecraft_ui_egui::docking::Panel::Properties);
     h.run_steps(4);
 
     let row = h.get_by_label("Effect A").rect();

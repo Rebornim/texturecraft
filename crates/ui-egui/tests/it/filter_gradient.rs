@@ -90,12 +90,11 @@ fn gradient_curve_preset_list_picks_a_curve() {
     assert!(matches!(filter_of(&harness, effect), Filter::GradientCurve { preset: CurvePreset::Bump, .. }), "{:?}", filter_of(&harness, effect));
 }
 
-/// Gradient Dynamic's orientation turns vertical
+/// Gradient Dynamic's orientation turns vertical: a boxed switch at the panel's width, Vertical one click away
 #[test]
 fn gradient_dynamic_orientation_turns_vertical() {
     let (mut harness, effect) = app_with("gradientDynamic");
-    harness.get_by_role_and_label(Role::ComboBox, "Horizontal").click();
-    harness.run_steps(3);
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "Horizontal").is_none(), "both choices fit side by side");
     harness.get_by_label("Vertical").click();
     harness.run_steps(3);
     assert!(matches!(filter_of(&harness, effect), Filter::GradientDynamic { vertical: true, .. }), "{:?}", filter_of(&harness, effect));

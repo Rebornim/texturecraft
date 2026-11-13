@@ -1059,8 +1059,15 @@ pub(crate) fn properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     if let Some(tabs) = properties_fill_tabs(app) {
         crate::property_sheet::section_tabs(ui, scope, 0, &tabs);
     }
-    crate::property_sheet::in_scope(ui, scope, |ui| {
-        egui::ScrollArea::vertical().id_salt("props").auto_shrink([false, false]).show(ui, |ui| properties_contents(app, ui));
+    crate::property_sheet::in_scope(ui, scope, |ui| properties_scrolled(app, ui, egui::ScrollArea::vertical().id_salt("props").auto_shrink([false, false])));
+}
+
+/// The sections in `area`, leaving the solid bar's room even without it, so the bar coming in refits no row (flipped it every frame)
+pub(crate) fn properties_scrolled(app: &mut TextureCraftApp, ui: &mut Ui, area: egui::ScrollArea) {
+    let sheet_width = (ui.available_width() - ui.spacing().scroll.allocated_width()).max(0.0);
+    area.show(ui, |ui| {
+        ui.set_max_width(sheet_width);
+        properties_contents(app, ui)
     });
 }
 

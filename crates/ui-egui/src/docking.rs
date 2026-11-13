@@ -12,7 +12,7 @@
 
 use craft_ui::docking::{Action, DockArea, DockContent, DockStyle, Layout, Location, Node, PanelLimits, PanelState, Permissions, Placement};
 use craft_ui::layout::{SplitAxis, SplitSize};
-use egui::{Id, Margin, RichText, Ui, vec2};
+use egui::{Id, Margin, RichText, Ui, Vec2, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -468,7 +468,28 @@ struct Panels<'a> {
 /// Room between a panel's edges and its contents
 const PANEL_BODY_MARGIN: Margin = Margin::symmetric(8, 4);
 
+/// Narrowest Properties panel and so its dock column: the 300 point design width plus the solid scroll bar; narrower, the 3D projection settings' X, Y, Z fields (the widest row) overlap
+pub const PROPERTIES_MIN_WIDTH: f32 = 310.0;
+
+/// Least size of a docked or floating panel other than the 3D view and Properties
+const PANEL_MIN_SIZE: Vec2 = vec2(120.0, 60.0);
+
+/// Least size of the 3D view
+const VIEWPORT_MIN_SIZE: Vec2 = vec2(200.0, 150.0);
+
+/// Size a panel opens at when it floats
+const FLOATING_SIZE: Vec2 = vec2(300.0, 380.0);
+
 /// The body of every panel except the viewport, in the dock or on the rail
+/// Least size of `panel`, docked or floating; a dock column or split stops shrinking at its panels' largest
+fn min_size(panel: Panel) -> Vec2 {
+    match panel {
+        Panel::Viewport => VIEWPORT_MIN_SIZE,
+        Panel::Properties => vec2(PROPERTIES_MIN_WIDTH, PANEL_MIN_SIZE.y),
+        _ => PANEL_MIN_SIZE,
+    }
+}
+
 pub(crate) fn panel_body(app: &mut TextureCraftApp, ui: &mut Ui, panel: Panel) {
     // Properties draws full-width bands and tabs, so it keeps its own margins
     let margin = if panel == Panel::Properties { Margin::ZERO } else { PANEL_BODY_MARGIN };
@@ -544,12 +565,11 @@ impl DockContent<Panel> for Panels<'_> {
     }
 
     fn limits(&self, panel: &Panel) -> PanelLimits {
-        let min = if *panel == Panel::Viewport { vec2(200.0, 150.0) } else { vec2(120.0, 60.0) };
-        PanelLimits { min, ..PanelLimits::default() }
+        PanelLimits { min: min_size(*panel), ..PanelLimits::default() }
     }
 
-    fn floating_size(&self, _panel: &Panel) -> Option<egui::Vec2> {
-        Some(vec2(300.0, 380.0))
+    fn floating_size(&self, panel: &Panel) -> Option<egui::Vec2> {
+        Some(FLOATING_SIZE.max(min_size(*panel)))
     }
 }
 

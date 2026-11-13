@@ -2331,3 +2331,37 @@ fn filter_picker_snapshots() {
     open(&mut harness, "Filter", "Bevel");
     save(&mut harness, &output_dir, "filter-picker-mask");
 }
+
+/// The Properties panel at its minimum width (the right column dragged as narrow as it goes), on the Fill tab's widest row
+/// (3D projection settings) and on a filter
+#[test]
+#[ignore]
+fn properties_min_width_snapshot() {
+    use craft_ui::docking::Node;
+    use craft_ui::layout::SplitSize;
+    use serde_json::json;
+    use texturecraft_engine::execute;
+    use texturecraft_ui_egui::docking::Dock;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1]})).unwrap()["layer"].clone();
+    let settings = json!({"layer": layer, "projection": "planar", "scaleMode": "physicalSize", "backfaceCulling": true, "shapeCrop": "cropped"});
+    execute(&mut session, "layer.fill.projection", &settings).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1500.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.run_steps(4);
+    let mut workspace = harness.state().ui.dock.workspace().clone();
+    let Some(Node::Split { second, .. }) = workspace.layout.root.as_mut() else { panic!("default columns") };
+    let Node::Split { size, .. } = second.as_mut() else { panic!("viewport and right column") };
+    *size = SplitSize::FixedSecond(0.0);
+    harness.state_mut().ui.dock = Dock::from_value(serde_json::to_value(workspace).unwrap());
+    for (brightness, name) in [(Brightness::MediumDark, "medium"), (Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+        harness.state_mut().ui.prefs.brightness = brightness;
+        save(&mut harness, &output_dir, &format!("properties-min-width-planar-{name}"));
+    }
+    harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    execute(&mut harness.state_mut().session, "effect.add.filter", &json!({"target": "content", "filter": "colorMatch"})).unwrap();
+    save(&mut harness, &output_dir, "properties-min-width-filter");
+}

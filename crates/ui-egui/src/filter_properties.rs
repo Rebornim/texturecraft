@@ -760,8 +760,12 @@ fn gradient_dynamic(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id
     let swatch = |painter: &Painter, rect: Rect| {
         painter.rect_filled(rect, 3, crate::fill_material_panel::shown_color(color));
     };
-    sheet.slot(&swatch, tr("Gradient Source"), tr("Uniform"), None, false, false);
+    // The card's row opens the picker of the colour bar under it: its source is a uniform color only
+    let card = sheet.slot(&swatch, tr("Gradient Source"), tr("Uniform"), None, false, false);
     let pick = sheet.color_bar(tr("Gradient Source"), color, app.picking_color, &app.session.doc.project.swatches);
+    if card.pick.clicked() {
+        sheet.open_color_picker(pick.id, color);
+    }
     sheet.close_card();
     if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
         app.run("effect.set", json!({"effect": id, "color": picked, "merge": pick.merge}));

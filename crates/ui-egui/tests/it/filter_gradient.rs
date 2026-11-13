@@ -100,3 +100,14 @@ fn gradient_dynamic_orientation_turns_vertical() {
     harness.run_steps(3);
     assert!(matches!(filter_of(&harness, effect), Filter::GradientDynamic { vertical: true, .. }), "{:?}", filter_of(&harness, effect));
 }
+
+#[test]
+fn gradient_dynamic_source_card_opens_the_color_picker() {
+    let (mut harness, _) = app_with("gradientDynamic");
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Gradient Source").is_none(), "no picker yet");
+    // Through the pointer, on the card's name: the card's whole row picks its source
+    let card = harness.get_by_role_and_label(Role::ComboBox, "Gradient Source").rect();
+    click_at(&mut harness, egui::pos2(card.center().x, card.center().y));
+    harness.run_steps(4);
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Gradient Source").is_some(), "the card opens the colour picker of its bar");
+}

@@ -62,7 +62,26 @@ const PICKER_MIN_WIDTH: f32 = 240.0;
 const RESIZE_GRIP: f32 = 5.0;
 const RESIZE_CORNER: f32 = 8.0;
 
+/// The picker state stored at `state_id`, else a closed picker in the last colour space and model used
+fn picker_state(ctx: &egui::Context, state_id: Id) -> PickerState {
+    ctx.data(|data| data.get_temp::<PickerState>(state_id)).unwrap_or_else(|| {
+        let (space, model) = ctx.data(|data| data.get_temp::<(ColorSpace, ColorModel)>(Id::unique(PREFERENCES_KEY))).unwrap_or_default();
+        PickerState { space, model, ..PickerState::default() }
+    })
+}
+
 impl PropertySheet<'_> {
+    /// Opens the picker of the colour bar `bar` (its [`ColorPick::id`]) on `linear` from the next frame, as a click on the bar does
+    pub(crate) fn open_color_picker(&self, bar: Id, linear: [f32; 3]) {
+        let ctx = self.ui.ctx();
+        let state_id = bar.with("picker");
+        let mut state = picker_state(ctx, state_id);
+        if !state.open {
+            state.open_on(linear);
+            ctx.data_mut(|data| data.insert_temp(state_id, state));
+        }
+    }
+
     /// A uniform colour (linear): a bar across the card that opens the picker (with the project's `swatches`), and the eyedropper; `eyedropping` is the bar whose pick waits for its click
     pub(crate) fn color_bar(&mut self, label: &str, linear: [f32; 3], eyedropping: Option<Id>, swatches: &[[f32; 3]]) -> ColorPick {
         let center_y = self.take(super::ROW_HEIGHT).center().y;
@@ -105,10 +124,7 @@ impl PropertySheet<'_> {
 
         let ctx = self.ui.ctx().clone();
         let state_id = id.with("picker");
-        let mut state = ctx.data(|data| data.get_temp::<PickerState>(state_id)).unwrap_or_else(|| {
-            let (space, model) = ctx.data(|data| data.get_temp::<(ColorSpace, ColorModel)>(Id::unique(PREFERENCES_KEY))).unwrap_or_default();
-            PickerState { space, model, ..PickerState::default() }
-        });
+        let mut state = picker_state(&ctx, state_id);
         state.follow(linear);
         if let Some(picked) = ColorPick::delivered(&ctx, id) {
             state.set_linear(picked);

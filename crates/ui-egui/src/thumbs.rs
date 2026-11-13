@@ -8,7 +8,7 @@ use std::sync::{Arc, Weak};
 
 use egui::{Color32, ColorImage, Painter, Pos2, Rect, TextureHandle, TextureOptions};
 use texturecraft_engine::compose::{ImageRes, ImageStore};
-use texturecraft_engine::core::ProceduralKind;
+use texturecraft_engine::core::{BakedMap, ProceduralKind};
 use texturecraft_engine::paint::presets::BrushPreset;
 use texturecraft_engine::paint::{BrushAlpha, BrushSettings, alphas};
 use texturecraft_engine::texel::linear_to_srgb;
@@ -50,6 +50,8 @@ pub struct Thumbs {
     saved_files_epoch: u64,
     images: HashMap<String, (Weak<ImageRes>, TextureHandle)>,
     images_revision: Option<u64>,
+    /// ID mesh map previews by bake identity
+    id_mesh_maps: HashMap<String, TextureHandle>,
     /// (frame, thumbnails rendered in it)
     budget: (u64, usize),
     /// Renders the orb thumbnails and the big previews
@@ -89,6 +91,26 @@ impl Thumbs {
         let texture = ctx.load_texture(key.clone(), color_image, TextureOptions::LINEAR);
         self.images.insert(key, (Arc::downgrade(image), texture.clone()));
         texture
+    }
+
+    /// Cached preview of a texture set's ID mesh map, its colors as stored (the ID view's); a rebake makes a new one
+    pub fn id_mesh_map(&mut self, ctx: &egui::Context, baked: &texturecraft_engine::compose::BakedMaps) -> Option<TextureHandle> {
+        let data = baked.maps.get(&BakedMap::Id)?;
+        let key = format!("mesh_id_{:p}_{}", data.as_ptr(), data.len());
+        if let Some(texture) = self.id_mesh_maps.get(&key) {
+            return Some(texture.clone());
+        }
+        let mut image = ColorImage::filled([IMAGE_PX, IMAGE_PX], Color32::TRANSPARENT);
+        for (index, pixel) in image.pixels.iter_mut().enumerate() {
+            let uv = [((index % IMAGE_PX) as f32 + 0.5) / IMAGE_PX as f32, ((index / IMAGE_PX) as f32 + 0.5) / IMAGE_PX as f32];
+            if let Some(color) = baked.sample_uv(BakedMap::Id, uv) {
+                let [red, green, blue] = color.map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8);
+                *pixel = Color32::from_rgb(red, green, blue);
+            }
+        }
+        let texture = ctx.load_texture(key.clone(), image, TextureOptions::NEAREST);
+        self.id_mesh_maps.insert(key, texture.clone());
+        Some(texture)
     }
 
     /// Cached preview of an image resource (64 px, letterboxed)

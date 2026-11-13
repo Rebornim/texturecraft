@@ -2,8 +2,8 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    BakedMap, BlendMode, Channel, ChannelKind, CompareOp, CompareSource, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind,
-    LayerId, Levels, Mask, MaskBackground, MicroDetail, OutputResolution, Procedural, ProceduralKind, Project, ResolutionMode, Sampling, Source,
+    BakedMap, BlendMode, Channel, ChannelKind, ColorSelection, CompareOp, CompareSource, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator,
+    GeneratorKind, LayerId, Levels, Mask, MaskBackground, MicroDetail, OutputResolution, Procedural, ProceduralKind, Project, ResolutionMode, Sampling, Source,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
@@ -20,7 +20,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add mask with color selection",
             ["Layers", "Mask"],
             None,
-            "{layer?, color?: [r,g,b] ID color, tolerance?}",
+            "{layer?, color?: [r,g,b] a first ID color (default: none, pick them with effect.colorSelection.pick), tolerance?}",
             has_layer,
             add_color_mask
         ),
@@ -94,7 +94,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, channel?: the content channel blend and opacity set (default: every channel), name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), generator?: kind (a generator effect only: changes kind in place), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, microAnchor?: id|null, microAmount?, value?, image?: resource name (a fill's source), projection?: uv|triplanar|planar|spherical|cylindrical, scale?, rotation?, offset?, axis?, sharpness? (a fill effect's projection), anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, affects?, clamp? (levels), tolerance?, left?, op?, right?, compareChannel?, hardness? (compare; value is its constant), colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, channel?: the content channel blend and opacity set (default: every channel), name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), generator?: kind (a generator effect only: changes kind in place), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, microAnchor?: id|null, microAmount?, value?, image?: resource name (a fill's source), projection?: uv|triplanar|planar|spherical|cylindrical, scale?, rotation?, offset?, axis?, sharpness? (a fill effect's projection), anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, affects?, clamp? (levels), tolerance?, left?, op?, right?, compareChannel?, hardness? (compare; value is its constant), colors?: [[r,g,b], ...] (a color selection's ID colors, may be empty), output?, background?: transparent | black | white | gray, idMap?: an image resource name read as the ID map, null for the texture set's ID mesh map (a color selection; tolerance and hardness too), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -141,13 +141,13 @@ fn add_mask(s: &mut Session, p: &Value, bg: MaskBackground) -> Result<Value> {
 }
 
 fn add_color_mask(s: &mut Session, p: &Value) -> Result<Value> {
-    let color = color_param("mask.add.colorSelection", p, "color")?.unwrap_or([1.0, 0.0, 0.0]);
+    let colors: Vec<[f32; 3]> = color_param("mask.add.colorSelection", p, "color")?.into_iter().collect();
     let tolerance = f32p(p, "tolerance").unwrap_or(0.1).clamp(0.0, 1.0);
     with_mask(s, p, "mask.add.colorSelection", "Add mask with color selection", |s, id| {
         let eid = s.doc.project.alloc_id();
         let l = s.doc.project.layer_mut(s.doc.project.mask_owner(id))?;
         let m = l.mask.get_or_insert_with(|| Mask::new(MaskBackground::Black));
-        m.effects.push(Effect::new(eid, EffectKind::ColorSelection { colors: vec![color], tolerance }));
+        m.effects.push(Effect::new(eid, EffectKind::ColorSelection(ColorSelection::new(colors, tolerance))));
         Ok(())
     })?;
     Ok(Value::Null)
@@ -713,6 +713,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         None => None,
     };
     let swaps_filter = swapped.is_some();
+    let id_map = crate::color_selection_cmds::id_map_param(session, params)?;
 
     let fitted = crate::warp_cmds::fitted_frame(&session.mesh);
     session.edit("Edit effect", |session| {
@@ -778,7 +779,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
                 // Preserve projection fields that the edit does not supply
                 *projection = projection_from(params, CMD, Some(&*projection), || fitted)?;
             }
-            EffectKind::ColorSelection { colors, tolerance } => crate::color_selection_cmds::apply_params(params, colors, tolerance)?,
+            EffectKind::ColorSelection(selection) => crate::color_selection_cmds::apply_params(params, selection, id_map.clone())?,
             kind @ EffectKind::Compare { .. } => compare_from(CMD, params, kind)?,
             _ => {}
         }

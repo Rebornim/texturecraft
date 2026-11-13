@@ -73,7 +73,7 @@ impl PropertySheet<'_> {
     }
 
     /// A row's 24 px control box from the left padding to the right one
-    fn wide_row(&mut self) -> Rect {
+    pub(super) fn wide_row(&mut self) -> Rect {
         let row = self.take(ROW_HEIGHT);
         let center_y = row.center().y;
         self.drawn(center_y + super::CONTROL_HEIGHT / 2.0);

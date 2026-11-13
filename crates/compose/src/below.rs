@@ -367,8 +367,8 @@ impl BelowCache {
         let project = inp.project;
         let set = project.texture_set(inp.ts).ok()?;
 
-        // Anchor readers depend on the stack below them
-        if project.render_tree(&set.stack).iter().any(|id| project.layers.get(id).is_some_and(Layer::reads_anchor)) {
+        // Anchor readers and compare masks reading layers depend on the stack below them
+        if project.render_tree(&set.stack).iter().any(|id| project.layers.get(id).is_some_and(Layer::reads_stack)) {
             return None;
         }
 

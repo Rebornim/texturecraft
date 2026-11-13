@@ -12,6 +12,7 @@ pub mod bake_mode;
 mod bake_scene;
 mod color_picker;
 mod color_selection_editor;
+mod compare_properties;
 pub mod control;
 mod decal_drop;
 pub mod dock;

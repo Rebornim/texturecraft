@@ -7,6 +7,7 @@ mod bake_resolution;
 mod bake_settings;
 mod bake_tiles;
 mod color_selection;
+mod compare_mask;
 mod content_effects;
 mod effect_blending;
 mod export_colour_space;

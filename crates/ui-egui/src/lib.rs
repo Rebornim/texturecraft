@@ -48,6 +48,7 @@ mod import_resources;
 mod inactive_set_hint;
 pub mod keymap;
 pub mod layer_panel;
+mod layer_toolbar;
 mod layout_dialog;
 mod levels_display;
 mod levels_editor;

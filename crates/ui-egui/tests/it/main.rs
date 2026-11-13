@@ -38,6 +38,7 @@ mod layer_blending_options;
 mod layer_clipboard;
 mod layer_multi_select;
 mod layer_rename;
+mod layer_toolbar;
 mod layers_panel;
 mod levels_editor;
 mod mask_export;

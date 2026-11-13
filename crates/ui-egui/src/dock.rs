@@ -23,8 +23,6 @@ use crate::theme::{Tokens, caption};
 use crate::toolbar::{MAX_BRUSH_SIZE, MIN_BRUSH_SIZE};
 use crate::widgets::{chip, color_swatch, combo, dnd_release, elided, icon_button, section, section_with_reset, slider, slider_edit};
 
-/// The filter Add filter adds: at its defaults it changes nothing, and its slot opens the picker to swap it
-const NEW_FILTER: &str = "hsl";
 const FILTER_SWATCH_WIDTH: f32 = 36.0;
 const FILTER_HINT_SIZE: f32 = 10.5;
 /// The most colors `effect.set {colors}` takes for a gradient map
@@ -130,75 +128,12 @@ pub(crate) fn texture_set_list(app: &mut TextureCraftApp, ui: &mut Ui) {
 // ---------------------------------------------------------------------------------------------
 // Layers
 
-/// The add-mask commands, for the selected layer or (`row`) the layer whose mask slot was clicked.
-fn add_mask_menu(app: &mut TextureCraftApp, ui: &mut Ui, row: Option<u64>) {
-    let enabled = row.is_some() || app.session.selected_layer().is_some();
-    for (label, id) in
-        [(tr("Add white mask"), "mask.add.white"), (tr("Add black mask"), "mask.add.black"), (tr("Add mask with color selection"), "mask.add.colorSelection")]
-    {
-        if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
-            if let Some(layer) = row {
-                app.run("layer.select", json!({ "layer": layer }));
-            }
-            app.run(id, Value::Null);
-            ui.close();
-        }
-    }
-}
-
 pub(crate) fn layers(app: &mut TextureCraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
 
-    // Wrap in a narrow column so rows stay within the panel
-    let project_open = app.session.project_open;
-    ui.add_enabled_ui(project_open, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            // Keep menu buttons as compact as the adjacent icon buttons
-            ui.spacing_mut().button_padding.x = 4.0;
-            ui.spacing_mut().item_spacing.x = TOOLBAR_SPACING;
-            let channels = app.session.doc.project.texture_set(app.session.ts()).map(|t| t.channel_list()).unwrap_or_default();
-
-            // The channel box takes what the six buttons leave, so the toolbar stays on one row in a narrow column
-            let buttons = 2.0 * (MENU_BUTTON_WIDTH + TOOLBAR_SPACING) + 4.0 * (TOOLBAR_ICON_SIZE + TOOLBAR_SPACING);
-            let channel_width = (ui.available_width() - buttons).clamp(CHANNEL_BOX_MIN_WIDTH, CHANNEL_BOX_WIDTH);
-            ui.allocate_ui(vec2(channel_width, ICON_BUTTON_SIZE), |ui| {
-                egui::ComboBox::from_id_salt("layer_channel").width(channel_width).truncate().selected_text(tr(app.ui.layer_channel.label())).show_ui(
-                    ui,
-                    |ui| {
-                        for channel in channels {
-                            ui.selectable_value(&mut app.ui.layer_channel, channel, tr(channel.label()));
-                        }
-                    },
-                );
-            });
-            ui.menu_button(RichText::new(ic::MAGIC_WAND).size(14.0), |ui| {
-                let selected = app.session.selected_layer().and_then(|id| app.session.doc.project.layers.get(&id)).cloned();
-                match &selected {
-                    Some(layer) => effect_menu(app, ui, layer),
-                    None => {
-                        ui.label(RichText::new(tr("Select a layer")).color(tokens.text_dim));
-                    }
-                }
-            })
-            .response
-            .on_hover_text(tr("Add effect"));
-            ui.menu_button(RichText::new(ic::SELECTION_BACKGROUND).size(14.0), |ui| add_mask_menu(app, ui, None)).response.on_hover_text(tr("Add mask"));
-            if icon_button(ui, ic::PAINT_BRUSH, tr("Add paint layer"), false, TOOLBAR_ICON_SIZE).clicked() {
-                app.run("layer.add.paint", Value::Null);
-            }
-            if icon_button(ui, ic::PAINT_BUCKET, tr("Add fill layer"), false, TOOLBAR_ICON_SIZE).clicked() {
-                app.run("layer.add.fill", Value::Null);
-            }
-            if icon_button(ui, ic::FOLDER_SIMPLE, tr("Add folder"), false, TOOLBAR_ICON_SIZE).clicked() {
-                app.run("layer.add.group", Value::Null);
-            }
-            if icon_button(ui, ic::TRASH, &crate::keymap::tip(&app.ui.keymap, tr("Remove layer"), "layer.remove"), false, TOOLBAR_ICON_SIZE).clicked() {
-                app.run("layer.remove", Value::Null);
-            }
-        })
-    });
-
     // The empty state has no layers: the toolbar stays, greyed
+    let project_open = app.session.project_open;
+    ui.add_enabled_ui(project_open, |ui| crate::layer_toolbar::show(app, ui));
     if !project_open {
         return;
     }
@@ -291,45 +226,6 @@ pub(crate) fn targets_content(app: &TextureCraftApp) -> bool {
     }
 }
 
-/// "Add effect" items for `layer`: content when it is the selected target, else the mask
-fn effect_menu(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer) {
-    let content = !layer.is_group() && app.session.selected_layer() == Some(layer.id) && targets_content(app);
-    let target = if content { "content" } else { "mask" };
-    ui.label(caption(if content { tr("Add to the layer content") } else { tr("Add to the mask") }));
-
-    // Generators and compare masks always go to the mask; anchor points go where the others do
-    let items = [
-        (tr("Add generator"), "effect.add.generator", json!({})),
-        (tr("Add paint"), "effect.add.paint", json!({"target": target})),
-        (tr("Add fill"), "effect.add.fill", json!({"target": target})),
-        (tr("Add levels"), "effect.add.levels", json!({"target": target})),
-        (tr("Add compare mask"), "effect.add.compare", json!({})),
-        (tr("Add filter"), "effect.add.filter", json!({"target": target, "filter": NEW_FILTER})),
-        (tr("Add anchor point"), "effect.add.anchor", json!({"target": target})),
-    ];
-    for (label, command, params) in items {
-        if !ui.button(label).clicked() {
-            continue;
-        }
-
-        if app.session.selected_layer() != Some(layer.id) {
-            app.run("layer.select", json!({"layer": layer.id.0}));
-        }
-
-        let added = app.run(command, with(&params, json!({"layer": layer.id.0})));
-
-        // The neutral filter is a placeholder: its slot opens the picker to choose the real one
-        if command == "effect.add.filter"
-            && let Some(effect) = added.as_ref().and_then(|result| result["effect"].as_u64())
-        {
-            app.ui.dock.focus(crate::docking::Panel::Properties);
-            crate::filter_slot::open_picker_when_shown(ui.ctx(), effect);
-        }
-
-        ui.close();
-    }
-}
-
 /// Layer rows alternate between two shades so neighbours read as separate items.
 fn row_shade(tokens: &Tokens, index: usize) -> Color32 {
     if index.is_multiple_of(2) { tokens.row } else { tokens.row.lerp_to_gamma(tokens.row_hover, ALTERNATE_LAYER_SHADE) }
@@ -351,14 +247,6 @@ pub fn layer_eye_colors(tokens: &Tokens, visible: bool) -> (Color32, Option<Colo
 const RIGHT_COLUMN: f32 = 58.0;
 /// Indent per folder level, and per level of the effect tree.
 const INDENT: f32 = 14.0;
-/// Width of the Layers toolbar's channel box when there is room, and the least it shrinks to.
-const CHANNEL_BOX_WIDTH: f32 = 86.0;
-const CHANNEL_BOX_MIN_WIDTH: f32 = 40.0;
-/// Gap between the Layers toolbar's buttons.
-const TOOLBAR_SPACING: f32 = 2.0;
-/// Edge of the toolbar's icon buttons, and the width of its two menu buttons.
-const TOOLBAR_ICON_SIZE: f32 = 20.0;
-const MENU_BUTTON_WIDTH: f32 = 22.0;
 /// Edge of the small icon buttons in the properties panel.
 const ICON_BUTTON_SIZE: f32 = 22.0;
 /// Height of a blend mode menu or opacity field in a stack row, and the rounding of its hover fill.
@@ -724,7 +612,9 @@ fn layer_row(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, depth: usize
         if slot.hovered() {
             painter.text(mask_rect.center(), egui::Align2::CENTER_CENTER, ic::PLUS, egui::FontId::proportional(EYE_FONT_SIZE), tokens.text);
         }
-        egui::Popup::menu(&slot).show(|ui| add_mask_menu(app, ui, Some(layer.id.0)));
+        let picker = ui.make_persistent_id(("bitmap_mask_picker", layer.id.0));
+        egui::Popup::menu(&slot).show(|ui| crate::layer_toolbar::mask_slot_menu(app, ui, layer, picker));
+        crate::layer_toolbar::bitmap_picker(app, &row, picker, layer.id);
     }
     x = mask_rect.right() + THUMBNAIL_GAP;
 
@@ -1481,7 +1371,7 @@ fn layer_context_menu(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer) {
         }
     });
     ui.separator();
-    effect_menu(app, ui, layer);
+    crate::layer_toolbar::effect_menu_items(app, ui, layer);
 }
 
 // ---------------------------------------------------------------------------------------------

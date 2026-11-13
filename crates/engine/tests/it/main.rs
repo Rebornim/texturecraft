@@ -10,6 +10,7 @@ mod brush_material;
 mod closed_session;
 mod color_selection;
 mod content_effects;
+mod effect_blending;
 mod export_colour_space;
 mod fill_patterns;
 mod fill_projections;

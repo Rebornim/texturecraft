@@ -80,3 +80,27 @@ fn the_header_close_button_closes_its_panel() {
     assert!(!harness.state().ui.dock.is_open(Panel::Properties));
     assert!(harness.state().ui.dock.is_visible(Panel::Layers), "only the panel under the bar closes");
 }
+
+/// With an effect selected the Properties header names its type, not the effect's own name (every filter reads "Filter")
+#[test]
+fn the_properties_header_names_the_selected_effects_type() {
+    let mut harness = app();
+    let session = &mut harness.state_mut().session;
+    let layer = texturecraft_engine::execute(session, "layer.add.fill", &serde_json::Value::Null).unwrap()["layer"].as_u64().unwrap();
+    let blur = texturecraft_engine::execute(session, "effect.add.filter", &serde_json::json!({"layer": layer, "target": "content", "filter": "blur"})).unwrap()
+        ["effect"]
+        .as_u64()
+        .unwrap();
+    texturecraft_engine::execute(session, "effect.set", &serde_json::json!({"effect": blur, "name": "Soften edges"})).unwrap();
+    texturecraft_engine::execute(session, "layer.select", &serde_json::json!({"layer": layer, "target": blur})).unwrap();
+    harness.run_steps(SETTLE_FRAMES);
+
+    tab_rect(&harness, "Properties - Filter");
+    let level = texturecraft_engine::execute(&mut harness.state_mut().session, "effect.add.levels", &serde_json::json!({"layer": layer, "target": "content"}))
+        .unwrap()["effect"]
+        .as_u64()
+        .unwrap();
+    texturecraft_engine::execute(&mut harness.state_mut().session, "layer.select", &serde_json::json!({"layer": layer, "target": level})).unwrap();
+    harness.run_steps(SETTLE_FRAMES);
+    tab_rect(&harness, "Properties - Levels");
+}

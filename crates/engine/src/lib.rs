@@ -77,6 +77,7 @@ pub mod swatch_cmds;
 pub mod template_cmds;
 pub mod text_cmds;
 pub mod thumbs;
+mod tile_transform_params;
 mod tool_availability;
 pub mod tool_cmds;
 pub mod tool_settings;

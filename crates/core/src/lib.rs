@@ -18,16 +18,20 @@ pub mod contents_offset;
 pub mod cook_resolution;
 pub mod curve_preset;
 pub mod depth_culling;
+pub mod directional_light;
 pub mod fill_symmetry;
 pub mod gradient_input;
 pub mod grayscale_mode;
 pub mod layer;
+pub mod lighting_output;
 pub mod oklab;
 pub mod project;
 pub mod projector;
 mod saved_projection;
 pub mod selection_background;
 pub mod shape_crop;
+pub mod stylized_lighting;
+pub mod sun_and_sky;
 pub mod symmetry_kind;
 
 pub use backface::Backface;
@@ -46,6 +50,7 @@ pub use contents_offset::ContentsOffset;
 pub use cook_resolution::CookResolution;
 pub use curve_preset::CurvePreset;
 pub use depth_culling::DepthCulling;
+pub use directional_light::DirectionalLight;
 pub use fill_symmetry::FillSymmetry;
 pub use gradient_input::GradientInput;
 pub use grayscale_mode::GrayscaleMode;
@@ -55,6 +60,7 @@ pub use layer::{
     OutputResolution, PathShape, Procedural, ProceduralKind, Projection, ResolutionMode, Sampling, ScaleMode, Source, TileBlending, TileGenerator,
     TileInputDistribution, TileShape, TileSizeMode, TileSymmetry, UvTransform, UvWrap, gradient, hsl_adjust, per_unit,
 };
+pub use lighting_output::LightingOutput;
 pub use project::{
     AoMixing, BlockScales, Camera, DepthOfField, DisplaySettings, FORMAT_VERSION, MAX_RESOLUTION, MAX_SWATCHES, MIN_RESOLUTION, NormalFormat, NormalMixing,
     Project, TANGENT_BENT_NORMAL_VERSION, TextureSet, TileGrid, ToneMapping, UDIM_RANGE, udim_at,
@@ -62,6 +68,8 @@ pub use project::{
 pub use projector::Projector;
 pub use selection_background::SelectionBackground;
 pub use shape_crop::ShapeCrop;
+pub use stylized_lighting::StylizedLighting;
+pub use sun_and_sky::SunAndSky;
 pub use symmetry_kind::SymmetryKind;
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq)]

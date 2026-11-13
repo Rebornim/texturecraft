@@ -1,7 +1,7 @@
 //! The colour filters (Color Balance, Color Correct, HSL Perceptive, Contrast Luminosity) and the shared edge wrap of Blur and Bevel
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, EffectKind, Filter, LayerId};
+use texturecraft_engine::core::{Bevel, Channel, EffectKind, Filter, LayerId};
 use texturecraft_engine::geom::glam::Vec2;
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute};
@@ -113,7 +113,7 @@ fn blur_and_bevel_take_the_edge_wrap() {
     assert!(matches!(filter_of(&s, blur), Filter::Blur { wrap: true, .. }));
     assert!(execute(&mut s, "effect.set", &json!({"effect": blur.0, "wrap": "yes"})).is_err());
     let bevel = filtered(&mut s, [0.2; 3], json!({"filter": "bevel", "wrap": true}));
-    assert!(matches!(filter_of(&s, bevel), Filter::Bevel { wrap: true, .. }));
+    assert!(matches!(filter_of(&s, bevel), Filter::DistanceBevel(Bevel { wrap: true, .. })));
 
     let old: Filter = serde_json::from_value(json!({"Blur": {"radius": 4.0}})).unwrap();
     assert_eq!(old, Filter::Blur { radius: 4.0, wrap: false });

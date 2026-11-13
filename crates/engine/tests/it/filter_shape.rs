@@ -1,0 +1,329 @@
+//! The shape filters: Threshold's modes, Mirror, Mask Outline, Bevel, Bevel Smooth, Directional Distance and Warp's modes
+
+use serde_json::{Value, json};
+use texturecraft_engine::core::{
+    Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, DirectionalDistance, EffectKind, Filter, LayerId, MaskOutline, Mirror, MirrorCorner,
+    MirrorMode, OutlinePosition, SourceWarp, ThresholdMode, WarpBlending, WarpMode,
+};
+use texturecraft_engine::geom::primitives;
+use texturecraft_engine::{Session, execute};
+
+const SIZE: u32 = 128;
+
+fn session() -> Session {
+    let mut s = Session::new_project("t", primitives::sphere(1.0, 48, 24), "builtin:sphere", None, SIZE).unwrap();
+    s.update();
+    s
+}
+
+/// The composited roughness at texel `(x, y)`
+fn roughness(s: &mut Session, (x, y): (u32, u32)) -> f32 {
+    s.update();
+    s.caches[0].composite.value(Channel::Roughness, x, y)[0]
+}
+
+fn add_filter(s: &mut Session, params: Value) -> LayerId {
+    let mut params = params;
+    params["target"] = json!("content");
+    LayerId(execute(s, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap())
+}
+
+fn filter_of(s: &Session, effect: LayerId) -> Filter {
+    match &s.doc.project.effect(effect).unwrap().1.kind {
+        EffectKind::Filter(filter) => filter.clone(),
+        other => panic!("not a filter: {other:?}"),
+    }
+}
+
+/// Threshold: a new one is Greater than 0.01; each mode compares its way; one saved before keeps Greater or equal
+#[test]
+fn threshold_modes_compare_their_way() {
+    let mut s = session();
+    execute(&mut s, "layer.add.fill", &json!({"color": [0.5, 0.5, 0.5], "roughness": 0.25})).unwrap();
+    let effect = add_filter(&mut s, json!({"filter": "threshold"}));
+    assert_eq!(filter_of(&s, effect), Filter::Threshold { level: 0.01, mode: ThresholdMode::Greater }, "the library defaults");
+    let texel = (SIZE / 4, SIZE / 2);
+    assert_eq!(roughness(&mut s, texel), 1.0);
+
+    execute(&mut s, "effect.set", &json!({"effect": effect.0, "level": 0.25})).unwrap();
+    assert_eq!(roughness(&mut s, texel), 0.0, "a value at the level is not greater");
+    for (mode, white) in [("greaterOrEqual", 1.0), ("lower", 0.0), ("lowerOrEqual", 1.0)] {
+        execute(&mut s, "effect.set", &json!({"effect": effect.0, "mode": mode})).unwrap();
+        assert_eq!(roughness(&mut s, texel), white, "{mode}");
+    }
+    assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "mode": "sideways"})).is_err());
+    assert_eq!(filter_of(&s, effect), Filter::Threshold { level: 0.25, mode: ThresholdMode::LowerOrEqual }, "a refused mode changes nothing");
+
+    execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap();
+    assert_eq!(filter_of(&s, effect), Filter::Threshold { level: 0.01, mode: ThresholdMode::Greater });
+}
+
+/// Mirror: the left half of each UV tile copied onto the right (inverted the other way, or a corner onto the rest), its axis white in Display Debug
+#[test]
+fn mirror_copies_one_side_over_the_other() {
+    let mut s = session();
+    execute(&mut s, "layer.add.fill", &json!({"color": [0.5, 0.5, 0.5], "roughness": 0.25})).unwrap();
+    execute(&mut s, "layer.fill.set", &json!({"channel": "roughness", "procedural": "gradient"})).unwrap();
+    let row = SIZE / 2;
+    let (left, right) = ((20, row), (SIZE - 1 - 20, row));
+    let (left_before, right_before) = (roughness(&mut s, left), roughness(&mut s, right));
+    assert!((left_before - right_before).abs() > 0.05, "the gradient differs across: {left_before} {right_before}");
+
+    let effect = add_filter(&mut s, json!({"filter": "mirror"}));
+    assert_eq!(filter_of(&s, effect), Filter::Mirror(Mirror::LIBRARY));
+    assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Mirror");
+    assert!((roughness(&mut s, left) - left_before).abs() < 2e-3, "the left side stays");
+    assert!((roughness(&mut s, right) - left_before).abs() < 2e-3, "the right side reads the left");
+
+    execute(&mut s, "effect.set", &json!({"effect": effect.0, "invertAxisX": true})).unwrap();
+    assert!((roughness(&mut s, left) - right_before).abs() < 2e-3, "inverted, the left side reads the right");
+
+    execute(&mut s, "effect.set", &json!({"effect": effect.0, "mode": "corner", "cornerType": "topRight"})).unwrap();
+    assert!((roughness(&mut s, (20, 20)) - roughness(&mut s, (SIZE - 1 - 20, 20))).abs() < 2e-3, "a corner mirrors across too");
+    let Filter::Mirror(mirror) = filter_of(&s, effect) else { panic!() };
+    assert_eq!((mirror.mode, mirror.corner), (MirrorMode::Corner, MirrorCorner::TopRight));
+
+    execute(&mut s, "effect.set", &json!({"effect": effect.0, "mode": "axisX", "displayDebug": true})).unwrap();
+    assert_eq!(roughness(&mut s, (SIZE / 2, row)), 1.0, "Display Debug draws the axis white");
+
+    for bad in [json!({"mode": "diagonal"}), json!({"cornerType": "middle"}), json!({"invertAxisY": "yes"})] {
+        let mut params = bad.clone();
+        params["effect"] = json!(effect.0);
+        assert!(execute(&mut s, "effect.set", &params).is_err(), "{bad}");
+    }
+    execute(&mut s, "effect.set", &json!({"effect": effect.0, "axisYOffset": 3.0})).unwrap();
+    let Filter::Mirror(mirror) = filter_of(&s, effect) else { panic!() };
+    assert_eq!(mirror.offset, [0.5, 1.0], "offsets clamp to the tile");
+}
+
+/// Mask Outline: a band along the edge where the gradient crosses its Threshold, outside, inside or on both sides, on black or over the values
+#[test]
+fn mask_outline_draws_a_band_along_the_threshold_edge() {
+    let mut s = session();
+    execute(&mut s, "layer.add.fill", &json!({"color": [0.5, 0.5, 0.5], "roughness": 0.25})).unwrap();
+    execute(&mut s, "layer.fill.set", &json!({"channel": "roughness", "procedural": "gradient"})).unwrap();
+    let row = SIZE / 2;
+    let values: Vec<f32> = (0..SIZE).map(|x| roughness(&mut s, (x, row))).collect();
+    // The gradient repeats: an edge where it crosses 0.5 away from the tile's sides, its first texel inside the shapes and the way out of them
+    let edge = (SIZE / 4..SIZE * 3 / 4).find(|x| (values[*x as usize] >= 0.5) != (values[*x as usize - 1] >= 0.5)).unwrap();
+    let rising = values[edge as usize] >= 0.5;
+    let (inner, outward): (u32, i64) = if rising { (edge, -1) } else { (edge - 1, 1) };
+    let at = |steps: i64| ((inner as i64 + steps * outward) as u32, row);
+
+    let effect = add_filter(&mut s, json!({"filter": "maskOutline"}));
+    assert_eq!(filter_of(&s, effect), Filter::MaskOutline(MaskOutline::LIBRARY), "the library defaults");
+    assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Mask Outline");
+    execute(&mut s, "effect.set", &json!({"effect": effect.0, "threshold": 0.5, "width": 0.03})).unwrap();
+    assert_eq!(roughness(&mut s, at(2)), 1.0, "outside, next to the edge");
+    assert_eq!(roughness(&mut s, at(8)), 0.0, "past the band");
+    assert_eq!(roughness(&mut s, at(-2)), 0.0, "inside the shapes");
+
+    execute(&mut s, "effect.set", &json!({"effect": effect.0, "maskPosition": "inside"})).unwrap();
+    assert_eq!((roughness(&mut s, at(-2)), roughness(&mut s, at(2))), (1.0, 0.0), "inside");
+    execute(&mut s, "effect.set", &json!({"effect": effect.0, "maskPosition": "both"})).unwrap();
+    assert_eq!((roughness(&mut s, at(-2)), roughness(&mut s, at(2))), (1.0, 1.0), "both sides");
+
+    execute(&mut s, "effect.set", &json!({"effect": effect.0, "startFromBlack": false})).unwrap();
+    let far = at(8);
+    assert!((roughness(&mut s, far) - values[far.0 as usize]).abs() < 2e-3, "over the values");
+
+    execute(&mut s, "effect.set", &json!({"effect": effect.0, "startFromBlack": true, "maskPosition": "outside", "blur": 1.0})).unwrap();
+    let (near, further) = (roughness(&mut s, at(1)), roughness(&mut s, at(2)));
+    assert!(near > further && further > 0.0 && near < 1.0, "a blurred band fades out: {near} {further}");
+
+    for bad in [json!({"maskPosition": "around"}), json!({"startFromBlack": 1})] {
+        let mut params = bad.clone();
+        params["effect"] = json!(effect.0);
+        assert!(execute(&mut s, "effect.set", &params).is_err(), "{bad}");
+    }
+    execute(&mut s, "effect.set", &json!({"effect": effect.0, "width": 4.0, "curveShape": -3.0})).unwrap();
+    let Filter::MaskOutline(outline) = filter_of(&s, effect) else { panic!() };
+    assert_eq!((outline.position, outline.width, outline.curve), (OutlinePosition::Outside, 1.0, -1.0), "values clamp");
+
+    execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap();
+    assert_eq!(filter_of(&s, effect), Filter::MaskOutline(MaskOutline::LIBRARY));
+}
+
+/// A roughness gradient crossing 0.5 away from the tile's sides along the middle row: texel `steps` outward of the shapes' first texel at its edge (inward below 0), the values before any filter, and the outward direction along x
+fn shape_edge(s: &mut Session) -> (impl Fn(i64) -> (u32, u32) + use<>, Vec<f32>, i64) {
+    execute(s, "layer.add.fill", &json!({"color": [0.5, 0.5, 0.5], "roughness": 0.25})).unwrap();
+    execute(s, "layer.fill.set", &json!({"channel": "roughness", "procedural": "gradient"})).unwrap();
+    let row = SIZE / 2;
+    let values: Vec<f32> = (0..SIZE).map(|x| roughness(s, (x, row))).collect();
+    let edge = (SIZE / 4..SIZE * 3 / 4).find(|x| (values[*x as usize] >= 0.5) != (values[*x as usize - 1] >= 0.5)).unwrap();
+    let (inner, outward): (u32, i64) = if values[edge as usize] >= 0.5 { (edge, -1) } else { (edge - 1, 1) };
+    (move |steps: i64| ((inner as i64 + steps * outward) as u32, row), values, outward)
+}
+
+fn set(s: &mut Session, effect: LayerId, params: Value) {
+    let mut params = params;
+    params["effect"] = json!(effect.0);
+    execute(s, "effect.set", &params).unwrap();
+}
+
+fn refused(s: &mut Session, effect: LayerId, bad: &[Value]) {
+    for bad in bad {
+        let mut params = bad.clone();
+        params["effect"] = json!(effect.0);
+        assert!(execute(s, "effect.set", &params).is_err(), "{bad}");
+    }
+}
+
+/// Bevel: a negative Distance slopes the shapes down to their edge, a positive one rises around them; Smoothing, Corner Type, Blur Mode and Wrap set; one saved before keeps its width bevel
+#[test]
+fn bevel_slopes_inwards_or_outwards() {
+    let mut s = session();
+    let (at, values, _) = shape_edge(&mut s);
+    let effect = add_filter(&mut s, json!({"filter": "bevel"}));
+    assert_eq!(filter_of(&s, effect), Filter::DistanceBevel(Bevel::LIBRARY), "the library defaults");
+    assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Bevel");
+    let value = |at: (u32, u32)| values[at.0 as usize];
+
+    // Inwards over a tenth of the tile (12.8 texels here)
+    let (edge, outside) = (roughness(&mut s, at(0)), roughness(&mut s, at(3)));
+    assert!(edge < value(at(0)) * 0.2, "down at the edge: {edge} vs {}", value(at(0)));
+    assert!((outside - value(at(3))).abs() < 2e-3, "outside untouched");
+
+    set(&mut s, effect, json!({"distance": 0.1}));
+    let (near, further) = (roughness(&mut s, at(1)), roughness(&mut s, at(6)));
+    assert!(near > 0.8 && further > value(at(6)) && near > further, "rises around the shapes: {near} {further}");
+    assert!((roughness(&mut s, at(-2)) - value(at(-2))).abs() < 2e-3, "inside untouched");
+
+    set(&mut s, effect, json!({"smoothing": 2.0, "blurMode": "uniform"}));
+    let smoothed = roughness(&mut s, at(1));
+    assert!((smoothed - near).abs() > 1e-3, "smoothing blurs the slope: {smoothed} vs {near}");
+    set(&mut s, effect, json!({"cornerType": "angular", "wrap": true}));
+    refused(&mut s, effect, &[json!({"cornerType": "square"}), json!({"blurMode": "even"}), json!({"wrap": 1})]);
+    set(&mut s, effect, json!({"distance": -3.0, "smoothing": 9.0}));
+    let expected = Bevel { wrap: true, distance: -1.0, corner: BevelCorner::Angular, smoothing: 5.0, blur: BevelBlur::Uniform };
+    assert_eq!(filter_of(&s, effect), Filter::DistanceBevel(expected), "values clamp");
+
+    execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap();
+    assert_eq!(filter_of(&s, effect), Filter::DistanceBevel(Bevel::LIBRARY));
+    let old: Filter = serde_json::from_value(json!({"Bevel": {"width": 16.0}})).unwrap();
+    assert_eq!(old, Filter::Bevel { width: 16.0, wrap: false }, "a bevel saved before keeps its width");
+}
+
+/// Bevel Smooth: a ramp from the edge outwards (shapes white), inwards (around them black) or across it (mid gray on it)
+#[test]
+fn bevel_smooth_ramps_from_the_edge() {
+    let mut s = session();
+    let (at, _, _) = shape_edge(&mut s);
+    let effect = add_filter(&mut s, json!({"filter": "bevelSmooth"}));
+    assert_eq!(filter_of(&s, effect), Filter::BevelSmooth(BevelSmooth::LIBRARY), "the library defaults");
+    assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Bevel Smooth");
+    set(&mut s, effect, json!({"smoothing": 0.0}));
+
+    let (inside, near, further) = (roughness(&mut s, at(-3)), roughness(&mut s, at(1)), roughness(&mut s, at(6)));
+    assert_eq!(inside, 1.0, "out: the shapes stay white");
+    assert!(near > further && further > 0.0 && near < 1.0, "fades outwards: {near} {further}");
+
+    set(&mut s, effect, json!({"direction": "in"}));
+    let (outside, inner) = (roughness(&mut s, at(3)), roughness(&mut s, at(-3)));
+    assert!(outside == 0.0 && inner > 0.0 && inner < 1.0, "in: rises inwards: {outside} {inner}");
+
+    set(&mut s, effect, json!({"direction": "inOut"}));
+    let (edge_in, edge_out) = (roughness(&mut s, at(0)), roughness(&mut s, at(1)));
+    assert!(edge_in > 0.5 && edge_out < 0.5 && edge_in - edge_out < 0.2, "across: mid gray at the edge: {edge_in} {edge_out}");
+
+    set(&mut s, effect, json!({"curveOffset": 0.5}));
+    assert!(roughness(&mut s, at(0)) > edge_in, "the offset raises the ramp");
+    refused(&mut s, effect, &[json!({"direction": "up"}), json!({"wrap": "yes"})]);
+    set(&mut s, effect, json!({"distance": 2.0, "smoothing": 20.0, "maskThreshold": -1.0, "distanceMapMultiplier": 4.0, "curveShape": 5.0}));
+    let Filter::BevelSmooth(smooth) = filter_of(&s, effect) else { panic!() };
+    assert_eq!(
+        (smooth.direction, smooth.distance, smooth.smoothing, smooth.threshold, smooth.multiplier, smooth.curve_shape),
+        (BevelDirection::InOut, 0.3, 10.0, 0.0, 1.0, 1.0),
+        "values clamp"
+    );
+}
+
+/// Directional Distance: a trail fading away from the shapes towards its Angle, none against it
+#[test]
+fn directional_distance_trails_one_way() {
+    let mut s = session();
+    let (at, _, outward) = shape_edge(&mut s);
+    let effect = add_filter(&mut s, json!({"filter": "directionalDistance"}));
+    assert_eq!(filter_of(&s, effect), Filter::DirectionalDistance(DirectionalDistance::LIBRARY), "the library defaults");
+    assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Directional Distance");
+
+    // Along the row, away from the shapes
+    let away = if outward > 0 { 0.0 } else { 180.0 };
+    set(&mut s, effect, json!({"angle": away, "distance": 0.05}));
+    let (inside, near, further) = (roughness(&mut s, at(-2)), roughness(&mut s, at(1)), roughness(&mut s, at(4)));
+    assert_eq!(inside, 1.0, "the shapes are white");
+    assert!(near > further && further > 0.0, "fades away from them: {near} {further}");
+
+    set(&mut s, effect, json!({"contrast": 0.5}));
+    assert_eq!(roughness(&mut s, at(1)), 1.0, "contrast hardens the near trail");
+    set(&mut s, effect, json!({"angle": away + 180.0, "contrast": 0.0}));
+    assert!(roughness(&mut s, at(1)) < near, "against the angle the edge gets less trail");
+    set(&mut s, effect, json!({"distance": 1.0, "angle": -90.0, "contrast": 3.0, "distanceMapMultiplier": -1.0}));
+    let expected = DirectionalDistance { distance: 0.3, angle: 270.0, contrast: 1.0, multiplier: 0.0 };
+    assert_eq!(filter_of(&s, effect), Filter::DirectionalDistance(expected), "values clamp, the angle wraps");
+}
+
+/// Warp: library defaults, the former Directional Warp id, Previous Input moving texels by their values, blended directions, old saves
+#[test]
+fn warp_modes_move_texels_their_way() {
+    let mut s = session();
+    execute(&mut s, "layer.add.fill", &json!({"color": [0.5, 0.5, 0.5], "roughness": 0.25})).unwrap();
+    execute(&mut s, "layer.fill.set", &json!({"channel": "roughness", "procedural": "gradient"})).unwrap();
+    let row = SIZE / 2;
+    let before: Vec<f32> = (0..SIZE).map(|x| roughness(&mut s, (x, row))).collect();
+    let after = |s: &mut Session| -> Vec<f32> { (0..SIZE).map(|x| roughness(s, (x, row))).collect() };
+    let moved = |values: &[f32]| values.iter().zip(&before).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+
+    let effect = add_filter(&mut s, json!({"filter": "warp"}));
+    assert_eq!(filter_of(&s, effect), Filter::SourceWarp(SourceWarp::LIBRARY), "the library defaults");
+    assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Warp");
+    set(&mut s, effect, json!({"intensity": 0.05, "divider": 1}));
+    let warped = after(&mut s);
+    assert!(moved(&warped) > 0.01 && warped.iter().all(|v| v.is_finite()), "the noise moves texels: {}", moved(&warped));
+    set(&mut s, effect, json!({"intensity": 0.0}));
+    assert!(moved(&after(&mut s)) < 2e-3, "no intensity, no move");
+
+    // Along the gradient where it rises: a texel above mid gray reads further up it, so it gets lighter
+    let rising = |x: usize| (x - 8..x + 8).all(|k| before[k + 1] > before[k]);
+    let falling = |x: usize| (x - 8..x + 8).all(|k| before[k + 1] < before[k]);
+    let light = |x: &usize| (0.6..0.85).contains(&before[*x]);
+    let (texel, angle) = match (8..SIZE as usize - 8).find(|x| light(x) && rising(*x)) {
+        Some(x) => (x, 0.0),
+        None => ((8..SIZE as usize - 8).find(|x| light(x) && falling(*x)).unwrap(), 180.0),
+    };
+    set(&mut s, effect, json!({"intensity": 0.05, "warpMode": "directional", "angle": angle, "sourceMode": "previousInput"}));
+    let directional = after(&mut s);
+    assert!(directional[texel] > before[texel] + 0.01, "{} -> {}", before[texel], directional[texel]);
+    set(&mut s, effect, json!({"sourceMode": "customNoise"}));
+    assert!(moved(&after(&mut s)) < 2e-3, "an unlinked custom noise is flat: nothing moves");
+
+    set(&mut s, effect, json!({"warpMode": "multiDirectional", "sourceMode": "defaultNoise", "directions": 2, "blendingMode": "max"}));
+    let max = after(&mut s);
+    set(&mut s, effect, json!({"blendingMode": "min"}));
+    let min = after(&mut s);
+    set(&mut s, effect, json!({"blendingMode": "average"}));
+    let average = after(&mut s);
+    assert!(max.iter().zip(&min).all(|(max, min)| max + 1e-4 >= *min) && max.iter().zip(&min).any(|(max, min)| max - min > 0.01), "Max over Min");
+    assert!(average.iter().zip(max.iter().zip(&min)).all(|(average, (max, min))| *average <= max + 2e-3 && *average >= min - 2e-3), "the average between");
+    set(&mut s, effect, json!({"blendingMode": "chain", "directions": 4}));
+    assert!(after(&mut s).iter().all(|v| v.is_finite()));
+
+    refused(&mut s, effect, &[json!({"warpMode": "spiral"}), json!({"directions": 3}), json!({"blendingMode": "sum"}), json!({"sourceMode": "image"})]);
+    set(&mut s, effect, json!({"intensity": 5.0, "angle": -90.0, "sourceTiling": 99.0, "sourceBlur": -1.0, "seed": 7}));
+    let Filter::SourceWarp(warp) = filter_of(&s, effect) else { panic!() };
+    assert_eq!((warp.intensity, warp.angle, warp.source.tiling, warp.source.blur, warp.seed), (1.0, 270.0, 16.0, 0.0, 7), "values clamp, the angle wraps");
+    assert_eq!((warp.mode, warp.blending, warp.directions), (WarpMode::MultiDirectional, WarpBlending::Chain, 4));
+
+    let former = add_filter(&mut s, json!({"filter": "warpDirectional"}));
+    let directional = SourceWarp { mode: WarpMode::Directional, ..SourceWarp::LIBRARY };
+    assert_eq!(filter_of(&s, former), Filter::SourceWarp(directional), "the former id adds a Directional Warp");
+
+    // Saved before the modes: loads as it was, and Restore defaults gives the warp of its mode
+    let saved = json!({"DirectionalWarp": {"intensity": 8.0, "angle": 30.0, "scale": 4.0, "seed": 3}});
+    let old: Filter = serde_json::from_value(saved.clone()).unwrap();
+    assert_eq!(old, Filter::DirectionalWarp { intensity: 8.0, angle: 30.0, scale: 4.0, seed: 3, divider: 1 });
+    assert_eq!(serde_json::to_value(&old).unwrap(), saved, "saves as before");
+    s.doc.project.effect_mut(former).unwrap().kind = EffectKind::Filter(old);
+    execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": former.0})).unwrap();
+    assert_eq!(filter_of(&s, former), Filter::SourceWarp(directional));
+}

@@ -31,6 +31,7 @@ mod pattern_context;
 pub mod projector_cover;
 pub mod projector_depth;
 pub mod projector_view;
+mod shape_distance;
 mod soft_box;
 pub mod solo;
 pub mod store;
@@ -40,6 +41,7 @@ mod tile_pattern;
 mod tile_random_stream;
 mod timber;
 pub mod warp;
+mod warp_texel;
 
 pub use below::{BelowCache, StackKey};
 pub use display::{DisplayKind, kinds_for, tile_bytes};

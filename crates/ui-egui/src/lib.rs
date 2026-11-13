@@ -26,6 +26,7 @@ mod fill_panel;
 mod fill_pictures;
 mod fill_placement;
 mod fill_symmetry_panel;
+mod filter_properties;
 mod filter_slot;
 mod folder_properties;
 pub mod fonts;

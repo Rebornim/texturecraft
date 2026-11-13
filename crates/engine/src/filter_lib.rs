@@ -5,8 +5,8 @@
 use serde_json::{Value, json};
 use texturecraft_core::{Channel, EffectKind, Fill, Filter, Levels, Procedural, ProceduralKind, Projection, Source};
 
-use crate::commands::{CommandSpec, always, bad, color_of, color_param, f32p, u64p};
-use crate::{Result, cmd};
+use crate::commands::{CommandSpec, always, bad, color_of, color_param, f32p, has_layer, u64p};
+use crate::{Result, Session, cmd};
 
 /// A filter of the library.
 #[derive(Clone, Copy, Debug)]
@@ -82,20 +82,66 @@ pub fn find(id: &str) -> Option<&'static FilterDef> {
 }
 
 pub fn specs() -> Vec<CommandSpec> {
-    vec![cmd!(
-        "filter.list",
-        "List filters",
-        [],
-        None,
-        "{} — the filter library: id, label, group, whether masks take it, default parameters",
-        always,
-        |_, _| Ok(Value::Array(
-            FILTERS
-                .iter()
-                .map(|f| json!({"id": f.id, "label": f.label, "group": f.group, "mask": f.mask, "defaults": build(f.id, &Value::Null).ok()}))
-                .collect()
-        ))
-    )]
+    vec![
+        cmd!(
+            "effect.filter.restoreDefaults",
+            "Restore defaults",
+            [],
+            None,
+            "{effect?: filter effect id, default the selected effect} — its filter's parameters back to their defaults (name, channels and blending stay) in one undo step; no step when they are already; returns {changed}",
+            has_layer,
+            restore_defaults
+        ),
+        cmd!(
+            "filter.list",
+            "List filters",
+            [],
+            None,
+            "{} — the filter library: id, label, group, whether masks take it, default parameters",
+            always,
+            |_, _| Ok(Value::Array(
+                FILTERS
+                    .iter()
+                    .map(|f| json!({"id": f.id, "label": f.label, "group": f.group, "mask": f.mask, "defaults": build(f.id, &Value::Null).ok()}))
+                    .collect()
+            ))
+        ),
+    ]
+}
+
+/// The filter `effect.filter.restoreDefaults` works on: its id and the library defaults of the filter it is (None: an empty filter)
+fn filter_defaults(s: &Session, p: &Value) -> Result<(texturecraft_core::LayerId, Option<Filter>)> {
+    const CMD: &str = "effect.filter.restoreDefaults";
+    let effect = crate::mask_cmds::effect_id(s, p, CMD)?;
+    let filter = match s.doc.project.effect(effect) {
+        Some((_, texturecraft_core::Effect { kind: EffectKind::Filter(filter), .. })) => filter,
+        Some(_) => return Err(bad(CMD, format!("effect {} is not a filter", effect.0))),
+        None => return Err(bad(CMD, format!("no effect {}", effect.0))),
+    };
+    let defaults = match find(filter.label()) {
+        Some(def) => match build(def.id, &Value::Null)? {
+            EffectKind::Filter(defaults) => Some(defaults),
+            _ => None,
+        },
+        None => None,
+    };
+    Ok((effect, defaults))
+}
+
+/// Puts a filter effect's parameters back to their library defaults in one undo step
+fn restore_defaults(s: &mut Session, p: &Value) -> Result<Value> {
+    let (effect, defaults) = filter_defaults(s, p)?;
+    let current = s.doc.project.effect(effect).map(|(_, found)| &found.kind);
+    let Some(defaults) = defaults.filter(|defaults| current != Some(&EffectKind::Filter(defaults.clone()))) else {
+        return Ok(json!({"changed": false}));
+    };
+    s.edit("Restore defaults", |s| {
+        if let Some(edited) = s.doc.project.effect_mut(effect) {
+            edited.kind = EffectKind::Filter(defaults);
+        }
+        Ok(())
+    })?;
+    Ok(json!({"changed": true}))
 }
 
 /// The effect for library filter `id` with its defaults, then the parameters in `p`.
@@ -116,12 +162,12 @@ pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
         "histogramScan" => Filter::HistogramScan { position: 0.5, contrast: 0.5 },
         "histogramRange" => Filter::HistogramRange { range: 0.5, position: 0.5 },
         "histogramShift" => Filter::HistogramShift { offset: 0.25 },
-        "warp" => Filter::Warp { intensity: 16.0, scale: 4.0, seed: 1 },
+        "warp" => Filter::Warp { intensity: 16.0, scale: 4.0, seed: 1, divider: 1 },
         "blurDirectional" => Filter::DirectionalBlur { radius: 16.0, angle: 0.0 },
-        "slopeBlur" => Filter::SlopeBlur { radius: 16.0, scale: 4.0, seed: 1 },
+        "slopeBlur" => Filter::SlopeBlur { radius: 16.0, scale: 4.0, seed: 1, divider: 1 },
         "highPass" => Filter::HighPass { radius: 8.0 },
         "edgeDetect" => Filter::EdgeDetect { width: 2.0 },
-        "warpDirectional" => Filter::DirectionalWarp { intensity: 16.0, angle: 0.0, scale: 4.0, seed: 1 },
+        "warpDirectional" => Filter::DirectionalWarp { intensity: 16.0, angle: 0.0, scale: 4.0, seed: 1, divider: 1 },
         "grayscale" => Filter::Grayscale,
         "normalInvert" => Filter::NormalInvert,
         "bevel" => Filter::Bevel { width: 16.0 },
@@ -177,7 +223,7 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         Filter::HistogramScan { position, contrast } => vec![("position", "Position", *position, 0.0, 1.0), ("contrast", "Contrast", *contrast, 0.0, 1.0)],
         Filter::HistogramRange { range, position } => vec![("range", "Range", *range, 0.0, 1.0), ("position", "Position", *position, 0.0, 1.0)],
         Filter::HistogramShift { offset } => vec![("offset", "Offset", *offset, -1.0, 1.0)],
-        Filter::Warp { intensity, scale, seed } => {
+        Filter::Warp { intensity, scale, seed, .. } => {
             vec![
                 ("intensity", "Intensity (texels at 2K)", *intensity, 0.0, 128.0),
                 ("scale", "Noise scale", *scale, 0.5, 64.0),
@@ -187,7 +233,7 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         Filter::DirectionalBlur { radius, angle } => {
             vec![("radius", "Intensity (texels at 2K)", *radius, 0.0, 128.0), ("angle", "Angle (degrees)", *angle, 0.0, 360.0)]
         }
-        Filter::SlopeBlur { radius, scale, seed } => {
+        Filter::SlopeBlur { radius, scale, seed, .. } => {
             vec![
                 ("radius", "Intensity (texels at 2K)", *radius, 0.0, 128.0),
                 ("scale", "Slope scale", *scale, 0.5, 64.0),
@@ -196,7 +242,7 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         }
         Filter::HighPass { radius } => vec![("radius", "Intensity (texels at 2K)", *radius, 0.0, 128.0)],
         Filter::EdgeDetect { width } => vec![("width", "Width (texels at 2K)", *width, 0.0, 64.0)],
-        Filter::DirectionalWarp { intensity, angle, scale, seed } => {
+        Filter::DirectionalWarp { intensity, angle, scale, seed, .. } => {
             vec![
                 ("intensity", "Intensity (texels at 2K)", *intensity, 0.0, 128.0),
                 ("angle", "Angle (degrees)", *angle, 0.0, 360.0),
@@ -219,7 +265,7 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         Filter::ReplaceColor { tolerance, softness, .. } => {
             vec![("tolerance", "Tolerance", *tolerance, 0.0, 1.0), ("softness", "Softness", *softness, 0.0, 1.0)]
         }
-        Filter::Invert | Filter::ColorBalance { .. } | Filter::GradientMap { .. } | Filter::Grayscale | Filter::NormalInvert => Vec::new(),
+        Filter::Invert | Filter::ColorBalance { .. } | Filter::GradientMap { .. } | Filter::Grayscale | Filter::NormalInvert | Filter::Empty => Vec::new(),
     }
 }
 
@@ -235,13 +281,20 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             *slot = u32::try_from(v).unwrap_or(u32::MAX);
         }
     };
+    let divider = |slot: &mut u16| -> Result<()> {
+        if p.get("divider").is_some() {
+            let value = u64p(p, "divider").and_then(|value| u16::try_from(value).ok()).filter(|value| Filter::DIVIDERS.contains(value));
+            *slot = value.ok_or_else(|| bad(cmd, "`divider` must be 1, 10, 100 or 1000"))?;
+        }
+        Ok(())
+    };
     let angle = |slot: &mut f32| {
         if let Some(v) = f32p(p, "angle") {
             *slot = v.rem_euclid(360.0);
         }
     };
     match f {
-        Filter::Invert | Filter::Grayscale | Filter::NormalInvert => {}
+        Filter::Invert | Filter::Grayscale | Filter::NormalInvert | Filter::Empty => {}
         Filter::Threshold { level } => set(level, "level", 0.0, 1.0),
         Filter::Blur { radius } => set(radius, "radius", 0.0, 256.0),
         Filter::Sharpen { amount } => set(amount, "amount", 0.0, 10.0),
@@ -285,19 +338,21 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             set(position, "position", 0.0, 1.0);
         }
         Filter::HistogramShift { offset } => set(offset, "offset", -1.0, 1.0),
-        Filter::Warp { intensity, scale, seed: s } => {
+        Filter::Warp { intensity, scale, seed: s, divider: d } => {
             set(intensity, "intensity", 0.0, 256.0);
             set(scale, "scale", 0.01, 1000.0);
             seed(s);
+            divider(d)?;
         }
         Filter::DirectionalBlur { radius, angle: a } => {
             set(radius, "radius", 0.0, 256.0);
             angle(a);
         }
-        Filter::SlopeBlur { radius, scale, seed: s } => {
+        Filter::SlopeBlur { radius, scale, seed: s, divider: d } => {
             set(radius, "radius", 0.0, 256.0);
             set(scale, "scale", 0.01, 1000.0);
             seed(s);
+            divider(d)?;
         }
         Filter::HighPass { radius } => set(radius, "radius", 0.0, 256.0),
         Filter::EdgeDetect { width } | Filter::Bevel { width } => set(width, "width", 0.0, 256.0),
@@ -324,11 +379,12 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             set(ambient, "ambient", 0.0, 10.0);
             set(occlusion, "occlusion", 0.0, 1.0);
         }
-        Filter::DirectionalWarp { intensity, angle: a, scale, seed: s } => {
+        Filter::DirectionalWarp { intensity, angle: a, scale, seed: s, divider: d } => {
             set(intensity, "intensity", 0.0, 256.0);
             angle(a);
             set(scale, "scale", 0.01, 1000.0);
             seed(s);
+            divider(d)?;
         }
     }
     Ok(())

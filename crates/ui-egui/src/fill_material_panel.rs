@@ -109,7 +109,7 @@ pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
 }
 
 /// A channel's name on its pill: the reference strip's short Title Case words, the full name where it has none
-fn pill_name(channel: Channel) -> &'static str {
+pub(crate) fn pill_name(channel: Channel) -> &'static str {
     match channel {
         Channel::BaseColor => "Color",
         Channel::Metallic => "Metal",

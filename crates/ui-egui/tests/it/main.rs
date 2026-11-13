@@ -52,4 +52,5 @@ mod start_window;
 mod tool_availability;
 mod toolbar;
 
+mod filter_card;
 mod symmetry;

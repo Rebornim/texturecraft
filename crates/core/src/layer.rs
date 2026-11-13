@@ -1,6 +1,6 @@
 //! Layers, masks, effects and fill sources.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -1011,6 +1011,9 @@ pub enum Filter {
         intensity: f32,
         scale: f32,
         seed: u32,
+        /// Divides `intensity` (1, 10, 100 or 1000) for fine displacements; 1 in projects saved before it
+        #[serde(default = "unit_divider", skip_serializing_if = "is_unit_divider")]
+        divider: u16,
     },
     /// Blur along one direction: `radius` in texels at 2K, `angle` in degrees.
     DirectionalBlur {
@@ -1023,6 +1026,9 @@ pub enum Filter {
         radius: f32,
         scale: f32,
         seed: u32,
+        /// Divides `radius` like [`Filter::Warp`]'s divider
+        #[serde(default = "unit_divider", skip_serializing_if = "is_unit_divider")]
+        divider: u16,
     },
     /// The detail finer than `radius` (texels at 2K) around mid gray: the value minus its blur.
     HighPass {
@@ -1038,6 +1044,9 @@ pub enum Filter {
         angle: f32,
         scale: f32,
         seed: u32,
+        /// Divides `intensity` like [`Filter::Warp`]'s divider
+        #[serde(default = "unit_divider", skip_serializing_if = "is_unit_divider")]
+        divider: u16,
     },
     /// Colors to their luminance (scalars and masks unchanged).
     Grayscale,
@@ -1076,6 +1085,18 @@ pub enum Filter {
         tolerance: f32,
         softness: f32,
     },
+    /// No filter picked yet: changes nothing
+    Empty,
+}
+
+/// The divider of projects saved before intensities had one
+fn unit_divider() -> u16 {
+    1
+}
+
+/// Whether `divider` leaves its intensity as it is (not saved then)
+fn is_unit_divider(divider: &u16) -> bool {
+    *divider == 1
 }
 
 /// Push `x` (0..1) towards 1 (`amount` > 0) or 0 (`amount` < 0); `amount` in −1..1.
@@ -1149,6 +1170,9 @@ pub fn gradient(colors: &[[f32; 3]], t: f32) -> Option<[f32; 3]> {
 }
 
 impl Filter {
+    /// The choices of an intensity's divider
+    pub const DIVIDERS: [u16; 4] = [1, 10, 100, 1000];
+
     /// Whether the filter reads neighbouring texels (the compositor runs it over a region).
     pub fn is_neighbourhood(&self) -> bool {
         matches!(
@@ -1265,7 +1289,8 @@ impl Filter {
             | Filter::Bevel { .. }
             | Filter::Mosaic { .. }
             | Filter::Glow { .. }
-            | Filter::BakedLighting { .. } => return None,
+            | Filter::BakedLighting { .. }
+            | Filter::Empty => return None,
         })
     }
 
@@ -1297,6 +1322,7 @@ impl Filter {
             Filter::Glow { .. } => "Glow",
             Filter::BakedLighting { .. } => "Baked Lighting",
             Filter::ReplaceColor { .. } => "Replace Color",
+            Filter::Empty => "Filter (empty)",
         }
     }
 
@@ -1554,18 +1580,39 @@ pub struct Effect {
     /// A content effect's channels that blend apart from `blend` and `opacity` (none in projects saved before they existed)
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub channel_blends: BTreeMap<Channel, ChannelBlend>,
+    /// A content effect's channels it leaves as they are (none in projects saved before they could be switched off)
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub off_channels: BTreeSet<Channel>,
 }
 
 impl Effect {
     pub fn new(id: LayerId, kind: EffectKind) -> Effect {
         // Generators and fills that build a mask usually add on top of the background.
-        Effect { id, name: kind.name().to_string(), visible: true, kind, blend: BlendMode::Normal, opacity: 1.0, channel_blends: BTreeMap::new() }
+        Effect {
+            id,
+            name: kind.name().to_string(),
+            visible: true,
+            kind,
+            blend: BlendMode::Normal,
+            opacity: 1.0,
+            channel_blends: BTreeMap::new(),
+            off_channels: BTreeSet::new(),
+        }
     }
 
     /// How the effect blends on `channel` of its layer's content, or on its mask (`None`)
     pub fn blend_of(&self, channel: Option<Channel>) -> ChannelBlend {
         let shared = ChannelBlend { mode: self.blend, opacity: self.opacity };
         channel.and_then(|channel| self.channel_blends.get(&channel).copied()).unwrap_or(shared)
+    }
+
+    /// How the effect lays onto `channel` when composited: [`Self::blend_of`], at no opacity on a channel it is switched off for
+    pub fn applied_blend(&self, channel: Option<Channel>) -> ChannelBlend {
+        let blend = self.blend_of(channel);
+        match channel {
+            Some(channel) if self.off_channels.contains(&channel) => ChannelBlend { opacity: 0.0, ..blend },
+            _ => blend,
+        }
     }
 }
 
@@ -1715,7 +1762,11 @@ mod tests {
         assert!(cb.point(c, [0.05; 3]).unwrap()[0] > 0.2 && cb.point(c, [0.95; 3]).unwrap()[2] > 0.99);
         assert!(close(Filter::Invert.point(ChannelKind::Signed, [0.5; 3]).unwrap(), [-0.5; 3]));
         assert_eq!(Filter::Invert.point(ChannelKind::NormalMap, [0.5, 0.5, 1.0]), Some([0.5, 0.5, 1.0]));
-        for f in [Filter::Blur { radius: 1.0 }, Filter::Warp { intensity: 1.0, scale: 1.0, seed: 0 }, Filter::DirectionalBlur { radius: 1.0, angle: 0.0 }] {
+        for f in [
+            Filter::Blur { radius: 1.0 },
+            Filter::Warp { intensity: 1.0, scale: 1.0, seed: 0, divider: 1 },
+            Filter::DirectionalBlur { radius: 1.0, angle: 0.0 },
+        ] {
             assert!(f.is_neighbourhood() && f.point(c, [0.5; 3]).is_none());
         }
         let nan = Filter::ContrastLuminosity { contrast: f32::NAN, luminosity: f32::NAN };

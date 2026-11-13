@@ -457,6 +457,15 @@ fn painted_text(harness: &Harness<'_, TextureCraftApp>, text: &str) -> bool {
     harness.output().shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Text(painted) if painted.galley.text() == text))
 }
 
+/// The Affects list: the combo box on the row of the painted "Affects" label, not the Layers channel list
+pub(crate) fn affects_list<'a>(harness: &'a Harness<'_, TextureCraftApp>) -> Option<egui_kittest::Node<'a>> {
+    let row = harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+        egui::Shape::Text(painted) if painted.galley.text() == "Affects" => Some(painted.pos.y + painted.galley.size().y / 2.0),
+        _ => None,
+    })?;
+    harness.get_all(by().role(Role::ComboBox)).find(|node| (node.rect().center().y - row).abs() < 4.0)
+}
+
 /// A fill layer with a content levels, selected
 fn content_levels_harness() -> (Harness<'static, TextureCraftApp>, LayerId) {
     let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
@@ -487,7 +496,8 @@ fn a_content_levels_picks_the_channel_it_affects() {
         "the switch shows red only"
     );
 
-    harness.get_by_role_and_label(Role::ComboBox, "Base color").click();
+    assert_eq!(affects_list(&harness).and_then(|list| list.accesskit_node().label()).as_deref(), Some("Base color"));
+    affects_list(&harness).unwrap().click();
     harness.run_steps(3);
     assert!(
         harness.query_by(|node| node.role() == Role::ListBoxOption && node.label().as_deref() == Some("Normal")).is_none(),
@@ -505,7 +515,7 @@ fn a_content_levels_picks_the_channel_it_affects() {
 fn clamp_is_one_undo_step() {
     let (mut harness, effect) = levels_harness("effect.add.levels", json!({"target": "mask"}));
     assert!(painted_text(&harness, "LEVELS - MASK"));
-    assert!(harness.query_by_role_and_label(Role::ComboBox, "Base color").is_none(), "a mask has no channel to pick");
+    assert!(affects_list(&harness).is_none() && !painted_text(&harness, "Affects"), "a mask has no channel to pick");
     assert!(!levels(&harness, effect).clamp, "new levels carry on past their handles");
     let steps = undo_steps(&harness);
     harness.get_by_role_and_label(Role::CheckBox, "Clamp").click();
@@ -518,7 +528,7 @@ fn clamp_is_one_undo_step() {
 fn the_affects_list_leaves_the_view_its_wheel_and_closes_on_escape_or_a_click_outside() {
     let (mut harness, effect) = content_levels_harness();
     let open_list = |harness: &mut Harness<'_, TextureCraftApp>| {
-        harness.get_by_role_and_label(Role::ComboBox, "Base color").click();
+        affects_list(harness).unwrap().click();
         harness.run_steps(3);
         assert!(egui::Popup::is_any_open(&harness.ctx), "the Affects list opens");
     };
@@ -541,7 +551,7 @@ fn the_affects_list_leaves_the_view_its_wheel_and_closes_on_escape_or_a_click_ou
     assert!(!egui::Popup::is_any_open(&harness.ctx), "Escape closes the list");
 
     open_list(&mut harness);
-    let combo = harness.get_by_role_and_label(Role::ComboBox, "Base color").rect();
+    let combo = affects_list(&harness).unwrap().rect();
     let outside = egui::pos2(combo.min.x - 400.0, combo.min.y);
     harness.hover_at(outside);
     for pressed in [true, false] {

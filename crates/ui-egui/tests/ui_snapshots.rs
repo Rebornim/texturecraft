@@ -2046,6 +2046,134 @@ fn shape_filter_snapshots() {
 }
 
 #[test]
+#[ignore = "writes the simple filters (screen 23) to TC_UI_SNAPSHOTS; run with --ignored"]
+/// Screen 23: Clamp, Smoothstep, Invert, Height Adjust, Histogram Scan, Histogram Shift, Sharpen and Posterize, one hovered switch
+fn simple_filter_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::core::LayerId;
+    use texturecraft_engine::{StackTarget, execute};
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "mask.add.white", &json!({"layer": layer.clone()})).unwrap();
+    let mut add = |filter: &str| {
+        let params = json!({"layer": layer.clone(), "target": "mask", "filter": filter});
+        LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap())
+    };
+    let effects = [
+        "clamp",
+        "smoothstep",
+        "invert",
+        "heightAdjust",
+        "histogramScan",
+        "histogramShift",
+        "sharpen",
+        "posterize",
+        "pixelate",
+        "fxaa",
+        "blur",
+        "blurDirectional",
+        "highPass",
+        "grayscale",
+        "anisotropicKuwahara",
+    ]
+    .map(|id| (id, add(id)));
+    // PBR Validate goes on the layer content (its Color and Metal pills)
+    let params = json!({"layer": layer.clone(), "target": "content", "filter": "pbrValidate"});
+    let pbr = LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap());
+    // Height To Normal too (its Normal pill), once with world units and once without
+    let params = json!({"layer": layer.clone(), "target": "content", "filter": "heightToNormal"});
+    let normals = [(); 2].map(|_| LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap()));
+    execute(&mut session, "effect.set", &json!({"effect": normals[1].0, "useWorldUnits": false})).unwrap();
+    // Color Match too (its Color pill): a new one, and one reading its Input and Image Input
+    let params = json!({"layer": layer.clone(), "target": "content", "filter": "colorMatch"});
+    let matches = [(); 2].map(|_| LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap()));
+    execute(&mut session, "effect.set", &json!({"effect": matches[1].0, "sourceColorMode": "input", "targetColorMode": "imageInput"})).unwrap();
+    execute(&mut session, "layer.select", &json!({"layer": layer})).unwrap();
+    session.target = StackTarget::Effect(effects[0].1);
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    for (name, effect) in effects {
+        harness.state_mut().session.target = StackTarget::Effect(effect);
+        harness.run_steps(6);
+        save(&mut harness, &output_dir, &format!("filter-{name}"));
+    }
+    let shown = |name: &str| effects.iter().find(|(shown, _)| *shown == name).map(|(_, effect)| *effect).unwrap();
+    harness.state_mut().session.target = StackTarget::Effect(shown("posterize"));
+    harness.run_steps(4);
+    let alpha = harness.get_by_role_and_label(egui::Role::CheckBox, "Apply to Alpha").rect();
+    harness.hover_at(alpha.center());
+    save(&mut harness, &output_dir, "filter-posterize-hovered");
+    harness.state_mut().session.target = StackTarget::Effect(shown("highPass"));
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Working space / Mask").click();
+    harness.run_steps(2);
+    harness.get_by_label("sRGB (from ACEScg)").hover();
+    save(&mut harness, &output_dir, "filter-highPass-open");
+    harness.key_press(egui::Key::Escape);
+    let custom = json!({"effect": shown("grayscale").0, "channelInput": "customInput"});
+    execute(&mut harness.state_mut().session, "effect.set", &custom).unwrap();
+    harness.state_mut().session.target = StackTarget::Effect(shown("grayscale"));
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "filter-grayscale-custom");
+    let custom = json!({"effect": shown("anisotropicKuwahara").0, "extractDirection": "customInput"});
+    execute(&mut harness.state_mut().session, "effect.set", &custom).unwrap();
+    harness.state_mut().session.target = StackTarget::Effect(shown("anisotropicKuwahara"));
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "filter-anisotropicKuwahara-custom");
+    harness.state_mut().session.target = StackTarget::Effect(pbr);
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "filter-pbrValidate");
+    let metal = harness.get_by_role_and_label(egui::Role::RadioButton, "70-100% Reflective").rect();
+    harness.hover_at(metal.center());
+    save(&mut harness, &output_dir, "filter-pbrValidate-hovered");
+    for (effect, name) in normals.into_iter().zip(["heightToNormal", "heightToNormal-intensity"]) {
+        harness.state_mut().session.target = StackTarget::Effect(effect);
+        harness.run_steps(6);
+        save(&mut harness, &output_dir, &format!("filter-{name}"));
+    }
+    let world = harness.get_by_role_and_label(egui::Role::CheckBox, "Use World Units").rect();
+    harness.hover_at(world.center());
+    save(&mut harness, &output_dir, "filter-heightToNormal-hovered");
+    for (effect, name) in matches.into_iter().zip(["colorMatch", "colorMatch-inputs"]) {
+        harness.state_mut().session.target = StackTarget::Effect(effect);
+        harness.run_steps(6);
+        save(&mut harness, &output_dir, &format!("filter-{name}"));
+    }
+    harness.state_mut().session.target = StackTarget::Effect(matches[0]);
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Average").click();
+    harness.run_steps(2);
+    harness.get_by_label("Input").hover();
+    save(&mut harness, &output_dir, "filter-colorMatch-open");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, theme) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            for name in ["heightAdjust", "histogramScan", "pixelate", "blurDirectional", "highPass", "grayscale", "anisotropicKuwahara"] {
+                harness.state_mut().session.target = StackTarget::Effect(shown(name));
+                harness.run_steps(6);
+                save(&mut harness, &output_dir, &format!("filter-{name}-{theme}"));
+            }
+            harness.state_mut().session.target = StackTarget::Effect(pbr);
+            harness.run_steps(6);
+            save(&mut harness, &output_dir, &format!("filter-pbrValidate-{theme}"));
+            harness.state_mut().session.target = StackTarget::Effect(normals[0]);
+            harness.run_steps(6);
+            save(&mut harness, &output_dir, &format!("filter-heightToNormal-{theme}"));
+            harness.state_mut().session.target = StackTarget::Effect(matches[0]);
+            harness.run_steps(6);
+            save(&mut harness, &output_dir, &format!("filter-colorMatch-{theme}"));
+        }
+    }
+}
+
+#[test]
 #[ignore = "writes the filter image inputs (screen 22) to TC_UI_SNAPSHOTS; run with --ignored"]
 /// Screen 22: Bevel Smooth's Distance Map uniform, read from an anchor point and its picker open; Warp's Custom Noise from a pattern
 fn image_input_snapshots() {

@@ -281,9 +281,12 @@ pub(crate) fn push_effect_with(
         if let Some(n) = name_param(p) {
             e.name = n.to_string();
         }
-        // A lighting filter only lights the base color: the other channels' pills start off
-        if content && matches!(&e.kind, EffectKind::Filter(f) if f.lights_base_color()) {
-            e.off_channels = Channel::ALL.into_iter().filter(|channel| *channel != Channel::BaseColor).collect();
+        // A filter that changes only some channels (lighting, validation) starts with the other channels' pills off
+        if content
+            && let EffectKind::Filter(f) = &e.kind
+            && let Some(on) = f.starts_on()
+        {
+            e.off_channels = Channel::ALL.into_iter().filter(|channel| !on.contains(channel)).collect();
         }
         if !content {
             l.mask.get_or_insert_with(|| Mask::new(bg)).effects.push(e);

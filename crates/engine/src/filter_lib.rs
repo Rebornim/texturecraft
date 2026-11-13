@@ -4,9 +4,10 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, CurvePreset, DirectionalDistance, EffectKind, Fill, Filter, GradientInput,
-    GrayscaleMode, Levels, MaskOutline, Mirror, MirrorCorner, MirrorMode, OutlinePosition, Procedural, ProceduralKind, Projection, Source, SourceWarp,
-    StylizedLighting, ThresholdMode, WarpBlending, WarpMode, WarpSourceMode,
+    AnisotropicKuwahara, Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, ColorMatch, ConversionMode, CurvePreset, DirectionalDistance,
+    EffectKind, Fill, Filter, GradientInput, GrayscaleConversion, GrayscaleMode, HeightToNormal, HighpassSpace, Levels, MaskOutline, Mirror, MirrorCorner,
+    MirrorMode, OutlinePosition, PbrValidate, Procedural, ProceduralKind, Projection, Source, SourceColorMode, SourceWarp, StylizedLighting, TargetColorMode,
+    ThresholdMode, ValidationMode, WarpBlending, WarpMode, WarpSourceMode,
 };
 
 use crate::commands::{CommandSpec, always, bad, boolp, color_of, color_param, f32p, has_layer, strp, u64p};
@@ -58,6 +59,8 @@ pub const FILTERS: &[FilterDef] = &[
     def("gradientDynamic", "Gradient Dynamic", "Adjustments", true),
     def("posterize", "Posterize", "Adjustments", true),
     def("clamp", "Clamp", "Adjustments", true),
+    def("smoothstep", "Smoothstep", "Adjustments", true),
+    def("heightAdjust", "Height Adjust", "Adjustments", true),
     def("histogramScan", "Histogram Scan", "Adjustments", true),
     def("histogramRange", "Histogram Range", "Adjustments", true),
     def("histogramShift", "Histogram Shift", "Adjustments", true),
@@ -69,11 +72,16 @@ pub const FILTERS: &[FilterDef] = &[
     def("bakedLighting", "Baked Lighting Stylized", "Adjustments", false),
     def("bakedLightingEnvironment", "Baked Lighting Environment", "Adjustments", false),
     def("replaceColor", "Replace Color", "Adjustments", false),
+    def("pbrValidate", "PBR Validate (Metallic Roughness)", "Adjustments", false),
+    def("heightToNormal", "Height To Normal", "Adjustments", false),
+    def("colorMatch", "Color Match", "Adjustments", false),
     def("blur", "Blur", "Blur and sharpen", true),
     def("blurDirectional", "Blur Directional", "Blur and sharpen", true),
     def("slopeBlur", "Blur Slope", "Blur and sharpen", true),
     def("sharpen", "Sharpen", "Blur and sharpen", true),
     def("highPass", "Highpass", "Blur and sharpen", true),
+    def("fxaa", "FXAA (Anti-aliasing)", "Blur and sharpen", true),
+    def("anisotropicKuwahara", "Anisotropic Kuwahara", "Blur and sharpen", true),
     def("bevel", "Bevel", "Blur and sharpen", true),
     def("bevelSmooth", "Bevel Smooth", "Blur and sharpen", true),
     def("directionalDistance", "Directional Distance", "Blur and sharpen", true),
@@ -81,7 +89,7 @@ pub const FILTERS: &[FilterDef] = &[
     def("dropShadow", "Drop Shadow", "Blur and sharpen", true),
     def("maskOutline", "Mask Outline", "Blur and sharpen", true),
     def("warp", "Warp", "Distort", true),
-    def("mosaic", "Mosaic", "Distort", true),
+    def("mosaic", "Pixelate", "Distort", true),
     def("mirror", "Mirror", "Distort", true),
     def("matFinishGrind", "MatFinish Grind", "Material finish", false),
     def("matFinishRaw", "MatFinish Raw", "Material finish", false),
@@ -203,7 +211,7 @@ pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
         "warp" if is_directional_warp(id) => Filter::SourceWarp(SourceWarp { mode: WarpMode::Directional, ..SourceWarp::LIBRARY }),
         "invert" => Filter::Invert,
         "threshold" => Filter::Threshold { level: 0.01, mode: ThresholdMode::Greater },
-        "blur" => Filter::Blur { radius: 2.0, wrap: false },
+        "blur" => Filter::Blur { radius: 0.3 * Filter::BLUR_INTENSITY, wrap: false },
         "sharpen" => Filter::Sharpen { amount: 1.0 },
         "hsl" => Filter::Hsl { hue: 0.0, saturation: 0.0, lightness: 0.0, perceptive: true },
         "contrastLuminosity" => Filter::ContrastLuminosity { contrast: 0.0, luminosity: 0.0 },
@@ -212,22 +220,29 @@ pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
         "gradientMap" => library_gradient(),
         "gradientCurve" => Filter::GradientCurve { preset: CurvePreset::Round, invert: false, balance: 0.5, contrast: 0.0 },
         "gradientDynamic" => Filter::GradientDynamic { vertical: false, position: 0.0, color: [0.6; 3] },
-        "posterize" => Filter::Posterize { levels: 4.0 },
-        "clamp" => Filter::Clamp { min: 0.2, max: 0.8 },
-        "histogramScan" => Filter::HistogramScan { position: 0.5, contrast: 0.5 },
+        "posterize" => Filter::Posterize { levels: 8.0, alpha: false },
+        "clamp" => Filter::Clamp { min: 0.0, max: 1.0 },
+        "smoothstep" => Filter::Smoothstep { min: 0.0, max: 1.0 },
+        "heightAdjust" => Filter::HeightAdjust { invert: false, offset: 0.0, multiply: 1.0 },
+        "histogramScan" => Filter::HistogramScan { position: 0.5, contrast: 0.0, invert_position: false },
         "histogramRange" => Filter::HistogramRange { range: 0.5, position: 0.5 },
-        "histogramShift" => Filter::HistogramShift { offset: 0.25 },
+        "histogramShift" => Filter::HistogramShift { offset: 0.0 },
         "warp" => Filter::SourceWarp(SourceWarp::LIBRARY),
         "blurDirectional" => Filter::DirectionalBlur { radius: 16.0, angle: 0.0 },
         "slopeBlur" => Filter::SlopeBlur { radius: 16.0, scale: 4.0, seed: 1, divider: 1 },
-        "highPass" => Filter::HighPass { radius: 8.0 },
+        "highPass" => Filter::HighPass { radius: 3.0 * Filter::BLUR_INTENSITY, space: HighpassSpace::Working, alpha: false },
         "edgeDetect" => Filter::EdgeDetect { width: 2.0 },
-        "grayscale" => Filter::Grayscale,
+        "grayscale" => Filter::GrayscaleConversion(GrayscaleConversion::LIBRARY),
         "normalInvert" => Filter::NormalInvert,
         "bevel" => Filter::DistanceBevel(Bevel::LIBRARY),
         "bevelSmooth" => Filter::BevelSmooth(BevelSmooth::LIBRARY),
         "directionalDistance" => Filter::DirectionalDistance(DirectionalDistance::LIBRARY),
-        "mosaic" => Filter::Mosaic { size: 32.0 },
+        "mosaic" => Filter::Mosaic { size: Filter::pixel_size(32.0), alpha: true },
+        "fxaa" => Filter::Fxaa { alpha: false },
+        "anisotropicKuwahara" => Filter::AnisotropicKuwahara(AnisotropicKuwahara::LIBRARY),
+        "pbrValidate" => Filter::PbrValidate(PbrValidate::LIBRARY),
+        "heightToNormal" => Filter::HeightToNormal(HeightToNormal::LIBRARY),
+        "colorMatch" => Filter::ColorMatch(ColorMatch::LIBRARY),
         "mirror" => Filter::Mirror(Mirror::LIBRARY),
         "maskOutline" => Filter::MaskOutline(MaskOutline::LIBRARY),
         "glow" => Filter::HaloGlow { on_mask: false, precise: false, width: 0.15, spread: 0.0, opacity: 1.0, color: GLOW_COLOR },
@@ -282,8 +297,8 @@ fn mat_finish(id: &str) -> Option<Fill> {
 /// Scalar parameters of a filter for editors: (param key, label, value, min, max); colors (color balance, gradient map) and the HSL hue have their own editors
 pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f32)> {
     match f {
-        Filter::Blur { radius, .. } => vec![("radius", "Intensity (texels at 2K)", *radius, 0.0, 128.0)],
-        Filter::Sharpen { amount } => vec![("amount", "Amount", *amount, 0.0, 5.0)],
+        Filter::Blur { radius, .. } => vec![("intensity", "Blur Intensity", *radius / Filter::BLUR_INTENSITY, 0.0, 16.0)],
+        Filter::Sharpen { amount } => vec![("amount", "Sharpen Intensity", *amount, 0.0, 4.0)],
         Filter::Threshold { level, .. } => vec![("level", "Threshold", *level, 0.0, 1.0)],
         Filter::Hsl { saturation, lightness, .. } => {
             vec![("saturation", "Saturation", *saturation, -1.0, 1.0), ("lightness", "Lightness", *lightness, -1.0, 1.0)]
@@ -291,11 +306,13 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         Filter::ContrastLuminosity { contrast, luminosity } => {
             vec![("contrast", "Contrast", *contrast, -1.0, 1.0), ("luminosity", "Luminosity", *luminosity, -1.0, 1.0)]
         }
-        Filter::Posterize { levels } => vec![("levels", "Steps", *levels, 2.0, 64.0)],
-        Filter::Clamp { min, max } => vec![("min", "Minimum", *min, 0.0, 1.0), ("max", "Maximum", *max, 0.0, 1.0)],
-        Filter::HistogramScan { position, contrast } => vec![("position", "Position", *position, 0.0, 1.0), ("contrast", "Contrast", *contrast, 0.0, 1.0)],
+        Filter::Posterize { levels, .. } => vec![("levels", "Colors Amount", *levels, 2.0, 64.0)],
+        Filter::Clamp { min, max } => vec![("min", "Min", *min, 0.0, 1.0), ("max", "Max", *max, 0.0, 1.0)],
+        Filter::Smoothstep { min, max } => vec![("min", "Minimum", *min, 0.0, 1.0), ("max", "Maximum", *max, 0.0, 1.0)],
+        Filter::HeightAdjust { offset, multiply, .. } => vec![("offset", "Offset", *offset, -1.0, 1.0), ("multiply", "Multiply", *multiply, 0.0, 10.0)],
+        Filter::HistogramScan { position, contrast, .. } => vec![("position", "Position", *position, 0.0, 1.0), ("contrast", "Contrast", *contrast, 0.0, 1.0)],
         Filter::HistogramRange { range, position } => vec![("range", "Range", *range, 0.0, 1.0), ("position", "Position", *position, 0.0, 1.0)],
-        Filter::HistogramShift { offset } => vec![("offset", "Offset", *offset, -1.0, 1.0)],
+        Filter::HistogramShift { offset } => vec![("position", "Position", Filter::shift_position(*offset), 0.0, 1.0)],
         Filter::Warp { intensity, scale, seed, .. } => {
             vec![
                 ("intensity", "Intensity (texels at 2K)", *intensity, 0.0, 128.0),
@@ -304,7 +321,7 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
             ]
         }
         Filter::DirectionalBlur { radius, angle } => {
-            vec![("radius", "Intensity (texels at 2K)", *radius, 0.0, 128.0), ("angle", "Angle (degrees)", *angle, 0.0, 360.0)]
+            vec![("intensity", "Intensity", *radius / Filter::BLUR_INTENSITY, 0.0, 16.0), ("angle", "Angle", *angle, 0.0, 360.0)]
         }
         Filter::SlopeBlur { radius, scale, seed, .. } => {
             vec![
@@ -313,7 +330,25 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
                 ("seed", "Seed", *seed as f32, 0.0, 999.0),
             ]
         }
-        Filter::HighPass { radius } => vec![("radius", "Intensity (texels at 2K)", *radius, 0.0, 128.0)],
+        Filter::HighPass { radius, .. } => vec![("intensity", "Radius", *radius / Filter::BLUR_INTENSITY, 0.0, 16.0)],
+        Filter::GrayscaleConversion(conversion) => conversion_params(conversion),
+        Filter::AnisotropicKuwahara(kuwahara) => vec![
+            ("radius", "Radius", kuwahara.radius, 0.0, AnisotropicKuwahara::MAX_RADIUS),
+            ("smoothness", "Smoothness", kuwahara.smoothness, 0.0, 1.0),
+            ("sharpness", "Sharpness", kuwahara.sharpness, 0.25, 1.0),
+            ("tensorSmoothness", "Tensor Smoothness", kuwahara.tensor_smoothness, 0.0, 1.0),
+            ("anisotropy", "Anisotropy", kuwahara.anisotropy, 0.0, 1.0),
+            ("angle", "Anisotropy Angle", kuwahara.angle, 0.0, 360.0),
+        ],
+        Filter::Grayscale => conversion_params(&GrayscaleConversion::of_luminance()),
+        Filter::HeightToNormal(filter) if filter.world_units => vec![
+            ("surfaceSize", "Surface Size (cm)", filter.surface_size, 1.0, HeightToNormal::MAX_SURFACE_SIZE),
+            ("heightDepth", "Height Depth (cm)", filter.height_depth, 0.0, HeightToNormal::MAX_HEIGHT_DEPTH),
+        ],
+        Filter::HeightToNormal(filter) => vec![("normalIntensity", "Normal Intensity", filter.intensity, 0.0, HeightToNormal::MAX_INTENSITY)],
+        Filter::ColorMatch(matcher) => {
+            vec![("hue", "Hue", matcher.hue, 0.0, 360.0), ("chroma", "Chroma", matcher.chroma, 0.0, 1.0), ("luma", "Luma", matcher.luma, 0.0, 1.0)]
+        }
         Filter::EdgeDetect { width } => vec![("width", "Width (texels at 2K)", *width, 0.0, 64.0)],
         Filter::DirectionalWarp { intensity, angle, scale, seed, .. } => {
             vec![
@@ -324,7 +359,7 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
             ]
         }
         Filter::Bevel { width, .. } => vec![("width", "Width (texels at 2K)", *width, 0.0, 128.0)],
-        Filter::Mosaic { size } => vec![("size", "Cell size (texels at 2K)", *size, 1.0, 256.0)],
+        Filter::Mosaic { size, .. } => vec![("pixelsAmount", "Pixels Amount", Filter::pixels_amount(*size), 1.0, 128.0)],
         Filter::DistanceBevel(bevel) => vec![("distance", "Distance", bevel.distance, -1.0, 1.0), ("smoothing", "Smoothing", bevel.smoothing, 0.0, 5.0)],
         Filter::SourceWarp(warp) => {
             let mut params = vec![("seed", "Seed", warp.seed as f32, 0.0, 999.0), ("intensity", "Intensity", warp.intensity, 0.0, 1.0)];
@@ -403,8 +438,57 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         ],
         Filter::GradientCurve { balance, contrast, .. } => vec![("balance", "Balance", *balance, 0.0, 1.0), ("contrast", "Contrast", *contrast, 0.0, 1.0)],
         Filter::GradientDynamic { position, .. } => vec![("position", "Gradient Input Position", *position, 0.0, 1.0)],
-        Filter::Invert | Filter::ColorBalance { .. } | Filter::ColorCorrect { .. } | Filter::Grayscale | Filter::NormalInvert | Filter::Empty => Vec::new(),
+        Filter::Invert
+        | Filter::InvertOff
+        | Filter::ColorBalance { .. }
+        | Filter::ColorCorrect { .. }
+        | Filter::NormalInvert
+        | Filter::Fxaa { .. }
+        | Filter::PbrValidate(_)
+        | Filter::Empty => Vec::new(),
     }
+}
+
+/// Grayscale Conversion's sliders: Balance and Contrast, then the Channels Weights' Red, Green, Blue and Alpha in that mode
+fn conversion_params(conversion: &GrayscaleConversion) -> Vec<(&'static str, &'static str, f32, f32, f32)> {
+    let mut params = vec![("balance", "Balance", conversion.balance, 0.0, 1.0), ("contrast", "Contrast", conversion.contrast, 0.0, 1.0)];
+    if conversion.mode == ConversionMode::ChannelsWeights {
+        let [red, green, blue, alpha] = conversion.weights;
+        params.extend([
+            ("red", "Red", red, 0.0, 1.0),
+            ("green", "Green", green, 0.0, 1.0),
+            ("blue", "Blue", blue, 0.0, 1.0),
+            ("alpha", "Alpha", alpha, 0.0, 1.0),
+        ]);
+    }
+    params
+}
+
+/// The keys `effect.set` takes for Grayscale Conversion
+const CONVERSION_KEYS: [&str; 9] = ["channelInput", "invert", "balance", "contrast", "mode", "red", "green", "blue", "alpha"];
+
+/// Set the Grayscale Conversion settings given in `p`: channelInput (currentChannel or customInput), invert, balance, contrast, mode and the red, green, blue and alpha weights
+fn apply_conversion(p: &Value, conversion: &mut GrayscaleConversion, cmd: &str) -> Result<()> {
+    if p.get("channelInput").is_some() {
+        conversion.custom_input = match strp(p, "channelInput").unwrap_or_default() {
+            "currentChannel" => false,
+            "customInput" => true,
+            _ => return Err(bad(cmd, "`channelInput` must be currentChannel or customInput")),
+        };
+    }
+    if p.get("invert").is_some() {
+        conversion.invert = boolp(p, "invert").ok_or_else(|| bad(cmd, "`invert` must be true or false"))?;
+    }
+    conversion.mode = choice(p, "mode", &ConversionMode::ALL, ConversionMode::id, cmd)?.unwrap_or(conversion.mode);
+    let [red, green, blue, alpha] = &mut conversion.weights;
+    for (key, slot) in
+        [("balance", &mut conversion.balance), ("contrast", &mut conversion.contrast), ("red", red), ("green", green), ("blue", blue), ("alpha", alpha)]
+    {
+        if let Some(v) = f32p(p, key) {
+            *slot = v.clamp(0.0, 1.0);
+        }
+    }
+    Ok(())
 }
 
 /// Make a gradient use its first `wanted` colors: an evenly spaced ramp keeps its places from now on, and each added color starts as the last one at 1
@@ -491,6 +575,18 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
         }
         Ok(())
     };
+    // A blur's Intensity in the reference workflow's unit (radius in texels at 2K ÷ Filter::BLUR_INTENSITY)
+    let blur_intensity = |radius: &mut f32| {
+        if let Some(intensity) = f32p(p, "intensity") {
+            *radius = (intensity * Filter::BLUR_INTENSITY).clamp(0.0, 256.0);
+        }
+    };
+    let switch = |slot: &mut bool, key: &str| -> Result<()> {
+        if p.get(key).is_some() {
+            *slot = boolp(p, key).ok_or_else(|| bad(cmd, format!("`{key}` must be true or false")))?;
+        }
+        Ok(())
+    };
     let shade = |slot: &mut [f32; 3]| -> Result<()> {
         if p.get("color").is_some() {
             let v = color_param(cmd, p, "color")?.ok_or_else(|| bad(cmd, "`color` must be a color ([r, g, b] linear or \"#rrggbb\")"))?;
@@ -504,7 +600,70 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
         }
     };
     match f {
-        Filter::Invert | Filter::Grayscale | Filter::NormalInvert | Filter::Empty => {}
+        Filter::Invert | Filter::InvertOff => {
+            if p.get("invert").is_some() {
+                let on = boolp(p, "invert").ok_or_else(|| bad(cmd, "`invert` must be true or false"))?;
+                *f = if on { Filter::Invert } else { Filter::InvertOff };
+            }
+        }
+        Filter::NormalInvert | Filter::Empty => {}
+        // A Grayscale saved before the settings takes its luminance weights on its first edit, so it looks the same
+        Filter::Grayscale => {
+            if CONVERSION_KEYS.iter().any(|key| p.get(key).is_some()) {
+                let mut conversion = GrayscaleConversion::of_luminance();
+                apply_conversion(p, &mut conversion, cmd)?;
+                *f = Filter::GrayscaleConversion(conversion);
+            }
+        }
+        Filter::GrayscaleConversion(conversion) => apply_conversion(p, conversion, cmd)?,
+        Filter::AnisotropicKuwahara(kuwahara) => {
+            if p.get("extractDirection").is_some() {
+                kuwahara.custom_input = match strp(p, "extractDirection").unwrap_or_default() {
+                    "currentChannel" => false,
+                    "customInput" => true,
+                    _ => return Err(bad(cmd, "`extractDirection` must be currentChannel or customInput")),
+                };
+            }
+            set(&mut kuwahara.radius, "radius", 0.0, AnisotropicKuwahara::MAX_RADIUS);
+            set(&mut kuwahara.smoothness, "smoothness", 0.0, 1.0);
+            set(&mut kuwahara.sharpness, "sharpness", 0.25, 1.0);
+            set(&mut kuwahara.tensor_smoothness, "tensorSmoothness", 0.0, 1.0);
+            set(&mut kuwahara.anisotropy, "anisotropy", 0.0, 1.0);
+            angle(&mut kuwahara.angle);
+        }
+        Filter::PbrValidate(validate) => {
+            validate.mode = choice(p, "validationMode", &ValidationMode::ALL, ValidationMode::id, cmd)?.unwrap_or(validate.mode);
+            for (key, slot, allowed) in [
+                ("albedoDarkRangeThreshold", &mut validate.albedo_dark, PbrValidate::ALBEDO_DARK),
+                ("metalReflectanceRange", &mut validate.metal_low, PbrValidate::METAL_LOW),
+            ] {
+                if p.get(key).is_some() {
+                    let value = u64p(p, key).and_then(|value| u8::try_from(value).ok()).filter(|value| allowed.contains(value));
+                    *slot = value.ok_or_else(|| bad(cmd, format!("`{key}` must be {} or {}", allowed[0], allowed[1])))?;
+                }
+            }
+        }
+        Filter::HeightToNormal(filter) => {
+            switch(&mut filter.overwrite, "overwriteExistingNormal")?;
+            switch(&mut filter.world_units, "useWorldUnits")?;
+            set(&mut filter.surface_size, "surfaceSize", 1.0, HeightToNormal::MAX_SURFACE_SIZE);
+            set(&mut filter.height_depth, "heightDepth", 0.0, HeightToNormal::MAX_HEIGHT_DEPTH);
+            set(&mut filter.intensity, "normalIntensity", 0.0, HeightToNormal::MAX_INTENSITY);
+        }
+        Filter::ColorMatch(matcher) => {
+            matcher.source_mode = choice(p, "sourceColorMode", &SourceColorMode::ALL, SourceColorMode::id, cmd)?.unwrap_or(matcher.source_mode);
+            matcher.target_mode = choice(p, "targetColorMode", &TargetColorMode::ALL, TargetColorMode::id, cmd)?.unwrap_or(matcher.target_mode);
+            for (key, slot) in [("sourceColor", &mut matcher.source_color), ("targetColor", &mut matcher.target_color)] {
+                if p.get(key).is_some() {
+                    let v = color_param(cmd, p, key)?.ok_or_else(|| bad(cmd, format!("`{key}` must be a color ([r, g, b] linear or \"#rrggbb\")")))?;
+                    *slot = v.map(|x| x.clamp(0.0, 1.0));
+                }
+            }
+            switch(&mut matcher.custom_variation, "customColorVariation")?;
+            set(&mut matcher.hue, "hue", 0.0, 360.0);
+            set(&mut matcher.chroma, "chroma", 0.0, 1.0);
+            set(&mut matcher.luma, "luma", 0.0, 1.0);
+        }
         Filter::Threshold { level, mode } => {
             set(level, "level", 0.0, 1.0);
             if p.get("mode").is_some() {
@@ -574,6 +733,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
         }
         Filter::Blur { radius, wrap: w } => {
             set(radius, "radius", 0.0, 256.0);
+            blur_intensity(radius);
             wrap(w)?;
         }
         Filter::Sharpen { amount } => set(amount, "amount", 0.0, 10.0),
@@ -667,20 +827,34 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             set(position, "position", 0.0, 1.0);
             shade(color)?;
         }
-        Filter::Posterize { levels } => set(levels, "levels", 2.0, 64.0),
-        Filter::Clamp { min, max } => {
+        Filter::Posterize { levels, alpha } => {
+            set(levels, "levels", 2.0, 64.0);
+            switch(alpha, "applyToAlpha")?;
+        }
+        Filter::Clamp { min, max } | Filter::Smoothstep { min, max } => {
             set(min, "min", 0.0, 1.0);
             set(max, "max", 0.0, 1.0);
         }
-        Filter::HistogramScan { position, contrast } => {
+        Filter::HeightAdjust { invert, offset, multiply } => {
+            switch(invert, "invert")?;
+            set(offset, "offset", -1.0, 1.0);
+            set(multiply, "multiply", 0.0, 10.0);
+        }
+        Filter::HistogramScan { position, contrast, invert_position } => {
             set(position, "position", 0.0, 1.0);
             set(contrast, "contrast", 0.0, 1.0);
+            switch(invert_position, "invertPosition")?;
         }
         Filter::HistogramRange { range, position } => {
             set(range, "range", 0.0, 1.0);
             set(position, "position", 0.0, 1.0);
         }
-        Filter::HistogramShift { offset } => set(offset, "offset", -1.0, 1.0),
+        Filter::HistogramShift { offset } => {
+            set(offset, "offset", -1.0, 1.0);
+            if let Some(position) = f32p(p, "position") {
+                *offset = Filter::shift_offset(position);
+            }
+        }
         Filter::Warp { intensity, scale, seed: s, divider: d } => {
             set(intensity, "intensity", 0.0, 256.0);
             set(scale, "scale", 0.01, 1000.0);
@@ -689,6 +863,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
         }
         Filter::DirectionalBlur { radius, angle: a } => {
             set(radius, "radius", 0.0, 256.0);
+            blur_intensity(radius);
             angle(a);
         }
         Filter::SlopeBlur { radius, scale, seed: s, divider: d } => {
@@ -697,13 +872,25 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             seed(s);
             divider(d)?;
         }
-        Filter::HighPass { radius } => set(radius, "radius", 0.0, 256.0),
+        Filter::HighPass { radius, space, alpha } => {
+            set(radius, "radius", 0.0, 256.0);
+            blur_intensity(radius);
+            *space = choice(p, "colorSpace", &HighpassSpace::ALL, HighpassSpace::id, cmd)?.unwrap_or(*space);
+            switch(alpha, "applyToAlpha")?;
+        }
         Filter::EdgeDetect { width } => set(width, "width", 0.0, 256.0),
         Filter::Bevel { width, wrap: w } => {
             set(width, "width", 0.0, 256.0);
             wrap(w)?;
         }
-        Filter::Mosaic { size } => set(size, "size", 1.0, 512.0),
+        Filter::Mosaic { size, alpha } => {
+            set(size, "size", 1.0, 2048.0);
+            if let Some(amount) = f32p(p, "pixelsAmount") {
+                *size = Filter::pixel_size(amount.round());
+            }
+            switch(alpha, "applyToAlpha")?;
+        }
+        Filter::Fxaa { alpha } => switch(alpha, "affectAlphaChannel")?,
         Filter::Glow { radius, amount } => {
             set(radius, "radius", 0.0, 256.0);
             set(amount, "amount", 0.0, 10.0);
@@ -793,7 +980,7 @@ mod tests {
             assert_eq!(find(f.label).map(|d| d.id), Some(f.id));
         }
         assert!(build("nope", &Value::Null).is_err());
-        let EffectKind::Filter(Filter::Posterize { levels }) = build("posterize", &json!({"levels": 1000})).unwrap() else { panic!() };
+        let EffectKind::Filter(Filter::Posterize { levels, .. }) = build("posterize", &json!({"levels": 1000})).unwrap() else { panic!() };
         assert_eq!(levels, 64.0);
         assert!(build("gradientMap", &json!({"colors": []})).is_err());
         assert!(build("colorBalance", &json!({"shadows": "x"})).is_err());

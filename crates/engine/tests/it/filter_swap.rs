@@ -179,7 +179,7 @@ fn a_mask_takes_grayscale_conversion() {
     execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "grayscale"})).unwrap();
 
     let swapped = effect(&s, id);
-    assert!(matches!(swapped.kind, EffectKind::Filter(Filter::Grayscale)), "{:?}", swapped.kind);
+    assert!(matches!(swapped.kind, EffectKind::Filter(Filter::GrayscaleConversion(_))), "{:?}", swapped.kind);
     assert_eq!(swapped.name, "Grayscale Conversion");
 }
 

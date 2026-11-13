@@ -3,9 +3,10 @@
 use egui::{Painter, Rect, Stroke, StrokeKind, Ui};
 use serde_json::{Value, json};
 use texturecraft_engine::core::{
-    Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, CurvePreset, DirectionalLight, EffectKind, Filter, GrayscaleMode, ImageInput, LayerId,
-    LightingOutput, MaskOutline, Mirror, MirrorCorner, MirrorMode, OutlinePosition, SourceWarp, StylizedLighting, ThresholdMode, WarpBlending, WarpMode,
-    WarpSourceMode,
+    AnisotropicKuwahara, Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, ColorMatch, ConversionMode, CurvePreset, DirectionalLight,
+    EffectKind, Filter, GrayscaleConversion, GrayscaleMode, HeightToNormal, HighpassSpace, ImageInput, LayerId, LightingOutput, MaskOutline, Mirror,
+    MirrorCorner, MirrorMode, OutlinePosition, PbrValidate, SourceColorMode, SourceWarp, StylizedLighting, TargetColorMode, ThresholdMode, ValidationMode,
+    WarpBlending, WarpMode, WarpSourceMode,
 };
 use texturecraft_engine::filter_lib::{build, find, scalar_params};
 
@@ -152,10 +153,28 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
         Filter::DistanceBevel(bevel) => return bevel_rows(app, sheet, id, bevel),
         Filter::BevelSmooth(smooth) => return bevel_smooth(app, sheet, id, smooth),
         Filter::SourceWarp(warp) => return source_warp(app, sheet, id, warp),
+        Filter::HighPass { radius, space, alpha } => return highpass(app, sheet, id, *radius, *space, *alpha),
+        Filter::GrayscaleConversion(conversion) => return grayscale_conversion(app, sheet, id, conversion),
+        Filter::Grayscale => return grayscale_conversion(app, sheet, id, &GrayscaleConversion::of_luminance()),
+        Filter::AnisotropicKuwahara(kuwahara) => return anisotropic_kuwahara(app, sheet, id, kuwahara),
+        Filter::PbrValidate(validate) => return pbr_validate(app, sheet, id, validate),
+        Filter::HeightToNormal(filter) => return height_to_normal(app, sheet, id, filter),
+        Filter::ColorMatch(matcher) => return color_match(app, sheet, id, matcher),
         _ => {}
     }
     let params = scalar_params(filter);
 
+    // Invert leads its filter's rows (Invert, Height Adjust)
+    let leading = match filter {
+        Filter::Invert | Filter::InvertOff => Some(*filter == Filter::Invert),
+        Filter::HeightAdjust { invert, .. } => Some(*invert),
+        _ => None,
+    };
+    if let Some(mut on) = leading
+        && sheet.toggle(tr("Invert"), &mut on)
+    {
+        set(app, "invert", json!(on), false);
+    }
     if let Some(&(_, label, value, _, _)) = params.iter().find(|(key, ..)| *key == "seed") {
         let mut seed = value as u32;
         if sheet.seed(tr(label), &mut seed) {
@@ -178,20 +197,175 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
         }
     }
 
-    // Blur and Bevel read past the texture's edges when they wrap
-    let wrap = match filter {
-        Filter::Blur { wrap, .. } => Some((tr("Blur Wrap"), *wrap)),
-        Filter::Bevel { wrap, .. } => Some((tr("Bevel Wrap"), *wrap)),
+    // Switches under the sliders: Blur and Bevel reading past the texture's edges, Posterize, Pixelate and FXAA changing the coverage, Histogram Scan's direction
+    let trailing = match filter {
+        Filter::Blur { wrap, .. } => Some(("wrap", tr("Blur Wrap"), *wrap)),
+        Filter::Bevel { wrap, .. } => Some(("wrap", tr("Bevel Wrap"), *wrap)),
+        Filter::Posterize { alpha, .. } => Some(("applyToAlpha", tr("Apply to Alpha"), *alpha)),
+        Filter::Mosaic { alpha, .. } => Some(("applyToAlpha", tr("Apply To Alpha"), *alpha)),
+        Filter::Fxaa { alpha } => Some(("affectAlphaChannel", tr("Affect Alpha Channel"), *alpha)),
+        Filter::HistogramScan { invert_position, .. } => Some(("invertPosition", tr("Invert Position"), *invert_position)),
         _ => None,
     };
-    if let Some((label, mut on)) = wrap
+    if let Some((key, label, mut on)) = trailing
         && sheet.toggle(label, &mut on)
     {
-        set(app, "wrap", json!(on), false);
+        set(app, key, json!(on), false);
     }
 
     // The color editors keep their swatches until their own screens
     sheet.embed(|ui| color_editors(app, ui, id, filter));
+}
+
+/// Highpass: Color Space, Radius (in Blur Intensity's unit) and Apply To Alpha
+fn highpass(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, radius: f32, space: HighpassSpace, alpha: bool) {
+    if let (Some(picked), _) = sheet.dropdown(tr("Color Space"), space, &HighpassSpace::ALL, |space| tr(space.label()).to_owned(), None) {
+        app.run("effect.set", json!({"effect": id, "colorSpace": picked.id()}));
+    }
+    slider_rows(app, sheet, id, &[("intensity", tr("Radius"), radius / Filter::BLUR_INTENSITY, 0.0..=16.0)]);
+    let mut alpha = alpha;
+    if sheet.toggle(tr("Apply To Alpha"), &mut alpha) {
+        app.run("effect.set", json!({"effect": id, "applyToAlpha": alpha}));
+    }
+}
+
+/// Grayscale Conversion: Channel Input (its Custom Input right under it), Invert, Balance, Contrast, Mode and the Channels Weights
+fn grayscale_conversion(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, conversion: &GrayscaleConversion) {
+    let inputs = [tr("Current Channel"), tr("Custom Input")];
+    if let Some(picked) = sheet.switch(tr("Channel Input"), &inputs, usize::from(conversion.custom_input)) {
+        app.run("effect.set", json!({"effect": id, "channelInput": if picked == 1 { "customInput" } else { "currentChannel" }}));
+    }
+    if conversion.custom_input {
+        input_slot(app, sheet, LayerId(id), ImageInput::CUSTOM_INPUT, false);
+    }
+    let mut invert = conversion.invert;
+    if sheet.toggle(tr("Invert"), &mut invert) {
+        app.run("effect.set", json!({"effect": id, "invert": invert}));
+    }
+    slider_rows(app, sheet, id, &[("balance", tr("Balance"), conversion.balance, 0.0..=1.0), ("contrast", tr("Contrast"), conversion.contrast, 0.0..=1.0)]);
+    if let (Some(picked), _) = sheet.dropdown(tr("Mode"), conversion.mode, &ConversionMode::ALL, |mode| tr(mode.label()).to_owned(), None) {
+        app.run("effect.set", json!({"effect": id, "mode": picked.id()}));
+    }
+    if conversion.mode == ConversionMode::ChannelsWeights {
+        let [red, green, blue, alpha] = conversion.weights;
+        let rows = [
+            ("red", tr("Red"), red, 0.0..=1.0),
+            ("green", tr("Green"), green, 0.0..=1.0),
+            ("blue", tr("Blue"), blue, 0.0..=1.0),
+            ("alpha", tr("Alpha"), alpha, 0.0..=1.0),
+        ];
+        slider_rows(app, sheet, id, &rows);
+    }
+}
+
+/// Anisotropic Kuwahara: Extract Direction (its Custom Input right under it), Radius, Smoothness, Sharpness, Tensor Smoothness, Anisotropy and its Angle
+fn anisotropic_kuwahara(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, kuwahara: &AnisotropicKuwahara) {
+    let inputs = [tr("Current Channel"), tr("Custom Input")];
+    if let Some(picked) = sheet.switch(tr("Extract Direction"), &inputs, usize::from(kuwahara.custom_input)) {
+        app.run("effect.set", json!({"effect": id, "extractDirection": if picked == 1 { "customInput" } else { "currentChannel" }}));
+    }
+    if kuwahara.custom_input {
+        input_slot(app, sheet, LayerId(id), ImageInput::CUSTOM_INPUT, false);
+    }
+    let rows = [
+        ("radius", tr("Radius"), kuwahara.radius, 0.0..=AnisotropicKuwahara::MAX_RADIUS),
+        ("smoothness", tr("Smoothness"), kuwahara.smoothness, 0.0..=1.0),
+        ("sharpness", tr("Sharpness"), kuwahara.sharpness, 0.25..=1.0),
+        ("tensorSmoothness", tr("Tensor Smoothness"), kuwahara.tensor_smoothness, 0.0..=1.0),
+        ("anisotropy", tr("Anisotropy"), kuwahara.anisotropy, 0.0..=1.0),
+    ];
+    slider_rows(app, sheet, id, &rows);
+    let mut angle = kuwahara.angle;
+    if let Some(merge) = sheet.angle(tr("Anisotropy Angle"), &mut angle, 0.0..=360.0) {
+        app.run("effect.set", json!({"effect": id, "angle": angle, "merge": merge}));
+    }
+}
+
+/// PBR Validate (Metallic Roughness): Validation Mode, Albedo Dark Range Threshold and Metal Reflectance Range, each label above its switch
+fn pbr_validate(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, validate: &PbrValidate) {
+    let modes: Vec<&str> = ValidationMode::ALL.iter().map(|mode| tr(mode.label())).collect();
+    let mode = ValidationMode::ALL.iter().position(|mode| *mode == validate.mode).unwrap_or_default();
+    if let Some(picked) = sheet.stacked_switch(tr("Validation Mode"), &modes, mode).and_then(|index| ValidationMode::ALL.get(index)) {
+        app.run("effect.set", json!({"effect": id, "validationMode": picked.id()}));
+    }
+    let dark = PbrValidate::ALBEDO_DARK.iter().position(|value| *value == validate.albedo_dark).unwrap_or_default();
+    if let Some(picked) = sheet.stacked_switch(tr("Albedo Dark Range Threshold"), &[tr("50 sRGB"), tr("30 sRGB")], dark) {
+        app.run("effect.set", json!({"effect": id, "albedoDarkRangeThreshold": PbrValidate::ALBEDO_DARK.get(picked)}));
+    }
+    let low = PbrValidate::METAL_LOW.iter().position(|value| *value == validate.metal_low).unwrap_or_default();
+    if let Some(picked) = sheet.stacked_switch(tr("Metal Reflectance Range"), &[tr("70-100% Reflective"), tr("60-100% Reflective")], low) {
+        app.run("effect.set", json!({"effect": id, "metalReflectanceRange": PbrValidate::METAL_LOW.get(picked)}));
+    }
+}
+
+/// Height To Normal: Overwrite Existing Normal, Use World Units, then Surface Size and Height Depth (whole cm) or Normal Intensity
+fn height_to_normal(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, filter: &HeightToNormal) {
+    for (key, label, on) in
+        [("overwriteExistingNormal", tr("Overwrite Existing Normal"), filter.overwrite), ("useWorldUnits", tr("Use World Units"), filter.world_units)]
+    {
+        let mut on = on;
+        if sheet.toggle(label, &mut on) {
+            app.run("effect.set", json!({"effect": id, key: on}));
+        }
+    }
+    let rows = if filter.world_units {
+        vec![
+            ("surfaceSize", tr("Surface Size (cm)"), filter.surface_size, 1.0..=HeightToNormal::MAX_SURFACE_SIZE, 0),
+            ("heightDepth", tr("Height Depth (cm)"), filter.height_depth, 0.0..=HeightToNormal::MAX_HEIGHT_DEPTH, 0),
+        ]
+    } else {
+        vec![("normalIntensity", tr("Normal Intensity"), filter.intensity, 0.0..=HeightToNormal::MAX_INTENSITY, 2)]
+    };
+    for (key, label, value, range, decimals) in rows {
+        let mut value = value;
+        if let Some(merge) = sheet.slider(label, &mut value, range, decimals) {
+            let value = if decimals == 0 { value.round() } else { value };
+            app.run("effect.set", json!({"effect": id, key: value, "merge": merge}));
+        }
+    }
+}
+
+/// Color Match: each Color Mode with its color or image slot right under it, Custom Color Variation and, while it is on, the Color Variation card (Hue with its dial, Chroma, Luma)
+fn color_match(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, matcher: &ColorMatch) {
+    let swatches = app.session.doc.project.swatches.clone();
+    let color = |app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, key: &str, label: &str, linear: [f32; 3]| {
+        let pick = sheet.color_bar_led(label, linear, app.picking_color, &swatches);
+        if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
+            app.run("effect.set", json!({"effect": id, key: picked, "merge": pick.merge}));
+        }
+    };
+    if let (Some(picked), _) = sheet.dropdown(tr("Source Color Mode"), matcher.source_mode, &SourceColorMode::ALL, |mode| tr(mode.label()).to_owned(), None) {
+        app.run("effect.set", json!({"effect": id, "sourceColorMode": picked.id()}));
+    }
+    match matcher.source_mode {
+        SourceColorMode::Parameter => color(app, sheet, "sourceColor", tr("Source Color"), matcher.source_color),
+        SourceColorMode::Input => input_slot(app, sheet, LayerId(id), ImageInput::SOURCE_INPUT, false),
+        SourceColorMode::Average => {}
+    }
+    let targets: Vec<&str> = TargetColorMode::ALL.iter().map(|mode| tr(mode.label())).collect();
+    let target = usize::from(matcher.target_mode == TargetColorMode::ImageInput);
+    if let Some(picked) = sheet.switch(tr("Target Color Mode"), &targets, target).and_then(|index| TargetColorMode::ALL.get(index)) {
+        app.run("effect.set", json!({"effect": id, "targetColorMode": picked.id()}));
+    }
+    match matcher.target_mode {
+        TargetColorMode::Parameter => color(app, sheet, "targetColor", tr("Target Color"), matcher.target_color),
+        TargetColorMode::ImageInput => input_slot(app, sheet, LayerId(id), ImageInput::TARGET_INPUT, false),
+    }
+    let mut custom = matcher.custom_variation;
+    if sheet.toggle(tr("Custom Color Variation"), &mut custom) {
+        app.run("effect.set", json!({"effect": id, "customColorVariation": custom}));
+    }
+    if !matcher.custom_variation {
+        return;
+    }
+    if sheet.card(tr("Color Variation"), Some(true)) {
+        let mut hue = matcher.hue;
+        if let Some(merge) = sheet.angle(tr("Hue"), &mut hue, 0.0..=360.0) {
+            app.run("effect.set", json!({"effect": id, "hue": hue, "merge": merge}));
+        }
+        slider_rows(app, sheet, id, &[("chroma", tr("Chroma"), matcher.chroma, 0.0..=1.0), ("luma", tr("Luma"), matcher.luma, 0.0..=1.0)]);
+    }
+    sheet.close_card();
 }
 
 /// Threshold: its level, then the Mode comparing a value with it (>, ≥, <, ≤)
@@ -794,10 +968,12 @@ fn intensity_row(
     edit
 }
 
-/// Decimals a parameter's value shows: whole numbers for counts, one for wide ranges
+/// Decimals a parameter's value shows: whole numbers for counts, two for blur intensities, one for wide ranges
 fn decimals(key: &str, min: f32, max: f32) -> usize {
-    if key == "levels" {
+    if matches!(key, "levels" | "pixelsAmount") {
         0
+    } else if key == "intensity" {
+        2
     } else if max - min > 10.0 {
         1
     } else {

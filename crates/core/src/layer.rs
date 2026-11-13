@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::curve_preset::CurvePreset;
 use crate::gradient_input::{GradientInput, ramp, shape};
 use crate::{
-    Backface, Bevel, BevelSmooth, BlendMode, Channel, ChannelKind, CompareSource, ContentsOffset, DepthCulling, DirectionalDistance, DirectionalLight,
-    FillSymmetry, MaskOutline, Mirror, Projector, ShapeCrop, SourceWarp, StylizedLighting, SunAndSky, ThresholdMode, lum,
+    AnisotropicKuwahara, Backface, Bevel, BevelSmooth, BlendMode, Channel, ChannelKind, ColorMatch, CompareSource, ContentsOffset, DepthCulling,
+    DirectionalDistance, DirectionalLight, FillSymmetry, GrayscaleConversion, HeightToNormal, HighpassSpace, MaskOutline, Mirror, PbrValidate, Projector,
+    ShapeCrop, SourceWarp, StylizedLighting, SunAndSky, ThresholdMode, lum,
 };
 
 mod curvature_detail;
@@ -911,6 +912,8 @@ pub enum Filter {
         amount: f32,
     },
     Invert,
+    /// Invert switched off: changes nothing until it is switched back on ([`Filter::Invert`])
+    InvertOff,
     Threshold {
         level: f32,
         /// Which side of `level` turns white; at or above it in projects saved before the modes
@@ -980,6 +983,20 @@ pub enum Filter {
     /// Quantize to `levels` steps (2..64).
     Posterize {
         levels: f32,
+        /// Steps the content's coverage too (Apply to Alpha); off in projects saved before it
+        #[serde(default, skip_serializing_if = "is_false")]
+        alpha: bool,
+    },
+    /// The values between `min` and `max` eased from black to white (smoothstep); outside them black or white
+    Smoothstep {
+        min: f32,
+        max: f32,
+    },
+    /// Heights flipped (`invert`), scaled by `multiply` and raised by `offset` around mid gray
+    HeightAdjust {
+        invert: bool,
+        offset: f32,
+        multiply: f32,
     },
     /// Keep values within `min..max`.
     Clamp {
@@ -991,6 +1008,9 @@ pub enum Filter {
     HistogramScan {
         position: f32,
         contrast: f32,
+        /// Scans from the other end: the position read as 1 − position (Invert Position); off in projects saved before it
+        #[serde(default, skip_serializing_if = "is_false")]
+        invert_position: bool,
     },
     /// The values squeezed towards `position`: `range` 1 keeps them, 0 sets them all to it.
     HistogramRange {
@@ -1029,6 +1049,12 @@ pub enum Filter {
     /// The detail finer than `radius` (texels at 2K) around mid gray: the value minus its blur.
     HighPass {
         radius: f32,
+        /// Color Space: colors filtered in sRGB from linear sRGB or ACEScg
+        #[serde(default, skip_serializing_if = "is_working_space")]
+        space: HighpassSpace,
+        /// Apply To Alpha: the content's coverage takes its detail too
+        #[serde(default, skip_serializing_if = "is_false")]
+        alpha: bool,
     },
     /// Gradient magnitude across `width` texels at 2K: edges light, flat areas black.
     EdgeDetect {
@@ -1044,8 +1070,10 @@ pub enum Filter {
         #[serde(default = "unit_divider", skip_serializing_if = "is_unit_divider")]
         divider: u16,
     },
-    /// Colors to their luminance (scalars and masks unchanged).
+    /// Colors to their luminance (scalars and masks unchanged): projects saved before Grayscale Conversion's settings.
     Grayscale,
+    /// The gray of every channel (or of its Custom Input) by its mode and weights, balanced, contrasted and maybe inverted.
+    GrayscaleConversion(GrayscaleConversion),
     /// Flip the green component of normal maps (OpenGL ↔ DirectX); other channels unchanged.
     NormalInvert,
     /// Shapes rounded off at their edges: values ramp up from 0 at a shape's edge to their own
@@ -1068,9 +1096,26 @@ pub enum Filter {
     Mirror(Mirror),
     /// A band along the edge where values cross a threshold
     MaskOutline(MaskOutline),
-    /// Square cells `size` texels at 2K across, each the value at its center.
+    /// Square cells `size` texels at 2K across, each the value at its center (Pixelate; see [`Filter::pixels_amount`])
     Mosaic {
         size: f32,
+        /// Steps the content's coverage into the cells too (Apply To Alpha); on in projects saved before the switch
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        alpha: bool,
+    },
+    /// Painterly smoothing along the strokes' direction: each texel the mean of the calmest sector around it
+    AnisotropicKuwahara(AnisotropicKuwahara),
+    /// Base colors outside the physically plausible ranges shown in red (reads the layer's metal)
+    PbrValidate(PbrValidate),
+    /// Height To Normal: the layer's Height turned into its Normal
+    HeightToNormal(HeightToNormal),
+    /// Color Match: the colors moved so a source color (the texture's mean by default) lands on a target color
+    ColorMatch(ColorMatch),
+    /// Stair-stepped edges smoothed by blending across them (FXAA)
+    Fxaa {
+        /// Smooths the content's coverage too (Affect Alpha Channel)
+        #[serde(default, skip_serializing_if = "is_false")]
+        alpha: bool,
     },
     /// Adds a blur of the values (`radius` texels at 2K) times `amount`: light bleeds around
     /// bright areas (projects saved before the halo glow below)
@@ -1148,6 +1193,10 @@ fn is_true(on: &bool) -> bool {
     *on
 }
 
+fn is_working_space(space: &HighpassSpace) -> bool {
+    *space == HighpassSpace::Working
+}
+
 fn is_false(on: &bool) -> bool {
     !*on
 }
@@ -1155,6 +1204,31 @@ fn is_false(on: &bool) -> bool {
 /// Whether `divider` leaves its intensity as it is (not saved then)
 fn is_unit_divider(divider: &u16) -> bool {
     *divider == 1
+}
+
+/// `x` (0..1) rounded to `levels` steps (2..64) from black to white
+pub fn posterize(x: f32, levels: f32) -> f32 {
+    let steps = (levels.clamp(2.0, 64.0).round() - 1.0).max(1.0);
+    let x = if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 };
+    (x * steps).round() / steps
+}
+
+/// 0 at or below `min`, 1 at or above `max`, eased between them (swapped bounds are read in order; equal bounds are a step)
+fn smoothstep(min: f32, max: f32, x: f32) -> f32 {
+    let (lo, hi) = (finite_or(min.min(max), 0.0), finite_or(min.max(max), 1.0));
+    if !x.is_finite() {
+        return 0.0;
+    }
+    if hi - lo <= 1e-6 {
+        return if x >= hi { 1.0 } else { 0.0 };
+    }
+    let t = ((x - lo) / (hi - lo)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// `v`, or `fallback` where it is not a number
+fn finite_or(v: f32, fallback: f32) -> f32 {
+    if v.is_finite() { v } else { fallback }
 }
 
 /// Push `x` (0..1) towards 1 (`amount` > 0) or 0 (`amount` < 0); `amount` in −1..1.
@@ -1257,6 +1331,35 @@ impl Filter {
     /// The most colors a gradient's Color Quantity uses
     pub const MAX_GRADIENT_COLORS: u8 = 10;
 
+    /// Histogram Shift's Position (0..1) for its `offset`: a shift back by 1 − position, so 1 shifts nothing (offsets above 0
+    /// saved before the Position read as themselves, the same shift but for white and black)
+    pub fn shift_position(offset: f32) -> f32 {
+        let offset = if offset.is_finite() { offset.clamp(-1.0, 1.0) } else { 0.0 };
+        if offset <= 0.0 { offset + 1.0 } else { offset }
+    }
+
+    /// The Histogram Shift offset a Position (0..1) sets (see [`Filter::shift_position`])
+    pub fn shift_offset(position: f32) -> f32 {
+        let position = if position.is_finite() { position.clamp(0.0, 1.0) } else { 1.0 };
+        position - 1.0
+    }
+
+    /// Texels at 2K a Blur Intensity (Blur, Blur Directional) of 1 reaches
+    pub const BLUR_INTENSITY: f32 = 16.0;
+
+    /// Texels across a UV tile that a Pixelate cell size counts in
+    const PIXELATE_TILE: f32 = 2048.0;
+
+    /// Pixelate's Pixels Amount (cells across a UV tile) for a cell `size` in texels at 2K
+    pub fn pixels_amount(size: f32) -> f32 {
+        Filter::PIXELATE_TILE / if size.is_finite() { size.max(1.0) } else { Filter::PIXELATE_TILE }
+    }
+
+    /// The cell size in texels at 2K that a Pixels Amount (cells across a UV tile) sets
+    pub fn pixel_size(amount: f32) -> f32 {
+        Filter::PIXELATE_TILE / if amount.is_finite() { amount.clamp(1.0, Filter::PIXELATE_TILE) } else { 1.0 }
+    }
+
     /// Texels at 2K a halo glow's Width or a drop shadow's Size of 1 reaches
     pub const HALO_REACH: f32 = 128.0;
 
@@ -1290,6 +1393,10 @@ impl Filter {
                 | Filter::DirectionalWarp { .. }
                 | Filter::Bevel { .. }
                 | Filter::Mosaic { .. }
+                | Filter::Fxaa { .. }
+                | Filter::AnisotropicKuwahara(_)
+                | Filter::HeightToNormal(_)
+                | Filter::ColorMatch(_)
                 | Filter::DistanceBevel(_)
                 | Filter::SourceWarp(_)
                 | Filter::BevelSmooth(_)
@@ -1365,19 +1472,29 @@ impl Filter {
                 ChannelKind::Color => color.map(unit),
                 _ => per_unit(kind, v, |_| unit(lum(*color))),
             },
-            Filter::Posterize { levels } => {
-                let steps = (levels.clamp(2.0, 64.0).round() - 1.0).max(1.0);
-                per_unit(kind, v, |x| (unit(x) * steps).round() / steps)
+            Filter::Posterize { levels, .. } => per_unit(kind, v, |x| posterize(x, *levels)),
+            Filter::Smoothstep { min, max } => per_unit(kind, v, |x| smoothstep(*min, *max, x)),
+            Filter::HeightAdjust { invert, offset, multiply } => {
+                let (offset, multiply) = (finite_or(*offset, 0.0), finite_or(*multiply, 1.0));
+                per_unit(kind, v, |x| {
+                    let x = if *invert { 1.0 - x } else { x };
+                    unit((x - 0.5) * multiply + 0.5 + offset)
+                })
             }
+            Filter::InvertOff => v,
             Filter::Clamp { min, max } => {
                 let (lo, hi) = (min.min(*max), min.max(*max));
                 per_unit(kind, v, |x| x.max(lo).min(hi))
             }
             // Full contrast is a threshold: the position itself goes to white.
-            Filter::HistogramScan { position, contrast } if *contrast >= 1.0 => per_unit(kind, v, |x| if x >= *position { 1.0 } else { 0.0 }),
-            Filter::HistogramScan { position, contrast } => {
-                let width = (1.0 - contrast.clamp(0.0, 1.0)).max(1e-3);
-                per_unit(kind, v, |x| unit((x - position) / width + 0.5))
+            Filter::HistogramScan { position, contrast, invert_position } => {
+                let position = if *invert_position { 1.0 - position } else { *position };
+                if *contrast >= 1.0 {
+                    per_unit(kind, v, |x| if x >= position { 1.0 } else { 0.0 })
+                } else {
+                    let width = (1.0 - contrast.clamp(0.0, 1.0)).max(1e-3);
+                    per_unit(kind, v, |x| unit((x - position) / width + 0.5))
+                }
             }
             Filter::HistogramRange { range, position } => per_unit(kind, v, |x| unit(position + (x - position) * range)),
             Filter::HistogramShift { offset } => per_unit(kind, v, |x| {
@@ -1395,6 +1512,8 @@ impl Filter {
                 ChannelKind::Color => [lum(v); 3],
                 _ => v,
             },
+            // Read opaque here: the compositor passes the content's coverage (and a Custom Input) through `GrayscaleConversion::gray`
+            Filter::GrayscaleConversion(conversion) => [conversion.gray(v, 1.0); 3],
             Filter::NormalInvert => match kind {
                 ChannelKind::NormalMap => [v[0], 1.0 - v[1], v[2]],
                 _ => v,
@@ -1425,6 +1544,11 @@ impl Filter {
             | Filter::DirectionalWarp { .. }
             | Filter::Bevel { .. }
             | Filter::Mosaic { .. }
+            | Filter::Fxaa { .. }
+            | Filter::AnisotropicKuwahara(_)
+            | Filter::PbrValidate(_)
+            | Filter::HeightToNormal(_)
+            | Filter::ColorMatch(_)
             | Filter::DistanceBevel(_)
             | Filter::SourceWarp(_)
             | Filter::BevelSmooth(_)
@@ -1444,7 +1568,7 @@ impl Filter {
         match self {
             Filter::Blur { .. } => "Blur",
             Filter::Sharpen { .. } => "Sharpen",
-            Filter::Invert => "Invert",
+            Filter::Invert | Filter::InvertOff => "Invert",
             Filter::Threshold { .. } => "Threshold",
             Filter::Hsl { .. } => "HSL Perceptive",
             Filter::ContrastLuminosity { .. } => "Contrast Luminosity",
@@ -1454,6 +1578,8 @@ impl Filter {
             Filter::GradientCurve { .. } => "Gradient Curve",
             Filter::GradientDynamic { .. } => "Gradient Dynamic",
             Filter::Posterize { .. } => "Posterize",
+            Filter::Smoothstep { .. } => "Smoothstep",
+            Filter::HeightAdjust { .. } => "Height Adjust",
             Filter::Clamp { .. } => "Clamp",
             Filter::HistogramScan { .. } => "Histogram Scan",
             Filter::HistogramRange { .. } => "Histogram Range",
@@ -1464,10 +1590,15 @@ impl Filter {
             Filter::HighPass { .. } => "Highpass",
             Filter::EdgeDetect { .. } => "Edge Detect",
             Filter::DirectionalWarp { .. } => "Warp Directional",
-            Filter::Grayscale => "Grayscale Conversion",
+            Filter::Grayscale | Filter::GrayscaleConversion(_) => "Grayscale Conversion",
             Filter::NormalInvert => "Normal Invert",
             Filter::Bevel { .. } => "Bevel",
-            Filter::Mosaic { .. } => "Mosaic",
+            Filter::Mosaic { .. } => "Pixelate",
+            Filter::Fxaa { .. } => "FXAA (Anti-aliasing)",
+            Filter::AnisotropicKuwahara(_) => "Anisotropic Kuwahara",
+            Filter::PbrValidate(_) => "PBR Validate (Metallic Roughness)",
+            Filter::HeightToNormal(_) => "Height To Normal",
+            Filter::ColorMatch(_) => "Color Match",
             Filter::DistanceBevel(_) => "Bevel",
             Filter::SourceWarp(_) => "Warp",
             Filter::BevelSmooth(_) => "Bevel Smooth",
@@ -1489,6 +1620,7 @@ impl Filter {
             Filter::ContrastLuminosity { .. } => Some("Contrast/Luminosity"),
             Filter::SlopeBlur { .. } => Some("Slope Blur"),
             Filter::HighPass { .. } => Some("High Pass"),
+            Filter::Mosaic { .. } => Some("Mosaic"),
             Filter::Grayscale => Some("Grayscale"),
             Filter::GradientMap { .. } => Some("Gradient Map"),
             Filter::BakedLighting { .. } => Some("Baked Lighting"),
@@ -1508,9 +1640,14 @@ impl Filter {
         Some(if k.is_finite() { k.max(0.0) } else { 1.0 })
     }
 
-    /// Whether the filter lights the base color and leaves every other channel as it is (the baked lighting filters)
-    pub fn lights_base_color(&self) -> bool {
-        matches!(self, Filter::BakedLighting { .. } | Filter::EnvironmentLighting { .. })
+    /// The channels a new content effect of the filter starts with on (None: all of them)
+    pub fn starts_on(&self) -> Option<&'static [Channel]> {
+        match self {
+            Filter::BakedLighting { .. } | Filter::EnvironmentLighting { .. } | Filter::ColorMatch(_) => Some(&[Channel::BaseColor]),
+            Filter::PbrValidate(_) => Some(&[Channel::BaseColor, Channel::Metallic]),
+            Filter::HeightToNormal(_) => Some(&[Channel::Normal]),
+            _ => None,
+        }
     }
 
     /// Baked Lighting Stylized's settings with its sun and sky (None for other filters and a Baked Lighting saved before them)
@@ -1870,9 +2007,9 @@ mod tests {
         assert!(close(gm.point(c, [0.0; 3]).unwrap(), [1.0, 0.0, 0.0]));
         assert!(close(gm.point(c, [1.0; 3]).unwrap(), [0.0, 0.0, 1.0]));
         assert_eq!(Filter::even_gradient(vec![]).point(c, [0.3; 3]), None, "an empty gradient changes nothing");
-        assert!(close(Filter::Posterize { levels: 2.0 }.point(c, [0.2, 0.6, 0.9]).unwrap(), [0.0, 1.0, 1.0]));
+        assert!(close(Filter::Posterize { levels: 2.0, alpha: false }.point(c, [0.2, 0.6, 0.9]).unwrap(), [0.0, 1.0, 1.0]));
         assert!(close(Filter::Clamp { min: 0.8, max: 0.3 }.point(c, [0.1, 0.5, 0.9]).unwrap(), [0.3, 0.5, 0.8]), "swapped bounds never panic");
-        let scan = |position, contrast| Filter::HistogramScan { position, contrast }.point(c, [0.2, 0.5, 0.9]).unwrap();
+        let scan = |position, contrast| Filter::HistogramScan { position, contrast, invert_position: false }.point(c, [0.2, 0.5, 0.9]).unwrap();
         assert!(close(scan(0.5, 0.0), [0.2, 0.5, 0.9]), "a full-width ramp at the middle keeps the values");
         assert!(close(scan(0.4, 1.0), [0.0, 1.0, 1.0]), "full contrast is a step at the position");
         assert!(close(scan(0.5, 1.0), [0.0, 1.0, 1.0]), "the position itself goes to white");

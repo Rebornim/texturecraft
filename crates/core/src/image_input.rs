@@ -1,6 +1,6 @@
 //! An image a filter reads besides the stack it filters (its image inputs), as a source on the filter's effect
 
-use crate::{Filter, LayerId, Source, WarpSourceMode};
+use crate::{Filter, LayerId, Source, SourceColorMode, TargetColorMode, WarpSourceMode};
 
 /// One image input of a filter: the key its source is stored under on the effect, its name and the gray it reads until a source is set
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -20,11 +20,29 @@ impl ImageInput {
     /// Warp's Custom Noise (Source Mode Custom Noise): the source its texels move by; mid gray moves nothing
     pub const CUSTOM_NOISE: ImageInput = ImageInput { id: "customNoise", label: "Custom Noise", default: 0.5, by_mode: true };
 
+    /// The Custom Input of Grayscale Conversion (the color it reads instead of the channel) and Anisotropic Kuwahara (its direction's gray); mid gray until set
+    pub const CUSTOM_INPUT: ImageInput = ImageInput { id: "customInput", label: "Custom Input", default: 0.5, by_mode: true };
+
+    /// Color Match's Input (Source Color Mode Input): the color each texel moves from; mid gray until set
+    pub const SOURCE_INPUT: ImageInput = ImageInput { id: "input", label: "Input", default: 0.5, by_mode: true };
+
+    /// Color Match's Image Input (Target Color Mode Image Input): the color each texel moves to; mid gray until set
+    pub const TARGET_INPUT: ImageInput = ImageInput { id: "imageInput", label: "Image Input", default: 0.5, by_mode: true };
+
     /// The image inputs `filter` reads now (a mode's input only while that mode is on)
     pub fn of(filter: &Filter) -> Vec<ImageInput> {
         match filter {
             Filter::BevelSmooth(_) | Filter::DirectionalDistance(_) => vec![Self::DISTANCE_MAP],
             Filter::SourceWarp(warp) if warp.source.mode == WarpSourceMode::CustomNoise => vec![Self::CUSTOM_NOISE],
+            Filter::GrayscaleConversion(conversion) if conversion.custom_input => vec![Self::CUSTOM_INPUT],
+            Filter::AnisotropicKuwahara(kuwahara) if kuwahara.custom_input => vec![Self::CUSTOM_INPUT],
+            Filter::ColorMatch(matcher) => [
+                (matcher.source_mode == SourceColorMode::Input).then_some(Self::SOURCE_INPUT),
+                (matcher.target_mode == TargetColorMode::ImageInput).then_some(Self::TARGET_INPUT),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
             _ => Vec::new(),
         }
     }
@@ -34,6 +52,8 @@ impl ImageInput {
         let inputs = match filter {
             Filter::BevelSmooth(_) | Filter::DirectionalDistance(_) => &[Self::DISTANCE_MAP][..],
             Filter::SourceWarp(_) => &[Self::CUSTOM_NOISE][..],
+            Filter::GrayscaleConversion(_) | Filter::AnisotropicKuwahara(_) => &[Self::CUSTOM_INPUT][..],
+            Filter::ColorMatch(_) => &[Self::SOURCE_INPUT, Self::TARGET_INPUT][..],
             _ => &[],
         };
         inputs.iter().find(|input| input.id == id).copied()

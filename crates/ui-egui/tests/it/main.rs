@@ -53,4 +53,6 @@ mod filter_gradient;
 mod filter_inputs;
 mod filter_light;
 mod filter_shape;
+mod filter_simple;
+mod filter_stylize;
 mod symmetry;

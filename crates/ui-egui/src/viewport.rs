@@ -579,7 +579,9 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     let rail_popup = crate::rail_popup::blocks_paint_input(app, ui.ctx());
 
     crate::properties_popup::open_on_right_click(app, ui, &response, rect, s_held || v_held);
-    let popup = app.properties_popup.is_some() || rail_popup;
+    // A press that closes an open colour picker only closes it: it neither paints nor moves a projection
+    let picker = crate::color_picker::blocks_view_press(ui.ctx());
+    let popup = app.properties_popup.is_some() || rail_popup || picker;
 
     // A pending ID color pick or eyedropper takes the next click instead of the brush
     let picking = app.picking_id_color.is_some() || app.picking_color.is_some();
@@ -600,7 +602,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         }
     }
 
-    // The selected planar or warp projection's frame, or the round projector Move on model moves, then its drags and wheel
+    // The selected fill's frame (planar, warp) or round projector (tri-planar, spherical, cylindrical): only a press on one of its handles moves it
     let gizmo_free = !alt && !s_held && !v_held && !focus_pick && !popup && !picking && touch.is_none() && !DecalDrop::blocks_input(ui.ctx());
     let frame_drag = gizmo_free && (crate::frame_gizmo::input(app, ui, &response, rect) || crate::round_gizmo::input(app, ui, &response, rect));
     let moving = crate::move_on_model::input(app, ui, &response, rect, !gizmo_free || frame_drag);
@@ -619,6 +621,11 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
 
     // A handle owns a new click, but a stroke already under way must still finish over it
     let symmetry_handle = !app.session.stroke_active() && crate::symmetry::manipulator_hovered(app, ui, rect);
+    // A projection gizmo's handle owns a press that began on it (the pointer may have left it by the time the drag registers)
+    let pressed_at = ui.input(|input| if input.pointer.any_down() { input.pointer.press_origin() } else { input.pointer.hover_pos() });
+    let gizmo_handle = gizmo_free
+        && !app.session.stroke_active()
+        && pressed_at.is_some_and(|at| crate::frame_gizmo::handle_at(app, rect, at) || crate::round_gizmo::handle_at(app, rect, at));
 
     // Painting
     let painting = app.ui.mode == crate::state::Mode::Painting
@@ -633,6 +640,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !decal_drag
         && !symmetry_drag
         && !symmetry_handle
+        && !gizmo_handle
         && !DecalDrop::blocks_input(ui.ctx());
     let path_tool = app.session.tool.tool == Tool::Path;
     let viewport = app.session.viewport;
@@ -709,6 +717,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && app.picking_id_color.is_none()
         && app.moving_on_model.is_none()
         && !crate::frame_gizmo::hovered(app, ui, rect)
+        && !crate::round_gizmo::hovered(app, ui, rect)
         && let Some(hover_pos) = if adjusting { ui.input(|input| input.pointer.press_origin()) } else { response.hover_pos() }
         && let Some(hit) = app.session.pick(local(hover_pos), app.session.viewport)
     {
@@ -1478,6 +1487,7 @@ fn view_2d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     let painting = app.ui.mode == crate::state::Mode::Painting
         && app.properties_popup.is_none()
         && !crate::rail_popup::blocks_paint_input(app, ui.ctx())
+        && !crate::color_picker::blocks_view_press(ui.ctx())
         && !alt
         && !adjusting
         && !v_held

@@ -29,6 +29,17 @@ impl MoveOnModel {
         }
     }
 
+    /// The selected fill layer, or the selected fill effect in it (its content or its mask); its projector shows in the 3D view
+    pub(crate) fn selected(app: &TextureCraftApp) -> Option<MoveOnModel> {
+        let layer = app.session.selected_layer()?;
+        let effect = match app.session.target {
+            texturecraft_engine::StackTarget::Content => None,
+            texturecraft_engine::StackTarget::Effect(effect) => Some(effect),
+            texturecraft_engine::StackTarget::Mask => return None,
+        };
+        Some(MoveOnModel { layer, effect })
+    }
+
     pub(crate) fn projection(self, app: &TextureCraftApp) -> Option<Projection> {
         let project = &app.session.doc.project;
         match self.effect {

@@ -9,6 +9,7 @@ mod bake_tiles;
 mod brush_material;
 mod closed_session;
 mod color_selection;
+mod compare_mask;
 mod content_effects;
 mod effect_blending;
 mod export_colour_space;

@@ -1,24 +1,34 @@
 //! A fill's Material section: the channel strip, the orb with the Material | Channels switch, then one slot card per channel that is on (Channels) or the fill's whole material (Material)
 
 use egui::{Color32, Painter, Rect};
+use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
+use texturecraft_engine::compose::ImageStore;
 use texturecraft_engine::core::{
     Channel, ChannelKind, CookResolution, Fill, LayerId, LinkParam, MaterialLink, NormalFormat, Procedural, ProceduralKind, Source,
 };
+use texturecraft_engine::fill_alpha::library_alpha_of;
 use texturecraft_engine::fill_material_cmds::whole_materials;
 use texturecraft_engine::materials::{SmartMaterial, find};
+use texturecraft_engine::paint::alphas;
 use texturecraft_engine::texel::linear_to_srgb;
 
 use crate::TextureCraftApp;
 use crate::color_picker::{ColorPick, SwatchEdit};
 use crate::dock::{anchors_below, with};
-use crate::i18n::{tr, trf};
+use crate::i18n::tr;
 use crate::material_orb::material_orb;
 use crate::orb_material::OrbMaterial;
+use crate::picker_group::PickerGroup;
+use crate::picker_tab::PickerTab;
 use crate::property_sheet::PropertySheet;
 use crate::resolution_band::resolution_band;
+use crate::resource_picker;
+use crate::resource_picker_item::ResourcePickerItem;
 use crate::slot_thumbnail::{paint_thumbnail, thumbnail};
 use crate::theme::Tokens;
+use crate::thumbs::Thumbs;
+use crate::tile_picture::TilePicture;
 
 /// The switch's two sides: the fill's whole material, or one source per channel
 const MODES: [&str; 2] = ["Material", "Channels"];
@@ -29,14 +39,15 @@ const CHANNELS_MODE: usize = 1;
 const PATTERN_SCALE: std::ops::RangeInclusive<f32> = 0.1..=32.0;
 const PATTERN_CONTRAST: std::ops::RangeInclusive<f32> = 0.0..=2.0;
 
-/// A source the slot's list offers
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// A source the slot's picker offers
+#[derive(Clone, Debug, PartialEq)]
 enum SourceChoice {
     Uniform,
     Procedural(ProceduralKind),
-    Image(usize),
+    Image(String),
+    Alpha(&'static str),
     Import,
-    Anchor(usize),
+    Anchor(LayerId),
 }
 
 /// The Material section of the fill at `base`; `on` holds the channels the fill writes
@@ -120,7 +131,10 @@ fn source_line(app: &TextureCraftApp, source: &Source) -> String {
     match source {
         Source::Uniform(_) => tr("Uniform").to_owned(),
         Source::Procedural { pattern, .. } => format!("{} · {}", tr(pattern.kind.label()), tr("procedural")),
-        Source::Image { name, .. } => format!("{name} · {}", tr("image")),
+        Source::Image { name, .. } => match library_alpha_of(name) {
+            Some(alpha) => format!("{} · {}", tr(&alpha.label), tr("alpha")),
+            None => format!("{name} · {}", tr("image")),
+        },
         Source::Anchor { anchor, .. } => {
             let name = app.session.doc.project.effect(*anchor).map_or_else(|| tr("missing").to_owned(), |(_, effect)| effect.name.clone());
             format!("{} · {name}", tr("Anchor"))
@@ -139,28 +153,22 @@ fn channel_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: 
     let procedural = matches!(source, Source::Procedural { .. });
     let slot = sheet.slot(&|painter, rect| paint_thumbnail(painter, rect, &picture, &tokens), tr(channel.label()), &line, None, !uniform, procedural);
 
-    let images: Vec<String> = app.session.doc.resources.keys().cloned().collect();
-    let mut options = vec![SourceChoice::Uniform];
-    options.extend(ProceduralKind::ALL.into_iter().map(SourceChoice::Procedural));
-    options.extend((0..images.len()).map(SourceChoice::Image));
-    options.push(SourceChoice::Import);
-    options.extend((0..anchors.len()).map(SourceChoice::Anchor));
-    let current = match &source {
-        Source::Uniform(_) => SourceChoice::Uniform,
-        Source::Procedural { pattern, .. } => SourceChoice::Procedural(pattern.kind),
-        Source::Image { name, .. } => images.iter().position(|image| image == name).map_or(SourceChoice::Import, SourceChoice::Image),
-        Source::Anchor { anchor, .. } => anchors.iter().position(|(id, _)| id == anchor).map_or(SourceChoice::Uniform, SourceChoice::Anchor),
+    let popup = sheet.ui.make_persistent_id(("source_picker", base.to_string(), channel.id()));
+    if slot.pick.clicked() {
+        resource_picker::toggle(sheet.ui.ctx(), popup);
+    }
+    let current = source_choice(&source);
+    // From Uniform the picker opens at the top, not at its Uniform tile at the end
+    let reveal = current != SourceChoice::Uniform;
+    let uniform = match source {
+        Source::Uniform(value) => value,
+        _ => channel.default_value(),
     };
-    let name = |choice: SourceChoice| match choice {
-        SourceChoice::Uniform => tr("Uniform").to_owned(),
-        SourceChoice::Procedural(kind) => tr(kind.label()).to_owned(),
-        SourceChoice::Image(index) => images.get(index).cloned().unwrap_or_default(),
-        SourceChoice::Import => tr("Import...").to_owned(),
-        SourceChoice::Anchor(index) => anchors.get(index).map(|(_, label)| trf("Anchor: {name}", &[("name", label)])).unwrap_or_default(),
-    };
-    let (picked, _) = sheet.hanging_list(&slot.pick, current, &options, &name, None);
+    let ctx = sheet.ui.ctx().clone();
+    let tabs = |thumbs: &mut Thumbs| source_tabs(thumbs, &ctx, &app.session.images, anchors, shown_color(uniform));
+    let picked = resource_picker::show(&slot.pick, popup, &mut app.thumbs, Some(&current), reveal, tabs);
     if let Some(choice) = picked.filter(|choice| *choice != current) {
-        pick_source(app, sheet.ui.ctx(), channel, choice, &images, anchors, &set);
+        pick_source(app, sheet.ui.ctx(), channel, choice, &set);
     }
     if slot.clear {
         app.run("layer.fill.set", set(json!({"value": channel.default_value()})));
@@ -186,15 +194,7 @@ fn channel_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: 
     sheet.close_card();
 }
 
-fn pick_source(
-    app: &mut TextureCraftApp,
-    ctx: &egui::Context,
-    channel: Channel,
-    choice: SourceChoice,
-    images: &[String],
-    anchors: &[(LayerId, String)],
-    set: &impl Fn(Value) -> Value,
-) {
+fn pick_source(app: &mut TextureCraftApp, ctx: &egui::Context, channel: Channel, choice: SourceChoice, set: &impl Fn(Value) -> Value) {
     match choice {
         SourceChoice::Uniform => {
             app.run("layer.fill.set", set(json!({"value": channel.default_value()})));
@@ -207,18 +207,64 @@ fn pick_source(
             };
             app.run("layer.fill.set", set(json!({"procedural": kind.label(), "low": low, "high": high})));
         }
-        SourceChoice::Image(index) => {
-            if let Some(name) = images.get(index) {
-                app.run("layer.fill.set", set(json!({"image": name})));
-            }
+        SourceChoice::Image(name) => {
+            app.run("layer.fill.set", set(json!({"image": name})));
+        }
+        SourceChoice::Alpha(id) => {
+            app.run("layer.fill.set", set(json!({"alpha": id})));
         }
         SourceChoice::Import => crate::menus::invoke(app, ctx, "resource.import"),
-        SourceChoice::Anchor(index) => {
-            if let Some((anchor, _)) = anchors.get(index) {
-                app.run("layer.fill.set", set(json!({"anchor": anchor.0})));
-            }
+        SourceChoice::Anchor(anchor) => {
+            app.run("layer.fill.set", set(json!({"anchor": anchor.0})));
         }
     }
+}
+
+/// The picker's choice `source` is: a library alpha's image is its alpha
+fn source_choice(source: &Source) -> SourceChoice {
+    match source {
+        Source::Uniform(_) => SourceChoice::Uniform,
+        Source::Procedural { pattern, .. } => SourceChoice::Procedural(pattern.kind),
+        Source::Image { name, .. } => library_alpha_of(name).map_or_else(|| SourceChoice::Image(name.clone()), |alpha| SourceChoice::Alpha(alpha.id.as_str())),
+        Source::Anchor { anchor, .. } => SourceChoice::Anchor(*anchor),
+    }
+}
+
+/// The source picker's tabs: Resources (Procedurals, Textures with Import... first, Alphas in their shelf groups, Uniform) and the stack's Anchor points
+fn source_tabs(thumbs: &mut Thumbs, ctx: &egui::Context, images: &ImageStore, anchors: &[(LayerId, String)], uniform: Color32) -> Vec<PickerTab<SourceChoice>> {
+    let procedurals = ProceduralKind::ALL
+        .into_iter()
+        .map(|kind| tile(SourceChoice::Procedural(kind), tr(kind.label()), None, TilePicture::Texture(thumbs.procedural(ctx, kind))))
+        .collect();
+    let mut textures = vec![tile(SourceChoice::Import, tr("Import..."), None, TilePicture::Import)];
+    let mut names: Vec<&String> = images.keys().filter(|name| library_alpha_of(name).is_none()).collect();
+    names.sort();
+    textures.extend(names.into_iter().filter_map(|name| images.get(name).map(|image| (name, image))).map(|(name, image)| {
+        let picture = TilePicture::Texture(Some(thumbs.image(ctx, name, image)));
+        tile(SourceChoice::Image(name.clone()), name, None, picture)
+    }));
+    let alphas = alphas::library()
+        .iter()
+        .map(|alpha| {
+            let picture = TilePicture::Texture(thumbs.alpha(ctx, alpha));
+            tile(SourceChoice::Alpha(alpha.id.as_str()), tr(&alpha.label), Some(tr(alpha.category)), picture)
+        })
+        .collect();
+    let uniform = vec![tile(SourceChoice::Uniform, tr("Uniform value"), None, TilePicture::Swatch(uniform))];
+    let resources = [("Procedurals", procedurals), ("Textures", textures), ("Alphas", alphas), ("Uniform", uniform)]
+        .into_iter()
+        .map(|(header, items)| PickerGroup { header: Some(tr(header)), items })
+        .collect();
+    let anchors = anchors.iter().map(|(anchor, label)| tile(SourceChoice::Anchor(*anchor), label, None, TilePicture::Glyph(ic::ANCHOR))).collect();
+    vec![
+        PickerTab { icon: ic::SQUARES_FOUR, name: tr("Resources"), groups: resources },
+        PickerTab { icon: ic::ANCHOR, name: tr("Anchor points"), groups: vec![PickerGroup { header: None, items: anchors }] },
+    ]
+}
+
+/// One tile of the source picker
+fn tile(id: SourceChoice, label: &str, caption: Option<&'static str>, picture: TilePicture) -> ResourcePickerItem<SourceChoice> {
+    ResourcePickerItem { id, label: label.to_owned(), caption, picture }
 }
 
 /// A uniform source: the colour bar (a click opens the picker) or the gray ramp with its invert glyph

@@ -1,4 +1,4 @@
-//! A fill channel takes an image resource from its slot's source list
+//! A fill channel takes an image resource from its slot's source picker
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -21,8 +21,10 @@ fn a_fill_channel_takes_an_image_from_its_source_menu() {
 
     h.get_by_role_and_label(egui::Role::Tab, "Material").click();
     h.run_steps(3);
-    // The Roughness slot's row opens its source list, hanging at the card's width
+    // The Roughness slot's row opens its source picker, whose search field has the focus and finds the image under Textures
     h.get_by_role_and_label(egui::Role::ComboBox, "Roughness").click();
+    h.run_steps(2);
+    h.event(egui::Event::Text("rough".into()));
     h.run_steps(2);
     h.get_by_role_and_label(egui::Role::ListBoxOption, &name).click();
     h.run_steps(3);

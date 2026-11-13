@@ -1031,3 +1031,102 @@ fn eyedropper_pointer_snapshots() {
     harness.hover_at(egui::pos2(700.0, 450.0));
     save(&mut harness, &output_dir, "eyedropper-over-viewport");
 }
+
+/// Gives the shelf thumbnails rendered off the UI thread time to arrive
+fn settle_thumbnails(h: &mut Harness<'_, TextureCraftApp>) {
+    for _ in 0..100 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        h.run_steps(1);
+    }
+}
+
+/// The channel source picker opened from each kind of source, searching, on Anchor points, and the filter picker in the same style
+#[test]
+#[ignore]
+fn source_picker_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let mut png = Vec::new();
+    let rust = image::RgbaImage::from_fn(64, 64, |x, y| image::Rgba([150 + ((x * 7 + y * 3) % 60) as u8, 70 + ((x * y) % 40) as u8, 30, 255]));
+    rust.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let rust = session.import_resource_bytes("rust_albedo.png", png).unwrap();
+    let below = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "effect.add.anchor", &json!({"layer": below, "name": "Edge wear"})).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({"color": [0.45, 0.13, 0.05]})).unwrap()["layer"].clone();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
+    harness.run_steps(3);
+
+    let shot = |harness: &mut Harness<'_, TextureCraftApp>, mut source: serde_json::Value, hover: Option<&str>, search: Option<&str>, name: &str| {
+        source["layer"] = layer.clone();
+        source["channel"] = json!("baseColor");
+        execute(&mut harness.state_mut().session, "layer.fill.set", &source).unwrap();
+        harness.run_steps(3);
+        harness.get_by_role_and_label(egui::Role::ComboBox, "Base color").click();
+        harness.run_steps(30);
+        if let Some(text) = search {
+            harness.event(egui::Event::Text(text.into()));
+            harness.run_steps(3);
+        }
+        settle_thumbnails(harness);
+        if let Some(label) = hover {
+            let at = harness.get_by_role_and_label(egui::Role::ListBoxOption, label).rect().center();
+            harness.hover_at(at);
+        }
+        save(harness, &output_dir, name);
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(3);
+    };
+    shot(&mut harness, json!({"color": [0.45, 0.13, 0.05]}), Some("Grunge"), None, "source-picker-top");
+    shot(&mut harness, json!({"image": rust}), Some("Import..."), None, "source-picker-textures");
+    shot(&mut harness, json!({"alpha": "scratches"}), Some("Cracks"), None, "source-picker-alphas");
+    shot(&mut harness, json!({"alpha": "letter_y"}), None, None, "source-picker-end");
+    shot(&mut harness, json!({"color": [0.45, 0.13, 0.05]}), None, Some("scr"), "source-picker-search");
+
+    // Anchor points on the Roughness slot, scrolled into view first
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Roughness").scroll_to_me();
+    harness.run_steps(25);
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Roughness").click();
+    harness.run_steps(3);
+    harness.get_by_role_and_label(egui::Role::Tab, "Anchor points").click();
+    harness.run_steps(3);
+    let anchor = harness.get_all_by_role(egui::Role::ListBoxOption).next().unwrap().rect().center();
+    harness.hover_at(anchor);
+    save(&mut harness, &output_dir, "source-picker-anchors");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+
+    // The picked procedural's card, then the three themes with the picker open from Uniform
+    execute(&mut harness.state_mut().session, "layer.fill.set", &json!({"layer": layer, "channel": "baseColor", "procedural": "Clouds", "scale": 4.0}))
+        .unwrap();
+    save(&mut harness, &output_dir, "source-picker-picked");
+    execute(&mut harness.state_mut().session, "layer.fill.set", &json!({"layer": layer, "channel": "baseColor", "color": [0.45, 0.13, 0.05]})).unwrap();
+    harness.run_steps(3);
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Base color").click();
+    settle_thumbnails(&mut harness);
+    for (brightness, name) in [(Brightness::MediumDark, "medium"), (Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+        harness.state_mut().ui.prefs.brightness = brightness;
+        save(&mut harness, &output_dir, &format!("source-picker-{name}"));
+    }
+    harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+
+    // The filter picker in the same style
+    let filter = execute(&mut harness.state_mut().session, "effect.add.filter", &json!({"target": "content", "filter": "invert"})).unwrap();
+    let filter = texturecraft_engine::core::LayerId(filter["effect"].as_u64().unwrap());
+    harness.state_mut().session.target = texturecraft_engine::StackTarget::Effect(filter);
+    harness.run_steps(3);
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Invert").click();
+    settle_thumbnails(&mut harness);
+    let blur = harness.get_by_role_and_label(egui::Role::ListBoxOption, "Blur").rect().center();
+    harness.hover_at(blur);
+    save(&mut harness, &output_dir, "filter-picker-v4");
+}

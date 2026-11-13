@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::project::ENVIRONMENTS;
-use texturecraft_core::{BakedMap, Channel, ToneMapping};
+use texturecraft_core::{BakedMap, Channel, EffectKind, Filter, Project, ToneMapping};
 use texturecraft_geom::glam::Vec3;
 
 use crate::commands::{CommandSpec, always, bad, boolp, can_redo, can_undo, color_param, f32p, strp, u64p};
@@ -212,6 +212,7 @@ fn display(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("display.set", format!("unknown environment `{e}`: one of {}, or resource:<image>", ENVIRONMENTS.join(", "))));
     }
     let scatter_color = color_param("display.set", p, "scatterColor")?;
+    let lighting = (s.doc.project.display.environment.clone(), s.doc.project.display.env_rotation);
     let d = &mut s.doc.project.display;
     if let Some(e) = env {
         d.environment = e;
@@ -269,8 +270,20 @@ fn display(s: &mut Session, p: &Value) -> Result<Value> {
     if f32p(p, "fov").is_some() {
         s.camera.fov = s.doc.project.display.fov;
     }
+    // Baked Lighting Environment lights with the viewport environment: the layers it lights composite again when that turns or changes
+    let display = &s.doc.project.display;
+    if (display.environment.as_str(), display.env_rotation) != (lighting.0.as_str(), lighting.1) && lit_by_environment(&s.doc.project) {
+        for cache in &mut s.caches {
+            cache.invalidate_all();
+        }
+    }
     s.revision = s.revision.wrapping_add(1);
     Ok(serde_json::to_value(&s.doc.project.display).unwrap_or(Value::Null))
+}
+
+/// Whether a layer's content has a Baked Lighting Environment
+fn lit_by_environment(project: &Project) -> bool {
+    project.layers.values().flat_map(|l| l.content_effects.iter()).any(|e| matches!(e.kind, EffectKind::Filter(Filter::EnvironmentLighting { .. })))
 }
 
 #[cfg(test)]

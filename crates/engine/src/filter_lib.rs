@@ -3,7 +3,9 @@
 //! by id; `filter.list` lists them with their default parameters.
 
 use serde_json::{Value, json};
-use texturecraft_core::{Channel, CurvePreset, EffectKind, Fill, Filter, GradientInput, GrayscaleMode, Levels, Procedural, ProceduralKind, Projection, Source};
+use texturecraft_core::{
+    Channel, CurvePreset, EffectKind, Fill, Filter, GradientInput, GrayscaleMode, Levels, Procedural, ProceduralKind, Projection, Source, StylizedLighting,
+};
 
 use crate::commands::{CommandSpec, always, bad, boolp, color_of, color_param, f32p, has_layer, strp, u64p};
 use crate::{Result, Session, cmd};
@@ -56,7 +58,8 @@ pub const FILTERS: &[FilterDef] = &[
     def("grayscale", "Grayscale Conversion", "Adjustments", true),
     def("edgeDetect", "Edge Detect", "Adjustments", true),
     def("normalInvert", "Normal Invert", "Adjustments", false),
-    def("bakedLighting", "Baked Lighting", "Adjustments", false),
+    def("bakedLighting", "Baked Lighting Stylized", "Adjustments", false),
+    def("bakedLightingEnvironment", "Baked Lighting Environment", "Adjustments", false),
     def("replaceColor", "Replace Color", "Adjustments", false),
     def("blur", "Blur", "Blur and sharpen", true),
     def("blurDirectional", "Blur Directional", "Blur and sharpen", true),
@@ -65,6 +68,7 @@ pub const FILTERS: &[FilterDef] = &[
     def("highPass", "Highpass", "Blur and sharpen", true),
     def("bevel", "Bevel", "Blur and sharpen", true),
     def("glow", "Glow", "Blur and sharpen", true),
+    def("dropShadow", "Drop Shadow", "Blur and sharpen", true),
     def("warp", "Warp", "Distort", true),
     def("warpDirectional", "Warp Directional", "Distort", true),
     def("mosaic", "Mosaic", "Distort", true),
@@ -153,6 +157,9 @@ const NEUTRAL_TONE: [f32; 3] = [0.0, 0.0, 0.5];
 /// Mid gray as a color picker shows it (sRGB 0.5), in linear RGB
 const MID_GRAY: f32 = 0.214;
 
+/// A new glow's warm light, in linear RGB
+const GLOW_COLOR: [f32; 3] = [0.871, 0.578, 0.188];
+
 /// The Gradient filter as the library adds it: black, mid gray and white at 0, 0.5 and 1 (the other seven colors wait white at 1)
 fn library_gradient() -> Filter {
     let quantity = 3;
@@ -194,9 +201,25 @@ pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
         "normalInvert" => Filter::NormalInvert,
         "bevel" => Filter::Bevel { width: 16.0, wrap: false },
         "mosaic" => Filter::Mosaic { size: 32.0 },
-        "glow" => Filter::Glow { radius: 16.0, amount: 1.0 },
+        "glow" => Filter::HaloGlow { on_mask: false, precise: false, width: 0.15, spread: 0.0, opacity: 1.0, color: GLOW_COLOR },
+        "dropShadow" => Filter::DropShadow { angle: 90.0, distance: 0.1, size: 0.2, spread: 0.0, opacity: 0.5, color: [0.0; 3] },
         "replaceColor" => Filter::ReplaceColor { from: [0.5, 0.05, 0.05], to: [0.05, 0.15, 0.5], tolerance: 0.2, softness: 0.15 },
-        "bakedLighting" => Filter::BakedLighting { azimuth: 45.0, elevation: 45.0, light: 0.8, ambient: 0.4, occlusion: 1.0 },
+        "bakedLighting" => Filter::BakedLighting {
+            azimuth: 0.0,
+            elevation: 45.0,
+            light: 1.0,
+            ambient: 1.0,
+            occlusion: 0.0,
+            stylized: Some(Box::new(StylizedLighting::library())),
+        },
+        "bakedLightingEnvironment" => Filter::EnvironmentLighting {
+            horizontal: 0.0,
+            vertical: 0.0,
+            exposure: 0.0,
+            height_intensity: 4.0,
+            ambient_occlusion: 1.0,
+            specular_occlusion: 0.0,
+        },
         "levels" => {
             let mut l = Levels::default();
             crate::mask_cmds::levels_from(cmd, p, &mut l)?;
@@ -277,12 +300,30 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         Filter::Glow { radius, amount } => {
             vec![("radius", "Radius (texels at 2K)", *radius, 0.0, 128.0), ("amount", "Amount", *amount, 0.0, 5.0)]
         }
-        Filter::BakedLighting { azimuth, elevation, light, ambient, occlusion } => vec![
-            ("azimuth", "Light azimuth (degrees)", *azimuth, 0.0, 360.0),
-            ("elevation", "Light elevation (degrees)", *elevation, -90.0, 90.0),
-            ("light", "Light intensity", *light, 0.0, 4.0),
-            ("ambient", "Ambient", *ambient, 0.0, 2.0),
-            ("occlusion", "Ambient occlusion", *occlusion, 0.0, 1.0),
+        Filter::HaloGlow { width, spread, opacity, .. } => {
+            vec![("width", "Width", *width, -1.0, 1.0), ("spread", "Spread", *spread, 0.0, 1.0), ("opacity", "Opacity", *opacity, 0.0, 1.0)]
+        }
+        Filter::DropShadow { angle, distance, size, spread, opacity, .. } => vec![
+            ("angle", "Angle", *angle, 0.0, 360.0),
+            ("distance", "Distance", *distance, -0.5, 0.5),
+            ("size", "Size", *size, 0.0, 1.0),
+            ("spread", "Spread", *spread, 0.0, 1.0),
+            ("opacity", "Opacity", *opacity, 0.0, 1.0),
+        ],
+        Filter::BakedLighting { azimuth, elevation, light, ambient, occlusion, .. } => vec![
+            ("light", "Sun Intensity", *light, 0.0, 10.0),
+            ("azimuth", "Horizontal Angle", *azimuth, 0.0, 360.0),
+            ("elevation", "Vertical Angle", *elevation, 0.0, 360.0),
+            ("ambient", "Sky Intensity", *ambient, 0.0, 2.0),
+            ("occlusion", "Diffuse AO", *occlusion, 0.0, 1.0),
+        ],
+        Filter::EnvironmentLighting { horizontal, vertical, exposure, height_intensity, ambient_occlusion, specular_occlusion } => vec![
+            ("horizontalRotation", "Horizontal Rotation", *horizontal, 0.0, 360.0),
+            ("verticalRotation", "Vertical Rotation", *vertical, 0.0, 360.0),
+            ("exposure", "Exposure", *exposure, -5.0, 5.0),
+            ("heightIntensity", "Height Intensity", *height_intensity, 0.0, 8.0),
+            ("ambientOcclusion", "Ambient Occlusion Intensity", *ambient_occlusion, 0.0, 1.0),
+            ("specularOcclusion", "Specular Occlusion Intensity", *specular_occlusion, 0.0, 1.0),
         ],
         Filter::ReplaceColor { tolerance, softness, .. } => {
             vec![("tolerance", "Tolerance", *tolerance, 0.0, 1.0), ("softness", "Softness", *softness, 0.0, 1.0)]
@@ -338,6 +379,13 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
     let wrap = |slot: &mut bool| -> Result<()> {
         if let Some(value) = p.get("wrap") {
             *slot = value.as_bool().ok_or_else(|| bad(cmd, "`wrap` must be true or false"))?;
+        }
+        Ok(())
+    };
+    let shade = |slot: &mut [f32; 3]| -> Result<()> {
+        if p.get("color").is_some() {
+            let v = color_param(cmd, p, "color")?.ok_or_else(|| bad(cmd, "`color` must be a color ([r, g, b] linear or \"#rrggbb\")"))?;
+            *slot = v.map(|x| x.clamp(0.0, 1.0));
         }
         Ok(())
     };
@@ -442,10 +490,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
                 };
             }
             set(position, "position", 0.0, 1.0);
-            if p.get("color").is_some() {
-                let v = color_param(cmd, p, "color")?.ok_or_else(|| bad(cmd, "`color` must be a color ([r, g, b] linear or \"#rrggbb\")"))?;
-                *color = v.map(|x| x.clamp(0.0, 1.0));
-            }
+            shade(color)?;
         }
         Filter::Posterize { levels } => set(levels, "levels", 2.0, 64.0),
         Filter::Clamp { min, max } => {
@@ -488,6 +533,30 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             set(radius, "radius", 0.0, 256.0);
             set(amount, "amount", 0.0, 10.0);
         }
+        Filter::HaloGlow { on_mask, precise, width, spread, opacity, color } => {
+            if p.get("usedOnMask").is_some() {
+                *on_mask = boolp(p, "usedOnMask").ok_or_else(|| bad(cmd, "`usedOnMask` must be true or false"))?;
+            }
+            if p.get("mode").is_some() {
+                *precise = match strp(p, "mode") {
+                    Some("soft") => false,
+                    Some("precise") => true,
+                    _ => return Err(bad(cmd, "`mode` must be \"soft\" or \"precise\"")),
+                };
+            }
+            set(width, "width", -1.0, 1.0);
+            set(spread, "spread", 0.0, 1.0);
+            set(opacity, "opacity", 0.0, 1.0);
+            shade(color)?;
+        }
+        Filter::DropShadow { angle: a, distance, size, spread, opacity, color } => {
+            angle(a);
+            set(distance, "distance", -0.5, 0.5);
+            set(size, "size", 0.0, 1.0);
+            set(spread, "spread", 0.0, 1.0);
+            set(opacity, "opacity", 0.0, 1.0);
+            shade(color)?;
+        }
         Filter::ReplaceColor { from, to, tolerance, softness } => {
             for (key, slot) in [("from", from), ("to", to)] {
                 if let Some(v) = color_param(cmd, p, key)? {
@@ -497,14 +566,32 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             set(tolerance, "tolerance", 0.0, 1.0);
             set(softness, "softness", 0.0, 1.0);
         }
-        Filter::BakedLighting { azimuth, elevation, light, ambient, occlusion } => {
+        Filter::BakedLighting { azimuth, elevation, light, ambient, occlusion, stylized } => {
             if let Some(v) = f32p(p, "azimuth") {
                 *azimuth = v.rem_euclid(360.0);
             }
-            set(elevation, "elevation", -90.0, 90.0);
+            // A light past the zenith comes from the far side: the angle wraps like the horizontal one
+            if let Some(v) = f32p(p, "elevation") {
+                *elevation = v.rem_euclid(360.0);
+            }
             set(light, "light", 0.0, 10.0);
             set(ambient, "ambient", 0.0, 10.0);
             set(occlusion, "occlusion", 0.0, 1.0);
+            // A Baked Lighting saved before the stylized settings takes them lit as it was
+            if crate::stylized_lighting_params::sets_any(p) {
+                crate::stylized_lighting_params::apply(p, stylized.get_or_insert_with(|| Box::new(StylizedLighting::PLAIN)), cmd)?;
+            }
+        }
+        Filter::EnvironmentLighting { horizontal, vertical, exposure, height_intensity, ambient_occlusion, specular_occlusion } => {
+            for (key, slot) in [("horizontalRotation", horizontal), ("verticalRotation", vertical)] {
+                if let Some(v) = f32p(p, key) {
+                    *slot = v.rem_euclid(360.0);
+                }
+            }
+            set(exposure, "exposure", -5.0, 5.0);
+            set(height_intensity, "heightIntensity", 0.0, 8.0);
+            set(ambient_occlusion, "ambientOcclusion", 0.0, 1.0);
+            set(specular_occlusion, "specularOcclusion", 0.0, 1.0);
         }
         Filter::DirectionalWarp { intensity, angle: a, scale, seed: s, divider: d } => {
             set(intensity, "intensity", 0.0, 256.0);

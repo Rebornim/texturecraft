@@ -89,7 +89,7 @@ fn randomize_seeds_gives_every_pattern_inside_a_new_seed_in_one_undo_step() {
             other => panic!("not a pattern: {other:?}"),
         };
         let warp = layer.mask.as_ref().unwrap().effects.iter().find_map(|e| match e.kind {
-            EffectKind::Filter(Filter::Warp { seed, .. }) => Some(seed),
+            EffectKind::Filter(Filter::SourceWarp(warp)) => Some(warp.seed),
             _ => None,
         });
         (pattern(Channel::BaseColor), pattern(Channel::Roughness), warp.unwrap())

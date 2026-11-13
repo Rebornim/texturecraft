@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::curve_preset::CurvePreset;
 use crate::gradient_input::{GradientInput, ramp, shape};
 use crate::{
-    Backface, BakedMap, BlendMode, Channel, ChannelKind, CompareSource, ContentsOffset, DepthCulling, DirectionalLight, FillSymmetry, Projector, ShapeCrop,
-    StylizedLighting, SunAndSky, lum,
+    Backface, BakedMap, Bevel, BevelSmooth, BlendMode, Channel, ChannelKind, CompareSource, ContentsOffset, DepthCulling, DirectionalDistance,
+    DirectionalLight, FillSymmetry, MaskOutline, Mirror, Projector, ShapeCrop, SourceWarp, StylizedLighting, SunAndSky, ThresholdMode, lum,
 };
 
 mod curvature_detail;
@@ -1128,6 +1128,9 @@ pub enum Filter {
     Invert,
     Threshold {
         level: f32,
+        /// Which side of `level` turns white; at or above it in projects saved before the modes
+        #[serde(default, skip_serializing_if = "ThresholdMode::is_default")]
+        mode: ThresholdMode,
     },
     /// Hue/saturation/lightness shift (color channels; lightness only on grays and masks).
     /// `hue` is in turns, `saturation` and `lightness` in −1..1; all zero = unchanged.
@@ -1214,7 +1217,7 @@ pub enum Filter {
         offset: f32,
     },
     /// Shift each texel's lookup along a noise vector field: `intensity` in texels at 2K,
-    /// `scale` noise features per UV unit.
+    /// `scale` noise features per UV unit (projects saved before the warp modes; new ones are [`Filter::SourceWarp`]).
     Warp {
         intensity: f32,
         scale: f32,
@@ -1246,7 +1249,7 @@ pub enum Filter {
     EdgeDetect {
         width: f32,
     },
-    /// Like [`Filter::Warp`], but every texel moves along one direction (`angle` in degrees).
+    /// Like [`Filter::Warp`], but every texel moves along one direction (`angle` in degrees; projects saved before the warp modes).
     DirectionalWarp {
         intensity: f32,
         angle: f32,
@@ -1268,6 +1271,18 @@ pub enum Filter {
         #[serde(default, skip_serializing_if = "is_false")]
         wrap: bool,
     },
+    /// Shapes sloped at their edge, inwards or outwards over a share of the UV tile (projects saved before keep [`Filter::Bevel`])
+    DistanceBevel(Bevel),
+    /// Texels read from where a source sends them, in one of the warp modes (projects saved before keep [`Filter::Warp`] and [`Filter::DirectionalWarp`])
+    SourceWarp(SourceWarp),
+    /// A smooth ramp from the shapes' edge, outwards, inwards or across it
+    BevelSmooth(BevelSmooth),
+    /// A trail fading away from the shapes in one direction
+    DirectionalDistance(DirectionalDistance),
+    /// One side of an axis (or one quarter) of each UV tile copied over the rest
+    Mirror(Mirror),
+    /// A band along the edge where values cross a threshold
+    MaskOutline(MaskOutline),
     /// Square cells `size` texels at 2K across, each the value at its center.
     Mosaic {
         size: f32,
@@ -1490,6 +1505,12 @@ impl Filter {
                 | Filter::DirectionalWarp { .. }
                 | Filter::Bevel { .. }
                 | Filter::Mosaic { .. }
+                | Filter::DistanceBevel(_)
+                | Filter::SourceWarp(_)
+                | Filter::BevelSmooth(_)
+                | Filter::DirectionalDistance(_)
+                | Filter::Mirror(_)
+                | Filter::MaskOutline(_)
                 | Filter::Glow { .. }
                 | Filter::HaloGlow { .. }
                 | Filter::DropShadow { .. }
@@ -1502,7 +1523,7 @@ impl Filter {
         let unit = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 };
         Some(match self {
             Filter::Invert => per_unit(kind, v, |x| 1.0 - x),
-            Filter::Threshold { level } => per_unit(kind, v, |x| if x >= *level { 1.0 } else { 0.0 }),
+            Filter::Threshold { level, mode } => per_unit(kind, v, |x| if mode.passes(x, *level) { 1.0 } else { 0.0 }),
             Filter::Hsl { hue, saturation, lightness, perceptive } => match kind {
                 ChannelKind::Color if *perceptive => perceptive_adjust(v, *hue, *saturation, *lightness),
                 ChannelKind::Color => hsl_adjust(v, *hue, *saturation, *lightness),
@@ -1619,6 +1640,12 @@ impl Filter {
             | Filter::DirectionalWarp { .. }
             | Filter::Bevel { .. }
             | Filter::Mosaic { .. }
+            | Filter::DistanceBevel(_)
+            | Filter::SourceWarp(_)
+            | Filter::BevelSmooth(_)
+            | Filter::DirectionalDistance(_)
+            | Filter::Mirror(_)
+            | Filter::MaskOutline(_)
             | Filter::Glow { .. }
             | Filter::HaloGlow { .. }
             | Filter::DropShadow { .. }
@@ -1656,6 +1683,12 @@ impl Filter {
             Filter::NormalInvert => "Normal Invert",
             Filter::Bevel { .. } => "Bevel",
             Filter::Mosaic { .. } => "Mosaic",
+            Filter::DistanceBevel(_) => "Bevel",
+            Filter::SourceWarp(_) => "Warp",
+            Filter::BevelSmooth(_) => "Bevel Smooth",
+            Filter::DirectionalDistance(_) => "Directional Distance",
+            Filter::Mirror(_) => "Mirror",
+            Filter::MaskOutline(_) => "Mask Outline",
             Filter::Glow { .. } | Filter::HaloGlow { .. } => "Glow",
             Filter::DropShadow { .. } => "Drop Shadow",
             Filter::BakedLighting { .. } => "Baked Lighting Stylized",

@@ -172,7 +172,7 @@ enum MenuIcon {
 
 /// A button with its icon and a caret whose menu hangs from it (caption, then `items`); the item picked
 fn menu_button(ui: &mut Ui, rect: Rect, label: &str, icon: MenuIcon, caption: &str, items: &[AddItem], tokens: &Tokens) -> Option<Pick> {
-    let response = ui.interact(rect, ui.scope_id().with(("layer_toolbar_menu", label)), Sense::click()).on_hover_text(label);
+    let response = tip_above(ui.interact(rect, ui.scope_id().with(("layer_toolbar_menu", label)), Sense::click()), label);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     let popup = ui.scope_id().with(("layer_toolbar_menu_popup", label));
     let open = egui::Popup::is_id_open(ui.ctx(), popup);
@@ -268,9 +268,17 @@ fn menu_row(ui: &mut Ui, width: f32, item: &AddItem, tokens: &Tokens) -> Respons
     response
 }
 
+/// The tooltip of toolbar button `response`, above it so it covers none of the layer rows under the toolbar
+fn tip_above(response: Response, text: &str) -> Response {
+    let mut tooltip = egui::Tooltip::for_enabled(&response);
+    tooltip.popup = tooltip.popup.anchor(response.rect).align(egui::RectAlign::TOP).align_alternatives(&[egui::RectAlign::LEFT, egui::RectAlign::RIGHT]);
+    tooltip.show(|ui| ui.label(text));
+    response
+}
+
 /// A plain icon button of the row: a button face while hovered
 fn plain_button(ui: &mut Ui, rect: Rect, glyph: &str, label: &str, tokens: &Tokens) -> Response {
-    let response = ui.interact(rect, ui.scope_id().with(("layer_toolbar_button", glyph)), Sense::click()).on_hover_text(label);
+    let response = tip_above(ui.interact(rect, ui.scope_id().with(("layer_toolbar_button", glyph)), Sense::click()), label);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     if response.hovered() {
         ui.painter().rect_filled(rect, CornerRadius::same(CONTROL_ROUNDING), tokens.button);

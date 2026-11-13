@@ -5,14 +5,14 @@ use texturecraft_core::{SourceWarp, WarpBlending, WarpMode, WarpSource, WarpSour
 use crate::eval::{direction, texel_noise};
 
 /// Bilinear sample at an absolute texel position into an accumulator (components, then weight), as [`crate::eval`]'s gather reads
-type Sample<'a> = &'a dyn Fn(f32, f32, &mut [f32; 5]);
+pub(crate) type Sample<'a> = &'a dyn Fn(f32, f32, &mut [f32; 5]);
 
-/// The warp's Custom Noise image input at an absolute texel position; None where the values it filters cover nothing
-type Input<'a> = &'a dyn Fn(f32, f32) -> Option<f32>;
+/// The filter's Custom Noise image input at an absolute texel position; None where the values it filters cover nothing
+pub(crate) type Input<'a> = &'a dyn Fn(f32, f32) -> Option<f32>;
 
 /// Warp `warp` at texel `(x, y)` (`res` texels across a UV tile, `comps` values a texel) into `acc`: where its source sends it, or those reads blended
 pub(crate) fn warp_texel(warp: &SourceWarp, (x, y): (f32, f32), (res, comps): (u32, usize), acc: &mut [f32; 5], (sample, input): (Sample<'_>, Input<'_>)) {
-    let source = Source { warp, res, comps, sample, input };
+    let source = Source { source: &warp.source, seed: warp.seed, res, comps, sample, input };
     let reach = warp.move_texels(res);
     if warp.mode == WarpMode::Warp {
         let probe = SourceWarp::probe_texels(res);
@@ -63,19 +63,21 @@ pub(crate) fn warp_texel(warp: &SourceWarp, (x, y): (f32, f32), (res, comps): (u
     }
 }
 
-/// A warp's source at one texel's neighbourhood
-struct Source<'a> {
-    warp: &'a SourceWarp,
-    res: u32,
-    comps: usize,
-    sample: Sample<'a>,
-    input: Input<'a>,
+/// A warp's or slope blur's source at one texel's neighbourhood
+pub(crate) struct Source<'a> {
+    pub(crate) source: &'a WarpSource,
+    /// The default noise's seed
+    pub(crate) seed: u32,
+    pub(crate) res: u32,
+    pub(crate) comps: usize,
+    pub(crate) sample: Sample<'a>,
+    pub(crate) input: Input<'a>,
 }
 
 impl Source<'_> {
     /// The source at texel position `(x, y)` after its blur, Balance and Contrast
-    fn at(&self, x: f32, y: f32) -> f32 {
-        let half = 0.5 * self.warp.source.blur_texels(self.res);
+    pub(crate) fn at(&self, x: f32, y: f32) -> f32 {
+        let half = 0.5 * self.source.blur_texels(self.res);
         let value = if half > 0.0 {
             let corners = [(-half, -half), (half, -half), (-half, half), (half, half)];
             let read: Vec<f32> = corners.iter().filter_map(|(dx, dy)| self.raw(x + dx, y + dy)).collect();
@@ -83,15 +85,13 @@ impl Source<'_> {
         } else {
             self.raw(x, y).unwrap_or(0.5)
         };
-        self.warp.source.shape(value)
+        self.source.shape(value)
     }
 
     /// The source at texel position `(x, y)` before it is shaped; None where the values it filters cover nothing
     fn raw(&self, x: f32, y: f32) -> Option<f32> {
-        match self.warp.source.mode {
-            WarpSourceMode::DefaultNoise => {
-                Some(WarpSource::stretch_noise(texel_noise(x, y, [0.0; 2], self.res, self.warp.source.noise_scale(), self.warp.seed)))
-            }
+        match self.source.mode {
+            WarpSourceMode::DefaultNoise => Some(WarpSource::stretch_noise(texel_noise(x, y, [0.0; 2], self.res, self.source.noise_scale(), self.seed))),
             WarpSourceMode::PreviousInput => {
                 let mut read = [0.0f32; 5];
                 (self.sample)(x, y, &mut read);

@@ -92,14 +92,16 @@ impl PropertySheet<'_> {
 
     /// A −1..1 balance between two tinted color names, left as the label and right after the track (`rights`: the group's right names)
     pub(crate) fn tinted_slider(&mut self, left: (&str, Color32), right: (&str, Color32), rights: &[&str], value: &mut f32) -> Option<bool> {
-        let (control, center_y) = self.row_with(RowLead::Tinted { text: left.0, color: left.1 });
+        let t = self.tokens;
+        let readable = |tint: Color32| crate::theme::legible_tint(tint, t.row, t.text);
+        let (control, center_y) = self.row_with(RowLead::Tinted { text: left.0, color: readable(left.1) });
         let id = self.next_id();
         let widest = rights.iter().map(|name| self.text_width(name, FontId::proportional(TEXT_SIZE))).fold(0.0, f32::max);
         let word_x = self.track_end() - widest;
         let track = Track { start: control.left() + KNOB_RADIUS, end: word_x - TINT_WORD_AIR, center_y, zero: Some(0.0), ramp: false };
         let range = -1.0..=1.0;
         let dragged = self.track(id, left.0, &track, value, &range);
-        self.ui.painter().text(pos2(word_x, center_y), Align2::LEFT_CENTER, right.0, FontId::proportional(TEXT_SIZE), right.1);
+        self.ui.painter().text(pos2(word_x, center_y), Align2::LEFT_CENTER, right.0, FontId::proportional(TEXT_SIZE), readable(right.1));
         let typed = self.value_field(id, center_y, *value, &range, 2, "");
         Self::apply_typed(value, typed, dragged)
     }

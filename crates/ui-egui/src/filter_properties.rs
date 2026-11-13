@@ -60,13 +60,13 @@ pub(crate) fn filter_properties(app: &mut TextureCraftApp, ui: &mut Ui, effect: 
 fn attributes(app: &TextureCraftApp, sheet: &mut PropertySheet<'_>, filter: &Filter) {
     let about = find(filter.label()).and_then(|def| def.about());
     if let Some(about) = about {
-        sheet.attribute_text(tr("Description"), about.description);
+        sheet.attribute_text(tr("Description"), tr(about.description));
     }
     sheet.attribute(tr("Category"), tr("Filter"));
     sheet.attribute(tr("Author"), "TextureCraft");
     sheet.attribute(tr("Author URL"), AUTHOR_URL);
     if let Some(about) = about {
-        sheet.attribute(tr("Tags"), &about.tags.join(", "));
+        sheet.attribute(tr("Tags"), &about.tags.iter().map(|tag| tr(tag)).collect::<Vec<_>>().join(", "));
     }
     if let Ok(texture_set) = app.session.doc.project.texture_set(app.session.ts()) {
         sheet.attribute(tr("Size"), &format!("{0} × {0}", texture_set.resolution));
@@ -105,6 +105,9 @@ fn channel_pills(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effec
     app.run("effect.set", json!({"effect": effect.0, "channels": switched}));
 }
 
+/// How soon a filter card whose picture is still rendering looks for it again
+const THUMBNAIL_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+
 /// The card naming the filter (or None): a click opens the filter picker under it, × empties it
 fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect: LayerId, filter: &Filter) {
     let ctx = sheet.ui.ctx().clone();
@@ -114,6 +117,18 @@ fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect:
     let picture = |painter: &Painter, rect: Rect| match &thumbnail {
         Some(texture) => {
             painter.image(texture.id(), rect, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+        }
+        // A picked filter whose picture is still rendering: a filled square, so it never reads as the empty card's outline
+        None if !empty => {
+            painter.rect_filled(rect.shrink(1.0), 3, tokens.button);
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                egui_phosphor::regular::HOURGLASS_MEDIUM,
+                egui::FontId::proportional(12.0),
+                tokens.text_dim,
+            );
+            ctx.request_repaint_after(THUMBNAIL_POLL);
         }
         None => {
             painter.rect_stroke(rect.shrink(1.0), 3, Stroke::new(1.0, tokens.text_dim), StrokeKind::Inside);

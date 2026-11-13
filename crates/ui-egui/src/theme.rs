@@ -390,6 +390,28 @@ pub const AXIS_COLORS: [Color32; 3] = [Color32::from_rgb(0xd8, 0x60, 0x4f), Colo
 /// Cyan, magenta and yellow: the opposites of [`AXIS_COLORS`] at the same brightness (Color Balance's color names)
 pub const OPPOSITE_COLORS: [Color32; 3] = [Color32::from_rgb(0x52, 0xb8, 0xc4), Color32::from_rgb(0xc4, 0x6a, 0xc8), Color32::from_rgb(0xd2, 0xb8, 0x52)];
 
+/// Least contrast a tinted color name keeps against its background (the WCAG ratio for large or bold text and UI parts)
+const TINT_MIN_CONTRAST: f32 = 3.0;
+
+/// `tint` moved toward `text` just enough to read on `background` (Color Balance's yellow and cyan names on a light card); a tint that already reads stays as it is
+pub fn legible_tint(tint: Color32, background: Color32, text: Color32) -> Color32 {
+    let steps = 10;
+    (0..=steps)
+        .map(|step| tint.lerp_to_gamma(text, step as f32 / steps as f32))
+        .find(|color| contrast_ratio(*color, background) >= TINT_MIN_CONTRAST)
+        .unwrap_or(text)
+}
+
+/// The WCAG contrast ratio of two opaque colors (1..21)
+fn contrast_ratio(a: Color32, b: Color32) -> f32 {
+    let luminance = |color: Color32| {
+        let linear = egui::Rgba::from(color);
+        0.2126 * linear.r() + 0.7152 * linear.g() + 0.0722 * linear.b()
+    };
+    let (high, low) = (luminance(a).max(luminance(b)), luminance(a).min(luminance(b)));
+    (high + 0.05) / (low + 0.05)
+}
+
 /// A section caption inside a panel: semibold in the strong colour, as written (no capitals).
 pub fn caption(text: &str) -> egui::RichText {
     egui::RichText::new(text).font(semibold(12.5)).strong()
@@ -398,6 +420,22 @@ pub fn caption(text: &str) -> egui::RichText {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tint_names_read_on_a_light_card_and_stay_as_they_are_on_a_dark_one() {
+        for theme in [Brightness::Light, Brightness::MediumLight, Brightness::MediumDark, Brightness::Dark] {
+            let t = Tokens::for_brightness(theme);
+            for tint in OPPOSITE_COLORS.into_iter().chain(AXIS_COLORS) {
+                let shown = legible_tint(tint, t.row, t.text);
+                assert!(contrast_ratio(shown, t.row) >= TINT_MIN_CONTRAST, "{theme:?} {tint:?} -> {shown:?}");
+                if t.dark {
+                    assert_eq!(shown, tint, "{theme:?}");
+                }
+            }
+        }
+        let light = Tokens::for_brightness(Brightness::Light);
+        assert_ne!(legible_tint(OPPOSITE_COLORS[2], light.row, light.text), OPPOSITE_COLORS[2], "yellow darkens on a light card");
+    }
 
     #[test]
     fn settings_round_trip_and_unknown_values_load_the_defaults() {

@@ -27,6 +27,7 @@ mod fill_material_rows;
 mod fill_projection_rows;
 mod fill_symmetry_rows;
 mod filter_picker;
+mod folder_properties;
 mod frame_selection;
 mod generator_panel;
 mod gradient_map_menu;

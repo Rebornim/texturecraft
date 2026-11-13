@@ -2091,6 +2091,9 @@ fn simple_filter_snapshots() {
     let params = json!({"layer": layer.clone(), "target": "content", "filter": "colorMatch"});
     let matches = [(); 2].map(|_| LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap()));
     execute(&mut session, "effect.set", &json!({"effect": matches[1].0, "sourceColorMode": "input", "targetColorMode": "imageInput"})).unwrap();
+    // Replace Color too (its two colour bars)
+    let params = json!({"layer": layer.clone(), "target": "content", "filter": "replaceColor"});
+    let replace = LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap());
     execute(&mut session, "layer.select", &json!({"layer": layer})).unwrap();
     session.target = StackTarget::Effect(effects[0].1);
     let mut harness =
@@ -2150,6 +2153,14 @@ fn simple_filter_snapshots() {
     harness.run_steps(2);
     harness.get_by_label("Input").hover();
     save(&mut harness, &output_dir, "filter-colorMatch-open");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    harness.state_mut().session.target = StackTarget::Effect(replace);
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "filter-replaceColor");
+    harness.get_by_role_and_label(egui::Role::Button, "Replacement color").click();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "filter-replaceColor-picker");
     harness.key_press(egui::Key::Escape);
     harness.run_steps(2);
     if std::env::var_os("TC_UI_THEMES").is_some() {

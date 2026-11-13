@@ -134,14 +134,14 @@ impl PropertySheet<'_> {
 
         let response = self.ui.interact(rect, id, Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
         response.widget_info(|| egui::WidgetInfo::slider(true, f64::from(field.value), format!("{label} {}", field.tag)));
-        let shown = format!("{:.decimals$}{}", field.value, field.suffix);
+        let shown = format!("{}{}", shown_number(field.value, decimals), field.suffix);
         painter.text(pos2(rect.right() - VALUE_INSET, rect.center().y), Align2::RIGHT_CENTER, shown, semibold(TEXT_SIZE), t.text);
         if response.hovered() || response.dragged() {
             painter.rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, t.button_border), StrokeKind::Inside);
         }
 
         if response.clicked() {
-            self.ui.data_mut(|data| data.insert_temp(typing_id, format!("{:.decimals$}", field.value)));
+            self.ui.data_mut(|data| data.insert_temp(typing_id, shown_number(field.value, decimals)));
             self.ui.memory_mut(|memory| memory.request_focus(typing_id));
             return None;
         }
@@ -152,4 +152,11 @@ impl PropertySheet<'_> {
         field.value += delta * field.speed;
         Some(!response.drag_started())
     }
+}
+
+/// `value` with `decimals` decimals, a value that rounds to zero reading 0 without a minus sign
+pub(super) fn shown_number(value: f32, decimals: usize) -> String {
+    let shown = format!("{value:.decimals$}");
+    let zero = shown.trim_start_matches('-').chars().all(|digit| matches!(digit, '0' | '.'));
+    if zero { shown.trim_start_matches('-').to_owned() } else { shown }
 }

@@ -98,6 +98,7 @@ mod view2d_tiles;
 mod view_mode_picker;
 mod window_menu_684;
 
+mod filter_card;
 mod stencil;
 mod symmetry;
 mod symmetry_2d;

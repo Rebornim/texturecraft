@@ -86,6 +86,7 @@ mod user_smart_mask;
 
 mod filter_card;
 mod filter_colour;
+mod filter_gradient;
 mod stencil;
 mod symmetry;
 mod symmetry_2d;

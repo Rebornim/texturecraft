@@ -63,9 +63,12 @@ impl PropertySheet<'_> {
         if let Some(changed) = reset {
             // At the defaults it is inert: a click there folds the band like the rest of it
             let sense = if changed { Sense::click() } else { Sense::hover() };
-            let mut reset_response = self.ui.interact(reset_rect, id.with("reset"), sense);
+            let reset_response = self.ui.interact(reset_rect, id.with("reset"), sense);
             if changed {
-                reset_response = self.tip(reset_response, crate::i18n::tr("Restore defaults"));
+                // Right above the glyph, as far right as it: over the card or toggles above the band, never a value
+                let mut tooltip = egui::Tooltip::for_enabled(&reset_response);
+                tooltip.popup = tooltip.popup.anchor(reset_rect).align(egui::RectAlign::TOP_END).align_alternatives(&[egui::RectAlign::LEFT]);
+                tooltip.show(|ui| ui.label(crate::i18n::tr("Restore defaults")));
             }
             reset_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, changed, crate::i18n::tr("Restore defaults")));
             reset_clicked = changed && reset_response.clicked();

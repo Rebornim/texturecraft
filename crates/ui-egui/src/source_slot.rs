@@ -1,7 +1,7 @@
-//! What a source slot card edits: one channel of a fill's material, or a mask fill's one grayscale source
+//! What a source slot card edits: one channel of a fill's material, a mask fill's one grayscale source, or a filter's image input
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, ChannelKind};
+use texturecraft_engine::core::{Channel, ChannelKind, ImageInput};
 
 use crate::i18n::tr;
 
@@ -10,6 +10,8 @@ pub(crate) enum SourceSlot {
     Channel(Channel),
     /// A mask fill's source, read as gray 0..1
     Grayscale,
+    /// A filter's image input, read as gray 0..1
+    Input(ImageInput),
 }
 
 impl SourceSlot {
@@ -18,6 +20,7 @@ impl SourceSlot {
         match self {
             SourceSlot::Channel(channel) => tr(channel.label()),
             SourceSlot::Grayscale => tr("Grayscale"),
+            SourceSlot::Input(input) => tr(input.label),
         }
     }
 
@@ -25,7 +28,7 @@ impl SourceSlot {
     pub(crate) fn kind(self) -> ChannelKind {
         match self {
             SourceSlot::Channel(channel) => channel.kind(),
-            SourceSlot::Grayscale => ChannelKind::Scalar,
+            SourceSlot::Grayscale | SourceSlot::Input(_) => ChannelKind::Scalar,
         }
     }
 
@@ -34,6 +37,7 @@ impl SourceSlot {
         match self {
             SourceSlot::Channel(channel) => channel.default_value(),
             SourceSlot::Grayscale => [1.0; 3],
+            SourceSlot::Input(input) => [input.default; 3],
         }
     }
 
@@ -45,7 +49,7 @@ impl SourceSlot {
     /// A procedural's two ends when it is picked: a gray fill spans the whole range, a channel a softer part of it
     pub(crate) fn procedural_ends(self) -> ([f32; 3], [f32; 3]) {
         match self {
-            SourceSlot::Grayscale => ([0.0; 3], [1.0; 3]),
+            SourceSlot::Grayscale | SourceSlot::Input(_) => ([0.0; 3], [1.0; 3]),
             SourceSlot::Channel(Channel::BaseColor) => ([0.15; 3], [0.85; 3]),
             SourceSlot::Channel(Channel::Height) => ([-0.05; 3], [0.05; 3]),
             SourceSlot::Channel(_) => ([0.2; 3], [0.8; 3]),
@@ -57,6 +61,7 @@ impl SourceSlot {
         match self {
             SourceSlot::Channel(channel) => json!({"channel": channel.id()}),
             SourceSlot::Grayscale => json!({}),
+            SourceSlot::Input(input) => json!({"input": input.id}),
         }
     }
 
@@ -65,6 +70,7 @@ impl SourceSlot {
         match self {
             SourceSlot::Channel(channel) => channel.id(),
             SourceSlot::Grayscale => "grayscale",
+            SourceSlot::Input(input) => input.id,
         }
     }
 }

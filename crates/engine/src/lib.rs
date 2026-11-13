@@ -24,6 +24,7 @@ pub mod fill_hit_test;
 pub mod fill_material_cmds;
 pub mod fill_mode;
 pub mod fill_reset_cmds;
+pub mod filter_about;
 pub mod filter_lib;
 pub mod folder_cmds;
 pub mod inspect;

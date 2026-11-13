@@ -11,9 +11,9 @@ use std::sync::Arc;
 use rayon::prelude::*;
 use texturecraft_core::{
     BakedMap, Bevel, BevelSmooth, BlendMode, BlockScales, Channel, ChannelKind, CompareSource, ContentsOffset, CurvatureDetail, CurvatureMode, Effect,
-    EffectKind, Fill, Filter, Filtering, Generator, GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, MaskOutline, MicroDetail,
-    Mirror, NormalFormat, Project, Projection, Sampling, ShapeCrop, Source, SourceWarp, StylizedLighting, TextureSet, TileGrid, blend1, blend3, lum, mix3,
-    per_unit,
+    EffectKind, Fill, Filter, Filtering, Generator, GeneratorKind, HeightMask, ImageInput, Layer, LayerId, LayerKind, Mask, MaskBackground, MaskOutline,
+    MicroDetail, Mirror, NormalFormat, Project, Projection, Sampling, ShapeCrop, Source, SourceWarp, StylizedLighting, TextureSet, TileGrid, blend1, blend3,
+    lum, mix3, per_unit,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, Surface, UvGBuffer};
@@ -450,9 +450,40 @@ pub(crate) fn texel_noise(x: f32, y: f32, d: [f32; 2], res: u32, scale: f32, see
 
 /// The neighbourhood filters that gather samples (directional and slope blur, warp) over a field region `(x0, y0, w, h)` of premultiplied `orig` texels (`comps` each) and their `cover`: bilinear samples weighted by coverage, so uncovered texels don't bleed in; positions are absolute texel coordinates, so a texel's result does not depend on the region
 #[allow(clippy::too_many_arguments)]
-fn gather(op: Op, orig: &[f32], cover: &[f32], comps: usize, (x0, y0, w, h): (u32, u32, u32, u32), r: f32, res: u32, opacity: f32) -> Vec<f32> {
+fn gather(
+    op: Op,
+    (orig, cover, grays): (&[f32], &[f32], &[f32]),
+    comps: usize,
+    (x0, y0, w, h): (u32, u32, u32, u32),
+    r: f32,
+    res: u32,
+    opacity: f32,
+) -> Vec<f32> {
     let mut data = orig.to_vec();
     let (wu, hu) = (w as usize, h as usize);
+    // The filter's image input at absolute texel position (fx, fy), bilinear over the covered texels; None off them
+    let input = |fx: f32, fy: f32| -> Option<f32> {
+        if !(fx.is_finite() && fy.is_finite()) {
+            return None;
+        }
+        let (bx, by) = (fx.floor(), fy.floor());
+        let (tx, ty) = (fx - bx, fy - by);
+        let (mut sum, mut weight) = (0.0f32, 0.0f32);
+        for (dx, dy, k) in [(0, 0, (1.0 - tx) * (1.0 - ty)), (1, 0, tx * (1.0 - ty)), (0, 1, (1.0 - tx) * ty), (1, 1, tx * ty)] {
+            let (cx, cy) = (bx as i64 + dx - i64::from(x0), by as i64 + dy - i64::from(y0));
+            if k <= 0.0 || cx < 0 || cy < 0 || cx >= wu as i64 || cy >= hu as i64 {
+                continue;
+            }
+            let i = cy as usize * wu + cx as usize;
+            if let (Some(covered), Some(gray)) = (cover.get(i), grays.get(i))
+                && *covered > 0.0
+            {
+                sum += gray * k;
+                weight += k;
+            }
+        }
+        (weight > 1e-6).then(|| sum / weight)
+    };
     // Bilinear sample at absolute texel position (fx, fy) into `acc` (components, then weight).
     let sample = |fx: f32, fy: f32, acc: &mut [f32; 5]| {
         if !(fx.is_finite() && fy.is_finite()) {
@@ -537,7 +568,7 @@ fn gather(op: Op, orig: &[f32], cover: &[f32], comps: usize, (x0, y0, w, h): (u3
                 Op::Mirror { mirror, block } => {
                     mirror_texel(&mirror, (x, y), (block, res), comps, orig.get((row * wu + col) * comps + comps - 1), &mut acc, &sample)
                 }
-                Op::SourceWarp(warp) => warp_texel(&warp, (x, y), (res, comps), &mut acc, &sample),
+                Op::SourceWarp(warp) => warp_texel(&warp, (x, y), (res, comps), &mut acc, (&sample, &input)),
                 Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) | Op::PreBlur | Op::Halo | Op::Shadow { .. } | Op::Outline(_) | Op::Distance => {}
             }
             if acc[4] > 1e-6
@@ -845,6 +876,9 @@ fn filter_extent(radius: f32, op: Op, longest_side: u32) -> (u32, u32) {
     (radius_texels, reach + moved)
 }
 
+/// One evaluated texel of a filter's region: its position, its premultiplied value and the gray its image input reads there
+type RegionTexel = (u32, u32, [f32; 4], f32);
+
 /// Whether neighbourhood filter `op` is computed from box blurs (the others gather samples)
 fn is_box_blur(op: Op) -> bool {
     matches!(op, Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) | Op::PreBlur | Op::Halo | Op::Shadow { .. } | Op::Outline(_) | Op::Distance)
@@ -882,11 +916,17 @@ fn filter_region(
         Job::Content(_) => 4,
     };
 
-    // Evaluate the stack up to the filter, tile by tile (content premultiplied by coverage)
+    // The gray the filter's image input reads (its first; the filters that read one have one)
+    let input = effects.iter().filter(|effect| effect.visible).nth(index).and_then(|effect| match &effect.kind {
+        EffectKind::Filter(filter) => ImageInput::of(filter).first().map(|input| effect.input(input)),
+        _ => None,
+    });
+
+    // Evaluate the stack up to the filter, tile by tile (content premultiplied by coverage), and its image input
     let (region_right, region_bottom) = (region_x + width, region_y + height);
     let region_tiles: Vec<(u32, u32)> =
         (region_y / TILE..region_bottom.div_ceil(TILE)).flat_map(|y| (region_x / TILE..region_right.div_ceil(TILE)).map(move |x| (x, y))).collect();
-    let parts: Vec<Vec<(u32, u32, [f32; 4])>> = region_tiles
+    let parts: Vec<Vec<RegionTexel>> = region_tiles
         .par_iter()
         .map(|&(tile_x, tile_y)| {
             let anchor_nodes = anchor_plan(inputs, id, channels, tile_x, tile_y, Some(below));
@@ -931,7 +971,8 @@ fn filter_region(
                         },
                         (None, None) => [0.0; 4],
                     };
-                    (x, y, value)
+                    let gray = input.as_ref().map_or(1.0, |source| texel.source(source, &Projection::default(), Sampling::default(), ChannelKind::Scalar)[0]);
+                    (x, y, value, gray.clamp(0.0, 1.0))
                 })
                 .collect()
         })
@@ -941,17 +982,23 @@ fn filter_region(
     let texel_count = (width * height) as usize;
     let mut stack_values = vec![0.0f32; texel_count * components];
     let mut cover = vec![0.0f32; texel_count];
+    let mut grays = vec![0.0f32; texel_count];
     let row_tiles = (region_right.div_ceil(TILE) - region_x / TILE).max(1) as usize;
     let band = (TILE * width) as usize;
-    stack_values.par_chunks_mut(band * components).zip(cover.par_chunks_mut(band)).zip(parts.par_chunks(row_tiles)).for_each(|((stack_values, cover), row)| {
-        for &(x, y, value) in row.iter().flatten() {
-            let texel = (((y - region_y) % TILE) * width + (x - region_x)) as usize;
-            if let (Some(covered), Some(pixel)) = (cover.get_mut(texel), stack_values.get_mut(texel * components..(texel + 1) * components)) {
-                *covered = 1.0;
-                pixel.copy_from_slice(&value[..components]);
+    stack_values.par_chunks_mut(band * components).zip(cover.par_chunks_mut(band)).zip(grays.par_chunks_mut(band)).zip(parts.par_chunks(row_tiles)).for_each(
+        |(((stack_values, cover), grays), row)| {
+            for &(x, y, value, gray) in row.iter().flatten() {
+                let texel = (((y - region_y) % TILE) * width + (x - region_x)) as usize;
+                if let (Some(covered), Some(read), Some(pixel)) =
+                    (cover.get_mut(texel), grays.get_mut(texel), stack_values.get_mut(texel * components..(texel + 1) * components))
+                {
+                    *covered = 1.0;
+                    *read = gray;
+                    pixel.copy_from_slice(&value[..components]);
+                }
             }
-        }
-    });
+        },
+    );
 
     // Release tile scatter data before allocating filter buffers
     drop(parts);
@@ -978,16 +1025,25 @@ fn filter_region(
         let scaled = neighbourhood_filters(effects, tile_resolution).find(|filter| filter.0 == index);
         let scaled_radius = scaled.map_or(radius_texels, |filter| filter.1.round().clamp(1.0, radius_texels as f32) as u32);
         if !is_box_blur(op) {
-            return gather(op, &stack_values, &cover, components, (region_x, region_y, width, height), scaled_radius as f32, tile_resolution, opacity);
+            return gather(
+                op,
+                (&stack_values, &cover, &grays),
+                components,
+                (region_x, region_y, width, height),
+                scaled_radius as f32,
+                tile_resolution,
+                opacity,
+            );
         }
 
         // Weighted so uncovered texels don't bleed in; a wrapping filter reads a border copied from the far side
         let pad = (pad_x as usize, pad_y as usize);
         let unpadded = (width as usize, height as usize);
-        let (stack_values, cover) = if pad == (0, 0) {
-            (Cow::Borrowed(&stack_values), Cow::Borrowed(&cover))
+        let (stack_values, cover, grays) = if pad == (0, 0) {
+            (Cow::Borrowed(&stack_values), Cow::Borrowed(&cover), Cow::Borrowed(&grays))
         } else {
-            (Cow::Owned(wrap_pad(&stack_values, components, unpadded, pad)), Cow::Owned(wrap_pad(&cover, 1, unpadded, pad)))
+            let padded = |values: &[f32], components: usize| Cow::Owned(wrap_pad(values, components, unpadded, pad));
+            (padded(&stack_values, components), padded(&cover, 1), padded(&grays, 1))
         };
         let (columns, rows, blur_radius) = (unpadded.0 + 2 * pad.0, unpadded.1 + 2 * pad.1, scaled_radius as usize);
         if let (Some((_, _, scaled_op @ (Op::Halo | Op::Shadow { .. }))), Some(Effect { kind: EffectKind::Filter(filter), .. })) =
@@ -1002,7 +1058,7 @@ fn filter_region(
             (scaled, effects.iter().filter(|effect| effect.visible).nth(index))
         {
             let mut distance_values = stack_values.to_vec();
-            distance_filter(&mut distance_values, &cover, components, (columns, rows), filter, tile_resolution, opacity);
+            distance_filter(&mut distance_values, (&cover, &grays), components, (columns, rows), filter, tile_resolution, opacity);
             return if pad == (0, 0) { distance_values } else { unpad(&distance_values, components, unpadded, pad) };
         }
         if let Some((_, _, Op::Outline(outline))) = scaled {

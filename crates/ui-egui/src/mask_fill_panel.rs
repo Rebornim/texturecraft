@@ -26,5 +26,5 @@ pub(crate) fn mask_fill_sheet(
 
     sheet.section(tr("Grayscale"), false);
     let anchors = anchors_below(app, reader);
-    source_card(app, sheet, source, &base, SourceSlot::Grayscale, &anchors);
+    source_card(app, sheet, source, &base, SourceSlot::Grayscale, &anchors, false);
 }

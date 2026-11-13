@@ -102,7 +102,7 @@ pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
         _ => {
             let anchors = anchors_below(app, reader);
             for channel in channels.into_iter().filter(|channel| on.contains(channel)) {
-                source_card(app, sheet, fill.source(channel), base, SourceSlot::Channel(channel), &anchors);
+                source_card(app, sheet, fill.source(channel), base, SourceSlot::Channel(channel), &anchors, false);
             }
         }
     }
@@ -143,7 +143,7 @@ pub(crate) fn source_line(app: &TextureCraftApp, source: &Source) -> String {
     }
 }
 
-/// One source's card (a channel's, or a mask fill's grayscale): its slot (the row opens the source picker), then the source's own settings
+/// One source's card (a channel's, a mask fill's grayscale or a filter's image input): its slot (the row opens the source picker), then the source's own settings; `in_card`: only its slot row, inside the card open now
 pub(crate) fn source_card(
     app: &mut TextureCraftApp,
     sheet: &mut PropertySheet<'_>,
@@ -151,6 +151,7 @@ pub(crate) fn source_card(
     base: &Value,
     slot_of: SourceSlot,
     anchors: &[(LayerId, String)],
+    in_card: bool,
 ) {
     let set = |extra: Value| with(base, with(&slot_of.fields(), extra));
     let tokens = Tokens::get(sheet.ui.ctx());
@@ -158,7 +159,12 @@ pub(crate) fn source_card(
     let line = source_line(app, &source);
     let uniform = matches!(source, Source::Uniform(_));
     let procedural = matches!(source, Source::Procedural { .. });
-    let slot = sheet.slot(&|painter, rect| paint_thumbnail(painter, rect, &picture, &tokens), slot_of.name(), &line, None, !uniform, procedural);
+    let thumb = |painter: &egui::Painter, rect: egui::Rect| paint_thumbnail(painter, rect, &picture, &tokens);
+    let slot = if in_card {
+        sheet.slot_in_card(&thumb, slot_of.name(), &line, !uniform)
+    } else {
+        sheet.slot(&thumb, slot_of.name(), &line, None, !uniform, procedural)
+    };
 
     let popup = sheet.ui.make_persistent_id(("source_picker", base.to_string(), slot_of.key()));
     if slot.pick.clicked() {
@@ -184,6 +190,10 @@ pub(crate) fn source_card(
         app.run("layer.fill.set", set(json!({"image": name})));
     }
 
+    // A slot in a mode's card is its row only (its source's own rows and Resolution band would split the card)
+    if in_card {
+        return;
+    }
     match source {
         Source::Uniform(value) => uniform_rows(app, sheet, slot_of, value, &set),
         Source::Procedural { pattern, low, high } => procedural_rows(app, sheet, slot_of, &pattern, [low, high], slot.reset, &set),

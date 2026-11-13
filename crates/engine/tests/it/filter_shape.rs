@@ -8,21 +8,21 @@ use texturecraft_engine::core::{
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute};
 
-const SIZE: u32 = 128;
+pub(crate) const SIZE: u32 = 128;
 
-fn session() -> Session {
+pub(crate) fn session() -> Session {
     let mut s = Session::new_project("t", primitives::sphere(1.0, 48, 24), "builtin:sphere", None, SIZE).unwrap();
     s.update();
     s
 }
 
 /// The composited roughness at texel `(x, y)`
-fn roughness(s: &mut Session, (x, y): (u32, u32)) -> f32 {
+pub(crate) fn roughness(s: &mut Session, (x, y): (u32, u32)) -> f32 {
     s.update();
     s.caches[0].composite.value(Channel::Roughness, x, y)[0]
 }
 
-fn add_filter(s: &mut Session, params: Value) -> LayerId {
+pub(crate) fn add_filter(s: &mut Session, params: Value) -> LayerId {
     let mut params = params;
     params["target"] = json!("content");
     LayerId(execute(s, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap())
@@ -145,7 +145,7 @@ fn mask_outline_draws_a_band_along_the_threshold_edge() {
 }
 
 /// A roughness gradient crossing 0.5 away from the tile's sides along the middle row: texel `steps` outward of the shapes' first texel at its edge (inward below 0), the values before any filter, and the outward direction along x
-fn shape_edge(s: &mut Session) -> (impl Fn(i64) -> (u32, u32) + use<>, Vec<f32>, i64) {
+pub(crate) fn shape_edge(s: &mut Session) -> (impl Fn(i64) -> (u32, u32) + use<>, Vec<f32>, i64) {
     execute(s, "layer.add.fill", &json!({"color": [0.5, 0.5, 0.5], "roughness": 0.25})).unwrap();
     execute(s, "layer.fill.set", &json!({"channel": "roughness", "procedural": "gradient"})).unwrap();
     let row = SIZE / 2;
@@ -155,7 +155,7 @@ fn shape_edge(s: &mut Session) -> (impl Fn(i64) -> (u32, u32) + use<>, Vec<f32>,
     (move |steps: i64| ((inner as i64 + steps * outward) as u32, row), values, outward)
 }
 
-fn set(s: &mut Session, effect: LayerId, params: Value) {
+pub(crate) fn set(s: &mut Session, effect: LayerId, params: Value) {
     let mut params = params;
     params["effect"] = json!(effect.0);
     execute(s, "effect.set", &params).unwrap();

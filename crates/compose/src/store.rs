@@ -146,6 +146,14 @@ impl ImageRes {
         bilinear(&self.rgba, self.width, self.height, u, v, (true, true))
     }
 
+    /// The texel under (`u`, `v`) as stored, wrapping (an ID map's colors must not blend)
+    pub fn sample_nearest(&self, u: f32, v: f32) -> [f32; 4] {
+        if !u.is_finite() || !v.is_finite() {
+            return [0.0; 4];
+        }
+        self.texel((u * self.width as f32).floor() as i64, (v * self.height as f32).floor() as i64, (true, true))
+    }
+
     /// The halved levels, built the first time they are asked for
     fn mips(&self) -> &[MipLevel] {
         self.mips.get_or_init(|| {

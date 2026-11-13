@@ -2064,7 +2064,7 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, eid:
             tool_properties(app, ui);
         }
         EffectKind::Filter(filter) => filter_properties(app, ui, id, filter),
-        EffectKind::ColorSelection { colors, tolerance } => crate::color_selection_editor::color_selection_properties(app, ui, eid, colors, *tolerance),
+        EffectKind::ColorSelection(selection) => crate::color_selection_editor::color_selection_properties(app, ui, eid, selection),
         EffectKind::Compare { op, value, tolerance, left, right, channel, hardness } => {
             let settings = crate::compare_properties::CompareSettings {
                 op: *op,

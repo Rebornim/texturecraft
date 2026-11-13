@@ -12,6 +12,7 @@ pub mod bake;
 pub mod blend;
 mod block_scales;
 pub mod channel;
+pub mod color_selection;
 pub mod compare_source;
 pub mod cook_resolution;
 pub mod depth_culling;
@@ -20,6 +21,7 @@ pub mod layer;
 pub mod project;
 pub mod projector;
 mod saved_projection;
+pub mod selection_background;
 pub mod shape_crop;
 pub mod symmetry_kind;
 
@@ -33,6 +35,7 @@ pub use bake::{
 };
 pub use blend::{BlendMode, blend1, blend3, lum, mix3};
 pub use channel::{Channel, ChannelFormat, ChannelKind};
+pub use color_selection::ColorSelection;
 pub use compare_source::CompareSource;
 pub use cook_resolution::CookResolution;
 pub use depth_culling::DepthCulling;
@@ -47,6 +50,7 @@ pub use project::{
     Project, TextureSet, TileGrid, ToneMapping, UDIM_RANGE, udim_at,
 };
 pub use projector::Projector;
+pub use selection_background::SelectionBackground;
 pub use shape_crop::ShapeCrop;
 pub use symmetry_kind::SymmetryKind;
 

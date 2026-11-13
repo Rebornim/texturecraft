@@ -119,18 +119,23 @@ impl PropertySheet<'_> {
 
     /// A full-width button lit in the accent while what it turns on stays on
     pub(crate) fn button_lit(&mut self, icon: &str, text: &str, lit: bool) -> egui::Response {
+        self.button_enabled(icon, text, lit, true)
+    }
+
+    /// [`Self::button_lit`] that answers no clicks and dims its words while not `enabled`
+    pub(crate) fn button_enabled(&mut self, icon: &str, text: &str, lit: bool, enabled: bool) -> egui::Response {
         let rect = self.take(ROW_HEIGHT);
         let button = self.control_box(self.left, rect.center().y);
         let id = self.next_id();
-        let response = self.ui.interact(button, id, Sense::click());
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, text));
+        let response = self.ui.interact(button, id, if enabled { Sense::click() } else { Sense::hover() });
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, text));
 
         let t = self.tokens;
         let painter = self.ui.painter();
         painter.rect(
             button,
             CornerRadius::same(4),
-            match (lit, response.hovered()) {
+            match (lit, enabled && response.hovered()) {
                 (true, _) => t.accent_dim,
                 (false, true) => t.row_hover,
                 (false, false) => t.button,
@@ -138,13 +143,14 @@ impl PropertySheet<'_> {
             Stroke::new(1.0, if lit { t.accent } else { t.button_border }),
             StrokeKind::Inside,
         );
+        let color = if enabled { t.text } else { t.text_dim };
         let font = FontId::proportional(TEXT_SIZE);
-        let icon_galley = painter.layout_no_wrap(icon.to_owned(), FontId::proportional(14.0), t.text);
-        let text_galley = painter.layout_no_wrap(text.to_owned(), font, t.text);
+        let icon_galley = painter.layout_no_wrap(icon.to_owned(), FontId::proportional(14.0), color);
+        let text_galley = painter.layout_no_wrap(text.to_owned(), font, color);
         let total = icon_galley.size().x + BUTTON_ICON_GAP + text_galley.size().x;
         let x = button.center().x - total / 2.0;
-        painter.galley(pos2(x, button.center().y - icon_galley.size().y / 2.0), icon_galley.clone(), t.text);
-        painter.galley(pos2(x + icon_galley.size().x + BUTTON_ICON_GAP, button.center().y - text_galley.size().y / 2.0), text_galley, t.text);
+        painter.galley(pos2(x, button.center().y - icon_galley.size().y / 2.0), icon_galley.clone(), color);
+        painter.galley(pos2(x + icon_galley.size().x + BUTTON_ICON_GAP, button.center().y - text_galley.size().y / 2.0), text_galley, color);
         self.drawn(button.bottom());
         response
     }

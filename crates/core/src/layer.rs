@@ -1272,10 +1272,7 @@ pub enum EffectKind {
     Levels(Levels),
     Filter(Filter),
     /// Select ID-map colors within a tolerance.
-    ColorSelection {
-        colors: Vec<[f32; 3]>,
-        tolerance: f32,
-    },
+    ColorSelection(crate::ColorSelection),
     /// Compare one channel (or the mask so far, or a constant) on two sides: 1 where the comparison holds, softened by `hardness`
     Compare {
         op: CompareOp,

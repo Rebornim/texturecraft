@@ -1356,6 +1356,67 @@ fn compare_snapshots() {
     }
 }
 
+/// Screen 10: a new color selection without an ID map, then three colors on the ID mesh map (a row hovered, a row picking again, the Background list open)
+#[test]
+#[ignore]
+fn color_selection_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let shoot = |with_id_map: bool| {
+        let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+        if !with_id_map {
+            execute(&mut session, "textureSet.meshMap.clear", &json!({"map": "id"})).unwrap();
+        }
+        let layer = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+        execute(&mut session, "mask.add.colorSelection", &json!({"layer": layer})).unwrap();
+        let effect = session.doc.project.layer(texturecraft_engine::core::LayerId(layer.as_u64().unwrap())).unwrap().mask.as_ref().unwrap().effects[0].id;
+        if with_id_map {
+            let colors = json!([[214.0 / 255.0, 1.0, 0.0], [1.0, 49.0 / 255.0, 0.0], [1.0, 0.0, 247.0 / 255.0]]);
+            execute(&mut session, "effect.set", &json!({"effect": effect.0, "colors": colors})).unwrap();
+        }
+        execute(&mut session, "layer.select", &json!({"layer": layer, "target": effect.0})).unwrap();
+        let mut harness =
+            Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+        harness.state_mut().ui.prefs.language = "en".into();
+        harness.run_steps(6);
+        harness
+    };
+
+    let mut harness = shoot(false);
+    save(&mut harness, &output_dir, "colorsel-new");
+
+    let mut harness = shoot(true);
+    let row = harness.get_by_label("Pick color R 255 G 49 B 0").rect().center();
+    harness.hover_at(row);
+    harness.run_steps(2);
+    save(&mut harness, &output_dir, "colorsel-hover");
+    let first = harness.get_by_label("Pick color R 214 G 255 B 0").rect().center();
+    harness.get_by_label("Pick color R 214 G 255 B 0").click();
+    harness.run_steps(4);
+    harness.hover_at(first);
+    harness.run_steps(2);
+    save(&mut harness, &output_dir, "colorsel-repick");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(4);
+
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Black").click();
+    harness.run_steps(3);
+    let hovered = harness.get_by_role_and_label(egui::Role::ListBoxOption, "Transparent").rect().center();
+    harness.hover_at(hovered);
+    save(&mut harness, &output_dir, "colorsel-background-list");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(3);
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("colorsel-{name}"));
+        }
+    }
+}
+
 /// Screen 08: a mask's levels, then a content levels on Base color (Colors, red only with Clamp on, its Affects list open with an option hovered) and on Roughness
 #[test]
 #[ignore]

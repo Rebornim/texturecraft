@@ -1303,6 +1303,15 @@ impl<'a, 'b> Texel<'a, 'b> {
         self.inp.baked.sample_working(map, self.x, self.y, (self.res, self.inp.gbuf.height), &self.inp.block_scales)
     }
 
+    /// This texel's ID color: from image resource `image` (nearest, as stored), or from the ID mesh map without one
+    fn id_color(&self, image: Option<&str>) -> Option<[f32; 3]> {
+        let Some(name) = image else { return self.baked_color(BakedMap::Id) };
+        let image = self.inp.images.get(name)?;
+        let [red, green, blue, _] =
+            image.sample_nearest((self.x as f32 + 0.5) / self.res.max(1) as f32, (self.y as f32 + 0.5) / self.inp.gbuf.height.max(1) as f32);
+        Some([red, green, blue])
+    }
+
     /// Where `proj` samples this texel: its coordinates, or for a projection from a frame on the surface (placed planar, warp) its place in the frame, and how much backface culling and the shape crop let through
     fn projected(&mut self, proj: &Projection) -> (Coords, f32) {
         let c = self.coords();
@@ -1516,11 +1525,9 @@ impl<'a, 'b> Texel<'a, 'b> {
                     let filtered = filter.point(ChannelKind::Scalar, [value; 3]).map_or(value, |gray| gray[0]);
                     value += (filtered - value) * opacity;
                 }
-                EffectKind::ColorSelection { colors, tolerance } => {
-                    let id = self.baked_color(BakedMap::Id);
-                    let within = |picked: &[f32; 3], color: [f32; 3]| (0..3).all(|component| (picked[component] - color[component]).abs() <= *tolerance);
-                    let selected = if id.is_some_and(|color| colors.iter().any(|picked| within(picked, color))) { 1.0 } else { 0.0 };
-                    value += (blend1(effect.blend, value, selected) - value) * opacity;
+                EffectKind::ColorSelection(selection) => {
+                    let (selected, cover) = selection.value(self.id_color(selection.id_map.as_deref()));
+                    value += (blend1(effect.blend, value, selected) - value) * opacity * cover;
                 }
                 EffectKind::Compare { op, value: constant, tolerance, left, right, channel, hardness } => {
                     let left = self.compare_side(*left, *channel, plan, value, *constant);
@@ -1843,9 +1850,7 @@ impl<'a, 'b> Texel<'a, 'b> {
             // Neighbourhood filters come precomputed through `ChanPlan::start`.
             EffectKind::Filter(f) => (f.point(c.kind, v).map_or(v, |out| mix3(v, out, o)), cov),
             // Anchors are recorded by `eval`; mask-only effects leave content as it is.
-            EffectKind::Anchor | EffectKind::Fill { .. } | EffectKind::Generator(_) | EffectKind::ColorSelection { .. } | EffectKind::Compare { .. } => {
-                (v, cov)
-            }
+            EffectKind::Anchor | EffectKind::Fill { .. } | EffectKind::Generator(_) | EffectKind::ColorSelection(_) | EffectKind::Compare { .. } => (v, cov),
         }
     }
 }

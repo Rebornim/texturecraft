@@ -66,9 +66,13 @@ fn effect_json(session: &Session, effect: &Effect, content: bool) -> Value {
             out["affects"] = levels.affects.map_or(json!("all"), |channel| json!(channel.id()));
             out["clamp"] = json!(levels.clamp);
         }
-        EffectKind::ColorSelection { colors, tolerance } => {
-            out["colors"] = json!(colors);
-            out["tolerance"] = json!(tolerance);
+        EffectKind::ColorSelection(selection) => {
+            out["colors"] = json!(selection.colors);
+            out["tolerance"] = json!(selection.tolerance);
+            out["output"] = json!(selection.output);
+            out["hardness"] = json!(selection.hardness);
+            out["background"] = json!(selection.background.id());
+            out["idMap"] = json!(selection.id_map);
         }
         EffectKind::Compare { op, value, tolerance, left, right, channel, hardness } => {
             out["compare"] = json!({

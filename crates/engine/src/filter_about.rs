@@ -55,6 +55,7 @@ const ABOUT: &[(&str, FilterAbout)] = &[
     ("colorMatch", about("Moves the colors so a source color, the texture's mean by default, lands on a target color.", &["color", "match", "recolor"])),
     ("heightToNormal", about("Turns the layer's height into its normal.", &["height", "normal", "convert"])),
     ("mirror", about("Copies one side of each UV tile over the other.", &["mirror", "symmetry", "flip"])),
+    ("transform", about("Scales, turns, moves and flips the content of each UV tile.", &["transform", "scale", "rotate", "offset", "flip"])),
     ("matFinishGrind", about("Gives the material a ground finish: fine brushed lines in its roughness.", &["material", "metal", "scratches"])),
     ("matFinishRaw", about("Gives the material a raw finish: uneven, cloudy roughness.", &["material", "raw", "rough"])),
     ("matFinishSanded", about("Gives the material a sanded finish: a fine, even grain in its roughness.", &["material", "sanded", "rough"])),

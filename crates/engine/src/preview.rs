@@ -2,7 +2,9 @@
 
 use rayon::prelude::*;
 use texturecraft_compose::pattern::{Coords, procedural};
-use texturecraft_core::{Channel, Effect, EffectKind, Fill, Filter, Layer, LayerKind, Procedural, ProceduralKind, Project, Projection, Source, TextureSet};
+use texturecraft_core::{
+    Channel, Effect, EffectKind, Fill, Filter, Layer, LayerKind, Procedural, ProceduralKind, Project, Projection, Source, TextureSet, TileTransform,
+};
 use texturecraft_geom::glam::{Vec2, Vec3};
 
 use crate::materials::{Builder, build};
@@ -103,6 +105,10 @@ fn magnified(f: Filter, k: f32) -> Filter {
 pub fn filter(id: &str, size: usize) -> Option<Vec<Option<Sample>>> {
     let res = u32::try_from(size).ok()?.max(1);
     let kind = match crate::filter_lib::build(id, &serde_json::Value::Null).ok()? {
+        // Transform changes nothing as the library adds it: its picture shows it scaled and turned
+        EffectKind::Filter(Filter::Transform(transform)) => {
+            EffectKind::Filter(Filter::Transform(TileTransform { scaling: [2.0, 2.0], rotation: 30.0, ..transform }))
+        }
         EffectKind::Filter(f) => EffectKind::Filter(magnified(f, 2048.0 / res as f32)),
         k => k,
     };

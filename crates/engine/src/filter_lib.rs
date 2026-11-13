@@ -7,7 +7,7 @@ use texturecraft_core::{
     AnisotropicKuwahara, Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, ColorMatch, ConversionMode, CurvePreset, DirectionalDistance,
     EffectKind, Fill, Filter, GradientInput, GrayscaleConversion, GrayscaleMode, HeightToNormal, HighpassSpace, Levels, MaskOutline, Mirror, MirrorCorner,
     MirrorMode, OutlinePosition, PbrValidate, Procedural, ProceduralKind, Projection, SlopeBlending, Source, SourceColorMode, SourceSlopeBlur, SourceWarp,
-    StylizedLighting, TargetColorMode, ThresholdMode, ValidationMode, WarpBlending, WarpMode, WarpSourceMode,
+    StylizedLighting, TargetColorMode, ThresholdMode, TileTransform, ValidationMode, WarpBlending, WarpMode, WarpSourceMode,
 };
 
 use crate::commands::{CommandSpec, always, bad, boolp, color_of, color_param, f32p, has_layer, strp, u64p};
@@ -91,6 +91,7 @@ pub const FILTERS: &[FilterDef] = &[
     def("warp", "Warp", "Distort", true),
     def("mosaic", "Pixelate", "Distort", true),
     def("mirror", "Mirror", "Distort", true),
+    def("transform", "Transform", "Distort", true),
     def("matFinishGrind", "MatFinish Grind", "Material finish", false),
     def("matFinishRaw", "MatFinish Raw", "Material finish", false),
     def("matFinishSanded", "MatFinish Sanded", "Material finish", false),
@@ -244,6 +245,7 @@ pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
         "heightToNormal" => Filter::HeightToNormal(HeightToNormal::LIBRARY),
         "colorMatch" => Filter::ColorMatch(ColorMatch::LIBRARY),
         "mirror" => Filter::Mirror(Mirror::LIBRARY),
+        "transform" => Filter::Transform(TileTransform::LIBRARY),
         "maskOutline" => Filter::MaskOutline(MaskOutline::LIBRARY),
         "glow" => Filter::HaloGlow { on_mask: false, precise: false, width: 0.15, spread: 0.0, opacity: 1.0, color: GLOW_COLOR },
         "dropShadow" => Filter::DropShadow { angle: 90.0, distance: 0.1, size: 0.2, spread: 0.0, opacity: 0.5, color: [0.0; 3] },
@@ -446,6 +448,7 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         | Filter::NormalInvert
         | Filter::Fxaa { .. }
         | Filter::PbrValidate(_)
+        | Filter::Transform(_)
         | Filter::Empty => Vec::new(),
     }
 }
@@ -676,6 +679,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             }
         }
         Filter::Mirror(mirror) => apply_mirror(p, mirror, cmd)?,
+        Filter::Transform(transform) => crate::tile_transform_params::apply(p, transform, cmd)?,
         Filter::SourceWarp(warp) => {
             seed(&mut warp.seed);
             warp.mode = choice(p, "warpMode", &WarpMode::ALL, WarpMode::id, cmd)?.unwrap_or(warp.mode);

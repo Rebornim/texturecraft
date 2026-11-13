@@ -18,6 +18,7 @@ pub mod control;
 mod decal_drop;
 pub mod dock;
 pub mod docking;
+mod drawn_icon;
 pub mod export_templates;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_dialogs;

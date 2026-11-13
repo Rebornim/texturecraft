@@ -7,11 +7,12 @@ use texturecraft_engine::Tool;
 
 use crate::TextureCraftApp;
 use crate::docking::Panel;
+use crate::drawn_icon::DrawnIcon;
 use crate::i18n::{tr, trf};
 use crate::keymap::{shortcut_of, tip};
 use crate::state::{Mode, ViewLayout};
 use crate::theme::{GUTTER, Tokens, card};
-use crate::widgets::{bar_slider, icon_button, icon_button_without_tooltip, icon_dropdown_button, icon_dropdown_button_width};
+use crate::widgets::{bar_slider, drawn_icon_button, icon_button, icon_button_without_tooltip, icon_dropdown_button, icon_dropdown_button_width};
 
 const BAR_SPACING: f32 = 10.0;
 const COMPACT_BAR_SPACING: f32 = 4.0;
@@ -215,7 +216,13 @@ fn tool_controls(app: &mut TextureCraftApp, ui: &mut egui::Ui, tokens: &Tokens) 
 
     let button_size = ui.spacing().interact_size.y;
     let tool = app.session.tool.tool;
-    ui.label(RichText::new(tool_icon(tool)).size(TOOL_ICON_SIZE).color(tokens.text_strong)).on_hover_text(tr(tool.label()));
+    if tool == Tool::ColorPicker {
+        let (icon, response) = ui.allocate_exact_size(vec2(TOOL_ICON_SIZE, TOOL_ICON_SIZE), egui::Sense::hover());
+        DrawnIcon::Pipette.paint(ui.painter(), icon.center(), TOOL_ICON_SIZE, tokens.text_strong);
+        response.on_hover_text(tr(tool.label()));
+    } else {
+        ui.label(RichText::new(tool_icon(tool)).size(TOOL_ICON_SIZE).color(tokens.text_strong)).on_hover_text(tr(tool.label()));
+    }
 
     let brush = &mut app.session.tool.brush;
     match tool {
@@ -353,7 +360,11 @@ pub fn tool_shelf(app: &mut TextureCraftApp, ui: &mut egui::Ui) {
                 for tool in Tool::ALL {
                     let selected = app.ui.mode == Mode::Painting && app.session.tool.tool == tool;
                     let hint = tip(&app.ui.keymap, tr(tool.label()), &format!("tool.{}", tool.id()));
-                    if icon_button(ui, tool_icon(tool), &hint, selected, 28.0).clicked() {
+                    let response = match tool {
+                        Tool::ColorPicker => drawn_icon_button(ui, DrawnIcon::Pipette, &hint, selected, 28.0),
+                        _ => icon_button(ui, tool_icon(tool), &hint, selected, 28.0),
+                    };
+                    if response.clicked() {
                         app.run("tool.select", json!({"tool": tool.id()}));
                     }
                 }

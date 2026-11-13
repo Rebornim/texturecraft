@@ -5,6 +5,7 @@ use egui_phosphor::regular as ic;
 
 use super::group::CARD_BLEED;
 use super::{IdColorRowResponse, PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE, TEXT_SIZE};
+use crate::drawn_icon::DrawnIcon;
 
 /// Height of the swatch
 const SWATCH_HEIGHT: f32 = 18.0;
@@ -18,6 +19,8 @@ const REMOVE_ROOM: f32 = 24.0;
 /// From the right edge to the ×'s centre, and the size of the row's glyphs
 const REMOVE_INSET: f32 = 6.0;
 const GLYPH_SIZE: f32 = 13.0;
+/// Size of the pipette on a hovered swatch
+const PIPETTE_SIZE: f32 = 14.0;
 
 /// From a component's letter to its value
 const LETTER_TO_VALUE: f32 = 12.0;
@@ -58,7 +61,7 @@ impl PropertySheet<'_> {
         if enabled && (hovered || repicking) {
             let luminance = (0.2126 * f32::from(red) + 0.7152 * f32::from(green) + 0.0722 * f32::from(blue)) / 255.0;
             let glyph = if luminance > LIGHT_SWATCH { Color32::from_gray(20) } else { Color32::from_gray(235) };
-            painter.text(swatch.center(), Align2::CENTER_CENTER, ic::EYEDROPPER, FontId::proportional(GLYPH_SIZE), glyph);
+            DrawnIcon::Pipette.paint(&painter, swatch.center(), PIPETTE_SIZE, glyph);
         }
 
         let step = (self.right - REMOVE_ROOM - self.column()) / 3.0;

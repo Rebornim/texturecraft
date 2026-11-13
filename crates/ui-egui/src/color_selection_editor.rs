@@ -6,6 +6,7 @@ use serde_json::json;
 use texturecraft_engine::core::{BakedMap, ColorSelection, LayerId, SelectionBackground};
 
 use crate::TextureCraftApp;
+use crate::drawn_icon::DrawnIcon;
 use crate::i18n::tr;
 use crate::id_color_pick::IdColorPick;
 use crate::picker_group::PickerGroup;
@@ -100,7 +101,7 @@ pub fn color_selection_properties(app: &mut TextureCraftApp, ui: &mut Ui, effect
             return;
         }
         let adding = picking.is_some_and(|pick| pick.index.is_none());
-        if sheet.button_enabled(ic::EYEDROPPER, tr("Pick color"), adding, has_id_map).clicked() {
+        if sheet.button_enabled(DrawnIcon::Pipette, tr("Pick color"), adding, has_id_map).clicked() {
             toggle_pick(app, effect, None, adding);
         }
         for (index, color) in selection.colors.iter().enumerate() {

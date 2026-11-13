@@ -2,7 +2,7 @@ use egui::{Align2, CornerRadius, FontId, Painter, Rect, Sense, Stroke, StrokeKin
 use egui_phosphor::regular as ic;
 
 use super::group::CARD_BLEED;
-use super::{PropertySheet, ROW_HEIGHT, SlotResponse, TEXT_SIZE};
+use super::{ButtonIcon, PropertySheet, ROW_HEIGHT, SlotResponse, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Air between a slot card's top and its slot row
@@ -39,6 +39,8 @@ const DICE_WIDTH: f32 = 28.0;
 
 /// Air between a full-width button's icon and its words
 const BUTTON_ICON_GAP: f32 = 8.0;
+/// Size of a full-width button's icon
+const BUTTON_ICON_SIZE: f32 = 14.0;
 
 impl PropertySheet<'_> {
     /// Opens a slot card with its top row: thumbnail, name over source, then ⟲, × and the toggle on the right; the row opens the source list
@@ -123,26 +125,26 @@ impl PropertySheet<'_> {
     }
 
     /// A full-width button: centred icon and words
-    pub(crate) fn button(&mut self, icon: &str, text: &str) -> egui::Response {
+    pub(crate) fn button<'a>(&mut self, icon: impl Into<ButtonIcon<'a>>, text: &str) -> egui::Response {
         self.button_lit(icon, text, false)
     }
 
     /// A full-width button lit in the accent while what it turns on stays on
-    pub(crate) fn button_lit(&mut self, icon: &str, text: &str, lit: bool) -> egui::Response {
+    pub(crate) fn button_lit<'a>(&mut self, icon: impl Into<ButtonIcon<'a>>, text: &str, lit: bool) -> egui::Response {
         self.button_enabled(icon, text, lit, true)
     }
 
     /// [`Self::button_lit`] that answers no clicks and dims its words while not `enabled`
-    pub(crate) fn button_enabled(&mut self, icon: &str, text: &str, lit: bool, enabled: bool) -> egui::Response {
-        self.button_sensing(icon, text, lit, if enabled { Sense::click() } else { Sense::hover() })
+    pub(crate) fn button_enabled<'a>(&mut self, icon: impl Into<ButtonIcon<'a>>, text: &str, lit: bool, enabled: bool) -> egui::Response {
+        self.button_sensing(icon.into(), text, lit, if enabled { Sense::click() } else { Sense::hover() })
     }
 
     /// [`Self::button_lit`] for a press-and-hold control: it also follows a drag that starts on it, wherever the pointer goes
     pub(crate) fn hold_button(&mut self, icon: &str, text: &str, lit: bool) -> egui::Response {
-        self.button_sensing(icon, text, lit, Sense::click_and_drag())
+        self.button_sensing(icon.into(), text, lit, Sense::click_and_drag())
     }
 
-    fn button_sensing(&mut self, icon: &str, text: &str, lit: bool, sense: Sense) -> egui::Response {
+    fn button_sensing(&mut self, icon: ButtonIcon<'_>, text: &str, lit: bool, sense: Sense) -> egui::Response {
         let enabled = sense != Sense::hover();
         let rect = self.take(ROW_HEIGHT);
         let button = self.control_box(self.left, rect.center().y);
@@ -165,12 +167,23 @@ impl PropertySheet<'_> {
         );
         let color = if enabled { t.text } else { t.text_dim };
         let font = FontId::proportional(TEXT_SIZE);
-        let icon_galley = painter.layout_no_wrap(icon.to_owned(), FontId::proportional(14.0), color);
+        let (icon_width, icon_galley) = match icon {
+            ButtonIcon::Glyph(glyph) => {
+                let galley = painter.layout_no_wrap(glyph.to_owned(), FontId::proportional(BUTTON_ICON_SIZE), color);
+                (galley.size().x, Some(galley))
+            }
+            ButtonIcon::Drawn(_) => (BUTTON_ICON_SIZE, None),
+        };
         let text_galley = painter.layout_no_wrap(text.to_owned(), font, color);
-        let total = icon_galley.size().x + BUTTON_ICON_GAP + text_galley.size().x;
+        let total = icon_width + BUTTON_ICON_GAP + text_galley.size().x;
         let x = button.center().x - total / 2.0;
-        painter.galley(pos2(x, button.center().y - icon_galley.size().y / 2.0), icon_galley.clone(), color);
-        painter.galley(pos2(x + icon_galley.size().x + BUTTON_ICON_GAP, button.center().y - text_galley.size().y / 2.0), text_galley, color);
+        if let Some(galley) = icon_galley {
+            painter.galley(pos2(x, button.center().y - galley.size().y / 2.0), galley, color);
+        }
+        if let ButtonIcon::Drawn(drawn) = icon {
+            drawn.paint(painter, pos2(x + icon_width / 2.0, button.center().y), BUTTON_ICON_SIZE, color);
+        }
+        painter.galley(pos2(x + icon_width + BUTTON_ICON_GAP, button.center().y - text_galley.size().y / 2.0), text_galley, color);
         self.drawn(button.bottom());
         response
     }

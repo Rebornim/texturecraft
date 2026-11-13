@@ -8,6 +8,7 @@ use texturecraft_engine::core::MAX_SWATCHES;
 
 use super::{CONTROL_HEIGHT, PAD, PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::color_picker::{ColorModel, ColorPick, ColorSpace, PickerState, SwatchEdit, hex, parse_hex};
+use crate::drawn_icon::DrawnIcon;
 use crate::fill_material_panel::shown_color as screen_color;
 use crate::i18n::tr;
 use crate::theme::semibold;
@@ -51,6 +52,8 @@ const MENU_INSET: f32 = 6.0;
 /// Size of the eyedropper and ⋯ glyphs and of their click targets
 const GLYPH_SIZE: f32 = 13.0;
 const GLYPH_TARGET: f32 = 18.0;
+/// Size of the eyedropper's pipette
+const PIPETTE_SIZE: f32 = 15.0;
 
 /// A dropdown is as wide as its value plus this (its padding and caret)
 const DROPDOWN_ROOM: f32 = 34.0;
@@ -232,7 +235,7 @@ impl PropertySheet<'_> {
         } else {
             idle
         };
-        self.ui.painter().text(glyph.center(), Align2::CENTER_CENTER, ic::EYEDROPPER, FontId::proportional(GLYPH_SIZE), color);
+        DrawnIcon::Pipette.paint(self.ui.painter(), glyph.center(), PIPETTE_SIZE, color);
         response.clicked()
     }
 

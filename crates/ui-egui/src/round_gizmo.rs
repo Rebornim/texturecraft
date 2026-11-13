@@ -1,4 +1,4 @@
-//! While Move on model is on, a tri-planar, spherical or cylindrical projection shows its projector round the whole model: a dashed box, sphere or cylinder with the centre square, X/Y/Z arrows and turn rings, and dots that resize it
+//! The selected tri-planar, spherical or cylindrical fill shows its projector round the whole model: a dashed box, sphere or cylinder with the centre square, X/Y/Z arrows and turn rings, and dots that resize it. Only a press on one of those handles moves it: any other drag paints or turns the camera
 
 use egui::{Color32, PointerButton, Pos2, Rect, Stroke, Ui};
 use serde_json::{Value, json};
@@ -6,7 +6,7 @@ use texturecraft_engine::core::Projection;
 use texturecraft_engine::geom::glam::{EulerRot, Mat3, Quat, Vec2, Vec3};
 
 use crate::TextureCraftApp;
-use crate::frame_gizmo::{ARROW, CENTER_SQUARE, GRAB, distance_to_segment, move_handles};
+use crate::frame_gizmo::{ARROW, HALO, HALO_EXTRA_WIDTH, SHAFT_WIDTH, arrow_distance, center_distance, distance_to_segment, handle_dot, move_handles, nearest};
 use crate::move_on_model::MoveOnModel;
 use crate::theme::{AXIS_COLORS, Tokens};
 use crate::viewport::project;
@@ -57,13 +57,12 @@ pub(crate) struct RoundGizmo {
     /// The projection's centre in the projector's units, and what offset puts it there (offset = -local × this)
     local: Vec3,
     offset_per_local: f32,
-    /// On screen: the centre, the arrow tips, the turn rings, the dashed outline, the size dots and the poles (shown only)
+    /// On screen: the centre, the arrow tips, the turn rings, the dashed outline and the size dots
     pub center: Pos2,
     pub arrows: [Option<Pos2>; 3],
     pub rings: [Vec<Pos2>; 3],
     outline: Vec<Vec<Pos2>>,
     pub dots: Vec<(Pos2, [bool; 3])>,
-    poles: Vec<Pos2>,
     /// Screen movement per world unit along each projector direction at the centre
     steps: [Option<egui::Vec2>; 3],
 }
@@ -73,13 +72,10 @@ pub(crate) const BOX_REACH: f32 = 1.08;
 pub(crate) const SPHERE_REACH: f32 = 1.2;
 pub(crate) const CYLINDER_REACH: f32 = 1.1;
 pub(crate) const CYLINDER_HEIGHT: f32 = 1.15;
-/// Screen radius of the turn rings, their width and how near one a press grabs it (points)
-const RING: f32 = 30.0;
-const RING_WIDTH: f32 = 2.0;
-const RING_GRAB: f32 = 5.0;
-/// The size dots' and the poles' radii (points)
-const SIZE_DOT: f32 = 5.0;
-const POLE_DOT: f32 = 3.0;
+/// Screen radius of the turn rings: past the arrow heads, so a ring is grabbed apart from the arrows and the other rings near the centre
+const RING: f32 = 84.0;
+/// The size dots' radius (points); a sphere's poles are size dots too
+const SIZE_DOT: f32 = 7.0;
 /// Points on a drawn circle
 pub(crate) const CIRCLE_POINTS: usize = 48;
 /// The projector's scale limits (as `layer.fill.projection` takes them)
@@ -101,12 +97,12 @@ fn drag_id() -> egui::Id {
 }
 
 impl RoundGizmo {
-    /// The projector of the tri-planar, spherical or cylindrical fill Move on model is moving
+    /// The projector of the selected tri-planar, spherical or cylindrical fill
     pub(crate) fn of(app: &TextureCraftApp, rect: Rect) -> Option<RoundGizmo> {
         if app.ui.mode != crate::state::Mode::Painting {
             return None;
         }
-        let target = app.moving_on_model.filter(|target| app.session.selected_layer() == Some(target.layer))?;
+        let target = MoveOnModel::selected(app)?;
         let (shape, offset, projector, offset_per_local) = match target.projection(app)? {
             Projection::Triplanar { scale, offset, projector, .. } => (Shape::Box, offset, projector, scale),
             Projection::Spherical { offset, projector, .. } => (Shape::Sphere, offset, projector, 1.0),
@@ -134,7 +130,6 @@ impl RoundGizmo {
             rings: Default::default(),
             outline: Vec::new(),
             dots: Vec::new(),
-            poles: Vec::new(),
             steps: [None; 3],
         };
         let origin = gizmo.world(local);
@@ -189,7 +184,10 @@ impl RoundGizmo {
                 }
                 gizmo.outline.push(silhouette);
                 gizmo.outline.push(circle(|t| at(local + Vec3::new(t.x, 0.0, t.y) * r)));
-                gizmo.poles.extend([at(local + Vec3::Y * r), at(local - Vec3::Y * r)].into_iter().flatten());
+                // The top and bottom dots resize it evenly too, as the side one does
+                for pole in [at(local + Vec3::Y * r), at(local - Vec3::Y * r)].into_iter().flatten() {
+                    gizmo.dots.push((keep_in_view(pole), [true; 3]));
+                }
             }
             Shape::Cylinder(axis) => {
                 let along = Vec3::AXES[axis];
@@ -235,21 +233,14 @@ impl RoundGizmo {
         Vec3::AXES.map(|axis| self.turn * axis)
     }
 
-    /// The handle under screen point `p`
+    /// The handle under screen point `p`: the nearest one within reach (where rings cross, the nearest ring)
     pub(crate) fn grab(&self, p: Pos2) -> Option<RoundGrab> {
-        if Rect::from_center_size(self.center, egui::Vec2::splat(CENTER_SQUARE)).expand(2.0).contains(p) {
-            return Some(RoundGrab::Slide);
-        }
-        if let Some(axis) = (0..3).find(|&axis| self.arrows[axis].is_some_and(|tip| distance_to_segment(p, self.center, tip) <= GRAB)) {
-            return Some(RoundGrab::Axis(axis));
-        }
-        if let Some((_, axes)) = self.dots.iter().find(|(dot, _)| dot.distance(p) <= GRAB) {
-            return Some(RoundGrab::Size(*axes));
-        }
-        // Where rings cross, the nearest one
+        let mut handles = vec![(RoundGrab::Slide, center_distance(self.center, p))];
+        handles.extend((0..3).filter_map(|axis| Some((RoundGrab::Axis(axis), arrow_distance(p, self.center, self.arrows[axis]?)))));
+        handles.extend(self.dots.iter().map(|(dot, axes)| (RoundGrab::Size(*axes), dot.distance(p))));
         let distance = |ring: &Vec<Pos2>| ring.windows(2).map(|pair| distance_to_segment(p, pair[0], pair[1])).fold(f32::INFINITY, f32::min);
-        let (axis, nearest) = (0..3).map(|axis| (axis, distance(&self.rings[axis]))).min_by(|a, b| a.1.total_cmp(&b.1))?;
-        (nearest <= RING_GRAB).then_some(RoundGrab::Ring(axis))
+        handles.extend((0..3).map(|axis| (RoundGrab::Ring(axis), distance(&self.rings[axis]))));
+        nearest(handles)
     }
 
     /// The `layer.fill.projection` params that slide the projector across the view from `from` to `to`, as its centre square does
@@ -331,6 +322,18 @@ fn on_view_plane(app: &TextureCraftApp, rect: Rect, origin: Vec3, forward: Vec3,
     hit.is_finite().then_some(hit)
 }
 
+/// Whether the pointer is over one of the selected projector's handles or dragging one (the brush cursor hides there and a press there doesn't paint)
+pub(crate) fn hovered(app: &TextureCraftApp, ui: &Ui, rect: Rect) -> bool {
+    let dragging = ui.ctx().data(|data| data.get_temp::<RoundDrag>(drag_id())).is_some();
+    dragging
+        || ui.ctx().pointer_hover_pos().is_some_and(|hover| rect.contains(hover) && RoundGizmo::of(app, rect).is_some_and(|gizmo| gizmo.grab(hover).is_some()))
+}
+
+/// Whether screen point `at` is on one of the selected projector's handles
+pub(crate) fn handle_at(app: &TextureCraftApp, rect: Rect, at: Pos2) -> bool {
+    rect.contains(at) && RoundGizmo::of(app, rect).is_some_and(|gizmo| gizmo.grab(at).is_some())
+}
+
 /// Drags on the projector's handles (one undo step per drag, the projection updates live); returns whether a drag owns the pointer
 pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response, rect: Rect) -> bool {
     let ctx = ui.ctx();
@@ -375,21 +378,17 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
     let lit = |grab: RoundGrab| active == Some(grab) || (active.is_none() && hovered == Some(grab));
     let fill = |grab: RoundGrab| if lit(grab) { tokens.viewport_accent } else { Color32::WHITE };
     let axis_color = |axis: usize, grab: RoundGrab| if lit(grab) { tokens.viewport_accent } else { AXIS_COLORS[axis] };
-    let edge = Stroke::new(1.0, Color32::from_black_alpha(200));
-
     for line in &gizmo.outline {
         for stroke in [Stroke::new(3.0, Color32::from_black_alpha(140)), Stroke::new(1.2, Color32::from_white_alpha(230))] {
             painter.add(egui::Shape::dashed_line(line, stroke, 6.0, 4.0));
         }
     }
-    for pole in &gizmo.poles {
-        painter.circle_filled(*pole, POLE_DOT, Color32::WHITE);
+    for (axis, ring) in gizmo.rings.iter().enumerate() {
+        painter.add(egui::Shape::line(ring.clone(), Stroke::new(SHAFT_WIDTH + HALO_EXTRA_WIDTH, HALO)));
+        painter.add(egui::Shape::line(ring.clone(), Stroke::new(SHAFT_WIDTH, axis_color(axis, RoundGrab::Ring(axis)))));
     }
     for (dot, axes) in &gizmo.dots {
-        painter.circle(*dot, SIZE_DOT, fill(RoundGrab::Size(*axes)), edge);
-    }
-    for (axis, ring) in gizmo.rings.iter().enumerate() {
-        painter.add(egui::Shape::line(ring.clone(), Stroke::new(RING_WIDTH, axis_color(axis, RoundGrab::Ring(axis)))));
+        handle_dot(&painter, *dot, SIZE_DOT, fill(RoundGrab::Size(*axes)));
     }
     move_handles(&painter, gizmo.center, gizmo.arrows, |axis| axis_color(axis, RoundGrab::Axis(axis)), fill(RoundGrab::Slide));
 }
@@ -424,19 +423,19 @@ mod tests {
     }
 
     #[test]
-    fn round_projections_show_their_projector_only_while_moved_on_the_model() {
+    fn round_projections_show_their_projector_while_their_fill_is_selected() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         for kind in ["triplanar", "spherical", "cylindrical"] {
             let (mut harness, _) = fill_app(kind);
-            assert!(RoundGizmo::of(harness.state(), harness.state().viewport_rect).is_none(), "{kind}: hidden until Move on model");
-            harness.get_by_label("Move on model").click();
             harness.run_steps(2);
             let shown = gizmo(&harness);
             assert!(shown.arrows.iter().all(Option::is_some) && shown.rings.iter().all(|ring| ring.len() > 8), "{kind}: arrows and rings {shown:?}");
             assert!(!shown.outline.is_empty(), "{kind}: its shape is drawn");
+            // A sphere's side, top and bottom dots; a cylinder's top rim and side
             let size_dots = if kind == "triplanar" {
                 0
             } else if kind == "spherical" {
-                1
+                3
             } else {
                 2
             };
@@ -537,5 +536,109 @@ mod tests {
             );
             assert_eq!(harness.state().session.history_labels().len(), steps + 3, "{kind}: one undo step per drag");
         }
+    }
+
+    /// A paint layer on the ball whose mask holds a fill effect (selected) projecting `kind`: painting there paints the mask
+    fn mask_fill_app(kind: &str) -> (egui_kittest::Harness<'static, TextureCraftApp>, LayerId) {
+        let session =
+            texturecraft_engine::Session::new_project("Gizmo", texturecraft_engine::geom::primitives::sphere(1.0, 48, 24), "builtin:sphere", None, 128)
+                .unwrap();
+        let mut harness = egui_kittest::Harness::builder().with_size(vec2(1600.0, 960.0)).build_eframe(|context| TextureCraftApp::new(context, session));
+        harness.run_steps(4);
+        let mut png = Vec::new();
+        image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 255, 255, 255])).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        let image = harness.state_mut().session.import_resource_bytes("decal.png", png).unwrap();
+        harness.state_mut().run("layer.add.decal", json!({"image": image, "channel": "mask", "size": 0.5})).unwrap();
+        let texturecraft_engine::StackTarget::Effect(effect) = harness.state().session.target else { panic!("the mask fill is selected") };
+        harness.state_mut().run("layer.fill.projection", json!({"effect": effect.0, "projection": kind})).unwrap();
+        harness.run_steps(2);
+        (harness, effect)
+    }
+
+    fn effect_projection(harness: &egui_kittest::Harness<'_, TextureCraftApp>, effect: LayerId) -> Projection {
+        match &harness.state().session.doc.project.effect(effect).unwrap().1.kind {
+            texturecraft_engine::core::EffectKind::Fill { projection, .. } => projection.clone(),
+            other => panic!("a fill effect: {other:?}"),
+        }
+    }
+
+    /// A point on the model clear of every handle of the shown gizmo
+    fn on_the_model_off_the_handles(harness: &egui_kittest::Harness<'_, TextureCraftApp>) -> Pos2 {
+        let app = harness.state();
+        let rect = app.viewport_rect;
+        let round = RoundGizmo::of(app, rect);
+        let frame = crate::frame_gizmo::FrameGizmo::of(app, rect);
+        let clear = |p: Pos2| {
+            round.as_ref().is_none_or(|gizmo| gizmo.grab(p).is_none())
+                && frame.as_ref().is_none_or(|gizmo| gizmo.grab(p).is_none())
+                && app.session.pick(texturecraft_engine::geom::glam::Vec2::new(p.x - rect.left(), p.y - rect.top()), app.session.viewport).is_some()
+        };
+        (1..12)
+            .flat_map(|ring| (0..16).map(move |step| rect.center() + egui::Vec2::angled(step as f32 / 16.0 * std::f32::consts::TAU) * (ring as f32 * 14.0)))
+            .find(|p| clear(*p) && clear(*p + vec2(30.0, 0.0)))
+            .expect("the model shows past the handles")
+    }
+
+    /// With painting on and every projection, a drag on the model away from the gizmo paints (the projection stays put); only a drag that starts on a handle moves the projection, and it paints nothing
+    #[test]
+    fn only_a_handle_moves_the_projection_and_any_other_drag_on_the_model_paints() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        for kind in ["planar", "warp", "triplanar", "spherical", "cylindrical"] {
+            let (mut harness, effect) = mask_fill_app(kind);
+            let rect = harness.state().viewport_rect;
+            let before = effect_projection(&harness, effect);
+            let steps = harness.state().session.history_labels().len();
+
+            let from = on_the_model_off_the_handles(&harness);
+            drag(&mut harness, from, from + vec2(30.0, 0.0), Modifiers::NONE);
+            assert_eq!(effect_projection(&harness, effect), before, "{kind}: a drag off the handles leaves the projection alone");
+            assert_eq!(harness.state().session.history_labels().len(), steps + 1, "{kind}: and paints one stroke");
+
+            let center = match RoundGizmo::of(harness.state(), rect) {
+                Some(round) => round.center,
+                None => crate::frame_gizmo::FrameGizmo::of(harness.state(), rect).expect("{kind}: a gizmo shows").center,
+            };
+            drag(&mut harness, center, center + vec2(0.0, -30.0), Modifiers::NONE);
+            assert_ne!(effect_projection(&harness, effect), before, "{kind}: the centre square moves it");
+            assert_eq!(harness.state().session.history_labels().len(), steps + 2, "{kind}: one step, no stroke");
+        }
+    }
+
+    /// Each of a sphere's three size dots (side, top, bottom) can be grabbed and resizes it evenly
+    #[test]
+    fn every_sphere_dot_resizes_it() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        for index in 0..3 {
+            let (mut harness, layer) = fill_app("spherical");
+            let start = gizmo(&harness);
+            let (dot, axes) = start.dots[index];
+            assert_eq!(start.grab(dot), Some(RoundGrab::Size([true; 3])), "dot {index} at {dot:?}: {axes:?}");
+            drag(&mut harness, dot, start.center + (dot - start.center) * 1.4, Modifiers::NONE);
+            let (scaled, _) = projector_and_offset(&projection(&harness, layer));
+            assert!(scaled.scale.iter().all(|scale| (scale - 1.4).abs() < 0.08), "dot {index} scales it evenly: {:?}", scaled.scale);
+        }
+    }
+
+    /// A plain left press on the model while a colour picker is open only closes the picker: no stroke, no slide (Move on model is on), and the press after it works again
+    #[test]
+    fn a_press_that_closes_the_colour_picker_neither_paints_nor_slides() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = moving("triplanar");
+        let before = projection(&harness, layer);
+        let from = on_the_model_off_the_handles(&harness);
+        harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
+        harness.run_steps(25);
+        harness.get_by_role_and_label(egui::Role::Button, "Base color").click();
+        harness.run_steps(2);
+        assert!(crate::color_picker::open_window(&harness.ctx).is_some(), "the picker is open");
+        let steps = harness.state().session.history_labels().len();
+
+        drag(&mut harness, from, from + vec2(40.0, 0.0), Modifiers::NONE);
+        assert!(crate::color_picker::open_window(&harness.ctx).is_none(), "the press closed the picker");
+        assert_eq!(projection(&harness, layer), before, "and slid nothing");
+        assert_eq!(harness.state().session.history_labels().len(), steps, "nor made an undo step");
+
+        drag(&mut harness, from, from + vec2(40.0, 0.0), Modifiers::NONE);
+        assert_ne!(projection(&harness, layer), before, "the next press slides again");
     }
 }

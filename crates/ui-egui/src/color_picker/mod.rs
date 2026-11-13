@@ -34,6 +34,24 @@ pub(crate) fn open_window(ctx: &egui::Context) -> Option<egui::Rect> {
     (pass.saturating_add(1) >= ctx.cumulative_pass_nr()).then_some(face)
 }
 
+/// Set while the press that closed the picker is still held
+fn closing_id() -> egui::Id {
+    egui::Id::unique("color_picker_closing")
+}
+
+/// A press outside the picker closed it: until it is released the views take no paint or gizmo input from it
+pub(crate) fn closed_by_press(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.insert_temp(closing_id(), true));
+}
+
+/// Whether a press in a view must leave painting and the projection gizmos alone: a picker is open (the press only closes it), or the press that closed it is still held or just released (the release would paint a dab)
+pub(crate) fn blocks_view_press(ctx: &egui::Context) -> bool {
+    if !ctx.input(|input| input.pointer.any_down() || input.pointer.any_released()) {
+        ctx.data_mut(|data| data.remove::<bool>(closing_id()));
+    }
+    open_window(ctx).is_some() || ctx.data(|data| data.get_temp::<bool>(closing_id())).unwrap_or(false)
+}
+
 /// `rgb` (0..1 each) as six hex digits, as the hex field shows it
 pub(crate) fn hex(rgb: [f32; 3]) -> String {
     rgb.iter().map(|c| format!("{:02X}", (c.clamp(0.0, 1.0) * 255.0).round() as u8)).collect()

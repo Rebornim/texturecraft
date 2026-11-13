@@ -261,6 +261,9 @@ impl PropertySheet<'_> {
         if closed || (!list_open && !waiting && (pressed_outside || escape)) {
             state.open = false;
             crate::color_picker::forget_window(&ctx);
+            if pressed_outside {
+                crate::color_picker::closed_by_press(&ctx);
+            }
         } else {
             crate::color_picker::remember_window(&ctx, face);
         }

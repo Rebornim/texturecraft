@@ -1893,11 +1893,6 @@ impl EffectKind {
         matches!(self, EffectKind::Paint | EffectKind::Path(_))
     }
 
-    /// Whether a source of this effect (a fill, a material or a generator input) reads an anchor point.
-    fn reads_anchor(&self) -> bool {
-        self.reads(None)
-    }
-
     /// Whether a source of this effect reads anchor point `anchor` (any anchor point when None)
     pub fn reads(&self, anchor: Option<LayerId>) -> bool {
         let hit = |s: &Source| s.anchor().is_some_and(|a| anchor.is_none_or(|wanted| wanted == a));
@@ -1958,7 +1953,7 @@ impl Layer {
             LayerKind::Fill(f) => f.sources.values().any(|s| s.anchor().is_some()),
             _ => false,
         };
-        fill || self.mask.iter().flat_map(|m| m.effects.iter()).chain(self.content_effects.iter()).any(|e| e.kind.reads_anchor())
+        fill || self.mask.iter().flat_map(|m| m.effects.iter()).chain(self.content_effects.iter()).any(|e| e.reads(None))
     }
 
     /// Whether the layer's result depends on the stack below it: it reads an anchor point, or its mask compares channels of the stack
@@ -1981,6 +1976,9 @@ pub struct Effect {
     /// A content effect's channels it leaves as they are (none in projects saved before they could be switched off)
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub off_channels: BTreeSet<Channel>,
+    /// A filter effect's image inputs set to a source, by [`crate::ImageInput`] id (the others read their default gray)
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub inputs: BTreeMap<String, Source>,
 }
 
 impl Effect {
@@ -1995,7 +1993,18 @@ impl Effect {
             opacity: 1.0,
             channel_blends: BTreeMap::new(),
             off_channels: BTreeSet::new(),
+            inputs: BTreeMap::new(),
         }
+    }
+
+    /// Whether a source of the effect, or one of its image inputs, reads anchor point `anchor` (any anchor point when None)
+    pub fn reads(&self, anchor: Option<LayerId>) -> bool {
+        self.kind.reads(anchor) || self.inputs.values().any(|source| crate::ImageInput::reads(source, anchor))
+    }
+
+    /// The source image input `input` reads: the one set on the effect, else its default gray
+    pub fn input(&self, input: &crate::ImageInput) -> Source {
+        self.inputs.get(input.id).cloned().unwrap_or_else(|| input.default_source())
     }
 
     /// How the effect blends on `channel` of its layer's content, or on its mask (`None`)

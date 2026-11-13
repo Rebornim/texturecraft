@@ -9,7 +9,7 @@ use crate::gradient_input::{GradientInput, ramp, shape};
 use crate::{
     AnisotropicKuwahara, Backface, BakedMap, Bevel, BevelSmooth, BlendMode, Channel, ChannelKind, ColorMatch, CompareSource, ContentsOffset, DepthCulling,
     DirectionalDistance, DirectionalLight, FillSymmetry, GrayscaleConversion, HeightToNormal, HighpassSpace, MaskOutline, Mirror, PbrValidate, Projector,
-    RandomizedSeed, ShapeCrop, SourceSlopeBlur, SourceWarp, StylizedLighting, SunAndSky, ThresholdMode, lum,
+    RandomizedSeed, ShapeCrop, SourceSlopeBlur, SourceWarp, StylizedLighting, SunAndSky, ThresholdMode, TileTransform, lum,
 };
 
 mod curvature_detail;
@@ -1313,6 +1313,8 @@ pub enum Filter {
     DirectionalDistance(DirectionalDistance),
     /// One side of an axis (or one quarter) of each UV tile copied over the rest
     Mirror(Mirror),
+    /// Each UV tile's content scaled, turned, moved and flipped, repeating or not
+    Transform(TileTransform),
     /// A band along the edge where values cross a threshold
     MaskOutline(MaskOutline),
     /// Square cells `size` texels at 2K across, each the value at its center (Pixelate; see [`Filter::pixels_amount`])
@@ -1622,6 +1624,7 @@ impl Filter {
                 | Filter::BevelSmooth(_)
                 | Filter::DirectionalDistance(_)
                 | Filter::Mirror(_)
+                | Filter::Transform(_)
                 | Filter::MaskOutline(_)
                 | Filter::Glow { .. }
                 | Filter::HaloGlow { .. }
@@ -1775,6 +1778,7 @@ impl Filter {
             | Filter::BevelSmooth(_)
             | Filter::DirectionalDistance(_)
             | Filter::Mirror(_)
+            | Filter::Transform(_)
             | Filter::MaskOutline(_)
             | Filter::Glow { .. }
             | Filter::HaloGlow { .. }
@@ -1826,6 +1830,7 @@ impl Filter {
             Filter::BevelSmooth(_) => "Bevel Smooth",
             Filter::DirectionalDistance(_) => "Directional Distance",
             Filter::Mirror(_) => "Mirror",
+            Filter::Transform(_) => "Transform",
             Filter::MaskOutline(_) => "Mask Outline",
             Filter::Glow { .. } | Filter::HaloGlow { .. } => "Glow",
             Filter::DropShadow { .. } => "Drop Shadow",

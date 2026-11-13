@@ -69,43 +69,52 @@ pub(crate) fn wrap_picture(painter: &Painter, rect: Rect, wrap: UvWrap, tokens: 
 
 /// Most tiles drawn across the window preview: beyond this the pattern is too fine to read
 const PREVIEW_MAX_TILES: f32 = 24.0;
+/// Most tiles drawn along one direction of a lattice preview, whatever its map
+const PREVIEW_MAX_SPAN: i32 = 64;
 /// The two shades of the preview's checker cells, as fractions of the way from `field` to `text`
 const PREVIEW_DARK: f32 = 0.18;
 const PREVIEW_LIGHT: f32 = 0.55;
 
 /// A window on the surface: a UV checker (2 × 2 cells per tile, accent tile borders) tiled, turned and slid as the fill is
 pub(crate) fn window_preview(painter: &Painter, rect: Rect, placement: Placement, tokens: &Tokens) {
-    let painter = painter.with_clip_rect(rect);
-    painter.rect_filled(rect, 0, tokens.field);
     let tiling = [placement.tiling[0].clamp(1e-3, PREVIEW_MAX_TILES), placement.tiling[1].clamp(1e-3, PREVIEW_MAX_TILES)];
     let (sin, cos) = placement.rotation.to_radians().sin_cos();
-    // Texture coordinates → the window (0..1 across and down): undo the offset, the scale, the turn
-    let to_window = |t: [f32; 2]| -> Pos2 {
-        let (x, y) = ((t[0] - placement.offset[0]) / tiling[0], (t[1] - placement.offset[1]) / tiling[1]);
-        let (u, v) = (x * cos + y * sin, -x * sin + y * cos);
-        pos2(rect.left() + u * rect.width(), rect.top() + v * rect.height())
-    };
-    // The window's corners in texture coordinates (turn, scale, offset): the tiles to draw
-    let to_texture = |u: f32, v: f32| -> [f32; 2] {
-        let (x, y) = (u * cos - v * sin, u * sin + v * cos);
-        [x * tiling[0] + placement.offset[0], y * tiling[1] + placement.offset[1]]
-    };
-    let corners = [to_texture(0.0, 0.0), to_texture(1.0, 0.0), to_texture(0.0, 1.0), to_texture(1.0, 1.0)];
-    let low = |axis: usize| corners.iter().map(|c| c[axis]).fold(f32::INFINITY, f32::min).floor() as i32;
-    let high = |axis: usize| corners.iter().map(|c| c[axis]).fold(f32::NEG_INFINITY, f32::max).ceil() as i32;
-    let (dark, light) = (lerp_color(tokens.field, tokens.text, PREVIEW_DARK), lerp_color(tokens.field, tokens.text, PREVIEW_LIGHT));
-    let (first_x, last_x, first_y, last_y) = (low(0), high(0), low(1), high(1));
-    let border = Stroke::new(1.0, tokens.accent);
-    for tile_x in first_x..last_x {
-        for tile_y in first_y..last_y {
-            for (cell_x, cell_y) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                let (x0, y0) = (tile_x as f32 + cell_x as f32 * 0.5, tile_y as f32 + cell_y as f32 * 0.5);
-                let corners = [[x0, y0], [x0 + 0.5, y0], [x0 + 0.5, y0 + 0.5], [x0, y0 + 0.5]].map(to_window);
-                let color = if (cell_x + cell_y) % 2 == 0 { light } else { dark };
-                painter.add(Shape::convex_polygon(corners.to_vec(), color, Stroke::NONE));
+    // Turn, scale, then offset: one step across the window moves (cos, sin) scaled in the texture
+    let columns = [[cos * tiling[0], sin * tiling[1]], [-sin * tiling[0], cos * tiling[1]]];
+    lattice_preview(painter, rect, (columns, placement.offset), true, tokens);
+}
+
+/// The window preview for any linear map: window point (u, v) shows the texture at `columns[0] · u + columns[1] · v + shift`; without `repeat` only tile 0..1
+pub(crate) fn lattice_preview(painter: &Painter, rect: Rect, (columns, shift): ([[f32; 2]; 2], [f32; 2]), repeat: bool, tokens: &Tokens) {
+    let painter = painter.with_clip_rect(rect);
+    painter.rect_filled(rect, 0, tokens.field);
+    let [[a, b], [c, d]] = columns;
+    let det = a * d - c * b;
+    if det.abs() > 1e-9 && det.is_finite() && shift.iter().all(|s| s.is_finite()) {
+        // Texture coordinates → the window: undo the shift, then the map
+        let to_window = |t: [f32; 2]| -> Pos2 {
+            let (x, y) = (t[0] - shift[0], t[1] - shift[1]);
+            let (u, v) = ((d * x - c * y) / det, (a * y - b * x) / det);
+            pos2(rect.left() + u * rect.width(), rect.top() + v * rect.height())
+        };
+        let to_texture = |u: f32, v: f32| -> [f32; 2] { [a * u + c * v + shift[0], b * u + d * v + shift[1]] };
+        let corners = [to_texture(0.0, 0.0), to_texture(1.0, 0.0), to_texture(0.0, 1.0), to_texture(1.0, 1.0)];
+        let low = |axis: usize| corners.iter().map(|c| c[axis]).fold(f32::INFINITY, f32::min).floor() as i32;
+        let high = |axis: usize| corners.iter().map(|c| c[axis]).fold(f32::NEG_INFINITY, f32::max).ceil() as i32;
+        let span = |first: i32, last: i32| if repeat { first..last.min(first.saturating_add(PREVIEW_MAX_SPAN)) } else { first.max(0)..last.min(1) };
+        let (dark, light) = (lerp_color(tokens.field, tokens.text, PREVIEW_DARK), lerp_color(tokens.field, tokens.text, PREVIEW_LIGHT));
+        let border = Stroke::new(1.0, tokens.accent);
+        for tile_x in span(low(0), high(0)) {
+            for tile_y in span(low(1), high(1)) {
+                for (cell_x, cell_y) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let (x0, y0) = (tile_x as f32 + cell_x as f32 * 0.5, tile_y as f32 + cell_y as f32 * 0.5);
+                    let corners = [[x0, y0], [x0 + 0.5, y0], [x0 + 0.5, y0 + 0.5], [x0, y0 + 0.5]].map(to_window);
+                    let color = if (cell_x + cell_y) % 2 == 0 { light } else { dark };
+                    painter.add(Shape::convex_polygon(corners.to_vec(), color, Stroke::NONE));
+                }
+                let (x, y) = (tile_x as f32, tile_y as f32);
+                painter.add(Shape::closed_line([[x, y], [x + 1.0, y], [x + 1.0, y + 1.0], [x, y + 1.0]].map(to_window).to_vec(), border));
             }
-            let (x, y) = (tile_x as f32, tile_y as f32);
-            painter.add(Shape::closed_line([[x, y], [x + 1.0, y], [x + 1.0, y + 1.0], [x, y + 1.0]].map(to_window).to_vec(), border));
         }
     }
     painter.rect_stroke(rect, 0, Stroke::new(1.0, tokens.field_border), egui::StrokeKind::Inside);

@@ -109,8 +109,8 @@ fn effect_json(session: &Session, effect: &Effect, content: bool) -> Value {
         EffectKind::Filter(filter) => {
             out["filter"] = json!(filter);
             match filter {
-                Filter::Hsl { hue, saturation, lightness } => out["hsl"] = json!([hue, saturation, lightness]),
-                Filter::Blur { radius } => out["radius"] = json!(radius),
+                Filter::Hsl { hue, saturation, lightness, .. } => out["hsl"] = json!([hue, saturation, lightness]),
+                Filter::Blur { radius, .. } => out["radius"] = json!(radius),
                 _ => {}
             }
         }

@@ -83,13 +83,13 @@ pub fn material(id: &str, size: usize) -> Option<Vec<Option<Sample>>> {
 /// `f` with its reach in texels multiplied by `k` (previews show at a fraction of 2K).
 fn magnified(f: Filter, k: f32) -> Filter {
     match f {
-        Filter::Blur { radius } => Filter::Blur { radius: radius * k },
+        Filter::Blur { radius, wrap } => Filter::Blur { radius: radius * k, wrap },
         Filter::DirectionalBlur { radius, angle } => Filter::DirectionalBlur { radius: radius * k, angle },
         Filter::SlopeBlur { radius, scale, seed, divider } => Filter::SlopeBlur { radius: radius * k, scale, seed, divider },
         Filter::Warp { intensity, scale, seed, divider } => Filter::Warp { intensity: intensity * k, scale, seed, divider },
         Filter::HighPass { radius } => Filter::HighPass { radius: radius * k },
         Filter::EdgeDetect { width } => Filter::EdgeDetect { width: width * k },
-        Filter::Bevel { width } => Filter::Bevel { width: width * k },
+        Filter::Bevel { width, wrap } => Filter::Bevel { width: width * k, wrap },
         Filter::Mosaic { size } => Filter::Mosaic { size: size * k },
         Filter::Glow { radius, amount } => Filter::Glow { radius: radius * k, amount },
         Filter::DirectionalWarp { intensity, angle, scale, seed, divider } => Filter::DirectionalWarp { intensity: intensity * k, angle, scale, seed, divider },

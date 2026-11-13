@@ -53,4 +53,5 @@ mod tool_availability;
 mod toolbar;
 
 mod filter_card;
+mod filter_colour;
 mod symmetry;

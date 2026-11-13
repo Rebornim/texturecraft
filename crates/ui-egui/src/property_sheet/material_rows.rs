@@ -63,7 +63,8 @@ impl PropertySheet<'_> {
         let row = self.take(ROW_HEIGHT);
         let center_y = row.center().y;
         let id = self.next_id();
-        let track = Track { start: self.left + KNOB_RADIUS, end: self.right - RAMP_END_INSET, center_y, signed: *range.start() < 0.0, ramp: true };
+        let track =
+            Track { start: self.left + KNOB_RADIUS, end: self.right - RAMP_END_INSET, center_y, zero: (*range.start() < 0.0).then_some(0.0), ramp: true };
         let ramp = Rect::from_min_max(pos2(track.start, center_y - RAMP_HEIGHT / 2.0), pos2(track.end, center_y + RAMP_HEIGHT / 2.0));
         self.ui.painter().add(gray_ramp(ramp));
         let dragged = self.track(id, label, &track, value, &range);

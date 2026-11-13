@@ -117,7 +117,9 @@ impl PropertySheet<'_> {
         if let Some(default_open) = foldable {
             open = self.ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
             let hit = Rect::from_x_y_ranges(self.left..=self.right, (center_y - 12.0)..=(center_y + 12.0));
-            if self.ui.interact(hit, id, Sense::click()).clicked() {
+            let response = self.ui.interact(hit, id, Sense::click());
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, title));
+            if response.clicked() {
                 open = !open;
                 self.ui.data_mut(|data| data.insert_temp(id, open));
             }

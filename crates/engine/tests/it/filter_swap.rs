@@ -40,7 +40,7 @@ fn swapping_a_filter_keeps_its_place_blend_opacity_and_visibility() {
     execute(&mut s, "effect.set", &json!({"effect": swapped.0, "filter": "blur", "radius": 5.0})).unwrap();
 
     let blur = effect(&s, swapped);
-    assert!(matches!(blur.kind, EffectKind::Filter(Filter::Blur { radius }) if radius == 5.0), "{:?}", blur.kind);
+    assert!(matches!(blur.kind, EffectKind::Filter(Filter::Blur { radius, .. }) if radius == 5.0), "{:?}", blur.kind);
     assert_eq!(blur.name, "Blur", "a default name follows the new filter");
     assert_eq!((blur.blend, blur.opacity, blur.visible), (BlendMode::Multiply, 0.4, false));
     assert_eq!(content_order(&s), vec![below, swapped, above]);
@@ -107,7 +107,7 @@ fn naming_the_current_filter_edits_it_in_place() {
     execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "blur"})).unwrap();
 
     let blur = effect(&s, id);
-    assert!(matches!(blur.kind, EffectKind::Filter(Filter::Blur { radius }) if radius == 9.0), "the radius is kept, not reset: {:?}", blur.kind);
+    assert!(matches!(blur.kind, EffectKind::Filter(Filter::Blur { radius, .. }) if radius == 9.0), "the radius is kept, not reset: {:?}", blur.kind);
 }
 
 #[test]

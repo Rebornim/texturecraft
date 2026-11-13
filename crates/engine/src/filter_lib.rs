@@ -42,6 +42,7 @@ pub const FILTERS: &[FilterDef] = &[
     def("levels", "Levels", "Adjustments", true),
     def("contrastLuminosity", "Contrast Luminosity", "Adjustments", true),
     def("colorBalance", "Color Balance", "Adjustments", true),
+    def("colorCorrect", "Color Correct", "Adjustments", true),
     def("gradientMap", "Gradient Map", "Adjustments", true),
     def("posterize", "Posterize", "Adjustments", true),
     def("clamp", "Clamp", "Adjustments", true),
@@ -144,6 +145,9 @@ fn restore_defaults(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"changed": true}))
 }
 
+/// A Color Correct tone that changes nothing: no contrast, no luminosity, saturation as it is
+const NEUTRAL_TONE: [f32; 3] = [0.0, 0.0, 0.5];
+
 /// The effect for library filter `id` with its defaults, then the parameters in `p`.
 pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
     let cmd = "effect.add.filter";
@@ -151,10 +155,11 @@ pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
     let mut f = match d.id {
         "invert" => Filter::Invert,
         "threshold" => Filter::Threshold { level: 0.5 },
-        "blur" => Filter::Blur { radius: 2.0 },
+        "blur" => Filter::Blur { radius: 2.0, wrap: false },
         "sharpen" => Filter::Sharpen { amount: 1.0 },
-        "hsl" => Filter::Hsl { hue: 0.0, saturation: 0.0, lightness: 0.0 },
-        "contrastLuminosity" => Filter::ContrastLuminosity { contrast: 0.3, luminosity: 0.0 },
+        "hsl" => Filter::Hsl { hue: 0.0, saturation: 0.0, lightness: 0.0, perceptive: true },
+        "contrastLuminosity" => Filter::ContrastLuminosity { contrast: 0.0, luminosity: 0.0 },
+        "colorCorrect" => Filter::ColorCorrect { shadows: NEUTRAL_TONE, midtones: NEUTRAL_TONE, highlights: NEUTRAL_TONE },
         "colorBalance" => Filter::ColorBalance { shadows: [0.0; 3], midtones: [0.0; 3], highlights: [0.0; 3] },
         "gradientMap" => Filter::GradientMap { colors: vec![[0.02, 0.02, 0.04], [0.45, 0.16, 0.05], [1.0, 0.85, 0.55]] },
         "posterize" => Filter::Posterize { levels: 4.0 },
@@ -170,7 +175,7 @@ pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
         "warpDirectional" => Filter::DirectionalWarp { intensity: 16.0, angle: 0.0, scale: 4.0, seed: 1, divider: 1 },
         "grayscale" => Filter::Grayscale,
         "normalInvert" => Filter::NormalInvert,
-        "bevel" => Filter::Bevel { width: 16.0 },
+        "bevel" => Filter::Bevel { width: 16.0, wrap: false },
         "mosaic" => Filter::Mosaic { size: 32.0 },
         "glow" => Filter::Glow { radius: 16.0, amount: 1.0 },
         "replaceColor" => Filter::ReplaceColor { from: [0.5, 0.05, 0.05], to: [0.05, 0.15, 0.5], tolerance: 0.2, softness: 0.15 },
@@ -209,7 +214,7 @@ fn mat_finish(id: &str) -> Option<Fill> {
 /// (color balance, gradient map) and the HSL hue have their own editors.
 pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f32)> {
     match f {
-        Filter::Blur { radius } => vec![("radius", "Intensity (texels at 2K)", *radius, 0.0, 128.0)],
+        Filter::Blur { radius, .. } => vec![("radius", "Intensity (texels at 2K)", *radius, 0.0, 128.0)],
         Filter::Sharpen { amount } => vec![("amount", "Amount", *amount, 0.0, 5.0)],
         Filter::Threshold { level } => vec![("level", "Level", *level, 0.0, 1.0)],
         Filter::Hsl { saturation, lightness, .. } => {
@@ -250,7 +255,7 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
                 ("seed", "Seed", *seed as f32, 0.0, 999.0),
             ]
         }
-        Filter::Bevel { width } => vec![("width", "Width (texels at 2K)", *width, 0.0, 128.0)],
+        Filter::Bevel { width, .. } => vec![("width", "Width (texels at 2K)", *width, 0.0, 128.0)],
         Filter::Mosaic { size } => vec![("size", "Cell size (texels at 2K)", *size, 1.0, 256.0)],
         Filter::Glow { radius, amount } => {
             vec![("radius", "Radius (texels at 2K)", *radius, 0.0, 128.0), ("amount", "Amount", *amount, 0.0, 5.0)]
@@ -265,7 +270,13 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         Filter::ReplaceColor { tolerance, softness, .. } => {
             vec![("tolerance", "Tolerance", *tolerance, 0.0, 1.0), ("softness", "Softness", *softness, 0.0, 1.0)]
         }
-        Filter::Invert | Filter::ColorBalance { .. } | Filter::GradientMap { .. } | Filter::Grayscale | Filter::NormalInvert | Filter::Empty => Vec::new(),
+        Filter::Invert
+        | Filter::ColorBalance { .. }
+        | Filter::ColorCorrect { .. }
+        | Filter::GradientMap { .. }
+        | Filter::Grayscale
+        | Filter::NormalInvert
+        | Filter::Empty => Vec::new(),
     }
 }
 
@@ -288,6 +299,12 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
         }
         Ok(())
     };
+    let wrap = |slot: &mut bool| -> Result<()> {
+        if let Some(value) = p.get("wrap") {
+            *slot = value.as_bool().ok_or_else(|| bad(cmd, "`wrap` must be true or false"))?;
+        }
+        Ok(())
+    };
     let angle = |slot: &mut f32| {
         if let Some(v) = f32p(p, "angle") {
             *slot = v.rem_euclid(360.0);
@@ -296,9 +313,19 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
     match f {
         Filter::Invert | Filter::Grayscale | Filter::NormalInvert | Filter::Empty => {}
         Filter::Threshold { level } => set(level, "level", 0.0, 1.0),
-        Filter::Blur { radius } => set(radius, "radius", 0.0, 256.0),
+        Filter::Blur { radius, wrap: w } => {
+            set(radius, "radius", 0.0, 256.0);
+            wrap(w)?;
+        }
         Filter::Sharpen { amount } => set(amount, "amount", 0.0, 10.0),
-        Filter::Hsl { hue, saturation, lightness } => {
+        Filter::Hsl { hue, saturation, lightness, perceptive } => {
+            if let Some(mode) = p.get("mode") {
+                *perceptive = match mode.as_str() {
+                    Some("perceptive") => true,
+                    Some("regular") => false,
+                    _ => return Err(bad(cmd, "`mode` must be \"regular\" or \"perceptive\"")),
+                };
+            }
             set(hue, "hue", -1.0, 1.0);
             set(saturation, "saturation", -1.0, 1.0);
             set(lightness, "lightness", -1.0, 1.0);
@@ -306,6 +333,14 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
         Filter::ContrastLuminosity { contrast, luminosity } => {
             set(contrast, "contrast", -1.0, 1.0);
             set(luminosity, "luminosity", -1.0, 1.0);
+        }
+        Filter::ColorCorrect { shadows, midtones, highlights } => {
+            for (key, slot) in [("shadows", shadows), ("midtones", midtones), ("highlights", highlights)] {
+                if p.get(key).is_some() {
+                    let v = p.get(key).and_then(color_of).ok_or_else(|| bad(cmd, format!("`{key}` must be [contrast, luminosity, saturation]")))?;
+                    *slot = [v[0].clamp(-1.0, 1.0), v[1].clamp(-1.0, 1.0), v[2].clamp(0.0, 1.0)];
+                }
+            }
         }
         Filter::ColorBalance { shadows, midtones, highlights } => {
             for (key, slot) in [("shadows", shadows), ("midtones", midtones), ("highlights", highlights)] {
@@ -355,7 +390,11 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             divider(d)?;
         }
         Filter::HighPass { radius } => set(radius, "radius", 0.0, 256.0),
-        Filter::EdgeDetect { width } | Filter::Bevel { width } => set(width, "width", 0.0, 256.0),
+        Filter::EdgeDetect { width } => set(width, "width", 0.0, 256.0),
+        Filter::Bevel { width, wrap: w } => {
+            set(width, "width", 0.0, 256.0);
+            wrap(w)?;
+        }
         Filter::Mosaic { size } => set(size, "size", 1.0, 512.0),
         Filter::Glow { radius, amount } => {
             set(radius, "radius", 0.0, 256.0);

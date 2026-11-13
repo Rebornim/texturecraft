@@ -316,7 +316,7 @@ const MIN_SHARPEN_RADIUS: f32 = 0.75;
 fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (usize, f32, Op)> + '_ {
     let texels = move |size: f32| (size * res as f32 / FILTER_SIZE_RESOLUTION).max(MIN_FILTER_RADIUS);
     effects.iter().filter(|effect| effect.visible).enumerate().filter_map(move |(index, effect)| match &effect.kind {
-        EffectKind::Filter(Filter::Blur { radius }) if *radius > 0.0 => Some((index, texels(*radius), Op::Blur(None))),
+        EffectKind::Filter(Filter::Blur { radius, .. }) if *radius > 0.0 => Some((index, texels(*radius), Op::Blur(None))),
         EffectKind::Filter(Filter::Sharpen { amount }) => {
             Some((index, (SHARPEN_RADIUS * res as f32 / FILTER_SIZE_RESOLUTION).max(MIN_SHARPEN_RADIUS), Op::Blur(Some(*amount))))
         }
@@ -330,7 +330,7 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
         EffectKind::Filter(Filter::HighPass { radius }) => Some((index, texels(*radius), Op::HighPass)),
         EffectKind::Filter(Filter::EdgeDetect { width }) => Some((index, texels(*width), Op::Edge)),
         // Three box passes ramp an edge over about twice their radius
-        EffectKind::Filter(Filter::Bevel { width }) => Some((index, texels(*width * 0.5), Op::Bevel)),
+        EffectKind::Filter(Filter::Bevel { width, .. }) => Some((index, texels(*width * 0.5), Op::Bevel)),
         EffectKind::Filter(Filter::Glow { radius, amount }) => Some((index, texels(*radius), Op::Glow(*amount))),
         EffectKind::Filter(Filter::Mosaic { size }) => Some((index, texels(*size), Op::Mosaic)),
         // Independent of `res`, so every caller agrees on which effects are stages; the reach covers the cells, then the blur around them
@@ -648,10 +648,16 @@ fn field(inp: &Inputs, channels: &[Channel], below: &Fields, id: LayerId, job: J
         margins[index] += margins[index + 1];
     }
 
+    // A wrapping filter reads across the set's edges, so it and every filter under it cover the whole set along an axis it crosses
+    let mut wrapping: Vec<bool> = filters.iter().map(|filter| wraps(effects, filter.0)).collect();
+    for index in (0..wrapping.len().saturating_sub(1)).rev() {
+        wrapping[index] |= wrapping[index + 1];
+    }
+
     let mut previous: Option<(usize, Field)> = None;
     let mut anchor_stages = Vec::new();
-    for (&filter, &margin) in filters.iter().zip(&margins) {
-        let region = region_around(inp, tiles, margin)?;
+    for ((&filter, &margin), &wrap) in filters.iter().zip(&margins).zip(&wrapping) {
+        let region = region_around(inp, tiles, margin, wrap)?;
         let start = previous.as_ref().map(|(index, field)| (*index, field));
         let filtered = filter_region(inp, channels, below, id, job, effects, filter, region, start)?;
 
@@ -676,14 +682,52 @@ fn field(inp: &Inputs, channels: &[Channel], below: &Fields, id: LayerId, job: J
     })
 }
 
-/// The tile-aligned texel region `(x0, y0, w, h)` around `tiles` plus `margin` tiles, clipped to the set.
-fn region_around(inp: &Inputs, tiles: &[(u32, u32)], margin: u32) -> Option<(u32, u32, u32, u32)> {
+/// The tile-aligned texel region `(x0, y0, w, h)` around `tiles` plus `margin` tiles, clipped to the set; with `wrap`, an axis
+/// the margin crosses an edge of spans the whole set (the filter reads the far side there)
+fn region_around(inp: &Inputs, tiles: &[(u32, u32)], margin: u32, wrap: bool) -> Option<(u32, u32, u32, u32)> {
     let (first_x, first_y) = tiles.iter().fold((u32::MAX, u32::MAX), |(min_x, min_y), tile| (min_x.min(tile.0), min_y.min(tile.1)));
     let (last_x, last_y) = tiles.iter().fold((0, 0), |(max_x, max_y), tile| (max_x.max(tile.0), max_y.max(tile.1)));
-    let (x0, y0) = (first_x.saturating_sub(margin) * TILE, first_y.saturating_sub(margin) * TILE);
-    let (x1, y1) = (((last_x + 1 + margin) * TILE).min(inp.gbuf.width), ((last_y + 1 + margin) * TILE).min(inp.gbuf.height));
+    let axis = |first: u32, last: u32, size: u32| {
+        let end = last.saturating_add(1).saturating_add(margin).saturating_mul(TILE);
+        if wrap && (first < margin || end > size) {
+            return (0, size);
+        }
+        (first.saturating_sub(margin).saturating_mul(TILE), end.min(size))
+    };
+    let ((x0, x1), (y0, y1)) = (axis(first_x, last_x, inp.gbuf.width), axis(first_y, last_y, inp.gbuf.height));
     let (w, h) = (x1.saturating_sub(x0), y1.saturating_sub(y0));
     (w > 0 && h > 0).then_some((x0, y0, w, h))
+}
+
+/// Whether the neighbourhood filter at `index` among the visible effects reads past the set's edges from the far side
+fn wraps(effects: &[Effect], index: usize) -> bool {
+    matches!(
+        effects.iter().filter(|effect| effect.visible).nth(index).map(|effect| &effect.kind),
+        Some(EffectKind::Filter(Filter::Blur { wrap: true, .. } | Filter::Bevel { wrap: true, .. }))
+    )
+}
+
+/// `data` (`w` × `h` texels of `comps` values) with `pad_x` and `pad_y` texels added around it, read from the opposite side
+fn wrap_pad(data: &[f32], comps: usize, (w, h): (usize, usize), (pad_x, pad_y): (usize, usize)) -> Vec<f32> {
+    let (padded_w, padded_h) = (w + 2 * pad_x, h + 2 * pad_y);
+    let mut out = vec![0.0f32; padded_w * padded_h * comps];
+    out.par_chunks_mut(padded_w * comps).enumerate().for_each(|(y, row)| {
+        let source_y = (y + h * pad_y.div_ceil(h.max(1)) - pad_y) % h.max(1);
+        for (x, pixel) in row.chunks_mut(comps).enumerate() {
+            let source_x = (x + w * pad_x.div_ceil(w.max(1)) - pad_x) % w.max(1);
+            let at = (source_y * w + source_x) * comps;
+            if let Some(source) = data.get(at..at + comps) {
+                pixel.copy_from_slice(source);
+            }
+        }
+    });
+    out
+}
+
+/// The `w` × `h` texels inside [`wrap_pad`]'s border
+fn unpad(data: &[f32], comps: usize, (w, h): (usize, usize), (pad_x, pad_y): (usize, usize)) -> Vec<f32> {
+    let padded_w = w + 2 * pad_x;
+    (pad_y..pad_y + h).flat_map(|y| data.get((y * padded_w + pad_x) * comps..(y * padded_w + pad_x + w) * comps).unwrap_or_default()).copied().collect()
 }
 
 /// A neighbourhood filter's radius in whole texels and how many texels around a texel it reads.
@@ -720,7 +764,7 @@ fn filter_region(
     };
     let filter_effect = effects.iter().filter(|effect| effect.visible).nth(index);
     let opacity = filter_effect.map(|effect| effect.applied_blend(channel).opacity.clamp(0.0, 1.0)).unwrap_or(1.0);
-    let (radius_texels, _) = filter_extent(radius, op, inputs.gbuf.width.max(inputs.gbuf.height));
+    let (radius_texels, reach) = filter_extent(radius, op, inputs.gbuf.width.max(inputs.gbuf.height));
 
     // Generator stages keep their ramp beside the mask stack below
     let generator = match (job, filter_effect.map(|effect| (&effect.kind, effect.blend))) {
@@ -813,6 +857,11 @@ fn filter_region(
         _ => 0.5,
     };
 
+    // Wrapping pads an axis the region spans whole by the filter's reach
+    let wrap = wraps(effects, index);
+    let pad_x = if wrap && region_x == 0 && width == inputs.gbuf.width { reach.min(width) } else { 0 };
+    let pad_y = if wrap && region_y == 0 && height == inputs.gbuf.height { reach.min(height) } else { 0 };
+
     // A smaller UV tile has fewer texels per UV unit, so its filters reach fewer texels
     let filtered = |scale: f32| -> Vec<f32> {
         let tile_resolution = ((inputs.tile_res() as f32 * scale).round() as u32).max(1);
@@ -828,11 +877,18 @@ fn filter_region(
             return gather(op, &stack_values, &cover, components, (region_x, region_y, width, height), scaled_radius as f32, tile_resolution, opacity);
         }
 
-        // Weighted so uncovered texels don't bleed in
-        let (columns, rows, blur_radius) = (width as usize, height as usize, scaled_radius as usize);
-        let mut weights = cover.clone();
+        // Weighted so uncovered texels don't bleed in; a wrapping filter reads a border copied from the far side
+        let pad = (pad_x as usize, pad_y as usize);
+        let unpadded = (width as usize, height as usize);
+        let (stack_values, cover) = if pad == (0, 0) {
+            (Cow::Borrowed(&stack_values), Cow::Borrowed(&cover))
+        } else {
+            (Cow::Owned(wrap_pad(&stack_values, components, unpadded, pad)), Cow::Owned(wrap_pad(&cover, 1, unpadded, pad)))
+        };
+        let (columns, rows, blur_radius) = (unpadded.0 + 2 * pad.0, unpadded.1 + 2 * pad.1, scaled_radius as usize);
+        let mut weights = cover.to_vec();
         blur(&mut weights, columns, rows, blur_radius);
-        let mut filtered_values = stack_values.clone();
+        let mut filtered_values = stack_values.to_vec();
         for component in 0..components {
             let mut sums: Vec<f32> = stack_values.par_chunks(components).map(|pixel| pixel.get(component).copied().unwrap_or(0.0)).collect();
             blur(&mut sums, columns, rows, blur_radius);
@@ -857,7 +913,7 @@ fn filter_region(
                 }
             });
         }
-        filtered_values
+        if pad == (0, 0) { filtered_values } else { unpad(&filtered_values, components, unpadded, pad) }
     };
 
     // Each block keeps the result at its tile's scale (blocks are TILE aligned)
@@ -3081,7 +3137,7 @@ mod tests {
                     let layer = fill_layer(&mut fixture.project, [color; 3], 0.5);
                     let mut mask = Mask::new(MaskBackground::White);
                     for radius in [8.0, 4.0, 2.0] {
-                        mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Filter(Filter::Blur { radius })));
+                        mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Filter(Filter::Blur { radius, wrap: false })));
                         if record_anchors && radius != 2.0 {
                             mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Anchor));
                         }
@@ -3334,7 +3390,7 @@ mod tests {
         let original = assert_sparse_mask_matches_image(&fixture, upper, &texels).unwrap();
         assert!(original.iter().any(|value| *value > 0.99) && original.iter().any(|value| *value < 0.01), "the anchor supplies the checker");
 
-        for filter in [Filter::Blur { radius: 64.0 }, Filter::DirectionalWarp { intensity: 256.0, angle: 90.0, scale: 4.0, seed: 3, divider: 1 }] {
+        for filter in [Filter::Blur { radius: 64.0, wrap: false }, Filter::DirectionalWarp { intensity: 256.0, angle: 90.0, scale: 4.0, seed: 3, divider: 1 }] {
             let mut filtered = mask.clone();
             filtered.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Filter(filter)));
             fixture.project.layer_mut(upper).unwrap().mask = Some(filtered);
@@ -3366,7 +3422,7 @@ mod tests {
         };
 
         let warped = masked(std::slice::from_ref(&warp));
-        let blurred_then_warped = masked(&[Filter::Blur { radius: 64.0 }, warp]);
+        let blurred_then_warped = masked(&[Filter::Blur { radius: 64.0, wrap: false }, warp]);
         assert!(blurred_then_warped.iter().zip(&warped).any(|(chained, single)| (chained - single).abs() > 0.1), "the blur under the warp still runs");
         assert!(blurred_then_warped.iter().any(|value| *value > 0.05 && *value < 0.95), "the blur softens the checker before the warp moves it");
     }
@@ -3386,7 +3442,7 @@ mod tests {
         };
         let warped = row(&fixture);
 
-        content_fx(&mut fixture, layer, EffectKind::Filter(Filter::Blur { radius: 64.0 }));
+        content_fx(&mut fixture, layer, EffectKind::Filter(Filter::Blur { radius: 64.0, wrap: false }));
         let effects = &mut fixture.project.layer_mut(layer).unwrap().content_effects;
         let warp_index = effects.iter().position(|effect| effect.id == warp_effect).unwrap();
         let warp_on_top = effects.remove(warp_index);
@@ -3589,7 +3645,7 @@ mod tests {
         assert!(!stack_reads_neighbours(&f.project, 0));
         let mut mask = Mask::new(MaskBackground::White);
         let eid = f.project.alloc_id();
-        mask.effects.push(Effect::new(eid, EffectKind::Filter(Filter::Blur { radius: 8.0 })));
+        mask.effects.push(Effect::new(eid, EffectKind::Filter(Filter::Blur { radius: 8.0, wrap: false })));
         f.project.layer_mut(id).unwrap().mask = Some(mask);
         assert!(stack_reads_neighbours(&f.project, 0));
         f.project.layer_mut(id).unwrap().mask = None;
@@ -3615,7 +3671,7 @@ mod tests {
         ));
         f.project.layer_mut(id).unwrap().mask = Some(mask.clone());
         let hard: Vec<f32> = (0..64).map(|x| run(&f, None).value(Channel::BaseColor, x, 20)[0]).collect();
-        mask.effects.push(Effect::new(e2, EffectKind::Filter(Filter::Blur { radius: 64.0 })));
+        mask.effects.push(Effect::new(e2, EffectKind::Filter(Filter::Blur { radius: 64.0, wrap: false })));
         f.project.layer_mut(id).unwrap().mask = Some(mask);
         let soft_img = run(&f, None);
         let soft: Vec<f32> = (0..64).map(|x| soft_img.value(Channel::BaseColor, x, 20)[0]).collect();
@@ -3665,7 +3721,7 @@ soft {soft:?}"
     fn content_filters_hsl_and_opacity_change_layer_values() {
         let mut f = fixture();
         let id = fill_layer(&mut f.project, [1.0, 0.0, 0.0], 0.2);
-        content_fx(&mut f, id, EffectKind::Filter(Filter::Hsl { hue: 1.0 / 3.0, saturation: 0.0, lightness: 0.0 }));
+        content_fx(&mut f, id, EffectKind::Filter(Filter::Hsl { hue: 1.0 / 3.0, saturation: 0.0, lightness: 0.0, perceptive: false }));
         let out = run(&f, None);
         assert!(close(out.value(Channel::BaseColor, 5, 5), [0.0, 1.0, 0.0]), "{:?}", out.value(Channel::BaseColor, 5, 5));
         assert!(close(out.value(Channel::Roughness, 5, 5), [0.2; 3]), "a hue shift leaves scalars alone");
@@ -3687,7 +3743,7 @@ soft {soft:?}"
         let mut f = fixture();
         let id = fill_layer(&mut f.project, [1.0; 3], 1.0);
         let mut mask = Mask::new(MaskBackground::White);
-        mask.effects.push(Effect::new(f.project.alloc_id(), EffectKind::Filter(Filter::Hsl { hue: 0.3, saturation: 1.0, lightness: -0.5 })));
+        mask.effects.push(Effect::new(f.project.alloc_id(), EffectKind::Filter(Filter::Hsl { hue: 0.3, saturation: 1.0, lightness: -0.5, perceptive: false })));
         f.project.layer_mut(id).unwrap().mask = Some(mask);
         assert!(close(run(&f, None).value(Channel::BaseColor, 5, 5), [0.75; 3]));
     }
@@ -3704,11 +3760,39 @@ soft {soft:?}"
             (0..64).map(|x| out.value(Channel::Roughness, x, 20)[0]).collect::<Vec<f32>>()
         };
         let hard = row(&f);
-        content_fx(&mut f, id, EffectKind::Filter(Filter::Blur { radius: 64.0 }));
+        content_fx(&mut f, id, EffectKind::Filter(Filter::Blur { radius: 64.0, wrap: false }));
         let soft = row(&f);
         let mids = |v: &[f32]| v.iter().filter(|x| **x > 0.05 && **x < 0.95).count();
         assert!(mids(&soft) > mids(&hard) + 4, "hard {hard:?}\nsoft {soft:?}");
         assert!(soft.iter().all(|v| (0.0..=1.0).contains(v)));
+    }
+
+    #[test]
+    fn a_wrapping_blur_reads_the_far_side_of_the_texture() {
+        let row = |wrap: Option<bool>| {
+            let mut f = fixture();
+            let id = f.project.alloc_id();
+            let mut fill = Fill::default();
+            fill.sources.insert(Channel::Roughness, Source::Procedural { pattern: Procedural::new(ProceduralKind::Checker), low: [0.0; 3], high: [1.0; 3] });
+            f.project.insert_layer(0, Layer::new(id, "F", LayerKind::Fill(fill), &[Channel::Roughness]), None, false).unwrap();
+            if let Some(wrap) = wrap {
+                content_fx(&mut f, id, EffectKind::Filter(Filter::Blur { radius: 96.0, wrap }));
+            }
+            let out = run(&f, None);
+            (0..64).map(|x| out.value(Channel::Roughness, x, 20)[0]).collect::<Vec<f32>>()
+        };
+
+        // The checker tiles: its period P repeats across the whole row
+        let hard = row(None);
+        let period = (1..64).find(|&p| (0..64 - p).all(|x| (hard[x] - hard[x + p]).abs() < 1e-3)).unwrap();
+        assert!(period <= 32, "{hard:?}");
+
+        // Wrapped, the blur at the texture's edge sees the far side, so the result keeps tiling; clipped, the edge differs
+        let wrapped = row(Some(true));
+        assert!((0..64 - period).all(|x| (wrapped[x] - wrapped[x + period]).abs() < 0.02), "{wrapped:?}");
+        let clipped = row(Some(false));
+        assert!((clipped[0] - clipped[period]).abs() > 0.05, "{clipped:?}");
+        assert!((12..52).all(|x| (clipped[x] - wrapped[x]).abs() < 0.02), "away from the edges, wrap changes nothing");
     }
 
     #[test]
@@ -3771,7 +3855,7 @@ soft {soft:?}"
         let id = checker(&mut f);
         let plain = values(&f);
         // Bevel: never above the shape, and its edges become ramps.
-        let fx = content_fx(&mut f, id, EffectKind::Filter(Filter::Bevel { width: 128.0 }));
+        let fx = content_fx(&mut f, id, EffectKind::Filter(Filter::Bevel { width: 128.0, wrap: false }));
         let bevel = values(&f);
         let mids = |v: &[f32]| v.iter().filter(|x| **x > 0.05 && **x < 0.95).count();
         assert!(bevel.iter().zip(&plain).all(|(b, p)| *b <= p + 1e-4 && *b >= 0.0), "a bevel only lowers values");
@@ -3887,7 +3971,7 @@ soft {soft:?}"
         f.project.layer_mut(top).unwrap().mask = Some(mask.clone());
         assert!(close(run(&f, None).value(Channel::BaseColor, 5, 5), [0.7; 3]));
         // Under a blur the anchor is read by the field pre-pass too: a flat height stays flat.
-        mask.effects.push(Effect::new(f.project.alloc_id(), EffectKind::Filter(Filter::Blur { radius: 32.0 })));
+        mask.effects.push(Effect::new(f.project.alloc_id(), EffectKind::Filter(Filter::Blur { radius: 32.0, wrap: false })));
         f.project.layer_mut(top).unwrap().mask = Some(mask);
         assert!(close(run(&f, None).value(Channel::BaseColor, 5, 5), [0.7; 3]));
         // An anchor above its reader is not evaluated yet: it reads the channel default (0).
@@ -3924,7 +4008,7 @@ soft {soft:?}"
         assert!(close(run(&fixture, None).value(Channel::BaseColor, 5, 5), [0.4; 3]));
 
         // Under a blur precomputed over the region the anchor still records its own place
-        mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Filter(Filter::Blur { radius: 32.0 })));
+        mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Filter(Filter::Blur { radius: 32.0, wrap: false })));
         fixture.project.layer_mut(low).unwrap().mask = Some(mask.clone());
         let color = run(&fixture, None).value(Channel::BaseColor, 5, 5);
         assert!(close(color, [0.4; 3]), "{color:?}");
@@ -3948,7 +4032,7 @@ soft {soft:?}"
             fixture.project.alloc_id(),
             EffectKind::Fill { source: checker, projection: Projection::default(), sampling: Default::default() },
         ));
-        mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Filter(Filter::Blur { radius: 64.0 })));
+        mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Filter(Filter::Blur { radius: 64.0, wrap: false })));
         mask.effects.push(Effect::new(anchor, EffectKind::Anchor));
         fixture.project.layer_mut(lower).unwrap().mask = Some(mask.clone());
         let reader = anchor_reader(&mut fixture, anchor);
@@ -3956,7 +4040,7 @@ soft {soft:?}"
         let expected = assert_sparse_mask_matches_image(&fixture, reader, &texels).unwrap();
         assert!(expected.iter().any(|value| *value > 0.1 && *value < 0.9), "the anchor records a softened checker");
 
-        mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Filter(Filter::Blur { radius: 128.0 })));
+        mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Filter(Filter::Blur { radius: 128.0, wrap: false })));
         fixture.project.layer_mut(lower).unwrap().mask = Some(mask);
         let actual = assert_sparse_mask_matches_image(&fixture, reader, &texels).unwrap();
 

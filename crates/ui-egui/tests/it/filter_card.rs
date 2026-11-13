@@ -85,3 +85,33 @@ fn the_filter_bands_span_the_panel_like_the_fills() {
     harness.run_steps(3);
     assert_eq!(band_rect(&harness, "Attributes").left(), filtering.left());
 }
+
+/// Air between the bottom of slider `last` and the top of the Attributes band under it, with library filter `filter` shown
+fn air_under(filter: &str, last: &str) -> f32 {
+    let (harness, _) = app_with(filter);
+    let slider = harness.get_by_role_and_label(Role::Slider, last).rect();
+    band_rect(&harness, "Attributes").top() - slider.bottom()
+}
+
+#[test]
+fn a_generic_filter_ends_its_parameters_like_a_dedicated_one() {
+    // Sharpen's rows come from the library's parameters, Mask Outline's from its own rows; both end on a slider
+    assert_eq!(air_under("sharpen", "Sharpen Intensity"), air_under("maskOutline", "Curve Shape"));
+}
+
+#[test]
+fn replace_colors_two_colors_are_colour_bars_with_their_eyedroppers() {
+    let (mut harness, effect) = app_with("replaceColor");
+    assert_eq!(harness.get_all_by_role_and_label(Role::Button, "Pick color").count(), 2, "an eyedropper beside each color");
+
+    harness.get_by_role_and_label(Role::Button, "Replacement color").click();
+    harness.run_steps(3);
+    harness.get_by_role_and_label(Role::TextInput, "Hex color").click();
+    harness.run_steps(3);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.event(egui::Event::Text("FF0000".into()));
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(3);
+    let Filter::ReplaceColor { to, .. } = filter_of(&harness, effect) else { panic!("a Replace Color filter") };
+    assert_eq!(to, [1.0, 0.0, 0.0], "the bar's picker sets the replacement color");
+}

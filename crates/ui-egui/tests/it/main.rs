@@ -12,6 +12,7 @@ mod clone_source_view;
 mod close_unsaved;
 mod color_picker;
 mod color_selection_editor;
+mod compare_mask_rows;
 mod curvature_generator;
 mod decal_proportions;
 mod display_post_effects;

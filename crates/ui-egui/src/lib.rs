@@ -18,6 +18,7 @@ mod bake_scene;
 mod color_management;
 mod color_picker;
 mod color_selection_editor;
+mod compare_properties;
 pub mod control;
 mod decal_drop;
 mod display_settings;

@@ -137,16 +137,19 @@ impl PropertySheet<'_> {
     pub(crate) fn lead_with(&mut self, lead: RowLead<'_>) -> f32 {
         let font = FontId::proportional(TEXT_SIZE);
         let center_y = self.cursor_y() + ROW_HEIGHT / 2.0;
-        let label_x = self.left + ROW_PICTURE_SIZE + ROW_PICTURE_AIR;
+        let shift = self.lead_shift(matches!(lead, RowLead::Child(_)));
+        let label_x = self.left + shift + ROW_PICTURE_SIZE + ROW_PICTURE_AIR;
         let (label, stack) = match lead {
             RowLead::Label { text, stack } => (text, stack),
-            RowLead::Loose(text) if self.text_width(text, font.clone()) <= self.column() - self.left - LOOSE_LABEL_AIR => {
-                self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, text, font, self.tokens.text);
+            RowLead::Loose(text) if shift + self.text_width(text, font.clone()) <= self.column() - self.left - LOOSE_LABEL_AIR => {
+                self.paint_info(center_y);
+                self.ui.painter().text(pos2(self.left + shift, center_y), Align2::LEFT_CENTER, text, font, self.tokens.text);
                 return self.column();
             }
-            RowLead::Loose(text) => return self.stacked_label(text),
+            RowLead::Loose(text) => return self.stacked_label(text, shift),
             RowLead::Picture { picture, text } => {
-                let square = Rect::from_center_size(pos2(self.left + ROW_PICTURE_SIZE / 2.0, center_y), egui::vec2(ROW_PICTURE_SIZE, ROW_PICTURE_SIZE));
+                self.paint_info(center_y);
+                let square = Rect::from_center_size(pos2(self.left + shift + ROW_PICTURE_SIZE / 2.0, center_y), egui::vec2(ROW_PICTURE_SIZE, ROW_PICTURE_SIZE));
                 picture(self.ui.painter(), square);
                 self.ui.painter().text(pos2(label_x, center_y), Align2::LEFT_CENTER, text, font, self.tokens.text);
                 return self.column();
@@ -157,26 +160,30 @@ impl PropertySheet<'_> {
             }
         };
 
-        let width = self.text_width(label, font.clone());
+        // The i's slot counts as part of the label
+        let width = shift + self.text_width(label, font.clone());
         if width <= LABEL_MAX {
             self.seen.label_width = self.seen.label_width.max(width);
         }
 
         let text = self.tokens.text;
         if width <= self.column() - self.left - LABEL_MIN_AIR && !stack {
-            self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, label, font, text);
+            self.paint_info(center_y);
+            self.ui.painter().text(pos2(self.left + shift, center_y), Align2::LEFT_CENTER, label, font, text);
             return self.column();
         }
 
-        self.stacked_label(label)
+        self.stacked_label(label, shift)
     }
 
-    /// Paints `label` on its own line above a full-width control; returns the control's left edge
-    fn stacked_label(&mut self, label: &str) -> f32 {
+    /// Paints `label` on its own line above a full-width control, `shift` right of the edge after its i; returns the control's left edge
+    fn stacked_label(&mut self, label: &str, shift: f32) -> f32 {
         self.space(STACK_AIR);
         let rect = self.take(STACK_LABEL_LINE);
+        let center_y = rect.top() + 8.0;
+        self.paint_info(center_y);
         let text = self.tokens.text;
-        self.ui.painter().text(pos2(self.left, rect.top() + 8.0), Align2::LEFT_CENTER, label, FontId::proportional(TEXT_SIZE), text);
+        self.ui.painter().text(pos2(self.left + shift, center_y), Align2::LEFT_CENTER, label, FontId::proportional(TEXT_SIZE), text);
         self.left
     }
 

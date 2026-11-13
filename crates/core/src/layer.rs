@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::curve_preset::CurvePreset;
 use crate::gradient_input::{GradientInput, ramp, shape};
-use crate::{Backface, BlendMode, Channel, ChannelKind, CompareSource, ContentsOffset, DepthCulling, FillSymmetry, Projector, ShapeCrop, lum};
+use crate::{
+    Backface, BlendMode, Channel, ChannelKind, CompareSource, ContentsOffset, DepthCulling, DirectionalLight, FillSymmetry, Projector, ShapeCrop,
+    StylizedLighting, SunAndSky, lum,
+};
 
 mod curvature_detail;
 mod curvature_mode;
@@ -1055,20 +1058,54 @@ pub enum Filter {
         size: f32,
     },
     /// Adds a blur of the values (`radius` texels at 2K) times `amount`: light bleeds around
-    /// bright areas.
+    /// bright areas (projects saved before the halo glow below)
     Glow {
         radius: f32,
         amount: f32,
     },
+    /// A halo in `color` around the shapes (content coverage, mask values), inside them below 0 `width`; see [`Filter::HALO_REACH`]
+    HaloGlow {
+        /// Laid on a mask as white rather than the color's luminance (Used on a Mask)
+        on_mask: bool,
+        /// Ends sharper (Mode Precise) instead of fading out (Soft)
+        precise: bool,
+        width: f32,
+        spread: f32,
+        opacity: f32,
+        color: [f32; 3],
+    },
+    /// The shapes in `color` laid under them, moved `distance` of a UV tile away from a light at `angle` and blurred over `size`
+    DropShadow {
+        angle: f32,
+        distance: f32,
+        size: f32,
+        spread: f32,
+        opacity: f32,
+        color: [f32; 3],
+    },
     /// Lighting painted into the base color: `ambient` (times the baked ambient occlusion by
     /// `occlusion`) plus a directional light of strength `light` from `azimuth` around +Y
     /// (degrees from +Z) and `elevation` above the horizon (degrees), on the mesh's normals.
+    /// `stylized` adds sky colors, more lights, cavity, edges and highlights (Baked Lighting Stylized); projects saved before have none and light as they did
     BakedLighting {
         azimuth: f32,
         elevation: f32,
         light: f32,
         ambient: f32,
         occlusion: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stylized: Option<Box<StylizedLighting>>,
+    },
+    /// The base color lit by the viewport environment (its diffuse light), turned `horizontal` and tilted `vertical` degrees,
+    /// brighter by 2^`exposure`, on the mesh's normals tilted by the baked height (`height_intensity`) and darkened by the baked
+    /// ambient occlusion (`ambient_occlusion` on the diffuse light, `specular_occlusion` on the reflections)
+    EnvironmentLighting {
+        horizontal: f32,
+        vertical: f32,
+        exposure: f32,
+        height_intensity: f32,
+        ambient_occlusion: f32,
+        specular_occlusion: f32,
     },
     /// Colors near `from` (within `tolerance`, fading out over `softness`, as RGB distance
     /// 0..1) shifted by `to − from`, so their shading and texture stay (linear RGB).
@@ -1205,6 +1242,9 @@ impl Filter {
     /// The most colors a gradient's Color Quantity uses
     pub const MAX_GRADIENT_COLORS: u8 = 10;
 
+    /// Texels at 2K a halo glow's Width or a drop shadow's Size of 1 reaches
+    pub const HALO_REACH: f32 = 128.0;
+
     /// The colors a gradient's ramp uses: the first Color Quantity of them (all of them where it has none)
     pub fn ramp_colors(&self) -> &[[f32; 3]] {
         match self {
@@ -1236,6 +1276,8 @@ impl Filter {
                 | Filter::Bevel { .. }
                 | Filter::Mosaic { .. }
                 | Filter::Glow { .. }
+                | Filter::HaloGlow { .. }
+                | Filter::DropShadow { .. }
         )
     }
 
@@ -1363,7 +1405,10 @@ impl Filter {
             | Filter::Bevel { .. }
             | Filter::Mosaic { .. }
             | Filter::Glow { .. }
+            | Filter::HaloGlow { .. }
+            | Filter::DropShadow { .. }
             | Filter::BakedLighting { .. }
+            | Filter::EnvironmentLighting { .. }
             | Filter::Empty => return None,
         })
     }
@@ -1396,8 +1441,10 @@ impl Filter {
             Filter::NormalInvert => "Normal Invert",
             Filter::Bevel { .. } => "Bevel",
             Filter::Mosaic { .. } => "Mosaic",
-            Filter::Glow { .. } => "Glow",
-            Filter::BakedLighting { .. } => "Baked Lighting",
+            Filter::Glow { .. } | Filter::HaloGlow { .. } => "Glow",
+            Filter::DropShadow { .. } => "Drop Shadow",
+            Filter::BakedLighting { .. } => "Baked Lighting Stylized",
+            Filter::EnvironmentLighting { .. } => "Baked Lighting Environment",
             Filter::ReplaceColor { .. } => "Replace Color",
             Filter::Empty => "Filter (empty)",
         }
@@ -1411,6 +1458,7 @@ impl Filter {
             Filter::HighPass { .. } => Some("High Pass"),
             Filter::Grayscale => Some("Grayscale"),
             Filter::GradientMap { .. } => Some("Gradient Map"),
+            Filter::BakedLighting { .. } => Some("Baked Lighting"),
             _ => None,
         }
     }
@@ -1418,13 +1466,25 @@ impl Filter {
     /// Baked lighting's factor on the base color of a surface facing `nrm` (world space) with
     /// ambient occlusion `ao` (None for other filters).
     pub fn baked_light(&self, nrm: [f32; 3], ao: f32) -> Option<f32> {
-        let Filter::BakedLighting { azimuth, elevation, light, ambient, occlusion } = self else { return None };
+        let Filter::BakedLighting { azimuth, elevation, light, ambient, occlusion, .. } = self else { return None };
         let (sa, ca) = azimuth.to_radians().sin_cos();
         let (se, ce) = elevation.to_radians().sin_cos();
         let facing = (nrm[0] * ce * sa + nrm[1] * se + nrm[2] * ce * ca).max(0.0);
         let ao = if ao.is_finite() { ao.clamp(0.0, 1.0) } else { 1.0 };
         let k = ambient * (1.0 + (ao - 1.0) * occlusion.clamp(0.0, 1.0)) + light * facing;
         Some(if k.is_finite() { k.max(0.0) } else { 1.0 })
+    }
+
+    /// Whether the filter lights the base color and leaves every other channel as it is (the baked lighting filters)
+    pub fn lights_base_color(&self) -> bool {
+        matches!(self, Filter::BakedLighting { .. } | Filter::EnvironmentLighting { .. })
+    }
+
+    /// Baked Lighting Stylized's settings with its sun and sky (None for other filters and a Baked Lighting saved before them)
+    pub fn stylized_lighting(&self) -> Option<(&StylizedLighting, SunAndSky)> {
+        let Filter::BakedLighting { azimuth, elevation, light, ambient, occlusion, stylized: Some(stylized) } = self else { return None };
+        let sun = DirectionalLight { azimuth: *azimuth, elevation: *elevation, intensity: *light, color: stylized.sun_color };
+        Some((stylized, SunAndSky { sun, sky_intensity: *ambient, diffuse_ao: *occlusion }))
     }
 }
 

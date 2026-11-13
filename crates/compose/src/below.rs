@@ -10,7 +10,7 @@ use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
 
 use texturecraft_core::project::MAX_DEPTH;
-use texturecraft_core::{BakedMap, Channel, Layer, LayerId, LayerKind, Project, TextureSet};
+use texturecraft_core::{BakedMap, Channel, EffectKind, Filter, Layer, LayerId, LayerKind, Project, TextureSet};
 use texturecraft_texel::TileImage;
 
 use crate::eval::{Inputs, PaintTarget};
@@ -79,6 +79,8 @@ pub struct StackKey {
     pixels: Vec<(LayerId, Option<Channel>, Shared)>,
     baked: (u32, Vec<(BakedMap, usize)>),
     images: Vec<(String, usize)>,
+    /// The viewport environment and its rotation (bits), where Baked Lighting Environment lights with them
+    environment: Option<(String, u32)>,
 }
 
 impl StackKey {
@@ -111,6 +113,12 @@ impl StackKey {
                 layer.chain(pixels.masks.get(id).map(|img| (*id, None, Shared(img.clone()))))
             })
             .collect();
+        let lit = tree
+            .iter()
+            .filter_map(|id| project.layers.get(id))
+            .flat_map(|l| l.content_effects.iter())
+            .any(|e| matches!(e.kind, EffectKind::Filter(Filter::EnvironmentLighting { .. })));
+        let environment = lit.then(|| (project.display.environment.clone(), project.display.env_rotation.to_bits()));
         let mut images: Vec<(String, usize)> = images.iter().map(|(n, i)| (n.clone(), Arc::as_ptr(i) as usize)).collect();
         images.sort();
         Some(StackKey {
@@ -120,6 +128,7 @@ impl StackKey {
             pixels,
             baked: (baked.resolution, baked.maps.iter().map(|(m, d)| (*m, Arc::as_ptr(d) as usize)).collect()),
             images,
+            environment,
         })
     }
 }

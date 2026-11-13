@@ -12,7 +12,7 @@ use rayon::prelude::*;
 use texturecraft_core::{
     BakedMap, BlendMode, BlockScales, Channel, ChannelKind, CompareSource, ContentsOffset, CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter,
     Filtering, Generator, GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, NormalFormat, Project, Projection, Sampling, ShapeCrop,
-    Source, TextureSet, TileGrid, blend1, blend3, lum, mix3, per_unit,
+    Source, StylizedLighting, TextureSet, TileGrid, blend1, blend3, lum, mix3, per_unit,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, Surface, UvGBuffer};
@@ -21,6 +21,7 @@ use texturecraft_texel::{DilationMap, TILE, TILE_AREA, TileImage, from_u16, nois
 use crate::below::{Band, BelowCache, Level};
 use crate::curvature_sizes::CurvatureSizes;
 use crate::effect_histogram::EffectHistogram;
+use crate::environment_sh::EnvironmentSh;
 use crate::fill_copies::FillCopies;
 use crate::fill_copy::FillCopy;
 use crate::mask_gray::MaskGray;
@@ -36,6 +37,18 @@ const COVERED: f32 = 0.9999;
 
 /// Stack values being composited, per channel.
 type Acc = [[f32; 3]; NCH];
+
+/// The baked curvature of a flat surface (below: cavities, above: edges)
+const FLAT_CURVATURE: f32 = 0.5;
+
+/// How tall a baked height of 1 stands, as a fraction of a UV tile, when Baked Lighting Stylized tilts normals by its slope
+const HEIGHT_RELIEF: f32 = 1.0 / 32.0;
+
+/// The Height Intensity of Baked Lighting Environment that tilts the normals as Baked Lighting Stylized's Height to Normal Intensity 1 does (its default)
+const ENVIRONMENT_HEIGHT_UNIT: f32 = 4.0;
+
+/// The most Baked Lighting Environment's Exposure brightens or darkens, in stops
+const EXPOSURE_STOPS: f32 = 5.0;
 
 /// What a live stroke paints into.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -228,6 +241,8 @@ struct EffectPlan<'a> {
     curvature_sizes: Option<Arc<CurvatureSizes>>,
     /// The projector's depth map of a fill or material effect that culls by depth
     depth: Option<Arc<ProjectorDepth>>,
+    /// The viewport environment's light, for Baked Lighting Environment
+    environment: Option<EnvironmentSh>,
 }
 
 struct MaskPlan<'a> {
@@ -292,6 +307,10 @@ enum Op {
     Slope { scale: f32, seed: u32 },
     /// Box blurs, then the effect's own point filter on the blurred value (a gradient's Blur Intensity)
     PreBlur,
+    /// A halo from the box blur of the shapes, laid around (or inside) them
+    Halo,
+    /// The shapes moved by `offset` (whole texels), box blurred and laid under them
+    Shadow { offset: [i32; 2] },
 }
 
 /// The last neighbourhood filter of an effect stack (see [`neighbourhood_filters`]).
@@ -318,6 +337,14 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
         EffectKind::Filter(Filter::Bevel { width, .. }) => Some((index, texels(*width * 0.5), Op::Bevel)),
         EffectKind::Filter(Filter::Glow { radius, amount }) => Some((index, texels(*radius), Op::Glow(*amount))),
         EffectKind::Filter(Filter::Mosaic { size }) => Some((index, texels(*size), Op::Mosaic)),
+        EffectKind::Filter(Filter::HaloGlow { width, .. }) => Some((index, texels(width.abs() * Filter::HALO_REACH), Op::Halo)),
+        EffectKind::Filter(Filter::DropShadow { angle, distance, size, .. }) => {
+            // Cast away from the light: `distance` of a UV tile, against the light's direction
+            let [dx, dy] = direction(*angle);
+            let reach = distance.clamp(-0.5, 0.5) * res as f32;
+            let offset = [(-dx * reach).round() as i32, (-dy * reach).round() as i32];
+            Some((index, texels(size * Filter::HALO_REACH), Op::Shadow { offset }))
+        }
         EffectKind::Filter(Filter::GradientMap { input, debug: false, .. }) if input.blur > 0.0 => Some((index, texels(input.blur), Op::PreBlur)),
         EffectKind::Filter(Filter::SlopeBlur { radius, scale, seed, divider }) if *radius > 0.0 => {
             Some((index, texels(divided(*radius, *divider)), Op::Slope { scale: *scale, seed: *seed }))
@@ -443,7 +470,7 @@ fn gather(op: Op, orig: &[f32], cover: &[f32], comps: usize, (x0, y0, w, h): (u3
                     let center = |v: f32| ((v / r).floor() + 0.5) * r - 0.5;
                     sample(center(x), center(y), &mut acc);
                 }
-                Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) | Op::PreBlur => {}
+                Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) | Op::PreBlur | Op::Halo | Op::Shadow { .. } => {}
             }
             if acc[4] > 1e-6
                 && let Some(px) = line.get_mut(col * comps..(col + 1) * comps)
@@ -665,12 +692,18 @@ fn filter_extent(radius: f32, op: Op, longest_side: u32) -> (u32, u32) {
 
     // Three box passes reach three radii; the gathering filters one radius plus a bilinear texel
     let reach = if is_box_blur(op) { 3 * radius_texels } else { radius_texels + 1 };
-    (radius_texels, reach)
+
+    // A shadow also reads the shapes it was moved from
+    let moved = match op {
+        Op::Shadow { offset: [dx, dy] } => dx.unsigned_abs().max(dy.unsigned_abs()).min(longest_side),
+        _ => 0,
+    };
+    (radius_texels, reach + moved)
 }
 
 /// Whether neighbourhood filter `op` is computed from box blurs (the others gather samples).
 fn is_box_blur(op: Op) -> bool {
-    matches!(op, Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) | Op::PreBlur)
+    matches!(op, Op::Blur(_) | Op::HighPass | Op::Bevel | Op::Glow(_) | Op::PreBlur | Op::Halo | Op::Shadow { .. })
 }
 
 /// The stack up to and including neighbourhood filter `filter` over texel `region`, continued from `start` (the filter below's field) when given.
@@ -773,9 +806,8 @@ fn filter_region(
     // A smaller UV tile has fewer texels per UV unit, so its filters reach fewer texels
     let filtered = |scale: f32| -> Vec<f32> {
         let res = ((inp.tile_res() as f32 * scale).round() as u32).max(1);
-        let scaled_radius = neighbourhood_filters(effects, res)
-            .find(|filter| filter.0 == index)
-            .map_or(radius_texels, |filter| filter.1.round().clamp(1.0, radius_texels as f32) as u32);
+        let scaled = neighbourhood_filters(effects, res).find(|filter| filter.0 == index);
+        let scaled_radius = scaled.map_or(radius_texels, |filter| filter.1.round().clamp(1.0, radius_texels as f32) as u32);
         if !is_box_blur(op) {
             return gather(op, &orig, &cover, comps, (rx0, ry0, w, h), scaled_radius as f32, res, opacity);
         }
@@ -788,6 +820,14 @@ fn filter_region(
             (Cow::Owned(wrap_pad(&orig, comps, (w as usize, h as usize), pad)), Cow::Owned(wrap_pad(&cover, 1, (w as usize, h as usize), pad)))
         };
         let (width, height, blur_radius) = (w as usize + 2 * pad.0, h as usize + 2 * pad.1, scaled_radius as usize);
+        if let (Some((_, _, scaled_op @ (Op::Halo | Op::Shadow { .. }))), Some(Effect { kind: EffectKind::Filter(filter), .. })) =
+            (scaled, effects.iter().filter(|effect| effect.visible).nth(index))
+        {
+            let kind = channel.map_or(ChannelKind::Scalar, Channel::kind);
+            let mut data = orig.to_vec();
+            halo(&mut data, &cover, comps, (width, height, blur_radius), (scaled_op, filter, kind), opacity);
+            return if pad == (0, 0) { data } else { unpad(&data, comps, (w as usize, h as usize), pad) };
+        }
         // A pre-blur takes the blur whole; the effect's opacity mixes its mapped result below
         let blurred_opacity = if matches!(op, Op::PreBlur) { 1.0 } else { opacity };
         let mut weights = cover.to_vec();
@@ -848,6 +888,88 @@ fn filter_region(
     unpremultiply(&mut data, comps);
     Some(Field { x0: rx0, y0: ry0, w, h, comps, data })
 }
+
+/// Lay halo glow or drop shadow `filter` (`op` its move) over premultiplied `data` in the tint of a channel of `kind`, mixed in by `opacity`
+fn halo(
+    data: &mut [f32],
+    cover: &[f32],
+    comps: usize,
+    (width, height, radius): (usize, usize, usize),
+    (op, filter, kind): (Op, &Filter, ChannelKind),
+    opacity: f32,
+) {
+    let (inner, precise, spread, strength, color, mask_white) = match *filter {
+        Filter::HaloGlow { on_mask, precise, width, spread, opacity, color } => (width < 0.0, precise, spread, opacity, color, on_mask),
+        Filter::DropShadow { spread, opacity, color, .. } => (false, false, spread, opacity, color, true),
+        _ => return,
+    };
+    let luminance = 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2];
+    let tint = match (comps, kind) {
+        (4, ChannelKind::Color) => color,
+        (4, _) => [luminance; 3],
+        _ if mask_white => [1.0; 3],
+        _ => [luminance; 3],
+    };
+
+    // The shapes: the content's coverage or the mask's value (the outside of them for an inner glow)
+    let shape = |texel: usize| {
+        let value = data.get(texel * comps + comps - 1).copied().unwrap_or(0.0);
+        let value = if value.is_finite() { value.clamp(0.0, 1.0) } else { 0.0 };
+        if inner { 1.0 - value } else { value }
+    };
+    let offset = match op {
+        Op::Shadow { offset } => offset,
+        _ => [0, 0],
+    };
+    let moved = |texel: usize| -> Option<usize> {
+        let (x, y) = ((texel % width.max(1)) as i64 - i64::from(offset[0]), (texel / width.max(1)) as i64 - i64::from(offset[1]));
+        (x >= 0 && y >= 0 && (x as usize) < width && (y as usize) < height).then(|| y as usize * width + x as usize)
+    };
+    let texels = width * height;
+    let mut weights: Vec<f32> = (0..texels).map(|texel| moved(texel).and_then(|from| cover.get(from).copied()).unwrap_or(0.0)).collect();
+    let mut sums: Vec<f32> = (0..texels).map(|texel| moved(texel).map_or(0.0, |from| shape(from) * cover.get(from).copied().unwrap_or(0.0))).collect();
+    blur(&mut weights, width, height, radius);
+    blur(&mut sums, width, height, radius);
+
+    let hardness = (1.0 - spread.clamp(0.0, 1.0)).max(HALO_SOFTEST);
+    let strength = strength.clamp(0.0, 1.0);
+    data.par_chunks_mut(comps).zip(sums.par_iter().zip(weights.par_iter())).for_each(|(pixel, (sum, weight))| {
+        let blurred = if *weight > 1e-6 { (sum / weight).clamp(0.0, 1.0) } else { 0.0 };
+        let shaped = if precise { crate::pattern::smoothstep(0.0, PRECISE_EDGE, blurred) } else { blurred };
+        let glow = (shaped / hardness).min(1.0) * strength;
+        let cov = pixel.last().copied().unwrap_or(0.0).clamp(0.0, 1.0);
+        let mut before = [0.0f32; 4];
+        for (was, value) in before.iter_mut().zip(pixel.iter()) {
+            *was = *value;
+        }
+        if inner {
+            // Inside the shapes, towards the tint (content premultiplied by its coverage)
+            let k = if comps == 4 { glow } else { glow * cov };
+            for (slot, tint) in pixel.iter_mut().zip(tint).take(comps.min(3)) {
+                let target = if comps == 4 { tint * cov } else { tint };
+                *slot += (target - *slot) * k;
+            }
+        } else {
+            // Under the shapes: it shows where they leave room
+            let under = glow * (1.0 - cov);
+            for (slot, tint) in pixel.iter_mut().zip(tint).take(comps.min(3)) {
+                *slot += tint * under;
+            }
+            if comps == 4
+                && let Some(alpha) = pixel.get_mut(3)
+            {
+                *alpha += under;
+            }
+        }
+        for (slot, was) in pixel.iter_mut().zip(before) {
+            *slot = was + (*slot - was) * opacity;
+        }
+    });
+}
+
+/// The blurred value a precise halo is solid from, and how soft a full spread leaves it
+const PRECISE_EDGE: f32 = 0.5;
+const HALO_SOFTEST: f32 = 0.01;
 
 /// Run point filter `filter` on blurred texels `data` (premultiplied content or masks) and mix the result over the unblurred `orig` by `opacity`
 fn map_blurred(data: &mut [f32], orig: &[f32], comps: usize, filter: &Filter, kind: ChannelKind, opacity: f32) {
@@ -985,6 +1107,10 @@ fn effect_plans<'a>(
                 EffectKind::Fill { projection, .. } | EffectKind::Material(Fill { projection, .. }) => ProjectorDepth::of(inp.mesh, inp.bounds, projection),
                 _ => None,
             };
+            let environment = match &effect.kind {
+                EffectKind::Filter(Filter::EnvironmentLighting { .. }) => Some(EnvironmentSh::of(&inp.project.display, inp.images)),
+                _ => None,
+            };
             let blend = effect.applied_blend(channel);
             EffectPlan {
                 id: effect.id,
@@ -995,6 +1121,7 @@ fn effect_plans<'a>(
                 preview: previews(inp, target),
                 curvature_sizes,
                 depth,
+                environment,
             }
         })
         .collect()
@@ -1239,6 +1366,8 @@ struct Texel<'a, 'b> {
     anchors: Vec<(LayerId, Acc)>,
     /// The stack below the layer whose mask compares its channels (recorded by `eval` there, or where it stops)
     below: Option<Acc>,
+    /// The material Baked Lighting Stylized reads its highlights from: the stack with the layer it lights (its other channels) laid on
+    lit: Option<Acc>,
     /// Where `eval` takes layer masks and content from.
     tape: Tape<'b>,
     /// The copy of a symmetric fill being sampled: the surface point and normal it sees, and its image's flip
@@ -1275,7 +1404,7 @@ impl<'t> Tape<'t> {
 
 impl<'a, 'b> Texel<'a, 'b> {
     fn new(inp: &'b Inputs<'a>, x: u32, y: u32, o: usize, stroke: f32) -> Self {
-        Texel { inp, x, y, o, res: inp.gbuf.width, coords: None, stroke, stop: None, anchors: Vec::new(), below: None, tape: Tape::Off, copy: None }
+        Texel { inp, x, y, o, res: inp.gbuf.width, coords: None, stroke, stop: None, anchors: Vec::new(), below: None, lit: None, tape: Tape::Off, copy: None }
     }
 
     /// Run `f` with `tape` as this texel's tape.
@@ -1442,6 +1571,64 @@ impl<'a, 'b> Texel<'a, 'b> {
             return ([0.0; 3], 0.0);
         }
         (value.map(|v| v / cover), cover)
+    }
+
+    /// What Baked Lighting Stylized and Environment read their highlights from in node `n`: the stack below (`acc`) with the layer's other channels on under mask `m`; None where nothing reads it
+    fn lit_material(&mut self, n: &Node, acc: &Acc, m: f32) -> Option<Acc> {
+        if matches!(self.tape, Tape::Replay(..)) {
+            return None;
+        }
+        let base = Channel::BaseColor.index();
+        let lights = |c: &ChanPlan| {
+            c.ch == base
+                && c.effects.iter().any(|e| match &*e.kind {
+                    EffectKind::Filter(f @ Filter::BakedLighting { .. }) => f.stylized_lighting().is_some_and(|(s, _)| s.output.specular()),
+                    EffectKind::Filter(Filter::EnvironmentLighting { .. }) => true,
+                    _ => false,
+                })
+        };
+        if !n.chans.iter().any(lights) {
+            return None;
+        }
+        let mut lit = *acc;
+        for c in n.chans.iter().filter(|c| c.ch != base) {
+            if let Some((v, cov)) = self.content(&n.content, c) {
+                apply(&mut lit, c, v, cov, m);
+            }
+        }
+        Some(lit)
+    }
+
+    /// The normal Baked Lighting Stylized lights: the mesh's, or (Mesh + Height + Normal) its [`Texel::detail_normal`]
+    fn lit_normal(&mut self, stylized: &StylizedLighting) -> [f32; 3] {
+        if stylized.mesh_only {
+            return self.coords().nrm.to_array();
+        }
+        self.detail_normal(stylized.height_to_normal)
+    }
+
+    /// The baked world normal (the mesh's without one) tilted by the baked height's slope times `relief`
+    fn detail_normal(&mut self, relief: f32) -> [f32; 3] {
+        let mesh = self.coords().nrm;
+        let detail = self.baked_color(BakedMap::WorldNormal).map(|packed| Vec3::from(packed) * 2.0 - Vec3::ONE).filter(|n| n.length_squared() > 1e-6);
+        let nrm = detail.map_or(mesh, Vec3::normalize);
+        let i = (self.y * self.inp.gbuf.width + self.x) as usize;
+        let (Some(surface), Some(slope)) = (self.surface(i), self.height_slope()) else { return nrm.to_array() };
+        let tangent = surface.tangent.truncate();
+        let bitangent = nrm.cross(tangent) * surface.tangent.w;
+        let tilted = nrm - (tangent * slope[0] + bitangent * slope[1]) * HEIGHT_RELIEF * relief;
+        tilted.try_normalize().unwrap_or(nrm).to_array()
+    }
+
+    /// The baked height's change per UV unit along U and V at this texel (central differences); None without a height bake
+    fn height_slope(&self) -> Option<[f32; 2]> {
+        let (width, height) = (self.res, self.inp.gbuf.height);
+        let at = |x: u32, y: u32| self.inp.baked.sample_working(BakedMap::Height, x, y, (width, height), &self.inp.block_scales).map(|h| h[0]);
+        let (left, right) = (self.x.saturating_sub(1), (self.x + 1).min(width.saturating_sub(1)));
+        let (up, down) = (self.y.saturating_sub(1), (self.y + 1).min(height.saturating_sub(1)));
+        let du = (at(right, self.y)? - at(left, self.y)?) / (right - left).max(1) as f32 * width as f32;
+        let dv = (at(self.x, down)? - at(self.x, up)?) / (down - up).max(1) as f32 * height as f32;
+        Some([du, dv]).filter(|slope| slope.iter().all(|s| s.is_finite()))
     }
 
     fn baked(&self, m: BakedMap) -> Option<f32> {
@@ -1753,11 +1940,13 @@ impl<'a, 'b> Texel<'a, 'b> {
                 }
                 Content::Fill(..) | Content::Paint { .. } if m > 0.0 => {
                     let before = if n.anchors.iter().any(|a| a.1.is_some()) { Some(*acc) } else { None };
+                    self.lit = self.lit_material(n, acc, m);
                     for c in &n.chans {
                         if let Some((v, cov)) = self.tape_content(&n.content, c) {
                             apply(acc, c, v, cov, m);
                         }
                     }
+                    self.lit = None;
                     // Anchors inside the content stack: the stack with the content cut there.
                     for (a, cut) in &n.anchors {
                         let rec = match (cut, before) {
@@ -2004,12 +2193,38 @@ impl<'a, 'b> Texel<'a, 'b> {
             // Baked lighting reads the texel's normal and occlusion, and lights the base color only.
             EffectKind::Filter(f @ Filter::BakedLighting { .. }) => match Channel::ALL.get(c.ch) {
                 Some(Channel::BaseColor) => {
-                    let nrm = self.coords().nrm.to_array();
-                    let k = f.baked_light(nrm, self.baked(BakedMap::AmbientOcclusion).unwrap_or(1.0)).unwrap_or(1.0);
-                    (mix3(v, v.map(|x| (x * k).clamp(0.0, 1.0)), o), cov)
+                    let ao = self.baked(BakedMap::AmbientOcclusion).unwrap_or(1.0);
+                    let lit = match f.stylized_lighting() {
+                        Some((stylized, light)) => {
+                            let nrm = self.lit_normal(stylized);
+                            let curvature = self.baked(BakedMap::Curvature).unwrap_or(FLAT_CURVATURE);
+                            let material = self.lit.unwrap_or_else(|| Channel::ALL.map(Channel::default_value));
+                            stylized.shade(light, v, nrm, [ao, curvature], &material)
+                        }
+                        None => {
+                            let k = f.baked_light(self.coords().nrm.to_array(), ao).unwrap_or(1.0);
+                            v.map(|x| (x * k).clamp(0.0, 1.0))
+                        }
+                    };
+                    (mix3(v, lit, o), cov)
                 }
                 _ => (v, cov),
             },
+            // Environment lighting reads the texel's normal, occlusion and metal, and lights the base color only.
+            EffectKind::Filter(Filter::EnvironmentLighting { horizontal, vertical, exposure, height_intensity, ambient_occlusion, specular_occlusion }) => {
+                match (Channel::ALL.get(c.ch), &e.environment) {
+                    (Some(Channel::BaseColor), Some(environment)) => {
+                        let ao = self.baked(BakedMap::AmbientOcclusion).unwrap_or(1.0);
+                        let nrm = Vec3::from(self.detail_normal(height_intensity / ENVIRONMENT_HEIGHT_UNIT));
+                        let light = environment.irradiance(nrm, horizontal.to_radians(), vertical.to_radians())
+                            * exposure.clamp(-EXPOSURE_STOPS, EXPOSURE_STOPS).exp2();
+                        let material = self.lit.unwrap_or_else(|| Channel::ALL.map(Channel::default_value));
+                        let lit = EnvironmentSh::shade(v, light, ao, [*ambient_occlusion, *specular_occlusion], &material);
+                        (mix3(v, lit, o), cov)
+                    }
+                    _ => (v, cov),
+                }
+            }
             // A gradient's debug view shows its ramp left to right across each UV tile
             EffectKind::Filter(f @ Filter::GradientMap { debug: true, .. }) => {
                 let ramp = f.ramp_at(self.coords().uv.x.rem_euclid(1.0)).map(|color| if c.kind == ChannelKind::Color { color } else { [lum(color); 3] });
@@ -3328,6 +3543,59 @@ soft {soft:?}"
     }
 
     #[test]
+    fn a_halo_glow_lights_around_a_masks_shapes_and_a_drop_shadow_lands_under_them_away_from_the_light() {
+        let row_of = |filter: Option<Filter>| {
+            let mut f = fixture();
+            let id = fill_layer(&mut f.project, [1.0; 3], 1.0);
+            let mut mask = Mask::new(MaskBackground::Black);
+            let fill = EffectKind::Fill {
+                source: Source::Procedural { pattern: Procedural::new(ProceduralKind::Checker), low: [0.0; 3], high: [1.0; 3] },
+                projection: Projection::default(),
+                sampling: Default::default(),
+            };
+            mask.effects.push(Effect::new(f.project.alloc_id(), fill));
+            if let Some(filter) = filter {
+                mask.effects.push(Effect::new(f.project.alloc_id(), EffectKind::Filter(filter)));
+            }
+            f.project.layer_mut(id).unwrap().mask = Some(mask);
+            let out = run(&f, None);
+            (0..64 * 64).map(|i| out.value(Channel::BaseColor, i % 64, i / 64)[0]).collect::<Vec<f32>>()
+        };
+        let plain = row_of(None);
+        let (low, high) = plain.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
+        let dark = |v: f32| v < low + 0.01;
+
+        // A glow only adds, and lights the dark texels beside the shapes
+        let glow = Filter::HaloGlow { on_mask: true, precise: false, width: 1.0, spread: 0.0, opacity: 1.0, color: [1.0; 3] };
+        let glowing = row_of(Some(glow));
+        assert!(glowing.iter().zip(&plain).all(|(g, p)| *g >= p - 1e-4), "a glow only adds");
+        let lit = (0..64 * 64).filter(|&i| dark(plain[i]) && glowing[i] > low + 0.1 * (high - low)).count();
+        assert!(lit > 64, "{lit} dark texels lit");
+
+        // A shadow from a light above lands below the shapes: dark texels under a shape take it, those above one do not
+        let shadow = Filter::DropShadow { angle: 90.0, distance: 0.1, size: 0.0, spread: 0.0, opacity: 0.5, color: [0.0; 3] };
+        let shadowed = row_of(Some(shadow));
+        assert!(shadowed.iter().zip(&plain).all(|(s, p)| *s >= p - 1e-4), "a shadow only goes under the shapes");
+        let reach = 6;
+        let at = |x: usize, y: usize| plain[y * 64 + x];
+        let (mut below, mut above) = (Vec::new(), Vec::new());
+        for y in 8..56 {
+            for x in 0..64 {
+                if dark(at(x, y)) && !dark(at(x, y - reach)) && (y - 2..=y).all(|row| dark(at(x, row))) {
+                    below.push(shadowed[y * 64 + x] - at(x, y));
+                }
+                if dark(at(x, y)) && !dark(at(x, y + reach)) && dark(at(x, y - reach)) && (y..=y + 2).all(|row| dark(at(x, row))) {
+                    above.push(shadowed[y * 64 + x] - at(x, y));
+                }
+            }
+        }
+        assert!(!below.is_empty() && !above.is_empty());
+        let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
+        assert!(mean(&below) > 0.2 * (high - low), "under: {below:?}");
+        assert!(mean(&above) < 0.05 * (high - low), "above: {above:?}");
+    }
+
+    #[test]
     fn bevel_glow_and_mosaic() {
         let checker = |f: &mut Fixture| {
             let id = f.project.alloc_id();
@@ -3369,7 +3637,7 @@ soft {soft:?}"
         let lit = |elevation: f32| {
             let mut f = fixture();
             let id = fill_layer(&mut f.project, [0.5; 3], 0.3);
-            let fx = Filter::BakedLighting { azimuth: 0.0, elevation, light: 0.6, ambient: 0.4, occlusion: 1.0 };
+            let fx = Filter::BakedLighting { azimuth: 0.0, elevation, light: 0.6, ambient: 0.4, occlusion: 1.0, stylized: None };
             content_fx(&mut f, id, EffectKind::Filter(fx));
             let out = run(&f, None);
             (out.value(Channel::BaseColor, 30, 30), out.value(Channel::Roughness, 30, 30))
@@ -3380,9 +3648,26 @@ soft {soft:?}"
         assert!(close(toward, [0.5; 3]) && close(rough, [0.3; 3]), "{toward:?} {rough:?}");
         let (away, _) = lit(if n.y > 0.0 { -90.0 } else { 90.0 });
         assert!(close(away, [0.2; 3]), "{away:?}");
-        let f = Filter::BakedLighting { azimuth: 0.0, elevation: 0.0, light: 0.0, ambient: 1.0, occlusion: 0.5 };
+        let f = Filter::BakedLighting { azimuth: 0.0, elevation: 0.0, light: 0.0, ambient: 1.0, occlusion: 0.5, stylized: None };
         assert_eq!(f.baked_light([0.0, 1.0, 0.0], 0.2), Some(0.6), "half the occlusion");
         assert_eq!(Filter::Invert.baked_light([0.0; 3], 1.0), None);
+    }
+
+    /// Baked Lighting Stylized's highlights read the roughness of the layer it lights: a smooth layer shines brighter than a rough one under the same sun
+    #[test]
+    fn stylized_baked_lighting_highlights_read_the_layers_roughness() {
+        let lit = |rough: f32| {
+            let mut f = fixture();
+            let id = fill_layer(&mut f.project, [0.2; 3], rough);
+            let n = primitives::plane(2.0, 2).normals[0];
+            let stylized = Some(Box::new(StylizedLighting { lights: [texturecraft_core::DirectionalLight::off(0.0); 2], ..StylizedLighting::library() }));
+            let elevation = if n.y > 0.0 { 90.0 } else { -90.0 };
+            let fx = Filter::BakedLighting { azimuth: 0.0, elevation, light: 1.0, ambient: 0.0, occlusion: 0.0, stylized };
+            content_fx(&mut f, id, EffectKind::Filter(fx));
+            run(&f, None).value(Channel::BaseColor, 30, 30)
+        };
+        let (smooth, rough) = (lit(0.15), lit(0.9));
+        assert!(smooth[0] > rough[0] + 0.05, "smooth {smooth:?} rough {rough:?}");
     }
 
     #[test]

@@ -58,6 +58,7 @@ pub mod resource_cmds;
 pub mod session;
 pub mod set_cmds;
 pub mod smart_masks;
+mod stylized_lighting_params;
 pub mod swatch_cmds;
 pub mod template_cmds;
 pub mod text_cmds;

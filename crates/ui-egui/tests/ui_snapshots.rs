@@ -1871,6 +1871,95 @@ fn gradient_filter_snapshots() {
 }
 
 #[test]
+#[ignore = "writes the light and shadow filters (screen 20) to TC_UI_SNAPSHOTS; run with --ignored"]
+/// Screen 20: Glow (and its Width hovered) and Drop Shadow
+fn light_filter_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::core::LayerId;
+    use texturecraft_engine::{StackTarget, execute};
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "mask.add.white", &json!({"layer": layer.clone()})).unwrap();
+    let mut add = |filter: &str| {
+        let params = json!({"layer": layer.clone(), "target": "mask", "filter": filter});
+        LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap())
+    };
+    let effects = [("glow", add("glow")), ("drop-shadow", add("dropShadow"))];
+    execute(&mut session, "layer.select", &json!({"layer": layer})).unwrap();
+    session.target = StackTarget::Effect(effects[0].1);
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    for (name, effect) in effects {
+        harness.state_mut().session.target = StackTarget::Effect(effect);
+        harness.run_steps(6);
+        save(&mut harness, &output_dir, &format!("filter-{name}"));
+    }
+    let distance = harness.get_by_role_and_label(egui::Role::Slider, "Distance").rect();
+    harness.hover_at(distance.center());
+    save(&mut harness, &output_dir, "filter-drop-shadow-hovered");
+    harness.get_by_role_and_label(egui::Role::Button, "Color").click();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "filter-drop-shadow-color-picker");
+    harness.key_press(egui::Key::Escape);
+    harness.state_mut().session.target = StackTarget::Effect(effects[0].1);
+    harness.run_steps(4);
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, theme) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("filter-glow-{theme}"));
+        }
+    }
+
+    // Baked Lighting Stylized on content, in a window tall enough for all its cards, then its Output list open
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    let params = json!({"layer": layer.clone(), "target": "content", "filter": "bakedLighting"});
+    let lighting = LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap());
+    let params = json!({"layer": layer.clone(), "target": "content", "filter": "bakedLightingEnvironment"});
+    let environment = LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap());
+    execute(&mut session, "layer.select", &json!({"layer": layer})).unwrap();
+    session.target = StackTarget::Effect(lighting);
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 2600.0)).with_pixels_per_point(1.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(8);
+    save(&mut harness, &output_dir, "filter-baked-lighting-stylized");
+    let output = harness.get_by_role_and_label(egui::Role::ComboBox, "Diffuse + Specular").rect();
+    harness.hover_at(output.center());
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Diffuse + Specular").click();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "filter-baked-lighting-stylized-output-list");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(4);
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, theme) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("filter-baked-lighting-stylized-{theme}"));
+        }
+        harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    }
+
+    // Baked Lighting Environment, then hovering its stacked Specular Occlusion Intensity
+    harness.state_mut().session.target = StackTarget::Effect(environment);
+    harness.run_steps(8);
+    save(&mut harness, &output_dir, "filter-baked-lighting-environment");
+    let specular = harness.get_by_role_and_label(egui::Role::Slider, "Specular Occlusion Intensity").rect();
+    harness.hover_at(specular.center());
+    save(&mut harness, &output_dir, "filter-baked-lighting-environment-hovered");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, theme) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("filter-baked-lighting-environment-{theme}"));
+        }
+    }
+}
+
+#[test]
 #[ignore = "writes the filter picker states (screen 13) to TC_UI_SNAPSHOTS; run with --ignored"]
 /// Screen 13: the filter picker opened from an empty card, swapping (current outlined), searching, and in a mask
 fn filter_picker_snapshots() {

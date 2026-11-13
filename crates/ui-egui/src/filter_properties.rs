@@ -2,7 +2,7 @@
 
 use egui::{Painter, Rect, Stroke, StrokeKind, Ui};
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, CurvePreset, EffectKind, Filter, GrayscaleMode, LayerId};
+use texturecraft_engine::core::{Channel, CurvePreset, DirectionalLight, EffectKind, Filter, GrayscaleMode, LayerId, LightingOutput, StylizedLighting};
 use texturecraft_engine::filter_lib::{build, find, scalar_params};
 
 use crate::TextureCraftApp;
@@ -102,6 +102,9 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
         Filter::GradientMap { .. } => return gradient(app, sheet, id, filter),
         Filter::GradientCurve { preset, invert, balance, contrast } => return gradient_curve(app, sheet, id, *preset, *invert, [*balance, *contrast]),
         Filter::GradientDynamic { vertical, position, color } => return gradient_dynamic(app, sheet, id, *vertical, *position, *color),
+        Filter::HaloGlow { on_mask, precise, color, .. } => return glow(app, sheet, id, filter, (*on_mask, *precise), *color),
+        Filter::DropShadow { color, .. } => return drop_shadow(app, sheet, id, filter, *color),
+        Filter::BakedLighting { .. } => return baked_lighting_stylized(app, sheet, id, filter),
         _ => {}
     }
     let params = scalar_params(filter);
@@ -116,7 +119,7 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
     for (key, label, mut value, min, max) in params.into_iter().filter(|(key, ..)| *key != "seed") {
         let edit = if Some(key) == divided.map(|(key, _)| key) {
             intensity_row(app, sheet, id, &mut value, min..=max, divided.map_or(1, |(_, divider)| divider))
-        } else if matches!(key, "angle" | "azimuth") {
+        } else if matches!(key, "angle" | "azimuth" | "horizontalRotation" | "verticalRotation") {
             sheet.angle(tr(label), &mut value, min..=max)
         } else if min < 0.0 {
             sheet.signed_slider(tr(label), &mut value, min..=max, decimals(key, min, max))
@@ -346,6 +349,177 @@ fn gradient_dynamic(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id
     sheet.slot(&swatch, tr("Gradient Source"), tr("Uniform"), None, false, false);
     let pick = sheet.color_bar(tr("Gradient Source"), color, app.picking_color, &app.session.doc.project.swatches);
     sheet.close_card();
+    if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
+        app.run("effect.set", json!({"effect": id, "color": picked, "merge": pick.merge}));
+    }
+}
+
+/// Glow: Used on a Mask, Mode (Soft | Precise), Width (inner below 0), Spread, Opacity and its Color
+fn glow(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, filter: &Filter, (on_mask, precise): (bool, bool), color: [f32; 3]) {
+    let mut used = on_mask;
+    if sheet.toggle(tr("Used on a Mask"), &mut used) {
+        app.run("effect.set", json!({"effect": id, "usedOnMask": used}));
+    }
+    if let Some(mode) = sheet.switch(tr("Mode"), &[tr("Soft"), tr("Precise")], usize::from(precise)) {
+        app.run("effect.set", json!({"effect": id, "mode": if mode == 1 { "precise" } else { "soft" }}));
+    }
+    for (key, label, mut value, min, max) in scalar_params(filter) {
+        let edit = if min < 0.0 { sheet.signed_slider(tr(label), &mut value, min..=max, 2) } else { sheet.slider(tr(label), &mut value, min..=max, 2) };
+        if let Some(merge) = edit {
+            app.run("effect.set", json!({"effect": id, key: value, "merge": merge}));
+        }
+    }
+    color_row(app, sheet, id, color);
+}
+
+/// Drop Shadow: Angle with its dial, Distance (either way), Size, Spread, Opacity and its Color
+fn drop_shadow(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, filter: &Filter, color: [f32; 3]) {
+    for (key, label, mut value, min, max) in scalar_params(filter) {
+        let edit = if key == "angle" {
+            sheet.angle(tr(label), &mut value, min..=max)
+        } else if min < 0.0 {
+            sheet.signed_slider(tr(label), &mut value, min..=max, 2)
+        } else {
+            sheet.slider(tr(label), &mut value, min..=max, 2)
+        };
+        if let Some(merge) = edit {
+            app.run("effect.set", json!({"effect": id, key: value, "merge": merge}));
+        }
+    }
+    color_row(app, sheet, id, color);
+}
+
+/// Baked Lighting Stylized: a card each for the Sun, the Sky, Light 1 and 2, Occlusion and cavity, the Material and Normal details (one saved before shows its plain settings)
+fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, filter: &Filter) {
+    let Filter::BakedLighting { azimuth, elevation, light, ambient, occlusion, stylized } = filter else { return };
+    let s = stylized.as_deref().unwrap_or(&StylizedLighting::PLAIN);
+    let set = |app: &mut TextureCraftApp, params: Value| {
+        let mut params = params;
+        params["effect"] = json!(id);
+        app.run("effect.set", params);
+    };
+    let swatches = app.session.doc.project.swatches.clone();
+
+    if sheet.card(tr("Sun"), Some(true)) {
+        let mut value = *light;
+        if let Some(merge) = sheet.slider(tr("Sun Intensity"), &mut value, 0.0..=10.0, 2) {
+            set(app, json!({"light": value, "merge": merge}));
+        }
+        for (key, label, value, range) in
+            [("azimuth", tr("Horizontal Angle"), *azimuth, 0.0..=360.0), ("elevation", tr("Vertical Angle"), elevation.rem_euclid(360.0), 0.0..=360.0)]
+        {
+            let mut value = value;
+            if let Some(merge) = sheet.angle(label, &mut value, range) {
+                set(app, json!({key: value, "merge": merge}));
+            }
+        }
+        let pick = sheet.color_bar_led(tr("Sun Color"), s.sun_color, app.picking_color, &swatches);
+        if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
+            set(app, json!({"sunColor": picked, "merge": pick.merge}));
+        }
+    }
+    sheet.close_card();
+
+    if sheet.card(tr("Sky"), Some(true)) {
+        let mut value = *ambient;
+        if let Some(merge) = sheet.slider(tr("Sky Intensity"), &mut value, 0.0..=2.0, 2) {
+            set(app, json!({"ambient": value, "merge": merge}));
+        }
+        for (key, label, color) in [
+            ("skyColor", tr("Sky Color"), s.sky_color),
+            ("horizonColor", tr("Horizon Color"), s.horizon_color),
+            ("groundColor", tr("Ground Color"), s.ground_color),
+        ] {
+            let pick = sheet.color_bar_led(label, color, app.picking_color, &swatches);
+            if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
+                set(app, json!({key: picked, "merge": pick.merge}));
+            }
+        }
+    }
+    sheet.close_card();
+
+    for (key, title, extra) in [("light1", tr("Light 1"), s.lights[0]), ("light2", tr("Light 2"), s.lights[1])] {
+        if sheet.card(title, Some(true)) {
+            extra_light(app, sheet, id, key, extra, &swatches);
+        }
+        sheet.close_card();
+    }
+
+    if sheet.card(tr("Occlusion and cavity"), Some(true)) {
+        let rows = [
+            ("occlusion", tr("Diffuse AO"), *occlusion, 1.0),
+            ("diffuseCavity", tr("Diffuse Cavity"), s.diffuse_cavity, 1.0),
+            ("specularAo", tr("Specular AO"), s.specular_ao, 1.0),
+            ("specularCavity", tr("Specular Cavity"), s.specular_cavity, 1.0),
+            ("cavitySmoothness", tr("Cavity Smoothness"), s.cavity_smoothness, 4.0),
+            ("edgesIntensity", tr("Edges Intensity"), s.edges_intensity, 1.0),
+            ("edgesSmoothness", tr("Edges Smoothness"), s.edges_smoothness, 1.0),
+        ];
+        for (key, label, value, max) in rows {
+            let mut value = value;
+            if let Some(merge) = sheet.slider(label, &mut value, 0.0..=max, 2) {
+                set(app, json!({key: value, "merge": merge}));
+            }
+        }
+    }
+    sheet.close_card();
+
+    if sheet.card(tr("Material"), Some(true)) {
+        let input = |glossiness: bool| tr(if glossiness { "Specular / Glossiness" } else { "Metal / Roughness" }).to_owned();
+        if let (Some(glossiness), _) = sheet.dropdown(tr("Input"), s.specular_glossiness, &[false, true], input, None) {
+            set(app, json!({"input": if glossiness { "specularGlossiness" } else { "metalRoughness" }}));
+        }
+        let output = |output: LightingOutput| tr(output.label()).to_owned();
+        if let (Some(picked), _) = sheet.dropdown(tr("Output"), s.output, &LightingOutput::ALL, output, None) {
+            set(app, json!({"output": picked.id()}));
+        }
+        let mut value = s.dielectric_reflectance;
+        if let Some(merge) = sheet.slider(tr("Dielectric Reflectance"), &mut value, 0.0..=0.16, 2) {
+            set(app, json!({"dielectricReflectance": value, "merge": merge}));
+        }
+    }
+    sheet.close_card();
+
+    if sheet.card(tr("Normal details"), Some(true)) {
+        let details = |mesh_only: bool| tr(if mesh_only { "Mesh only" } else { "Mesh + Height + Normal" }).to_owned();
+        if let (Some(mesh_only), _) = sheet.dropdown(tr("Normal Details Type"), s.mesh_only, &[true, false], details, None) {
+            set(app, json!({"normalDetails": if mesh_only { "mesh" } else { "meshHeightNormal" }}));
+        }
+        let mut value = s.height_to_normal;
+        if let Some(merge) = sheet.slider(tr("Height to Normal Intensity"), &mut value, 0.0..=3.0, 2) {
+            set(app, json!({"heightToNormal": value, "merge": merge}));
+        }
+    }
+    sheet.close_card();
+}
+
+/// Light 1 or 2's rows (`key` names it to `effect.set`): Horizontal and Vertical Angle with their dials, Intensity and Color
+fn extra_light(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, key: &str, light: DirectionalLight, swatches: &[[f32; 3]]) {
+    let mut edits: Vec<(Value, bool)> = Vec::new();
+    for (part, label, value, range) in
+        [("azimuth", tr("Horizontal Angle"), light.azimuth, 0.0..=360.0), ("elevation", tr("Vertical Angle"), light.elevation.rem_euclid(360.0), 0.0..=360.0)]
+    {
+        let mut value = value;
+        if let Some(merge) = sheet.angle(label, &mut value, range) {
+            edits.push((json!({part: value}), merge));
+        }
+    }
+    let mut intensity = light.intensity;
+    if let Some(merge) = sheet.slider(tr("Intensity"), &mut intensity, 0.0..=2.0, 2) {
+        edits.push((json!({"intensity": intensity}), merge));
+    }
+    let pick = sheet.color_bar_led(tr("Color"), light.color, app.picking_color, swatches);
+    if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
+        edits.push((json!({"color": picked}), pick.merge));
+    }
+    for (part, merge) in edits {
+        app.run("effect.set", json!({"effect": id, key: part, "merge": merge}));
+    }
+}
+
+/// A light or shadow filter's Color: its bar opens the colour picker, the eyedropper picks from the screen
+fn color_row(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, color: [f32; 3]) {
+    let pick = sheet.color_bar_led(tr("Color"), color, app.picking_color, &app.session.doc.project.swatches);
     if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
         app.run("effect.set", json!({"effect": id, "color": picked, "merge": pick.merge}));
     }

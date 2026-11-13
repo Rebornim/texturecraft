@@ -31,6 +31,7 @@ mod sheet_measure;
 mod slider;
 mod slot;
 mod slot_response;
+mod source_card;
 mod stack_slider;
 mod switch_control;
 mod tooltip;

@@ -35,6 +35,7 @@ mod help_menu_664;
 mod history_panel;
 mod import_resources;
 mod inactive_set_hint;
+mod instance_properties;
 mod layer_blending_options;
 mod layer_clipboard;
 mod layer_multi_select;

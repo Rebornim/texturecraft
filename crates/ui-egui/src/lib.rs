@@ -49,6 +49,7 @@ mod inactive_set_hint;
 pub mod keymap;
 pub mod layer_panel;
 mod layout_dialog;
+mod levels_display;
 mod levels_editor;
 mod levels_handle;
 mod levels_properties;

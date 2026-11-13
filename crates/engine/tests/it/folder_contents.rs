@@ -113,3 +113,68 @@ fn randomize_seeds_gives_every_pattern_inside_a_new_seed_in_one_undo_step() {
     assert_eq!(execute(&mut s, "folder.randomizeSeeds", &json!({"layer": empty.0})).unwrap()["seeds"], 0);
     assert_eq!(s.history_labels().len(), steps);
 }
+
+/// The seeds of `fill`'s base color and roughness patterns and of its mask's warp filter
+fn fill_seeds(s: &Session, fill: LayerId) -> (u32, u32, u32) {
+    let layer = s.doc.project.layer(fill).unwrap();
+    let LayerKind::Fill(f) = &layer.kind else { panic!("not a fill") };
+    let pattern = |c| match f.sources.get(&c) {
+        Some(Source::Procedural { pattern, .. }) => pattern.seed,
+        other => panic!("not a pattern: {other:?}"),
+    };
+    let warp = layer.mask.as_ref().unwrap().effects.iter().find_map(|e| match e.kind {
+        EffectKind::Filter(Filter::SourceWarp(warp)) => Some(warp.seed),
+        _ => None,
+    });
+    (pattern(Channel::BaseColor), pattern(Channel::Roughness), warp.unwrap())
+}
+
+#[test]
+fn the_contents_reset_puts_back_the_seeds_randomize_seeds_changed_in_one_undo_step() {
+    let (mut s, folder, fill) = folder_with_fill();
+    let before = fill_seeds(&s, fill);
+    let pictured = base_colors(&s);
+    assert!(!texturecraft_engine::folder_cmds::contents_changed(&s.doc.project, folder), "a new folder's contents are at their defaults");
+
+    // Randomized twice, with a Scale laid on top: the reset still goes back to the seeds from before the first
+    execute(&mut s, "folder.randomizeSeeds", &json!({"layer": folder.0})).unwrap();
+    execute(&mut s, "folder.randomizeSeeds", &json!({"layer": folder.0})).unwrap();
+    execute(&mut s, "folder.contents.set", &json!({"layer": folder.0, "scale": 2.0})).unwrap();
+    let randomized = fill_seeds(&s, fill);
+    assert!(randomized.0 != before.0 && randomized.2 != before.2, "{before:?} -> {randomized:?}");
+    assert!(texturecraft_engine::folder_cmds::contents_changed(&s.doc.project, folder), "the reset is lit");
+
+    // Old projects: the record is saved with the folder and read back
+    let saved = serde_json::to_value(&s.doc.project).unwrap();
+    assert!(saved.to_string().contains("randomized"), "the folder keeps its seeds from before in the project");
+
+    let steps = s.history_labels().len();
+    execute(&mut s, "folder.contents.reset", &json!({"layer": folder.0})).unwrap();
+    assert_eq!(s.history_labels().len(), steps + 1, "one undo step");
+    assert_eq!(fill_seeds(&s, fill), before, "every seed is back");
+    assert!(s.doc.project.contents_offset(folder).is_none(), "the Scale is dropped too");
+    assert!(!texturecraft_engine::folder_cmds::contents_changed(&s.doc.project, folder), "nothing left to reset");
+    s.update();
+    assert_eq!(base_colors(&s), pictured, "the fill looks as it did before Randomize seeds");
+
+    execute(&mut s, "edit.undo", &Value::Null).unwrap();
+    assert_eq!(fill_seeds(&s, fill), randomized, "one undo brings the random seeds and the Scale back");
+    assert_eq!(s.doc.project.contents_offset(folder).scale, 2.0);
+
+    // A seed the artist set by hand after randomizing keeps their pick; the others go back
+    execute(&mut s, "layer.fill.set", &json!({"layer": fill.0, "channel": "roughness", "procedural": "Clouds", "seed": 42})).unwrap();
+    execute(&mut s, "folder.contents.reset", &json!({"layer": folder.0})).unwrap();
+    let after = fill_seeds(&s, fill);
+    assert_eq!((after.0, after.1, after.2), (before.0, 42, before.2));
+}
+
+/// A project saved before folders kept their randomized seeds opens with none and saves the folder as before
+#[test]
+fn a_folder_saved_without_randomized_seeds_opens_and_saves_unchanged() {
+    let (s, folder, _) = folder_with_fill();
+    let saved = serde_json::to_value(&s.doc.project.layers[&folder]).unwrap();
+    assert!(saved.to_string().contains("\"children\"") && !saved.to_string().contains("randomized"), "nothing new is written: {saved}");
+    let read: texturecraft_engine::core::Layer = serde_json::from_value(saved.clone()).unwrap();
+    assert!(matches!(&read.kind, LayerKind::Group { randomized, .. } if randomized.is_empty()));
+    assert_eq!(serde_json::to_value(&read).unwrap(), saved);
+}

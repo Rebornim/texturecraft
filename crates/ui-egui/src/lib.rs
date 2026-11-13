@@ -150,6 +150,7 @@ mod uv_tile_grid;
 mod uv_view_map;
 mod view_mode_picker;
 pub mod viewport;
+mod warp_checker;
 pub mod web_files;
 pub mod widgets;
 pub mod windows;

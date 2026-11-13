@@ -215,6 +215,8 @@ enum Content<'a> {
 }
 
 struct EffectPlan<'a> {
+    /// The effect's id (an anchor point records under it)
+    id: LayerId,
     kind: &'a EffectKind,
     blend: BlendMode,
     opacity: f32,
@@ -886,6 +888,7 @@ fn effect_plans<'a>(inp: &Inputs<'a>, effects: &'a [Effect], tile_x: u32, tile_y
             };
             let blend = effect.blend_of(channel);
             EffectPlan {
+                id: effect.id,
                 kind: &effect.kind,
                 blend: blend.mode,
                 opacity: blend.opacity,
@@ -970,19 +973,22 @@ fn plan_node<'a>(
         return None;
     }
     let (content, chans) = plan_content(inp, id, layer, channels, tx, ty, depth, fields, kids)?;
+    let mask = layer_mask(inp.project, id).and_then(|m| mask_plan(inp, id, m, tx, ty, fields));
+    // Anchor points in the mask record even where the layer draws nothing
+    let mask_anchor = mask.as_ref().is_some_and(|m| m.effects.iter().any(|e| matches!(e.kind, EffectKind::Anchor)));
     // A paint layer with nothing painted (and not being painted) or added by its content effects contributes nothing
     if let Content::Paint { preview: false } = content
         && chans.iter().all(|c| c.data.is_none() && c.effects.is_empty())
+        && !mask_anchor
     {
         return None;
     }
-    if chans.is_empty() {
+    if chans.is_empty() && !mask_anchor {
         return None;
     }
-    let mask = layer_mask(inp.project, id).and_then(|m| mask_plan(inp, id, m, tx, ty, fields));
     let fx = !layer.is_group() && layer.content_effects.iter().any(|e| e.visible);
     let anchors = if fx { anchor_cuts(&layer.content_effects) } else { Vec::new() };
-    let has_anchor = !anchors.is_empty() || matches!(&content, Content::Group(nodes) if nodes.iter().any(|n| n.has_anchor));
+    let has_anchor = !anchors.is_empty() || mask_anchor || matches!(&content, Content::Group(nodes) if nodes.iter().any(|n| n.has_anchor));
     // The geometry mask is the layer's own (an instance in another set has other parts)
     let parts = own.geometry_mask.as_ref().map(|names| inp.mesh.submeshes.iter().map(|s| names.contains(&s.name)).collect());
     Some(Node { id, content, chans, mask, anchors, has_anchor, height_mask: layer.height_mask, parts })
@@ -1482,8 +1488,16 @@ impl<'a, 'b> Texel<'a, 'b> {
             value = filtered;
             skip = filtered_index + 1;
         }
+        // Anchor points under the precomputed filter: the mask up to the last of them, only to record them
+        if let Some(last) = plan.effects.iter().take(skip).rposition(|e| matches!(e.kind, EffectKind::Anchor)) {
+            self.mask_effects(plan, plan.background, 0, last + 1);
+        }
+        self.mask_effects(plan, value, skip, plan.effects.len())
+    }
 
-        for effect in plan.effects.iter().skip(skip) {
+    /// Mask effects `from..to` of `plan` over `value`, recording the anchor points among them
+    fn mask_effects(&mut self, plan: &MaskPlan, mut value: f32, from: usize, to: usize) -> f32 {
+        for effect in plan.effects.iter().take(to).skip(from) {
             let opacity = effect.opacity.clamp(0.0, 1.0);
             match effect.kind {
                 EffectKind::Paint | EffectKind::Path(_) => {
@@ -1534,8 +1548,10 @@ impl<'a, 'b> Texel<'a, 'b> {
                     let right = self.compare_side(*right, *channel, plan, value, *constant);
                     value += (op.mask(left, right, *tolerance, *hardness) - value) * opacity;
                 }
-                // Content-only effects
-                EffectKind::Material(_) | EffectKind::Anchor => {}
+                // Every channel of a mask anchor point reads the mask's gray
+                EffectKind::Anchor => self.anchors.push((effect.id, [[value.clamp(0.0, 1.0); 3]; NCH])),
+                // Content only
+                EffectKind::Material(_) => {}
             }
         }
         value.clamp(0.0, 1.0)
@@ -3234,6 +3250,65 @@ soft {soft:?}"
         // An anchor above its reader is not evaluated yet: it reads the channel default (0).
         f.project.move_layer(low, 1).unwrap();
         assert!(close(run(&f, None).value(Channel::BaseColor, 5, 5), [0.5; 3]));
+    }
+
+    /// A white fill layer on top whose mask reads anchor point `anchor` (any channel: a mask anchor point is gray)
+    fn anchor_reader(f: &mut Fixture, anchor: LayerId) -> LayerId {
+        let top = fill_layer(&mut f.project, [1.0; 3], 0.5);
+        let mut mask = Mask::new(MaskBackground::Black);
+        let source = Source::Anchor { anchor, channel: Channel::Roughness };
+        mask.effects.push(Effect::new(f.project.alloc_id(), EffectKind::Fill { source, projection: Projection::default(), sampling: Default::default() }));
+        f.project.layer_mut(top).unwrap().mask = Some(mask);
+        top
+    }
+
+    /// A mask of a 0.4 gray fill, an anchor point, then a fill of `after`: (the mask, the anchor point)
+    fn anchored_mask(f: &mut Fixture, after: f32) -> (Mask, LayerId) {
+        let (gray, anchor, last) = (f.project.alloc_id(), f.project.alloc_id(), f.project.alloc_id());
+        let uniform = |v: f32| EffectKind::Fill { source: Source::Uniform([v; 3]), projection: Projection::default(), sampling: Default::default() };
+        let mut mask = Mask::new(MaskBackground::Black);
+        mask.effects = vec![Effect::new(gray, uniform(0.4)), Effect::new(anchor, EffectKind::Anchor), Effect::new(last, uniform(after))];
+        (mask, anchor)
+    }
+
+    #[test]
+    fn mask_anchor_points_record_the_mask_value_at_their_place() {
+        let mut f = fixture();
+        let low = fill_layer(&mut f.project, [0.0; 3], 0.5);
+        let (mut mask, anchor) = anchored_mask(&mut f, 1.0);
+        f.project.layer_mut(low).unwrap().mask = Some(mask.clone());
+        anchor_reader(&mut f, anchor);
+        // The low layer shows whole (black), the top one at the 0.4 the anchor point recorded
+        assert!(close(run(&f, None).value(Channel::BaseColor, 5, 5), [0.4; 3]));
+
+        // Under a blur precomputed over the region the anchor point still records its own place
+        mask.effects.push(Effect::new(f.project.alloc_id(), EffectKind::Filter(Filter::Blur { radius: 32.0 })));
+        f.project.layer_mut(low).unwrap().mask = Some(mask);
+        let v = run(&f, None).value(Channel::BaseColor, 5, 5);
+        assert!(close(v, [0.4; 3]), "{v:?}");
+
+        // A paint layer with nothing painted draws nothing (the base stays 0.5) but its mask's anchor points still record
+        f.project.layer_mut(low).unwrap().kind = LayerKind::Paint;
+        let v = run(&f, None).value(Channel::BaseColor, 5, 5);
+        assert!(close(v, [0.7; 3]), "{v:?}");
+    }
+
+    #[test]
+    fn folder_mask_anchor_points_record_even_where_the_folder_is_masked_out() {
+        let mut f = fixture();
+        let gid = f.project.alloc_id();
+        let folder = Layer::new(gid, "G", LayerKind::Group { children: vec![], collapsed: false }, &[Channel::BaseColor, Channel::Roughness]);
+        f.project.insert_layer(0, folder, None, false).unwrap();
+        let child = f.project.alloc_id();
+        let mut fill = Fill::default();
+        fill.sources.insert(Channel::BaseColor, Source::Uniform([0.0; 3]));
+        f.project.insert_layer(0, Layer::new(child, "C", LayerKind::Fill(fill), &[Channel::BaseColor]), Some(gid), true).unwrap();
+        let (mask, anchor) = anchored_mask(&mut f, 0.0);
+        f.project.layer_mut(gid).unwrap().mask = Some(mask);
+        anchor_reader(&mut f, anchor);
+        // The folder's mask ends at 0 (its black child hides), the reader above shows at 0.4 over the 0.5 base
+        let v = run(&f, None).value(Channel::BaseColor, 5, 5);
+        assert!(close(v, [0.7; 3]), "{v:?}");
     }
 
     #[test]

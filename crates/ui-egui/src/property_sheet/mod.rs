@@ -14,6 +14,7 @@ mod id_color_row;
 mod id_color_row_response;
 mod info_icon;
 mod material_rows;
+mod name_field;
 
 mod number_field;
 mod open_card;
@@ -21,6 +22,7 @@ mod preview_block;
 mod preview_edit;
 mod preview_lower;
 mod preview_size;
+mod reference_row;
 mod row;
 mod row_lead;
 mod section_tabs;

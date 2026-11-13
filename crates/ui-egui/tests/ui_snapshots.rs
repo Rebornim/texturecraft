@@ -1356,6 +1356,52 @@ fn compare_snapshots() {
     }
 }
 
+/// Screen 11: a new anchor point on a fill's content being renamed, then a mask anchor point read by two layers above (a reference hovered)
+#[test]
+#[ignore]
+fn anchor_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let low = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.rename", &json!({"layer": low, "name": "Cavity Dirt"})).unwrap();
+    execute(&mut session, "effect.add.generator", &json!({"layer": low, "generator": "dirt"})).unwrap();
+    let anchor = execute(&mut session, "effect.add.anchor", &json!({"layer": low, "target": "mask"})).unwrap()["effect"].clone();
+    for name in ["Fill layer 2", "Rust"] {
+        let reader = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+        execute(&mut session, "layer.rename", &json!({"layer": reader, "name": name})).unwrap();
+        execute(&mut session, "mask.add.black", &json!({"layer": reader})).unwrap();
+        execute(&mut session, "effect.add.fill", &json!({"layer": reader, "anchor": anchor})).unwrap();
+    }
+    let fresh = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    let content = execute(&mut session, "effect.add.anchor", &json!({"layer": fresh})).unwrap()["effect"].clone();
+    execute(&mut session, "layer.select", &json!({"layer": fresh, "target": content})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    harness.get_by_role_and_label(egui::Role::TextInput, "Anchor point name").click();
+    harness.run_steps(3);
+    save(&mut harness, &output_dir, "anchor-new-renaming");
+
+    harness.key_press(egui::Key::Escape);
+    harness.state_mut().session.target = texturecraft_engine::StackTarget::Content;
+    execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": low, "target": anchor})).unwrap();
+    harness.run_steps(6);
+    let row = harness.get_by_role_and_label(egui::Role::Button, "Rust Mask fill").rect().center();
+    harness.hover_at(row);
+    save(&mut harness, &output_dir, "anchor-mask-references");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("anchor-mask-references-{name}"));
+        }
+    }
+}
+
 /// Screen 10: a new color selection without an ID map, then three colors on the ID mesh map (a row hovered, a row picking again, the Background list open)
 #[test]
 #[ignore]

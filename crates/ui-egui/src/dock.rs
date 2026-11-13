@@ -229,7 +229,7 @@ fn effect_menu(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer) {
     let target = if content { "content" } else { "mask" };
     ui.label(caption(if content { tr("Add to the layer content") } else { tr("Add to the mask") }));
 
-    // Generators and compare masks always go to the mask, anchor points to the content
+    // Generators and compare masks always go to the mask
     let items = [
         (tr("Add generator"), "effect.add.generator", json!({})),
         (tr("Add paint"), "effect.add.paint", json!({"target": target})),
@@ -237,11 +237,10 @@ fn effect_menu(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer) {
         (tr("Add levels"), "effect.add.levels", json!({"target": target})),
         (tr("Add compare mask"), "effect.add.compare", json!({})),
         (tr("Add filter"), "effect.add.filter", json!({"target": target, "filter": NEW_FILTER})),
-        (tr("Add anchor point"), "effect.add.anchor", json!({})),
+        (tr("Add anchor point"), "effect.add.anchor", json!({"target": target})),
     ];
     for (label, command, params) in items {
-        let enabled = command != "effect.add.anchor" || !layer.is_group();
-        if !ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+        if !ui.button(label).clicked() {
             continue;
         }
 
@@ -1910,17 +1909,23 @@ pub(crate) fn with(base: &Value, extra: Value) -> Value {
     v
 }
 
-/// Anchor points below layer `reader` in its texture set: (effect id, "layer / anchor" label).
+/// Anchor points (content and mask ones) below layer `reader` in its texture set: (effect id, its name, or "layer / name" where two share a name)
 pub(crate) fn anchors_below(app: &TextureCraftApp, reader: LayerId) -> Vec<(LayerId, String)> {
     let p = &app.session.doc.project;
     let Some((ts, _, _)) = p.locate(reader) else { return Vec::new() };
-    p.walk(ts)
+    let anchors: Vec<(LayerId, &str, &str)> = p
+        .walk(ts)
         .into_iter()
         .map(|(id, _)| id)
         .take_while(|id| *id != reader)
         .filter_map(|id| p.layers.get(&id))
-        .flat_map(|l| l.content_effects.iter().filter(|e| matches!(e.kind, EffectKind::Anchor)).map(move |e| (e.id, format!("{} / {}", l.name, e.name))))
-        .collect()
+        .flat_map(|l| {
+            let effects = l.content_effects.iter().chain(l.mask.iter().flat_map(|m| m.effects.iter()));
+            effects.filter(|e| matches!(e.kind, EffectKind::Anchor)).map(move |e| (e.id, l.name.as_str(), e.name.as_str()))
+        })
+        .collect();
+    let shared = |name: &str| anchors.iter().filter(|(_, _, other)| *other == name).count() > 1;
+    anchors.iter().map(|(id, layer, name)| (*id, if shared(name) { format!("{layer} / {name}") } else { (*name).to_owned() })).collect()
 }
 
 fn anchor_label(app: &TextureCraftApp, anchor: LayerId, channel: Channel) -> String {
@@ -2024,13 +2029,7 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, eid:
                 crate::fill_panel::fill_sheet(app, sheet, fill, &json!({"effect": id}), &enabled, layer.id);
             });
         }
-        EffectKind::Anchor => {
-            ui.label(caption(tr("Anchor point")));
-            ui.label(
-                RichText::new(tr("Records the stack up to this layer. Fill effects in masks (and fill layers) above can read it as a source."))
-                    .color(tk.text_dim),
-            );
-        }
+        EffectKind::Anchor => crate::anchor_properties::anchor_properties(app, ui, eid, &effect.name),
         EffectKind::Paint => {
             let hint = if layer.content_effects.iter().any(|content| content.id == eid) {
                 tr("Paint on the mesh to edit the layer content.")

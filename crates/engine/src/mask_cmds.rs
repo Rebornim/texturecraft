@@ -85,9 +85,9 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add anchor point",
             ["Layers", "Effects"],
             None,
-            "{layer?, name?} (records the stack up to this layer for fills and masks above: effect.add.fill {anchor})",
+            "{layer?, target?: content|mask (default content), name? (default the layer's name, \"<layer> mask\" in a mask)} (on the content it records the stack up to this layer, in a mask the mask value at that point: every channel reads that gray; fills and masks above read it: effect.add.fill {anchor})",
             has_layer,
-            |s, p| push_effect(s, p, EffectKind::Anchor, BlendMode::Normal)
+            add_anchor
         ),
         cmd!(
             "effect.set",
@@ -265,6 +265,19 @@ fn push_effect(s: &mut Session, p: &Value, mut kind: EffectKind, blend: BlendMod
         Ok(eid)
     })?;
     Ok(json!({ "effect": eid.0 }))
+}
+
+/// An anchor point on the layer content (no target, as before anchor points went in masks) or, with `target: "mask"`, in its mask; named after the layer
+fn add_anchor(s: &mut Session, p: &Value) -> Result<Value> {
+    let mut params = p.as_object().cloned().unwrap_or_default();
+    let content = strp(p, "target").is_none() || content_target(p, "effect.add.anchor")?;
+    params.insert("target".into(), json!(if content { "content" } else { "mask" }));
+    if name_param(p).is_none() {
+        let layer = s.doc.project.layer(layer_param(s, "effect.add.anchor", p)?)?;
+        let name = if content { layer.name.clone() } else { format!("{} mask", layer.name) };
+        params.insert("name".into(), json!(name));
+    }
+    push_effect(s, &Value::Object(params), EffectKind::Anchor, BlendMode::Normal)
 }
 
 /// A source reading anchor point `anchor` for layer `reader`: the anchor must sit on a layer

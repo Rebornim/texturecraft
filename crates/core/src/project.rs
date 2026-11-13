@@ -605,6 +605,22 @@ impl Project {
         self.layers.values().find_map(|l| l.mask.iter().flat_map(|m| m.effects.iter()).chain(l.content_effects.iter()).find(|e| e.id == id).map(|e| (l.id, e)))
     }
 
+    /// What reads anchor point `anchor`, bottom to top in its texture set: (layer, the effect reading it, or None for the layer's own fill)
+    pub fn anchor_readers(&self, anchor: LayerId) -> Vec<(LayerId, Option<LayerId>)> {
+        let Some((ts, _, _)) = self.effect(anchor).and_then(|(owner, _)| self.locate(owner)) else { return Vec::new() };
+        let mut out = Vec::new();
+        for layer in self.walk(ts).into_iter().filter_map(|(id, _)| self.layers.get(&id)) {
+            if let LayerKind::Fill(fill) = &layer.kind
+                && fill.sources.values().any(|s| s.anchor() == Some(anchor))
+            {
+                out.push((layer.id, None));
+            }
+            let effects = layer.mask.iter().flat_map(|m| m.effects.iter()).chain(layer.content_effects.iter());
+            out.extend(effects.filter(|e| e.kind.reads(Some(anchor))).map(|e| (layer.id, Some(e.id))));
+        }
+        out
+    }
+
     pub fn effect_mut(&mut self, id: LayerId) -> Option<&mut Effect> {
         self.layers.values_mut().find_map(|l| {
             let in_mask = l.mask.as_mut().and_then(|m| m.effects.iter_mut().find(|e| e.id == id));
@@ -804,6 +820,11 @@ mod tests {
         let back: Project = serde_json::from_str(&json).unwrap();
         assert_eq!(back, p);
         assert_eq!(back.effect(anchor).map(|(owner, _)| owner), Some(id));
+        // The mask fill of the layer above reads it
+        let top = back.layers.values().find(|l| l.name == "y").unwrap();
+        let reader = top.mask.as_ref().unwrap().effects[0].id;
+        assert_eq!(back.anchor_readers(anchor), vec![(top.id, Some(reader))]);
+        assert!(back.anchor_readers(LayerId(999)).is_empty());
         // Projects saved before content effects existed load with empty stacks.
         let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
         for l in v["layers"].as_object_mut().unwrap().values_mut() {

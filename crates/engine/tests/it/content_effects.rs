@@ -97,6 +97,47 @@ fn anchor_points_feed_masks_above() {
 }
 
 #[test]
+fn mask_anchor_points_feed_layers_above_and_folders_take_them() {
+    let mut s = session();
+    let low = id(execute(&mut s, "layer.add.fill", &json!({"height": 0.5})).unwrap(), "layer");
+    let name = s.doc.project.layer(LayerId(low)).unwrap().name.clone();
+    // No target (or null params) still goes on the content, named after the layer
+    let content = id(execute(&mut s, "effect.add.anchor", &Value::Null).unwrap(), "effect");
+    assert!(s.doc.project.layer(LayerId(low)).unwrap().content_effects.iter().any(|e| e.id.0 == content));
+    assert_eq!(s.doc.project.effect(LayerId(content)).unwrap().1.name, name);
+    execute(&mut s, "effect.add.fill", &json!({"layer": low, "target": "mask", "value": 0.4})).unwrap();
+    let anchor = id(execute(&mut s, "effect.add.anchor", &json!({"layer": low, "target": "mask"})).unwrap(), "effect");
+    execute(&mut s, "edit.undo", &Value::Null).unwrap();
+    assert!(s.doc.project.effect(LayerId(anchor)).is_none() && s.doc.project.layer(LayerId(low)).unwrap().mask.is_some(), "one undo step");
+    execute(&mut s, "edit.redo", &Value::Null).unwrap();
+    let mask = s.doc.project.layer(LayerId(low)).unwrap().mask.clone().unwrap();
+    assert_eq!(mask.effects.last().map(|e| (e.id.0, e.name.clone())), Some((anchor, format!("{name} mask"))));
+    assert!(execute(&mut s, "effect.add.anchor", &json!({"layer": low, "target": "nope"})).is_err());
+
+    // A layer above reads the mask's gray (0.4) in any channel: the same as a uniform 0.4 mask
+    let top = id(execute(&mut s, "layer.add.fill", &json!({"color": [1.0, 1.0, 1.0]})).unwrap(), "layer");
+    execute(&mut s, "mask.add.black", &Value::Null).unwrap();
+    let reader = id(execute(&mut s, "effect.add.fill", &json!({"anchor": anchor, "anchorChannel": "baseColor"})).unwrap(), "effect");
+    let anchored = center(&mut s, Channel::BaseColor);
+    execute(&mut s, "effect.set", &json!({"effect": reader, "value": 0.4})).unwrap();
+    assert!(close(anchored, center(&mut s, Channel::BaseColor)), "{anchored:?}");
+    execute(&mut s, "effect.set", &json!({"effect": reader, "anchor": anchor, "anchorChannel": "roughness"})).unwrap();
+    assert!(close(anchored, center(&mut s, Channel::BaseColor)), "every channel reads the gray");
+    // Inspect lists what reads an anchor point
+    let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap().to_string();
+    assert!(inspect.contains(&format!("\"references\":[{{\"effect\":{reader},\"layer\":{top}}}]")), "{inspect}");
+
+    // Folders take mask anchor points, not content ones
+    let folder = id(execute(&mut s, "layer.add.group", &Value::Null).unwrap(), "layer");
+    assert!(execute(&mut s, "effect.add.anchor", &json!({"layer": folder})).is_err(), "a folder has no content stack");
+    let folder_anchor = id(execute(&mut s, "effect.add.anchor", &json!({"layer": folder, "target": "mask"})).unwrap(), "effect");
+    let folder_mask = s.doc.project.layer(LayerId(folder)).unwrap().mask.clone().unwrap();
+    assert!(folder_mask.effects.iter().any(|e| e.id.0 == folder_anchor));
+    let back = Session::from_project_bytes(&s.to_project_bytes().unwrap()).unwrap();
+    assert_eq!(back.doc.project, s.doc.project);
+}
+
+#[test]
 fn painting_into_a_content_paint_effect() {
     let mut s = session();
     execute(&mut s, "layer.add.fill", &json!({"roughness": 0.3})).unwrap();

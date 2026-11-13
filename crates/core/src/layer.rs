@@ -1294,8 +1294,9 @@ pub enum EffectKind {
     /// Content only: a material fill (one source per channel; channels without a source are
     /// left as they are).
     Material(Fill),
-    /// Content only: records the composited stack right after its layer (that layer and
-    /// everything below) so masks and fills above can read it ([`Source::Anchor`]).
+    /// Records the stack at its place so masks and fills above can read it ([`Source::Anchor`]): in
+    /// a content stack the composited stack right after its layer (that layer and everything
+    /// below), in a mask the mask value there (every channel reads that gray).
     Anchor,
 }
 
@@ -1394,9 +1395,9 @@ impl EffectKind {
     /// both (`None`).
     pub fn content_only(&self) -> Option<bool> {
         match self {
-            EffectKind::Material(_) | EffectKind::Anchor => Some(true),
+            EffectKind::Material(_) => Some(true),
             EffectKind::Fill { .. } | EffectKind::Generator(_) | EffectKind::ColorSelection { .. } | EffectKind::Compare { .. } => Some(false),
-            EffectKind::Paint | EffectKind::Path(_) | EffectKind::Levels(_) | EffectKind::Filter(_) => None,
+            EffectKind::Paint | EffectKind::Path(_) | EffectKind::Levels(_) | EffectKind::Filter(_) | EffectKind::Anchor => None,
         }
     }
 
@@ -1407,9 +1408,15 @@ impl EffectKind {
 
     /// Anchor points read by this effect's sources.
     fn reads_anchor(&self) -> bool {
+        self.reads(None)
+    }
+
+    /// Whether a source of this effect reads anchor point `anchor` (any anchor point when None)
+    pub fn reads(&self, anchor: Option<LayerId>) -> bool {
+        let hit = |s: &Source| s.anchor().is_some_and(|a| anchor.is_none_or(|wanted| wanted == a));
         match self {
-            EffectKind::Fill { source, .. } => source.anchor().is_some(),
-            EffectKind::Material(f) => f.sources.values().any(|s| s.anchor().is_some()),
+            EffectKind::Fill { source, .. } => hit(source),
+            EffectKind::Material(f) => f.sources.values().any(hit),
             _ => false,
         }
     }
@@ -1592,7 +1599,7 @@ mod tests {
 
     #[test]
     fn effect_targets_and_anchor_reads() {
-        assert_eq!(EffectKind::Anchor.content_only(), Some(true));
+        assert_eq!(EffectKind::Anchor.content_only(), None, "anchor points go on content and masks");
         assert_eq!(EffectKind::Generator(Generator::new(GeneratorKind::Dirt)).content_only(), Some(false));
         assert_eq!(EffectKind::Filter(Filter::Invert).content_only(), None);
         let mut l = Layer::new(LayerId(1), "l", LayerKind::Paint, &[Channel::BaseColor]);
@@ -1603,6 +1610,8 @@ mod tests {
             ..Mask::new(MaskBackground::Black)
         });
         assert!(l.reads_anchor());
+        let reader = &l.mask.as_ref().unwrap().effects[0].kind;
+        assert!(reader.reads(Some(LayerId(9))) && reader.reads(None) && !reader.reads(Some(LayerId(8))));
     }
 
     #[test]

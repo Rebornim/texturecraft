@@ -45,6 +45,11 @@ fn fill_json(f: &Fill) -> Value {
 /// A mask or content (`content`) effect.
 fn effect_json(session: &Session, effect: &Effect, content: bool) -> Value {
     let mut out = json!({ "id": effect.id.0, "name": effect.name, "kind": effect.kind.name(), "visible": effect.visible, "blend": effect.blend.label(), "opacity": effect.opacity });
+    if !effect.channel_blends.is_empty() {
+        let channels =
+            effect.channel_blends.iter().map(|(channel, blend)| (channel.id().to_string(), json!({ "blend": blend.mode.label(), "opacity": blend.opacity })));
+        out["channelBlends"] = Value::Object(channels.collect());
+    }
     let mask_tiles = || session.doc.pixels.masks.get(&effect.id).map_or(0, |image| image.allocated_count());
     let content_tiles = || session.doc.pixels.layers.iter().filter(|((id, _), _)| *id == effect.id).map(|(_, image)| image.allocated_count()).sum::<usize>();
 

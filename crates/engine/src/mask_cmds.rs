@@ -94,7 +94,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, offset?, invert?, mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, channel?: the content channel blend and opacity set (default: every channel), name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, offset?, invert?, mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -460,6 +460,10 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
     const CMD: &str = "effect.set";
     let effect = effect_id(session, params, CMD)?;
     let blend = blend_param(CMD, params, "blend")?;
+    let channel = channel_param(CMD, params, "channel")?;
+    if channel.is_some() && crate::effect_blending_cmds::on_mask(&session.doc.project, effect) {
+        return Err(bad(CMD, "a mask effect blends one channel: leave out `channel`"));
+    }
 
     // `anchor` picks a fill's anchor point, `anchorChannel` alone re-targets the current one
     let anchor = match session.doc.project.effect(effect) {
@@ -499,12 +503,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         if let Some(visible) = boolp(params, "visible") {
             edited.visible = visible;
         }
-        if let Some(blend) = blend {
-            edited.blend = blend;
-        }
-        if let Some(opacity) = f32p(params, "opacity") {
-            edited.opacity = opacity.clamp(0.0, 1.0);
-        }
+        crate::effect_blending_cmds::set_blending(edited, channel, blend, f32p(params, "opacity"));
         if let Some(name) = name_param(params) {
             edited.name = name.to_string();
         }

@@ -619,7 +619,11 @@ fn filter_region(
     (rx0, ry0, w, h): (u32, u32, u32, u32),
     start: Option<(usize, &Field)>,
 ) -> Option<Field> {
-    let opacity = effects.iter().filter(|effect| effect.visible).nth(index).map(|effect| effect.opacity.clamp(0.0, 1.0)).unwrap_or(1.0);
+    let channel = match job {
+        Job::Mask(_) => None,
+        Job::Content(channel) => Some(channel),
+    };
+    let opacity = effects.iter().filter(|effect| effect.visible).nth(index).map(|effect| effect.blend_of(channel).opacity.clamp(0.0, 1.0)).unwrap_or(1.0);
     let (radius_texels, _) = filter_extent(radius, op, inp.gbuf.width.max(inp.gbuf.height));
     let comps = match job {
         Job::Mask(_) => 1,
@@ -869,10 +873,11 @@ fn effect_plans<'a>(inp: &Inputs<'a>, effects: &'a [Effect], tile_x: u32, tile_y
                 EffectKind::Fill { projection, .. } | EffectKind::Material(Fill { projection, .. }) => ProjectorDepth::of(inp.mesh, inp.bounds, projection),
                 _ => None,
             };
+            let blend = effect.blend_of(channel);
             EffectPlan {
                 kind: &effect.kind,
-                blend: effect.blend,
-                opacity: effect.opacity,
+                blend: blend.mode,
+                opacity: blend.opacity,
                 data: if effect.kind.painted() { tile_of(inp, image, tile_x, tile_y, channel) } else { None },
                 preview: previews(inp, target),
                 curvature_sizes,

@@ -1303,6 +1303,11 @@ impl EffectKind {
         }
     }
 
+    /// Whether the effect has a blend mode and opacity of its own (levels and anchor points do not)
+    pub fn blends(&self) -> bool {
+        !matches!(self, EffectKind::Levels(_) | EffectKind::Anchor)
+    }
+
     /// Whether the effect belongs in a layer's content stack (`true`), its mask (`false`), or
     /// both (`None`).
     pub fn content_only(&self) -> Option<bool> {
@@ -1347,12 +1352,21 @@ pub struct Effect {
     pub kind: EffectKind,
     pub blend: BlendMode,
     pub opacity: f32,
+    /// A content effect's channels that blend apart from `blend` and `opacity` (none in projects saved before they existed)
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub channel_blends: BTreeMap<Channel, ChannelBlend>,
 }
 
 impl Effect {
     pub fn new(id: LayerId, kind: EffectKind) -> Effect {
         // Generators and fills that build a mask usually add on top of the background.
-        Effect { id, name: kind.name().to_string(), visible: true, kind, blend: BlendMode::Normal, opacity: 1.0 }
+        Effect { id, name: kind.name().to_string(), visible: true, kind, blend: BlendMode::Normal, opacity: 1.0, channel_blends: BTreeMap::new() }
+    }
+
+    /// How the effect blends on `channel` of its layer's content, or on its mask (`None`)
+    pub fn blend_of(&self, channel: Option<Channel>) -> ChannelBlend {
+        let shared = ChannelBlend { mode: self.blend, opacity: self.opacity };
+        channel.and_then(|channel| self.channel_blends.get(&channel).copied()).unwrap_or(shared)
     }
 }
 

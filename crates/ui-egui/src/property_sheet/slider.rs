@@ -1,6 +1,6 @@
 use std::ops::RangeInclusive;
 
-use egui::{Align2, CornerRadius, FontId, Id, Rect, Response, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, FontId, Id, Rect, Response, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
 use egui_phosphor::regular as ic;
 
 use super::value_text::ValueText;
@@ -25,6 +25,9 @@ const DIAL_RADIUS: f32 = 8.0;
 /// Air between the dial and the value, and between the track's end and the dial
 const DIAL_AIR: f32 = 6.0;
 
+/// Air between a tinted slider's track end and its right-hand color name
+const TINT_WORD_AIR: f32 = 8.0;
+
 /// Half the height of Intensity's divider chip
 const CHIP_HALF_HEIGHT: f32 = 10.0;
 
@@ -39,7 +42,8 @@ pub(super) struct Track {
     pub(super) start: f32,
     pub(super) end: f32,
     pub(super) center_y: f32,
-    pub(super) signed: bool,
+    /// Where a two-sided range's fill starts and its tick sits (0 for signed ranges, 0.5 for a 0..1 range centred on "unchanged")
+    pub(super) zero: Option<f32>,
 
     /// The track is a picture of its range (a gray ramp) drawn by the caller: no line and no fill
     pub(super) ramp: bool,
@@ -60,7 +64,7 @@ impl PropertySheet<'_> {
     pub(crate) fn slider_led(&mut self, lead: RowLead<'_>, value: &mut f32, range: RangeInclusive<f32>, decimals: usize, suffix: &str) -> Option<bool> {
         let (control, center_y) = self.row_with(lead);
         let id = self.next_id();
-        let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, signed: false, ramp: false };
+        let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, zero: None, ramp: false };
         let dragged = self.track(id, lead.text(), &track, value, &range);
         let typed = self.value_field(id, center_y, *value, &range, decimals, suffix);
         Self::apply_typed(value, typed, dragged)
@@ -70,9 +74,33 @@ impl PropertySheet<'_> {
     pub(crate) fn signed_slider(&mut self, label: &str, value: &mut f32, range: RangeInclusive<f32>, decimals: usize) -> Option<bool> {
         let (control, center_y) = self.row(label);
         let id = self.next_id();
-        let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, signed: true, ramp: false };
+        let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, zero: Some(0.0), ramp: false };
         let dragged = self.track(id, label, &track, value, &range);
         let typed = self.value_field(id, center_y, *value, &range, decimals, "");
+        Self::apply_typed(value, typed, dragged)
+    }
+
+    /// A range whose middle `centre` leaves things as they are: fills from it and marks it with a tick, like a signed range
+    pub(crate) fn centered_slider(&mut self, label: &str, value: &mut f32, range: RangeInclusive<f32>, centre: f32, decimals: usize) -> Option<bool> {
+        let (control, center_y) = self.row(label);
+        let id = self.next_id();
+        let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, zero: Some(centre), ramp: false };
+        let dragged = self.track(id, label, &track, value, &range);
+        let typed = self.value_field(id, center_y, *value, &range, decimals, "");
+        Self::apply_typed(value, typed, dragged)
+    }
+
+    /// A −1..1 balance between two tinted color names, left as the label and right after the track (`rights`: the group's right names)
+    pub(crate) fn tinted_slider(&mut self, left: (&str, Color32), right: (&str, Color32), rights: &[&str], value: &mut f32) -> Option<bool> {
+        let (control, center_y) = self.row_with(RowLead::Tinted { text: left.0, color: left.1 });
+        let id = self.next_id();
+        let widest = rights.iter().map(|name| self.text_width(name, FontId::proportional(TEXT_SIZE))).fold(0.0, f32::max);
+        let word_x = self.track_end() - widest;
+        let track = Track { start: control.left() + KNOB_RADIUS, end: word_x - TINT_WORD_AIR, center_y, zero: Some(0.0), ramp: false };
+        let range = -1.0..=1.0;
+        let dragged = self.track(id, left.0, &track, value, &range);
+        self.ui.painter().text(pos2(word_x, center_y), Align2::LEFT_CENTER, right.0, FontId::proportional(TEXT_SIZE), right.1);
+        let typed = self.value_field(id, center_y, *value, &range, 2, "");
         Self::apply_typed(value, typed, dragged)
     }
 
@@ -96,7 +124,13 @@ impl PropertySheet<'_> {
         let (control, center_y) = self.row_with(lead);
         let id = self.next_id();
         let dial_x = self.right - self.used.value_width.max(super::VALUE_MIN_WIDTH) - DIAL_AIR - DIAL_RADIUS;
-        let track = Track { start: control.left() + KNOB_RADIUS, end: dial_x - DIAL_RADIUS - DIAL_AIR, center_y, signed: *range.start() < 0.0, ramp: false };
+        let track = Track {
+            start: control.left() + KNOB_RADIUS,
+            end: dial_x - DIAL_RADIUS - DIAL_AIR,
+            center_y,
+            zero: (*range.start() < 0.0).then_some(0.0),
+            ramp: false,
+        };
         let dragged = self.track(id, lead.text(), &track, degrees, &range);
 
         let t = self.tokens;
@@ -145,7 +179,7 @@ impl PropertySheet<'_> {
         painter.text(pos2(chip_end - 9.0, center_y), Align2::CENTER_CENTER, ic::CARET_DOWN, FontId::proportional(ICON_SIZE), t.text);
         painter.text(pos2(chip_end - 18.0, center_y), Align2::RIGHT_CENTER, chip, semibold(SMALL_TEXT_SIZE), t.text);
 
-        let track = Track { start: control.left() + KNOB_RADIUS, end: chip_rect.left() - DIAL_AIR - KNOB_RADIUS, center_y, signed: false, ramp: false };
+        let track = Track { start: control.left() + KNOB_RADIUS, end: chip_rect.left() - DIAL_AIR - KNOB_RADIUS, center_y, zero: None, ramp: false };
         let dragged = self.track(id, label, &track, value, &range);
         let typed = self.value_field(id, center_y, *value, &range, decimals, "");
         (Self::apply_typed(value, typed, dragged), chip_response)
@@ -185,13 +219,13 @@ impl PropertySheet<'_> {
         let t = self.tokens;
         let at = |v: f32| track.start + ((v - minimum) / span).clamp(0.0, 1.0) * length;
         let knob_x = at(*value);
-        let zero_x = if track.signed { at(0.0_f32.clamp(minimum, maximum)) } else { track.start };
+        let zero_x = track.zero.map_or(track.start, |zero| at(zero.clamp(minimum, maximum)));
         let painter = self.ui.painter();
         if !track.ramp {
             painter.line_segment([pos2(track.start, track.center_y), pos2(track.end, track.center_y)], Stroke::new(TRACK_WIDTH, t.button_border));
             painter.line_segment([pos2(zero_x.min(knob_x), track.center_y), pos2(zero_x.max(knob_x), track.center_y)], Stroke::new(TRACK_WIDTH, t.accent));
         }
-        if track.signed {
+        if track.zero.is_some() {
             let tick = [pos2(zero_x, track.center_y - ZERO_TICK_HALF), pos2(zero_x, track.center_y + ZERO_TICK_HALF)];
             painter.line_segment(tick, Stroke::new(1.0, t.text_dim));
         }

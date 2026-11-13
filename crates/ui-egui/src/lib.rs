@@ -35,6 +35,7 @@ pub mod gpu;
 mod grid_tile;
 pub mod i18n;
 pub mod id_color_pick;
+mod instance_properties;
 pub mod keymap;
 pub mod layer_panel;
 mod layer_toolbar;

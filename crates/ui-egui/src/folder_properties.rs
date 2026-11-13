@@ -1,10 +1,10 @@
-//! Properties of a folder: CONTENTS, the Scale and Rotation laid on every fill inside on top of their own (the round reset drops them), and Randomize seeds
+//! Properties of a folder: CONTENTS, the Scale and Rotation laid on every fill inside on top of their own (the round reset drops them and puts back the seeds Randomize seeds changed), and Randomize seeds
 
 use egui::Ui;
 use egui_phosphor::regular as ic;
 use serde_json::json;
 use texturecraft_engine::core::{ContentsOffset, LayerId};
-use texturecraft_engine::folder_cmds::has_contents;
+use texturecraft_engine::folder_cmds::{contents_changed, has_contents};
 
 use crate::TextureCraftApp;
 use crate::i18n::tr;
@@ -18,12 +18,13 @@ pub(crate) fn folder_properties(app: &mut TextureCraftApp, ui: &mut Ui, folder: 
     let project = &app.session.doc.project;
     let has_contents = has_contents(project, folder);
     let offset = project.contents_offset(folder);
+    let changed = contents_changed(project, folder);
     PropertySheet::show(ui, ("folder_sheet", folder.0), |sheet| {
         if !has_contents {
-            sheet.empty_note(&tr("No properties found"));
+            sheet.empty_note(tr("No properties found"));
             return;
         }
-        if sheet.section_reset(&tr("Contents"), !offset.is_none()) {
+        if sheet.section_reset(tr("Contents"), changed) {
             app.run("folder.contents.reset", json!({"layer": folder.0}));
         }
         let (low, high) = ContentsOffset::SCALE_RANGE;

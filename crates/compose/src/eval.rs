@@ -4805,7 +4805,12 @@ soft {soft:?}"
     fn groups_pass_through_with_opacity() {
         let mut f = fixture();
         let gid = f.project.alloc_id();
-        let g = Layer::new(gid, "G", LayerKind::Group { children: vec![], collapsed: false, contents: Default::default() }, &[Channel::BaseColor]);
+        let g = Layer::new(
+            gid,
+            "G",
+            LayerKind::Group { children: vec![], collapsed: false, contents: Default::default(), randomized: Vec::new() },
+            &[Channel::BaseColor],
+        );
         f.project.insert_layer(0, g, None, false).unwrap();
         f.project.layer_mut(gid).unwrap().channels.insert(Channel::BaseColor, ChannelBlend { mode: BlendMode::Passthrough, opacity: 0.5 });
         let cid = f.project.alloc_id();
@@ -5467,7 +5472,7 @@ soft {soft:?}"
             let mut f = fixture();
             let folder = |f: &mut Fixture, contents: ContentsOffset| {
                 let id = f.project.alloc_id();
-                Layer::new(id, "G", LayerKind::Group { children: vec![], collapsed: false, contents }, &[Channel::BaseColor])
+                Layer::new(id, "G", LayerKind::Group { children: vec![], collapsed: false, contents, randomized: Vec::new() }, &[Channel::BaseColor])
             };
             let outer = folder(&mut f, outer);
             let outer = f.project.insert_layer(0, outer, None, false).unwrap();
@@ -5505,7 +5510,7 @@ soft {soft:?}"
         let folder = Layer::new(
             group_id,
             "G",
-            LayerKind::Group { children: vec![], collapsed: false, contents: Default::default() },
+            LayerKind::Group { children: vec![], collapsed: false, contents: Default::default(), randomized: Vec::new() },
             &[Channel::BaseColor, Channel::Roughness],
         );
         fixture.project.insert_layer(0, folder, None, false).unwrap();

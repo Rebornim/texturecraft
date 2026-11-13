@@ -39,6 +39,7 @@ mod shelf_panel;
 mod shift_lines_2d;
 mod shortcut_keys;
 mod skew_paint;
+mod source_picker;
 mod split_divider;
 mod start_window;
 mod tool_availability;

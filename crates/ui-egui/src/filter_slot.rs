@@ -8,11 +8,13 @@ use texturecraft_engine::filter_lib::{filter_effects, find};
 
 use crate::TextureCraftApp;
 use crate::i18n::tr;
+use crate::picker_group::PickerGroup;
+use crate::picker_tab::PickerTab;
 use crate::resource_picker;
 use crate::resource_picker_item::ResourcePickerItem;
-use crate::shelf_preview::ShelfPreview;
 use crate::theme::Tokens;
 use crate::thumbs::Thumbs;
+use crate::tile_picture::TilePicture;
 use crate::widgets::elided;
 
 const SLOT_HEIGHT: f32 = 52.0;
@@ -50,14 +52,22 @@ pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui, effect: u64, filter: 
     let highlighted = response.hovered() || egui::Popup::is_id_open(&ctx, popup);
     paint(ui, rect, highlighted, response.has_focus(), thumbnail.as_ref(), name);
 
-    let items = |thumbs: &mut Thumbs| {
-        filter_effects()
+    let tabs = |thumbs: &mut Thumbs| {
+        let mut items: Vec<ResourcePickerItem<&'static str>> = filter_effects()
             .iter()
             .filter(|def| def.mask || !on_mask)
-            .map(|def| ResourcePickerItem { id: def.id, label: tr(def.label), group: tr(def.group), thumbnail: thumbs.filter(&ctx, def.id) })
-            .collect()
+            .map(|def| ResourcePickerItem {
+                id: def.id,
+                label: tr(def.label).to_owned(),
+                caption: None,
+                picture: TilePicture::Texture(thumbs.filter(&ctx, def.id)),
+            })
+            .collect();
+        // One kind of resource: one grid in name order, no group captions
+        items.sort_by_key(|item| item.label.to_lowercase());
+        vec![PickerTab { icon: ic::FUNNEL, name: tr("Filters"), groups: vec![PickerGroup { header: None, items }] }]
     };
-    let picked = resource_picker::show(&response, popup, &mut app.thumbs, current, items, ShelfPreview::Filter);
+    let picked = resource_picker::show(&response, popup, &mut app.thumbs, current.as_ref(), current.is_some(), tabs);
     if let Some(id) = picked.filter(|id| Some(*id) != current) {
         app.run("effect.set", json!({"effect": effect, "filter": id}));
     }

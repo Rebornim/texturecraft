@@ -371,17 +371,6 @@ pub(crate) fn tiles(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
     ui.add_space(SECTION_GAP);
 }
 
-/// The distinct categories of `items`, in order of first appearance.
-pub(crate) fn categories<T>(items: &[T], category: impl Fn(&T) -> &'static str) -> Vec<&'static str> {
-    let mut out: Vec<&'static str> = Vec::new();
-    for c in items.iter().map(category) {
-        if !out.contains(&c) {
-            out.push(c);
-        }
-    }
-    out
-}
-
 /// Read the user's saved smart materials (desktop library folder) unless they are already listed
 #[cfg(not(target_arch = "wasm32"))]
 fn scan_library(app: &mut TextureCraftApp) {
@@ -503,18 +492,6 @@ fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry
             }
         });
     }
-}
-
-/// Asset tile with optional dragging and a larger hover preview, at the medium size
-pub(crate) fn tile(
-    ui: &mut Ui,
-    thumbs: &mut Thumbs,
-    texture: Option<&egui::TextureHandle>,
-    preview: impl FnOnce() -> ShelfPreview,
-    label: &str,
-    drag: Option<&Asset>,
-) -> egui::Response {
-    tile_in_view(ui, thumbs, texture, |_| Some(preview()), label, drag, ShelfView::Medium)
 }
 
 /// [`tile`] at `view`'s size: a grid tile with the name under the thumbnail, or a list row with it beside; `preview` runs on hover

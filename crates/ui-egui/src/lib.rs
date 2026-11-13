@@ -82,6 +82,7 @@ pub mod pbr_import;
 mod picker_group;
 mod picker_tab;
 mod preview_image;
+mod preview_outline;
 mod preview_request;
 mod preview_worker;
 pub mod profile;

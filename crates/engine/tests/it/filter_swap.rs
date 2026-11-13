@@ -74,7 +74,7 @@ fn a_mask_refuses_a_content_only_filter() {
     let mut s = session();
     let id = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "mask"}));
 
-    let err = execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "grayscale"})).unwrap_err();
+    let err = execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "normalInvert"})).unwrap_err();
 
     assert!(err.to_string().contains("not on masks"), "{err}");
     assert!(matches!(effect(&s, id).kind, EffectKind::Filter(Filter::Invert)));
@@ -130,7 +130,7 @@ fn a_refused_swap_changes_nothing_and_adds_no_undo_step() {
     let before = effect(&s, id);
 
     for refused in [
-        json!({"effect": id.0, "filter": "grayscale"}),
+        json!({"effect": id.0, "filter": "normalInvert"}),
         json!({"effect": id.0, "filter": "nope"}),
         json!({"effect": id.0, "filter": "levels"}),
         json!({"effect": id.0, "filter": "colorBalance", "shadows": "not a color"}),
@@ -169,4 +169,32 @@ fn invalid_swap_parameters_report_effect_set_and_preserve_history() {
     assert!(matches!(error, texturecraft_engine::EngineError::BadParams { ref cmd, .. } if cmd == "effect.set"), "{error}");
     assert_eq!(effect(&s, id), before);
     assert_eq!(s.history_labels(), history);
+}
+
+#[test]
+fn a_mask_takes_grayscale_conversion() {
+    let mut s = session();
+    let id = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "mask"}));
+
+    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "grayscale"})).unwrap();
+
+    let swapped = effect(&s, id);
+    assert!(matches!(swapped.kind, EffectKind::Filter(Filter::Grayscale)), "{:?}", swapped.kind);
+    assert_eq!(swapped.name, "Grayscale Conversion");
+}
+
+#[test]
+fn filters_carry_the_workflows_names_and_former_names_still_follow_a_swap() {
+    let mut s = session();
+    let slope = add(&mut s, "effect.add.filter", json!({"filter": "slopeBlur", "target": "content"}));
+    assert_eq!(effect(&s, slope).name, "Blur Slope");
+    let names: Vec<Value> = execute(&mut s, "filter.list", &Value::Null).unwrap().as_array().unwrap().iter().map(|def| def["label"].clone()).collect();
+    for name in ["Contrast Luminosity", "Blur Slope", "Highpass", "Grayscale Conversion"] {
+        assert!(names.contains(&json!(name)), "{name} in {names:?}");
+    }
+
+    // A project saved before the rename holds the former name: a swap still renames it, and the former name still finds the filter
+    let old = add(&mut s, "effect.add.filter", json!({"filter": "Slope Blur", "target": "content", "name": "Slope Blur"}));
+    execute(&mut s, "effect.set", &json!({"effect": old.0, "filter": "blur"})).unwrap();
+    assert_eq!(effect(&s, old).name, "Blur");
 }

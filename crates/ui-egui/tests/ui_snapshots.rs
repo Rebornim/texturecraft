@@ -1761,3 +1761,51 @@ fn filter_card_snapshots() {
     harness.hover_at(option);
     save(&mut harness, &output_dir, "filter-divider-open");
 }
+
+#[test]
+#[ignore = "writes the filter picker states (screen 13) to TC_UI_SNAPSHOTS; run with --ignored"]
+/// Screen 13: the filter picker opened from an empty card, swapping (current outlined), searching, and in a mask
+fn filter_picker_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::core::LayerId;
+    use texturecraft_engine::{StackTarget, execute};
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    let add = |session: &mut texturecraft_engine::Session, params: serde_json::Value| {
+        LayerId(execute(session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap())
+    };
+    let empty = add(&mut session, json!({"layer": layer, "target": "content", "filter": "none"}));
+    let slope = add(&mut session, json!({"layer": layer, "target": "content", "filter": "slopeBlur"}));
+    execute(&mut session, "effect.set", &json!({"effect": slope.0, "channels": {"metallic": false, "normal": false}})).unwrap();
+    let masked = add(&mut session, json!({"layer": layer, "target": "mask", "filter": "none"}));
+    execute(&mut session, "layer.select", &json!({"layer": layer})).unwrap();
+    session.target = StackTarget::Effect(empty);
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    let open = |harness: &mut Harness<'_, TextureCraftApp>, card: &str, hover: &str| {
+        harness.get_by_role_and_label(egui::Role::ComboBox, card).click();
+        settle_thumbnails(harness);
+        let tile = harness.get_by_role_and_label(egui::Role::ListBoxOption, hover).rect().center();
+        harness.hover_at(tile);
+    };
+    open(&mut harness, "Filter", "Blur");
+    save(&mut harness, &output_dir, "filter-picker-new");
+    harness.event(egui::Event::Text("blur".into()));
+    harness.hover_at(egui::pos2(1.0, 1.0));
+    save(&mut harness, &output_dir, "filter-picker-search");
+    harness.key_press(egui::Key::Escape);
+    harness.state_mut().session.target = StackTarget::Effect(slope);
+    harness.run_steps(4);
+    open(&mut harness, "Blur Slope", "Clamp");
+    save(&mut harness, &output_dir, "filter-picker-swapping");
+    harness.key_press(egui::Key::Escape);
+    harness.state_mut().session.target = StackTarget::Effect(masked);
+    harness.run_steps(4);
+    open(&mut harness, "Filter", "Bevel");
+    save(&mut harness, &output_dir, "filter-picker-mask");
+}

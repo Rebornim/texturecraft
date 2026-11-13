@@ -622,7 +622,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         let edited = session.doc.project.effect_mut(effect).ok_or_else(|| bad(CMD, format!("no effect {}", effect.0)))?;
         if let Some((kind, label)) = swapped {
             if let EffectKind::Filter(old) = &edited.kind
-                && edited.name == old.label()
+                && (edited.name == old.label() || Some(edited.name.as_str()) == old.former_label())
             {
                 edited.name = label.to_string();
             }

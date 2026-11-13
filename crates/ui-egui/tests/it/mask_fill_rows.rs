@@ -85,8 +85,8 @@ fn a_mask_fill_has_fill_symmetry_and_grayscale_tabs_and_its_slot_picks_the_sourc
     assert_eq!(mask_fill(&harness, effect).0, Source::Uniform([1.0; 3]));
 }
 
-/// A drag as a mouse sends it: press, hold still a frame, then small moves one per frame until released
-fn mouse_drag(harness: &mut Harness<'_, TextureCraftApp>, from: Pos2, to: Pos2) {
+/// A drag as a mouse sends it: press, hold still a frame, then small moves one per frame until released; `watch` looks at the app after each move
+fn mouse_drag_watching(harness: &mut Harness<'_, TextureCraftApp>, from: Pos2, to: Pos2, mut watch: impl FnMut(&Harness<'_, TextureCraftApp>)) {
     let button = |pos: Pos2, pressed: bool| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
     harness.event(Event::PointerMoved(from));
     harness.run_steps(1);
@@ -96,6 +96,7 @@ fn mouse_drag(harness: &mut Harness<'_, TextureCraftApp>, from: Pos2, to: Pos2) 
     for step in 1..=STEPS {
         harness.event(Event::PointerMoved(from.lerp(to, step as f32 / STEPS as f32)));
         harness.run_steps(1);
+        watch(harness);
     }
     harness.event(button(to, false));
     harness.run_steps(2);
@@ -104,17 +105,15 @@ fn mouse_drag(harness: &mut Harness<'_, TextureCraftApp>, from: Pos2, to: Pos2) 
 #[test]
 fn a_mask_fills_projection_moves_on_the_model_and_resets_with_its_section() {
     let (mut harness, layer, effect) = app_with_mask_fill("uv");
-    click(&mut harness, Role::Button, "Move on model");
-    assert_eq!(harness.state().moving_on_model, Some(MoveOnModel { layer, effect: Some(effect) }));
-
-    // A real drag on the model slides the mask fill's image
-    let middle = harness.state().viewport_rect.center() + vec2(-100.0, 80.0);
-    mouse_drag(&mut harness, middle, middle + vec2(60.0, 0.0));
+    // A real drag that starts on the held button slides the mask fill's image
+    let button = harness.get_by_role_and_label(Role::Button, "Move on model").rect().center();
+    let mut held = None;
+    mouse_drag_watching(&mut harness, button, button + vec2(-60.0, 0.0), |harness| held = held.or(harness.state().moving_on_model));
+    assert_eq!(held, Some(MoveOnModel { layer, effect: Some(effect) }));
+    assert_eq!(harness.state().moving_on_model, None, "letting go ends it");
     let Projection::Uv { offset, .. } = mask_fill(&harness, effect).1 else { panic!("still UV") };
     assert!(offset[0] != 0.0 && offset[1] == 0.0, "a drag across slides the image across: {offset:?}");
 
-    harness.key_press(egui::Key::Escape);
-    harness.run_steps(SETTLE_FRAMES);
     click(&mut harness, Role::Button, "Fill: Reset to defaults");
     assert_eq!(mask_fill(&harness, effect).1, Projection::default(), "the Fill section's reset reaches the mask fill");
 }

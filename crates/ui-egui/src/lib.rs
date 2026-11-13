@@ -49,6 +49,7 @@ mod mask_source_choice;
 mod material_orb;
 mod material_preview_image;
 pub mod menus;
+mod move_hold;
 pub mod move_on_model;
 pub mod new_project_advanced;
 mod orb_environment;
@@ -89,7 +90,6 @@ pub mod thumbs;
 mod tile_picture;
 pub mod titlebar;
 pub mod toolbar;
-mod trackpad_drag;
 pub mod ui_state_store;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod updates_ui;
@@ -185,7 +185,7 @@ pub struct TextureCraftApp {
     pub last_paint_point: Option<texturecraft_engine::geom::glam::Vec2>,
     /// The last finished 2D stroke's endpoint, scoped to its mesh and texture set for Shift+click lines
     pub last_paint_uv: Option<uv_paint_point::UvPaintPoint>,
-    /// The fill Move on model moves: drags in the 3D view slide its projection, the wheel resizes it, Shift+drag turns it
+    /// The fill whose Move on model button is held down: dragging slides its projection, Shift or the right button turns it, the wheel scales it
     pub moving_on_model: Option<move_on_model::MoveOnModel>,
     /// The Properties popup a right click in a view opens.
     pub properties_popup: Option<properties_popup::PropertiesPopup>,

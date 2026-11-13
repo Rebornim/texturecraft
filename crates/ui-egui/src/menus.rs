@@ -374,8 +374,6 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
             app.ui.rail_panel = None;
         } else if app.picking_id_color.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
             crate::id_color_pick::IdColorPick::end(app);
-        } else if app.moving_on_model.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
-            app.moving_on_model = None;
         } else if app.ui.mode == Mode::Painting && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.session.cancel_stroke();
             app.session.cancel_path();

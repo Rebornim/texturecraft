@@ -7,6 +7,8 @@ mod band_response;
 mod choice;
 mod color_bar;
 mod color_picker_rows;
+mod compare_row;
+mod compare_row_response;
 mod group;
 mod info_icon;
 mod material_rows;
@@ -33,6 +35,7 @@ mod tests;
 
 pub(crate) use action_row_response::ActionRowResponse;
 pub(crate) use band_response::BandResponse;
+pub(crate) use compare_row_response::CompareRowResponse;
 pub(crate) use number_field::NumberField;
 pub(crate) use preview_lower::PreviewLower;
 pub(crate) use preview_size::PreviewSize;

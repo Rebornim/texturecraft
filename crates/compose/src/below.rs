@@ -258,8 +258,8 @@ impl BelowCache {
         let hot = self.hot?;
         let p = inp.project;
         let set = p.texture_set(inp.ts).ok()?;
-        // Anchor readers depend on the stack below them.
-        if p.render_tree(&set.stack).iter().any(|id| p.layers.get(id).is_some_and(Layer::reads_anchor)) {
+        // Anchor readers and compare masks reading layers depend on the stack below them
+        if p.render_tree(&set.stack).iter().any(|id| p.layers.get(id).is_some_and(Layer::reads_stack)) {
             return None;
         }
         let levels = path(p, &set.stack, hot)?;

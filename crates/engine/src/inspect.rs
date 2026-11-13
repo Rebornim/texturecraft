@@ -70,6 +70,17 @@ fn effect_json(session: &Session, effect: &Effect, content: bool) -> Value {
             out["colors"] = json!(colors);
             out["tolerance"] = json!(tolerance);
         }
+        EffectKind::Compare { op, value, tolerance, left, right, channel, hardness } => {
+            out["compare"] = json!({
+                "left": left.id(),
+                "op": op.id(),
+                "right": right.id(),
+                "compareChannel": channel.id(),
+                "value": value,
+                "tolerance": tolerance,
+                "hardness": hardness,
+            });
+        }
         EffectKind::Path(paths) => {
             out["paths"] = json!(
                 paths.iter().map(|path| json!({ "points": path.points.len(), "uv": path.uv, "closed": path.closed, "fill": path.fill })).collect::<Vec<_>>()

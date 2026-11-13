@@ -2,8 +2,8 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    BlendMode, Channel, ChannelKind, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask,
-    MaskBackground, Procedural, ProceduralKind, Project, Sampling, Source,
+    BlendMode, Channel, ChannelKind, CompareOp, CompareSource, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId,
+    Levels, Mask, MaskBackground, Procedural, ProceduralKind, Project, Sampling, Source,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
@@ -76,7 +76,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add compare mask",
             ["Layers", "Effects"],
             None,
-            "{layer?, name?, op?: lesser|within|greater, value?, tolerance?}",
+            "{layer?, name?, left?: layersBelow|thisLayer|thisMask|constant (default thisLayer), op?: lesser|within|greater (default greater), right? (default layersBelow), compareChannel? (default height), value?: the constant, tolerance?, hardness? (default 0.9)}",
             has_layer,
             add_compare
         ),
@@ -94,7 +94,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, channel?: the content channel blend and opacity set (default: every channel), name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, offset?, invert?, mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, affects?, clamp? (levels), tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, channel?: the content channel blend and opacity set (default: every channel), name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, offset?, invert?, mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, affects?, clamp? (levels), tolerance?, left?, op?, right?, compareChannel?, hardness? (compare; value is its constant), colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -114,7 +114,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Effect input histogram",
             [],
             None,
-            "{effect, channel?: for content effects (default: the channel a levels effect remaps, else the layer's first channel), bins?: 2..256 (64)} → {target: mask|content, channel?, bins: [count per bucket over 0..1], luminance?, components?: [red, green, blue] (a color channel)}",
+            "{effect, channel?: for content effects (default: the channel a levels effect remaps, else the layer's first channel), bins?: 2..256 (64)} → {target: mask|content, channel?, bins: [count per bucket over 0..1], luminance?, components?: [red, green, blue] (a color channel), compare?: {left, right} (a compare mask: what each side reads)}",
             always,
             histogram
         ),
@@ -444,15 +444,48 @@ fn add_filter(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn add_compare(s: &mut Session, p: &Value) -> Result<Value> {
-    let op = match strp(p, "op").unwrap_or("greater") {
-        "lesser" | "less" => CompareOp::LesserThan,
-        "within" => CompareOp::WithinTolerance,
-        "greater" => CompareOp::GreaterThan,
-        other => return Err(bad("effect.add.compare", format!("unknown op `{other}`"))),
+    let mut kind = EffectKind::Compare {
+        op: CompareOp::GreaterThan,
+        value: 0.5,
+        tolerance: 0.1,
+        left: CompareSource::ThisLayer,
+        right: CompareSource::LayersBelow,
+        channel: Channel::Height,
+        hardness: 0.9,
     };
-    let kind =
-        EffectKind::Compare { op, value: f32p(p, "value").unwrap_or(0.5).clamp(0.0, 1.0), tolerance: f32p(p, "tolerance").unwrap_or(0.1).clamp(0.0, 1.0) };
+    compare_from("effect.add.compare", p, &mut kind)?;
     push_effect(s, p, kind, BlendMode::Normal)
+}
+
+/// Apply the compare parameters of `p` to `kind` (a compare effect)
+fn compare_from(cmd: &str, p: &Value, kind: &mut EffectKind) -> Result<()> {
+    let EffectKind::Compare { op, value, tolerance, left, right, channel, hardness } = kind else { return Ok(()) };
+    let source = |key: &str| -> Result<Option<CompareSource>> {
+        match strp(p, key) {
+            None => Ok(None),
+            Some(id) => CompareSource::from_id(id)
+                .map(Some)
+                .ok_or_else(|| bad(cmd, format!("unknown {key} source `{id}` (layersBelow, thisLayer, thisMask, constant)"))),
+        }
+    };
+    if let Some(id) = strp(p, "op") {
+        *op = CompareOp::from_id(id).ok_or_else(|| bad(cmd, format!("unknown op `{id}`")))?;
+    }
+    if let Some(source) = source("left")? {
+        *left = source;
+    }
+    if let Some(source) = source("right")? {
+        *right = source;
+    }
+    if let Some(compared) = channel_param(cmd, p, "compareChannel")? {
+        *channel = compared;
+    }
+    for (key, slot) in [("value", value), ("tolerance", tolerance), ("hardness", hardness)] {
+        if let Some(number) = f32p(p, key) {
+            *slot = number.clamp(0.0, 1.0);
+        }
+    }
+    Ok(())
 }
 
 /// The `effect` param, or the selected effect.
@@ -482,7 +515,11 @@ fn histogram(s: &mut Session, p: &Value) -> Result<Value> {
     let bins = u64p(p, "bins").unwrap_or(64).clamp(2, 256) as usize;
     let counts = s.effect_histogram(eid, channel, bins).ok_or_else(|| bad(CMD, "the texture set is not ready"))?;
     if !content {
-        return Ok(json!({"target": "mask", "bins": counts.all}));
+        let mut out = json!({"target": "mask", "bins": counts.all});
+        if let Some([left, right]) = s.compare_histograms(eid, bins) {
+            out["compare"] = json!({"left": left, "right": right});
+        }
+        return Ok(out);
     }
     let mut out = json!({"target": "content", "channel": channel.id(), "bins": counts.all, "luminance": counts.luminance});
     if !counts.components.is_empty() {
@@ -564,11 +601,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
                 }
             }
             EffectKind::ColorSelection { colors, tolerance } => crate::color_selection_cmds::apply_params(params, colors, tolerance)?,
-            EffectKind::Compare { tolerance, .. } => {
-                if let Some(value) = f32p(params, "tolerance") {
-                    *tolerance = value.clamp(0.0, 1.0);
-                }
-            }
+            kind @ EffectKind::Compare { .. } => compare_from(CMD, params, kind)?,
             _ => {}
         }
         Ok(())

@@ -933,6 +933,13 @@ impl Session {
         self.with_inputs(ts, |inp| texturecraft_compose::effect_histogram(inp, effect, channel, bins))
     }
 
+    /// Histograms (`bins` buckets over 0..1) of what the two sides of compare mask `effect` read, left then right (None for an unknown effect or one that is no compare mask)
+    pub fn compare_histograms(&self, effect: LayerId, bins: usize) -> Option<[Vec<u32>; 2]> {
+        let (owner, _) = self.doc.project.effect(effect)?;
+        let (ts, _, _) = self.doc.project.locate(owner)?;
+        self.with_inputs(ts, |inp| texturecraft_compose::compare_histograms(inp, effect, bins))
+    }
+
     pub fn baked(&self, ts: usize) -> Option<&BakedMaps> {
         self.doc.baked.get(&ts)
     }

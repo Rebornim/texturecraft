@@ -1309,6 +1309,53 @@ fn mask_fill_snapshots() {
     shot(&mut harness, json!({"value": 1.0}), "mask-fill-uniform-again");
 }
 
+/// Screen 09: a compare mask at its defaults, within tolerance, its right source's list open with Constant hovered, then Constant picked
+#[test]
+#[ignore]
+fn compare_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let mut layer = json!(null);
+    for (low, high) in [(-0.7, 0.1), (-0.2, 0.6)] {
+        layer = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+        let (low, high) = (json!([low, low, low]), json!([high, high, high]));
+        execute(&mut session, "layer.fill.set", &json!({"layer": layer, "channel": "height", "procedural": "Clouds", "scale": 3.0, "low": low, "high": high}))
+            .unwrap();
+    }
+    let compare = execute(&mut session, "effect.add.compare", &json!({"layer": layer})).unwrap()["effect"].clone();
+    execute(&mut session, "layer.select", &json!({"layer": layer, "target": compare})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "compare-default");
+
+    harness.get_by(|node| node.role() == egui::Role::RadioButton && node.label().as_deref() == Some("≈")).click();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "compare-within");
+    harness.get_by(|node| node.role() == egui::Role::RadioButton && node.label().as_deref() == Some(">")).click();
+    harness.run_steps(4);
+
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Layers below").click();
+    harness.run_steps(3);
+    let hovered = harness.get_by_role_and_label(egui::Role::ListBoxOption, "Constant").rect().center();
+    harness.hover_at(hovered);
+    save(&mut harness, &output_dir, "compare-source-list");
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, "Constant").click();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "compare-constant");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("compare-constant-{name}"));
+        }
+    }
+}
+
 /// Screen 08: a mask's levels, then a content levels on Base color (Colors, red only with Clamp on, its Affects list open with an option hovered) and on Roughness
 #[test]
 #[ignore]

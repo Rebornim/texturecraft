@@ -14,16 +14,16 @@ const PICTURE_SIZE: f32 = 18.0;
 const PICTURE_INSET: f32 = 6.0;
 
 /// From a plain dropdown's left edge to its value
-const VALUE_INSET: f32 = 8.0;
+pub(super) const VALUE_INSET: f32 = 8.0;
 
 /// Air between a picture and the words after it
 const PICTURE_TO_TEXT: f32 = 8.0;
 
 /// From a dropdown's right edge to its caret's centre
-const CARET_INSET: f32 = 10.0;
+pub(super) const CARET_INSET: f32 = 10.0;
 
 /// Room a dropdown keeps for its caret: its value is cut with "…" before it
-const CARET_ROOM: f32 = 24.0;
+pub(super) const CARET_ROOM: f32 = 24.0;
 
 /// The open list's border, drawn outside its options: the list's outer edge is its button's
 const LIST_BORDER: f32 = 1.0;
@@ -41,7 +41,7 @@ const EYE_INSET: f32 = 16.0;
 const EYE_MIN_LIST_WIDTH: f32 = 80.0;
 
 /// The lettering of a set-once choice, cut with "…" to fit `room`
-fn truncated(painter: &Painter, text: &str, room: f32, color: Color32) -> std::sync::Arc<egui::Galley> {
+pub(super) fn truncated(painter: &Painter, text: &str, room: f32, color: Color32) -> std::sync::Arc<egui::Galley> {
     let font = semibold(TEXT_SIZE);
     let full = painter.layout_no_wrap(text.to_owned(), font.clone(), color);
     if full.size().x <= room {

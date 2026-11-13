@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Backface, BlendMode, Channel, ChannelKind, DepthCulling, FillSymmetry, Projector, ShapeCrop, lum};
+use crate::{Backface, BlendMode, Channel, ChannelKind, CompareSource, DepthCulling, FillSymmetry, Projector, ShapeCrop, lum};
 
 mod curvature_detail;
 mod curvature_mode;
@@ -1276,11 +1276,23 @@ pub enum EffectKind {
         colors: Vec<[f32; 3]>,
         tolerance: f32,
     },
-    /// Compare the mask with a constant.
+    /// Compare one channel (or the mask so far, or a constant) on two sides: 1 where the comparison holds, softened by `hardness`
     Compare {
         op: CompareOp,
+        /// The constant a [`CompareSource::Constant`] side reads
         value: f32,
+        /// How far apart two values may be and still count as equal ([`CompareOp::WithinTolerance`])
         tolerance: f32,
+        #[serde(default = "CompareSource::saved_left")]
+        left: CompareSource,
+        #[serde(default = "CompareSource::saved_right")]
+        right: CompareSource,
+        /// The channel a layer side reads
+        #[serde(default = "saved_compare_channel")]
+        channel: Channel,
+        /// 1 is a hard step (what compare masks saved before hardness did); lower ramps over 1 − hardness
+        #[serde(default = "saved_compare_hardness")]
+        hardness: f32,
     },
     /// Content only: a material fill (one source per channel; channels without a source are
     /// left as they are).
@@ -1310,6 +1322,54 @@ pub enum CompareOp {
     LesserThan,
     WithinTolerance,
     GreaterThan,
+}
+
+impl CompareOp {
+    /// Menu order
+    pub const ALL: [CompareOp; 3] = [CompareOp::LesserThan, CompareOp::WithinTolerance, CompareOp::GreaterThan];
+
+    /// Command id
+    pub fn id(self) -> &'static str {
+        match self {
+            CompareOp::LesserThan => "lesser",
+            CompareOp::WithinTolerance => "within",
+            CompareOp::GreaterThan => "greater",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<CompareOp> {
+        match id {
+            "less" => Some(CompareOp::LesserThan),
+            _ => CompareOp::ALL.into_iter().find(|op| op.id() == id),
+        }
+    }
+
+    /// The mask value of `left` compared with `right`: a hard 0/1 at hardness 1, else a ramp over 1 − hardness past the edge
+    pub fn mask(self, left: f32, right: f32, tolerance: f32, hardness: f32) -> f32 {
+        // How far past the edge of the passing range `left` is (positive passes)
+        let past = match self {
+            CompareOp::LesserThan => right - left,
+            CompareOp::GreaterThan => left - right,
+            CompareOp::WithinTolerance => tolerance - (left - right).abs(),
+        };
+        let width = (1.0 - hardness).clamp(0.0, 1.0);
+        let pass = if self == CompareOp::WithinTolerance { past >= 0.0 } else { past > 0.0 };
+        if width <= 0.0 || past.is_nan() {
+            return if pass { 1.0 } else { 0.0 };
+        }
+        let ramp = if self == CompareOp::WithinTolerance { 1.0 + past / width } else { past / width };
+        ramp.clamp(0.0, 1.0)
+    }
+}
+
+/// The channel of compare masks saved before the channel choice (their sides read no channel)
+fn saved_compare_channel() -> Channel {
+    Channel::Height
+}
+
+/// The hardness of compare masks saved before hardness existed (a hard step)
+fn saved_compare_hardness() -> f32 {
+    1.0
 }
 
 impl EffectKind {
@@ -1356,6 +1416,11 @@ impl EffectKind {
             _ => false,
         }
     }
+
+    /// Reads a channel of the layer or of the stack below it (a compare mask's layer sides)
+    pub fn reads_stack(&self) -> bool {
+        matches!(self, EffectKind::Compare { left, right, .. } if left.reads_stack() || right.reads_stack())
+    }
 }
 
 impl Layer {
@@ -1366,6 +1431,11 @@ impl Layer {
             _ => false,
         };
         fill || self.mask.iter().flat_map(|m| m.effects.iter()).chain(self.content_effects.iter()).any(|e| e.kind.reads_anchor())
+    }
+
+    /// Whether the layer's result depends on the stack below it: it reads an anchor point, or its mask compares channels of the stack
+    pub fn reads_stack(&self) -> bool {
+        self.reads_anchor() || self.mask.iter().flat_map(|m| m.effects.iter()).any(|e| e.visible && e.kind.reads_stack())
     }
 }
 
@@ -1536,6 +1606,30 @@ mod tests {
             ..Mask::new(MaskBackground::Black)
         });
         assert!(l.reads_anchor());
+    }
+
+    #[test]
+    fn compare_masks_saved_before_sources_compare_the_mask_with_the_constant_hard() {
+        let saved = r#"{"Compare":{"op":"GreaterThan","value":0.5,"tolerance":0.1}}"#;
+        let kind: EffectKind = serde_json::from_str(saved).unwrap();
+        let EffectKind::Compare { left, right, channel, hardness, .. } = kind else { panic!("{kind:?}") };
+        assert_eq!((left, right, channel, hardness), (CompareSource::ThisMask, CompareSource::Constant, Channel::Height, 1.0));
+        let round_trip: EffectKind = serde_json::from_str(&serde_json::to_string(&kind).unwrap()).unwrap();
+        assert_eq!(round_trip, kind);
+    }
+
+    #[test]
+    fn a_hard_compare_is_the_old_step_and_a_soft_one_ramps() {
+        // Hardness 1 keeps the strict comparisons compare masks always made
+        for (left, right) in [(0.4, 0.5), (0.5, 0.5), (0.6, 0.5), (f32::NAN, 0.5)] {
+            let step = |pass: bool| if pass { 1.0 } else { 0.0 };
+            assert_eq!(CompareOp::GreaterThan.mask(left, right, 0.1, 1.0), step(left > right));
+            assert_eq!(CompareOp::LesserThan.mask(left, right, 0.1, 1.0), step(left < right));
+            assert_eq!(CompareOp::WithinTolerance.mask(left, right, 0.05, 1.0), step((left - right).abs() <= 0.05));
+        }
+        assert!((CompareOp::GreaterThan.mask(0.55, 0.5, 0.1, 0.9) - 0.5).abs() < 1e-5, "halfway up a 0.1 ramp");
+        assert_eq!(CompareOp::GreaterThan.mask(0.45, 0.5, 0.1, 0.0), 0.0, "below the edge stays 0 however soft");
+        assert!((CompareOp::WithinTolerance.mask(0.65, 0.5, 0.1, 0.9) - 0.5).abs() < 1e-5, "0.05 past the tolerance");
     }
 
     #[test]

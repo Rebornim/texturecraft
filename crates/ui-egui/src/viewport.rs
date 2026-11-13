@@ -187,12 +187,6 @@ const MIN_SPLIT_VIEW_WIDTH: f32 = 16.0;
 /// Width of the split divider's grab zone, centred on its line
 const SPLIT_DIVIDER_GRAB_WIDTH: f32 = 8.0;
 
-/// Where the decal placing hint sits from the 3D view's top left corner (points)
-const PLACING_HINT_OFFSET: egui::Vec2 = vec2(12.0, 40.0);
-
-/// Text size of the decal placing hint (points)
-const PLACING_HINT_SIZE: f32 = 12.0;
-
 /// The split divider's widget id, shared by its drag read and its grab zone
 fn split_divider_id(ui: &Ui) -> egui::Id {
     ui.scope_id().with("split_divider")
@@ -871,26 +865,6 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     // A dismissing click cannot paint or place a decal through the rail popup
     let rail_popup = crate::rail_popup::blocks_paint_input(app, ui.ctx());
 
-    // Decal placement: a click moves the decal being placed there, unless it dismisses a waiting image drop's menu
-    let placing = app.placing_decal.filter(|_| app.ui.mode == crate::state::Mode::Painting);
-    if let Some(target) = placing {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
-        if !alt
-            && !rail_popup
-            && !DecalDrop::blocks_input(ui.ctx())
-            && response.clicked_by(PointerButton::Primary)
-            && let Some(pointer) = response.interact_pointer_pos()
-        {
-            let (at, viewport) = (local(pointer), app.session.viewport);
-            let mut params = json!({"x": at.x, "y": at.y, "viewport": [viewport.x, viewport.y]});
-
-            // The id is a decal layer's or a mask fill effect's
-            params[if app.session.doc.project.effect(target).is_some() { "effect" } else { "layer" }] = json!(target.0);
-            app.run("layer.decal.set", params);
-            app.placing_decal = None;
-        }
-    }
-
     crate::properties_popup::open_on_right_click(app, ui, &response, rect, s_held || v_held);
     let popup = app.properties_popup.is_some() || rail_popup;
 
@@ -914,8 +888,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     }
 
     // The selected planar or warp projection's frame, or the round projector Move on model moves, then its drags and wheel
-    let gizmo_free =
-        !alt && !s_held && !v_held && !focus_pick && !popup && placing.is_none() && !picking && touch.is_none() && !DecalDrop::blocks_input(ui.ctx());
+    let gizmo_free = !alt && !s_held && !v_held && !focus_pick && !popup && !picking && touch.is_none() && !DecalDrop::blocks_input(ui.ctx());
     let frame_drag = gizmo_free && (crate::frame_gizmo::input(app, ui, &response, rect) || crate::round_gizmo::input(app, ui, &response, rect));
     let moving = crate::move_on_model::input(app, ui, &response, rect, !gizmo_free || frame_drag);
     let decal_drag = frame_drag || moving;
@@ -923,7 +896,6 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !s_held
         && !v_held
         && !focus_pick
-        && placing.is_none()
         && !picking
         && touch.is_none()
         && !DecalDrop::blocks_input(ui.ctx())
@@ -936,7 +908,6 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !v_held
         && !focus_pick
         && !popup
-        && placing.is_none()
         && !picking
         && touch.is_none()
         && !DecalDrop::blocks_input(ui.ctx())
@@ -1068,7 +1039,6 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     }
     crate::symmetry::overlay(app, ui, rect, symmetry_cursor);
     stencil_overlay(app, ui, rect);
-    placing_overlay(app, ui, rect);
     crate::frame_gizmo::overlay(app, ui, rect);
     crate::round_gizmo::overlay(app, ui, rect);
     brush_readout(app, ui, &response, adjusting);
@@ -1104,49 +1074,6 @@ fn bake_visualization(app: &TextureCraftApp) -> Option<texturecraft_render::Bake
     }
 
     Some(app.ui.bake_visualization.visualization(app.session.ts()))
-}
-
-/// The fill layer or mask fill effect holding the selected decal (a planar projection placed on the surface)
-fn selected_decal(app: &TextureCraftApp) -> Option<texturecraft_engine::core::LayerId> {
-    use texturecraft_engine::StackTarget;
-    use texturecraft_engine::core::{EffectKind, Fill, LayerKind, Projection};
-
-    let layers = &app.session.doc.project;
-    let selected = app.session.selected_layer()?;
-    match app.session.target {
-        StackTarget::Content => {
-            let layer = layers.content_layer(selected)?;
-            matches!(layer.kind, LayerKind::Fill(Fill { projection: Projection::Planar { placed: Some(_), .. }, .. })).then_some(layer.id)
-        }
-        StackTarget::Effect(effect) => {
-            // Only the selected layer's effective mask may hold it, including an instance's inherited mask
-            let mask = layers.layer(layers.mask_owner(selected)).ok()?.mask.as_ref()?;
-            let mask_effect = mask.effects.iter().find(|candidate| candidate.id == effect)?;
-            matches!(mask_effect.kind, EffectKind::Fill { projection: Projection::Planar { placed: Some(_), .. }, .. }).then_some(effect)
-        }
-        StackTarget::Mask => None,
-    }
-}
-
-/// The hint while a click in the 3D view places a decal; placing follows the selection, so another layer or effect selected stops it
-fn placing_overlay(app: &mut TextureCraftApp, ui: &Ui, rect: Rect) {
-    if app.ui.mode != crate::state::Mode::Painting {
-        return;
-    }
-    if app.placing_decal.is_some() && app.placing_decal != selected_decal(app) {
-        app.placing_decal = None;
-    }
-    if app.placing_decal.is_some() {
-        let tk = Tokens::get(ui.ctx());
-        let hint = tr("Click the mesh to place the decal");
-        ui.painter_at(rect).text(
-            rect.left_top() + PLACING_HINT_OFFSET,
-            egui::Align2::LEFT_TOP,
-            hint,
-            egui::FontId::proportional(PLACING_HINT_SIZE),
-            tk.viewport_accent,
-        );
-    }
 }
 
 /// Draw the projection stencil in Paint Mode

@@ -88,8 +88,10 @@ fn effect_json(session: &Session, effect: &Effect, content: bool) -> Value {
         }
         EffectKind::Paint if content => out["tiles"] = json!(content_tiles()),
         EffectKind::Paint => out["tiles"] = json!(mask_tiles()),
-        EffectKind::Fill { source, sampling, .. } => {
+        EffectKind::Fill { source, projection, sampling } => {
             out["source"] = source_json(source);
+            out["projection"] = json!(projection.label());
+            out["projectionSettings"] = json!(projection);
             out["filtering"] = json!(sampling.filtering.id());
             out["wrap"] = json!(sampling.wrap.id());
             out["scaleMode"] = json!(sampling.scale.id());

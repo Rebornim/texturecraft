@@ -6,8 +6,7 @@ use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::compose::ThumbTarget;
 use texturecraft_engine::core::{
-    BakedMap, BlendMode, Channel, ChannelBlend, Decal, DecalFlip, Effect, EffectKind, Filter, Layer, LayerId, LayerKind, LinkParam, MaterialLink, Projection,
-    Source,
+    BakedMap, BlendMode, Channel, ChannelBlend, Effect, EffectKind, Filter, Layer, LayerId, LayerKind, LinkParam, MaterialLink, Projection, Sampling, Source,
 };
 use texturecraft_engine::filter_lib::scalar_params;
 use texturecraft_engine::paint::alpha_params::MAX_ALPHA_CONTRAST;
@@ -1822,21 +1821,36 @@ pub(crate) fn properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     // A floating scroll bar would cover the right-aligned slider values and section reset icons
     ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
     let scope = SectionScope::Docked;
-    if properties_has_fill_tabs(app) {
-        crate::property_sheet::section_tabs(ui, scope, 0, &crate::fill_panel::fill_tabs());
+    if let Some(tabs) = properties_fill_tabs(app) {
+        crate::property_sheet::section_tabs(ui, scope, 0, &tabs);
     }
     crate::property_sheet::in_scope(ui, scope, |ui| {
         egui::ScrollArea::vertical().id_salt("props").auto_shrink([false, false]).show(ui, |ui| properties_contents(app, ui));
     });
 }
 
-/// Whether the panel shows a fill layer's sections, which the tabs jump between
-pub(crate) fn properties_has_fill_tabs(app: &TextureCraftApp) -> bool {
-    let layer = app.session.selected_layer().and_then(|id| app.session.doc.project.layers.get(&id));
-    let polygon_fill_shown = app.session.tool.tool == Tool::PolygonFill && app.session.tool_usable(Tool::PolygonFill);
-    !polygon_fill_shown
-        && app.session.target == StackTarget::Content
-        && layer.is_some_and(|layer| matches!(&layer.kind, LayerKind::Fill(fill) if fill.projection.placed().is_none()))
+/// The tabs over the panel when it shows a fill layer's or a mask fill effect's sections, which they jump between
+pub(crate) fn properties_fill_tabs(app: &TextureCraftApp) -> Option<[(&'static str, &'static str); 3]> {
+    if app.session.tool.tool == Tool::PolygonFill && app.session.tool_usable(Tool::PolygonFill) {
+        return None;
+    }
+    let project = &app.session.doc.project;
+    match app.session.target {
+        StackTarget::Content => {
+            let layer = app.session.selected_layer().and_then(|id| project.layers.get(&id))?;
+            matches!(&layer.kind, LayerKind::Fill(fill) if fill.projection.placed().is_none()).then(|| crate::fill_panel::fill_tabs(false))
+        }
+        StackTarget::Effect(effect) => mask_fill_of(project, effect).map(|_| crate::fill_panel::fill_tabs(true)),
+        _ => None,
+    }
+}
+
+/// Effect `effect`'s source, projection and sampling when it is a mask fill the Properties panel lays out like a fill (a decal's placed fill keeps its own rows)
+fn mask_fill_of(project: &texturecraft_engine::core::Project, effect: LayerId) -> Option<(&Source, &texturecraft_engine::core::Projection, Sampling)> {
+    match &project.effect(effect)?.1.kind {
+        EffectKind::Fill { source, projection, sampling } if projection.placed().is_none() => Some((source, projection, *sampling)),
+        _ => None,
+    }
 }
 
 /// Room around the Properties rows not yet laid out by the property sheet, as every other panel has
@@ -1862,6 +1876,7 @@ pub(crate) fn properties_contents(app: &mut TextureCraftApp, ui: &mut Ui) {
     match (&selected, app.session.target) {
         // Polygon fill shows its own settings and says what it fills into, wherever it can fill
         _ if tool == Tool::PolygonFill && tool_usable => legacy_body(ui, |ui| polygon_fill_properties(app, ui)),
+        (Some(layer), StackTarget::Effect(effect)) if mask_fill_of(&app.session.doc.project, effect).is_some() => mask_fill_properties(app, ui, layer, effect),
         (Some(layer), StackTarget::Effect(effect)) => legacy_body(ui, |ui| effect_properties(app, ui, layer, effect)),
         (Some(layer), StackTarget::Content) if matches!(layer.kind, LayerKind::Fill(_)) => fill_properties(app, ui, layer),
         (Some(layer), StackTarget::Content) if layer.is_group() => legacy_body(ui, |ui| {
@@ -2763,6 +2778,18 @@ pub(crate) fn anchor_label(app: &TextureCraftApp, anchor: LayerId, channel: Chan
     if mask_anchor_enabled(app, anchor) == Some(false) { format!("{label} ({})", tr("Off")) } else { label }
 }
 
+/// A mask fill effect: its Fill, Symmetry and Grayscale sections as one sheet (its blending is on its row)
+fn mask_fill_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, eid: LayerId) {
+    let Some((source, projection, sampling)) =
+        mask_fill_of(&app.session.doc.project, eid).map(|(source, projection, sampling)| (source.clone(), projection.clone(), sampling))
+    else {
+        return;
+    };
+    PropertySheet::show(ui, ("mask_fill_sheet", eid.0), |sheet| {
+        crate::mask_fill_panel::mask_fill_sheet(app, sheet, eid, source, projection, sampling, layer.id);
+    });
+}
+
 /// Slider range of a fill's scale or tiling
 const FILL_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.01..=20.0;
 
@@ -2934,107 +2961,6 @@ fn axis_combo(ui: &mut Ui, axis: u8) -> Option<u8> {
     picked
 }
 
-/// A decal's frame: place it with a click in the 3D view, then size, turn and shift it. `base` is the
-/// `{layer}` or `{effect}` holding it (a mask fill effect's decal edits like a layer's); `layer` is the reader.
-pub(crate) fn decal_editor(app: &mut TextureCraftApp, ui: &mut Ui, d: &Decal, base: &Value, layer: LayerId) {
-    // What a placing click or the stack selection names: the effect when the decal is a mask effect's
-    let holder = base.get("effect").and_then(Value::as_u64).map_or(layer, LayerId);
-    let tk = Tokens::get(ui.ctx());
-    ui.label(caption(tr("Decal")));
-    let placing = app.placing_decal == Some(holder);
-    let label = format!("{} {}", ic::CROSSHAIR, if placing { tr("Click the mesh to place the decal") } else { tr("Place on the surface") });
-    if ui.selectable_label(placing, label).on_hover_text(tr("The next click in the 3D view moves the decal there")).clicked() {
-        app.placing_decal = if placing { None } else { Some(holder) };
-    }
-    let (lo, hi) = app.session.mesh.bounds();
-    let diag = (hi - lo).length().max(1e-3);
-    let mut v = [d.size[0], d.size[1], d.rotation, d.offset[0], d.offset[1], d.depth];
-    let rows = [
-        (tr("Width"), diag * 0.01..=diag * 2.0),
-        (tr("Height"), diag * 0.01..=diag * 2.0),
-        (tr("Rotation (degrees)"), 0.0..=360.0),
-        (tr("Offset right"), -diag..=diag),
-        (tr("Offset up"), -diag..=diag),
-        (tr("Depth"), diag * 0.005..=diag),
-    ];
-    let mut edit = None;
-    for (row, ((label, range), x)) in rows.into_iter().zip(v.iter_mut()).enumerate() {
-        edit = edit.or(slider_edit(ui, label, x, range, 3).map(|merge| (row, merge)));
-    }
-
-    // The lock is a setting of the editor, not of the decal: every decal starts locked
-    let keep_id = ui.scope_id().with(("decal_keep_proportions", holder.0));
-    let mut keep = ui.ctx().data(|data| data.get_temp::<bool>(keep_id)).unwrap_or(true);
-    if ui.checkbox(&mut keep, tr("Keep proportions")).on_hover_text(tr("Width and height follow each other by the image's aspect")).changed() {
-        ui.ctx().data_mut(|data| data.insert_temp(keep_id, keep));
-        if keep {
-            app.run("layer.decal.set", with(base, json!({"keepProportions": true})));
-        }
-    }
-    let mut flip = d.flip;
-    let flipped = ui.horizontal(|ui| ui.checkbox(&mut flip[0], tr("Flip U")).changed() | ui.checkbox(&mut flip[1], tr("Flip V")).changed()).inner;
-    if flipped {
-        app.run("layer.decal.set", with(base, json!({"flipU": flip[0], "flipV": flip[1]})));
-    }
-    if let Some((row, merge)) = edit {
-        // Locked: the edited side sets the other (a height sets the width, anything else the height)
-        let size = if keep && row == 1 { json!(v[1]) } else { json!([v[0], v[1]]) };
-        app.run(
-            "layer.decal.set",
-            with(base, json!({"size": size, "keepProportions": keep && row < 2, "rotation": v[2], "offset": [v[3], v[4]], "depth": v[5], "merge": merge})),
-        );
-    }
-    decal_symmetry_editor(app, ui, d, base);
-    ui.label(
-        RichText::new(tr("The image's alpha cuts the decal's shape; faces turned away and surfaces beyond its depth stay clear."))
-            .size(10.5)
-            .color(tk.text_dim),
-    );
-}
-
-/// The decal's mirrored copy on the other side of the mesh: the axis it is mirrored across and how its image is flipped
-fn decal_symmetry_editor(app: &mut TextureCraftApp, ui: &mut Ui, decal: &Decal, base: &Value) {
-    let axes = ["X", "Y", "Z"];
-    let axis = decal.symmetry.map(|symmetry| usize::from(symmetry.axis));
-    let mut picked = None;
-    combo(ui, tr("Mirror across"), axis.and_then(|axis| axes.get(axis).copied()).unwrap_or_else(|| tr("Off")), |ui| {
-        if ui.selectable_label(axis.is_none(), tr("Off")).clicked() && axis.is_some() {
-            picked = Some(json!({"symmetry": "off"}));
-        }
-        for (i, name) in axes.into_iter().enumerate() {
-            if ui.selectable_label(axis == Some(i), name).clicked() && axis != Some(i) {
-                picked = Some(json!({"symmetry": name.to_ascii_lowercase()}));
-            }
-        }
-    });
-
-    if let Some(symmetry) = decal.symmetry {
-        let flips = [(DecalFlip::None, tr("None"), "none"), (DecalFlip::U, "U", "u"), (DecalFlip::V, "V", "v")];
-        let current = flips.iter().find(|flip| flip.0 == symmetry.flip).map_or("", |flip| flip.1);
-        combo(ui, tr("Flip the copy's image"), current, |ui| {
-            for (flip, name, id) in flips {
-                if ui.selectable_label(flip == symmetry.flip, name).clicked() && flip != symmetry.flip {
-                    picked = Some(json!({"symmetryFlip": id}));
-                }
-            }
-        });
-    }
-
-    if let Some(symmetry) = decal.symmetry {
-        // The plane moves within the mesh, as the symmetry popup's axis position does
-        let (lo, hi) = app.session.mesh.bounds();
-        let limit = ((hi - lo) * 0.5)[usize::from(symmetry.axis.min(2))];
-        let mut offset = symmetry.offset;
-        if let Some(merge) = slider_edit(ui, tr("Axis position"), &mut offset, -limit..=limit, 2) {
-            picked = Some(json!({"symmetryOffset": offset, "merge": merge}));
-        }
-    }
-
-    if let Some(change) = picked {
-        app.run("layer.decal.set", with(base, change));
-    }
-}
-
 /// Swatches for gradient map stops (dark to light) with Add color and Remove last; true when
 /// they changed.
 fn gradient_stops(ui: &mut Ui, salt: &str, stops: &mut Vec<[f32; 3]>) -> bool {
@@ -3067,14 +2993,29 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, effe
     match &effect.kind {
         EffectKind::Generator(generator) => crate::generator_panel::generator_properties(app, ui, layer.id, id, generator),
         EffectKind::Levels(levels) => crate::levels_properties::levels_properties(app, ui, layer, effect_id, levels),
-        EffectKind::Fill { source, projection, .. } => {
+        EffectKind::Fill { source, projection, .. } => legacy_body(ui, |ui| {
             ui.label(caption(tr("Fill")));
             let anchors = effect_anchors_below(app, layer.id, effect_id);
-            let target = crate::fill_source_target::FillSourceTarget::Mask { effect: id };
-            let slot = ui.scope(|ui| crate::fill_source_slot::show(app, ui, &target, source, (&anchors, tr("Grayscale")))).response;
+            let current = match source {
+                Source::Anchor { anchor, channel, .. } => anchor_label(app, *anchor, *channel),
+                Source::Uniform(_) => tr("Uniform value").to_string(),
+                Source::Procedural { pattern, .. } => tr(pattern.kind.label()).to_string(),
+                Source::Image { name, .. } => trf("Image: {name}", &[("name", name)]),
+            };
+            let source_response = combo(ui, tr("Source"), current, |ui| {
+                if ui.selectable_label(matches!(source, Source::Uniform(_)), tr("Uniform value")).clicked() {
+                    app.run("effect.set", json!({"effect": id, "value": 1.0}));
+                }
+                if let Some(anchor) = anchor_entries(ui, &anchors, source.anchor()) {
+                    app.run("effect.set", json!({"effect": id, "anchor": anchor.0}));
+                }
+                if let Some(name) = image_menu(app, ui) {
+                    app.run("effect.set", json!({"effect": id, "image": name}));
+                }
+            });
 
-            // The slot accepts image drops from the Assets panel
-            if let Some(name) = image_drop(ui, &slot.interact(Sense::hover())) {
+            // The source selector accepts image drops from the Assets panel
+            if let Some(name) = image_drop(ui, &source_response.interact(Sense::hover())) {
                 app.run("effect.set", json!({"effect": id, "image": name}));
             }
 
@@ -3084,10 +3025,6 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, effe
                     if let Some(merge) = slider_edit(ui, tr("Value"), &mut value, 0.0..=1.0, 2) {
                         app.run("effect.set", json!({"effect": id, "value": value, "merge": merge}));
                     }
-                }
-                Source::Procedural { pattern, .. } => {
-                    let target = crate::pattern_target::PatternTarget { command: "effect.set", base: json!({"effect": id}), salt: format!("mask_fill_{id}") };
-                    crate::pattern_panel::pattern_properties(app, ui, &target, pattern);
                 }
                 Source::Anchor { anchor, .. } if anchor_in_mask(app, *anchor) => {
                     let note = if mask_anchor_enabled(app, *anchor) == Some(false) { tr("Off") } else { tr("A mask anchor reads as its mask's gray.") };
@@ -3105,17 +3042,17 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, effe
                     ui.label(RichText::new(tr("Colors read as gray. Add a levels or blur effect above to shape the result.")).color(tokens.text_dim));
                 }
                 Source::Image { .. } => {
-                    if let Projection::Planar { placed: Some(decal), .. } = projection {
-                        decal_editor(app, ui, decal, &json!({"effect": id}), layer.id);
-                    } else {
-                        projection_editor(app, ui, projection, "effect.set", &json!({"effect": id}), &format!("maskfill{id}"));
-                    }
+                    projection_editor(app, ui, projection, "effect.set", &json!({"effect": id}), &format!("maskfill{id}"));
+                }
+                Source::Procedural { pattern, .. } => {
+                    let target = crate::pattern_target::PatternTarget { command: "effect.set", base: json!({"effect": id}), salt: format!("mask_fill_{id}") };
+                    crate::pattern_panel::pattern_properties(app, ui, &target, pattern);
                 }
             }
             if anchors.is_empty() {
                 ui.label(RichText::new(tr("Add an anchor point to a layer below to use its stack as a mask.")).color(tokens.text_dim));
             }
-        }
+        }),
         EffectKind::Material(fill) => {
             let enabled: Vec<Channel> = fill.sources.keys().copied().collect();
             PropertySheet::show(ui, ("fill_effect_sheet", id), |sheet| {

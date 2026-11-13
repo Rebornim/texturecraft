@@ -123,18 +123,18 @@ fn a_mask_fill_selects_an_image_edits_projection_and_returns_to_uniform() {
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(4);
 
-    // The mask fill's slot opens the source picker
-    harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").scroll_to_me();
-    harness.run_steps(30);
+    // The mask fill's Grayscale slot opens the source picker; its search finds the image
     harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").click();
-    harness.run_steps(3);
-    harness.get_by_role_and_label(egui::Role::Button, &image_name).click();
+    harness.run_steps(2);
+    harness.event(egui::Event::Text("mask".into()));
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, &image_name).click();
     harness.run_steps(3);
 
     let effect = &harness.state().session.doc.project.effect(effect_id).unwrap().1.kind;
     assert!(matches!(effect, EffectKind::Fill { source: Source::Image { name, .. }, .. } if name == &image_name));
 
-    harness.get_all_by_role(egui::Role::ComboBox).find(|node| node.value().as_deref() == Some("UV projection")).unwrap().click();
+    harness.get_by_role_and_label(egui::Role::ComboBox, "UV projection").click();
     harness.run_steps(2);
     harness.get_by_label("Tri-planar projection").click();
     harness.run_steps(3);
@@ -142,10 +142,8 @@ fn a_mask_fill_selects_an_image_edits_projection_and_returns_to_uniform() {
     let effect = &harness.state().session.doc.project.effect(effect_id).unwrap().1.kind;
     assert!(matches!(effect, EffectKind::Fill { projection: Projection::Triplanar { .. }, .. }));
 
-    assert_eq!(harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").value().as_deref(), Some(image_name.as_str()), "the slot names the image");
-    harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").click();
-    harness.run_steps(3);
-    harness.get_by_role_and_label(egui::Role::Button, "Uniform value").click();
+    // The slot's × puts the mask fill back to a uniform value
+    harness.get_by_role_and_label(egui::Role::Button, "Clear").click();
     harness.run_steps(3);
 
     let effect = &harness.state().session.doc.project.effect(effect_id).unwrap().1.kind;

@@ -77,8 +77,8 @@ pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
             ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
             // The docked panel's jump tabs on the top edge stay put while the sections scroll under them
             let scope = SectionScope::Popup;
-            if crate::dock::properties_has_fill_tabs(app) {
-                crate::property_sheet::section_tabs(ui, scope, ui.style().visuals.menu_corner_radius.nw, &crate::fill_panel::fill_tabs());
+            if let Some(tabs) = crate::dock::properties_fill_tabs(app) {
+                crate::property_sheet::section_tabs(ui, scope, ui.style().visuals.menu_corner_radius.nw, &tabs);
             }
             crate::property_sheet::in_scope(ui, scope, |ui| {
                 egui::ScrollArea::vertical().id_salt("properties_popup_scroll").show(ui, |ui| crate::dock::properties_contents(app, ui));

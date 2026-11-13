@@ -24,6 +24,7 @@ use crate::effect_histogram::EffectHistogram;
 use crate::fill_copies::FillCopies;
 use crate::fill_copy::FillCopy;
 use crate::held_fields::HeldFields;
+use crate::mask_gray::MaskGray;
 use crate::pattern::{Coords, image_samples, pattern_pixels, procedural_in, world_noise};
 use crate::pattern_context::PatternContext;
 use crate::projector_cover::{framed_cover, projector_cover};
@@ -96,8 +97,8 @@ pub struct StrokePreview {
     pub erase: bool,
     /// Values painted per channel (layer targets).
     pub values: BTreeMap<Channel, [f32; 3]>,
-    /// Gray value painted into a mask.
-    pub mask_value: f32,
+    /// Gray painted into a mask.
+    pub mask_gray: MaskGray,
     /// Projection tool: base color (and alpha) come from a screen-pinned image.
     pub stencil: Option<Stencil>,
     /// Clone and smudge: straight values per channel carried by the stroke (replace `values`).
@@ -1912,7 +1913,10 @@ impl<'a, 'b> Texel<'a, 'b> {
                             coverage *= 1.0 - stroke;
                         } else {
                             // Clone and smudge show the values they carry instead of the mask gray
-                            let deposited = preview.carried_mask.as_ref().map_or(preview.mask_value, |carried| from_u16(carried.get(self.x, self.y)[0]));
+                            let deposited = preview.carried_mask.as_ref().map_or_else(
+                                || preview.mask_gray.at(self.x, self.y, (self.inp.gbuf.width, self.inp.gbuf.height)),
+                                |carried| from_u16(carried.get(self.x, self.y)[0]),
+                            );
                             painted = deposited * stroke + painted * (1.0 - stroke);
                             coverage = stroke + coverage * (1.0 - stroke);
                         }
@@ -3352,7 +3356,7 @@ mod tests {
             opacity: 1.0,
             erase: false,
             values: [(Channel::BaseColor, [0.0, 0.0, 1.0])].into_iter().collect(),
-            mask_value: 1.0,
+            mask_gray: MaskGray::Value(1.0),
             stencil: None,
             carried: BTreeMap::new(),
             carried_mask: None,

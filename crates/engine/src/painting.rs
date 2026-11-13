@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use texturecraft_compose::PaintTarget;
+use texturecraft_compose::{MaskGray, PaintTarget};
 use texturecraft_core::{Channel, Effect, EffectKind, LayerId, LayerKind, Mask, MaskBackground, Source};
 use texturecraft_geom::glam::Vec2;
 use texturecraft_paint::{
@@ -187,6 +187,15 @@ impl Session {
             images: Default::default(),
         };
         Some(Pickup::from_snapshot(PickupMode::Clone { offset: [0; 2] }, snapshot, self.caches.get(ts)?.gbuf.clone(), values.keys().copied()))
+    }
+
+    /// What mask strokes paint: the tool's image while it is loaded, else its gray
+    pub(crate) fn mask_gray(&self) -> MaskGray {
+        let image = self.tool.mask_image.as_ref().and_then(|name| Some((name, self.images.get(name)?)));
+        match image {
+            Some((name, image)) => MaskGray::Image { name: name.clone(), image: image.clone() },
+            None => MaskGray::Value(self.tool.mask_value),
+        }
     }
 
     fn stroke_values(&self, target: PaintTarget) -> BTreeMap<Channel, [f32; 3]> {
@@ -522,6 +531,7 @@ impl Session {
     /// After stamps were rasterized: prepare the tiles the commit will write (so it only swaps
     /// them in) and mark the touched tiles for the live preview.
     fn stroke_painted(&mut self) {
+        let mask_gray = self.mask_gray();
         let Some(st) = self.stroke.as_mut() else { return };
         let recent = std::mem::take(&mut st.canvas.recent);
         let (ts, target) = (st.ts, st.target);
@@ -530,11 +540,11 @@ impl Session {
             return;
         };
         let gbuf = self.caches.get(ts).map(|c| c.gbuf.clone());
-        let (pixels, mask_value) = (&self.doc.pixels, self.tool.mask_value);
+        let pixels = &self.doc.pixels;
         let mut staging = std::mem::take(&mut st.staging);
         with_commit_source(st, gbuf.as_deref(), &self.mesh, &recent, |src| match t {
             PaintTarget::Layer(id) => staging.stage_layer(pixels, id, &st.values, &src),
-            PaintTarget::Mask(eid) => staging.stage_mask(pixels, eid, mask_value, &src),
+            PaintTarget::Mask(eid) => staging.stage_mask(pixels, eid, &mask_gray, &src),
         });
         st.staging = staging;
         self.mark_painted(ts, target, recent);
@@ -556,7 +566,7 @@ impl Session {
         let gbuf = self.caches.get(st.ts).map(|c| c.gbuf.clone());
         let mesh = self.mesh.clone();
         let mut staging = std::mem::take(&mut st.staging);
-        let mask_value = self.tool.mask_value;
+        let mask_gray = self.mask_gray();
         match st.target {
             Some(PaintTarget::Layer(id)) => {
                 let pixels = &mut self.doc.pixels;
@@ -564,7 +574,7 @@ impl Session {
             }
             Some(PaintTarget::Mask(eid)) => {
                 let pixels = &mut self.doc.pixels;
-                with_commit_source(&st, gbuf.as_deref(), &mesh, &st.canvas.dirty, |src| commit_mask(pixels, eid, size, mask_value, src, &mut staging));
+                with_commit_source(&st, gbuf.as_deref(), &mesh, &st.canvas.dirty, |src| commit_mask(pixels, eid, size, &mask_gray, src, &mut staging));
             }
             None => {
                 with_commit_source(&st, gbuf.as_deref(), &mesh, &st.canvas.dirty, |src| self.commit_quick_mask(st.ts, size, src));
@@ -658,7 +668,10 @@ impl Session {
         let values = self.stroke_values(target);
         match target {
             PaintTarget::Layer(id) => commit_layer(&mut self.doc.pixels, id, size, &values, source, &mut Staging::default()),
-            PaintTarget::Mask(effect) => commit_mask(&mut self.doc.pixels, effect, size, self.tool.mask_value, source, &mut Staging::default()),
+            PaintTarget::Mask(effect) => {
+                let mask_gray = self.mask_gray();
+                commit_mask(&mut self.doc.pixels, effect, size, &mask_gray, source, &mut Staging::default())
+            }
         }
         Ok(())
     }

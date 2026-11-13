@@ -49,7 +49,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Tool material",
             [],
             None,
-            "{channel, color?: ([r,g,b] linear or \"#rrggbb\" sRGB)|value?, enabled?, solo?: true (paint this channel only)} or {maskValue?: 0..1} or {material: id or label of a simple material (see material.list, smart: false)} — the brush paints that material's pattern (colour, metallic, roughness, height…, fixed to the surface, its size following the brush size) in the channels that are on; no layer is added, smart materials are refused (add them with material.apply)",
+            "{channel, color?: ([r,g,b] linear or \"#rrggbb\" sRGB)|value?, enabled?, solo?: true (paint this channel only)} or {maskValue?: 0..1, maskImage?: image resource | null (paint its gray into masks; null = maskValue)} or {material: id or label of a simple material (see material.list, smart: false)} — the brush paints that material's pattern (colour, metallic, roughness, height…, fixed to the surface, its size following the brush size) in the channels that are on; no layer is added, smart materials are refused (add them with material.apply)",
             always,
             material
         ),
@@ -335,6 +335,17 @@ fn material(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(v) = f32p(p, "maskValue") {
         s.tool.mask_value = v.clamp(0.0, 1.0);
     }
+    match p.get("maskImage") {
+        Some(Value::Null) => s.tool.mask_image = None,
+        Some(name) => {
+            let name = name.as_str().ok_or_else(|| bad("tool.material", "maskImage must be an image resource name or null"))?;
+            if !s.doc.resources.contains_key(name) {
+                return Err(bad("tool.material", format!("no image resource '{name}'")));
+            }
+            s.tool.mask_image = Some(name.to_owned());
+        }
+        None => {}
+    }
     if let Some(c) = channel {
         if let Some(v) = color.or(value) {
             let v = if c == Channel::Height { v.map(|x| x.clamp(-1.0, 1.0)) } else { v.map(|x| x.clamp(0.0, 1.0)) };
@@ -361,6 +372,7 @@ fn material(s: &mut Session, p: &Value) -> Result<Value> {
         "values": s.tool.values.iter().map(|(c, v)| (c.id().to_string(), json!(v))).collect::<serde_json::Map<_, _>>(),
         "enabled": s.tool.enabled.iter().map(|c| c.id()).collect::<Vec<_>>(),
         "maskValue": s.tool.mask_value,
+        "maskImage": s.tool.mask_image,
     }))
 }
 

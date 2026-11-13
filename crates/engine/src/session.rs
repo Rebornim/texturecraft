@@ -236,6 +236,9 @@ pub struct ToolState {
     pub material: Option<String>,
     /// Gray painted into masks.
     pub mask_value: f32,
+    /// Image resource whose gray is painted into masks in place of `mask_value`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_image: Option<String>,
     pub fill_mode: FillMode,
     /// How a polygon fill box decides which polygons it selects
     #[serde(default)]
@@ -310,6 +313,7 @@ impl Default for ToolState {
             enabled: [Channel::BaseColor, Channel::Metallic, Channel::Roughness, Channel::Height, Channel::Normal].into_iter().collect(),
             material: None,
             mask_value: 1.0,
+            mask_image: None,
             fill_mode: FillMode::Triangle,
             fill_hit_test: Default::default(),
             fill_visible_only: default_fill_visible_only(),
@@ -1006,7 +1010,7 @@ impl Session {
                 opacity: stroke.stroke.settings.opacity,
                 erase: stroke.erase,
                 values: stroke.values.clone(),
-                mask_value: self.tool.mask_value,
+                mask_gray: self.mask_gray(),
                 stencil: stroke.stencil.clone(),
                 carried_mask: stroke.canvas.pickup.as_ref().and_then(|pickup| pickup.mask_values()).cloned(),
                 carried: stroke.canvas.pickup.as_ref().map(|pickup| pickup.values.clone()).unwrap_or_default(),

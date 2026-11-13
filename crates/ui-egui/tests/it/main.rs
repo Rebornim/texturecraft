@@ -52,6 +52,7 @@ mod levels_editor;
 mod log_panel_680;
 mod mask_export;
 mod mask_fill_rows;
+mod mask_paint_grayscale;
 mod mask_value_swap;
 mod named_layouts;
 mod nav_buttons;

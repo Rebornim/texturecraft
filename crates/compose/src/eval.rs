@@ -12,8 +12,9 @@ use rayon::prelude::*;
 use texturecraft_core::{
     AnisotropicKuwahara, BakedMap, Bevel, BevelSmooth, BlendMode, BlockScales, Channel, ChannelKind, ColorMatch, CompareSource, ContentsOffset,
     CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter, Filtering, Generator, GeneratorKind, HeightMask, HeightToNormal, HighpassSpace,
-    ImageInput, Layer, LayerId, LayerKind, Mask, MaskBackground, MaskOutline, Mirror, NormalFormat, Project, Projection, Sampling, ShapeCrop, Source,
-    SourceColorMode, SourceSlopeBlur, SourceWarp, StylizedLighting, TargetColorMode, TextureSet, TileGrid, blend1, blend3, lum, mix3, per_unit, posterize,
+    ImageInput, Layer, LayerId, LayerKind, Mask, MaskBackground, MaskOutline, Mirror, NormalFormat, Project, Projection, RepeatMode, Sampling, ShapeCrop,
+    Source, SourceColorMode, SourceSlopeBlur, SourceWarp, StylizedLighting, TargetColorMode, TextureSet, TileGrid, TileTransform, blend1, blend3, lum, mix3,
+    per_unit, posterize,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, Surface, UvGBuffer};
@@ -323,6 +324,8 @@ enum Op {
     Shadow { offset: [i32; 2] },
     /// Each UV tile's texels read from where `mirror` sends them in their tile (`block` texels across the set's atlas blocks)
     Mirror { mirror: Mirror, block: u32 },
+    /// Each UV tile's texels read from where `transform` sends them, repeating round the tile or empty past it
+    Transform { transform: TileTransform, block: u32 },
     /// A band along the edge of the shapes past a threshold, from the box blur of the shapes
     Outline(MaskOutline),
     /// Drawn from the distance to the shapes' edge (see [`distance_filter`])
@@ -378,6 +381,10 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
         }
         // A mirror reads anywhere in its UV tile
         EffectKind::Filter(Filter::Mirror(mirror)) => Some((index, res as f32, Op::Mirror { mirror: *mirror, block: res })),
+        // A transform reads anywhere in its UV tile; one that changes nothing is skipped
+        EffectKind::Filter(Filter::Transform(transform)) if !transform.is_identity() => {
+            Some((index, res as f32, Op::Transform { transform: *transform, block: res }))
+        }
         // Three box passes reach the band's width
         EffectKind::Filter(Filter::MaskOutline(outline)) => Some((index, (outline.width * res as f32 / 3.0).max(0.5), Op::Outline(*outline))),
         // Three box passes' reach covers the distance and its smoothing
@@ -571,6 +578,7 @@ fn gather(
                 Op::Mirror { mirror, block } => {
                     mirror_texel(&mirror, (x, y), (block, res), comps, orig.get((row * wu + col) * comps + comps - 1), &mut acc, &sample)
                 }
+                Op::Transform { transform, block } => transform_texel(&transform, (x, y), (block, res), &mut acc, &sample),
                 Op::SourceWarp(warp) => warp_texel(&warp, (x, y), (res, comps), &mut acc, (&sample, &input)),
                 Op::SourceSlopeBlur(slope) => slope_texel(&slope, (x, y), (res, comps), &mut acc, (&sample, &input)),
                 Op::HeightToNormal(filter) => {
@@ -943,6 +951,47 @@ fn mirror_texel(
     // Whole texels, so an even mirror copies texels exactly
     let at = |origin: f32, along: f32| origin + (along * size - 0.5).round().clamp(0.0, size - 1.0);
     sample(at(origin_x, u), at(origin_y, v), acc);
+}
+
+/// Transform `transform` at texel `(x, y)` into `acc`: bilinear between the four texels round where it reads in its UV tile (`res`
+/// texels from its `block`'s top left), each wrapped round the tile; where it does not repeat, a read past the tile counts as empty
+fn transform_texel(transform: &TileTransform, (x, y): (f32, f32), (block, res): (u32, u32), acc: &mut [f32; 5], sample: &dyn Fn(f32, f32, &mut [f32; 5])) {
+    let (block, size) = (block.max(1) as f32, res.max(1) as f32);
+    let (origin_x, origin_y) = ((x / block).floor() * block, (y / block).floor() * block);
+    let (local_x, local_y) = (x - origin_x, y - origin_y);
+    if local_x >= size || local_y >= size {
+        return;
+    }
+    let (columns, shift) = transform.affine();
+    let uv = [(local_x + 0.5) / size, (local_y + 0.5) / size];
+    // Texel space of the tile, centres at whole numbers
+    let at = [0, 1].map(|axis| (columns[0][axis] * uv[0] + columns[1][axis] * uv[1] + shift[axis]) * size - 0.5);
+    if !at.iter().all(|a| a.is_finite()) {
+        return;
+    }
+    let (base_x, base_y) = (at[0].floor(), at[1].floor());
+    let (tx, ty) = (at[0] - base_x, at[1] - base_y);
+    let repeat = transform.repeat == RepeatMode::HorizontallyAndVertically;
+    let mut total = [0.0f32; 5];
+    for (dx, dy, k) in [(0.0, 0.0, (1.0 - tx) * (1.0 - ty)), (1.0, 0.0, tx * (1.0 - ty)), (0.0, 1.0, (1.0 - tx) * ty), (1.0, 1.0, tx * ty)] {
+        if k <= 0.0 {
+            continue;
+        }
+        let (cx, cy) = (base_x + dx, base_y + dy);
+        let inside = (0.0..size).contains(&cx) && (0.0..size).contains(&cy);
+        if !repeat && !inside {
+            // Empty: no value, full weight
+            total[4] += k;
+            continue;
+        }
+        // One whole texel: the sample's own weights, so this matches its bilinear read
+        let mut one = [0.0f32; 5];
+        sample(origin_x + cx.rem_euclid(size), origin_y + cy.rem_euclid(size), &mut one);
+        for (slot, value) in total.iter_mut().zip(one) {
+            *slot += value * k;
+        }
+    }
+    *acc = total;
 }
 
 /// Fixed-point scale of the blur. Integer running sums make a texel's result independent of

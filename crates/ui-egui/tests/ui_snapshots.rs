@@ -2009,6 +2009,8 @@ fn shape_filter_snapshots() {
         ("warp", add("warp", json!({}))),
         ("warp-directional", add("warp", json!({"warpMode": "directional"}))),
         ("warp-multi-directional", add("warp", json!({"warpMode": "multiDirectional"}))),
+        ("transform", add("transform", json!({"scaling": [2.0, 2.0], "offset": [0.25, 0.0], "rotation": 30.0}))),
+        ("transform-plain", add("transform", json!({"repeatMode": "none", "scaling": [1.5, 1.5], "tileSafeRotation": false, "rotation": 20.0}))),
     ];
     execute(&mut session, "layer.select", &json!({"layer": layer})).unwrap();
     session.target = StackTarget::Effect(effects[0].1);
@@ -2050,10 +2052,26 @@ fn shape_filter_snapshots() {
     save(&mut harness, &output_dir, "filter-warp-blending-list");
     harness.key_press(egui::Key::Escape);
     harness.run_steps(4);
+
+    // Transform's Flip mode and Repeat mode lists, open with a choice hovered
+    harness.state_mut().session.target = StackTarget::Effect(shown("transform"));
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::ComboBox, "None").click();
+    harness.run_steps(4);
+    harness.hover_at(harness.get_by_label("Vertically").rect().center());
+    harness.run_steps(2);
+    save(&mut harness, &output_dir, "filter-transform-flip-list");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Horizontally & Vertically").click();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "filter-transform-repeat-list");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(4);
     if std::env::var_os("TC_UI_THEMES").is_some() {
         for (brightness, theme) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
             harness.state_mut().ui.prefs.brightness = brightness;
-            for name in ["mirror-axis-x", "mask-outline", "bevel", "bevel-smooth", "warp-multi-directional"] {
+            for name in ["mirror-axis-x", "mask-outline", "bevel", "bevel-smooth", "warp-multi-directional", "transform"] {
                 harness.state_mut().session.target = StackTarget::Effect(shown(name));
                 harness.run_steps(6);
                 save(&mut harness, &output_dir, &format!("filter-{name}-{theme}"));

@@ -64,6 +64,7 @@ pub mod swatch_cmds;
 pub mod template_cmds;
 pub mod text_cmds;
 pub mod thumbs;
+mod tile_transform_params;
 pub mod tool_cmds;
 mod triangle_partition;
 mod uv_stroke_state;

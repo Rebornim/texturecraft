@@ -47,5 +47,6 @@ mod filter_light;
 mod filter_shape;
 mod filter_simple;
 mod filter_stylize;
+mod filter_transform;
 mod swatches;
 mod symmetry;

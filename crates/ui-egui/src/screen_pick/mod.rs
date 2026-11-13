@@ -13,6 +13,8 @@ mod portal;
 mod windows_hook;
 #[cfg(windows)]
 mod windows_pointer;
+#[cfg(windows)]
+mod windows_trace;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod x11_grab;
 #[cfg(all(unix, not(target_os = "macos")))]

@@ -1763,7 +1763,7 @@ pub(crate) fn properties_contents(app: &mut TextureCraftApp, ui: &mut Ui) {
         _ if tool == Tool::PolygonFill && tool_usable => legacy_body(ui, |ui| polygon_fill_properties(app, ui)),
         (Some(layer), StackTarget::Effect(effect)) if mask_fill_of(&app.session.doc.project, effect).is_some() => mask_fill_properties(app, ui, layer, effect),
         (Some(layer), StackTarget::Effect(effect)) => {
-            legacy_body(ui, |ui| effect_properties(app, ui, layer, effect));
+            effect_properties(app, ui, layer, effect);
             let painted = app.session.doc.project.effect(effect).is_some_and(|(_, effect)| matches!(effect.kind, EffectKind::Paint | EffectKind::Path(_)));
             if painted && grayscale_tab_open(app) {
                 crate::mask_paint_panel::grayscale_sheet(app, ui);
@@ -2864,8 +2864,9 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, effe
 
     let id = effect_id.0;
 
+    // Property sheets keep the panel's own edges; only the rows not yet laid out by one get the legacy margin
     match &effect.kind {
-        EffectKind::Generator(generator) => crate::generator_panel::generator_properties(app, ui, layer.id, id, generator),
+        EffectKind::Generator(generator) => legacy_body(ui, |ui| crate::generator_panel::generator_properties(app, ui, layer.id, id, generator)),
         EffectKind::Levels(levels) => crate::levels_properties::levels_properties(app, ui, layer, effect_id, levels),
         EffectKind::Fill { source, projection, .. } => legacy_body(ui, |ui| {
             ui.label(caption(tr("Fill")));
@@ -2934,7 +2935,7 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, effe
             });
         }
         EffectKind::Anchor => crate::anchor_properties::anchor_properties(app, ui, effect_id, &effect.name),
-        EffectKind::Paint => {
+        EffectKind::Paint => legacy_body(ui, |ui| {
             let hint = if layer.content_effects.iter().any(|content| content.id == effect_id) {
                 tr("Paint on the mesh to edit the layer content.")
             } else {
@@ -2944,8 +2945,8 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, effe
             if app.session.tool_usable(app.session.tool.tool) {
                 tool_properties(app, ui);
             }
-        }
-        EffectKind::Path(paths) => {
+        }),
+        EffectKind::Path(paths) => legacy_body(ui, |ui| {
             ui.label(
                 RichText::new(tr("Paths stay editable: pick one to move its points or change its brush and material, and the sublayer repaints at once. Add paths with the Path tool."))
                     .color(tokens.text_dim),
@@ -2969,7 +2970,7 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, effe
             if app.session.tool_usable(app.session.tool.tool) {
                 tool_properties(app, ui);
             }
-        }
+        }),
         EffectKind::Filter(filter) => crate::filter_properties::filter_properties(app, ui, effect_id, filter),
         EffectKind::ColorSelection(selection) => crate::color_selection_editor::color_selection_properties(app, ui, effect_id, selection),
         EffectKind::Compare { op, value, tolerance, left, right, channel, hardness } => {

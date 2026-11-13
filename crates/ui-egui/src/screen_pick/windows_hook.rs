@@ -1,5 +1,6 @@
 //! Windows: a low-level mouse hook on its own thread takes a left click outside the app's windows (the click never reaches the
-//! window under it) and reads the one pixel under it from the desktop through GDI; clicks on the app's own windows pass on
+//! window under it) and reads the one pixel under it from the desktop through GDI; clicks on the app's own windows pass on. The
+//! system pointer is the eyedropper until the wait ends
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
@@ -36,6 +37,8 @@ pub(super) fn run(shared: &Arc<PickShared>, outcomes: Sender<PickOutcome>, ctx: 
     if let Ok(mut hook) = HOOK.lock() {
         *hook = Some(HookState { generation, shared: Arc::clone(shared), outcomes, ctx: ctx.clone(), pressed: false, done: false });
     }
+    // Before the hook: while it is in place this thread must keep reading messages, or every mouse move on the desktop stalls
+    let _pointer = super::windows_pointer::SystemPointer::show();
     let Ok(module) = HINSTANCE::GetModuleHandle(None) else { return finish(&unavailable, &ctx) };
     let Ok(mut hook) = HHOOK::SetWindowsHookEx(co::WH::MOUSE_LL, mouse_hook, Some(&module), None) else {
         return finish(&unavailable, &ctx);

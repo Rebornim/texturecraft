@@ -535,3 +535,27 @@ fn a_click_outside_the_app_hands_its_screen_colour_to_the_bar_and_a_cancelled_or
     assert!(harness.state().picking_color.is_none() && harness.state().screen_pick.is_none(), "the click ends the pick");
     assert_eq!(harness.state().session.history_labels().len(), undo_before + 1, "one undo step");
 }
+
+#[test]
+fn an_armed_eyedropper_is_the_pointer_over_the_whole_window_and_the_app_losing_the_focus_ends_it() {
+    let (mut harness, layer) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
+    let before = base_color(&harness, layer);
+    click(&mut harness, Role::Button, "Base color");
+    harness.get_all_by_role_and_label(Role::Button, "Pick color").next().unwrap().click();
+    harness.run_steps(SETTLE_FRAMES);
+    let bar = harness.state().picking_color.expect("the eyedropper waits for a click");
+
+    harness.get_by_role_and_label(Role::Tab, "Material").hover();
+    harness.run_steps(SETTLE_FRAMES);
+    let pointer = harness.output().platform_output.cursor_icon;
+    assert_eq!(pointer, egui::CursorIcon::None, "over the Properties panel, not only the 3D view, the drawn eyedropper is the pointer");
+
+    harness.state_mut().screen_pick = Some(ScreenPick::waiting(bar));
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(harness.state().picking_color.is_some(), "a focused app keeps waiting");
+    harness.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().focused = Some(false);
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(harness.state().picking_color.is_none() && harness.state().screen_pick.is_none(), "another app came forward: the pick ends");
+    assert_eq!(base_color(&harness, layer), before, "nothing changes");
+    assert_ne!(harness.output().platform_output.cursor_icon, egui::CursorIcon::None, "the pointer is the user's again");
+}

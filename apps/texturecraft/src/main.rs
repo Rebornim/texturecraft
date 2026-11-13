@@ -181,6 +181,11 @@ fn main() {
     if let Some(result) = craft_update::self_update::finish(&texturecraft_ui_egui::UPDATE_APP, &std::env::args_os().skip(1).collect::<Vec<_>>()) {
         std::process::exit(i32::from(result.is_err()));
     }
+    // Windows: the eyedropper's pointer keeper (screen_pick) is a copy of this program started with its own argument
+    #[cfg(windows)]
+    if std::env::args_os().nth(1).is_some_and(|arg| arg == texturecraft_ui_egui::screen_pick::KEEPER_ARG) {
+        std::process::exit(texturecraft_ui_egui::screen_pick::keep_pointer());
+    }
     let args = match parse_args() {
         Ok(Some(a)) => a,
         Ok(None) => return,

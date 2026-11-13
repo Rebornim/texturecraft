@@ -14,10 +14,12 @@ use crate::tile_picture::TilePicture;
 const COLUMNS: usize = 4;
 /// One row of tiles: the picture, two lines of name and air
 const ROW_HEIGHT: f32 = 86.0;
-/// The grid's height, fixed so the popup keeps its place and size while searching or switching tabs; less only where the window ends sooner
+/// The grid's height, fixed so the popup keeps its place and size while searching or switching tabs; less only in a window too short for it
 const GRID_HEIGHT: f32 = 4.0 * ROW_HEIGHT;
-/// Room kept between the popup's shadow and the window's bottom edge
+/// Room kept between the popup's shadow and the window's top or bottom edge
 const WINDOW_MARGIN: f32 = 8.0;
+/// Where the popup goes when it doesn't fit under its slot: above it, then flush with the slot's right edge below or above
+const HANG_FALLBACKS: [egui::RectAlign; 3] = [egui::RectAlign::TOP_START, egui::RectAlign::BOTTOM_END, egui::RectAlign::TOP_END];
 const TILE_GAP: f32 = 4.0;
 const PICTURE_SIZE: f32 = 52.0;
 const PICTURE_TOP: f32 = 6.0;
@@ -90,8 +92,8 @@ pub(crate) fn toggle(ctx: &egui::Context, popup_id: Id) {
     });
 }
 
-/// Draws picker `popup_id` under `slot`, at its width, while open and returns the id clicked; `tabs` runs only then.
-/// It opens on the tab holding `current`, scrolled to it when `reveal_current`, else at the top
+/// Draws picker `popup_id` under `slot` (above it where the window ends first) at its width while open, on the tab holding `current` (scrolled to it
+/// when `reveal_current`, else at the top); returns the id clicked, and runs `tabs` only while open
 pub(crate) fn show<K: Clone + PartialEq>(
     slot: &Response,
     popup_id: Id,
@@ -114,9 +116,9 @@ pub(crate) fn show<K: Clone + PartialEq>(
         spread: 0,
         color: SHADOW,
     });
-    // The picker always hangs under its slot, never over the row it edits: a short window gets a shorter grid
+    // Always its full size, under the slot or above it where the window ends first; only a window too short for it anywhere gets a shorter grid
     let head = if tabs.len() > 1 { STRIP_HEIGHT } else { 0.0 } + SEARCH_ROW;
-    let room = ctx.content_rect().bottom() - slot.rect.bottom() - head - BOTTOM - 2.0 * BORDER - WINDOW_MARGIN;
+    let room = ctx.content_rect().height() - head - BOTTOM - 2.0 * BORDER - 2.0 * WINDOW_MARGIN;
     let grid_height = room.clamp(ROW_HEIGHT, GRID_HEIGHT);
     let mut picked = None;
     egui::Popup::from_response(slot)
@@ -124,7 +126,7 @@ pub(crate) fn show<K: Clone + PartialEq>(
         .open_memory(None)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .align(egui::RectAlign::BOTTOM_START)
-        .align_alternatives(&[])
+        .align_alternatives(&HANG_FALLBACKS)
         .gap(1.0)
         .width(width)
         .frame(frame)

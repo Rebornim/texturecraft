@@ -3,7 +3,7 @@
 use egui::accesskit::Role;
 use egui::{Event, Modifiers, PointerButton, Pos2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::{Value, json};
 use texturecraft_engine::core::{BakedMap, EffectKind, LayerId, SelectionBackground};
 use texturecraft_engine::{StackTarget, ViewMode, execute};
@@ -13,6 +13,8 @@ const FIRST: [f32; 3] = [200.0 / 255.0, 0.0, 0.0];
 const SECOND: [f32; 3] = [10.0 / 255.0, 1.0, 0.0];
 const THIRD: [f32; 3] = [30.0 / 255.0, 0.0, 1.0];
 const ID_PART: [u8; 3] = [90, 160, 220];
+/// Most air between a control and the text of its tooltip above it: the tooltip's gap plus its frame's margin
+const TIP_GAP: f32 = 16.0;
 
 /// An ID map of one color, as a PNG
 fn id_map_png() -> Vec<u8> {
@@ -367,4 +369,33 @@ fn the_id_mask_slot_picks_a_texture_and_its_x_goes_back_to_the_mesh_map() {
     click_at(&mut harness, clear);
     assert_eq!(selection(&harness, effect).id_map, None);
     assert!(harness.query_by_role_and_label(Role::Button, "Clear").is_none(), "the mesh map has no ×");
+}
+
+#[test]
+fn the_invert_tooltip_shows_right_above_its_button() {
+    let (mut harness, _) = app_with_color_selection(true);
+    let invert = harness.get_by_role_and_label(Role::Button, "Invert").rect();
+    harness.hover_at(invert.center());
+    // Past the tooltip delay
+    harness.run_steps(60);
+    let tip =
+        harness.get_all_by_label("Invert").find(|node| node.accesskit_node().role() == Role::Label).map(|node| node.rect()).expect("the button's tooltip");
+    assert!(tip.bottom() <= invert.top() && invert.top() - tip.bottom() <= TIP_GAP, "the tooltip sits right above the button: {tip:?} {invert:?}");
+    assert!(tip.right() >= invert.left() && tip.left() <= invert.right(), "the tooltip overlaps the button's columns, not off to its side: {tip:?} {invert:?}");
+}
+
+#[test]
+#[ignore = "requires a GPU adapter; set TC_UI_SNAPSHOTS to save the rendered view"]
+fn invert_tooltip_snapshot() {
+    let (session, _) = color_selection_session(true);
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 960.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.run_steps(4);
+    let invert = harness.get_by_role_and_label(Role::Button, "Invert").rect();
+    harness.hover_at(invert.center());
+    harness.run_steps(60);
+    let image = harness.render().unwrap();
+    if let Some(directory) = std::env::var_os("TC_UI_SNAPSHOTS") {
+        image.save(std::path::Path::new(&directory).join("invert-tooltip.png")).unwrap();
+    }
 }

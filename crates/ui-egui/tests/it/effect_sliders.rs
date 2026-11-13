@@ -2,10 +2,12 @@
 
 use egui::accesskit::Role;
 use egui_kittest::Harness;
-use egui_kittest::kittest::{Queryable, by};
+use egui_kittest::kittest::{NodeT, Queryable, by};
 use serde_json::json;
 use texturecraft_engine::core::{EffectKind, LayerId};
 use texturecraft_ui_egui::TextureCraftApp;
+
+use crate::levels_editor::affects_list;
 
 /// The sample session with its first generator effect selected, and that effect's id.
 fn selected_generator() -> (Harness<'static, TextureCraftApp>, LayerId) {
@@ -80,12 +82,6 @@ fn dragging_a_generator_slider_applies_live_as_one_undo_step() {
     assert_eq!(harness.state().session.history_labels().len(), steps + 1, "one undo step for the drag");
 }
 
-/// The combo box in the row of the levels editor's Reset button.
-fn channel_picker<'a>(harness: &'a Harness<'_, TextureCraftApp>) -> egui_kittest::Node<'a> {
-    let row = harness.get_by_label("Reset").rect().center().y;
-    harness.get_all(by().role(Role::ComboBox)).find(|node| (node.rect().center().y - row).abs() < 4.0).unwrap()
-}
-
 /// A content levels effect offers a channel for its histogram; picking one keeps it selected.
 #[test]
 fn content_levels_pick_the_histogram_channel() {
@@ -94,12 +90,13 @@ fn content_levels_pick_the_histogram_channel() {
     texturecraft_engine::execute(&mut session, "effect.add.levels", &json!({"target": "content"})).unwrap();
     let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).build_eframe(|creation_context| TextureCraftApp::new(creation_context, session));
     harness.run_steps(4);
-    assert_eq!(channel_picker(&harness).value().as_deref(), Some("Base color"), "the layer's first channel");
-    channel_picker(&harness).click();
+    let affects = |harness: &Harness<'_, TextureCraftApp>| affects_list(harness).and_then(|list| list.accesskit_node().label());
+    assert_eq!(affects(&harness).as_deref(), Some("Base color"), "the layer's first channel");
+    affects_list(&harness).unwrap().click();
     harness.run_steps(2);
-    harness.get_by_label("Roughness").click();
+    harness.get_by(|node| node.role() == Role::ListBoxOption && node.label().as_deref() == Some("Roughness")).click();
     harness.run_steps(3);
-    assert_eq!(channel_picker(&harness).value().as_deref(), Some("Roughness"), "the picked channel stays");
+    assert_eq!(affects(&harness).as_deref(), Some("Roughness"), "the picked channel stays");
 }
 
 #[test]

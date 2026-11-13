@@ -7,9 +7,12 @@ use crate::eval::{direction, texel_noise};
 /// Bilinear sample at an absolute texel position into an accumulator (components, then weight), as [`crate::eval`]'s gather reads
 type Sample<'a> = &'a dyn Fn(f32, f32, &mut [f32; 5]);
 
+/// The warp's Custom Noise image input at an absolute texel position; None where the values it filters cover nothing
+type Input<'a> = &'a dyn Fn(f32, f32) -> Option<f32>;
+
 /// Warp `warp` at texel `(x, y)` (`res` texels across a UV tile, `comps` values a texel) into `acc`: where its source sends it, or those reads blended
-pub(crate) fn warp_texel(warp: &SourceWarp, (x, y): (f32, f32), (res, comps): (u32, usize), acc: &mut [f32; 5], sample: Sample<'_>) {
-    let source = Source { warp, res, comps, sample };
+pub(crate) fn warp_texel(warp: &SourceWarp, (x, y): (f32, f32), (res, comps): (u32, usize), acc: &mut [f32; 5], (sample, input): (Sample<'_>, Input<'_>)) {
+    let source = Source { warp, res, comps, sample, input };
     let reach = warp.move_texels(res);
     if warp.mode == WarpMode::Warp {
         let probe = SourceWarp::probe_texels(res);
@@ -66,6 +69,7 @@ struct Source<'a> {
     res: u32,
     comps: usize,
     sample: Sample<'a>,
+    input: Input<'a>,
 }
 
 impl Source<'_> {
@@ -98,8 +102,8 @@ impl Source<'_> {
                     _ => None,
                 }
             }
-            // The image input is not linked yet: flat mid gray, so nothing moves
-            WarpSourceMode::CustomNoise => Some(0.5),
+            // Mid gray (its default) moves nothing
+            WarpSourceMode::CustomNoise => (self.input)(x, y),
         }
     }
 }

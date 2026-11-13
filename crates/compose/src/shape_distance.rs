@@ -14,8 +14,17 @@ const EDGE_OFFSET: f32 = 0.5;
 /// What a texel becomes from its index, whether it is inside the shapes and its own value
 type TexelResult<'a> = dyn Fn(usize, bool, f32) -> f32 + Sync + 'a;
 
-/// Lay distance filter `filter` over premultiplied `data` (`width` × `height` texels of `comps`; content's shapes from its luminance), `res` texels across a UV tile, mixed in by `opacity`
-pub(crate) fn distance_filter(data: &mut [f32], cover: &[f32], comps: usize, (width, height): (usize, usize), filter: &Filter, res: u32, opacity: f32) {
+/// Lay distance filter `filter` over premultiplied `data` (`width` × `height` texels of `comps`; content's shapes from its luminance), `res` texels across a UV tile, mixed in by `opacity`; its Distance Map `grays` (0..1 a texel) scales the distance texel by texel
+pub(crate) fn distance_filter(
+    data: &mut [f32],
+    (cover, grays): (&[f32], &[f32]),
+    comps: usize,
+    (width, height): (usize, usize),
+    filter: &Filter,
+    res: u32,
+    opacity: f32,
+) {
+    let map = |texel: usize| grays.get(texel).copied().unwrap_or(1.0);
     let value = |pixel: &[f32]| match pixel {
         [r, g, b, alpha] if *alpha > 1e-5 => lum([r / alpha, g / alpha, b / alpha]),
         [value] => *value,
@@ -55,7 +64,8 @@ pub(crate) fn distance_filter(data: &mut [f32], cover: &[f32], comps: usize, (wi
             let inside = shapes(&|value| smooth.inside(value));
             let edge = edge_distances(&inside, (width, height), false);
             let reach = smooth.reach(res);
-            let mut ramp: Vec<f32> = inside.par_iter().zip(edge.par_iter()).map(|(inside, edge)| smooth.value(*inside, *edge, reach)).collect();
+            let mut ramp: Vec<f32> =
+                inside.par_iter().zip(edge.par_iter()).enumerate().map(|(texel, (inside, edge))| smooth.value(*inside, *edge, reach * map(texel))).collect();
             smoothed(&mut ramp, smooth.smoothing_texels(res));
             (inside, Box::new(move |texel, _, value| ramp.get(texel).copied().unwrap_or(value)))
         }
@@ -63,7 +73,15 @@ pub(crate) fn distance_filter(data: &mut [f32], cover: &[f32], comps: usize, (wi
             let inside = shapes(&|value| value >= texturecraft_core::DirectionalDistance::EDGE);
             let along = trail_distances(&inside, (width, height), crate::eval::direction(trail.angle), trail.reach(res));
             let trail = *trail;
-            (inside, Box::new(move |texel, _, _| trail.value(along.get(texel).copied().flatten())))
+            // A share of the full reach is a larger share of a texel's shorter one; no trail where the map is black, the shapes stay
+            let shortened = move |texel: usize| {
+                along.get(texel).copied().flatten().and_then(|along| match map(texel) {
+                    _ if along <= 0.0 => Some(0.0),
+                    gray if gray > 0.0 => Some(along / gray),
+                    _ => None,
+                })
+            };
+            (inside, Box::new(move |texel, _, _| trail.value(shortened(texel).filter(|along| *along <= 1.0))))
         }
         _ => return,
     };

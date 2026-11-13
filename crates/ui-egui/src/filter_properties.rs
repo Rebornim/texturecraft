@@ -1,9 +1,9 @@
-//! The Filter effect's properties: FILTER over the channel pills (content), the filter card and its Parameters band
+//! The Filter effect's properties: FILTER over the channel pills (content), the filter card, its Parameters, Image inputs and Attributes bands
 
 use egui::{Painter, Rect, Stroke, StrokeKind, Ui};
 use serde_json::{Value, json};
 use texturecraft_engine::core::{
-    Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, CurvePreset, DirectionalLight, EffectKind, Filter, GrayscaleMode, LayerId,
+    Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, CurvePreset, DirectionalLight, EffectKind, Filter, GrayscaleMode, ImageInput, LayerId,
     LightingOutput, MaskOutline, Mirror, MirrorCorner, MirrorMode, OutlinePosition, SourceWarp, StylizedLighting, ThresholdMode, WarpBlending, WarpMode,
     WarpSourceMode,
 };
@@ -17,6 +17,10 @@ use crate::theme::{AXIS_COLORS, OPPOSITE_COLORS, Tokens};
 use crate::widgets::color_swatch;
 
 const SWATCH_WIDTH: f32 = 36.0;
+
+/// Where TextureCraft's filters come from: the repository, without its scheme
+const AUTHOR_URL: &str = "github.com/storytold/texturecraft";
+
 /// The widest Divider chip text: the chip keeps one width whatever it shows
 const WIDEST_DIVIDER: &str = "÷1000";
 
@@ -42,7 +46,40 @@ pub(crate) fn filter_properties(app: &mut TextureCraftApp, ui: &mut Ui, effect: 
         if band.open {
             parameters(app, sheet, effect.0, filter);
         }
+        let inputs: Vec<ImageInput> = ImageInput::of(filter).into_iter().filter(|input| !input.by_mode).collect();
+        if !inputs.is_empty() && sheet.band(tr("Image inputs"), true, None, None).open {
+            for input in inputs {
+                input_slot(app, sheet, effect, input, false);
+            }
+        }
+        if sheet.band(tr("Attributes"), false, None, None).open {
+            attributes(app, sheet, filter);
+        }
     });
+}
+
+/// The filter's read-only Attributes: what it does, who made it, the words it is found by and the size it works at
+fn attributes(app: &TextureCraftApp, sheet: &mut PropertySheet<'_>, filter: &Filter) {
+    let about = find(filter.label()).and_then(|def| def.about());
+    if let Some(about) = about {
+        sheet.attribute_text(tr("Description"), about.description);
+    }
+    sheet.attribute(tr("Category"), tr("Filter"));
+    sheet.attribute(tr("Author"), "TextureCraft");
+    sheet.attribute(tr("Author URL"), AUTHOR_URL);
+    if let Some(about) = about {
+        sheet.attribute(tr("Tags"), &about.tags.join(", "));
+    }
+    if let Ok(texture_set) = app.session.doc.project.texture_set(app.session.ts()) {
+        sheet.attribute(tr("Size"), &format!("{0} × {0}", texture_set.resolution));
+    }
+}
+
+/// The slot card of image input `input` of filter effect `effect` (its row only, inside the card open now, when `in_card`): the source it reads, picked like a mask fill's
+fn input_slot(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect: LayerId, input: ImageInput, in_card: bool) {
+    let Some((reader, source)) = app.session.doc.project.effect(effect).map(|(owner, found)| (owner, found.input(&input))) else { return };
+    let anchors = crate::dock::anchors_below(app, reader);
+    crate::fill_material_panel::source_card(app, sheet, source, &json!({"effect": effect.0}), crate::source_slot::SourceSlot::Input(input), &anchors, in_card);
 }
 
 /// The library defaults of `filter` (None for an empty filter)
@@ -333,6 +370,9 @@ fn source_warp(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64
         let name = |mode: WarpSourceMode| tr(mode.label()).to_owned();
         if let (Some(picked), _) = sheet.dropdown(tr("Source Mode"), source.mode, &WarpSourceMode::ALL, name, None) {
             set(app, "sourceMode", json!(picked.id()), false);
+        }
+        if source.mode == WarpSourceMode::CustomNoise {
+            input_slot(app, sheet, LayerId(id), ImageInput::CUSTOM_NOISE, true);
         }
         slider_rows(
             app,

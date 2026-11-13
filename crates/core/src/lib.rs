@@ -28,6 +28,7 @@ pub mod directional_light;
 pub mod fill_symmetry;
 pub mod gradient_input;
 pub mod grayscale_mode;
+pub mod image_input;
 pub mod layer;
 pub mod lighting_output;
 pub mod mask_outline;
@@ -77,6 +78,7 @@ pub use directional_light::DirectionalLight;
 pub use fill_symmetry::FillSymmetry;
 pub use gradient_input::GradientInput;
 pub use grayscale_mode::GrayscaleMode;
+pub use image_input::ImageInput;
 pub use layer::{
     ChannelBlend, CompareOp, CurvatureDetail, CurvatureMode, Decal, Effect, EffectKind, Fill, Filter, Filtering, Generator, GeneratorKind, HeightMask, Layer,
     LayerId, LayerKind, Levels, LinkParam, LinkPreset, Mask, MaskBackground, MaterialLink, PathShape, Procedural, ProceduralKind, Projection, Sampling,

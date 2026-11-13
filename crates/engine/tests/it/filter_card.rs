@@ -1,4 +1,4 @@
-//! The Filter effect card: an empty filter, its content channels switched on and off, Intensity's divider and Restore defaults
+//! The Filter effect card: an empty filter, its content channels switched on and off, Intensity's divider, Restore defaults and the Attributes it lists
 
 use serde_json::{Value, json};
 use texturecraft_engine::core::{Channel, EffectKind, Filter, LayerId, SourceWarp};
@@ -140,4 +140,16 @@ fn restore_defaults_puts_the_filters_parameters_back() {
     assert_eq!(execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": empty.0})).unwrap(), json!({"changed": false}));
     let fill = execute(&mut s, "effect.add.fill", &json!({"target": "content"})).unwrap()["effect"].as_u64().unwrap();
     assert!(execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": fill})).is_err());
+}
+
+#[test]
+fn filter_list_describes_and_tags_every_filter() {
+    let mut s = session();
+    let listed = execute(&mut s, "filter.list", &Value::Null).unwrap();
+    for def in listed.as_array().unwrap() {
+        assert!(def["description"].as_str().is_some_and(|text| !text.is_empty()), "{def}");
+        assert!(def["tags"].as_array().is_some_and(|tags| !tags.is_empty()), "{def}");
+    }
+    let blur = listed.as_array().unwrap().iter().find(|def| def["id"] == "blur").unwrap();
+    assert_eq!(blur["tags"], json!(["blur", "soften"]));
 }

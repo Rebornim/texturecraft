@@ -12,7 +12,7 @@ use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 
 /// The app with library filter `filter` in a fill layer's mask, selected so Properties shows it
-fn app_with(filter: &str) -> (Harness<'static, TextureCraftApp>, LayerId) {
+pub(crate) fn app_with(filter: &str) -> (Harness<'static, TextureCraftApp>, LayerId) {
     let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
     let layer = execute(&mut session, "layer.add.fill", &Value::Null).unwrap();
     execute(&mut session, "mask.add.white", &json!({"layer": layer["layer"]})).unwrap();
@@ -28,7 +28,7 @@ fn app_with(filter: &str) -> (Harness<'static, TextureCraftApp>, LayerId) {
 }
 
 /// A press and release of the primary button at `pos`, as the pointer does it
-fn click_at(harness: &mut Harness<'_, TextureCraftApp>, pos: egui::Pos2) {
+pub(crate) fn click_at(harness: &mut Harness<'_, TextureCraftApp>, pos: egui::Pos2) {
     let modifiers = egui::Modifiers::NONE;
     harness.event(egui::Event::PointerMoved(pos));
     harness.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers });
@@ -111,7 +111,7 @@ fn mask_outline_rows_set_the_band() {
 }
 
 /// Pick `option` of a setting shown as a boxed switch where its words fit, or as a dropdown showing `current` where they don't
-fn pick(harness: &mut Harness<'_, TextureCraftApp>, current: &str, option: &str) {
+pub(crate) fn pick(harness: &mut Harness<'_, TextureCraftApp>, current: &str, option: &str) {
     if let Some(segment) = harness.query_by_role_and_label(Role::RadioButton, option).map(|node| node.rect()) {
         click_at(harness, segment.center());
     } else {

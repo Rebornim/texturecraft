@@ -59,6 +59,9 @@ fn effect_json(session: &Session, effect: &Effect, content: bool) -> Value {
     if !effect.off_channels.is_empty() {
         out["offChannels"] = json!(effect.off_channels.iter().map(|channel| channel.id()).collect::<Vec<_>>());
     }
+    if !effect.inputs.is_empty() {
+        out["inputs"] = Value::Object(effect.inputs.iter().map(|(id, source)| (id.clone(), source_json(source))).collect());
+    }
     let mask_tiles = || session.doc.pixels.masks.get(&effect.id).map_or(0, |image| image.allocated_count());
     let content_tiles = || session.doc.pixels.layers.iter().filter(|((id, _), _)| *id == effect.id).map(|(_, image)| image.allocated_count()).sum::<usize>();
 

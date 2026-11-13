@@ -53,6 +53,16 @@ impl PropertySheet<'_> {
     ) -> SlotResponse {
         self.open_card();
         self.space(SLOT_CARD_TOP);
+        self.slot_row(thumbnail, name, source, on, clear, reset)
+    }
+
+    /// [`Self::slot`]'s row inside the card open now (an input a mode adds, under that mode), not a card of its own
+    pub(crate) fn slot_in_card(&mut self, thumbnail: &dyn Fn(&Painter, Rect), name: &str, source: &str, clear: bool) -> SlotResponse {
+        self.slot_row(thumbnail, name, source, None, clear, false)
+    }
+
+    /// A slot row: thumbnail, name over source, then ⟲, × and the toggle on the right; the row opens the source list
+    fn slot_row(&mut self, thumbnail: &dyn Fn(&Painter, Rect), name: &str, source: &str, on: Option<&mut bool>, clear: bool, reset: bool) -> SlotResponse {
         let rect = self.take(SLOT_HEIGHT);
         let center_y = rect.top() + SLOT_HEIGHT / 2.0;
         let enabled = on.as_deref().copied().unwrap_or(true);

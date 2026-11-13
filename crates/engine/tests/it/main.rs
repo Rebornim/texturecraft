@@ -15,6 +15,7 @@ mod fill_alpha_source;
 mod fill_patterns;
 mod fill_projections;
 mod fill_sampling;
+mod filter_inputs;
 mod filter_swap;
 mod filters;
 mod folder_contents;

@@ -2046,6 +2046,94 @@ fn shape_filter_snapshots() {
 }
 
 #[test]
+#[ignore = "writes the filter image inputs (screen 22) to TC_UI_SNAPSHOTS; run with --ignored"]
+/// Screen 22: Bevel Smooth's Distance Map uniform, read from an anchor point and its picker open; Warp's Custom Noise from a pattern
+fn image_input_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::core::LayerId;
+    use texturecraft_engine::{StackTarget, execute};
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    execute(&mut session, "layer.add.fill", &json!({})).unwrap();
+    let anchor = execute(&mut session, "effect.add.anchor", &json!({"name": "Cavity Dirt mask"})).unwrap()["effect"].clone();
+    let layer = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "mask.add.white", &json!({"layer": layer.clone()})).unwrap();
+    let mut add = |filter: &str, settings: serde_json::Value, input: serde_json::Value| {
+        let params = json!({"layer": layer.clone(), "target": "mask", "filter": filter});
+        let effect = execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap();
+        let mut settings = settings;
+        settings["effect"] = json!(effect);
+        execute(&mut session, "effect.set", &settings).unwrap();
+        if !input.is_null() {
+            let mut input = input;
+            input["effect"] = json!(effect);
+            execute(&mut session, "layer.fill.set", &input).unwrap();
+        }
+        LayerId(effect)
+    };
+    let effects = [
+        ("bevel-smooth-uniform", add("bevelSmooth", json!({}), serde_json::Value::Null)),
+        ("bevel-smooth-anchor", add("bevelSmooth", json!({}), json!({"input": "distanceMap", "anchor": anchor}))),
+        ("warp-custom-noise", add("warp", json!({"sourceMode": "customNoise"}), json!({"input": "customNoise", "procedural": "clouds"}))),
+        ("blur-changed", add("blur", json!({"radius": 12.0, "wrap": true}), serde_json::Value::Null)),
+    ];
+    execute(&mut session, "layer.select", &json!({"layer": layer})).unwrap();
+    session.target = StackTarget::Effect(effects[0].1);
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 2200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    for (name, effect) in effects {
+        harness.state_mut().session.target = StackTarget::Effect(effect);
+        harness.run_steps(6);
+        save(&mut harness, &output_dir, &format!("filter-{name}"));
+    }
+    harness.state_mut().session.target = StackTarget::Effect(effects[0].1);
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Distance Map").click();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "filter-distance-map-picker");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(4);
+
+    // Blur with Attributes open, then its Parameters reset hovered (Restore defaults named over it)
+    harness.state_mut().session.target = StackTarget::Effect(effects[3].1);
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::Button, "Attributes").click();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "filter-attributes-open");
+    harness.get_by_role_and_label(egui::Role::Button, "Attributes").click();
+    harness.run_steps(4);
+    let reset = harness.get_by_role_and_label(egui::Role::Button, "Restore defaults").rect().center();
+    harness.set_render_cursor(false);
+    harness.hover_at(reset);
+    harness.run_steps(60);
+    save(&mut harness, &output_dir, "filter-restore-defaults-hover");
+    harness.set_render_cursor(true);
+    harness.hover_at(egui::pos2(1.0, 1.0));
+    harness.run_steps(4);
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, theme) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            harness.state_mut().session.target = StackTarget::Effect(effects[3].1);
+            harness.run_steps(4);
+            harness.get_by_role_and_label(egui::Role::Button, "Attributes").click();
+            harness.run_steps(6);
+            save(&mut harness, &output_dir, &format!("filter-attributes-open-{theme}"));
+            harness.get_by_role_and_label(egui::Role::Button, "Attributes").click();
+            harness.run_steps(4);
+            for (name, effect) in effects {
+                harness.state_mut().session.target = StackTarget::Effect(effect);
+                harness.run_steps(6);
+                save(&mut harness, &output_dir, &format!("filter-{name}-{theme}"));
+            }
+        }
+    }
+}
+
+#[test]
 #[ignore = "writes the filter picker states (screen 13) to TC_UI_SNAPSHOTS; run with --ignored"]
 /// Screen 13: the filter picker opened from an empty card, swapping (current outlined), searching, and in a mask
 fn filter_picker_snapshots() {

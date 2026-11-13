@@ -62,15 +62,27 @@ impl PropertySheet<'_> {
         }
 
         let (control, _) = self.row(label);
+        let runs: Vec<&[Color32]> = tints.iter().map(std::slice::from_ref).collect();
+        self.segments(control, options, selected, &runs, None)
+    }
+
+    /// A boxed switch across the whole panel; the chosen word takes its colours from `tints` (several colours split the word between them)
+    pub(crate) fn wide_switch(&mut self, options: &[&str], selected: usize, tints: &[&[Color32]]) -> Option<usize> {
+        let control = self.wide_row();
         self.segments(control, options, selected, tints, None)
+    }
+
+    /// A row's 24 px control box from the left padding to the right one
+    fn wide_row(&mut self) -> Rect {
+        let row = self.take(ROW_HEIGHT);
+        let center_y = row.center().y;
+        self.drawn(center_y + super::CONTROL_HEIGHT / 2.0);
+        Rect::from_x_y_ranges(self.left..=self.right, (center_y - super::CONTROL_HEIGHT / 2.0)..=(center_y + super::CONTROL_HEIGHT / 2.0))
     }
 
     /// A boxed switch across the whole panel (a mode switch at the top of a group), each word led by its picture; returns the picked index
     pub(crate) fn picture_switch(&mut self, options: &[&str], selected: usize, picture: SegmentPicture<'_>) -> Option<usize> {
-        let row = self.take(ROW_HEIGHT);
-        let center_y = row.center().y;
-        self.drawn(center_y + super::CONTROL_HEIGHT / 2.0);
-        let control = Rect::from_x_y_ranges(self.left..=self.right, (center_y - super::CONTROL_HEIGHT / 2.0)..=(center_y + super::CONTROL_HEIGHT / 2.0));
+        let control = self.wide_row();
         self.segments(control, options, selected, &[], Some(picture))
     }
 
@@ -80,7 +92,7 @@ impl PropertySheet<'_> {
         control: Rect,
         options: &[&str],
         selected: usize,
-        tints: &[Color32],
+        tints: &[&[Color32]],
         picture: Option<SegmentPicture<'_>>,
     ) -> Option<usize> {
         let segment = control.width() / options.len().max(1) as f32;
@@ -103,10 +115,13 @@ impl PropertySheet<'_> {
             } else if response.hovered() {
                 painter.rect_filled(rect.shrink(SEGMENT_INSET), CornerRadius::same(4), t.row_hover);
             }
-            let tint = tints.get(index).copied().unwrap_or(t.text);
+            let runs = tints.get(index).copied().unwrap_or_default();
+            let tint = runs.first().copied().unwrap_or(t.text);
             let (font, color) = if on { (semibold(SMALL_TEXT_SIZE), tint) } else { (FontId::proportional(SMALL_TEXT_SIZE), t.text_dim) };
             let Some(draw) = picture else {
-                painter.text(rect.center(), Align2::CENTER_CENTER, *option, font, color);
+                let word =
+                    if on && runs.len() > 1 { split_word(painter, option, runs, &font) } else { painter.layout_no_wrap((*option).to_owned(), font, color) };
+                painter.galley(rect.center() - word.size() / 2.0, word, color);
                 continue;
             };
 
@@ -236,4 +251,17 @@ impl PropertySheet<'_> {
         self.air_at = Some(self.cursor_y());
         clicked
     }
+}
+
+/// `word` laid out with its letters split as evenly as they go between the colours of `runs`
+fn split_word(painter: &Painter, word: &str, runs: &[Color32], font: &FontId) -> std::sync::Arc<egui::Galley> {
+    let letters: Vec<char> = word.chars().collect();
+    let mut job = egui::text::LayoutJob::default();
+    let parts = runs.len().max(1);
+    for (part, color) in runs.iter().enumerate() {
+        let (start, end) = (letters.len() * part / parts, letters.len() * (part + 1) / parts);
+        let text: String = letters.get(start..end).unwrap_or_default().iter().collect();
+        job.append(&text, 0.0, egui::TextFormat::simple(font.clone(), *color));
+    }
+    painter.layout_job(job)
 }

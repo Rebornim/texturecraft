@@ -751,19 +751,41 @@ pub struct Levels {
     pub gamma: f32,
     pub out_low: f32,
     pub out_high: f32,
+    /// The one channel a content levels remaps; none remaps every channel (as levels saved before the choice did) and a mask's one value
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub affects: Option<Channel>,
+    /// Values past the input handles stop at the output ends; off, the remap's line carries on past them (older saves load clamped)
+    #[serde(default = "saved_levels_clamp")]
+    pub clamp: bool,
+}
+
+/// What levels saved before [`Levels::clamp`] existed did
+fn saved_levels_clamp() -> bool {
+    true
 }
 
 impl Default for Levels {
     fn default() -> Self {
-        Levels { in_low: 0.0, in_high: 1.0, gamma: 1.0, out_low: 0.0, out_high: 1.0 }
+        Levels { in_low: 0.0, in_high: 1.0, gamma: 1.0, out_low: 0.0, out_high: 1.0, affects: None, clamp: false }
     }
 }
 
 impl Levels {
     pub fn apply(&self, x: f32) -> f32 {
-        let t = ((x - self.in_low) / (self.in_high - self.in_low).max(1e-5)).clamp(0.0, 1.0);
-        let t = t.powf(1.0 / self.gamma.max(1e-3));
+        let t = (x - self.in_low) / (self.in_high - self.in_low).max(1e-5);
+        // Past the input handles an unclamped remap carries on in a straight line (gamma only bends the part between them)
+        let t = if self.clamp || (0.0..=1.0).contains(&t) { t.clamp(0.0, 1.0).powf(1.0 / self.gamma.max(1e-3)) } else { t };
         self.out_low + (self.out_high - self.out_low) * t
+    }
+
+    /// Whether these levels remap `channel` of a layer's content
+    pub fn remaps(&self, channel: Channel) -> bool {
+        self.affects.is_none_or(|affects| affects == channel)
+    }
+
+    /// The handles back at their defaults, keeping the channel and the clamp
+    pub fn reset(&self) -> Levels {
+        Levels { affects: self.affects, clamp: self.clamp, ..Levels::default() }
     }
 }
 
@@ -1414,7 +1436,7 @@ mod tests {
 
     #[test]
     fn levels_map_range_and_gamma() {
-        let l = Levels { in_low: 0.2, in_high: 0.6, gamma: 1.0, out_low: 0.0, out_high: 1.0 };
+        let l = Levels { in_low: 0.2, in_high: 0.6, clamp: true, ..Levels::default() };
         assert!((l.apply(0.4) - 0.5).abs() < 1e-6);
         assert_eq!(l.apply(0.0), 0.0);
         assert_eq!(l.apply(1.0), 1.0);
@@ -1423,6 +1445,32 @@ mod tests {
         // Degenerate ranges never divide by zero.
         let d = Levels { in_low: 0.5, in_high: 0.5, ..Levels::default() };
         assert!(d.apply(0.7).is_finite());
+    }
+
+    #[test]
+    fn unclamped_levels_carry_on_past_the_input_handles() {
+        let clamped = Levels { in_low: 0.2, in_high: 0.6, clamp: true, ..Levels::default() };
+        let open = Levels { clamp: false, ..clamped };
+        assert_eq!(clamped.apply(0.0), 0.0);
+        assert!((open.apply(0.0) + 0.5).abs() < 1e-6, "0.2 below the black handle is half a range below black");
+        assert!((open.apply(0.8) - 1.5).abs() < 1e-6);
+        assert!((open.apply(0.4) - clamped.apply(0.4)).abs() < 1e-6, "between the handles both remap alike");
+        let bent = Levels { gamma: 2.0, ..open };
+        assert!((bent.apply(0.0) + 0.5).abs() < 1e-6, "gamma bends only the part between the handles");
+    }
+
+    #[test]
+    fn levels_saved_before_the_channel_and_clamp_load_as_they_rendered() {
+        let saved = serde_json::json!({"in_low": 0.2, "in_high": 0.6, "gamma": 1.0, "out_low": 0.0, "out_high": 1.0});
+        let loaded: Levels = serde_json::from_value(saved.clone()).unwrap();
+        assert!(loaded.clamp, "they stopped at the output ends");
+        assert_eq!(loaded.affects, None, "they remapped every channel");
+        assert!(Channel::ALL.iter().all(|&channel| loaded.remaps(channel)));
+        let saved_again = serde_json::to_value(loaded).unwrap();
+        assert!(saved_again.get("affects").is_none(), "no channel is saved, as before: {saved_again}");
+        assert_eq!(serde_json::from_value::<Levels>(saved_again).unwrap(), loaded);
+        let base = Levels { affects: Some(Channel::BaseColor), ..loaded };
+        assert!(base.remaps(Channel::BaseColor) && !base.remaps(Channel::Roughness));
     }
 
     #[test]

@@ -281,3 +281,62 @@ fn merged_edits_are_one_undo_step() {
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
     assert_eq!(opacity(&s), 1.0, "one undo reverts the whole drag");
 }
+
+/// A content levels remaps the one channel it affects (Base color when added); levels saved before
+/// the choice remap every channel; Clamp stops values past the input handles at the output ends
+#[test]
+fn content_levels_remap_the_channel_they_affect() {
+    let mut s = session();
+    let layer = id(execute(&mut s, "layer.add.fill", &json!({"color": [0.8, 0.8, 0.8], "roughness": 0.8})).unwrap(), "layer");
+    let lv = id(execute(&mut s, "effect.add.levels", &json!({"target": "content", "outHigh": 0.5})).unwrap(), "effect");
+    let inspected = execute(&mut s, "project.inspect", &Value::Null).unwrap().to_string();
+    assert!(inspected.contains("\"affects\":\"baseColor\""), "{inspected}");
+    assert!(close(center(&mut s, Channel::BaseColor), [0.4; 3]), "{:?}", center(&mut s, Channel::BaseColor));
+    assert!((center(&mut s, Channel::Roughness)[0] - 0.8).abs() < 1e-3, "roughness is not what it remaps");
+
+    execute(&mut s, "effect.set", &json!({"effect": lv, "affects": "roughness"})).unwrap();
+    assert!((center(&mut s, Channel::BaseColor)[0] - 0.8).abs() < 1e-3);
+    assert!((center(&mut s, Channel::Roughness)[0] - 0.4).abs() < 1e-3);
+    assert!(execute(&mut s, "effect.set", &json!({"effect": lv, "affects": "normal"})).is_err(), "levels pass normal maps through");
+    assert!(execute(&mut s, "effect.set", &json!({"effect": lv, "affects": "nope"})).is_err());
+
+    // Levels saved before the choice: every channel
+    if let Some(EffectKind::Levels(levels)) = s.doc.project.effect_mut(LayerId(lv)).map(|effect| &mut effect.kind) {
+        levels.affects = None;
+    }
+    for visible in [false, true] {
+        execute(&mut s, "effect.set", &json!({"effect": lv, "visible": visible})).unwrap();
+    }
+    assert!((center(&mut s, Channel::BaseColor)[0] - 0.4).abs() < 1e-3);
+    assert!((center(&mut s, Channel::Roughness)[0] - 0.4).abs() < 1e-3);
+
+    // Past the white input handle: on, it stops at the output end; off, it carries on
+    execute(&mut s, "effect.set", &json!({"effect": lv, "affects": "baseColor", "inHigh": 0.6, "outHigh": 0.6, "clamp": true})).unwrap();
+    assert!((center(&mut s, Channel::BaseColor)[0] - 0.6).abs() < 1e-3, "{:?}", center(&mut s, Channel::BaseColor));
+    execute(&mut s, "effect.set", &json!({"effect": lv, "clamp": false})).unwrap();
+    assert!((center(&mut s, Channel::BaseColor)[0] - 0.8).abs() < 1e-3, "0.8 is a third past 0.6: {:?}", center(&mut s, Channel::BaseColor));
+
+    // A mask's levels remap its one value
+    execute(&mut s, "mask.add.black", &json!({"layer": layer})).unwrap();
+    assert!(execute(&mut s, "effect.add.levels", &json!({"target": "mask", "affects": "roughness"})).is_err());
+    let ml = id(execute(&mut s, "effect.add.levels", &json!({"target": "mask"})).unwrap(), "effect");
+    assert!(execute(&mut s, "effect.set", &json!({"effect": ml, "affects": "roughness"})).is_err());
+}
+
+/// A colour channel's histogram counts each component and the luminance on their own
+#[test]
+fn a_color_histogram_has_its_components_and_luminance() {
+    let mut s = session();
+    execute(&mut s, "layer.add.fill", &json!({"color": [1.0, 0.0, 0.0]})).unwrap();
+    let lv = id(execute(&mut s, "effect.add.levels", &json!({"target": "content"})).unwrap(), "effect");
+    let r = execute(&mut s, "effect.histogram", &json!({"effect": lv, "bins": 4})).unwrap();
+    let counts = |v: &Value| v.as_array().unwrap().iter().map(|b| b.as_u64().unwrap()).collect::<Vec<u64>>();
+    let components: Vec<Vec<u64>> = r["components"].as_array().unwrap().iter().map(counts).collect();
+    let texels = components[0][3];
+    assert!(texels > 0);
+    assert_eq!(components, vec![vec![0, 0, 0, texels], vec![texels, 0, 0, 0], vec![texels, 0, 0, 0]]);
+    assert_eq!(counts(&r["luminance"]), vec![0, texels, 0, 0], "red's luminance is 0.3");
+    assert_eq!(counts(&r["bins"]), vec![2 * texels, 0, 0, texels]);
+    let rough = execute(&mut s, "effect.histogram", &json!({"effect": lv, "channel": "roughness"})).unwrap();
+    assert!(rough.get("components").is_none(), "one value has no components");
+}

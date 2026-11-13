@@ -1308,3 +1308,67 @@ fn mask_fill_snapshots() {
 
     shot(&mut harness, json!({"value": 1.0}), "mask-fill-uniform-again");
 }
+
+/// Screen 08: a mask's levels, then a content levels on Base color (Colors, red only with Clamp on, its Affects list open with an option hovered) and on Roughness
+#[test]
+#[ignore]
+fn levels_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({"roughness": 0.5})).unwrap()["layer"].clone();
+    for (channel, low, high) in
+        [("baseColor", json!([0.1, 0.2, 0.45]), json!([0.85, 0.5, 0.2])), ("roughness", json!([0.25, 0.25, 0.25]), json!([0.7, 0.7, 0.7]))]
+    {
+        execute(&mut session, "layer.fill.set", &json!({"layer": layer, "channel": channel, "procedural": "Clouds", "scale": 3.0, "low": low, "high": high}))
+            .unwrap();
+    }
+    execute(&mut session, "mask.add.black", &json!({"layer": layer})).unwrap();
+    execute(&mut session, "effect.add.fill", &json!({"layer": layer, "target": "mask", "procedural": "clouds"})).unwrap();
+    let mask_levels = execute(&mut session, "effect.add.levels", &json!({"layer": layer, "target": "mask"})).unwrap()["effect"].clone();
+    let content_levels = execute(&mut session, "effect.add.levels", &json!({"layer": layer, "target": "content"})).unwrap()["effect"].clone();
+    execute(&mut session, "layer.select", &json!({"layer": layer, "target": mask_levels})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "levels-mask");
+
+    execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": layer, "target": content_levels})).unwrap();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "levels-colors");
+    let switch = |harness: &mut Harness<'_, TextureCraftApp>, view: &str| {
+        harness.get_by(|node| node.role() == egui::Role::RadioButton && node.label().as_deref() == Some(view)).click();
+        harness.run_steps(3);
+    };
+    switch(&mut harness, "R");
+    harness.get_by_role_and_label(egui::Role::CheckBox, "Clamp").click();
+    harness.run_steps(3);
+    save(&mut harness, &output_dir, "levels-red-clamp");
+    harness.get_by_role_and_label(egui::Role::CheckBox, "Clamp").click();
+    switch(&mut harness, "Colors");
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Base color").click();
+    harness.run_steps(3);
+    let hovered = harness.get_by_role_and_label(egui::Role::ListBoxOption, "Roughness").rect().center();
+    harness.hover_at(hovered);
+    save(&mut harness, &output_dir, "levels-affects-list");
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, "Roughness").click();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "levels-roughness");
+    harness.get_by_role_and_label(egui::Role::Slider, "Gamma").focus();
+    harness.run_steps(2);
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(3);
+    save(&mut harness, &output_dir, "levels-exact-entry");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("levels-roughness-{name}"));
+        }
+    }
+}

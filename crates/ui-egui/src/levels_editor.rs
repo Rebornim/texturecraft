@@ -1,13 +1,13 @@
-//! Levels handles over a histogram and output gradient, with labelled fields for exact values
+//! Levels handles over a histogram; a handle opens labelled fields for exact values
 
-use egui::{Color32, CornerRadius, CursorIcon, Id, Pos2, Rect, Response, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
+use egui::{Color32, CursorIcon, Id, Pos2, Rect, Response, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 use texturecraft_engine::core::Levels;
 
 use crate::i18n::tr;
 use crate::levels_handle::LevelsHandle;
 use crate::theme::Tokens;
 
-const HISTOGRAM_HEIGHT: f32 = 56.0;
+const HISTOGRAM_HEIGHT: f32 = 70.0;
 const HANDLE_HEIGHT: f32 = 11.0;
 const HANDLE_HALF_WIDTH: f32 = 5.0;
 
@@ -20,13 +20,14 @@ const HANDLE_TARGET_SIZE: f32 = 24.0;
 /// Fraction of the track moved by one arrow key press
 const KEYBOARD_STEP: f32 = 0.01;
 
-const GRADIENT_HEIGHT: f32 = 8.0;
-const GAP_BELOW_HISTOGRAM: f32 = 3.0;
 const VALUE_ROW_HEIGHT: f32 = 16.0;
-const VALUE_FONT_SIZE: f32 = 11.5;
+const VALUE_FONT_SIZE: f32 = 10.0;
 
-/// Padding of the histogram well around its bars
-const WELL_PADDING: f32 = 3.0;
+/// Size of the exact-entry fields' labels
+const FIELD_LABEL_SIZE: f32 = 11.5;
+
+/// How much of a histogram's colour shows over the well (the rest is the well)
+const HISTOGRAM_TINT: f32 = 0.55;
 
 /// Gray of the gamma handle, between the black input-low and white input-high handles
 const GAMMA_HANDLE_GRAY: u8 = 128;
@@ -40,18 +41,11 @@ const VALUE_DECIMALS: usize = 3;
 /// Space kept around a printed value; a value closer to one already printed is left out
 const VALUE_SPACING: f32 = 2.0;
 
-/// Opacity of the shade over the histogram outside the input range
-const OUTSIDE_RANGE_SHADE: f32 = 0.7;
-
-/// Opacity of the line at gamma, fainter than the input range's accent lines
-const GAMMA_LINE_OPACITY: f32 = 0.6;
-
-/// Edits `levels` over histogram `counts`; `Some(merge)` per change, `merge` true for a drag's later frames
-pub fn levels_editor(ui: &mut Ui, id_salt: impl std::hash::Hash + std::fmt::Debug, counts: Option<&[u32]>, levels: &mut Levels) -> Option<bool> {
-    let height = VALUE_ROW_HEIGHT * 2.0 + HANDLE_HEIGHT * 2.0 + HISTOGRAM_HEIGHT + GAP_BELOW_HISTOGRAM + GRADIENT_HEIGHT;
+/// Edits `levels` over the histograms in `series` (counts and colour, drawn in order); `Some(merge)` per change, `merge` true for a drag's later frames
+pub fn levels_editor(ui: &mut Ui, id_salt: impl std::hash::Hash + std::fmt::Debug, series: &[(&[u32], Color32)], levels: &mut Levels) -> Option<bool> {
+    let height = VALUE_ROW_HEIGHT * 2.0 + HANDLE_HEIGHT * 2.0 + HISTOGRAM_HEIGHT;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let histogram_top = rect.top() + VALUE_ROW_HEIGHT + HANDLE_HEIGHT;
-    let gradient_top = output_handles_top(rect) - GRADIENT_HEIGHT;
     let track = track(rect);
     let id = ui.make_persistent_id(("levels_editor", id_salt));
 
@@ -109,12 +103,17 @@ pub fn levels_editor(ui: &mut Ui, id_salt: impl std::hash::Hash + std::fmt::Debu
         responses.push((handle, response));
     }
 
-    let well = Rect::from_x_y_ranges(rect.x_range().shrink(HANDLE_HALF_WIDTH), histogram_top..=histogram_top + HISTOGRAM_HEIGHT);
-    paint_histogram(ui, well, counts.unwrap_or_default(), levels);
-    paint_output_gradient(ui, Rect::from_x_y_ranges(track, gradient_top..=gradient_top + GRADIENT_HEIGHT));
+    let well = Rect::from_x_y_ranges(track, histogram_top..=histogram_top + HISTOGRAM_HEIGHT);
+    paint_histogram(ui, well, series);
     paint_handles_and_values(ui, rect, &responses, levels);
 
     let cancel_typing = responses.iter().any(|(_, response)| response.is_pointer_button_down_on());
+    let open_id = id.with("exact_entry");
+    let open = focus_value.is_some() || ui.data(|data| data.get_temp::<ExactEntryOpen>(open_id)).is_some();
+    if !open {
+        return edit;
+    }
+
     let fields = [LevelsHandle::InputLow, LevelsHandle::Gamma, LevelsHandle::InputHigh, LevelsHandle::OutputLow, LevelsHandle::OutputHigh];
     let mut labels = Vec::with_capacity(fields.len());
 
@@ -122,7 +121,7 @@ pub fn levels_editor(ui: &mut Ui, id_salt: impl std::hash::Hash + std::fmt::Debu
     ui.columns(fields.len(), |columns| {
         for (ui, handle) in columns.iter_mut().zip(fields) {
             let label =
-                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| ui.label(egui::RichText::new(handle.label()).size(VALUE_FONT_SIZE))).inner;
+                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| ui.label(egui::RichText::new(handle.label()).size(FIELD_LABEL_SIZE))).inner;
             labels.push(label.id);
         }
     });
@@ -139,8 +138,23 @@ pub fn levels_editor(ui: &mut Ui, id_salt: impl std::hash::Hash + std::fmt::Debu
         ui.colored_label(Tokens::get(ui.ctx()).warning, tr("Enter a finite number"));
     }
 
+    // The row closes once no field is being typed in; a field just asked for focus holds it from the next frame
+    let typing = fields.iter().any(|handle| ui.memory(|memory| memory.has_focus(id.with((handle, "value")))));
+    let keep_open = focus_value.is_some() || typing || invalid;
+    ui.data_mut(|data| {
+        if keep_open {
+            data.insert_temp(open_id, ExactEntryOpen);
+        } else {
+            data.remove::<ExactEntryOpen>(open_id);
+        }
+    });
+
     edit
 }
+
+/// Marks the exact-entry fields as shown; they appear on a handle's double-click or Enter and close when typing ends
+#[derive(Clone, Copy)]
+struct ExactEntryOpen;
 
 /// Properties shows one effect at a time; its old cursor, draft and drag state must not accumulate
 fn forget_previous_editor(ui: &Ui, id: Id, handles: &[LevelsHandle]) {
@@ -158,6 +172,7 @@ fn forget_previous_editor(ui: &Ui, id: Id, handles: &[LevelsHandle]) {
                 data.remove::<(String, bool)>(field);
                 data.remove::<bool>(previous.with(handle));
             }
+            data.remove::<ExactEntryOpen>(previous.with("exact_entry"));
         }
         data.insert_temp(owner, id);
     });
@@ -171,9 +186,9 @@ fn output_handles_top(rect: Rect) -> f32 {
     rect.bottom() - VALUE_ROW_HEIGHT - HANDLE_HEIGHT
 }
 
-/// The x range the handles move along in the editor's `rect`, lined up with the histogram bars
+/// The x range the handles move along in the editor's `rect`: the histogram's width, the end handles reaching the rect's edges
 fn track(rect: Rect) -> egui::Rangef {
-    rect.x_range().shrink(HANDLE_HALF_WIDTH + WELL_PADDING)
+    rect.x_range().shrink(HANDLE_HALF_WIDTH)
 }
 
 fn track_x(track: &egui::Rangef, position: f32) -> f32 {
@@ -208,50 +223,35 @@ fn value_rect(rect: Rect, handle: LevelsHandle, levels: &Levels, size: egui::Vec
     placed.translate(vec2(shift, 0.0))
 }
 
-/// The histogram in its well: quarter lines, the outside of the input range dimmed, lines at the handles
-fn paint_histogram(ui: &Ui, well: Rect, counts: &[u32], levels: &Levels) {
+/// The histograms in their well over quarter lines, each a column per bucket in its colour, the tallest bucket of all filling the well
+fn paint_histogram(ui: &Ui, well: Rect, series: &[(&[u32], Color32)]) {
     let tokens = Tokens::get(ui.ctx());
-    let painter = ui.painter_at(well);
-    painter.rect(well, CornerRadius::same(tokens.radius), tokens.field, Stroke::new(1.0, tokens.field_border), egui::StrokeKind::Inside);
-
-    let inner = well.shrink(WELL_PADDING);
-    let vertical_line = |x: f32, color: Color32| painter.line_segment([pos2(x, inner.top()), pos2(x, inner.bottom())], Stroke::new(1.0, color));
+    let painter = ui.painter_at(well.expand(1.0));
+    painter.rect_filled(well, 0.0, tokens.field);
+    let vertical_line = |x: f32, color: Color32| painter.line_segment([pos2(x, well.top()), pos2(x, well.bottom())], Stroke::new(1.0, color));
     for fraction in GRID_FRACTIONS {
-        vertical_line(track_x(&inner.x_range(), fraction), tokens.field_border);
+        vertical_line(track_x(&well.x_range(), fraction), tokens.separator);
     }
 
-    let fullest = counts.iter().copied().max().unwrap_or(0).max(1) as f32;
-    let bar_width = inner.width() / counts.len().max(1) as f32;
-    for (index, count) in counts.iter().enumerate() {
-        let bar_height = inner.height() * *count as f32 / fullest;
-        let x = inner.left() + index as f32 * bar_width;
-        painter.rect_filled(Rect::from_min_max(pos2(x, inner.bottom() - bar_height), pos2(x + bar_width, inner.bottom())), 0.0, tokens.text_dim);
+    let fullest = series.iter().flat_map(|(counts, _)| counts.iter().copied()).max().unwrap_or(0).max(1) as f32;
+    for (counts, color) in series {
+        let fill = lerp_color(tokens.field, *color, HISTOGRAM_TINT);
+        let bar_width = well.width() / counts.len().max(1) as f32;
+        for (index, count) in counts.iter().enumerate() {
+            let bar_height = well.height() * *count as f32 / fullest;
+            let x = well.left() + index as f32 * bar_width;
+            painter.rect_filled(Rect::from_min_max(pos2(x, well.bottom() - bar_height), pos2(x + bar_width, well.bottom())), 0.0, fill);
+        }
     }
 
-    let x_at = |handle: LevelsHandle| track_x(&inner.x_range(), handle.position(levels));
-    let (low, high) = (x_at(LevelsHandle::InputLow), x_at(LevelsHandle::InputHigh));
-    let shade = tokens.field.gamma_multiply(OUTSIDE_RANGE_SHADE);
-    painter.rect_filled(Rect::from_x_y_ranges(inner.left()..=low, inner.y_range()), 0.0, shade);
-    painter.rect_filled(Rect::from_x_y_ranges(high..=inner.right(), inner.y_range()), 0.0, shade);
-    vertical_line(low, tokens.accent);
-    vertical_line(high, tokens.accent);
-    vertical_line(x_at(LevelsHandle::Gamma), tokens.text_dim.gamma_multiply(GAMMA_LINE_OPACITY));
+    vertical_line(well.left(), tokens.text_dim);
+    vertical_line(well.right(), tokens.text_dim);
 }
 
-/// A black-to-white strip: the output values the output handles pick from
-fn paint_output_gradient(ui: &Ui, strip: Rect) {
-    let mut mesh = egui::Mesh::default();
-    for (corner, color) in
-        [(strip.left_top(), Color32::BLACK), (strip.right_top(), Color32::WHITE), (strip.right_bottom(), Color32::WHITE), (strip.left_bottom(), Color32::BLACK)]
-    {
-        mesh.colored_vertex(corner, color);
-    }
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(0, 2, 3);
-
-    let painter = ui.painter();
-    painter.add(mesh);
-    painter.rect_stroke(strip, 0.0, Stroke::new(1.0, Tokens::get(ui.ctx()).field_border), egui::StrokeKind::Outside);
+/// `from` moved `amount` of the way to `to`, opaque
+fn lerp_color(from: Color32, to: Color32, amount: f32) -> Color32 {
+    let mix = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * amount).round() as u8;
+    Color32::from_rgb(mix(from.r(), to.r()), mix(from.g(), to.g()), mix(from.b(), to.b()))
 }
 
 /// Each handle filled with its gray, the active one on top, and its value beside it, overlapping values left out
@@ -277,7 +277,7 @@ fn paint_handles_and_values(ui: &Ui, rect: Rect, responses: &[(LevelsHandle, Res
         } else if response.hovered() {
             tokens.text_strong
         } else {
-            tokens.text
+            tokens.text_dim
         };
         let points_down = LevelsHandle::INPUT.contains(&handle);
         painter.add(egui::Shape::convex_polygon(handle_outline(x, handle_top(rect, handle), points_down), fill, Stroke::new(1.5, outline)));
@@ -289,7 +289,7 @@ fn paint_handles_and_values(ui: &Ui, rect: Rect, responses: &[(LevelsHandle, Res
     let mut by_priority: Vec<&(LevelsHandle, Response)> = responses.iter().collect();
     by_priority.sort_by_key(|(_, response)| std::cmp::Reverse(priority(response)));
     for &(handle, ref response) in by_priority {
-        let color = if response.hovered() || response.has_focus() || response.dragged() { tokens.text_strong } else { tokens.text };
+        let color = if response.hovered() || response.has_focus() || response.dragged() { tokens.text } else { tokens.text_dim };
         let galley = painter.layout_no_wrap(shown_value(handle.value(levels)), font.clone(), color);
         let text_rect = value_rect(rect, handle, levels, galley.size());
         if printed.iter().any(|other| other.expand(VALUE_SPACING).intersects(text_rect)) {
@@ -411,8 +411,9 @@ mod tests {
         for effect in 0..100 {
             context
                 .run_ui(egui::RawInput::default(), |ui| {
-                    levels_editor(ui, effect, None, &mut levels);
                     let id = ui.make_persistent_id(("levels_editor", effect));
+                    ui.data_mut(|data| data.insert_temp(id.with("exact_entry"), ExactEntryOpen));
+                    levels_editor(ui, effect, &[], &mut levels);
                     ui.data_mut(|data| {
                         data.insert_temp(id.with((LevelsHandle::Gamma, "value")), ("invalid draft".to_string(), true));
                         data.insert_temp(id.with(LevelsHandle::Gamma), true);
@@ -425,6 +426,7 @@ mod tests {
             assert_eq!(data.count::<egui::text_edit::TextEditState>(), 5, "only the current effect's fields remain");
             assert_eq!(data.count::<(String, bool)>(), 1, "only the current draft remains");
             assert_eq!(data.count::<bool>(), 1, "only the current drag state remains");
+            assert_eq!(data.count::<ExactEntryOpen>(), 0, "the open row closes once nothing is typed in it");
         });
     }
 }

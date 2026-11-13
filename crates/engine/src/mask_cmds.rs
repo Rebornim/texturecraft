@@ -2,8 +2,8 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask, MaskBackground,
-    Procedural, ProceduralKind, Project, Sampling, Source,
+    BlendMode, Channel, ChannelKind, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask,
+    MaskBackground, Procedural, ProceduralKind, Project, Sampling, Source,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
@@ -58,7 +58,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add levels",
             ["Layers", "Effects"],
             None,
-            "{layer?, target?: mask|content, name?, inLow?, inHigh?, gamma?, outLow?, outHigh?}",
+            "{layer?, target?: mask|content, name?, inLow?, inHigh?, gamma?, outLow?, outHigh?, affects?: the one content channel it remaps (default baseColor; not normal maps, not on a mask), clamp?: values past the input handles stop at the output ends (default false)}",
             has_layer,
             add_levels
         ),
@@ -94,7 +94,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, channel?: the content channel blend and opacity set (default: every channel), name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, offset?, invert?, mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, channel?: the content channel blend and opacity set (default: every channel), name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), level?, softness?, noise?, noiseScale?, offset?, invert?, mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, affects?, clamp? (levels), tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -114,7 +114,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Effect input histogram",
             [],
             None,
-            "{effect, channel?: for content effects (default: the layer's first channel), bins?: 2..256 (64)} → {target: mask|content, channel?, bins: [count per bucket over 0..1]}",
+            "{effect, channel?: for content effects (default: the channel a levels effect remaps, else the layer's first channel), bins?: 2..256 (64)} → {target: mask|content, channel?, bins: [count per bucket over 0..1], luminance?, components?: [red, green, blue] (a color channel)}",
             always,
             histogram
         ),
@@ -234,10 +234,13 @@ fn name_param(p: &Value) -> Option<&str> {
 
 /// Add an effect to the selected layer's mask (creating a mask if there is none) or, with
 /// `target: "content"` or a content-only effect, to its content stack.
-fn push_effect(s: &mut Session, p: &Value, kind: EffectKind, blend: BlendMode) -> Result<Value> {
+fn push_effect(s: &mut Session, p: &Value, mut kind: EffectKind, blend: BlendMode) -> Result<Value> {
     let content = kind.content_only() == Some(true) || content_target(p, "effect.add")?;
     if kind.content_only().is_some_and(|c| c != content) {
         return Err(bad("effect.add", format!("{} effects go on masks, not on layer content", kind.name())));
+    }
+    if let EffectKind::Levels(levels) = &mut kind {
+        levels_target(levels, content)?;
     }
     let label = format!("Add {}", kind.name().to_ascii_lowercase());
     let eid = with_mask(s, p, "effect.add", &label, |s, id| {
@@ -391,17 +394,39 @@ fn add_generator(session: &mut Session, params: &Value) -> Result<Value> {
     push_effect(session, params, EffectKind::Generator(generator), blend)
 }
 
-pub(crate) fn levels_from(p: &Value, l: &mut Levels) {
+pub(crate) fn levels_from(cmd: &str, p: &Value, l: &mut Levels) -> Result<()> {
     for (k, slot) in [("inLow", &mut l.in_low), ("inHigh", &mut l.in_high), ("gamma", &mut l.gamma), ("outLow", &mut l.out_low), ("outHigh", &mut l.out_high)] {
         if let Some(v) = f32p(p, k) {
             *slot = if k == "gamma" { v.clamp(0.01, 10.0) } else { v.clamp(0.0, 1.0) };
         }
     }
+    if let Some(clamp) = boolp(p, "clamp") {
+        l.clamp = clamp;
+    }
+    match channel_param(cmd, p, "affects")? {
+        // Levels pass normal maps through unchanged (`per_unit`)
+        Some(channel) if channel.kind() == ChannelKind::NormalMap => Err(bad(cmd, format!("levels cannot remap `{}`, a normal map", channel.id()))),
+        Some(channel) => {
+            l.affects = Some(channel);
+            Ok(())
+        }
+        None => Ok(()),
+    }
+}
+
+/// A levels effect added to a mask remaps its one value; on the content it remaps Base color unless told otherwise
+fn levels_target(levels: &mut Levels, content: bool) -> Result<()> {
+    if content {
+        levels.affects.get_or_insert(Channel::BaseColor);
+    } else if levels.affects.is_some() {
+        return Err(bad("effect.add", "a mask's levels remap its one value: leave out `affects`"));
+    }
+    Ok(())
 }
 
 fn add_levels(s: &mut Session, p: &Value) -> Result<Value> {
     let mut l = Levels::default();
-    levels_from(p, &mut l);
+    levels_from("effect.add.levels", p, &mut l)?;
     push_effect(s, p, EffectKind::Levels(l), BlendMode::Normal)
 }
 
@@ -446,13 +471,24 @@ fn histogram(s: &mut Session, p: &Value) -> Result<Value> {
     let (owner, _) = s.doc.project.effect(eid).ok_or_else(|| bad(CMD, format!("no effect {}", eid.0)))?;
     let l = s.doc.project.layer(owner)?;
     let content = l.content_effects.iter().any(|e| e.id == eid);
+    let remapped = match &s.doc.project.effect(eid) {
+        Some((_, Effect { kind: EffectKind::Levels(levels), .. })) => levels.affects,
+        _ => None,
+    };
     let channel = match channel_param(CMD, p, "channel")? {
         Some(c) => c,
-        None => l.channels.keys().next().copied().unwrap_or(Channel::BaseColor),
+        None => remapped.or_else(|| l.channels.keys().next().copied()).unwrap_or(Channel::BaseColor),
     };
     let bins = u64p(p, "bins").unwrap_or(64).clamp(2, 256) as usize;
     let counts = s.effect_histogram(eid, channel, bins).ok_or_else(|| bad(CMD, "the texture set is not ready"))?;
-    Ok(if content { json!({"target": "content", "channel": channel.id(), "bins": counts}) } else { json!({"target": "mask", "bins": counts}) })
+    if !content {
+        return Ok(json!({"target": "mask", "bins": counts.all}));
+    }
+    let mut out = json!({"target": "content", "channel": channel.id(), "bins": counts.all, "luminance": counts.luminance});
+    if !counts.components.is_empty() {
+        out["components"] = json!(counts.components);
+    }
+    Ok(out)
 }
 
 /// Edit visibility, blending, name, effect parameters, or a filter's type
@@ -461,8 +497,12 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
     let effect = effect_id(session, params, CMD)?;
     let blend = blend_param(CMD, params, "blend")?;
     let channel = channel_param(CMD, params, "channel")?;
-    if channel.is_some() && crate::effect_blending_cmds::on_mask(&session.doc.project, effect) {
+    let on_mask = crate::effect_blending_cmds::on_mask(&session.doc.project, effect);
+    if channel.is_some() && on_mask {
         return Err(bad(CMD, "a mask effect blends one channel: leave out `channel`"));
+    }
+    if on_mask && params.get("affects").is_some() {
+        return Err(bad(CMD, "a mask's levels remap its one value: leave out `affects`"));
     }
 
     // `anchor` picks a fill's anchor point, `anchorChannel` alone re-targets the current one
@@ -510,7 +550,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
 
         match &mut edited.kind {
             EffectKind::Generator(generator) => generator_from(CMD, params, generator)?,
-            EffectKind::Levels(levels) => levels_from(params, levels),
+            EffectKind::Levels(levels) => levels_from(CMD, params, levels)?,
             // The swapped filter was built with the parameters already
             EffectKind::Filter(_) if swaps_filter => {}
             EffectKind::Filter(filter) => crate::filter_lib::apply(params, filter, CMD)?,

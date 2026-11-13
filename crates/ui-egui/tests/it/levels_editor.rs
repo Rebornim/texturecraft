@@ -161,7 +161,7 @@ fn reset_and_invert_are_one_undo_step_each() {
     button(&harness, "Invert").click();
     harness.run_steps(3);
 
-    assert_eq!(levels(&harness, effect), Levels { in_low: 0.1, in_high: 0.9, gamma: 2.0, out_low: 0.7, out_high: 0.2 });
+    assert_eq!(levels(&harness, effect), Levels { in_low: 0.1, in_high: 0.9, gamma: 2.0, out_low: 0.7, out_high: 0.2, ..Levels::default() });
     assert_eq!(undo_steps(&harness), steps + 1);
 
     button(&harness, "Reset").click();
@@ -174,7 +174,7 @@ fn reset_and_invert_are_one_undo_step_each() {
 #[test]
 fn auto_fits_the_input_range_to_the_histogram() {
     let (mut harness, effect) = levels_harness("effect.add.levels", json!({"target": "mask", "gamma": 1.5}));
-    let counts = harness.state().session.effect_histogram(effect, Channel::BaseColor, HISTOGRAM_BUCKETS).unwrap();
+    let counts = harness.state().session.effect_histogram(effect, Channel::BaseColor, HISTOGRAM_BUCKETS).unwrap().all;
     let total: u32 = counts.iter().sum();
     let holds = |count: &u32| f64::from(*count) > f64::from(total) * AUTO_MIN_SHARE;
     let low = counts.iter().position(holds).unwrap() as f32 / HISTOGRAM_BUCKETS as f32;
@@ -193,6 +193,19 @@ fn auto_fits_the_input_range_to_the_histogram() {
     harness.run_steps(3);
 
     assert_eq!(undo_steps(&harness), steps, "Auto again changes nothing, so it adds no undo step");
+}
+
+/// How many of the five exact-entry fields are shown
+fn open_fields(harness: &Harness<'_, TextureCraftApp>) -> usize {
+    HANDLE_LABELS.iter().filter(|label| harness.query_by_role_and_label(Role::TextInput, label).is_some()).count()
+}
+
+/// Opens the number fields from `label`'s handle with the keyboard (focus, Enter)
+fn open_exact_entry(harness: &mut Harness<'_, TextureCraftApp>, label: &str) {
+    harness.get_by_role_and_label(Role::Slider, label).focus();
+    harness.run_steps(2);
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(2);
 }
 
 /// Double-clicks `label`'s handle, then types `text` into its number field with the value selected
@@ -220,18 +233,24 @@ fn a_value_typed_after_double_clicking_a_handle_applies() {
 
     assert_eq!(levels(&harness, effect).gamma, 2.5);
     assert_eq!(undo_steps(&harness), steps + 1);
+    assert_eq!(open_fields(&harness), 0, "Enter commits and closes the fields");
 }
 
 #[test]
-fn focusing_exact_entry_moves_nothing_in_the_panel() {
+fn exact_entry_opens_on_a_double_click_and_closes_with_typing() {
     let (mut harness, _) = levels_harness("effect.add.levels", json!({"target": "mask"}));
     let buttons = |harness: &Harness<'_, TextureCraftApp>| ["Reset", "Auto", "Invert"].map(|label| button(harness, label).rect());
     let before = buttons(&harness);
+    assert_eq!(open_fields(&harness), 0, "no number fields until a handle asks for them");
 
     type_value(&mut harness, "Output low", "");
-
     assert!(harness.query_all(by().role(Role::TextInput)).any(|node| node.is_focused()), "the number field has focus");
-    assert_eq!(buttons(&harness), before);
+    assert_eq!(open_fields(&harness), HANDLE_LABELS.len());
+
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+    assert_eq!(open_fields(&harness), 0, "Escape closes the fields");
+    assert_eq!(buttons(&harness), before, "the buttons go back where they were");
 }
 
 #[test]
@@ -296,7 +315,8 @@ fn the_hovered_handle_is_painted_on_top() {
 
 #[test]
 fn number_fields_are_labelled_and_stay_in_one_row() {
-    let (harness, _) = levels_harness("effect.add.levels", json!({"target": "mask"}));
+    let (mut harness, _) = levels_harness("effect.add.levels", json!({"target": "mask"}));
+    open_exact_entry(&mut harness, "Gamma");
 
     let fields = HANDLE_LABELS.map(|label| harness.get_by_role_and_label(Role::TextInput, label).rect());
     let row = fields[0].center().y;
@@ -405,6 +425,7 @@ fn dragging_near_a_handle_uses_the_larger_target() {
 fn number_fields_commit_on_focus_loss() {
     let (mut harness, effect) = levels_harness("effect.add.levels", json!({"target": "mask", "inLow": 0.2, "inHigh": 0.8}));
     let steps = undo_steps(&harness);
+    open_exact_entry(&mut harness, "Gamma");
 
     harness.get_by_role_and_label(Role::TextInput, "Input low").focus();
     harness.run_steps(2);
@@ -427,6 +448,106 @@ fn replacing_effects_releases_old_histograms() {
         harness.run_steps(3);
     }
 
-    let cached = harness.ctx.data(|data| data.count::<(u64, std::sync::Arc<Vec<u32>>)>());
+    let cached = harness.ctx.data(|data| data.count::<(u64, std::sync::Arc<texturecraft_engine::compose::EffectHistogram>)>());
     assert_eq!(cached, 1, "only the current effect's histogram remains cached");
+}
+
+/// Whether `text` was painted this frame (section captions are painted, not widgets)
+fn painted_text(harness: &Harness<'_, TextureCraftApp>, text: &str) -> bool {
+    harness.output().shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Text(painted) if painted.galley.text() == text))
+}
+
+/// A fill layer with a content levels, selected
+fn content_levels_harness() -> (Harness<'static, TextureCraftApp>, LayerId) {
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    execute(&mut session, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1]})).unwrap();
+    execute(&mut session, "effect.add.levels", &json!({"target": "content"})).unwrap();
+    let effect = levels_effect(&session);
+    open(session, effect)
+}
+
+#[test]
+fn a_content_levels_picks_the_channel_it_affects() {
+    let (mut harness, effect) = content_levels_harness();
+    assert_eq!(levels(&harness, effect).affects, Some(Channel::BaseColor));
+    assert!(painted_text(&harness, "LEVELS - BASE COLOR"), "the caption names the channel");
+    assert!(harness.query_by_label("Blending").is_none(), "levels have no blending");
+    for view in ["Colors", "RGB", "R", "G", "B", "Lum"] {
+        assert!(harness.query_by(|node| node.role() == Role::RadioButton && node.label().as_deref() == Some(view)).is_some(), "{view} on the display switch");
+    }
+
+    // The display switch only changes the view
+    let steps = undo_steps(&harness);
+    harness.get_by(|node| node.role() == Role::RadioButton && node.label().as_deref() == Some("R")).click();
+    harness.run_steps(3);
+    assert_eq!(undo_steps(&harness), steps);
+    assert!(
+        harness.get_by(|node| node.role() == Role::RadioButton && node.label().as_deref() == Some("R")).accesskit_node().toggled()
+            == Some(egui::accesskit::Toggled::True),
+        "the switch shows red only"
+    );
+
+    harness.get_by_role_and_label(Role::ComboBox, "Base color").click();
+    harness.run_steps(3);
+    assert!(
+        harness.query_by(|node| node.role() == Role::ListBoxOption && node.label().as_deref() == Some("Normal")).is_none(),
+        "levels pass normal maps through"
+    );
+    harness.get_by(|node| node.role() == Role::ListBoxOption && node.label().as_deref() == Some("Roughness")).click();
+    harness.run_steps(4);
+    assert_eq!(levels(&harness, effect).affects, Some(Channel::Roughness));
+    assert_eq!(undo_steps(&harness), steps + 1);
+    assert!(painted_text(&harness, "LEVELS - ROUGHNESS"));
+    assert!(harness.query_by(|node| node.role() == Role::RadioButton && node.label().as_deref() == Some("Colors")).is_none(), "one value: no display choice");
+}
+
+#[test]
+fn clamp_is_one_undo_step() {
+    let (mut harness, effect) = levels_harness("effect.add.levels", json!({"target": "mask"}));
+    assert!(painted_text(&harness, "LEVELS - MASK"));
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "Base color").is_none(), "a mask has no channel to pick");
+    assert!(!levels(&harness, effect).clamp, "new levels carry on past their handles");
+    let steps = undo_steps(&harness);
+    harness.get_by_role_and_label(Role::CheckBox, "Clamp").click();
+    harness.run_steps(3);
+    assert!(levels(&harness, effect).clamp);
+    assert_eq!(undo_steps(&harness), steps + 1);
+}
+
+#[test]
+fn the_affects_list_leaves_the_view_its_wheel_and_closes_on_escape_or_a_click_outside() {
+    let (mut harness, effect) = content_levels_harness();
+    let open_list = |harness: &mut Harness<'_, TextureCraftApp>| {
+        harness.get_by_role_and_label(Role::ComboBox, "Base color").click();
+        harness.run_steps(3);
+        assert!(egui::Popup::is_any_open(&harness.ctx), "the Affects list opens");
+    };
+    open_list(&mut harness);
+
+    let distance = harness.state().session.camera.distance;
+    harness.hover_at(harness.state().viewport_rect.center());
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, 60.0),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Wheel,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(4);
+    assert_ne!(harness.state().session.camera.distance, distance, "the wheel over the view zooms with the list open");
+
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+    assert!(!egui::Popup::is_any_open(&harness.ctx), "Escape closes the list");
+
+    open_list(&mut harness);
+    let combo = harness.get_by_role_and_label(Role::ComboBox, "Base color").rect();
+    let outside = egui::pos2(combo.min.x - 400.0, combo.min.y);
+    harness.hover_at(outside);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: outside, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        harness.run_steps(2);
+    }
+    assert!(!egui::Popup::is_any_open(&harness.ctx), "a click outside closes the list");
+    assert_eq!(levels(&harness, effect).affects, Some(Channel::BaseColor), "nothing changed");
 }

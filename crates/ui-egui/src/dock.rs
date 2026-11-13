@@ -1967,7 +1967,10 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, eid:
     let Some((_, effect)) = app.session.doc.project.effect(eid).map(|(owner, effect)| (owner, effect.clone())) else { return };
 
     let id = eid.0;
-    effect_blending_rows(app, ui, &effect);
+    // Levels and anchor points have no blending (their rows show none either)
+    if effect.kind.blends() {
+        effect_blending_rows(app, ui, &effect);
+    }
 
     match &effect.kind {
         EffectKind::Generator(generator) => generator_properties(app, ui, id, generator),

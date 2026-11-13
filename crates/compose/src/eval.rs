@@ -20,6 +20,7 @@ use texturecraft_texel::{DilationMap, TILE, TILE_AREA, TileImage, from_u16, nois
 
 use crate::below::{Band, BelowCache, Level};
 use crate::curvature_sizes::CurvatureSizes;
+use crate::effect_histogram::EffectHistogram;
 use crate::fill_copies::FillCopies;
 use crate::fill_copy::FillCopy;
 use crate::pattern::{Coords, image_samples, procedural_sized, world_noise};
@@ -1762,7 +1763,10 @@ impl<'a, 'b> Texel<'a, 'b> {
                 }
                 None => (v, cov),
             },
-            EffectKind::Levels(l) => (mix3(v, per_unit(c.kind, v, |x| l.apply(x)), o), cov),
+            EffectKind::Levels(l) => match Channel::ALL.get(c.ch) {
+                Some(&channel) if l.remaps(channel) => (mix3(v, per_unit(c.kind, v, |x| l.apply(x)), o), cov),
+                _ => (v, cov),
+            },
             // Baked lighting reads the texel's normal and occlusion, and lights the base color only.
             EffectKind::Filter(f @ Filter::BakedLighting { .. }) => match Channel::ALL.get(c.ch) {
                 Some(Channel::BaseColor) => {
@@ -2266,9 +2270,9 @@ fn histogram_tiles(width: u32, height: u32) -> Vec<(u32, u32)> {
 
 /// Histogram (`bins` buckets over 0..1) of the values entering effect `effect`: its layer's mask
 /// below it, or (a content effect) the layer's `channel` below it where the layer has content,
-/// color components pooled and signed values mapped to 0..1. Over the texels the mesh covers
+/// signed values mapped to 0..1, a color's components pooled, on their own and as luminance. Over the texels the mesh covers
 /// (in an even sample of tiles on large sets); None for an unknown effect.
-pub fn effect_histogram(inp: &Inputs, effect: LayerId, channel: Channel, bins: usize) -> Option<Vec<u32>> {
+pub fn effect_histogram(inp: &Inputs, effect: LayerId, channel: Channel, bins: usize) -> Option<EffectHistogram> {
     let (owner, _) = inp.project.effect(effect)?;
     let bins = bins.max(1);
     // Evaluate the layer forced visible, its mask enabled, cut just below the effect.
@@ -2294,7 +2298,7 @@ pub fn effect_histogram(inp: &Inputs, effect: LayerId, channel: Channel, bins: u
     // is the whole set: with a neighbourhood filter below, each tile gets its own.
     let probe = neighbourhood_fields(&cut_inp, &channels, tiles.get(..1).unwrap_or_default());
     let shared = probe.is_empty().then_some(probe);
-    let bin = |v: f32| ((v.clamp(0.0, 1.0) * bins as f32) as usize).min(bins - 1);
+    let color = !in_mask && channel.kind() == ChannelKind::Color;
     let hist = tiles
         .par_iter()
         .map(|&(tx, ty)| {
@@ -2306,7 +2310,7 @@ pub fn effect_histogram(inp: &Inputs, effect: LayerId, channel: Channel, bins: u
                     &own
                 }
             };
-            let mut h = vec![0u32; bins];
+            let mut h = EffectHistogram::new(bins, color);
             // The mask is planned on its own: a layer with nothing drawn plans no node.
             let mask = if in_mask { layer_mask(&cut, owner).and_then(|m| mask_plan(&cut_inp, owner, m, tx, ty, Some(fields))) } else { None };
             let nodes = if in_mask { Vec::new() } else { plan(&cut_inp, &[owner], &channels, tx, ty, 0, Some(fields)) };
@@ -2321,29 +2325,22 @@ pub fn effect_histogram(inp: &Inputs, effect: LayerId, channel: Channel, bins: u
                     tex.anchors_below(&full, owner);
                 }
                 if let Some(m) = &mask {
-                    if let Some(b) = h.get_mut(bin(tex.mask(m))) {
-                        *b += 1;
-                    }
+                    h.add_value(tex.mask(m));
                 } else if let Some((n, c)) = content
                     && let Some((v, _)) = tex.content(&n.content, c)
                 {
                     // As levels reads them (`per_unit`); normal maps pass through levels unchanged.
-                    let (vals, signed) = match c.kind {
-                        ChannelKind::Color => (&v[..], false),
-                        ChannelKind::Scalar => (&v[..1], false),
-                        ChannelKind::Signed => (&v[..1], true),
-                        ChannelKind::NormalMap => (&v[..0], false),
-                    };
-                    for x in vals {
-                        if let Some(b) = h.get_mut(bin(if signed { x * 0.5 + 0.5 } else { *x })) {
-                            *b += 1;
-                        }
+                    match c.kind {
+                        ChannelKind::Color => h.add_color(v),
+                        ChannelKind::Scalar => h.add_value(v[0]),
+                        ChannelKind::Signed => h.add_value(v[0] * 0.5 + 0.5),
+                        ChannelKind::NormalMap => {}
                     }
                 }
             }
             h
         })
-        .reduce(|| vec![0u32; bins], |a, b| a.iter().zip(&b).map(|(x, y)| x.saturating_add(*y)).collect());
+        .reduce(|| EffectHistogram::new(bins, color), |a, b| a.merged(&b));
     Some(hist)
 }
 

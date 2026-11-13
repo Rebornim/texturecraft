@@ -1,5 +1,7 @@
 //! The Properties panel's rows, groups and controls, shared by every panel so they line up
 
+mod action_row;
+mod action_row_response;
 mod axis_rows;
 mod band_response;
 mod choice;
@@ -29,6 +31,7 @@ mod tooltip;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use action_row_response::ActionRowResponse;
 pub(crate) use band_response::BandResponse;
 pub(crate) use number_field::NumberField;
 pub(crate) use preview_lower::PreviewLower;

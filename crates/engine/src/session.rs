@@ -927,7 +927,7 @@ impl Session {
 
     /// Histogram (`bins` buckets over 0..1) of the values entering effect `effect`: its layer's
     /// mask, or for a content effect the layer's `channel` (None for an unknown effect).
-    pub fn effect_histogram(&self, effect: LayerId, channel: Channel, bins: usize) -> Option<Vec<u32>> {
+    pub fn effect_histogram(&self, effect: LayerId, channel: Channel, bins: usize) -> Option<texturecraft_compose::EffectHistogram> {
         let (owner, _) = self.doc.project.effect(effect)?;
         let (ts, _, _) = self.doc.project.locate(owner)?;
         self.with_inputs(ts, |inp| texturecraft_compose::effect_histogram(inp, effect, channel, bins))

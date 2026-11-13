@@ -61,7 +61,11 @@ fn effect_json(session: &Session, effect: &Effect, content: bool) -> Value {
 
     match &effect.kind {
         EffectKind::Generator(generator) => out["generator"] = generator_json(generator),
-        EffectKind::Levels(levels) => out["levels"] = json!([levels.in_low, levels.in_high, levels.gamma, levels.out_low, levels.out_high]),
+        EffectKind::Levels(levels) => {
+            out["levels"] = json!([levels.in_low, levels.in_high, levels.gamma, levels.out_low, levels.out_high]);
+            out["affects"] = levels.affects.map_or(json!("all"), |channel| json!(channel.id()));
+            out["clamp"] = json!(levels.clamp);
+        }
         EffectKind::ColorSelection { colors, tolerance } => {
             out["colors"] = json!(colors);
             out["tolerance"] = json!(tolerance);

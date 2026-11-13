@@ -2,7 +2,7 @@
 
 use egui::{Painter, Rect, Stroke, StrokeKind, Ui};
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, EffectKind, Filter, LayerId};
+use texturecraft_engine::core::{Channel, CurvePreset, EffectKind, Filter, GrayscaleMode, LayerId};
 use texturecraft_engine::filter_lib::{build, find, scalar_params};
 
 use crate::TextureCraftApp;
@@ -13,8 +13,6 @@ use crate::theme::{AXIS_COLORS, OPPOSITE_COLORS, Tokens};
 use crate::widgets::color_swatch;
 
 const SWATCH_WIDTH: f32 = 36.0;
-/// The most colors `effect.set {colors}` takes for a gradient map
-const MAX_GRADIENT_STOPS: usize = 16;
 /// The widest Divider chip text: the chip keeps one width whatever it shows
 const WIDEST_DIVIDER: &str = "÷1000";
 
@@ -101,6 +99,9 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
         Filter::ColorBalance { shadows, midtones, highlights } => return color_balance(app, sheet, id, [highlights, midtones, shadows]),
         Filter::ColorCorrect { shadows, midtones, highlights } => return color_correct(app, sheet, id, [shadows, midtones, highlights]),
         Filter::Hsl { hue, saturation, lightness, perceptive } => return hsl(app, sheet, id, [*hue, *saturation, *lightness], *perceptive),
+        Filter::GradientMap { .. } => return gradient(app, sheet, id, filter),
+        Filter::GradientCurve { preset, invert, balance, contrast } => return gradient_curve(app, sheet, id, *preset, *invert, [*balance, *contrast]),
+        Filter::GradientDynamic { vertical, position, color } => return gradient_dynamic(app, sheet, id, *vertical, *position, *color),
         _ => {}
     }
     let params = scalar_params(filter);
@@ -210,6 +211,146 @@ fn hsl(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, [hue, 
     }
 }
 
+/// Gradient: Display Gradient (Debug), the Input Transformation card, then the Colors card (the ramp, Color Quantity, Blend Color in Linear and a row per color)
+fn gradient(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, filter: &Filter) {
+    let Filter::GradientMap { colors, positions, input, linear, debug, .. } = filter else { return };
+    let set = |app: &mut TextureCraftApp, params: Value| {
+        let mut params = params;
+        params["effect"] = json!(id);
+        app.run("effect.set", params);
+    };
+    let mut shown = *debug;
+    if sheet.toggle(tr("Display Gradient (Debug)"), &mut shown) {
+        set(app, json!({"debug": shown}));
+    }
+
+    if sheet.card(tr("Input Transformation"), Some(true)) {
+        let name = |mode: GrayscaleMode| tr(mode.label()).to_owned();
+        if let (Some(mode), _) = sheet.dropdown(tr("Grayscale Mode"), input.mode, &GrayscaleMode::ALL, name, None) {
+            set(app, json!({"grayscaleMode": mode.id()}));
+        }
+        for (key, label, value) in
+            [("blur", tr("Blur Intensity"), input.blur), ("balance", tr("Balance"), input.balance), ("contrast", tr("Contrast"), input.contrast)]
+        {
+            let mut value = value;
+            let range = if key == "blur" { 0.0..=16.0 } else { 0.0..=1.0 };
+            if let Some(merge) = sheet.slider(label, &mut value, range, 2) {
+                set(app, json!({key: value, "merge": merge}));
+            }
+        }
+        let mut invert = input.invert;
+        if sheet.toggle(tr("Invert"), &mut invert) {
+            set(app, json!({"invert": invert}));
+        }
+    }
+    sheet.close_card();
+
+    if sheet.card(tr("Colors"), Some(true)) {
+        let used = filter.ramp_colors();
+        // An evenly spaced ramp (projects saved before) shows its places, and keeps them once one moves
+        let last = used.len().saturating_sub(1).max(1) as f32;
+        let mut places: Vec<f32> = (0..colors.len()).map(|index| positions.get(index).copied().unwrap_or(index as f32 / last)).collect();
+        if let Some(drag) = sheet.gradient_ramp(used, &places, &|t| filter.ramp_at(t).unwrap_or([0.0; 3])) {
+            if let Some(place) = places.get_mut(drag.index) {
+                *place = drag.position;
+            }
+            set(app, json!({"positions": places, "merge": drag.merge}));
+        }
+        let mut quantity = used.len() as f32;
+        if let Some(merge) = sheet.slider(tr("Color Quantity"), &mut quantity, 2.0..=f32::from(Filter::MAX_GRADIENT_COLORS), 0) {
+            let quantity = quantity.round();
+            if quantity as usize != used.len() {
+                set(app, json!({"quantity": quantity, "merge": merge}));
+            }
+        }
+        let mut in_linear = *linear;
+        if sheet.toggle(tr("Blend Color in Linear"), &mut in_linear) {
+            set(app, json!({"linear": in_linear}));
+        }
+        for (index, color) in used.iter().enumerate() {
+            let label = format!("{} {}", tr("Color"), index + 1);
+            let mut place = places.get(index).copied().unwrap_or(0.0);
+            let (pick, moved) = sheet.color_stop(&label, *color, &mut place, app.picking_color, &app.session.doc.project.swatches);
+            if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
+                let mut recolored = colors.clone();
+                if let Some(slot) = recolored.get_mut(index) {
+                    *slot = picked;
+                }
+                set(app, json!({"colors": recolored, "merge": pick.merge}));
+            }
+            if let Some(merge) = moved {
+                if let Some(slot) = places.get_mut(index) {
+                    *slot = place;
+                }
+                set(app, json!({"positions": places, "merge": merge}));
+            }
+        }
+    }
+    sheet.close_card();
+}
+
+/// Gradient Curve: Preset (each drawn as its curve), Invert, Balance and Contrast
+fn gradient_curve(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, preset: CurvePreset, invert: bool, [balance, contrast]: [f32; 2]) {
+    let tokens = Tokens::get(sheet.ui.ctx());
+    let picture = |painter: &Painter, rect: Rect, preset: CurvePreset| curve_picture(painter, rect, preset, &tokens);
+    let name = |preset: CurvePreset| tr(preset.label()).to_owned();
+    if let (Some(picked), _) = sheet.dropdown(tr("Preset"), preset, &CurvePreset::ALL, name, Some(&picture)) {
+        app.run("effect.set", json!({"effect": id, "preset": picked.id()}));
+    }
+    let mut inverted = invert;
+    if sheet.toggle(tr("Invert"), &mut inverted) {
+        app.run("effect.set", json!({"effect": id, "invert": inverted}));
+    }
+    for (key, label, value) in [("balance", tr("Balance"), balance), ("contrast", tr("Contrast"), contrast)] {
+        let mut value = value;
+        if let Some(merge) = sheet.slider(label, &mut value, 0.0..=1.0, 2) {
+            app.run("effect.set", json!({"effect": id, key: value, "merge": merge}));
+        }
+    }
+}
+
+/// A curve preset's shape over a dark square
+fn curve_picture(painter: &Painter, rect: Rect, preset: CurvePreset, tokens: &Tokens) {
+    painter.rect_filled(rect, 2, tokens.field);
+    let inner = rect.shrink(CURVE_PICTURE_INSET);
+    let points: Vec<egui::Pos2> = (0..=CURVE_PICTURE_STEPS)
+        .map(|step| {
+            let t = step as f32 / CURVE_PICTURE_STEPS as f32;
+            egui::pos2(inner.left() + inner.width() * t, inner.bottom() - inner.height() * preset.at(t))
+        })
+        .collect();
+    painter.add(egui::Shape::line(points, Stroke::new(CURVE_PICTURE_STROKE, tokens.accent)));
+}
+
+/// A curve picture's inset in its square, the points it is drawn through and its line's width
+const CURVE_PICTURE_INSET: f32 = 2.0;
+const CURVE_PICTURE_STEPS: usize = 30;
+const CURVE_PICTURE_STROKE: f32 = 1.5;
+
+/// Gradient Dynamic: Gradient Orientation and Gradient Input Position, then its Gradient Source under Image inputs
+fn gradient_dynamic(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, vertical: bool, position: f32, color: [f32; 3]) {
+    if let Some(picked) = sheet.switch(tr("Gradient Orientation"), &[tr("Horizontal"), tr("Vertical")], usize::from(vertical)) {
+        app.run("effect.set", json!({"effect": id, "orientation": if picked == 1 { "vertical" } else { "horizontal" }}));
+    }
+    let mut value = position;
+    if let Some(merge) = sheet.slider(tr("Gradient Input Position"), &mut value, 0.0..=1.0, 2) {
+        app.run("effect.set", json!({"effect": id, "position": value, "merge": merge}));
+    }
+
+    if !sheet.band(tr("Image inputs"), true, None, None).open {
+        return;
+    }
+    let swatch = |painter: &Painter, rect: Rect| {
+        painter.rect_filled(rect, 3, crate::fill_material_panel::shown_color(color));
+    };
+    sheet.slot(&swatch, tr("Gradient Source"), tr("Uniform"), None, false, false);
+    let pick = sheet.color_bar(tr("Gradient Source"), color, app.picking_color, &app.session.doc.project.swatches);
+    sheet.close_card();
+    if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
+        app.run("effect.set", json!({"effect": id, "color": picked, "merge": pick.merge}));
+    }
+}
+
 /// The parameter a filter's Divider divides and the divider it has
 fn divided_key(filter: &Filter) -> Option<(&'static str, u16)> {
     match filter {
@@ -248,7 +389,7 @@ fn decimals(key: &str, min: f32, max: f32) -> usize {
     }
 }
 
-/// The swatches of replace color and gradient map
+/// The swatches of replace color
 fn color_editors(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, filter: &Filter) {
     let set = |app: &mut TextureCraftApp, key: &str, value: Value, merge: bool| {
         let mut params = json!({ "effect": id, "merge": merge });
@@ -265,30 +406,6 @@ fn color_editors(app: &mut TextureCraftApp, ui: &mut Ui, id: u64, filter: &Filte
                     }
                     ui.label(label);
                 });
-            }
-        }
-        Filter::GradientMap { colors } => {
-            let mut stops = colors.clone();
-            let mut changed = false;
-            ui.horizontal_wrapped(|ui| {
-                for (index, stop) in stops.iter_mut().enumerate() {
-                    changed |= color_swatch(ui, &format!("gradient_{id}_{index}"), stop, SWATCH_WIDTH);
-                }
-            });
-            ui.horizontal(|ui| {
-                let add = egui::Button::new(format!("{} {}", egui_phosphor::regular::PLUS, tr("Add color")));
-                if ui.add_enabled(stops.len() < MAX_GRADIENT_STOPS, add).clicked() {
-                    stops.push(stops.last().copied().unwrap_or([1.0; 3]));
-                    changed = true;
-                }
-                let remove = egui::Button::new(format!("{} {}", egui_phosphor::regular::MINUS, tr("Remove last")));
-                if ui.add_enabled(stops.len() > 1, remove).clicked() {
-                    stops.pop();
-                    changed = true;
-                }
-            });
-            if changed {
-                set(app, "colors", json!(stops), false);
             }
         }
         _ => {}

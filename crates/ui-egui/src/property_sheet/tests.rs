@@ -3,6 +3,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 use egui_phosphor::regular as ic;
 
+use super::number_field::shown_number;
 use super::slot::next_seed;
 use super::{NumberField, PropertySheet};
 use crate::theme::{Accent, Brightness, Tokens};
@@ -295,4 +296,14 @@ fn property_sheet_gallery_snapshots() {
         h.run_steps(2);
         h.render().unwrap().save(output_dir.join(format!("sheet-{name}-list-open.png"))).unwrap();
     }
+}
+
+#[test]
+fn a_number_field_reads_zero_without_a_minus_sign() {
+    assert_eq!(shown_number(-0.0, 0), "0");
+    assert_eq!(shown_number(-0.004, 2), "0.00");
+    assert_eq!(shown_number(-0.3, 0), "0");
+    assert_eq!(shown_number(-0.6, 0), "-1");
+    assert_eq!(shown_number(-1.25, 2), "-1.25");
+    assert_eq!(shown_number(2.5, 1), "2.5");
 }

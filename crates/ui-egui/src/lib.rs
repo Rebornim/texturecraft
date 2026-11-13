@@ -768,6 +768,10 @@ impl eframe::App for TextureCraftApp {
         toasts(self, &ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.file_dialogs.show_pending(frame);
+        // Last, so no widget's pointer replaces it: an armed eyedropper is the pointer over the whole window
+        if self.picking_color.is_some() {
+            screen_pick::paint_cursor(&ctx, None);
+        }
         let end = now_ms();
         let dt = (end - t0) as f32;
         self.ui_ms = if self.ui_ms == 0.0 { dt } else { self.ui_ms * 0.9 + dt * 0.1 };

@@ -1,13 +1,18 @@
 //! Eyedropper picks outside the app: while a colour bar's eyedropper waits, a left click anywhere on the desktop (another app, a
 //! reference picture on another monitor) reads the one screen pixel under it at that moment. Nothing records the screen, and
-//! clicks on the app's own windows keep picking from the model. Where the system allows neither, the pick stays on the model.
+//! clicks on the app's own windows keep picking from the model. Where the system allows neither, the pick stays on the model;
+//! While a pick waits the pointer is the eyedropper, drawn over the app's window and, where the system allows, over every app
 
+mod cursor_image;
+mod painted_cursor;
 mod pick_outcome;
 mod pick_shared;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod portal;
 #[cfg(windows)]
 mod windows_hook;
+#[cfg(windows)]
+mod windows_pointer;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod x11_grab;
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -16,8 +21,12 @@ mod x11_pixel;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 
+pub use cursor_image::CursorImage;
+pub use painted_cursor::paint as paint_cursor;
 pub use pick_outcome::PickOutcome;
 pub(crate) use pick_shared::PickShared;
+#[cfg(windows)]
+pub use windows_pointer::{KEEPER_ARG, keep_pointer};
 
 use crate::TextureCraftApp;
 use crate::color_picker::ColorPick;
@@ -27,6 +36,8 @@ pub struct ScreenPick {
     bar: egui::Id,
     outcomes: Receiver<PickOutcome>,
     shared: Arc<PickShared>,
+    /// Whether the app losing the focus ends the pick (not while the desktop's own picker has it)
+    ends_on_focus_loss: bool,
 }
 
 impl ScreenPick {
@@ -39,14 +50,20 @@ impl ScreenPick {
         if let Err(error) = spawned {
             log::warn!("the eyedropper picks on the model only: {error}");
         }
-        ScreenPick { bar, outcomes, shared }
+        ScreenPick { bar, outcomes, shared, ends_on_focus_loss: ends_on_focus_loss() }
     }
 
     /// A pick for `bar` whose click outside the app already ended as `outcome` (tests and agents stand in for the system)
     pub fn ended(bar: egui::Id, outcome: PickOutcome) -> Self {
         let (sender, outcomes) = mpsc::channel();
         let _ = sender.send(outcome);
-        ScreenPick { bar, outcomes, shared: Arc::default() }
+        ScreenPick { bar, outcomes, shared: Arc::default(), ends_on_focus_loss: true }
+    }
+
+    /// A pick for `bar` still waiting for its click outside the app (tests stand in for the system)
+    pub fn waiting(bar: egui::Id) -> Self {
+        let (_, outcomes) = mpsc::channel();
+        ScreenPick { bar, outcomes, shared: Arc::default(), ends_on_focus_loss: true }
     }
 
     /// Tells the waiting thread where the app's windows are and whether the pointer is over one of them
@@ -74,6 +91,7 @@ pub(crate) fn sync(app: &mut TextureCraftApp, ctx: &egui::Context) {
         app.screen_pick = None;
         return;
     };
+
     if app.screen_pick.as_ref().is_none_or(|pick| pick.bar != bar) {
         app.screen_pick = app.screen_picking.then(|| ScreenPick::start(bar, ctx));
     }
@@ -91,8 +109,19 @@ pub(crate) fn sync(app: &mut TextureCraftApp, ctx: &egui::Context) {
             app.screen_pick = None;
         }
         // The pick stays on the model; the finished wait is kept so it does not start again
-        Ok(PickOutcome::Unavailable) | Err(_) => {}
+        Ok(PickOutcome::Unavailable) | Err(_) => {
+            // Another app came forward (Alt+Tab, the Start menu): the pick ends there and the pointer is the user's again
+            if pick.ends_on_focus_loss && ctx.input(|input| input.viewport().focused) == Some(false) {
+                app.picking_color = None;
+                app.screen_pick = None;
+            }
+        }
     }
+}
+
+/// Whether the app losing the focus ends a pick here (not on Wayland, where the desktop's colour picker takes the focus)
+fn ends_on_focus_loss() -> bool {
+    cfg!(windows) || (cfg!(all(unix, not(target_os = "macos"))) && std::env::var_os("WAYLAND_DISPLAY").is_none())
 }
 
 /// A window's outer rectangle as `[left, top, right, bottom]` in physical screen pixels, where the system reports one

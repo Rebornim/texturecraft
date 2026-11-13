@@ -1,0 +1,180 @@
+//! The eyedropper pointer an armed pick shows everywhere: drawn in code (a pipette from its tip at the bottom left to its bulb at
+//! the top right, white with a dark outline so it reads on any colour), the same picture in the app and, where the system lets
+//! the app set the pointer, over other apps; its hotspot is the tip's last pixel, so the pixel under the tip is the one picked
+
+/// The pipette's parts as capsules `(from, to, radius at from, radius at to)` in a unit square, y down
+const PARTS: [([f32; 2], [f32; 2], f32, f32); 3] = [
+    // The glass tube, thin at the tip
+    ([0.07, 0.93], [0.52, 0.48], 0.03, 0.07),
+    // The collar between the tube and the bulb
+    ([0.43, 0.39], [0.61, 0.57], 0.065, 0.065),
+    // The rubber bulb
+    ([0.58, 0.42], [0.80, 0.20], 0.13, 0.13),
+];
+
+/// The outline's width in pixels at the smallest pointer; larger pointers scale it
+const OUTLINE_PX: f32 = 1.0;
+/// The pointer size the outline width is given for
+const OUTLINE_SIZE: f32 = 24.0;
+/// The coverage from which a pixel counts as ink for the hotspot
+const INK_ALPHA: u8 = 128;
+/// A `.cur` file's header (6 bytes) and its one picture's entry (16 bytes)
+const CUR_HEADER_BYTES: u32 = 22;
+/// The `.cur` file type in its header (an `.ico` file says 1)
+const CUR_TYPE: u16 = 2;
+/// A `BITMAPINFOHEADER`'s size
+const BITMAP_HEADER_BYTES: u32 = 40;
+/// The smallest and largest pointer drawn, in pixels
+const SIZES: std::ops::RangeInclusive<u32> = 8..=256;
+
+/// A square pointer picture in straight-alpha RGBA rows, top row first, with the pixel that is the pointer's position
+#[derive(Clone, Debug, PartialEq)]
+pub struct CursorImage {
+    pub size: u32,
+    pub rgba: Vec<u8>,
+    pub hotspot: [u32; 2],
+}
+
+impl CursorImage {
+    /// The eyedropper `size` pixels square (clamped to a sane range)
+    pub fn eyedropper(size: u32) -> Self {
+        let size = size.clamp(*SIZES.start(), *SIZES.end());
+        let scale = size as f32;
+        let outline = OUTLINE_PX * (scale / OUTLINE_SIZE).max(1.0);
+        let mut rgba = Vec::with_capacity((size * size * 4) as usize);
+        for y in 0..size {
+            for x in 0..size {
+                let point = [(x as f32 + 0.5) / scale, (y as f32 + 0.5) / scale];
+                let inside = PARTS.iter().map(|&(from, to, r0, r1)| cone_distance(point, from, to, r0, r1)).fold(f32::INFINITY, f32::min) * scale;
+                let fill = (0.5 - inside).clamp(0.0, 1.0);
+                let alpha = (0.5 - (inside - outline)).clamp(0.0, 1.0);
+                let grey = (fill * 255.0).round() as u8;
+                rgba.extend_from_slice(&[grey, grey, grey, (alpha * 255.0).round() as u8]);
+            }
+        }
+        let hotspot = tip(&rgba, size);
+        CursorImage { size, rgba, hotspot }
+    }
+
+    /// The picture as a Windows `.cur` file: 32-bit colour with alpha, its hotspot in the file's header
+    #[cfg_attr(not(windows), allow(dead_code, reason = "only Windows loads a pointer from a file"))]
+    pub fn cur_file(&self) -> Vec<u8> {
+        let side = self.size;
+        let mask_row = side.div_ceil(32) * 4;
+        let pixel_bytes = side * side * 4;
+        let image_bytes = BITMAP_HEADER_BYTES + pixel_bytes + mask_row * side;
+        let mut file = Vec::with_capacity((CUR_HEADER_BYTES + image_bytes) as usize);
+        // The file's header: one cursor picture, a byte size of 0 standing for 256
+        for word in [0_u16, CUR_TYPE, 1] {
+            file.extend_from_slice(&word.to_le_bytes());
+        }
+        let byte_side = u8::try_from(side).unwrap_or(0);
+        file.extend_from_slice(&[byte_side, byte_side, 0, 0]);
+        for word in self.hotspot.map(|edge| u16::try_from(edge).unwrap_or(0)) {
+            file.extend_from_slice(&word.to_le_bytes());
+        }
+        file.extend_from_slice(&image_bytes.to_le_bytes());
+        file.extend_from_slice(&CUR_HEADER_BYTES.to_le_bytes());
+        // The bitmap's header: twice the height, the colour picture over its mask
+        let side_signed = i32::try_from(side).unwrap_or(0);
+        for word in [BITMAP_HEADER_BYTES as i32, side_signed, side_signed * 2] {
+            file.extend_from_slice(&word.to_le_bytes());
+        }
+        file.extend_from_slice(&1_u16.to_le_bytes());
+        file.extend_from_slice(&32_u16.to_le_bytes());
+        for word in [0, pixel_bytes + mask_row * side, 0, 0, 0, 0] {
+            file.extend_from_slice(&word.to_le_bytes());
+        }
+        // Rows bottom up: blue, green, red, alpha; then the mask, set where the picture is clear
+        for row in self.rgba.chunks_exact(side as usize * 4).rev() {
+            for &[red, green, blue, alpha] in row.as_chunks::<4>().0 {
+                file.extend_from_slice(&[blue, green, red, alpha]);
+            }
+        }
+        for row in self.rgba.chunks_exact(side as usize * 4).rev() {
+            let mut bits = vec![0_u8; mask_row as usize];
+            for (x, &[.., alpha]) in row.as_chunks::<4>().0.iter().enumerate() {
+                if alpha == 0
+                    && let Some(byte) = bits.get_mut(x / 8)
+                {
+                    *byte |= 0x80 >> (x % 8);
+                }
+            }
+            file.extend_from_slice(&bits);
+        }
+        file
+    }
+
+    /// The alpha of the pixel at `(x, y)`, none outside the picture
+    pub fn alpha(&self, x: u32, y: u32) -> Option<u8> {
+        let index = (y.checked_mul(self.size)?.checked_add(x)? as usize).checked_mul(4)?.checked_add(3)?;
+        (x < self.size).then(|| self.rgba.get(index).copied()).flatten()
+    }
+}
+
+/// The ink pixel furthest toward the bottom-left corner: the pipette's tip
+fn tip(rgba: &[u8], size: u32) -> [u32; 2] {
+    let ink = rgba.as_chunks::<4>().0.iter().enumerate().filter(|(_, [.., alpha])| *alpha >= INK_ALPHA);
+    let corner = ink.map(|(index, _)| [index as u32 % size, index as u32 / size]).max_by_key(|&[x, y]| (i64::from(y) - i64::from(x), y));
+    corner.unwrap_or([0, size.saturating_sub(1)])
+}
+
+/// The signed distance from `point` to a capsule from `from` (radius `r0`) to `to` (radius `r1`), negative inside
+fn cone_distance(point: [f32; 2], from: [f32; 2], to: [f32; 2], r0: f32, r1: f32) -> f32 {
+    let along = [to[0] - from[0], to[1] - from[1]];
+    let offset = [point[0] - from[0], point[1] - from[1]];
+    let length = along[0] * along[0] + along[1] * along[1];
+    let h = ((offset[0] * along[0] + offset[1] * along[1]) / length).clamp(0.0, 1.0);
+    let closest = [offset[0] - along[0] * h, offset[1] - along[1] * h];
+    (closest[0] * closest[0] + closest[1] * closest[1]).sqrt() - (r0 + (r1 - r0) * h)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_hotspot_is_the_tips_last_ink_pixel_at_every_size() {
+        for size in [16, 24, 32, 48, 64] {
+            let image = CursorImage::eyedropper(size);
+            let [hx, hy] = image.hotspot;
+
+            assert!(image.alpha(hx, hy).is_some_and(|alpha| alpha >= INK_ALPHA), "{size}: the hotspot pixel is ink");
+            assert!(hx < size / 4 && hy >= size * 3 / 4, "{size}: the tip is at the bottom left: {:?}", image.hotspot);
+            for y in 0..size {
+                for x in 0..size {
+                    let ink = image.alpha(x, y).is_some_and(|alpha| alpha >= INK_ALPHA);
+                    let further = i64::from(y) - i64::from(x) > i64::from(hy) - i64::from(hx);
+                    assert!(!(ink && further), "{size}: ink at ({x}, {y}) lies beyond the tip");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_pipette_is_white_inside_a_dark_outline_on_a_clear_ground() {
+        let image = CursorImage::eyedropper(32);
+        let pixel = |x: u32, y: u32| image.rgba.get(((y * 32 + x) * 4) as usize..((y * 32 + x) * 4 + 4) as usize).map(<[u8]>::to_vec);
+
+        assert_eq!(pixel(24, 8), Some(vec![255, 255, 255, 255]), "the bulb is white");
+        assert_eq!(pixel(31, 31).and_then(|pixel| pixel.get(3).copied()), Some(0), "the bottom-right corner is clear");
+        let [hx, hy] = image.hotspot;
+        assert!(pixel(hx, hy).and_then(|pixel| pixel.first().copied()).is_some_and(|grey| grey < 128), "the tip's edge is the dark outline");
+        assert_eq!(CursorImage::eyedropper(0).size, 8, "a degenerate size is clamped");
+    }
+
+    #[test]
+    fn the_cur_files_hotspot_is_the_tip_and_its_pixel_is_ink() {
+        let image = CursorImage::eyedropper(32);
+        let file = image.cur_file();
+        let word = |at: usize| file.get(at..at + 2).map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]));
+
+        assert_eq!([word(2), word(4)], [Some(CUR_TYPE), Some(1)], "one cursor picture");
+        assert_eq!([word(10), word(12)], [Some(image.hotspot[0] as u16), Some(image.hotspot[1] as u16)], "the hotspot is the tip");
+        assert_eq!(file.len(), 22 + 40 + 32 * 32 * 4 + 4 * 32, "header, bitmap header, colour rows and mask rows");
+        let [hx, hy] = image.hotspot;
+        let bottom_up_row = (31 - hy) as usize;
+        let alpha = file.get(22 + 40 + (bottom_up_row * 32 + hx as usize) * 4 + 3).copied();
+        assert!(alpha.is_some_and(|alpha| alpha >= INK_ALPHA), "the file's hotspot pixel is the tip's ink: {alpha:?}");
+    }
+}

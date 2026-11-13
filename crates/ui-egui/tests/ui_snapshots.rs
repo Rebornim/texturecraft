@@ -1001,3 +1001,33 @@ fn fill_material_snapshots() {
     harness.get_by_role_and_label(egui::Role::RadioButton, "Channels").click();
     save(&mut harness, &output_dir, "material-linked-channels");
 }
+
+/// The armed eyedropper is the pointer over the panels too, its tip on the hovered pixel
+#[test]
+#[ignore]
+fn eyedropper_pointer_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    execute(&mut session, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1]})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 960.0)).with_pixels_per_point(1.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    // Only the app's own pointer shows, not the test's stand-in arrow
+    harness.set_render_cursor(false);
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
+    harness.run_steps(3);
+    harness.get_by_role_and_label(egui::Role::Button, "Base color").click();
+    harness.run_steps(3);
+    harness.get_all_by_role_and_label(egui::Role::Button, "Pick color").next().unwrap().click();
+    harness.run_steps(3);
+    let over_panel = harness.get_by_role_and_label(egui::Role::Tab, "Material").rect().center();
+    harness.hover_at(over_panel);
+    save(&mut harness, &output_dir, "eyedropper-over-properties");
+    harness.hover_at(egui::pos2(700.0, 450.0));
+    save(&mut harness, &output_dir, "eyedropper-over-viewport");
+}

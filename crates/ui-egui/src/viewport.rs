@@ -584,7 +584,10 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     // A pending ID color pick or eyedropper takes the next click instead of the brush
     let picking = app.picking_id_color.is_some() || app.picking_color.is_some();
     if picking {
-        crate::id_color_pick::IdColorPick::draw_cursor(ui, rect);
+        // The eyedropper's own pointer is drawn over the whole window (screen_pick)
+        if app.picking_color.is_none() {
+            crate::id_color_pick::IdColorPick::draw_cursor(ui, rect);
+        }
         if !alt
             && response.clicked_by(PointerButton::Primary)
             && let Some(position) = response.interact_pointer_pos()

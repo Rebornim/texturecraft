@@ -22,6 +22,9 @@ const TAG_GLYPH_CENTER: f32 = 10.0;
 /// From a field's right edge to its value's right end
 const VALUE_INSET: f32 = 6.0;
 
+/// Least air between a field's tag and its value: a value that would come closer drops decimals
+const TAG_VALUE_GAP: f32 = 5.0;
+
 /// One part of a row of number fields: its tag (an axis letter in its colour, or a glyph) and value
 pub(crate) struct NumberField<'a> {
     pub(crate) tag: &'a str,
@@ -134,7 +137,13 @@ impl PropertySheet<'_> {
 
         let response = self.ui.interact(rect, id, Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
         response.widget_info(|| egui::WidgetInfo::slider(true, f64::from(field.value), format!("{label} {}", field.tag)));
-        let shown = format!("{}{}", shown_number(field.value, decimals), field.suffix);
+        let tag_right = match field.tag_color {
+            Some(_) => rect.left() + TAG_LETTER_INSET + painter.layout_no_wrap(field.tag.to_owned(), semibold(SMALL_TEXT_SIZE), t.text).size().x,
+            None => rect.left() + TAG_GLYPH_CENTER + ICON_SIZE / 2.0,
+        };
+        let room = rect.right() - VALUE_INSET - tag_right - TAG_VALUE_GAP;
+        let shown =
+            fitting_number(field.value, decimals, field.suffix, room, |text| painter.layout_no_wrap(text.to_owned(), semibold(TEXT_SIZE), t.text).size().x);
         painter.text(pos2(rect.right() - VALUE_INSET, rect.center().y), Align2::RIGHT_CENTER, shown, semibold(TEXT_SIZE), t.text);
         if response.hovered() || response.dragged() {
             painter.rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, t.button_border), StrokeKind::Inside);
@@ -154,9 +163,39 @@ impl PropertySheet<'_> {
     }
 }
 
+/// `value` and `suffix` with up to `decimals` decimals, as many as fit `room` wide (as measured by `width`), at least none
+fn fitting_number(value: f32, decimals: usize, suffix: &str, room: f32, width: impl Fn(&str) -> f32) -> String {
+    let mut decimals = decimals;
+    loop {
+        let shown = format!("{}{suffix}", shown_number(value, decimals));
+        if decimals == 0 || width(&shown) <= room {
+            return shown;
+        }
+        decimals -= 1;
+    }
+}
+
 /// `value` with `decimals` decimals, a value that rounds to zero reading 0 without a minus sign
 pub(super) fn shown_number(value: f32, decimals: usize) -> String {
     let shown = format!("{value:.decimals$}");
     let zero = shown.trim_start_matches('-').chars().all(|digit| matches!(digit, '0' | '.'));
     if zero { shown.trim_start_matches('-').to_owned() } else { shown }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fitting_number;
+
+    /// Every character is 7 wide
+    fn width(text: &str) -> f32 {
+        7.0 * text.chars().count() as f32
+    }
+
+    #[test]
+    fn a_value_too_wide_for_its_field_drops_decimals_before_it_reaches_the_tag() {
+        assert_eq!(fitting_number(1.0, 2, "", 28.0, width), "1.00");
+        assert_eq!(fitting_number(1.0, 2, "", 27.0, width), "1.0");
+        assert_eq!(fitting_number(-12.5, 2, "°", 30.0, width), "-12°");
+        assert_eq!(fitting_number(12345.0, 2, "", 1.0, width), "12345");
+    }
 }

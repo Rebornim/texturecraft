@@ -1312,6 +1312,9 @@ fn mask_fill_snapshots() {
     harness.key_press(egui::Key::Escape);
     harness.run_steps(3);
     shot(&mut harness, json!({"anchor": anchor}), "mask-fill-anchor");
+    // Again once the anchored stack's picture has rendered
+    settle_thumbnails(&mut harness);
+    save(&mut harness, &output_dir, "mask-fill-anchor");
 
     shot(&mut harness, json!({"value": 1.0}), "mask-fill-uniform-again");
 }

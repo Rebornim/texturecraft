@@ -1650,8 +1650,8 @@ impl Filter {
     /// The channels a new content effect of the filter starts with on (None: all of them)
     pub fn starts_on(&self) -> Option<&'static [Channel]> {
         match self {
-            Filter::BakedLighting { .. } | Filter::EnvironmentLighting { .. } | Filter::ColorMatch(_) => Some(&[Channel::BaseColor]),
-            Filter::PbrValidate(_) => Some(&[Channel::BaseColor, Channel::Metallic]),
+            // PBR Validate reads the metal but changes only the base color, so its Metal pill would do nothing
+            Filter::BakedLighting { .. } | Filter::EnvironmentLighting { .. } | Filter::ColorMatch(_) | Filter::PbrValidate(_) => Some(&[Channel::BaseColor]),
             Filter::HeightToNormal(_) => Some(&[Channel::Normal]),
             _ => None,
         }

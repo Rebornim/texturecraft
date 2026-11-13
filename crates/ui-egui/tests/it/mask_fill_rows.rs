@@ -64,6 +64,9 @@ fn a_mask_fill_has_fill_symmetry_and_grayscale_tabs_and_its_slot_picks_the_sourc
     assert_eq!((pattern.kind, low, high), (ProceduralKind::Clouds, [0.0; 3], [1.0; 3]), "a gray pattern spans black to white");
     assert!(!egui::Popup::is_any_open(&harness.ctx), "a pick closes the picker");
     assert!(harness.query_by_label("Scale").is_some(), "the pattern's own rows follow the slot");
+    for shown in ["Contrast", "Balance", "Random"] {
+        assert!(harness.query_by_label(shown).is_some(), "a grayscale's {shown} (Seed's dice) shows with Scale, Attributes folded");
+    }
 
     // Resolution: the pattern is made at the texture set's size until another is picked
     let resolution = |harness: &Harness<'_, TextureCraftApp>| match mask_fill(harness, effect).0 {

@@ -13,8 +13,8 @@ type SegmentPicture<'a> = &'a dyn Fn(&Painter, Rect, usize);
 const SEGMENT_PICTURE_SIZE: f32 = 14.0;
 const SEGMENT_PICTURE_AIR: f32 = 6.0;
 
-/// Room a switch's word needs in its segment beyond its own width
-const SEGMENT_AIR: f32 = 16.0;
+/// Room a switch's word needs in its segment beyond its own width (6 px each side: Bevel Smooth's Out | In | In/Out fits beside the widest label column)
+const SEGMENT_AIR: f32 = 12.0;
 
 /// How far the chosen segment sits inside the switch's box
 const SEGMENT_INSET: f32 = 2.0;

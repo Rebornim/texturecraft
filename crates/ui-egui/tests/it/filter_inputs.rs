@@ -44,7 +44,7 @@ fn the_distance_map_slot_picks_its_source() {
     assert!(gray < 0.05, "{gray}");
 }
 
-/// Warp shows its Custom Noise slot right under Source Mode only in that mode, above the source's sliders
+/// Warp shows its Custom Noise slot right under Source Mode only in that mode, above the source's sliders; a pattern picked there shows its Scale and Contrast
 #[test]
 fn the_custom_noise_slot_follows_the_source_mode() {
     let (mut harness, effect) = app_with("warp");
@@ -55,8 +55,15 @@ fn the_custom_noise_slot_follows_the_source_mode() {
     assert!(slot.bottom() <= blur.top(), "the slot sits above Source Blur");
     click_at(&mut harness, slot.center());
     click(&mut harness, Role::ListBoxOption, "Clouds");
-    assert!(matches!(input(&harness, effect, "customNoise"), Some(Source::Procedural { .. })));
+    let Some(Source::Procedural { pattern, .. }) = input(&harness, effect, "customNoise") else { panic!("a procedural custom noise") };
     assert!(harness.query_by_label("Image inputs").is_none(), "a mode's input is not under Image inputs");
+
+    // The picked pattern's Scale and Contrast show inside the mode's card, like every slot's, and set the pattern
+    let scale = harness.get_by_role_and_label(Role::Slider, "Scale").rect();
+    assert!(scale.top() >= slot.bottom() && harness.query_by_role_and_label(Role::Slider, "Contrast").is_some());
+    click_at(&mut harness, egui::pos2(scale.left() + 1.0, scale.center().y));
+    let Some(Source::Procedural { pattern: scaled, .. }) = input(&harness, effect, "customNoise") else { panic!("still a procedural") };
+    assert!(scaled.scale < pattern.scale, "{} -> {}", pattern.scale, scaled.scale);
 }
 
 /// Attributes is closed at first; a click on its band shows the filter's read-only rows under Image inputs, another hides them

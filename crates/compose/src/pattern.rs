@@ -216,6 +216,15 @@ fn place_uv(q: Vec2, uv: &UvTransform) -> Vec2 {
     place(q, Vec2::from(uv.tiling), uv.rotation, Vec2::from(uv.offset))
 }
 
+/// The middle of a frame's 0..1 texture coordinates: a frame's image turns round it
+pub const FRAME_UV_CENTER: Vec2 = Vec2::splat(0.5);
+
+/// `q` (0..1 across and down a frame) placed as `uv` lays a frame's image: turned round the frame's centre, then tiled and moved from its top left
+pub fn place_frame_uv(q: Vec2, uv: &UvTransform) -> Vec2 {
+    let tiling = Vec2::from(uv.tiling);
+    place(q - FRAME_UV_CENTER, tiling, uv.rotation, Vec2::from(uv.offset)) + FRAME_UV_CENTER * tiling
+}
+
 /// `c` inside a projector turned and scaled by `projector`; the default projector returns `c` unchanged
 pub fn projector_local(projector: &Projector, c: &Coords) -> Coords {
     if !projector.turns() {
@@ -269,7 +278,7 @@ fn evaluate(pattern: &Procedural, projection: &Projection, coords: &Coords, grid
             planes.into_iter().filter(|(w, _)| *w > 0.0).map(|(w, q)| flat(place_uv(q, uv)) * w).sum()
         }
         // The coordinates are already in the placed or warped frame (see [`placed_uv`] and [`crate::warp::warp_uv`])
-        Projection::Planar { uv, placed: Some(_), .. } | Projection::Warp { uv, .. } => flat(place_uv(coords.uv, uv) * pattern_scale),
+        Projection::Planar { uv, placed: Some(_), .. } | Projection::Warp { uv, .. } => flat(place_frame_uv(coords.uv, uv) * pattern_scale),
         Projection::Planar { scale, axis, offset, uv, projector, .. } => {
             let p = projector_local(projector, coords).pos * *scale * pattern_scale + Vec3::from(*offset);
             let q = match axis {
@@ -316,7 +325,7 @@ pub fn image_samples(projection: &Projection, coords: &Coords) -> [(Vec2, f32); 
             let weights = weights / (weights.x + weights.y + weights.z).max(1e-6);
             [(place_uv(Vec2::new(p.z, -p.y), uv), weights.x), (place_uv(Vec2::new(p.x, p.z), uv), weights.y), (place_uv(Vec2::new(p.x, -p.y), uv), weights.z)]
         }
-        Projection::Planar { uv, placed: Some(_), .. } | Projection::Warp { uv, .. } => one(place_uv(coords.uv, uv)),
+        Projection::Planar { uv, placed: Some(_), .. } | Projection::Warp { uv, .. } => one(place_frame_uv(coords.uv, uv)),
         Projection::Planar { scale, axis, offset, uv, projector, .. } => {
             let p = projector_local(projector, coords).pos * *scale + Vec3::from(*offset);
             let q = match axis {
@@ -419,6 +428,45 @@ pub fn world_noise(pos: Vec3, scale: f32, seed: u32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A frame's image turns round the frame's centre: the centre reads the same texel at any Rotation, and an unturned image reads exactly as before for any Tiling and Offset
+    #[test]
+    fn a_frame_image_turns_round_the_frame_centre() {
+        let frame = Decal { center: [0.0; 3], normal: [0.0, 0.0, 1.0], up: [0.0, 1.0, 0.0], size: [1.0; 2], rotation: 0.0, offset: [0.0; 2], depth: 0.5 };
+        let at = |uv: Vec2| Coords { uv, pos: Vec3::ZERO, nrm: Vec3::Z };
+        let sample = |rotation: f32, tiling: [f32; 2], offset: [f32; 2], uv: Vec2| {
+            image_samples(
+                &Projection::Warp {
+                    frame,
+                    corners: Projection::FRAME_CORNERS,
+                    depth: 0.1,
+                    uv: UvTransform { tiling, rotation, offset },
+                    projector: Projector::default(),
+                },
+                &at(uv),
+            )[0]
+            .0
+        };
+        for rotation in [37.0, 90.0, 180.0] {
+            let center = sample(rotation, [1.0; 2], [0.0; 2], FRAME_UV_CENTER);
+            assert!((center - FRAME_UV_CENTER).length() < 1e-5, "{rotation}°: the centre stays put, not swung round the top left: {center}");
+        }
+        let corner = sample(90.0, [1.0; 2], [0.0; 2], Vec2::ZERO);
+        assert!((corner - Vec2::new(1.0, 0.0)).length() < 1e-5, "a quarter turn brings the top left to the top right: {corner}");
+        let placed = Projection::Planar {
+            scale: 1.0,
+            axis: 2,
+            offset: [0.0; 3],
+            uv: UvTransform { rotation: 90.0, ..UvTransform::default() },
+            projector: Projector::default(),
+            placed: Some(frame),
+        };
+        assert!((image_samples(&placed, &at(FRAME_UV_CENTER))[0].0 - FRAME_UV_CENTER).length() < 1e-5, "a placed planar frame turns the same way");
+        for (tiling, offset, uv) in [([2.0, 3.0], [0.25, -0.5], Vec2::new(0.1, 0.8)), ([1.0, 1.0], [0.0, 0.0], Vec2::new(0.7, 0.2))] {
+            let before = uv * Vec2::from(tiling) + Vec2::from(offset);
+            assert!((sample(0.0, tiling, offset, uv) - before).length() < 1e-6, "unturned: as before");
+        }
+    }
 
     #[test]
     fn every_pattern_and_projection_stays_in_range() {

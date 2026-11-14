@@ -1,9 +1,12 @@
 //! A fill's Material section: the channel strip, the orb with the Material | Channels switch, then one slot card per channel that is on (Channels) or the fill's whole material (Material)
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use egui::{Color32, Painter, Rect};
 use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
-use texturecraft_engine::compose::ImageStore;
+use texturecraft_engine::compose::{ImageRes, ImageStore};
 use texturecraft_engine::core::{
     Channel, ChannelKind, CookResolution, Fill, LayerId, LinkParam, MaterialLink, NormalFormat, Procedural, ProceduralKind, Source,
 };
@@ -27,6 +30,7 @@ use crate::resource_picker;
 use crate::resource_picker_item::ResourcePickerItem;
 use crate::slot_thumbnail::{paint_thumbnail, thumbnail};
 use crate::source_slot::SourceSlot;
+use crate::state::UiState;
 use crate::theme::Tokens;
 use crate::thumbs::Thumbs;
 use crate::tile_picture::TilePicture;
@@ -66,8 +70,9 @@ pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
 
     let tokens = Tokens::get(sheet.ui.ctx());
     let look = OrbMaterial::of_fill(fill, on, &app.session.images);
+    let shown = orb_look(&app.ui, fill, on, &app.session.images);
     let place = base.to_string();
-    let orb = |painter: &Painter, rect: Rect| material_orb(painter, rect, &look, &tokens, &format!("orb{place}"));
+    let orb = |painter: &Painter, rect: Rect| material_orb(painter, rect, &shown, &tokens, &format!("orb{place}"));
     let link = fill.link.as_deref().zip(base.get("layer").and_then(Value::as_u64)).map(|(link, layer)| (link.clone(), LayerId(layer)));
     let mode_id = sheet.ui.make_persistent_id(("material_mode", base.to_string()));
     // A fill opens on the side that made it: a material (linked or built-in) on Material, separate sources on Channels
@@ -106,6 +111,11 @@ pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
             }
         }
     }
+}
+
+/// What the orb shows, following the Layers panel's channel list: the whole material, or the channel picked there alone
+fn orb_look(ui: &UiState, fill: &Fill, on: &[Channel], images: &HashMap<String, Arc<ImageRes>>) -> OrbMaterial {
+    if ui.layer_material_view { OrbMaterial::of_fill(fill, on, images) } else { OrbMaterial::of_channel(fill, ui.layer_channel, on, images) }
 }
 
 /// A channel's name on its pill: the reference strip's short Title Case words, the full name where it has none
@@ -537,4 +547,24 @@ fn link_input(sheet: &mut PropertySheet<'_>, layer: LayerId, param: &LinkParam, 
         _ => sheet.embed(|ui| crate::dock::link_param_editor(ui, layer, param)),
     };
     changed.filter(|_| editable)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_orb_shows_the_channel_the_layers_panel_shows_and_the_whole_material_on_material() {
+        let mut ui = UiState::default();
+        let on = [Channel::BaseColor, Channel::Roughness];
+
+        let whole = orb_look(&ui, &Fill::default(), &on, &HashMap::new());
+        ui.layer_material_view = false;
+        ui.layer_channel = Channel::Roughness;
+        let roughness = orb_look(&ui, &Fill::default(), &on, &HashMap::new());
+
+        assert_eq!(whole.alone(), None, "the list starts on Material: the whole material");
+        assert_eq!(roughness.alone(), Some(Channel::Roughness));
+        assert_ne!(whole.key(), roughness.key(), "a new pick draws a new orb");
+    }
 }

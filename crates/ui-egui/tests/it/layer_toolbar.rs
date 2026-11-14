@@ -5,7 +5,7 @@ use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::{Value, json};
-use texturecraft_engine::core::{EffectKind, LayerId, Source};
+use texturecraft_engine::core::{Channel, EffectKind, LayerId, Source};
 use texturecraft_engine::paint::alphas;
 use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
@@ -97,4 +97,48 @@ fn a_toolbar_tooltip_shows_above_its_button_off_the_layer_rows() {
     let tip =
         harness.get_all_by_label("Add effect").find(|node| node.accesskit_node().role() == Role::Label).map(|node| node.rect()).expect("the button's tooltip");
     assert!(tip.bottom() <= button.top(), "the tooltip sits above the toolbar: {tip:?} {button:?}");
+}
+
+/// Where the Layers panel's channel list shows `current`, if it does (the topmost list showing it: Properties sits below)
+fn channel_list(harness: &Harness<'_, TextureCraftApp>, current: &str) -> Option<egui::Rect> {
+    harness.query_all_by_role_and_label(Role::ComboBox, current).map(|node| node.rect()).min_by(|a, b| a.top().total_cmp(&b.top()))
+}
+
+/// Opens the Layers panel's channel list showing `current` and picks `item` in it (the nearest `item` under the list)
+fn pick_channel(harness: &mut Harness<'_, TextureCraftApp>, current: &str, item: &str) {
+    let list = channel_list(harness, current).unwrap();
+    harness.hover_at(list.center());
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: list.center(), button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        harness.run_steps(1);
+    }
+    harness.run_steps(3);
+    let below = |rect: egui::Rect| rect.top() >= list.bottom() - 1.0 && rect.left() < list.right() && rect.right() > list.left();
+    let row = harness.query_all_by_label(item).map(|node| node.rect()).filter(|rect| below(*rect)).min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
+    // A real press and release on the row, as a mouse would
+    let at = row.center();
+    harness.hover_at(at);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        harness.run_steps(1);
+    }
+    harness.run_steps(3);
+}
+
+#[test]
+fn the_channel_list_starts_on_material_and_picks_a_channel_or_material_again() {
+    let (mut harness, _) = app();
+    let start = channel_list(&harness, "Material");
+    assert!(start.is_some(), "the list starts on the whole material");
+
+    pick_channel(&mut harness, "Material", "Roughness");
+
+    assert_eq!(channel_list(&harness, "Roughness"), start, "the list shows the channel picked");
+    assert!(!harness.state().ui.layer_material_view);
+    assert_eq!(harness.state().ui.layer_channel, Channel::Roughness);
+
+    pick_channel(&mut harness, "Roughness", "Material");
+
+    assert!(harness.state().ui.layer_material_view, "Material shows the whole material again");
+    assert_eq!(harness.state().ui.layer_channel, Channel::Roughness, "the rows keep the last channel's blending");
 }

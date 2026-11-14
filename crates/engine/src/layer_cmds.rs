@@ -288,8 +288,7 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(Value::Null)
 }
 
-/// Which fill `layer.fill.*` edits: a fill layer's (`layer`), a content fill effect's
-/// (`effect`) or a mask fill effect's (`effect`: one grayscale source, no channels or material).
+/// Which fill `layer.fill.*` edits: a fill layer's (`layer`), a content fill effect's (`effect`) or a mask fill effect's (`effect`: one grayscale source, no channels or material)
 #[derive(Clone, Copy)]
 pub(crate) enum FillTarget {
     Layer(LayerId),

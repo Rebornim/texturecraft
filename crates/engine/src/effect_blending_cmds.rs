@@ -67,8 +67,7 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
 }
 
-/// Sets `effect`'s blend `mode` and `opacity` where given: on `channel` alone, or on every channel (`None`, a mask effect's
-/// only one); channels left blending like the others stop blending apart
+/// Sets `effect`'s blend `mode` and `opacity` where given: on `channel` alone, or on every channel (`None`, a mask effect's only one); channels left blending like the others stop blending apart
 pub fn set_blending(effect: &mut Effect, channel: Option<Channel>, mode: Option<BlendMode>, opacity: Option<f32>) {
     let edit = |blend: &mut ChannelBlend| {
         if let Some(mode) = mode {
@@ -101,8 +100,7 @@ pub fn on_mask(project: &Project, id: LayerId) -> bool {
     project.layers.values().any(|layer| layer.mask.as_ref().is_some_and(|mask| mask.effects.iter().any(|effect| effect.id == id)))
 }
 
-/// Whether the selected effect has blending (and with `content_only`, is a content effect); with no effect selected, a
-/// command names its effect
+/// Whether the selected effect has blending (and with `content_only`, is a content effect); with no effect selected, a command names its effect
 fn selected_blending_effect(s: &Session, content_only: bool) -> std::result::Result<(), String> {
     let StackTarget::Effect(id) = s.target else { return has_layer(s) };
     let Some((_, effect)) = s.doc.project.effect(id) else { return has_layer(s) };
@@ -130,8 +128,7 @@ fn can_paste(s: &Session) -> std::result::Result<(), String> {
     blending_effect_selected(s)
 }
 
-/// Effect `effect` (or the selected one) of command `cmd`, checked to have blending and, with `content_only`, to be a
-/// content effect
+/// Effect `effect` (or the selected one) of command `cmd`, checked to have blending and, with `content_only`, to be a content effect
 fn blending_effect(s: &Session, p: &Value, cmd: &str, content_only: bool) -> Result<LayerId> {
     let id = effect_id(s, p, cmd)?;
     let (_, effect) = s.doc.project.effect(id).ok_or_else(|| bad(cmd, format!("no effect {}", id.0)))?;

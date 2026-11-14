@@ -5,9 +5,7 @@ use egui::{Color32, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::compose::ThumbTarget;
-use texturecraft_engine::core::{
-    BakedMap, BlendMode, Channel, Effect, EffectKind, Layer, LayerId, LayerKind, LinkParam, MaterialLink, Projection, Sampling, Source,
-};
+use texturecraft_engine::core::{BakedMap, BlendMode, Channel, Effect, EffectKind, Layer, LayerId, LayerKind, LinkParam, Projection, Sampling, Source};
 use texturecraft_engine::paint::{BrushAlpha, BrushSettings, alphas};
 use texturecraft_engine::{CloneFrom, StackTarget, Tool};
 
@@ -2145,7 +2143,7 @@ fn fill_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer) {
 
 /// Writes the material's package to a temporary file and opens it in MaterialCraft
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn open_link_in_materialcraft(app: &mut TextureCraftApp, layer: LayerId, link: &MaterialLink) {
+pub(crate) fn open_link_in_materialcraft(app: &mut TextureCraftApp, layer: LayerId, link: &texturecraft_engine::core::MaterialLink) {
     let ext = texturecraft_engine::link_cmds::source_extension(&link.package);
     let path = std::env::temp_dir().join(format!("{}.{ext}", texturecraft_engine::formats::export::sanitize_file_stem(&link.name)));
     let opened = app

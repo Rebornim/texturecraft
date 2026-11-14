@@ -86,8 +86,7 @@ impl StylizedLighting {
         if up >= 0.0 { mix3(self.horizon_color, self.sky_color, up) } else { mix3(self.horizon_color, self.ground_color, -up) }
     }
 
-    /// The lit base color of linear `albedo` facing `nrm` (world space, unit) with baked ambient occlusion `ao` and curvature `curvature` (0.5 flat),
-    /// its material read from `channels` (straight values by [`Channel::index`]); the viewer looks straight at the surface
+    /// The lit base color of linear `albedo` facing `nrm` (world space, unit) with baked ambient occlusion `ao` and curvature `curvature` (0.5 flat), its material read from `channels` (straight values by [`Channel::index`]); the viewer looks straight at the surface
     pub fn shade(&self, light: SunAndSky, albedo: [f32; 3], nrm: [f32; 3], [ao, curvature]: [f32; 2], channels: &[[f32; 3]]) -> [f32; 3] {
         let channel = |channel: Channel| channels.get(channel.index()).copied().unwrap_or_else(|| channel.default_value());
         let unit = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 };

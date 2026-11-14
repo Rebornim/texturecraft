@@ -25,8 +25,7 @@ const CHECKER_SQUARES: usize = 4;
 /// The checker's two grays
 const CHECKER_GRAYS: [u8; 2] = [150, 90];
 
-/// The ID Mask slot, the output value, hardness, tolerance and background, then the Colors band: Pick color and one row per ID color.
-/// Every edit goes through `effect.set` or `effect.colorSelection.pick`
+/// The ID Mask slot, the output value, hardness, tolerance and background, then the Colors band: Pick color and one row per ID color. Every edit goes through `effect.set` or `effect.colorSelection.pick`
 pub fn color_selection_properties(app: &mut TextureCraftApp, ui: &mut Ui, effect: LayerId, selection: &ColorSelection) {
     let id = effect.0;
     let set_index = app.session.doc.project.locate(effect_owner(app, effect)).map_or(app.session.ts(), |(set_index, _, _)| set_index);

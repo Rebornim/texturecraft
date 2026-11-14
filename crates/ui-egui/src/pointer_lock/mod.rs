@@ -57,6 +57,7 @@ pub(crate) fn rewrite(ctx: &Context, raw: &mut RawInput) {
     let Some(mut lock) = ctx.data(|data| data.get_temp::<PointerLock>(lock_id())) else {
         return;
     };
+
     if lock.let_go {
         raw.events.insert(0, Event::PointerMoved(lock.anchor));
         ctx.data_mut(|data| data.remove::<PointerLock>(lock_id()));
@@ -104,6 +105,7 @@ pub(crate) fn settle(ctx: &Context) {
             let (Some(seen), false) = (latest, hold == Hold::Free) else {
                 return;
             };
+
             if hold == Hold::Locked {
                 ctx.send_viewport_cmd(ViewportCommand::CursorGrab(egui::CursorGrab::Locked));
             }

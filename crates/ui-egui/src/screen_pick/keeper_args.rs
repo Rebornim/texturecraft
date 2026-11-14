@@ -7,12 +7,14 @@ pub const KEEPER_ARG: &str = "--eyedropper-pointer";
 /// The screen density of a system pointer's nominal size (32 pixels at 100 %)
 pub(crate) const BASE_DPI: u32 = 96;
 /// The nominal pointer cell at `BASE_DPI`
+#[cfg(any(windows, test))]
 const BASE_POINTER_PX: u32 = 32;
 /// The densest screen taken from a command line (Windows scales to 500 %)
+#[cfg(any(windows, test))]
 const MAX_DPI: u32 = BASE_DPI * 5;
 
 /// What a pointer keeper is started with
-#[cfg_attr(not(windows), allow(dead_code, reason = "only Windows starts a pointer keeper"))]
+#[cfg(any(windows, test))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct KeeperArgs {
     /// The app's process: the keeper puts the user's pointers back when it ends, however it ends
@@ -23,7 +25,7 @@ pub(crate) struct KeeperArgs {
     pub dpi: u32,
 }
 
-#[cfg_attr(not(windows), allow(dead_code, reason = "only Windows starts a pointer keeper"))]
+#[cfg(any(windows, test))]
 impl KeeperArgs {
     /// The whole command line that starts `program` as this keeper (Windows paths hold no quotes)
     pub fn command_line(&self, program: &str) -> String {

@@ -592,6 +592,14 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         if app.picking_color.is_none() {
             crate::id_color_pick::IdColorPick::draw_cursor(ui, rect);
         }
+        // The eyedropper's disc shows the colour a click here would pick
+        if app.picking_color.is_some()
+            && let Some(hover) = response.hover_pos()
+            && let Ok(values) = app.session.color_at(local(hover), app.session.viewport)
+            && let Some(color) = values.get(&texturecraft_engine::core::Channel::BaseColor)
+        {
+            crate::screen_pick::SwatchColor::over_model(ui.ctx(), *color);
+        }
         if !alt
             && response.clicked_by(PointerButton::Primary)
             && let Some(position) = response.interact_pointer_pos()
@@ -716,6 +724,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && (app.session.tool.tool != Tool::Path || adjusting)
         && !crate::symmetry::manipulator_hovered(app, ui, rect)
         && app.picking_id_color.is_none()
+        && app.picking_color.is_none()
         && app.moving_on_model.is_none()
         && !crate::frame_gizmo::hovered(app, ui, rect)
         && !crate::round_gizmo::hovered(app, ui, rect)

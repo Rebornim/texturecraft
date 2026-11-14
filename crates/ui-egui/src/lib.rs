@@ -795,7 +795,7 @@ impl eframe::App for TextureCraftApp {
         self.file_dialogs.show_pending(frame);
         // Last, so no widget's pointer replaces it: an armed eyedropper is the pointer over the whole window
         if self.picking_color.is_some() {
-            screen_pick::paint_cursor(&ctx, None);
+            screen_pick::paint_cursor(&ctx, None, screen_pick::SwatchColor::shown(&ctx));
         }
         pointer_lock::settle(&ctx);
         let end = now_ms();

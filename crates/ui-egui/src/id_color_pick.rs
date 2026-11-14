@@ -53,7 +53,7 @@ impl IdColorPick {
 
     /// An eyedropper in place of the pointer while it is over `rect`, its tip on the hotspot
     pub fn draw_cursor(ui: &egui::Ui, rect: egui::Rect) {
-        crate::screen_pick::paint_cursor(ui.ctx(), Some(rect));
+        crate::screen_pick::paint_cursor(ui.ctx(), Some(rect), None);
     }
 
     /// Ends pick mode once its effect is no longer selected or painting mode is left

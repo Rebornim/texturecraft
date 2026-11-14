@@ -1,6 +1,7 @@
 //! X11: while the pointer is off the app's windows the pointer is grabbed, so a left click there comes to the app instead of the
 //! window under it, and the one root-window pixel under it is read; over the app's windows the grab lets go and clicks stay the app's;
-//! the grab shows the eyedropper pointer, so the pointer is the eyedropper over every other window too
+//! the grab shows the eyedropper pointer, so the pointer is the eyedropper over every other window too, with a disc of the one
+//! root-window pixel under its tip, read again each poll and swapped in only when its colour or side changed
 
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
@@ -8,13 +9,13 @@ use std::time::Duration;
 
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
-use x11rb::protocol::render::{ConnectionExt as _, CreatePictureAux, PictType};
+use x11rb::protocol::render::{ConnectionExt as _, CreatePictureAux, PictType, Pictformat};
 use x11rb::protocol::xproto::{ConnectionExt, CreateGCAux, Cursor, EventMask, GrabMode, GrabStatus, ImageFormat, ImageOrder, Window};
 use x11rb::rust_connection::RustConnection;
 
 use super::pick_shared::over_windows;
 use super::x11_pixel::{PixelLayout, premultiplied_argb};
-use super::{CursorImage, PickOutcome, PickShared};
+use super::{CursorImage, PickOutcome, PickShared, SwatchSide, swatch_reach, swatch_unit};
 
 /// How often the pointer's place is checked against the app's windows
 const POLL: Duration = Duration::from_millis(15);
@@ -27,12 +28,22 @@ const MAX_POINTER_PX: u32 = 64;
 /// The colour depth of a pointer picture with alpha
 const ARGB_DEPTH: u8 = 32;
 
+/// The disc the grab's pointer shows now and that pointer
+struct ShownDisc {
+    look: ([u8; 3], SwatchSide),
+    pointer: Cursor,
+}
+
 /// Waits for a left click off the app's windows until it lands or `shared` stops the pick; `None` when there is no X server
 pub(super) fn run(shared: &Arc<PickShared>, outcomes: &Sender<PickOutcome>, ctx: &egui::Context) -> Option<()> {
     let (connection, screen) = x11rb::connect(None).ok()?;
-    let root = connection.setup().roots.get(screen)?.root;
+    let root_screen = connection.setup().roots.get(screen)?;
+    let (root, root_size) = (root_screen.root, [root_screen.width_in_pixels, root_screen.height_in_pixels]);
     let layout = pixel_layout(&connection, screen)?;
-    let pointer_shape = eyedropper_pointer(&connection, root).unwrap_or(x11rb::NONE);
+    let argb = argb_format(&connection);
+    let cell = pointer_px();
+    let pointer_shape = argb.and_then(|argb| make_pointer(&connection, root, argb, &CursorImage::eyedropper(cell))).unwrap_or(x11rb::NONE);
+    let mut disc: Option<ShownDisc> = None;
     let mut grabbed = false;
     let mut pressed = false;
     while pressed || !shared.stopped() {
@@ -40,9 +51,18 @@ pub(super) fn run(shared: &Arc<PickShared>, outcomes: &Sender<PickOutcome>, ctx:
         let windows = shared.windows();
         let outside = !windows.is_empty() && !over_windows(&windows, pointer.root_x.into(), pointer.root_y.into());
         if outside && !grabbed && !shared.stopped() {
-            grabbed = grab(&connection, root, pointer_shape);
+            grabbed = grab(&connection, root, disc.as_ref().map_or(pointer_shape, |disc| disc.pointer));
         } else if !outside && grabbed && !pressed {
             grabbed = !ungrab(&connection);
+        }
+        if grabbed
+            && let Some(argb) = argb
+            && let Some(color) = root_pixel(&connection, root, layout, pointer.root_x, pointer.root_y)
+        {
+            let tip = [f32::from(pointer.root_x) + 0.5, f32::from(pointer.root_y) + 0.5];
+            let unit = swatch_unit(cell);
+            let side = SwatchSide::fitting(tip, unit, swatch_reach(unit), [0.0, 0.0, f32::from(root_size[0]), f32::from(root_size[1])]);
+            follow(&connection, root, argb, cell, (color, side), &mut disc);
         }
 
         while let Ok(Some(event)) = connection.poll_for_event() {
@@ -68,10 +88,35 @@ pub(super) fn run(shared: &Arc<PickShared>, outcomes: &Sender<PickOutcome>, ctx:
     Some(())
 }
 
+/// Shows `look` in the held grab's pointer when it differs from the disc shown now, freeing the pointer it replaces
+fn follow(connection: &RustConnection, root: Window, argb: Pictformat, cell: u32, look: ([u8; 3], SwatchSide), disc: &mut Option<ShownDisc>) {
+    if disc.as_ref().is_some_and(|disc| disc.look == look) {
+        return;
+    }
+    let Some(pointer) = make_pointer(connection, root, argb, &CursorImage::eyedropper_with_swatch(cell, look.0, look.1)) else { return };
+
+    let _ = connection.change_active_pointer_grab(pointer, x11rb::CURRENT_TIME, grab_mask());
+    if let Some(old) = disc.replace(ShownDisc { look, pointer }) {
+        let _ = connection.free_cursor(old.pointer);
+    }
+    let _ = connection.flush();
+}
+
+/// The pointer events a grab takes
+fn grab_mask() -> EventMask {
+    EventMask::BUTTON_PRESS | EventMask::BUTTON_RELEASE
+}
+
+/// The desktop's pointer size (`XCURSOR_SIZE`), in pixels
+fn pointer_px() -> u32 {
+    let size = std::env::var("XCURSOR_SIZE").ok().and_then(|size| size.trim().parse().ok()).unwrap_or(DEFAULT_POINTER_PX);
+    size.min(MAX_POINTER_PX)
+}
+
 /// Takes the pointer, showing `pointer_shape` over every window while it is held
 fn grab(connection: &RustConnection, root: Window, pointer_shape: Cursor) -> bool {
-    let mask = EventMask::BUTTON_PRESS | EventMask::BUTTON_RELEASE;
-    let Ok(cookie) = connection.grab_pointer(false, root, mask, GrabMode::ASYNC, GrabMode::ASYNC, x11rb::NONE, pointer_shape, x11rb::CURRENT_TIME) else {
+    let Ok(cookie) = connection.grab_pointer(false, root, grab_mask(), GrabMode::ASYNC, GrabMode::ASYNC, x11rb::NONE, pointer_shape, x11rb::CURRENT_TIME)
+    else {
         return false;
     };
 
@@ -83,8 +128,8 @@ fn ungrab(connection: &RustConnection) -> bool {
     connection.ungrab_pointer(x11rb::CURRENT_TIME).is_ok() && connection.flush().is_ok()
 }
 
-/// The eyedropper as an X pointer with its hotspot on the tip, where the server can show one (freed with the connection)
-fn eyedropper_pointer(connection: &RustConnection, root: Window) -> Option<Cursor> {
+/// The server's 32-bit picture format with alpha that coloured pointers are made from, where it has one
+fn argb_format(connection: &RustConnection) -> Option<Pictformat> {
     connection.render_query_version(0, 5).ok()?.reply().ok()?;
     let formats = connection.render_query_pict_formats().ok()?.reply().ok()?;
     let argb = formats.formats.iter().find(|format| {
@@ -94,8 +139,11 @@ fn eyedropper_pointer(connection: &RustConnection, root: Window) -> Option<Curso
             && [direct.alpha_shift, direct.red_shift, direct.green_shift, direct.blue_shift] == [24, 16, 8, 0]
             && [direct.alpha_mask, direct.red_mask, direct.green_mask, direct.blue_mask] == [0xff; 4]
     })?;
-    let size = std::env::var("XCURSOR_SIZE").ok().and_then(|size| size.trim().parse().ok()).unwrap_or(DEFAULT_POINTER_PX);
-    let image = CursorImage::eyedropper(size.min(MAX_POINTER_PX));
+    Some(argb.id)
+}
+
+/// `image` as an X pointer with its hotspot, where the server can show one (freed with the connection)
+fn make_pointer(connection: &RustConnection, root: Window, argb: Pictformat, image: &CursorImage) -> Option<Cursor> {
     let side = u16::try_from(image.size).ok()?;
     let [hot_x, hot_y] = image.hotspot.map(|edge| u16::try_from(edge).unwrap_or_default());
     let least_significant_first = connection.setup().image_byte_order == ImageOrder::LSB_FIRST;
@@ -107,7 +155,7 @@ fn eyedropper_pointer(connection: &RustConnection, root: Window) -> Option<Curso
     let data = premultiplied_argb(&image.rgba, least_significant_first);
     connection.put_image(ImageFormat::Z_PIXMAP, pixmap, gc, side, side, 0, 0, 0, ARGB_DEPTH, &data).ok()?;
     let picture = connection.generate_id().ok()?;
-    connection.render_create_picture(picture, pixmap, argb.id, &CreatePictureAux::new()).ok()?;
+    connection.render_create_picture(picture, pixmap, argb, &CreatePictureAux::new()).ok()?;
     let cursor = connection.generate_id().ok()?;
     // Checked: a pointer the server refused would make every grab fail
     let made = connection.render_create_cursor(cursor, picture, hot_x, hot_y).ok()?.check().is_ok();

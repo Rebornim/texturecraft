@@ -37,7 +37,7 @@ pub struct CursorImage {
 impl CursorImage {
     /// The eyedropper in a pointer cell `size` pixels square (clamped to a sane range), the pipette in its bottom-left part
     pub fn eyedropper(size: u32) -> Self {
-        let size = size.clamp(*SIZES.start(), *SIZES.end());
+        let size = CursorImage::clamped_size(size);
         let scale = (size as f32 * GLYPH_SHARE).round();
         let top = size as f32 - scale;
         let outline = OUTLINE_PX * (scale / OUTLINE_SIZE).max(1.0);
@@ -54,6 +54,11 @@ impl CursorImage {
         }
         let hotspot = tip(&rgba, size);
         CursorImage { size, rgba, hotspot }
+    }
+
+    /// A pointer size kept to the range drawn
+    pub fn clamped_size(size: u32) -> u32 {
+        size.clamp(*SIZES.start(), *SIZES.end())
     }
 
     /// The picture as a Windows `.cur` file: 32-bit colour with alpha, its hotspot in the file's header

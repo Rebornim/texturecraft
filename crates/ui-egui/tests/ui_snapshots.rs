@@ -1090,25 +1090,38 @@ fn eyedropper_pointer_snapshots() {
 
     let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
     std::fs::create_dir_all(&output_dir).unwrap();
-    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
-    execute(&mut session, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1]})).unwrap();
-    let mut harness =
-        Harness::builder().with_size(egui::vec2(1600.0, 960.0)).with_pixels_per_point(1.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
-    harness.state_mut().ui.prefs.language = "en".into();
-    // Only the app's own pointer shows, not the test's stand-in arrow
-    harness.set_render_cursor(false);
-    harness.run_steps(4);
-    harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
-    harness.run_steps(3);
-    harness.get_by_role_and_label(egui::Role::Button, "Base color").click();
-    harness.run_steps(3);
-    harness.get_all_by_role_and_label(egui::Role::Button, "Pick color").next().unwrap().click();
-    harness.run_steps(3);
-    let over_panel = harness.get_by_role_and_label(egui::Role::Tab, "Material").rect().center();
-    harness.hover_at(over_panel);
-    save(&mut harness, &output_dir, "eyedropper-over-properties");
-    harness.hover_at(egui::pos2(700.0, 450.0));
-    save(&mut harness, &output_dir, "eyedropper-over-viewport");
+    // A light and a dark model: the disc's white outline and faint dark ring must read on both
+    for (name, color) in [("light", [0.92, 0.92, 0.9]), ("dark", [0.01, 0.01, 0.012])] {
+        let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+        execute(&mut session, "layer.add.fill", &json!({"color": color})).unwrap();
+        let mut harness =
+            Harness::builder().with_size(egui::vec2(1600.0, 960.0)).with_pixels_per_point(1.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+        harness.state_mut().ui.prefs.language = "en".into();
+        // Only the app's own pointer shows, not the test's stand-in arrow
+        harness.set_render_cursor(false);
+        harness.run_steps(4);
+        harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
+        harness.run_steps(3);
+        harness.get_by_role_and_label(egui::Role::Button, "Base color").click();
+        harness.run_steps(3);
+        harness.get_all_by_role_and_label(egui::Role::Button, "Pick color").next().unwrap().click();
+        harness.run_steps(3);
+        harness.hover_at(egui::pos2(520.0, 430.0));
+        harness.run_steps(2);
+        save(&mut harness, &output_dir, &format!("eyedropper-over-{name}-model"));
+        if name == "light" {
+            let over_panel = harness.get_by_role_and_label(egui::Role::Tab, "Material").rect().center();
+            harness.hover_at(over_panel);
+            harness.run_steps(2);
+            save(&mut harness, &output_dir, "eyedropper-over-properties");
+            harness.hover_at(egui::pos2(1590.0, 300.0));
+            harness.run_steps(2);
+            save(&mut harness, &output_dir, "eyedropper-at-right-edge");
+            harness.hover_at(egui::pos2(12.0, 950.0));
+            harness.run_steps(2);
+            save(&mut harness, &output_dir, "eyedropper-at-bottom-left-corner");
+        }
+    }
 }
 
 /// Gives the shelf thumbnails rendered off the UI thread time to arrive

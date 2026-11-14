@@ -117,6 +117,9 @@ impl PropertySheet<'_> {
         self.ui.painter().rect(bar, CornerRadius::same(3), shown_color(linear), Stroke::new(1.0, border), StrokeKind::Inside);
 
         let waiting = eyedropping == Some(id);
+        if waiting {
+            crate::screen_pick::SwatchColor::of_bar(self.ui.ctx(), linear);
+        }
         let glyph = Rect::from_center_size(pos2(eyedropper_x, bar.center().y), vec2(EYEDROPPER_TARGET, EYEDROPPER_TARGET));
         let mut pick = ColorPick::none(id);
         pick.eyedropper = self.eyedropper_at(glyph, waiting, t.text_dim);

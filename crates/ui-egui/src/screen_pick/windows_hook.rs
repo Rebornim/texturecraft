@@ -1,6 +1,6 @@
 //! Windows: a low-level mouse hook on its own thread takes a left click outside the app's windows (the click never reaches the
 //! window under it) and reads the one pixel under it from the desktop through GDI; clicks on the app's own windows pass on. The
-//! system pointer is the eyedropper until the wait ends
+//! system pointer is the eyedropper with its colour disc until the wait ends
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
@@ -10,6 +10,7 @@ use winsafe::prelude::Handle;
 use winsafe::{HHOOK, HINSTANCE, HWND, MSG, POINT, co};
 
 use super::pick_shared::over_windows;
+use super::windows_swatch::LiveSwatch;
 use super::{PickOutcome, PickShared};
 
 /// How often the hook thread wakes to see whether the pick ended in the app, in milliseconds
@@ -38,16 +39,24 @@ pub(super) fn run(shared: &Arc<PickShared>, outcomes: Sender<PickOutcome>, ctx: 
         *hook = Some(HookState { generation, shared: Arc::clone(shared), outcomes, ctx: ctx.clone(), pressed: false, done: false });
     }
     // Before the hook: while it is in place this thread must keep reading messages, or every mouse move on the desktop stalls
-    let _pointer = super::windows_pointer::SystemPointer::show(dpi);
+    let pointer = super::windows_pointer::SystemPointer::show(dpi);
     let Ok(module) = HINSTANCE::GetModuleHandle(None) else { return finish(&unavailable, &ctx) };
     let Ok(mut hook) = HHOOK::SetWindowsHookEx(co::WH::MOUSE_LL, mouse_hook, Some(&module), None) else {
         return finish(&unavailable, &ctx);
     };
 
-    // A thread timer wakes GetMessage so the loop sees a stop; the hook procedure runs inside GetMessage
+    // A thread timer wakes GetMessage so the loop sees a stop and the disc follows; the hook procedure runs inside GetMessage
     let timer = HWND::NULL.SetTimer(1, STOP_CHECK_MS, None);
     let mut message = MSG::default();
-    while waiting(shared, generation) && matches!(winsafe::GetMessage(&mut message, None, 0, 0), Ok(true)) {}
+    // The disc follows on a thread of its own: this one must answer the hook at once, or every mouse move stalls
+    let disc = pointer.as_ref().map(|pointer| (pointer.shown_event.clone(), pointer.cell));
+    std::thread::scope(|scope| {
+        if let Some((shown_event, cell)) = &disc {
+            let follow = std::thread::Builder::new().name("eyedropper disc".into());
+            let _ = follow.spawn_scoped(scope, || LiveSwatch::follow(shown_event, *cell, shared, generation));
+        }
+        while waiting(shared, generation) && matches!(winsafe::GetMessage(&mut message, None, 0, 0), Ok(true)) {}
+    });
     if let Ok(timer) = timer {
         let _ = HWND::NULL.KillTimer(timer);
     }
@@ -65,7 +74,7 @@ fn finish(outcomes: &Sender<PickOutcome>, ctx: &egui::Context) {
 }
 
 /// Whether pick `generation` still waits: for its click until the app ends the pick, then for the release of the press it took
-fn waiting(shared: &PickShared, generation: u64) -> bool {
+pub(super) fn waiting(shared: &PickShared, generation: u64) -> bool {
     let Ok(hook) = HOOK.lock() else { return false };
     let Some(state) = hook.as_ref().filter(|state| state.generation == generation) else { return false };
 
@@ -107,12 +116,12 @@ fn take(message: usize) -> bool {
 }
 
 /// Whether the window under `point` belongs to this process (the app's main window, a floating panel, a dialog)
-fn over_own_window(point: POINT) -> bool {
+pub(super) fn over_own_window(point: POINT) -> bool {
     HWND::WindowFromPoint(point).is_some_and(|window| window.GetWindowThreadProcessId().1 == winsafe::GetCurrentProcessId())
 }
 
 /// The colour of the one desktop pixel at `point` (physical pixels across every monitor: the app is per-monitor DPI aware)
-fn screen_pixel(point: POINT) -> Option<[u8; 3]> {
+pub(super) fn screen_pixel(point: POINT) -> Option<[u8; 3]> {
     let monitor = xcap::Monitor::from_point(point.x, point.y).ok()?;
     let x = u32::try_from(point.x.checked_sub(monitor.x().ok()?)?).ok()?;
     let y = u32::try_from(point.y.checked_sub(monitor.y().ok()?)?).ok()?;

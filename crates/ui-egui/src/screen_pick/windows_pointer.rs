@@ -3,7 +3,9 @@
 //! ends, and also when the app goes away for any reason: it watches the app's process, so the system pointer is never left
 //! changed. The keeper is started with the system's start-up feedback off: Windows otherwise shows its "app starting" pointer
 //! (an arrow with a busy circle) over every app for up to seven seconds after a program starts, until the program first calls
-//! `GetMessage`, which a keeper never does, and that pointer showed instead of the eyedropper
+//! `GetMessage`, which a keeper never does, and that pointer showed instead of the eyedropper. Once the keeper has kept the
+//! user's pointers and shown the eyedropper, the app swaps in the eyedropper with its live colour disc; the keeper still puts
+//! the user's own back
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -41,6 +43,12 @@ static NEXT_PICK: AtomicU64 = AtomicU64::new(0);
 pub(super) struct SystemPointer {
     keeper: CloseHandlePiGuard,
     stop: CloseHandleGuard<HEVENT>,
+    /// The event the keeper sets once it has kept the user's pointers, held so it lives as long as the pick
+    _shown: CloseHandleGuard<HEVENT>,
+    /// That event's name
+    pub(super) shown_event: String,
+    /// The system's pointer cell at the app window's density, in pixels
+    pub(super) cell: u32,
 }
 
 impl SystemPointer {
@@ -50,13 +58,25 @@ impl SystemPointer {
         let parent = std::process::id();
         let stop_name = format!("Local\\texturecraft-eyedropper-{parent}-{}", NEXT_PICK.fetch_add(1, Ordering::Relaxed));
         let stop = HEVENT::CreateEvent(None, true, false, Some(&stop_name)).ok()?;
-        let command_line = KeeperArgs { parent, stop: stop_name, dpi }.command_line(program.to_str()?);
+        let args = KeeperArgs { parent, stop: stop_name, dpi };
+        let shown_event = args.shown_event();
+        let shown = HEVENT::CreateEvent(None, true, false, Some(&shown_event)).ok()?;
+        let cell = args.pointer_px(winsafe::GetSystemMetricsForDpi(co::SM::CXCURSOR, dpi).ok());
+        let command_line = args.command_line(program.to_str()?);
         let mut startup = STARTUPINFO::default();
         // No "app starting" pointer for the keeper: it shows no window and never asks for input
         startup.dwFlags = co::STARTF::FORCEOFFFEEDBACK;
         let keeper = winsafe::CreateProcess(None, Some(&command_line), None, None, false, co::CREATE::NO_WINDOW, &[], None, &mut startup);
-        Some(SystemPointer { keeper: keeper.ok()?, stop })
+        Some(SystemPointer { keeper: keeper.ok()?, stop, _shown: shown, shown_event, cell })
     }
+}
+
+/// Shows `image` as every swapped system pointer (only once the keeper has kept the user's own); whether it could
+pub(super) fn swap_in(image: &CursorImage) -> bool {
+    let Some(picture) = load(image) else { return false };
+
+    swap_all(&picture);
+    true
 }
 
 impl Drop for SystemPointer {
@@ -79,13 +99,10 @@ pub fn keep_pointer() -> i32 {
     let size = keeper.pointer_px(winsafe::GetSystemMetricsForDpi(co::SM::CXCURSOR, keeper.dpi).ok());
     let Some(eyedropper) = load(&CursorImage::eyedropper(size)) else { return 1 };
     let originals: Vec<_> = POINTERS.iter().filter_map(|&pointer| Some((pointer, current(pointer)?))).collect();
-    for (pointer, _) in &originals {
-        if let Ok(mut copy) = eyedropper.CopyCursor()
-            && copy.SetSystemCursor(*pointer).is_ok()
-        {
-            // The system owns the copy now
-            let _ = copy.leak();
-        }
+    swap_all(&eyedropper);
+    // The app may change the picture from now on: the user's own pointers are kept
+    if let Ok(shown) = HEVENT::NULL.OpenEvent(co::EVENT_RIGHTS::MODIFY_STATE, false, &keeper.shown_event()) {
+        let _ = shown.SetEvent();
     }
 
     // Ends when the app sets the stop event (the pick ended) or its process ends (closed, killed, crashed)
@@ -96,6 +113,18 @@ pub fn keep_pointer() -> i32 {
         }
     }
     0
+}
+
+/// `picture` as each of the system pointers other apps show
+fn swap_all(picture: &DestroyCursorGuard) {
+    for pointer in POINTERS {
+        if let Ok(mut copy) = picture.CopyCursor()
+            && copy.SetSystemCursor(pointer).is_ok()
+        {
+            // The system owns the copy now
+            let _ = copy.leak();
+        }
+    }
 }
 
 /// Whether a wait says its object is signalled (or can't be waited on, which ends the keeper just as well)

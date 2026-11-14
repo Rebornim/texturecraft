@@ -13,6 +13,10 @@ const BASE_POINTER_PX: u32 = 32;
 #[cfg(any(windows, test))]
 const MAX_DPI: u32 = BASE_DPI * 5;
 
+/// The shown event's name after the stop event's
+#[cfg(any(windows, test))]
+const SHOWN_SUFFIX: &str = "-shown";
+
 /// What a pointer keeper is started with
 #[cfg(any(windows, test))]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,6 +45,11 @@ impl KeeperArgs {
         Some(KeeperArgs { parent: parent.parse().ok()?, stop: usable_name.then_some(stop)?, dpi })
     }
 
+    /// The name of the event the keeper sets once the eyedropper shows: from then on the app may change the pointer's picture
+    pub fn shown_event(&self) -> String {
+        format!("{}{SHOWN_SUFFIX}", self.stop)
+    }
+
     /// The pointer cell in pixels: the system's own pointer size at this density (`system`, where it says), else 32 scaled
     pub fn pointer_px(&self, system: Option<i32>) -> u32 {
         let scaled = BASE_POINTER_PX * self.dpi / BASE_DPI;
@@ -63,7 +72,8 @@ mod tests {
         let after_arg = line.split_once(KEEPER_ARG).map(|(_, rest)| rest.split_whitespace().map(str::to_owned).collect::<Vec<_>>());
 
         assert!(line.starts_with("\"C:\\Program Files\\TextureCraft\\texturecraft.exe\" "), "the program's path is quoted: {line}");
-        assert_eq!(after_arg.and_then(|rest| KeeperArgs::parse(&rest)), Some(keeper));
+        assert_eq!(after_arg.and_then(|rest| KeeperArgs::parse(&rest)), Some(keeper.clone()));
+        assert_eq!(keeper.shown_event(), "Local\\texturecraft-eyedropper-4120-3-shown", "the shown event is the pick's own");
     }
 
     #[test]

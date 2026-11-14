@@ -259,47 +259,49 @@ pub(crate) fn push_effect_with(
     first: impl FnOnce(&mut Session) -> Result<()>,
 ) -> Result<Value> {
     let content = kind.content_only() == Some(true) || content_target(p, "effect.add")?;
-    if kind.content_only().is_some_and(|c| c != content) {
+    if kind.content_only().is_some_and(|content_only| content_only != content) {
         return Err(bad("effect.add", format!("{} effects go on masks, not on layer content", kind.name())));
     }
+
     if let EffectKind::Levels(levels) = &mut kind {
         levels_target(levels, content)?;
     }
-    let eid = with_mask(s, p, "effect.add", label, |s, id| {
+    let new_effect = with_mask(s, p, "effect.add", label, |s, id| {
         first(s)?;
-        let eid = s.doc.project.alloc_id();
-        // An instance's content and (unless it has its own) mask belong to its source.
-        let id = if content { s.doc.project.content_layer(id).map_or(id, |l| l.id) } else { s.doc.project.mask_owner(id) };
-        let l = s.doc.project.layer_mut(id)?;
-        let bg = if matches!(kind, EffectKind::Generator(_) | EffectKind::Fill { .. } | EffectKind::ColorSelection(_)) {
+        let new_effect = s.doc.project.alloc_id();
+
+        // An instance's content and (unless it has its own) mask belong to its source
+        let id = if content { s.doc.project.content_layer(id).map_or(id, |source| source.id) } else { s.doc.project.mask_owner(id) };
+        let layer = s.doc.project.layer_mut(id)?;
+        let background = if matches!(kind, EffectKind::Generator(_) | EffectKind::Fill { .. } | EffectKind::ColorSelection(_)) {
             MaskBackground::Black
         } else {
             MaskBackground::White
         };
-        let mut e = Effect::new(eid, kind);
-        e.blend = blend;
-        if let Some(n) = name_param(p) {
-            e.name = n.to_string();
+        let mut effect = Effect::new(new_effect, kind);
+        effect.blend = blend;
+        if let Some(name) = name_param(p) {
+            effect.name = name.to_string();
         }
 
         // A filter that changes only some channels (lighting, validation) starts with the other channels' pills off
         if content
-            && let EffectKind::Filter(f) = &e.kind
-            && let Some(on) = f.starts_on()
+            && let EffectKind::Filter(filter) = &effect.kind
+            && let Some(on) = filter.starts_on()
         {
-            e.off_channels = Channel::ALL.into_iter().filter(|channel| !on.contains(channel)).collect();
+            effect.off_channels = Channel::ALL.into_iter().filter(|channel| !on.contains(channel)).collect();
         }
         if !content {
-            l.mask.get_or_insert_with(|| Mask::new(bg)).effects.push(e);
-        } else if l.is_group() {
-            return Err(EngineError::Other(format!("\"{}\" is a folder: content effects go on paint and fill layers", l.name)));
+            layer.mask.get_or_insert_with(|| Mask::new(background)).effects.push(effect);
+        } else if layer.is_group() {
+            return Err(EngineError::Other(format!("\"{}\" is a folder: content effects go on paint and fill layers", layer.name)));
         } else {
-            l.content_effects.push(e);
+            layer.content_effects.push(effect);
         }
-        s.target = StackTarget::Effect(eid);
-        Ok(eid)
+        s.target = StackTarget::Effect(new_effect);
+        Ok(new_effect)
     })?;
-    Ok(json!({ "effect": eid.0 }))
+    Ok(json!({ "effect": new_effect.0 }))
 }
 
 /// An anchor point on the layer content (no target, as before anchor points went in masks) or, with `target: "mask"`, in its mask; named after the layer
@@ -442,20 +444,28 @@ fn add_generator(session: &mut Session, params: &Value) -> Result<Value> {
     push_effect(session, params, EffectKind::Generator(generator), blend)
 }
 
-pub(crate) fn levels_from(cmd: &str, p: &Value, l: &mut Levels) -> Result<()> {
-    for (k, slot) in [("inLow", &mut l.in_low), ("inHigh", &mut l.in_high), ("gamma", &mut l.gamma), ("outLow", &mut l.out_low), ("outHigh", &mut l.out_high)] {
-        if let Some(v) = f32p(p, k) {
-            *slot = if k == "gamma" { v.clamp(0.01, 10.0) } else { v.clamp(0.0, 1.0) };
+pub(crate) fn levels_from(cmd: &str, p: &Value, levels: &mut Levels) -> Result<()> {
+    let slots = [
+        ("inLow", &mut levels.in_low),
+        ("inHigh", &mut levels.in_high),
+        ("gamma", &mut levels.gamma),
+        ("outLow", &mut levels.out_low),
+        ("outHigh", &mut levels.out_high),
+    ];
+    for (key, slot) in slots {
+        if let Some(value) = f32p(p, key) {
+            let range = if key == "gamma" { Levels::GAMMA_RANGE } else { 0.0..=1.0 };
+            *slot = value.clamp(*range.start(), *range.end());
         }
     }
     if let Some(clamp) = boolp(p, "clamp") {
-        l.clamp = clamp;
+        levels.clamp = clamp;
     }
     match channel_param(cmd, p, "affects")? {
         // Levels pass normal maps through unchanged (`per_unit`)
         Some(channel) if channel.kind() == ChannelKind::NormalMap => Err(bad(cmd, format!("levels cannot remap `{}`, a normal map", channel.id()))),
         Some(channel) => {
-            l.affects = Some(channel);
+            levels.affects = Some(channel);
             Ok(())
         }
         None => Ok(()),
@@ -473,9 +483,9 @@ fn levels_target(levels: &mut Levels, content: bool) -> Result<()> {
 }
 
 fn add_levels(s: &mut Session, p: &Value) -> Result<Value> {
-    let mut l = Levels::default();
-    levels_from("effect.add.levels", p, &mut l)?;
-    push_effect(s, p, EffectKind::Levels(l), BlendMode::Normal)
+    let mut levels = Levels::default();
+    levels_from("effect.add.levels", p, &mut levels)?;
+    push_effect(s, p, EffectKind::Levels(levels), BlendMode::Normal)
 }
 
 fn add_filter(s: &mut Session, p: &Value) -> Result<Value> {
@@ -483,7 +493,8 @@ fn add_filter(s: &mut Session, p: &Value) -> Result<Value> {
 
     // An empty filter changes nothing until one is picked into it
     let kind = if id == EMPTY_FILTER { EffectKind::Filter(Filter::Empty) } else { crate::filter_lib::build(id, p)? };
-    // Library filters are named after their shelf entry (material finishes are fill effects).
+
+    // Library filters are named after their shelf entry (material finishes are fill effects)
     let mut p = p.clone();
     if name_param(&p).is_none()
         && let (Some(d), Some(o)) = (crate::filter_lib::find(id), p.as_object_mut())
@@ -552,30 +563,38 @@ pub(crate) fn effect_id(s: &Session, p: &Value, cmd: &str) -> Result<LayerId> {
     }
 }
 
-/// The distribution of the values entering an effect (what a levels effect remaps).
+/// Histogram bins when the call names none
+const DEFAULT_HISTOGRAM_BINS: u64 = 64;
+
+/// The fewest and most histogram bins a call takes
+const HISTOGRAM_BINS_RANGE: (u64, u64) = (2, 256);
+
+/// The distribution of the values entering an effect (what a levels effect remaps)
 fn histogram(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "effect.histogram";
-    let eid = effect_id(s, p, CMD)?;
-    let (owner, _) = s.doc.project.effect(eid).ok_or_else(|| bad(CMD, format!("no effect {}", eid.0)))?;
-    let l = s.doc.project.layer(owner)?;
-    let content = l.content_effects.iter().any(|e| e.id == eid);
-    let remapped = match &s.doc.project.effect(eid) {
+    let effect = effect_id(s, p, CMD)?;
+    let (owner, _) = s.doc.project.effect(effect).ok_or_else(|| bad(CMD, format!("no effect {}", effect.0)))?;
+    let layer = s.doc.project.layer(owner)?;
+    let content = layer.content_effects.iter().any(|e| e.id == effect);
+    let remapped = match &s.doc.project.effect(effect) {
         Some((_, Effect { kind: EffectKind::Levels(levels), .. })) => levels.affects,
         _ => None,
     };
     let channel = match channel_param(CMD, p, "channel")? {
-        Some(c) => c,
-        None => remapped.or_else(|| l.channels.keys().next().copied()).unwrap_or(Channel::BaseColor),
+        Some(channel) => channel,
+        None => remapped.or_else(|| layer.channels.keys().next().copied()).unwrap_or(Channel::BaseColor),
     };
-    let bins = u64p(p, "bins").unwrap_or(64).clamp(2, 256) as usize;
-    let counts = s.effect_histogram(eid, channel, bins).ok_or_else(|| bad(CMD, "the texture set is not ready"))?;
+    let (fewest_bins, most_bins) = HISTOGRAM_BINS_RANGE;
+    let bins = u64p(p, "bins").unwrap_or(DEFAULT_HISTOGRAM_BINS).clamp(fewest_bins, most_bins) as usize;
+    let counts = s.effect_histogram(effect, channel, bins).ok_or_else(|| bad(CMD, "the texture set is not ready"))?;
     if !content {
         let mut out = json!({"target": "mask", "bins": counts.all});
-        if let Some([left, right]) = s.compare_histograms(eid, bins) {
+        if let Some([left, right]) = s.compare_histograms(effect, bins) {
             out["compare"] = json!({"left": left, "right": right});
         }
         return Ok(out);
     }
+
     let mut out = json!({"target": "content", "channel": channel.id(), "bins": counts.all, "luminance": counts.luminance});
     if !counts.components.is_empty() {
         out["components"] = json!(counts.components);

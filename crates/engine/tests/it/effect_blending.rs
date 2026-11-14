@@ -99,6 +99,11 @@ fn one_channels_blending_goes_to_every_channel_in_one_undo_step() {
     execute(&mut s, "effect.blending.bothToEveryChannel", &json!({"channel": "roughness"})).unwrap();
     assert_close(center(&mut s, Channel::BaseColor), [0.5, 0.0, 0.0], "base color multiplies at full opacity");
     assert!(channel_blends(&mut s, layer).is_null(), "every channel blends alike");
+
+    // Nothing left to change: no empty undo step
+    let steps = s.history_labels().len();
+    execute(&mut s, "effect.blending.bothToEveryChannel", &json!({"channel": "roughness"})).unwrap();
+    assert_eq!(s.history_labels().len(), steps, "every channel already blends alike");
 }
 
 /// Copy and paste carry every channel's blending to another effect; masks, levels and anchors take what applies to them
@@ -115,6 +120,9 @@ fn channel_blending_copies_and_pastes_between_effects() {
     let pasted = s.doc.project.effect(LayerId(other)).unwrap().1;
     assert_eq!(pasted.blend_of(Some(Channel::Roughness)), s.doc.project.effect(LayerId(effect)).unwrap().1.blend_of(Some(Channel::Roughness)));
     assert_eq!(pasted.blend_of(Some(Channel::BaseColor)), pasted.blend_of(None));
+    let steps = s.history_labels().len();
+    execute(&mut s, "effect.blending.paste", &json!({"effect": other})).unwrap();
+    assert_eq!(s.history_labels().len(), steps, "pasting the blending it already has adds no undo step");
 
     // A mask effect has one channel: it takes the shared blending and refuses a channel of its own
     execute(&mut s, "mask.add.white", &json!({"layer": layer})).unwrap();

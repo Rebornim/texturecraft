@@ -401,6 +401,12 @@ impl Projection {
     /// A new tri-planar projection's blend sharpness
     pub const TRIPLANAR_SHARPNESS: f32 = 8.0;
 
+    /// The blend sharpness a tri-planar projection takes: an exponent from soft (1) to near hard (64)
+    pub const TRIPLANAR_SHARPNESS_RANGE: std::ops::RangeInclusive<f32> = 1.0..=64.0;
+
+    /// The arc in degrees a cylindrical projection wraps its image round; a zero arc would divide by zero
+    pub const CYLINDER_ANGLE_RANGE: std::ops::RangeInclusive<f32> = 1.0..=360.0;
+
     /// A tri-planar projection with a new fill's settings
     pub fn triplanar() -> Projection {
         Projection::Triplanar {
@@ -798,12 +804,21 @@ impl Default for Levels {
 }
 
 impl Levels {
+    /// The gamma a levels effect takes, typed or dragged
+    pub const GAMMA_RANGE: std::ops::RangeInclusive<f32> = 0.01..=10.0;
+
+    /// Narrowest input range the remap divides by, so handles on one value never divide by zero
+    const MIN_INPUT_RANGE: f32 = 1e-5;
+
+    /// Smallest gamma the remap raises by, so a zero gamma read from a file never divides by zero
+    const MIN_GAMMA: f32 = 1e-3;
+
     pub fn apply(&self, x: f32) -> f32 {
-        let t = (x - self.in_low) / (self.in_high - self.in_low).max(1e-5);
+        let between = (x - self.in_low) / (self.in_high - self.in_low).max(Self::MIN_INPUT_RANGE);
 
         // Past the input handles an unclamped remap carries on in a straight line (gamma only bends the part between them)
-        let t = if self.clamp || (0.0..=1.0).contains(&t) { t.clamp(0.0, 1.0).powf(1.0 / self.gamma.max(1e-3)) } else { t };
-        self.out_low + (self.out_high - self.out_low) * t
+        let between = if self.clamp || (0.0..=1.0).contains(&between) { between.clamp(0.0, 1.0).powf(1.0 / self.gamma.max(Self::MIN_GAMMA)) } else { between };
+        self.out_low + (self.out_high - self.out_low) * between
     }
 
     /// Whether these levels remap `channel` of a layer's content
@@ -1779,7 +1794,7 @@ impl CompareOp {
         };
         let width = (1.0 - hardness).clamp(0.0, 1.0);
         let pass = if self == CompareOp::WithinTolerance { past >= 0.0 } else { past > 0.0 };
-        if width <= 0.0 || past.is_nan() {
+        if width.is_nan() || width <= 0.0 || past.is_nan() {
             return if pass { 1.0 } else { 0.0 };
         }
 
@@ -2097,6 +2112,7 @@ mod tests {
         }
         assert!((CompareOp::GreaterThan.mask(0.55, 0.5, 0.1, 0.9) - 0.5).abs() < 1e-5, "halfway up a 0.1 ramp");
         assert_eq!(CompareOp::GreaterThan.mask(0.45, 0.5, 0.1, 0.0), 0.0, "below the edge stays 0 however soft");
+        assert_eq!(CompareOp::GreaterThan.mask(0.6, 0.5, 0.1, f32::NAN), 1.0, "a NaN hardness compares hard");
         assert!((CompareOp::WithinTolerance.mask(0.65, 0.5, 0.1, 0.9) - 0.5).abs() < 1e-5, "0.05 past the tolerance");
     }
 

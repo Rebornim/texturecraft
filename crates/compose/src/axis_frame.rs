@@ -3,13 +3,13 @@
 use texturecraft_core::{Decal, Projection, Projector};
 use texturecraft_geom::glam::{EulerRot, Mat3, Vec3};
 
-use crate::pattern::frame_uv_from_corner;
+use crate::pattern::{frame_uv_from_corner, mesh_frame, nonzero_stretch, projector_stretch};
 
-/// The placed planar projection that reads images exactly as axis planar `proj` does on a mesh with bounds `lo`..`hi` (None for other projections, placed ones included)
-pub fn placed_from_axis(proj: &Projection, (lo, hi): (Vec3, Vec3)) -> Option<Projection> {
+/// The placed planar projection that reads images exactly as axis planar `proj` does on a mesh within `bounds` (None for other projections, placed ones included)
+pub fn placed_from_axis(proj: &Projection, bounds: (Vec3, Vec3)) -> Option<Projection> {
     let Projection::Planar { scale, axis, offset, uv, projector, placed: None } = proj else { return None };
 
-    let frame = axis_frame(*scale, *axis, Vec3::from(*offset), projector, (lo, hi))?;
+    let frame = axis_frame(*scale, *axis, Vec3::from(*offset), projector, bounds)?;
 
     // The turn and per-axis scale are now in the frame; culling and crop stay
     let projector = Projector { rotation: [0.0; 3], scale: [1.0; 3], ..*projector };
@@ -20,13 +20,12 @@ pub fn placed_from_axis(proj: &Projection, (lo, hi): (Vec3, Vec3)) -> Option<Pro
 }
 
 /// The frame of an axis planar projection: its image's 0..1 square on the plane through the mesh, turned and sized by `projector`
-pub fn axis_frame(scale: f32, axis: u8, offset: Vec3, projector: &Projector, (lo, hi): (Vec3, Vec3)) -> Option<Decal> {
-    let center = (lo + hi) * 0.5;
-    let radius = ((hi - lo).length() * 0.5).max(1e-4);
+pub fn axis_frame(scale: f32, axis: u8, offset: Vec3, projector: &Projector, bounds: (Vec3, Vec3)) -> Option<Decal> {
+    let (center, radius) = mesh_frame(bounds);
     let [x, y, z] = projector.rotation.map(f32::to_radians);
     let turn = Mat3::from_euler(EulerRot::ZYX, z, y, x);
-    let stretch = Vec3::from(projector.scale).map(|s| if s.abs() < 1e-6 { 1e-6 } else { s });
-    let scale = if scale.abs() < 1e-6 { 1e-6 } else { scale };
+    let stretch = projector_stretch(projector);
+    let scale = nonzero_stretch(scale);
 
     // Where the image's centre sits, then its across, up and out directions with the stretch along each
     let origin = center + turn * (stretch * -offset / scale) * radius;

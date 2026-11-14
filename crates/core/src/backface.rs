@@ -11,6 +11,11 @@ pub struct Backface {
     pub hardness: f32,
 }
 
+impl Backface {
+    /// The angle culling may take, in degrees from facing the projector
+    pub const ANGLE_RANGE: std::ops::RangeInclusive<f32> = 0.0..=180.0;
+}
+
 impl Default for Backface {
     fn default() -> Self {
         Backface { on: false, angle: 90.0, hardness: 0.5 }

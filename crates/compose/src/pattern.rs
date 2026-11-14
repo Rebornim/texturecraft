@@ -170,11 +170,35 @@ fn place(q: Vec2, tiling: Vec2, rotation: f32, offset: Vec2) -> Vec2 {
 /// 0..1 around a cylindrical projection's axis (`b` over `a`), over an arc of `angle` degrees centred on the front
 fn around(a: f32, b: f32, angle: f32) -> f32 {
     let u = b.atan2(a) / std::f32::consts::TAU + 0.5;
-    if angle == 360.0 { u } else { (u - 0.5) * 360.0 / angle.max(1.0) + 0.5 }
+    if angle == 360.0 { u } else { (u - 0.5) * 360.0 / angle.max(MIN_CYLINDER_ANGLE) + 0.5 }
 }
+
+/// Narrowest arc in degrees a cylindrical projection wraps its image round, so a zero angle never divides by zero
+pub const MIN_CYLINDER_ANGLE: f32 = *Projection::CYLINDER_ANGLE_RANGE.start();
 
 fn place_uv(q: Vec2, uv: &UvTransform) -> Vec2 {
     place(q, Vec2::from(uv.tiling), uv.rotation, Vec2::from(uv.offset))
+}
+
+/// Smallest mesh radius projections measure in, so a flat or empty mesh never divides by zero
+const MIN_MESH_RADIUS: f32 = 1e-4;
+
+/// Nearest to zero a projection scale or stretch gets, so it never divides by zero
+const MIN_STRETCH: f32 = 1e-6;
+
+/// The mesh's centre and its radius (half the diagonal) from its bounds
+pub fn mesh_frame((lo, hi): (Vec3, Vec3)) -> (Vec3, f32) {
+    ((lo + hi) * 0.5, ((hi - lo).length() * 0.5).max(MIN_MESH_RADIUS))
+}
+
+/// `value` kept at least [`MIN_STRETCH`] from zero, on its own side
+pub fn nonzero_stretch(value: f32) -> f32 {
+    value.signum() * value.abs().max(MIN_STRETCH)
+}
+
+/// A projector's per-axis scale with no axis at zero, each keeping its sign
+pub fn projector_stretch(projector: &Projector) -> Vec3 {
+    Vec3::from(projector.scale).map(nonzero_stretch)
 }
 
 /// The middle of a frame's 0..1 texture coordinates: a frame's image turns round it
@@ -200,7 +224,7 @@ pub fn projector_local(projector: &Projector, c: &Coords) -> Coords {
 
     let [x, y, z] = projector.rotation.map(f32::to_radians);
     let to_local = Mat3::from_euler(EulerRot::ZYX, z, y, x).transpose();
-    let scale = Vec3::from(projector.scale).map(|s| if s.abs() < 1e-6 { 1e-6 } else { s });
+    let scale = projector_stretch(projector);
     let nrm = (to_local * c.nrm * scale).try_normalize().unwrap_or(c.nrm);
     Coords { pos: to_local * c.pos / scale, nrm, ..*c }
 }

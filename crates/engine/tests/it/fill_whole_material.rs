@@ -71,3 +71,17 @@ fn a_fill_takes_one_whole_material_names_it_and_forgets_it_once_a_channel_is_set
     assert!(execute(&mut s, "layer.fill.material", &json!({"layer": id})).is_err(), "material is required");
     assert!(execute(&mut s, "layer.fill.material", &json!({"layer": id, "material": 7})).is_err());
 }
+
+#[test]
+fn a_fill_in_another_texture_set_takes_the_channels_of_its_own_set() {
+    let mut s = texturecraft_engine::sample_session(256, 64).unwrap();
+    execute(&mut s, "textureSet.select", &json!({"ts": 1})).unwrap();
+    let other = layer(execute(&mut s, "layer.add.fill", &Value::Null).unwrap());
+    s.doc.project.texture_sets[1].channels.retain(|(channel, _)| *channel != Channel::Metallic);
+    execute(&mut s, "textureSet.select", &json!({"ts": 0})).unwrap();
+
+    execute(&mut s, "layer.fill.material", &json!({"layer": other, "material": "copper_hammered"})).unwrap();
+
+    assert!(!channels(&s, other).contains(&Channel::Metallic), "set 1 has no metallic channel: {:?}", channels(&s, other));
+    assert!(channels(&s, other).contains(&Channel::BaseColor));
+}

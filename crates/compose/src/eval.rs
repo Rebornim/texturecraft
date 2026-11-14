@@ -27,7 +27,7 @@ use crate::environment_sh::EnvironmentSh;
 use crate::fill_copies::FillCopies;
 use crate::fill_copy::FillCopy;
 use crate::mask_gray::MaskGray;
-use crate::pattern::{Coords, image_samples, procedural_sized, world_noise};
+use crate::pattern::{Coords, image_samples, mesh_frame, procedural_sized, world_noise};
 use crate::projector_cover::{framed_cover, projector_cover};
 use crate::projector_depth::ProjectorDepth;
 use crate::shape_distance::distance_filter;
@@ -39,6 +39,9 @@ const NCH: usize = Channel::ALL.len();
 
 /// Coverage past which a symmetric fill's remaining copies would not show under the ones above
 const COVERED: f32 = 0.9999;
+
+/// Share of an image's longer side a step to the next texel may jump before it counts as a UV seam
+const SEAM_JUMP_SHARE: f32 = 0.25;
 
 /// Stack values being composited, per channel.
 type Acc = [[f32; 3]; NCH];
@@ -2163,22 +2166,31 @@ impl<'a, 'b> Texel<'a, 'b> {
         }
 
         let g = self.inp.gbuf;
-        let i = (self.y * g.width + self.x) as usize;
-        let (lo, hi) = self.inp.bounds;
-        let center = (lo + hi) * 0.5;
-        let r = ((hi - lo).length() * 0.5).max(1e-4);
-        let mut c = match self.surface(i) {
-            Some(s) => Coords { uv: s.uv, pos: (s.pos - center) / r, nrm: s.nrm },
-            None => Coords { uv: Vec2::new((self.x as f32 + 0.5) / g.width as f32, (self.y as f32 + 0.5) / g.height as f32), pos: Vec3::ZERO, nrm: Vec3::Y },
+        let c = match self.surface((self.y * g.width + self.x) as usize) {
+            Some(s) => self.coords_of(s),
+            None => self.tile_uv(Coords {
+                uv: Vec2::new((self.x as f32 + 0.5) / g.width as f32, (self.y as f32 + 0.5) / g.height as f32),
+                pos: Vec3::ZERO,
+                nrm: Vec3::Y,
+            }),
         };
+        self.coords = Some(c);
+        c
+    }
 
-        // UV-tiled sets: projections see the mesh's own UVs (patterns repeat per tile)
+    /// The coordinates projections see at surface `s`: its UV, and its position in mesh radii from the mesh's centre
+    fn coords_of(&self, s: Surface) -> Coords {
+        let (center, radius) = mesh_frame(self.inp.bounds);
+        self.tile_uv(Coords { uv: s.uv, pos: (s.pos - center) / radius, nrm: s.nrm })
+    }
+
+    /// `c` with its UV moved out of the atlas on a UV-tiled set, so projections see the mesh's own UVs (patterns repeat per tile)
+    fn tile_uv(&self, mut c: Coords) -> Coords {
         if let Ok(set) = self.inp.project.texture_set(self.inp.ts)
             && let Some(grid) = set.tile_grid()
         {
             c.uv = Vec2::from(set.from_atlas(&grid, c.uv.to_array()));
         }
-        self.coords = Some(c);
         c
     }
 
@@ -2190,15 +2202,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         }
 
         let s = self.surface((y * g.width + x) as usize)?;
-        let (lo, hi) = self.inp.bounds;
-        let center = (lo + hi) * 0.5;
-        let r = ((hi - lo).length() * 0.5).max(1e-4);
-        let mut c = Coords { uv: s.uv, pos: (s.pos - center) / r, nrm: s.nrm };
-        if let Ok(set) = self.inp.project.texture_set(self.inp.ts)
-            && let Some(grid) = set.tile_grid()
-        {
-            c.uv = Vec2::from(set.from_atlas(&grid, c.uv.to_array()));
-        }
+        let c = self.coords_of(s);
         if proj.frame().is_none() {
             return Some(c);
         }
@@ -2215,8 +2219,8 @@ impl<'a, 'b> Texel<'a, 'b> {
             for ((footprint, (uv, _)), (next_uv, _)) in out.iter_mut().zip(samples).zip(self.image_uvs(proj, &next)) {
                 let span = ((next_uv - *uv) * size).length();
 
-                // A jump of more than a quarter of the image is a UV seam, not the texel's size
-                if span.is_finite() && span < size.max_element() * 0.25 {
+                // A jump across more of the image than this is a UV seam, not the texel's size
+                if span.is_finite() && span < size.max_element() * SEAM_JUMP_SHARE {
                     *footprint = footprint.max(span);
                 }
             }
@@ -2224,7 +2228,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         out
     }
 
-    /// World position of this texel (None when uncovered)
+    /// World position of this texel as the fill copy being sampled sees it (None when uncovered)
     fn world(&self) -> Option<Vec3> {
         self.surface((self.y * self.inp.gbuf.width + self.x) as usize).map(|s| s.pos)
     }
@@ -2252,22 +2256,26 @@ impl<'a, 'b> Texel<'a, 'b> {
     /// A fill's value and coverage through `proj`, from `one` (which samples it once): with `sampling`'s symmetry on, every copy of the projection is sampled and the copies are laid over each other, the texel's own copy on top
     fn symmetric(&mut self, proj: &Projection, sampling: Sampling, mut one: impl FnMut(&mut Self) -> ([f32; 3], f32)) -> ([f32; 3], f32) {
         let symmetry = sampling.symmetry;
-        let world = self.inp.gbuf.surface(self.inp.mesh, (self.y * self.inp.gbuf.width + self.x) as usize).map(|s| s.pos);
-        let (Some(p), true) = (world, symmetry.on && proj.takes_symmetry()) else {
+
+        // Most fills have no symmetry: they never pay for the surface lookup
+        if !(symmetry.on && proj.takes_symmetry()) {
+            return one(self);
+        }
+
+        let Some(world) = self.inp.gbuf.surface(self.inp.mesh, (self.y * self.inp.gbuf.width + self.x) as usize).map(|surface| surface.pos) else {
             return one(self);
         };
 
-        let (lo, hi) = self.inp.bounds;
-        let radius = ((hi - lo).length() * 0.5).max(1e-4);
+        let (center, radius) = mesh_frame(self.inp.bounds);
         let cached = self.coords.take();
         let mut value = [0.0f32; 3];
         let mut cover = 0.0f32;
-        for copy in FillCopies::new(&symmetry, p, (lo + hi) * 0.5, radius) {
+        for copy in FillCopies::new(&symmetry, world, center, radius) {
             self.copy = Some(copy);
             self.coords = None;
-            let (v, c) = one(self);
-            let weight = c.clamp(0.0, 1.0) * (1.0 - cover);
-            for (total, part) in value.iter_mut().zip(v) {
+            let (copy_value, copy_cover) = one(self);
+            let weight = copy_cover.clamp(0.0, 1.0) * (1.0 - cover);
+            for (total, part) in value.iter_mut().zip(copy_value) {
                 *total += part * weight;
             }
             cover += weight;
@@ -2401,8 +2409,9 @@ impl<'a, 'b> Texel<'a, 'b> {
             Source::Image { name, .. } => self.inp.images.get(name),
             _ => None,
         });
-        let uv = self.copy.map_or(c.uv, |copy| copy.uv(c.uv));
-        cover * image.map_or(1.0, |img| img.sample(uv.x, uv.y)[3].clamp(0.0, 1.0))
+        let [(uv, _), ..] = self.image_uvs(proj, &c);
+        let alpha = image.map_or(1.0, |img| img.sample_filtered(uv.x, uv.y, sampling, 1.0)[3].clamp(0.0, 1.0));
+        cover * alpha * self.tile_cover(proj, &c, sampling)
     }
 
     /// 1 where a fill placed by `proj` at `coords` lands inside its 0..1 tile on every axis `sampling.wrap` does not repeat, else 0
@@ -4699,8 +4708,8 @@ soft {soft:?}"
         assert!(close(v, [0.7; 3]), "{v:?}");
     }
 
-    #[test]
-    fn decal_fills_cover_only_their_frame_and_image_alpha() {
+    /// A fixture under a decal fill of image "decal" framed on the plane's middle, its projection changed by `change`
+    fn decal_fixture(change: impl FnOnce(&mut Fill)) -> Fixture {
         let mut f = fixture();
         let s = f.gbuf.surface(&f.mesh, 32 * 64 + 32).unwrap();
         let d = texturecraft_core::Decal {
@@ -4715,31 +4724,78 @@ soft {soft:?}"
         let id = f.project.alloc_id();
         let mut fill = Fill { projection: Projection::decal(d), ..Fill::default() };
         fill.sources.insert(Channel::BaseColor, Source::image("decal"));
+        change(&mut fill);
         f.project.insert_layer(0, Layer::new(id, "Decal", LayerKind::Fill(fill), &[Channel::BaseColor]), None, false).unwrap();
-        let composite = |alpha: f32| {
-            let img = crate::store::ImageRes::new(2, 2, vec![[1.0, 0.0, 0.0, alpha]; 4], false);
-            let images: ImageStore = [("decal".to_string(), std::sync::Arc::new(img))].into_iter().collect();
-            let inp = Inputs {
-                project: &f.project,
-                ts: 0,
-                mesh: &f.mesh,
-                gbuf: &f.gbuf,
-                pixels: &f.pixels,
-                baked: &f.baked,
-                block_scales: f.project.texture_sets[0].block_scales(),
-                preview: None,
-                images: &images,
-                bounds: f.mesh.bounds(),
-            };
-            let mut out = Composite::new(&f.project.texture_sets[0].channel_list(), 64);
-            composite_tiles(&inp, &mut out, &all_tiles(64, 64));
-            out
+        f
+    }
+
+    /// `f` composited with `image` as its "decal" image
+    fn composite_with_decal(f: &Fixture, image: crate::store::ImageRes) -> Composite {
+        let images: ImageStore = [("decal".to_string(), std::sync::Arc::new(image))].into_iter().collect();
+        let inp = Inputs {
+            project: &f.project,
+            ts: 0,
+            mesh: &f.mesh,
+            gbuf: &f.gbuf,
+            pixels: &f.pixels,
+            baked: &f.baked,
+            block_scales: f.project.texture_sets[0].block_scales(),
+            preview: None,
+            images: &images,
+            bounds: f.mesh.bounds(),
         };
+        let mut out = Composite::new(&f.project.texture_sets[0].channel_list(), 64);
+        composite_tiles(&inp, &mut out, &all_tiles(64, 64));
+        out
+    }
+
+    /// Texels of a 64 x 64 composite whose base colour is not the fixture's grey
+    fn decal_texels(out: &Composite) -> Vec<[f32; 3]> {
+        (0..64 * 64).map(|i| out.value(Channel::BaseColor, i % 64, i / 64)).filter(|v| !close(*v, [0.5; 3])).collect()
+    }
+
+    #[test]
+    fn decal_fills_cover_only_their_frame_and_image_alpha() {
+        let f = decal_fixture(|_| {});
+        let composite = |alpha: f32| composite_with_decal(&f, crate::store::ImageRes::new(2, 2, vec![[1.0, 0.0, 0.0, alpha]; 4], false));
         let out = composite(1.0);
         assert!(close(out.value(Channel::BaseColor, 32, 32), [1.0, 0.0, 0.0]), "{:?}", out.value(Channel::BaseColor, 32, 32));
         assert!(close(out.value(Channel::BaseColor, 2, 2), [0.5; 3]), "outside the frame");
         let half = composite(0.5);
         assert!(close(half.value(Channel::BaseColor, 32, 32), [0.75, 0.25, 0.25]), "the image alpha shapes the decal");
+    }
+
+    #[test]
+    fn a_cropped_frames_image_alpha_turns_with_its_image() {
+        let f = decal_fixture(|fill| {
+            if let Projection::Planar { uv, .. } = &mut fill.projection {
+                uv.rotation = 180.0;
+            }
+        });
+
+        // Opaque red on the left half, see-through green on the right
+        let half = (0..8 * 8).map(|i| if i % 8 < 4 { [1.0, 0.0, 0.0, 1.0] } else { [0.0, 1.0, 0.0, 0.0] }).collect();
+        let shown = decal_texels(&composite_with_decal(&f, crate::store::ImageRes::new(8, 8, half, false)));
+
+        assert!(!shown.is_empty(), "the red half shows");
+        assert!(shown.iter().all(|v| v[1] < 0.75), "the see-through green half stays hidden once turned (a seam texel blends some in): {shown:?}");
+    }
+
+    #[test]
+    fn a_cropped_frame_with_wrap_none_shows_one_image_however_it_tiles() {
+        let opaque = || crate::store::ImageRes::new(2, 2, vec![[1.0, 0.0, 0.0, 1.0]; 4], false);
+        let once = decal_texels(&composite_with_decal(&decal_fixture(|_| {}), opaque())).len();
+        let tiled = decal_fixture(|fill| {
+            fill.sampling.wrap = texturecraft_core::UvWrap::None;
+            if let Projection::Planar { uv, .. } = &mut fill.projection {
+                uv.tiling = [2.0, 2.0];
+            }
+        });
+
+        let quarter = decal_texels(&composite_with_decal(&tiled, opaque())).len();
+
+        assert!(once > 0, "the frame shows");
+        assert!(quarter.abs_diff(once / 4) <= once / 16, "tiled twice with no wrap, one image fills a quarter of the frame: {quarter} of {once}");
     }
 
     #[test]

@@ -21,6 +21,7 @@ pub mod fill_copies;
 pub mod fill_copy;
 pub mod frame_placement;
 mod mask_gray;
+pub mod mip_level;
 pub mod pattern;
 pub mod projector_cover;
 pub mod projector_depth;

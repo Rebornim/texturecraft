@@ -46,8 +46,11 @@ fn a_distance_map_scales_the_bevel_smooth_distance() {
     assert!((roughness(&mut s, at(4)) - half).abs() < 1e-3, "the anchor's 0.5 reads as the uniform 0.5");
     input(&mut s, effect, json!({"input": "distanceMap", "clear": true})).unwrap();
     assert!(inputs(&s, effect).is_empty() && roughness(&mut s, at(4)) == full, "cleared: white, as before");
+    let steps = s.history_labels().len();
     input(&mut s, effect, json!({"input": "distanceMap", "value": 1.0})).unwrap();
+    input(&mut s, effect, json!({"input": "distanceMap", "clear": true})).unwrap();
     assert!(inputs(&s, effect).is_empty(), "the default gray is not stored");
+    assert_eq!(s.history_labels().len(), steps, "setting what the input already reads adds no undo step");
 
     for bad in [json!({"input": "nope", "value": 0.5}), json!({"input": "distanceMap", "channel": "roughness", "value": 0.5}), json!({"input": "distanceMap"})]
     {

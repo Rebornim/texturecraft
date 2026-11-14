@@ -43,8 +43,9 @@ fn set_material(s: &mut Session, p: &Value) -> Result<Value> {
         None => return Err(bad(CMD, "`material` is required: a material id or null")),
     };
     let label = material.map_or_else(|| "Clear fill material".to_string(), |found| format!("Set fill material {}", found.label));
+    let set = target_set(s, target)?;
     s.edit(&label, |s| {
-        let channels = s.doc.project.texture_set(s.ts())?.channel_list();
+        let channels = s.doc.project.texture_set(set)?.channel_list();
         let whole = match material {
             Some(found) => Some((found.id, whole_fill(s, found, &channels)?)),
             None => None,
@@ -72,6 +73,17 @@ fn set_material(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     Ok(Value::Null)
+}
+
+/// The texture set the fill `target` paints in, whichever set is selected
+fn target_set(s: &Session, target: FillTarget) -> Result<usize> {
+    let owner = match target {
+        FillTarget::Layer(id) => id,
+        FillTarget::Effect(id) | FillTarget::Mask(id) => {
+            s.doc.project.effect(id).map(|(owner, _)| owner).ok_or_else(|| bad(CMD, format!("no effect {}", id.0)))?
+        }
+    };
+    s.doc.project.locate(owner).map(|(set, ..)| set).ok_or_else(|| bad(CMD, format!("layer {} is in no texture set", owner.0)))
 }
 
 /// The one unmasked fill a plain material is made of

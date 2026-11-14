@@ -7,7 +7,7 @@ use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::compose::frame_placement;
 use texturecraft_engine::compose::tile_length::{MeshSize, tile_length, tiling_for_length};
-use texturecraft_engine::core::{Channel, Fill, Filtering, LayerId, Projection, Projector, ScaleMode, ShapeCrop, UvWrap};
+use texturecraft_engine::core::{Backface, Channel, Fill, Filtering, LayerId, Projection, Projector, ScaleMode, ShapeCrop, UvWrap};
 
 use crate::TextureCraftApp;
 use crate::dock::with;
@@ -41,16 +41,16 @@ const OFFSET_TYPED: RangeInclusive<f32> = -1000.0..=1000.0;
 const ROTATION_RANGE: RangeInclusive<f32> = 0.0..=360.0;
 
 /// Tri-planar blend's largest exponent: Hardness 1 (0 = exponent 1, 0.5 = 8)
-const TRIPLANAR_SHARPNESS_MAX: f32 = 64.0;
+const TRIPLANAR_SHARPNESS_MAX: f32 = *Projection::TRIPLANAR_SHARPNESS_RANGE.end();
 
 /// Range of every Hardness the panel shows
 const HARDNESS_RANGE: RangeInclusive<f32> = 0.0..=1.0;
 
 /// What a cylindrical projection's Angle may be: the arc one repeat spans, in degrees
-const CYLINDER_ANGLE_RANGE: RangeInclusive<f32> = 1.0..=360.0;
+const CYLINDER_ANGLE_RANGE: RangeInclusive<f32> = Projection::CYLINDER_ANGLE_RANGE;
 
 /// What Backface culling's Angle may be, in degrees from facing the projector
-const BACKFACE_ANGLE_RANGE: RangeInclusive<f32> = 0.0..=180.0;
+const BACKFACE_ANGLE_RANGE: RangeInclusive<f32> = Backface::ANGLE_RANGE;
 
 /// What the Projection Depth track spans, in lengths of the frame's longer side
 const PROJECTION_DEPTH_TRACK: RangeInclusive<f32> = 0.0..=1.0;

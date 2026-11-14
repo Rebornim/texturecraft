@@ -24,6 +24,12 @@ pub struct ProjectorDepth {
 /// Built maps by their view and the mesh they come from
 type CacheEntry = (ProjectorView, u64, Arc<ProjectorDepth>);
 
+/// The smallest grid cell across and up, so a flat view still divides
+const MIN_CELL_SIZE: f32 = 1e-6;
+
+/// A cell centre this close outside a triangle's edge (as a share of its area) still counts as inside, so shared edges leave no gaps
+const EDGE_TOLERANCE: f32 = 1e-6;
+
 static CACHE: Mutex<Vec<CacheEntry>> = Mutex::new(Vec::new());
 
 impl ProjectorDepth {
@@ -47,6 +53,11 @@ impl ProjectorDepth {
         Some(depth)
     }
 
+    /// Drop every built map: a mesh replacing another (a reimport, another project) can share the old one's fingerprint
+    pub fn forget_all() {
+        CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
+    }
+
     /// Rasterize every triangle of `mesh` in `view`, keeping the nearest per cell (None when no vertex lands in the view)
     pub fn build(view: ProjectorView, mesh: &Mesh) -> Option<ProjectorDepth> {
         let local: Vec<Option<Vec3>> = mesh.positions.iter().map(|p| view.local(*p)).collect();
@@ -55,7 +66,7 @@ impl ProjectorDepth {
             return None;
         }
 
-        let cell = ((hi - lo) / SIZE as f32).max(Vec2::splat(1e-6));
+        let cell = ((hi - lo) / SIZE as f32).max(Vec2::splat(MIN_CELL_SIZE));
         let mut depth = ProjectorDepth { view, origin: lo, cell, front: vec![[f32::NEG_INFINITY, 0.0, 0.0]; SIZE * SIZE] };
         let mut budget = CELL_BUDGET;
         for tri in mesh.indices.as_chunks::<3>().0 {
@@ -94,7 +105,7 @@ impl ProjectorDepth {
         for y in y0..y1 {
             for x in x0..x1 {
                 let q = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
-                let inside = [edge(pb, pc, q), edge(pc, pa, q), edge(pa, pb, q)].iter().all(|w| w * area.signum() >= -1e-6 * area.abs());
+                let inside = [edge(pb, pc, q), edge(pc, pa, q), edge(pa, pb, q)].iter().all(|w| w * area.signum() >= -EDGE_TOLERANCE * area.abs());
                 if !inside {
                     continue;
                 }
@@ -221,6 +232,27 @@ mod tests {
         let soft = depth.cover(Vec3::new(0.5, 0.3, 0.5 - 0.01), 0.0);
         assert!(soft > 0.0 && soft < 1.0, "a soft cull fades just behind the front: {soft}");
         assert!(ProjectorView::of(&planar_z(false, 1.0), bounds).is_none(), "off, there is nothing to build");
+    }
+
+    #[test]
+    fn a_mesh_edited_where_its_fingerprint_does_not_look_is_rebuilt_once_forgotten() {
+        // Unused vertices spread the fingerprint's samples so the front square's right edge is not among them
+        let mut mesh = two_squares(0.5, -0.5);
+        mesh.positions.extend((0..FINGERPRINT_SAMPLES * 3).map(|_| Vec3::ZERO));
+        let mut edited = mesh.clone();
+        for right in [1, 2] {
+            edited.positions[right].x = 0.5;
+        }
+        assert_eq!(fingerprint(&mesh), fingerprint(&edited), "the edit is unseen by the fingerprint");
+        let proj = planar_z(true, 1.0);
+        let behind_the_cut = Vec3::new(0.75, 0.3, -0.5);
+        let bounds = mesh.bounds();
+        assert_eq!(ProjectorDepth::of(&mesh, bounds, &proj).unwrap().cover(behind_the_cut, 1.0), 0.0);
+
+        ProjectorDepth::forget_all();
+
+        let rebuilt = ProjectorDepth::of(&edited, bounds, &proj).unwrap();
+        assert_eq!(rebuilt.cover(behind_the_cut, 1.0), 1.0, "nothing is in front there any more");
     }
 
     #[test]

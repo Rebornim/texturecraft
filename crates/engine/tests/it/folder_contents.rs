@@ -5,13 +5,19 @@ use texturecraft_engine::core::{Channel, ContentsOffset, EffectKind, Filter, Lay
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute};
 
+/// The test project's texture size
+const RESOLUTION: u32 = 128;
+
+/// Texels between two base colour samples, across and down
+const SAMPLE_STRIDE: usize = 9;
+
 fn id(v: Value, key: &str) -> LayerId {
     LayerId(v[key].as_u64().unwrap())
 }
 
 /// A folder holding a Clouds fill (base color and roughness on one seed) with a warp filter in its mask; returns (session, folder, fill)
 fn folder_with_fill() -> (Session, LayerId, LayerId) {
-    let mut s = Session::new_project("t", primitives::sphere(1.0, 16, 8), "builtin:sphere", None, 128).unwrap();
+    let mut s = Session::new_project("t", primitives::sphere(1.0, 16, 8), "builtin:sphere", None, RESOLUTION).unwrap();
     let fill = id(execute(&mut s, "layer.add.fill", &Value::Null).unwrap(), "layer");
     for channel in ["baseColor", "roughness"] {
         execute(&mut s, "layer.fill.set", &json!({"layer": fill.0, "channel": channel, "procedural": "Clouds", "seed": 7})).unwrap();
@@ -32,8 +38,9 @@ fn projection(s: &Session, fill: LayerId) -> Projection {
 }
 
 fn base_colors(s: &Session) -> Vec<[f32; 3]> {
-    let c = &s.caches[0].composite;
-    (0..128).step_by(9).flat_map(|y| (0..128).step_by(9).map(move |x| (x, y))).map(|(x, y)| c.value(Channel::BaseColor, x, y)).collect()
+    let composite = &s.caches[s.ts()].composite;
+    let samples = || (0..RESOLUTION).step_by(SAMPLE_STRIDE);
+    samples().flat_map(|y| samples().map(move |x| (x, y))).map(|(x, y)| composite.value(Channel::BaseColor, x, y)).collect()
 }
 
 #[test]
@@ -59,6 +66,11 @@ fn a_folders_scale_and_rotation_lay_on_its_fills_without_changing_them_and_reset
     assert_eq!(s.history_labels().len(), steps + 1);
     assert_eq!(s.doc.project.contents_offset(folder), ContentsOffset::new(1.5, 40.0));
 
+    // The values it already has add no step
+    let unchanged = execute(&mut s, "folder.contents.set", &json!({"layer": folder.0, "scale": 1.5, "rotation": 40.0})).unwrap();
+    assert_eq!(unchanged, json!({"scale": 1.5, "rotation": 40.0}));
+    assert_eq!(s.history_labels().len(), steps + 1, "no step for the same values");
+
     execute(&mut s, "folder.contents.reset", &json!({"layer": folder.0})).unwrap();
     assert!(s.doc.project.contents_offset(folder).is_none());
     s.update();
@@ -82,31 +94,18 @@ fn randomize_seeds_gives_every_pattern_inside_a_new_seed_in_one_undo_step() {
 
     // The folder inside another: its seeds are inside that one too
     let outer = id(execute(&mut s, "layer.group", &json!({"layer": folder.0})).unwrap(), "layer");
-    let seeds = |s: &Session| {
-        let layer = s.doc.project.layer(fill).unwrap();
-        let LayerKind::Fill(f) = &layer.kind else { panic!("not a fill") };
-        let pattern = |c| match f.sources.get(&c) {
-            Some(Source::Procedural { pattern, .. }) => pattern.seed,
-            other => panic!("not a pattern: {other:?}"),
-        };
-        let warp = layer.mask.as_ref().unwrap().effects.iter().find_map(|e| match e.kind {
-            EffectKind::Filter(Filter::SourceWarp(warp)) => Some(warp.seed),
-            _ => None,
-        });
-        (pattern(Channel::BaseColor), pattern(Channel::Roughness), warp.unwrap())
-    };
-    let before = seeds(&s);
+    let before = fill_seeds(&s, fill);
     let steps = s.history_labels().len();
 
     let out = execute(&mut s, "folder.randomizeSeeds", &json!({"layer": outer.0})).unwrap();
     assert_eq!(out["seeds"], 3);
     assert_eq!(s.history_labels().len(), steps + 1, "one undo step");
-    let after = seeds(&s);
+    let after = fill_seeds(&s, fill);
     assert!(after.0 != before.0 && after.2 != before.2, "{before:?} -> {after:?}");
     assert_eq!(after.0, after.1, "channels on one seed stay on one seed");
 
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
-    assert_eq!(seeds(&s), before, "one undo takes every seed back");
+    assert_eq!(fill_seeds(&s, fill), before, "one undo takes every seed back");
 
     // A folder with nothing seeded inside adds no step
     let empty = id(execute(&mut s, "layer.add.group", &Value::Null).unwrap(), "layer");

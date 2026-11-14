@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use texturecraft_core::{Channel, ChannelKind, Filtering, LayerId, Sampling};
 use texturecraft_texel::{TileImage, from_u16, from_u16_signed};
 
+use crate::mip_level::MipLevel;
+
 /// Painted data of one paint layer channel: premultiplied value(s) plus coverage, u16 per
 /// component (height stored signed).
 #[derive(Clone, Debug, Default)]
@@ -70,14 +72,6 @@ pub struct ImageRes {
     pub mips: std::sync::OnceLock<Vec<MipLevel>>,
 }
 
-/// One halved copy of an image (box-filtered, wrapping at the edges)
-#[derive(Clone, Debug, PartialEq)]
-pub struct MipLevel {
-    pub width: u32,
-    pub height: u32,
-    pub rgba: Vec<[f32; 4]>,
-}
-
 /// Image resources by name.
 pub type ImageStore = HashMap<String, std::sync::Arc<ImageRes>>;
 
@@ -85,7 +79,7 @@ pub type ImageStore = HashMap<String, std::sync::Arc<ImageRes>>;
 const MAX_MIP_LEVELS: usize = 16;
 
 /// Texel (`x`, `y`) of `rgba`; an axis that does not `repeat` (across, down) stops at its edge
-fn texel_of(rgba: &[[f32; 4]], width: u32, height: u32, x: i64, y: i64, repeat: (bool, bool)) -> [f32; 4] {
+pub(crate) fn texel_of(rgba: &[[f32; 4]], width: u32, height: u32, x: i64, y: i64, repeat: (bool, bool)) -> [f32; 4] {
     let (w, h) = (width.max(1) as i64, height.max(1) as i64);
     let x = if repeat.0 { x.rem_euclid(w) } else { x.clamp(0, w - 1) };
     let y = if repeat.1 { y.rem_euclid(h) } else { y.clamp(0, h - 1) };
@@ -95,38 +89,24 @@ fn texel_of(rgba: &[[f32; 4]], width: u32, height: u32, x: i64, y: i64, repeat: 
 
 /// Bilinear sample of `rgba` (texture coordinates, v down), wrapping around on the axes that `repeat`
 fn bilinear(rgba: &[[f32; 4]], width: u32, height: u32, u: f32, v: f32, repeat: (bool, bool)) -> [f32; 4] {
-    let fx = u * width as f32 - 0.5;
-    let fy = v * height as f32 - 0.5;
-    let (x0, y0) = (fx.floor() as i64, fy.floor() as i64);
-    let (tx, ty) = (fx - fx.floor(), fy - fy.floor());
-    let texel = |x, y| texel_of(rgba, width, height, x, y, repeat);
-    let (a, b, c, d) = (texel(x0, y0), texel(x0 + 1, y0), texel(x0, y0 + 1), texel(x0 + 1, y0 + 1));
-    let mut out = [0.0; 4];
-    for k in 0..4 {
-        let top = a[k] + (b[k] - a[k]) * tx;
-        let bot = c[k] + (d[k] - c[k]) * tx;
-        out[k] = top + (bot - top) * ty;
-    }
-    out
-}
+    // Texel centres sit half a texel in from the texel's corner
+    let texel_x = u * width as f32 - 0.5;
+    let texel_y = v * height as f32 - 0.5;
+    let (left, top) = (texel_x.floor() as i64, texel_y.floor() as i64);
+    let (across, down) = (texel_x - texel_x.floor(), texel_y - texel_y.floor());
 
-/// `rgba` halved: each texel averages the 2×2 texels it covers (odd sizes wrap)
-fn halve(rgba: &[[f32; 4]], width: u32, height: u32) -> MipLevel {
-    let (w, h) = ((width / 2).max(1), (height / 2).max(1));
-    let mut out = Vec::with_capacity(w as usize * h as usize);
-    for y in 0..i64::from(h) {
-        for x in 0..i64::from(w) {
-            let mut sum = [0.0f32; 4];
-            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                let t = texel_of(rgba, width, height, x * 2 + dx, y * 2 + dy, (true, true));
-                for k in 0..4 {
-                    sum[k] += t[k] * 0.25;
-                }
-            }
-            out.push(sum);
-        }
+    // A huge coordinate saturates to the last texel instead of overflowing past it
+    let (right, bottom) = (left.saturating_add(1), top.saturating_add(1));
+    let texel = |x, y| texel_of(rgba, width, height, x, y, repeat);
+    let (top_left, top_right) = (texel(left, top), texel(right, top));
+    let (bottom_left, bottom_right) = (texel(left, bottom), texel(right, bottom));
+    let mut blended = [0.0; 4];
+    for k in 0..4 {
+        let upper = top_left[k] + (top_right[k] - top_left[k]) * across;
+        let lower = bottom_left[k] + (bottom_right[k] - bottom_left[k]) * across;
+        blended[k] = upper + (lower - upper) * down;
     }
-    MipLevel { width: w, height: h, rgba: out }
+    blended
 }
 
 impl ImageRes {
@@ -162,8 +142,8 @@ impl ImageRes {
             let (mut w, mut h) = (self.width, self.height);
             while (w > 1 || h > 1) && levels.len() < MAX_MIP_LEVELS {
                 let next = match levels.last() {
-                    Some(l) => halve(&l.rgba, l.width, l.height),
-                    None => halve(&self.rgba, w, h),
+                    Some(level) => MipLevel::halve(&level.rgba, level.width, level.height),
+                    None => MipLevel::halve(&self.rgba, w, h),
                 };
                 (w, h) = (next.width, next.height);
                 levels.push(next);
@@ -185,20 +165,40 @@ impl ImageRes {
             Filtering::BilinearSharp => full(u, v),
             Filtering::BilinearHq => {
                 let lod = if footprint.is_finite() && footprint > 1.0 { footprint.log2() } else { 0.0 };
-                let level = |i: usize| match i.checked_sub(1) {
+
+                // Level 0 is the full image, level n the nth mip (the smallest past the last)
+                let level = |index: usize| match index.checked_sub(1) {
                     None => full(u, v),
-                    Some(m) => self.mips().get(m).or(self.mips().last()).map_or_else(|| full(u, v), |l| bilinear(&l.rgba, l.width, l.height, u, v, repeat)),
+                    Some(mip_index) => self
+                        .mips()
+                        .get(mip_index)
+                        .or(self.mips().last())
+                        .map_or_else(|| full(u, v), |mip| bilinear(&mip.rgba, mip.width, mip.height, u, v, repeat)),
                 };
-                let lo = lod.floor() as usize;
-                let t = lod - lod.floor();
-                let a = level(lo);
-                if t <= 0.0 {
-                    return a;
+                let finer_level = lod.floor() as usize;
+                let toward_coarser = lod - lod.floor();
+                let finer = level(finer_level);
+                if toward_coarser <= 0.0 {
+                    return finer;
                 }
 
-                let b = level(lo + 1);
-                [0, 1, 2, 3].map(|k| a[k] + (b[k] - a[k]) * t)
+                let coarser = level(finer_level + 1);
+                [0, 1, 2, 3].map(|component| finer[component] + (coarser[component] - finer[component]) * toward_coarser)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_huge_texture_coordinate_samples_without_overflowing() {
+        let image = ImageRes::new(2, 2, vec![[0.5; 4]; 4], false);
+
+        let sampled = image.sample(1e30, -1e30);
+
+        assert_eq!(sampled, [0.5; 4]);
     }
 }

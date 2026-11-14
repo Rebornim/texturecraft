@@ -1,3 +1,5 @@
+//! The kind of copies a symmetric fill makes: mirrored or turned round an axis
+
 use serde::{Deserialize, Serialize};
 
 /// How a symmetric fill copies its projection

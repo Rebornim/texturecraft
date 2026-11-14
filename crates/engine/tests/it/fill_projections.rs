@@ -232,6 +232,9 @@ fn warp_projection_bends_to_its_corners_reaches_its_depth_and_resets_its_frame()
     execute(&mut s, "layer.fill.resetFrame", &json!({"layer": layer.0})).unwrap();
     let Projection::Warp { frame: reset, corners, depth, .. } = projection(&s, layer) else { panic!("still a warp") };
     assert_eq!((reset, corners, depth), (frame, Projection::FRAME_CORNERS, 1.0), "the frame and corners go back; the depth stays");
+    let steps = s.history_labels().len();
+    execute(&mut s, "layer.fill.resetFrame", &json!({"layer": layer.0})).unwrap();
+    assert_eq!(s.history_labels().len(), steps, "resetting a frame already reset adds no undo step");
 
     let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap();
     let row = inspect["layers"].as_array().unwrap().iter().find(|l| l["id"] == layer.0).unwrap().clone();
@@ -455,6 +458,9 @@ fn reset_fill_settings_keeps_the_projection_and_restores_its_defaults_in_one_und
     assert_eq!(reset.sampling, Sampling { symmetry: changed.sampling.symmetry, ..Sampling::default() }, "the sampling is a new fill's; the symmetry stays");
     assert_eq!(reset.sources, changed.sources, "the material stays");
     assert!(texturecraft_engine::fill_reset_cmds::at_defaults(&reset.projection, reset.sampling));
+    let steps = s.history_labels().len();
+    execute(&mut s, "layer.fill.resetProjection", &json!({"layer": layer.0})).unwrap();
+    assert_eq!(s.history_labels().len(), steps, "resetting a Fill section at its defaults adds no undo step");
 
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
     assert_eq!(fill(&s), changed, "one undo brings every setting back");
@@ -485,4 +491,27 @@ fn reset_fill_settings_keeps_a_warp_frame_and_restores_its_settings() {
 
     execute(&mut s, "layer.fill.resetProjection", &json!({"layer": layer.0})).unwrap();
     assert_eq!(projection(&s, layer), Projection::warp(moved), "still a warp: its frame stays, every setting is a new warp's");
+}
+
+#[test]
+fn malformed_warp_corners_and_copy_flips_are_rejected_and_change_nothing() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    set(&mut s, layer, json!({"projection": "warp"}));
+    let before = projection(&s, layer);
+    let steps = s.history_labels().len();
+
+    for bad in [
+        json!({"warpCorners": [[1, 2]]}),
+        json!({"warpCorners": [[0, 0], [0, 0], [0, 0], ["x", 0]]}),
+        json!({"warpCorners": "pulled"}),
+        json!({"flipCopy": [true, "x"]}),
+    ] {
+        let mut p = bad.clone();
+        p["layer"] = json!(layer.0);
+        assert!(execute(&mut s, "layer.fill.projection", &p).is_err(), "{bad}");
+    }
+
+    assert_eq!(projection(&s, layer), before);
+    assert_eq!(s.history_labels().len(), steps, "no undo step for a rejected edit");
 }

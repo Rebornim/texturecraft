@@ -207,6 +207,9 @@ fn materials_cook_at_their_picked_resolution() {
     assert_eq!((link(&s, id).resolution, size(&s)), (Some(CookResolution::Fixed(1024)), 1024));
     pick(&mut s, json!({"relative": 2})).unwrap();
     assert_eq!(size(&s), 512);
+    let steps = s.history_labels().len();
+    pick(&mut s, json!({"relative": 2})).unwrap();
+    assert_eq!(s.history_labels().len(), steps, "the size it already has adds no step");
     for bad in [
         json!({"fixed": 300}),
         json!({"fixed": 64}),

@@ -288,38 +288,43 @@ fn material(s: &mut Session, p: &Value) -> Result<Value> {
     let channel = channel_param("tool.material", p, "channel")?;
     let color = color_param("tool.material", p, "color")?;
     let value = color_param("tool.material", p, "value")?;
-    if let Some(v) = f32p(p, "maskValue") {
-        s.tool.mask_value = v.clamp(0.0, 1.0);
-    }
-    match p.get("maskImage") {
-        Some(Value::Null) => s.tool.mask_image = None,
+
+    // Every param is checked before the tool changes, so a refused call changes nothing
+    let mask_image = match p.get("maskImage") {
+        Some(Value::Null) => Some(None),
         Some(name) => {
             let name = name.as_str().ok_or_else(|| bad("tool.material", "maskImage must be an image resource name or null"))?;
             if !s.doc.resources.contains_key(name) {
                 return Err(bad("tool.material", format!("no image resource '{name}'")));
             }
 
-            s.tool.mask_image = Some(name.to_owned());
+            Some(Some(name.to_owned()))
         }
-        None => {}
+        None => None,
+    };
+    if let Some(mask_value) = f32p(p, "maskValue") {
+        s.tool.mask_value = mask_value.clamp(0.0, 1.0);
     }
-    if let Some(c) = channel {
-        if let Some(v) = color.or(value) {
-            let v = if c == Channel::Height { v.map(|x| x.clamp(-1.0, 1.0)) } else { v.map(|x| x.clamp(0.0, 1.0)) };
-            s.tool.values.insert(c, v);
-            s.tool.enabled.insert(c);
+    if let Some(mask_image) = mask_image {
+        s.tool.mask_image = mask_image;
+    }
+    if let Some(channel) = channel {
+        if let Some(picked) = color.or(value) {
+            let picked = if channel == Channel::Height { picked.map(|x| x.clamp(-1.0, 1.0)) } else { picked.map(|x| x.clamp(0.0, 1.0)) };
+            s.tool.values.insert(channel, picked);
+            s.tool.enabled.insert(channel);
         }
         match boolp(p, "enabled") {
             Some(true) => {
-                s.tool.enabled.insert(c);
+                s.tool.enabled.insert(channel);
             }
             Some(false) => {
-                s.tool.enabled.remove(&c);
+                s.tool.enabled.remove(&channel);
             }
             None => {}
         }
         if boolp(p, "solo") == Some(true) {
-            s.tool.enabled = std::iter::once(c).collect();
+            s.tool.enabled = std::iter::once(channel).collect();
         }
     }
     s.revision = s.revision.wrapping_add(1);

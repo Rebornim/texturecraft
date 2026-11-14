@@ -3,6 +3,8 @@
 use texturecraft_core::{Decal, Projection, Projector};
 use texturecraft_geom::glam::{EulerRot, Mat3, Vec3};
 
+use crate::pattern::frame_uv_from_corner;
+
 /// The placed planar projection that reads images exactly as axis planar `proj` does on a mesh with bounds `lo`..`hi` (None for other projections, placed ones included)
 pub fn placed_from_axis(proj: &Projection, (lo, hi): (Vec3, Vec3)) -> Option<Projection> {
     let Projection::Planar { scale, axis, offset, uv, projector, placed: None } = proj else { return None };
@@ -10,7 +12,9 @@ pub fn placed_from_axis(proj: &Projection, (lo, hi): (Vec3, Vec3)) -> Option<Pro
     let frame = axis_frame(*scale, *axis, Vec3::from(*offset), projector, (lo, hi))?;
     // The turn and per-axis scale are now in the frame; culling and crop stay
     let projector = Projector { rotation: [0.0; 3], scale: [1.0; 3], ..*projector };
-    Some(Projection::Planar { scale: *scale, axis: *axis, offset: *offset, uv: *uv, projector, placed: Some(frame) })
+    // An axis planar turns its image round the top left, a frame round its centre
+    let uv = frame_uv_from_corner(uv);
+    Some(Projection::Planar { scale: *scale, axis: *axis, offset: *offset, uv, projector, placed: Some(frame) })
 }
 
 /// The frame of an axis planar projection: its image's 0..1 square on the plane through the mesh, turned and sized by `projector`

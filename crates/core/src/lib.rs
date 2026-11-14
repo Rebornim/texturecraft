@@ -101,8 +101,9 @@ pub use highpass_space::HighpassSpace;
 pub use image_input::ImageInput;
 pub use layer::{
     ChannelBlend, CompareOp, CurvatureDetail, CurvatureMode, Decal, Effect, EffectKind, Fill, Filter, Filtering, Generator, GeneratorGlobal, GeneratorKind,
-    HeightMask, Layer, LayerId, LayerKind, Levels, LinkParam, LinkPreset, Mask, MaskBackground, MaterialLink, MicroDetail, OutputResolution, PathShape,
-    Procedural, ProceduralKind, Projection, ResolutionMode, Sampling, ScaleMode, Source, UvTransform, UvWrap, gradient, hsl_adjust, per_unit, posterize,
+    HeightMask, Layer, LayerId, LayerKind, Levels, LinkParam, LinkPreset, Mask, MaskBackground, MaterialLink, MicroDetail, OutputResolution,
+    POSTERIZE_LEVELS_MAX, PathShape, Procedural, ProceduralKind, Projection, ResolutionMode, Sampling, ScaleMode, Source, UvTransform, UvWrap, gradient,
+    hsl_adjust, per_unit, posterize,
 };
 pub use lighting_output::LightingOutput;
 pub use mask_outline::MaskOutline;

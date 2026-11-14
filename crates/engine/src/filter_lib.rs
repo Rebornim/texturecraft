@@ -195,6 +195,54 @@ const MID_GRAY: f32 = 0.214;
 /// A new glow's warm light, in linear RGB
 const GLOW_COLOR: [f32; 3] = [0.871, 0.578, 0.188];
 
+use texturecraft_core::POSTERIZE_LEVELS_MAX;
+
+pub use crate::stylized_lighting_params::{MAX_CAVITY_SMOOTHNESS, MAX_DIELECTRIC_REFLECTANCE, MAX_HEIGHT_TO_NORMAL, MAX_LIGHT_INTENSITY};
+
+/// A Seed slider's end; any seed can be typed
+const SEED_SLIDER_MAX: f32 = 999.0;
+
+/// The Tiling range of a warp's or slope blur's source
+pub const SOURCE_TILING_MIN: f32 = 0.01;
+pub const SOURCE_TILING_MAX: f32 = 16.0;
+
+/// The Source Tiling slider range of a noise-driven warp or blur
+const NOISE_TILING_MIN: f32 = 0.5;
+const NOISE_TILING_MAX: f32 = 64.0;
+
+/// A blur Intensity slider's end, in the reference workflow's unit (see [`Filter::BLUR_INTENSITY`])
+pub const BLUR_INTENSITY_SLIDER_MAX: f32 = 16.0;
+
+/// The widest radius or width a filter takes, in texels at 2K; its slider ends at [`TEXELS_SLIDER_MAX`]
+const TEXELS_MAX: f32 = 256.0;
+const TEXELS_SLIDER_MAX: f32 = 128.0;
+
+/// Slider ends where a larger value can still be typed
+const SHARPEN_SLIDER_MAX: f32 = 4.0;
+const GLOW_AMOUNT_SLIDER_MAX: f32 = 5.0;
+const EDGE_WIDTH_SLIDER_MAX: f32 = 64.0;
+const MOSAIC_PIXELS_SLIDER_MAX: f32 = 128.0;
+
+/// The largest mosaic cell, in pixels
+const MOSAIC_SIZE_MAX: f32 = 2048.0;
+
+/// Height Adjust's largest Multiply
+const HEIGHT_MULTIPLY_MAX: f32 = 10.0;
+
+/// Distance Bevel's largest Smoothing
+pub const DISTANCE_BEVEL_SMOOTHING_MAX: f32 = 5.0;
+
+/// Bevel Smooth's and Directional Distance's largest Distance, as a share of the texture
+pub const SMOOTH_DISTANCE_MAX: f32 = 0.3;
+
+/// Bevel Smooth's largest Smoothing
+pub const BEVEL_SMOOTHING_MAX: f32 = 10.0;
+
+/// Stylized lighting's Sun Intensity, Exposure (stops either way) and Height Intensity ends
+pub const SUN_INTENSITY_MAX: f32 = 10.0;
+const EXPOSURE_MAX_EV: f32 = 5.0;
+const HEIGHT_INTENSITY_MAX: f32 = 8.0;
+
 /// The Gradient filter as the library adds it: black, mid gray and white at 0, 0.5 and 1 (the other seven colors wait white at 1)
 fn library_gradient() -> Filter {
     let quantity = 3;
@@ -300,8 +348,8 @@ fn mat_finish(id: &str) -> Option<Fill> {
 /// Scalar parameters of a filter for editors: (param key, label, value, min, max); colors (color balance, gradient map) and the HSL hue have their own editors
 pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f32)> {
     match f {
-        Filter::Blur { radius, .. } => vec![("intensity", "Blur Intensity", *radius / Filter::BLUR_INTENSITY, 0.0, 16.0)],
-        Filter::Sharpen { amount } => vec![("amount", "Sharpen Intensity", *amount, 0.0, 4.0)],
+        Filter::Blur { radius, .. } => vec![("intensity", "Blur Intensity", *radius / Filter::BLUR_INTENSITY, 0.0, BLUR_INTENSITY_SLIDER_MAX)],
+        Filter::Sharpen { amount } => vec![("amount", "Sharpen Intensity", *amount, 0.0, SHARPEN_SLIDER_MAX)],
         Filter::Threshold { level, .. } => vec![("level", "Threshold", *level, 0.0, 1.0)],
         Filter::Hsl { saturation, lightness, .. } => {
             vec![("saturation", "Saturation", *saturation, -1.0, 1.0), ("lightness", "Lightness", *lightness, -1.0, 1.0)]
@@ -309,23 +357,33 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         Filter::ContrastLuminosity { contrast, luminosity } => {
             vec![("contrast", "Contrast", *contrast, -1.0, 1.0), ("luminosity", "Luminosity", *luminosity, -1.0, 1.0)]
         }
-        Filter::Posterize { levels, .. } => vec![("levels", "Colors Amount", *levels, 2.0, 64.0)],
+        Filter::Posterize { levels, .. } => vec![("levels", "Colors Amount", *levels, 2.0, POSTERIZE_LEVELS_MAX)],
         Filter::Clamp { min, max } => vec![("min", "Min", *min, 0.0, 1.0), ("max", "Max", *max, 0.0, 1.0)],
         Filter::Smoothstep { min, max } => vec![("min", "Minimum", *min, 0.0, 1.0), ("max", "Maximum", *max, 0.0, 1.0)],
-        Filter::HeightAdjust { offset, multiply, .. } => vec![("offset", "Offset", *offset, -1.0, 1.0), ("multiply", "Multiply", *multiply, 0.0, 10.0)],
+        Filter::HeightAdjust { offset, multiply, .. } => {
+            vec![("offset", "Offset", *offset, -1.0, 1.0), ("multiply", "Multiply", *multiply, 0.0, HEIGHT_MULTIPLY_MAX)]
+        }
         Filter::HistogramScan { position, contrast, .. } => vec![("position", "Position", *position, 0.0, 1.0), ("contrast", "Contrast", *contrast, 0.0, 1.0)],
         Filter::HistogramRange { range, position } => vec![("range", "Range", *range, 0.0, 1.0), ("position", "Position", *position, 0.0, 1.0)],
         Filter::HistogramShift { offset } => vec![("position", "Position", Filter::shift_position(*offset), 0.0, 1.0)],
         Filter::Warp { intensity, scale, seed, .. } => {
-            vec![("intensity", "Intensity", *intensity, 0.0, 128.0), ("scale", "Source Tiling", *scale, 0.5, 64.0), ("seed", "Seed", *seed as f32, 0.0, 999.0)]
+            vec![
+                ("intensity", "Intensity", *intensity, 0.0, TEXELS_SLIDER_MAX),
+                ("scale", "Source Tiling", *scale, NOISE_TILING_MIN, NOISE_TILING_MAX),
+                ("seed", "Seed", *seed as f32, 0.0, SEED_SLIDER_MAX),
+            ]
         }
         Filter::DirectionalBlur { radius, angle } => {
-            vec![("intensity", "Intensity", *radius / Filter::BLUR_INTENSITY, 0.0, 16.0), ("angle", "Angle", *angle, 0.0, 360.0)]
+            vec![("intensity", "Intensity", *radius / Filter::BLUR_INTENSITY, 0.0, BLUR_INTENSITY_SLIDER_MAX), ("angle", "Angle", *angle, 0.0, 360.0)]
         }
         Filter::SlopeBlur { radius, scale, seed, .. } => {
-            vec![("radius", "Intensity", *radius, 0.0, 128.0), ("scale", "Source Tiling", *scale, 0.5, 64.0), ("seed", "Seed", *seed as f32, 0.0, 999.0)]
+            vec![
+                ("radius", "Intensity", *radius, 0.0, TEXELS_SLIDER_MAX),
+                ("scale", "Source Tiling", *scale, NOISE_TILING_MIN, NOISE_TILING_MAX),
+                ("seed", "Seed", *seed as f32, 0.0, SEED_SLIDER_MAX),
+            ]
         }
-        Filter::HighPass { radius, .. } => vec![("intensity", "Radius", *radius / Filter::BLUR_INTENSITY, 0.0, 16.0)],
+        Filter::HighPass { radius, .. } => vec![("intensity", "Radius", *radius / Filter::BLUR_INTENSITY, 0.0, BLUR_INTENSITY_SLIDER_MAX)],
         Filter::GrayscaleConversion(conversion) => conversion_params(conversion),
         Filter::AnisotropicKuwahara(kuwahara) => vec![
             ("radius", "Radius", kuwahara.radius, 0.0, AnisotropicKuwahara::MAX_RADIUS),
@@ -344,20 +402,22 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         Filter::ColorMatch(matcher) => {
             vec![("hue", "Hue", matcher.hue, 0.0, 360.0), ("chroma", "Chroma", matcher.chroma, 0.0, 1.0), ("luma", "Luma", matcher.luma, 0.0, 1.0)]
         }
-        Filter::EdgeDetect { width } => vec![("width", "Width", *width, 0.0, 64.0)],
+        Filter::EdgeDetect { width } => vec![("width", "Width", *width, 0.0, EDGE_WIDTH_SLIDER_MAX)],
         Filter::DirectionalWarp { intensity, angle, scale, seed, .. } => {
             vec![
-                ("intensity", "Intensity", *intensity, 0.0, 128.0),
+                ("intensity", "Intensity", *intensity, 0.0, TEXELS_SLIDER_MAX),
                 ("angle", "Angle", *angle, 0.0, 360.0),
-                ("scale", "Source Tiling", *scale, 0.5, 64.0),
+                ("scale", "Source Tiling", *scale, NOISE_TILING_MIN, NOISE_TILING_MAX),
                 ("seed", "Seed", *seed as f32, 0.0, 999.0),
             ]
         }
-        Filter::Bevel { width, .. } => vec![("width", "Distance", *width, 0.0, 128.0)],
-        Filter::Mosaic { size, .. } => vec![("pixelsAmount", "Pixels Amount", Filter::pixels_amount(*size), 1.0, 128.0)],
-        Filter::DistanceBevel(bevel) => vec![("distance", "Distance", bevel.distance, -1.0, 1.0), ("smoothing", "Smoothing", bevel.smoothing, 0.0, 5.0)],
+        Filter::Bevel { width, .. } => vec![("width", "Distance", *width, 0.0, TEXELS_SLIDER_MAX)],
+        Filter::Mosaic { size, .. } => vec![("pixelsAmount", "Pixels Amount", Filter::pixels_amount(*size), 1.0, MOSAIC_PIXELS_SLIDER_MAX)],
+        Filter::DistanceBevel(bevel) => {
+            vec![("distance", "Distance", bevel.distance, -1.0, 1.0), ("smoothing", "Smoothing", bevel.smoothing, 0.0, DISTANCE_BEVEL_SMOOTHING_MAX)]
+        }
         Filter::SourceWarp(warp) => {
-            let mut params = vec![("seed", "Seed", warp.seed as f32, 0.0, 999.0), ("intensity", "Intensity", warp.intensity, 0.0, 1.0)];
+            let mut params = vec![("seed", "Seed", warp.seed as f32, 0.0, SEED_SLIDER_MAX), ("intensity", "Intensity", warp.intensity, 0.0, 1.0)];
             if warp.mode != WarpMode::Warp {
                 params.push(("angle", "Angle", warp.angle, 0.0, 360.0));
             }
@@ -365,29 +425,29 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
                 ("sourceBlur", "Source Blur", warp.source.blur, 0.0, 1.0),
                 ("sourceBalance", "Source Balance", warp.source.balance, 0.0, 1.0),
                 ("sourceContrast", "Source Contrast", warp.source.contrast, 0.0, 1.0),
-                ("sourceTiling", "Source Tiling", warp.source.tiling, 0.01, 16.0),
+                ("sourceTiling", "Source Tiling", warp.source.tiling, SOURCE_TILING_MIN, SOURCE_TILING_MAX),
             ]);
             params
         }
         Filter::SourceSlopeBlur(slope) => vec![
-            ("seed", "Seed", slope.seed as f32, 0.0, 999.0),
+            ("seed", "Seed", slope.seed as f32, 0.0, SEED_SLIDER_MAX),
             ("intensity", "Intensity", slope.intensity, 0.0, 1.0),
             ("quality", "Quality", slope.quality, 0.0, 1.0),
             ("sourceBlur", "Blur", slope.source.blur, 0.0, 1.0),
             ("sourceBalance", "Position", slope.source.balance, 0.0, 1.0),
             ("sourceContrast", "Contrast", slope.source.contrast, 0.0, 1.0),
-            ("sourceTiling", "Source Tiling", slope.source.tiling, 0.01, 16.0),
+            ("sourceTiling", "Source Tiling", slope.source.tiling, SOURCE_TILING_MIN, SOURCE_TILING_MAX),
         ],
         Filter::BevelSmooth(smooth) => vec![
-            ("distance", "Distance", smooth.distance, 0.0, 0.3),
-            ("smoothing", "Smoothing", smooth.smoothing, 0.0, 10.0),
+            ("distance", "Distance", smooth.distance, 0.0, SMOOTH_DISTANCE_MAX),
+            ("smoothing", "Smoothing", smooth.smoothing, 0.0, BEVEL_SMOOTHING_MAX),
             ("curveOffset", "Curve Offset", smooth.curve_offset, -1.0, 1.0),
             ("curveShape", "Curve Shape", smooth.curve_shape, -1.0, 1.0),
             ("maskThreshold", "Mask Threshold", smooth.threshold, 0.0, 1.0),
             ("distanceMapMultiplier", "Distance Map Multiplier", smooth.multiplier, 0.0, 1.0),
         ],
         Filter::DirectionalDistance(trail) => vec![
-            ("distance", "Distance", trail.distance, 0.0, 0.3),
+            ("distance", "Distance", trail.distance, 0.0, SMOOTH_DISTANCE_MAX),
             ("angle", "Angle", trail.angle, 0.0, 360.0),
             ("contrast", "Contrast", trail.contrast, 0.0, 1.0),
             ("distanceMapMultiplier", "Distance Map Multiplier", trail.multiplier, 0.0, 1.0),
@@ -405,7 +465,7 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
             ("curveShape", "Curve Shape", outline.curve, -1.0, 1.0),
         ],
         Filter::Glow { radius, amount } => {
-            vec![("radius", "Width", *radius, 0.0, 128.0), ("amount", "Amount", *amount, 0.0, 5.0)]
+            vec![("radius", "Width", *radius, 0.0, TEXELS_SLIDER_MAX), ("amount", "Amount", *amount, 0.0, GLOW_AMOUNT_SLIDER_MAX)]
         }
         Filter::HaloGlow { width, spread, opacity, .. } => {
             vec![("width", "Width", *width, -1.0, 1.0), ("spread", "Spread", *spread, 0.0, 1.0), ("opacity", "Opacity", *opacity, 0.0, 1.0)]
@@ -418,7 +478,7 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
             ("opacity", "Opacity", *opacity, 0.0, 1.0),
         ],
         Filter::BakedLighting { azimuth, elevation, light, ambient, occlusion, .. } => vec![
-            ("light", "Sun Intensity", *light, 0.0, 10.0),
+            ("light", "Sun Intensity", *light, 0.0, SUN_INTENSITY_MAX),
             ("azimuth", "Horizontal Angle", *azimuth, 0.0, 360.0),
             ("elevation", "Vertical Angle", *elevation, 0.0, 360.0),
             ("ambient", "Sky Intensity", *ambient, 0.0, 2.0),
@@ -427,8 +487,8 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         Filter::EnvironmentLighting { horizontal, vertical, exposure, height_intensity, ambient_occlusion, specular_occlusion } => vec![
             ("horizontalRotation", "Horizontal Rotation", *horizontal, 0.0, 360.0),
             ("verticalRotation", "Vertical Rotation", *vertical, 0.0, 360.0),
-            ("exposure", "Exposure", *exposure, -5.0, 5.0),
-            ("heightIntensity", "Height Intensity", *height_intensity, 0.0, 8.0),
+            ("exposure", "Exposure", *exposure, -EXPOSURE_MAX_EV, EXPOSURE_MAX_EV),
+            ("heightIntensity", "Height Intensity", *height_intensity, 0.0, HEIGHT_INTENSITY_MAX),
             ("ambientOcclusion", "Ambient Occlusion Intensity", *ambient_occlusion, 0.0, 1.0),
             ("specularOcclusion", "Specular Occlusion Intensity", *specular_occlusion, 0.0, 1.0),
         ],
@@ -436,7 +496,7 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
             vec![("tolerance", "Tolerance", *tolerance, 0.0, 1.0), ("softness", "Softness", *softness, 0.0, 1.0)]
         }
         Filter::GradientMap { input, .. } => vec![
-            ("blur", "Blur Intensity", input.blur, 0.0, 16.0),
+            ("blur", "Blur Intensity", input.blur, 0.0, BLUR_INTENSITY_SLIDER_MAX),
             ("balance", "Balance", input.balance, 0.0, 1.0),
             ("contrast", "Contrast", input.contrast, 0.0, 1.0),
         ],
@@ -583,7 +643,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
     // A blur's Intensity in the reference workflow's unit (radius in texels at 2K ÷ Filter::BLUR_INTENSITY)
     let blur_intensity = |radius: &mut f32| {
         if let Some(intensity) = f32p(p, "intensity") {
-            *radius = (intensity * Filter::BLUR_INTENSITY).clamp(0.0, 256.0);
+            *radius = (intensity * Filter::BLUR_INTENSITY).clamp(0.0, TEXELS_MAX);
         }
     };
     let switch = |slot: &mut bool, key: &str| -> Result<()> {
@@ -696,7 +756,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             set(&mut warp.source.blur, "sourceBlur", 0.0, 1.0);
             set(&mut warp.source.balance, "sourceBalance", 0.0, 1.0);
             set(&mut warp.source.contrast, "sourceContrast", 0.0, 1.0);
-            set(&mut warp.source.tiling, "sourceTiling", 0.01, 16.0);
+            set(&mut warp.source.tiling, "sourceTiling", SOURCE_TILING_MIN, SOURCE_TILING_MAX);
         }
         Filter::SourceSlopeBlur(slope) => {
             seed(&mut slope.seed);
@@ -708,19 +768,19 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             set(&mut slope.source.blur, "sourceBlur", 0.0, 1.0);
             set(&mut slope.source.balance, "sourceBalance", 0.0, 1.0);
             set(&mut slope.source.contrast, "sourceContrast", 0.0, 1.0);
-            set(&mut slope.source.tiling, "sourceTiling", 0.01, 16.0);
+            set(&mut slope.source.tiling, "sourceTiling", SOURCE_TILING_MIN, SOURCE_TILING_MAX);
         }
         Filter::DistanceBevel(bevel) => {
             set(&mut bevel.distance, "distance", -1.0, 1.0);
-            set(&mut bevel.smoothing, "smoothing", 0.0, 5.0);
+            set(&mut bevel.smoothing, "smoothing", 0.0, DISTANCE_BEVEL_SMOOTHING_MAX);
             bevel.corner = choice(p, "cornerType", &BevelCorner::ALL, BevelCorner::id, cmd)?.unwrap_or(bevel.corner);
             bevel.blur = choice(p, "blurMode", &BevelBlur::ALL, BevelBlur::id, cmd)?.unwrap_or(bevel.blur);
             wrap(&mut bevel.wrap)?;
         }
         Filter::BevelSmooth(smooth) => {
             smooth.direction = choice(p, "direction", &BevelDirection::ALL, BevelDirection::id, cmd)?.unwrap_or(smooth.direction);
-            set(&mut smooth.distance, "distance", 0.0, 0.3);
-            set(&mut smooth.smoothing, "smoothing", 0.0, 10.0);
+            set(&mut smooth.distance, "distance", 0.0, SMOOTH_DISTANCE_MAX);
+            set(&mut smooth.smoothing, "smoothing", 0.0, BEVEL_SMOOTHING_MAX);
             set(&mut smooth.curve_offset, "curveOffset", -1.0, 1.0);
             set(&mut smooth.curve_shape, "curveShape", -1.0, 1.0);
             set(&mut smooth.threshold, "maskThreshold", 0.0, 1.0);
@@ -728,7 +788,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             wrap(&mut smooth.wrap)?;
         }
         Filter::DirectionalDistance(trail) => {
-            set(&mut trail.distance, "distance", 0.0, 0.3);
+            set(&mut trail.distance, "distance", 0.0, SMOOTH_DISTANCE_MAX);
             angle(&mut trail.angle);
             set(&mut trail.contrast, "contrast", 0.0, 1.0);
             set(&mut trail.multiplier, "distanceMapMultiplier", 0.0, 1.0);
@@ -750,7 +810,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             set(&mut outline.curve, "curveShape", -1.0, 1.0);
         }
         Filter::Blur { radius, wrap: w } => {
-            set(radius, "radius", 0.0, 256.0);
+            set(radius, "radius", 0.0, TEXELS_MAX);
             blur_intensity(radius);
             wrap(w)?;
         }
@@ -814,7 +874,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
                     .find(|m| m.id() == id)
                     .ok_or_else(|| bad(cmd, "`grayscaleMode` must be desaturation, luma, average, max or min"))?;
             }
-            set(&mut input.blur, "blur", 0.0, 16.0);
+            set(&mut input.blur, "blur", 0.0, BLUR_INTENSITY_SLIDER_MAX);
             set(&mut input.balance, "balance", 0.0, 1.0);
             set(&mut input.contrast, "contrast", 0.0, 1.0);
             for (key, slot) in [("invert", &mut input.invert), ("linear", linear), ("debug", debug)] {
@@ -846,7 +906,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             shade(color)?;
         }
         Filter::Posterize { levels, alpha } => {
-            set(levels, "levels", 2.0, 64.0);
+            set(levels, "levels", 2.0, POSTERIZE_LEVELS_MAX);
             switch(alpha, "applyToAlpha")?;
         }
         Filter::Clamp { min, max } | Filter::Smoothstep { min, max } => {
@@ -856,7 +916,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
         Filter::HeightAdjust { invert, offset, multiply } => {
             switch(invert, "invert")?;
             set(offset, "offset", -1.0, 1.0);
-            set(multiply, "multiply", 0.0, 10.0);
+            set(multiply, "multiply", 0.0, HEIGHT_MULTIPLY_MAX);
         }
         Filter::HistogramScan { position, contrast, invert_position } => {
             set(position, "position", 0.0, 1.0);
@@ -891,18 +951,18 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             divider(d)?;
         }
         Filter::HighPass { radius, space, alpha } => {
-            set(radius, "radius", 0.0, 256.0);
+            set(radius, "radius", 0.0, TEXELS_MAX);
             blur_intensity(radius);
             *space = choice(p, "colorSpace", &HighpassSpace::ALL, HighpassSpace::id, cmd)?.unwrap_or(*space);
             switch(alpha, "applyToAlpha")?;
         }
-        Filter::EdgeDetect { width } => set(width, "width", 0.0, 256.0),
+        Filter::EdgeDetect { width } => set(width, "width", 0.0, TEXELS_MAX),
         Filter::Bevel { width, wrap: w } => {
-            set(width, "width", 0.0, 256.0);
+            set(width, "width", 0.0, TEXELS_MAX);
             wrap(w)?;
         }
         Filter::Mosaic { size, alpha } => {
-            set(size, "size", 1.0, 2048.0);
+            set(size, "size", 1.0, MOSAIC_SIZE_MAX);
             if let Some(amount) = f32p(p, "pixelsAmount") {
                 *size = Filter::pixel_size(amount.round());
             }
@@ -954,7 +1014,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             if let Some(v) = f32p(p, "elevation") {
                 *elevation = v.rem_euclid(360.0);
             }
-            set(light, "light", 0.0, 10.0);
+            set(light, "light", 0.0, SUN_INTENSITY_MAX);
             set(ambient, "ambient", 0.0, 10.0);
             set(occlusion, "occlusion", 0.0, 1.0);
             // A Baked Lighting saved before the stylized settings takes them lit as it was
@@ -968,8 +1028,8 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
                     *slot = v.rem_euclid(360.0);
                 }
             }
-            set(exposure, "exposure", -5.0, 5.0);
-            set(height_intensity, "heightIntensity", 0.0, 8.0);
+            set(exposure, "exposure", -EXPOSURE_MAX_EV, EXPOSURE_MAX_EV);
+            set(height_intensity, "heightIntensity", 0.0, HEIGHT_INTENSITY_MAX);
             set(ambient_occlusion, "ambientOcclusion", 0.0, 1.0);
             set(specular_occlusion, "specularOcclusion", 0.0, 1.0);
         }

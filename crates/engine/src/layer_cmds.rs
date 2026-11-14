@@ -13,6 +13,13 @@ use crate::commands::{
 };
 use crate::{EngineError, Result, Session, cmd, session::StackTarget};
 
+/// The smallest scale or tiling, and the largest scale, tiling or offset a fill's placement takes
+const MIN_SCALE: f32 = 0.001;
+const MAX_PLACEMENT: f32 = 1000.0;
+
+/// The highest contrast a procedural pattern takes
+const MAX_PATTERN_CONTRAST: f32 = 20.0;
+
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!("layer.add.paint", "Add paint layer", ["Layers"], None, "{name?}", always, add_paint),
@@ -526,13 +533,13 @@ fn procedural_source(p: &Value, kind: ProceduralKind, current: Option<Source>, n
         _ => (Procedural::new(kind), [0.0; 3], [1.0; 3]),
     };
     if let Some(scale) = f32p(p, "scale") {
-        pattern.scale = scale.clamp(0.001, 1000.0);
+        pattern.scale = scale.clamp(MIN_SCALE, MAX_PLACEMENT);
     }
     if let Some(seed) = u64p(p, "seed") {
         pattern.seed = seed as u32;
     }
     if let Some(contrast) = f32p(p, "contrast") {
-        pattern.contrast = contrast.clamp(0.0, 20.0);
+        pattern.contrast = contrast.clamp(0.0, MAX_PATTERN_CONTRAST);
     }
     if let Some(balance) = f32p(p, "balance") {
         pattern.balance = balance.clamp(-1.0, 1.0);
@@ -584,25 +591,25 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
         (Some(n), _) => n,
         (None, c) => c.cloned().unwrap_or_default(),
     };
-    let scale = floats::<2>(p, "scale", 0.001, 1000.0);
-    let tiling = floats::<2>(p, "tiling", 0.001, 1000.0);
+    let scale = floats::<2>(p, "scale", MIN_SCALE, MAX_PLACEMENT);
+    let tiling = floats::<2>(p, "tiling", MIN_SCALE, MAX_PLACEMENT);
     let rotation = f32p(p, "rotation").map(|r| r.rem_euclid(360.0));
     let axis = u64p(p, "axis").map(|a| a.min(2) as u8);
     // The UV transformations of a 3D projection: tiling, rotation and an offset across the surface
     let place = |uv: &mut UvTransform| {
         uv.tiling = tiling.unwrap_or(uv.tiling);
         uv.rotation = rotation.unwrap_or(uv.rotation);
-        uv.offset = floats(p, "uvOffset", -1000.0, 1000.0).unwrap_or(uv.offset);
+        uv.offset = floats(p, "uvOffset", -MAX_PLACEMENT, MAX_PLACEMENT).unwrap_or(uv.offset);
     };
     // The 3D projection settings: the projector's offset, turn and per-axis scale
-    let offset3 = floats::<3>(p, "offset", -1000.0, 1000.0);
+    let offset3 = floats::<3>(p, "offset", -MAX_PLACEMENT, MAX_PLACEMENT);
     let crop = match strp(p, "shapeCrop") {
         None => None,
         Some(id) => Some(ShapeCrop::from_id(id).ok_or_else(|| bad(cmd, format!("unknown shapeCrop `{id}`: cropped or extendsOutside")))?),
     };
     let turn = |pr: &mut Projector| {
         pr.rotation = floats(p, "projectorRotation", -360.0, 360.0).unwrap_or(pr.rotation);
-        pr.scale = floats(p, "projectorScale", 0.001, 1000.0).unwrap_or(pr.scale);
+        pr.scale = floats(p, "projectorScale", MIN_SCALE, MAX_PLACEMENT).unwrap_or(pr.scale);
         pr.crop = crop.unwrap_or(pr.crop);
         pr.backface.on = p.get("backfaceCulling").and_then(Value::as_bool).unwrap_or(pr.backface.on);
         pr.backface.angle = f32p(p, "backfaceAngle").map_or(pr.backface.angle, |v| v.clamp(0.0, 180.0));

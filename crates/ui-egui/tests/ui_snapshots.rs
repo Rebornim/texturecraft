@@ -704,9 +704,9 @@ fn fill_properties_snapshots() {
     // Tri-planar's Shape crop sits highest in the panel: its list opens in view
     execute(session, "layer.fill.projection", &json!({"layer": layer, "projection": "triplanar"})).unwrap();
     harness.run_steps(2);
-    harness.get_by_label("Projection Extends Outside Shape").click();
+    harness.get_by_label("Extends Outside Shape").click();
     harness.run_steps(2);
-    harness.get_by_label("Projection Cropped to Shape").hover();
+    harness.get_by_label("Cropped to Shape").hover();
     save(&mut harness, &output_dir, "fill-triplanar-crop-open");
     harness.key_press(egui::Key::Escape);
     harness.run_steps(2);

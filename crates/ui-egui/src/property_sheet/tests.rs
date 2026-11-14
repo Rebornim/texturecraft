@@ -231,6 +231,30 @@ fn dropdown_list_hangs_from_its_button_at_its_width_and_picks() {
     assert_eq!(h.state().filtering, Filtering::Nearest);
 }
 
+/// Clicks at `at`, then types `text` into the field that opened and presses Enter
+fn type_at(h: &mut Harness<'_, Gallery>, at: egui::Pos2, text: &str) {
+    h.drag_at(at);
+    h.drop_at(at);
+    h.run_steps(2);
+    h.get_by_role(egui::Role::TextInput).type_text(text);
+    h.run_steps(1);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(2);
+}
+
+#[test]
+fn a_click_on_a_value_or_the_seed_selects_it_so_typing_replaces_it() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = harness(Brightness::MediumDark, Gallery::default());
+    let track = h.get_by_label("Hardness").rect();
+    type_at(&mut h, egui::pos2(track.right() + 20.0, track.center().y), "0.4");
+    assert_eq!(h.state().hardness, 0.4, "the slider's value is replaced, not appended to");
+
+    let dice = h.get_by_label("Random").rect();
+    type_at(&mut h, egui::pos2(dice.left() - 20.0, dice.center().y), "77");
+    assert_eq!(h.state().seed, 77, "the seed is replaced, not appended to");
+}
+
 #[test]
 fn a_drag_merges_after_its_first_step_and_a_click_does_not() {
     let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -295,6 +319,32 @@ fn property_sheet_gallery_snapshots() {
         h.get_by_label("Bilinear | Sharp").hover();
         h.run_steps(2);
         h.render().unwrap().save(output_dir.join(format!("sheet-{name}-list-open.png"))).unwrap();
+        h.key_press(egui::Key::Escape);
+        h.run_steps(2);
+
+        // A value: the grey line on hover, then typing on that line in accent; the seed's box lights the same way
+        let track = h.get_by_label("Hardness").rect();
+        let value = egui::pos2(track.right() + 20.0, track.center().y);
+        h.hover_at(value);
+        h.run_steps(2);
+        h.render().unwrap().save(output_dir.join(format!("sheet-{name}-value-hover.png"))).unwrap();
+        h.drag_at(value);
+        h.drop_at(value);
+        h.run_steps(2);
+        h.get_by_role(egui::Role::TextInput).type_text("0.4");
+        h.run_steps(2);
+        h.render().unwrap().save(output_dir.join(format!("sheet-{name}-value-typing.png"))).unwrap();
+        h.key_press(egui::Key::Escape);
+        h.run_steps(2);
+        let dice = h.get_by_label("Random").rect();
+        let seed = egui::pos2(dice.left() - 20.0, dice.center().y);
+        h.hover_at(seed);
+        h.run_steps(2);
+        h.render().unwrap().save(output_dir.join(format!("sheet-{name}-seed-hover.png"))).unwrap();
+        h.drag_at(seed);
+        h.drop_at(seed);
+        h.run_steps(2);
+        h.render().unwrap().save(output_dir.join(format!("sheet-{name}-seed-typing.png"))).unwrap();
     }
 }
 

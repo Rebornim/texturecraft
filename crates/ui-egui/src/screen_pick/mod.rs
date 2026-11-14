@@ -4,6 +4,7 @@
 //! While a pick waits the pointer is the eyedropper, drawn over the app's window and, where the system allows, over every app
 
 mod cursor_image;
+mod keeper_args;
 mod painted_cursor;
 mod pick_outcome;
 mod pick_shared;
@@ -13,8 +14,6 @@ mod portal;
 mod windows_hook;
 #[cfg(windows)]
 mod windows_pointer;
-#[cfg(windows)]
-mod windows_trace;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod x11_grab;
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -24,11 +23,12 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 
 pub use cursor_image::CursorImage;
+pub use keeper_args::KEEPER_ARG;
 pub use painted_cursor::paint as paint_cursor;
 pub use pick_outcome::PickOutcome;
 pub(crate) use pick_shared::PickShared;
 #[cfg(windows)]
-pub use windows_pointer::{KEEPER_ARG, keep_pointer};
+pub use windows_pointer::keep_pointer;
 
 use crate::TextureCraftApp;
 use crate::color_picker::ColorPick;
@@ -47,8 +47,9 @@ impl ScreenPick {
         let (sender, outcomes) = mpsc::channel();
         let shared = Arc::new(PickShared::default());
         let waiting = Arc::clone(&shared);
+        let dpi = window_dpi(ctx);
         let ctx = ctx.clone();
-        let spawned = std::thread::Builder::new().name("eyedropper".into()).spawn(move || wait_for_click(&waiting, sender, ctx));
+        let spawned = std::thread::Builder::new().name("eyedropper".into()).spawn(move || wait_for_click(&waiting, sender, ctx, dpi));
         if let Err(error) = spawned {
             log::warn!("the eyedropper picks on the model only: {error}");
         }
@@ -126,6 +127,12 @@ fn ends_on_focus_loss() -> bool {
     cfg!(windows) || (cfg!(all(unix, not(target_os = "macos"))) && std::env::var_os("WAYLAND_DISPLAY").is_none())
 }
 
+/// The app window's dots per inch, which size the eyedropper as the system's pointers are sized there
+fn window_dpi(ctx: &egui::Context) -> u32 {
+    let scale = ctx.input(|input| input.viewport().native_pixels_per_point).filter(|scale| scale.is_finite() && *scale > 0.0);
+    (scale.unwrap_or(1.0) * keeper_args::BASE_DPI as f32).round().clamp(1.0, 4096.0) as u32
+}
+
 /// A window's outer rectangle as `[left, top, right, bottom]` in physical screen pixels, where the system reports one
 fn physical_rect(viewport: &egui::ViewportInfo) -> Option<[i32; 4]> {
     let rect = viewport.outer_rect?;
@@ -138,9 +145,11 @@ fn physical_rect(viewport: &egui::ViewportInfo) -> Option<[i32; 4]> {
 }
 
 /// The system's way to read a click outside the app, on the pick's own thread
-fn wait_for_click(shared: &Arc<PickShared>, outcomes: Sender<PickOutcome>, ctx: egui::Context) {
+fn wait_for_click(shared: &Arc<PickShared>, outcomes: Sender<PickOutcome>, ctx: egui::Context, dpi: u32) {
     #[cfg(windows)]
-    windows_hook::run(shared, outcomes, ctx);
+    windows_hook::run(shared, outcomes, ctx, dpi);
+    #[cfg(not(windows))]
+    let _ = dpi;
 
     #[cfg(all(unix, not(target_os = "macos")))]
     if std::env::var_os("WAYLAND_DISPLAY").is_some() {

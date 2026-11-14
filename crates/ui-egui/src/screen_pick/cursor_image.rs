@@ -1,7 +1,8 @@
 //! The eyedropper pointer an armed pick shows everywhere: the panels' pipette icon (tip at the bottom left, bulb at the top
 //! right) in white with a dark outline so it reads on any colour, its glass tube's inside dark like the glyph's, the same picture
 //! in the app and, where the system lets the app set the pointer, over other apps; its hotspot is the tip's last pixel, so the
-//! pixel under the tip is the one picked
+//! pixel under the tip is the one picked. The pointer is a system pointer's cell (32 pixels at 100 %) with the pipette drawn
+//! in its bottom-left part, about as tall as the system's arrow in its cell, so it reads at the size every other pointer has
 
 use crate::drawn_icon::pipette;
 
@@ -17,6 +18,8 @@ const CUR_HEADER_BYTES: u32 = 22;
 const CUR_TYPE: u16 = 2;
 /// A `BITMAPINFOHEADER`'s size
 const BITMAP_HEADER_BYTES: u32 = 40;
+/// The part of the pointer's cell the pipette's square takes (the system's arrow is about 20 pixels tall in its 32-pixel cell)
+const GLYPH_SHARE: f32 = 0.625;
 /// The smallest and largest pointer drawn, in pixels
 const SIZES: std::ops::RangeInclusive<u32> = 8..=256;
 
@@ -29,15 +32,16 @@ pub struct CursorImage {
 }
 
 impl CursorImage {
-    /// The eyedropper `size` pixels square (clamped to a sane range)
+    /// The eyedropper in a pointer cell `size` pixels square (clamped to a sane range), the pipette in its bottom-left part
     pub fn eyedropper(size: u32) -> Self {
         let size = size.clamp(*SIZES.start(), *SIZES.end());
-        let scale = size as f32;
+        let scale = (size as f32 * GLYPH_SHARE).round();
+        let top = size as f32 - scale;
         let outline = OUTLINE_PX * (scale / OUTLINE_SIZE).max(1.0);
         let mut rgba = Vec::with_capacity((size * size * 4) as usize);
         for y in 0..size {
             for x in 0..size {
-                let point = [(x as f32 + 0.5) / scale, (y as f32 + 0.5) / scale];
+                let point = [(x as f32 + 0.5) / scale, (y as f32 + 0.5 - top) / scale];
                 let inside = pipette::silhouette(point) * scale;
                 let fill = (0.5 - inside).clamp(0.0, 1.0).min((0.5 - pipette::glyph(point) * scale).clamp(0.0, 1.0));
                 let alpha = (0.5 - (inside - outline)).clamp(0.0, 1.0);
@@ -139,7 +143,8 @@ mod tests {
         let image = CursorImage::eyedropper(32);
         let pixel = |x: u32, y: u32| image.rgba.get(((y * 32 + x) * 4) as usize..((y * 32 + x) * 4 + 4) as usize).map(<[u8]>::to_vec);
 
-        assert_eq!(pixel(24, 8), Some(vec![255, 255, 255, 255]), "the bulb is white");
+        let [bulb_x, bulb_y] = pipette::square(0.85, 0.0).map(|edge| (edge * 20.0) as u32);
+        assert_eq!(pixel(bulb_x, bulb_y + 12), Some(vec![255, 255, 255, 255]), "the bulb is white");
         assert_eq!(pixel(31, 31).and_then(|pixel| pixel.get(3).copied()), Some(0), "the bottom-right corner is clear");
         let [hx, hy] = image.hotspot;
         assert!(pixel(hx, hy).and_then(|pixel| pixel.first().copied()).is_some_and(|grey| grey < 128), "the tip's edge is the dark outline");
@@ -147,11 +152,31 @@ mod tests {
     }
 
     #[test]
+    fn the_pipette_is_as_tall_as_the_systems_arrow_in_its_cell_at_every_size() {
+        for size in [32, 48, 64] {
+            let image = CursorImage::eyedropper(size);
+            let ink: Vec<[u32; 2]> =
+                (0..size).flat_map(|y| (0..size).map(move |x| [x, y])).filter(|&[x, y]| image.alpha(x, y).is_some_and(|a| a > 0)).collect();
+            let span = |axis: usize| {
+                let along = ink.iter().map(|pixel| pixel[axis]);
+                along.clone().max().unwrap_or(0) - along.min().unwrap_or(0) + 1
+            };
+            let most = (size as f32 * 0.69).ceil() as u32;
+
+            assert_eq!(image.size, size, "the pointer's cell is the system pointer's size");
+            assert!(span(0) <= most && span(1) <= most, "{size}: the pipette takes {}x{} of the cell, at most {most}", span(0), span(1));
+            assert!(span(0) >= size / 2 && span(1) >= size / 2, "{size}: and still reads: {}x{}", span(0), span(1));
+        }
+    }
+
+    #[test]
     fn the_pointer_is_the_panels_pipette_white_with_its_glass_tube_hollow() {
         let size = 48;
         let image = CursorImage::eyedropper(size);
-        let glyph = crate::drawn_icon::DrawnIcon::Pipette.coverage(size);
-        let at = |[x, y]: [f32; 2]| ((y * size as f32) as u32, (x * size as f32) as u32);
+        let glyph_px = (size as f32 * GLYPH_SHARE).round() as u32;
+        let top = size - glyph_px;
+        let glyph = crate::drawn_icon::DrawnIcon::Pipette.coverage(glyph_px);
+        let at = |[x, y]: [f32; 2]| ((y * glyph_px as f32) as u32 + top, (x * glyph_px as f32) as u32);
         let grey = |point: [f32; 2]| {
             let (row, column) = at(point);
             image.rgba.get(((row * size + column) * 4) as usize).copied()
@@ -162,7 +187,8 @@ mod tests {
         assert!(image.alpha(at(tube).1, at(tube).0).is_some_and(|alpha| alpha == u8::MAX), "and still opaque, so the pointer reads");
         assert_eq!(grey(pipette::square(0.85, 0.0)), Some(u8::MAX), "the bulb is white");
         for (index, coverage) in glyph.iter().enumerate() {
-            let alpha = image.rgba.get(index * 4 + 3).copied().unwrap_or(0);
+            let (row, column) = (index as u32 / glyph_px + top, index as u32 % glyph_px);
+            let alpha = image.alpha(column, row).unwrap_or(0);
             assert!(*coverage == 0 || alpha > 0, "every pixel of the glyph's ink is part of the pointer ({index})");
         }
     }

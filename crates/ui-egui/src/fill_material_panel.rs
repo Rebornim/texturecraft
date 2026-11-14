@@ -9,7 +9,7 @@ use texturecraft_engine::core::{
 };
 use texturecraft_engine::fill_alpha::library_alpha_of;
 use texturecraft_engine::fill_material_cmds::whole_materials;
-use texturecraft_engine::materials::{SmartMaterial, find};
+use texturecraft_engine::materials::find;
 use texturecraft_engine::paint::alphas;
 use texturecraft_engine::texel::linear_to_srgb;
 
@@ -22,7 +22,7 @@ use crate::orb_material::OrbMaterial;
 use crate::picker_group::PickerGroup;
 use crate::picker_tab::PickerTab;
 use crate::property_sheet::PropertySheet;
-use crate::resolution_band::resolution_band;
+use crate::resolution_band::{resolution_band, resolution_row};
 use crate::resource_picker;
 use crate::resource_picker_item::ResourcePickerItem;
 use crate::slot_thumbnail::{paint_thumbnail, thumbnail};
@@ -404,7 +404,7 @@ fn procedural_rows(
     }
     // The size the pattern is made at, as a cooked texture would be (the texture set's own by default)
     let texture_set = app.session.doc.project.texture_set(app.session.ts()).map_or(2048, |texture_set| texture_set.resolution);
-    if let Some(picked) = resolution_band(sheet, pattern.resolution.unwrap_or(CookResolution::TEXTURE_SET), texture_set) {
+    if let Some(picked) = resolution_row(sheet, pattern.resolution.unwrap_or(CookResolution::TEXTURE_SET), texture_set) {
         let size = match picked {
             CookResolution::Relative(factor) => json!({"relative": factor}),
             CookResolution::Fixed(size) => json!({"fixed": size}),
@@ -457,26 +457,39 @@ fn whole_material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>,
     let name = held.map_or_else(|| tr("None"), |material| tr(material.label));
     let slot =
         sheet.slot(&|painter, rect| material_orb(painter, rect, look, &tokens, &format!("card{place}")), name, tr("Material"), None, held.is_some(), false);
-    let materials: Vec<&'static SmartMaterial> = whole_materials().collect();
-    let options: Vec<usize> = (0..materials.len()).collect();
-    let current = held.and_then(|material| materials.iter().position(|listed| listed.id == material.id)).unwrap_or(usize::MAX);
-    let label = |index: usize| materials.get(index).map(|material| tr(material.label).to_owned()).unwrap_or_default();
-    let picture = |painter: &Painter, rect: Rect, index: usize| {
-        if let Some(material) = materials.get(index) {
-            let look = OrbMaterial::uniform(material.base, material.metallic, material.roughness);
-            material_orb(painter, rect, &look, &tokens, material.id);
-        }
-    };
-    if let (Some(index), _) = sheet.hanging_list(&slot.pick, current, &options, &label, Some(&picture))
-        && index != current
-        && let Some(material) = materials.get(index)
-    {
-        app.run("layer.fill.material", with(base, json!({"material": material.id})));
+    let popup = sheet.ui.make_persistent_id(("material_picker", base.to_string()));
+    if slot.pick.clicked() {
+        resource_picker::toggle(sheet.ui.ctx(), popup);
+    }
+    let current = held.map(|material| material.id);
+    let ctx = sheet.ui.ctx().clone();
+    let picked = resource_picker::show(&slot.pick, popup, &mut app.thumbs, current.as_ref(), current.is_some(), |thumbs| material_tabs(&ctx, thumbs));
+    if let Some(id) = picked.filter(|id| Some(*id) != current) {
+        app.run("layer.fill.material", with(base, json!({"material": id})));
     }
     if slot.clear {
         app.run("layer.fill.material", with(base, json!({"material": null})));
     }
     sheet.close_card();
+}
+
+/// The material picker's one tab: every plain material's preview ball, grouped under its shelf category in library order
+fn material_tabs(ctx: &egui::Context, thumbs: &mut Thumbs) -> Vec<PickerTab<&'static str>> {
+    let mut groups: Vec<PickerGroup<&'static str>> = Vec::new();
+    for material in whole_materials() {
+        let item = ResourcePickerItem {
+            id: material.id,
+            label: tr(material.label).to_owned(),
+            caption: None,
+            picture: TilePicture::Texture(thumbs.material(ctx, material.id)),
+        };
+        let header = Some(tr(material.category));
+        match groups.iter_mut().find(|group| group.header == header) {
+            Some(group) => group.items.push(item),
+            None => groups.push(PickerGroup { header, items: vec![item] }),
+        }
+    }
+    vec![PickerTab { icon: ic::SPHERE, name: tr("Materials"), groups }]
 }
 
 /// Channels mapping: which of the material's outputs each channel that is on reads

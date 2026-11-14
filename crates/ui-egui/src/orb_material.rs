@@ -39,6 +39,7 @@ pub(crate) struct OrbMaterial {
 
 impl OrbMaterial {
     /// One value per channel: a plain material's base colour, metallic and roughness
+    #[cfg(test)]
     pub(crate) fn uniform(base: [f32; 3], metallic: f32, roughness: f32) -> OrbMaterial {
         let sources = BTreeMap::from([
             (Channel::BaseColor, Source::Uniform(base)),

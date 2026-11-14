@@ -73,14 +73,14 @@ fn a_mask_fill_has_fill_symmetry_and_grayscale_tabs_and_its_slot_picks_the_sourc
         Source::Procedural { pattern, .. } => pattern.resolution,
         other => panic!("a procedural: {other:?}"),
     };
-    assert!(harness.query_by_role_and_label(Role::RadioButton, "Fixed").is_none(), "Resolution starts folded");
-    click_below(&mut harness, Role::Button, "Resolution");
-    click_below(&mut harness, Role::RadioButton, "Fixed");
-    assert_eq!(resolution(&harness), Some(CookResolution::Fixed(TEXTURE_RESOLUTION)));
-    click_below(&mut harness, Role::ComboBox, "256 × 256");
+    click_below(&mut harness, Role::ComboBox, "Texture set  ·  256");
+    for caption in ["Relative", "Fixed"] {
+        assert!(harness.query_by_role_and_label(Role::Label, caption).is_some(), "one list holds the {caption} sizes under their caption");
+    }
     click(&mut harness, Role::ListBoxOption, "1024 × 1024");
     assert_eq!(resolution(&harness), Some(CookResolution::Fixed(1024)));
-    click_below(&mut harness, Role::RadioButton, "Relative");
+    click_below(&mut harness, Role::ComboBox, "1024 × 1024");
+    click(&mut harness, Role::ListBoxOption, "×4  ·  1024");
     assert_eq!(resolution(&harness), Some(CookResolution::Relative(2)), "1024 is the texture set's ×4");
 
     // The slot's × puts the mask fill back to white

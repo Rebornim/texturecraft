@@ -2,6 +2,7 @@ use egui::{Align2, CornerRadius, FontId, Painter, Rect, Sense, Stroke, StrokeKin
 use egui_phosphor::regular as ic;
 
 use super::group::CARD_BLEED;
+use super::row::RESET_AT_DEFAULT_OPACITY;
 use super::{ButtonIcon, PropertySheet, ROW_HEIGHT, SlotResponse, TEXT_SIZE};
 use crate::theme::semibold;
 
@@ -33,6 +34,9 @@ const RESET_STEP: f32 = 22.0;
 /// Size of the slot's × and ⟲ glyphs
 const SLOT_ICON_SIZE: f32 = 12.0;
 
+/// From the seed field's right edge to its value's right end
+const SEED_VALUE_INSET: f32 = 8.0;
+
 /// Room the seed's dice button takes at the row's end, and the button's width
 const DICE_ROOM: f32 = 34.0;
 const DICE_WIDTH: f32 = 28.0;
@@ -55,16 +59,31 @@ impl PropertySheet<'_> {
     ) -> SlotResponse {
         self.open_card();
         self.space(SLOT_CARD_TOP);
-        self.slot_row(thumbnail, name, source, on, clear, reset)
+        self.slot_row(thumbnail, name, source, on, clear, reset.then_some(true))
+    }
+
+    /// [`Self::slot`] whose ⟲ always shows beside the ×, faint and inert while what it restores is at its defaults (`changed` false)
+    pub(crate) fn slot_restorable(&mut self, thumbnail: &dyn Fn(&Painter, Rect), name: &str, source: &str, changed: bool) -> SlotResponse {
+        self.open_card();
+        self.space(SLOT_CARD_TOP);
+        self.slot_row(thumbnail, name, source, None, true, Some(changed))
     }
 
     /// [`Self::slot`]'s row inside the card open now (an input a mode adds, under that mode), not a card of its own
     pub(crate) fn slot_in_card(&mut self, thumbnail: &dyn Fn(&Painter, Rect), name: &str, source: &str, clear: bool) -> SlotResponse {
-        self.slot_row(thumbnail, name, source, None, clear, false)
+        self.slot_row(thumbnail, name, source, None, clear, None)
     }
 
-    /// A slot row: thumbnail, name over source, then ⟲, × and the toggle on the right; the row opens the source list
-    fn slot_row(&mut self, thumbnail: &dyn Fn(&Painter, Rect), name: &str, source: &str, on: Option<&mut bool>, clear: bool, reset: bool) -> SlotResponse {
+    /// A slot row: thumbnail, name over source, then ⟲ (`Some(changed)`), × and the toggle on the right; the row opens the source list
+    fn slot_row(
+        &mut self,
+        thumbnail: &dyn Fn(&Painter, Rect),
+        name: &str,
+        source: &str,
+        on: Option<&mut bool>,
+        clear: bool,
+        reset: Option<bool>,
+    ) -> SlotResponse {
         let rect = self.take(SLOT_HEIGHT);
         let center_y = rect.top() + SLOT_HEIGHT / 2.0;
         let enabled = on.as_deref().copied().unwrap_or(true);
@@ -88,24 +107,29 @@ impl PropertySheet<'_> {
         painter.text(pos2(text_x, center_y - 7.0), Align2::LEFT_CENTER, name, name_font, name_color);
         painter.text(pos2(text_x, center_y + 8.0), Align2::LEFT_CENTER, source, FontId::proportional(SOURCE_TEXT_SIZE), t.text_dim);
 
-        for (shown, x, glyph, tip, slot) in
-            [(clear, clear_x, ic::X, "Clear", &mut result.clear), (reset, reset_x, ic::ARROW_COUNTER_CLOCKWISE, "Restore defaults", &mut result.reset)]
-        {
+        for (shown, live, x, glyph, tip, slot) in [
+            (clear, true, clear_x, ic::X, "Clear", &mut result.clear),
+            (reset.is_some(), reset.unwrap_or(false), reset_x, ic::ARROW_COUNTER_CLOCKWISE, "Restore defaults", &mut result.reset),
+        ] {
             if !shown {
                 continue;
             }
             let glyph_rect = Rect::from_center_size(pos2(x, center_y), vec2(18.0, 18.0));
             let id = self.next_id();
-            let response = self.tip(self.ui.interact(glyph_rect, id, Sense::click()), crate::i18n::tr(tip));
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr(tip)));
-            *slot = response.clicked();
-            painter.text(
-                glyph_rect.center(),
-                Align2::CENTER_CENTER,
-                glyph,
-                FontId::proportional(SLOT_ICON_SIZE),
-                if response.hovered() { t.text } else { t.text_dim },
-            );
+            // At the defaults the ⟲ is faint and inert, as on a band: a click there picks the source like the rest of the row
+            let response = if live {
+                self.tip(self.ui.interact(glyph_rect, id, Sense::click()), crate::i18n::tr(tip))
+            } else {
+                self.ui.interact(glyph_rect, id, Sense::hover())
+            };
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, live, crate::i18n::tr(tip)));
+            *slot = live && response.clicked();
+            let color = match (live, response.hovered()) {
+                (false, _) => t.text_dim.gamma_multiply(RESET_AT_DEFAULT_OPACITY),
+                (true, true) => t.text,
+                (true, false) => t.text_dim,
+            };
+            painter.text(glyph_rect.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(SLOT_ICON_SIZE), color);
         }
 
         if let Some(on) = on {
@@ -199,15 +223,12 @@ impl PropertySheet<'_> {
         let painter = self.ui.painter().clone();
         painter.rect(field, CornerRadius::same(4), t.field, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
 
+        // The value sits right like every number; the box lights on hover and goes accent while typing
         let mut changed = false;
         if let Some(mut text) = self.ui.data(|data| data.get_temp::<String>(typing_id)) {
-            let edit = egui::TextEdit::singleline(&mut text)
-                .id(typing_id)
-                .font(semibold(TEXT_SIZE))
-                .frame(egui::Frame::NONE)
-                .align(egui::Align2::LEFT_CENTER)
-                .margin(vec2(8.0, 0.0));
-            let response = self.ui.put(field.shrink(1.0), edit);
+            let edit = egui::TextEdit::singleline(&mut text).id(typing_id).font(semibold(TEXT_SIZE)).align(egui::Align2::RIGHT_CENTER);
+            let response = self.typing_edit(field.left() + SEED_VALUE_INSET, field.right() - SEED_VALUE_INSET, center_y, edit);
+            painter.rect_stroke(field, CornerRadius::same(4), Stroke::new(1.0, t.accent), StrokeKind::Inside);
             if response.lost_focus() {
                 self.ui.data_mut(|data| data.remove::<String>(typing_id));
                 if let Ok(typed) = text.trim().parse::<u32>()
@@ -222,10 +243,12 @@ impl PropertySheet<'_> {
             }
         } else {
             let response = self.ui.interact(field, id, Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
-            painter.text(pos2(field.left() + 8.0, center_y), Align2::LEFT_CENTER, seed.to_string(), semibold(TEXT_SIZE), t.text);
+            painter.text(pos2(field.right() - SEED_VALUE_INSET, center_y), Align2::RIGHT_CENTER, seed.to_string(), semibold(TEXT_SIZE), t.text);
+            if response.hovered() {
+                painter.rect_stroke(field, CornerRadius::same(4), Stroke::new(1.0, t.button_border), StrokeKind::Inside);
+            }
             if response.clicked() {
-                self.ui.data_mut(|data| data.insert_temp(typing_id, seed.to_string()));
-                self.ui.memory_mut(|memory| memory.request_focus(typing_id));
+                self.start_typing(typing_id, seed.to_string());
             }
         }
 

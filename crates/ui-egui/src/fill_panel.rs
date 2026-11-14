@@ -167,10 +167,8 @@ fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fil
             }
         }
         if let Some(projector) = projector_of(&fill.projection) {
-            // Its two values differ only at their end: the label stacks so they show in full
             let picture = |painter: &Painter, rect: Rect, crop: ShapeCrop| crop_picture(painter, rect, crop, &tokens);
-            let lead = RowLead::Label { text: tr("Shape crop"), stack: true };
-            let (picked, _) = sheet.dropdown_led(lead, projector.crop, &ShapeCrop::ALL, |crop| tr(crop_label(crop)).to_owned(), Some(&picture));
+            let (picked, _) = sheet.dropdown(tr("Shape crop"), projector.crop, &ShapeCrop::ALL, |crop| tr(crop_label(crop)).to_owned(), Some(&picture));
             if let Some(crop) = picked {
                 run(app, json!({"shapeCrop": crop.id()}));
             }
@@ -192,12 +190,12 @@ fn projector_of(projection: &Projection) -> Option<&Projector> {
     }
 }
 
-/// The name of a Shape crop choice
+/// The name of a Shape crop choice; both fit beside the label at the default panel width
 fn crop_label(crop: ShapeCrop) -> &'static str {
     use crate::i18n::n_;
     match crop {
-        ShapeCrop::Cropped => n_("Projection Cropped to Shape"),
-        ShapeCrop::ExtendsOutside => n_("Projection Extends Outside Shape"),
+        ShapeCrop::Cropped => n_("Cropped to Shape"),
+        ShapeCrop::ExtendsOutside => n_("Extends Outside Shape"),
     }
 }
 
@@ -215,8 +213,9 @@ fn triplanar_sharpness(hardness: f32) -> f32 {
 fn frame_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value) {
     let Projection::Warp { depth, .. } = &fill.projection else { return };
     let mut depth = *depth;
-    // Long, and alone in its panel: it keeps the column every projection shares
-    if let Some(merge) = sheet.slider_led(RowLead::Loose(tr("Projection Depth")), &mut depth, PROJECTION_DEPTH_TRACK, 2, "") {
+    // Its i tells it apart from Depth culling; it keeps the column every projection shares
+    sheet.info(tr("How far the warp projection reaches into the mesh, in front of and behind its frame, in lengths of the frame's longer side. It bounds the fill only when cropped to its shape."));
+    if let Some(merge) = sheet.slider_led(RowLead::Loose(tr("Depth")), &mut depth, PROJECTION_DEPTH_TRACK, 2, "") {
         app.run("layer.fill.projection", with(base, json!({"projectionDepth": depth, "merge": merge})));
     }
     if sheet.button(ic::ARROW_CLOCKWISE, tr("Reset frame")).clicked() {

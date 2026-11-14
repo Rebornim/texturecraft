@@ -61,20 +61,20 @@ fn each_projection_shows_its_own_rows() {
     let shows = |harness: &Harness<'_, TextureCraftApp>, label: &str| harness.query_by_label(label).is_some();
 
     let (harness, _) = app_with_fill("planar");
-    for label in ["Depth culling", "Backface culling", "Angle", "Projection Extends Outside Shape", "Offset X", "Rotation Y", "Scale Z"] {
+    for label in ["Depth culling", "Backface culling", "Angle", "Extends Outside Shape", "Offset X", "Rotation Y", "Scale Z"] {
         assert!(shows(&harness, label), "planar: {label}");
     }
     assert!(!shows(&harness, "Reset frame"), "planar has no frame to reset");
 
     let (harness, _) = app_with_fill("warp");
     // A warp's 3D projection settings are its frame's: where its centre is, its turn and its size
-    for label in ["Projection Depth", "Reset frame", "Depth culling", "Offset X", "Rotation X", "Scale X"] {
+    for label in ["Depth", "Reset frame", "Depth culling", "Offset X", "Rotation X", "Scale X"] {
         assert!(shows(&harness, label), "warp: {label}");
     }
     assert!(!shows(&harness, "Backface culling"), "a warp has no backface culling");
 
     let (harness, _) = app_with_fill("cylindrical");
-    for label in ["Angle", "Backface culling", "Projection Extends Outside Shape", "Offset X"] {
+    for label in ["Angle", "Backface culling", "Extends Outside Shape", "Offset X"] {
         assert!(shows(&harness, label), "cylindrical: {label}");
     }
     assert!(!shows(&harness, "Depth culling"));
@@ -135,12 +135,31 @@ fn the_culling_rows_i_explains_the_row_on_hover_without_covering_its_values() {
     assert_eq!(projection(&harness, layer), before);
 }
 
+/// What a warp's Depth row says on its i
+const WARP_DEPTH_TIP: &str = "How far the warp projection reaches into the mesh, in front of and behind its frame, in lengths of the frame's longer side. It bounds the fill only when cropped to its shape.";
+
+#[test]
+fn shape_crop_sits_beside_its_label_and_a_warps_depth_explains_itself() {
+    let (harness, _) = app_with_fill("warp");
+    // Beside its label like Filtering, not under a stacked label at the panel's full width
+    let crop = harness.get_by_label("Extends Outside Shape").rect();
+    let filtering = harness.get_by_label("Bilinear | HQ").rect();
+    assert!((crop.left() - filtering.left()).abs() < 0.5, "Shape crop's list starts on the controls column: {crop:?} vs {filtering:?}");
+    assert!((crop.width() - filtering.width()).abs() < 0.5, "and is as wide as Filtering's");
+
+    // Depth, not "Projection Depth": its i, on its row, tells it apart from Depth culling
+    let info = harness.get_by_label(WARP_DEPTH_TIP).rect();
+    let depth = harness.get_by_label("Depth").rect();
+    assert!((info.center().y - depth.center().y).abs() < 1.0 && info.right() <= depth.left() + 1.0, "the i sits left of Depth");
+    assert!(harness.query_by_label("Projection Depth").is_none());
+}
+
 #[test]
 fn shape_crop_is_picked_from_its_list() {
     // Tri-planar's Shape crop sits highest in the panel, in view
     let (mut harness, layer) = app_with_fill("triplanar");
-    click(&mut harness, "Projection Extends Outside Shape");
-    click(&mut harness, "Projection Cropped to Shape");
+    click(&mut harness, "Extends Outside Shape");
+    click(&mut harness, "Cropped to Shape");
     let Projection::Triplanar { projector, .. } = projection(&harness, layer) else { panic!("still tri-planar") };
     assert_eq!(projector.crop, ShapeCrop::Cropped);
 }

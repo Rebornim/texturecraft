@@ -28,12 +28,12 @@ pub(crate) const KEYS: [&str; 17] = [
 ];
 
 /// The highest Dielectric Reflectance, Cavity Smoothness and Height to Normal Intensity
-const MAX_DIELECTRIC_REFLECTANCE: f32 = 0.16;
-const MAX_CAVITY_SMOOTHNESS: f32 = 4.0;
-const MAX_HEIGHT_TO_NORMAL: f32 = 3.0;
+pub const MAX_DIELECTRIC_REFLECTANCE: f32 = 0.16;
+pub const MAX_CAVITY_SMOOTHNESS: f32 = 4.0;
+pub const MAX_HEIGHT_TO_NORMAL: f32 = 3.0;
 
 /// The highest intensity of Light 1 and Light 2
-const MAX_LIGHT_INTENSITY: f32 = 2.0;
+pub const MAX_LIGHT_INTENSITY: f32 = 2.0;
 
 /// Whether `p` sets any stylized setting
 pub(crate) fn sets_any(p: &Value) -> bool {

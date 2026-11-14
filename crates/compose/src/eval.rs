@@ -347,7 +347,7 @@ fn neighbourhood(effects: &[Effect], res: u32) -> Option<(usize, f32, Op)> {
 
 /// The neighbourhood filters of an effect stack, bottom → top: index among the visible effects, radius in texels (`res` texels per UV tile across) and what it does
 fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (usize, f32, Op)> + '_ {
-    let texels = move |size: f32| (size * res as f32 / 2048.0).max(0.5);
+    let texels = move |size: f32| (size * res as f32 / SIZE_REFERENCE_RES).max(0.5);
     effects.iter().filter(|effect| effect.visible).enumerate().filter_map(move |(index, effect)| match &effect.kind {
         EffectKind::Filter(Filter::Blur { radius, .. }) if *radius > 0.0 => Some((index, texels(*radius), Op::Blur(None))),
         EffectKind::Filter(Filter::Sharpen { amount }) => Some((index, (1.5 * res as f32 / 2048.0).max(0.75), Op::Blur(Some(*amount)))),
@@ -386,10 +386,12 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
             Some((index, res as f32, Op::Transform { transform: *transform, block: res }))
         }
         // Three box passes reach the band's width
-        EffectKind::Filter(Filter::MaskOutline(outline)) => Some((index, (outline.width * res as f32 / 3.0).max(0.5), Op::Outline(*outline))),
+        EffectKind::Filter(Filter::MaskOutline(outline)) => {
+            Some((index, (outline.width * res as f32 / BLUR_BOX_PASSES as f32).max(0.5), Op::Outline(*outline)))
+        }
         // Three box passes' reach covers the distance and its smoothing
         EffectKind::Filter(filter @ (Filter::DistanceBevel(_) | Filter::BevelSmooth(_) | Filter::DirectionalDistance(_))) => {
-            Some((index, distance_reach(filter, res) / 3.0 + 1.0, Op::Distance))
+            Some((index, distance_reach(filter, res) / BLUR_BOX_PASSES as f32 + 1.0, Op::Distance))
         }
         EffectKind::Filter(Filter::HaloGlow { width, .. }) => Some((index, texels(width.abs() * Filter::HALO_REACH), Op::Halo)),
         EffectKind::Filter(Filter::DropShadow { angle, distance, size, .. }) => {
@@ -410,11 +412,14 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
 /// A neighbourhood radius that reaches the whole set ([`filter_extent`] caps it at the set's longest side)
 const WHOLE_SET: f32 = 65_536.0;
 
+/// Filter sizes are given in texels at 2K, as in the reference workflow
+const SIZE_REFERENCE_RES: f32 = 2048.0;
+
 /// How many texels around a texel distance filter `filter` reads at `res` texels across a UV tile: its reach and its smoothing's three box passes
 fn distance_reach(filter: &Filter, res: u32) -> f32 {
     match filter {
-        Filter::DistanceBevel(bevel) => bevel.reach(res) + 3.0 * bevel.smoothing_texels(res),
-        Filter::BevelSmooth(smooth) => smooth.reach(res) + 3.0 * smooth.smoothing_texels(res),
+        Filter::DistanceBevel(bevel) => bevel.reach(res) + BLUR_BOX_PASSES as f32 * bevel.smoothing_texels(res),
+        Filter::BevelSmooth(smooth) => smooth.reach(res) + BLUR_BOX_PASSES as f32 * smooth.smoothing_texels(res),
         Filter::DirectionalDistance(trail) => trail.reach(res),
         _ => 0.0,
     }
@@ -586,7 +591,7 @@ fn gather(
                     height_to_normal_texel(&filter, (x, y), (res, center), &mut acc, &input);
                 }
                 Op::Kuwahara(kuwahara) => {
-                    let radius = (kuwahara.radius.min(AnisotropicKuwahara::MAX_RADIUS) * res as f32 / 2048.0).max(0.5);
+                    let radius = (kuwahara.radius.min(AnisotropicKuwahara::MAX_RADIUS) * res as f32 / SIZE_REFERENCE_RES).max(0.5);
                     kuwahara_texel(&kuwahara, (x, y), (radius, comps), &mut acc, (&sample, &input));
                 }
                 Op::ColorMatch(_)
@@ -699,6 +704,8 @@ fn height_to_normal_texel(
         return;
     }
     let at = |dx: f32, dy: f32| height(x + dx, y + dy).unwrap_or(own);
+
+    // Sobel gradients over the kernel's weight sum
     let gx = (at(1.0, -1.0) + 2.0 * at(1.0, 0.0) + at(1.0, 1.0) - at(-1.0, -1.0) - 2.0 * at(-1.0, 0.0) - at(-1.0, 1.0)) / 8.0;
     let gy = (at(-1.0, 1.0) + 2.0 * at(0.0, 1.0) + at(1.0, 1.0) - at(-1.0, -1.0) - 2.0 * at(0.0, -1.0) - at(1.0, -1.0)) / 8.0;
     let made = filter.normal([gx, gy], res).map(|v| v * 0.5 + 0.5);
@@ -726,6 +733,9 @@ fn keep_coverage(acc: &mut [f32; 5], comps: usize, own: Option<&f32>) {
 
 /// Sample rows (and columns) on each side of the middle Anisotropic Kuwahara reads its ellipse with at most
 const KUWAHARA_STEPS: i32 = 6;
+
+/// Below this, a structure tensor has no direction
+const MIN_TENSOR: f32 = 1e-12;
 
 /// A spread of one in a sector, in 8-bit steps: what Anisotropic Kuwahara's sector weights are measured in
 const KUWAHARA_SPREAD_SCALE: f32 = 255.0;
@@ -769,7 +779,7 @@ fn kuwahara_texel(
         }
     }
     let root = ((xx - yy).powi(2) + 4.0 * xy * xy).sqrt();
-    let clear = if xx + yy > 1e-12 { root / (xx + yy) } else { 0.0 };
+    let clear = if xx + yy > MIN_TENSOR { root / (xx + yy) } else { 0.0 };
 
     // Strokes run across the steepest change; Anisotropy Angle turns the ellipse counterclockwise on screen
     let along = 0.5 * (2.0 * xy).atan2(xx - yy) + std::f32::consts::FRAC_PI_2 - kuwahara.angle.to_radians();
@@ -910,9 +920,10 @@ fn fxaa_texel((x, y): (f32, f32), comps: usize, center: &[f32], acc: &mut [f32; 
     let (nearest, delta) = if back < ahead { (back, back_delta) } else { (ahead, ahead_delta) };
     let edge_blend = if (delta < 0.0) != (own < edge) { 0.5 - nearest / (back + ahead) } else { 0.0 };
 
-    // A texel unlike all its neighbours blends in by its own contrast
+    // A texel unlike all its neighbours blends in by its own contrast (sides weigh twice the corners)
     let average = (2.0 * (n + s + w + e) + nw + ne + sw + se) / 12.0;
     let contrast = ((average - own).abs() / range).clamp(0.0, 1.0);
+    // Smoothstep of the contrast
     let eased = contrast * contrast * (3.0 - 2.0 * contrast);
     let blend = edge_blend.max(eased * eased * FXAA_SUBPIXEL);
     if blend > 0.0 {
@@ -937,7 +948,7 @@ fn mirror_texel(
         return;
     }
     let uv = [(local_x + 0.5) / size, (local_y + 0.5) / size];
-    let line = (Mirror::DEBUG_HALF_WIDTH * size / 2048.0).max(0.5) / size;
+    let line = (Mirror::DEBUG_HALF_WIDTH * size / SIZE_REFERENCE_RES).max(0.5) / size;
     if mirror.debug && mirror.on_axis(uv, line) {
         // Content stays premultiplied by its own coverage; masks are one value
         let cover = if comps == 4 { alpha.copied().unwrap_or(0.0) } else { 1.0 };
@@ -1482,9 +1493,12 @@ fn filter_region(
     Some(Field { x0: rx0, y0: ry0, w, h, comps, data })
 }
 
+/// Straight colours a colour space map must leave alone to be the identity
+const IDENTITY_PROBE: [f32; 3] = [0.25, 0.5, 0.75];
+
 /// Premultiplied content `data` (four components a texel) with each straight color mapped by `map` (nothing for masks or an identity space)
 fn recode(data: &mut [f32], comps: usize, map: impl Fn([f32; 3]) -> [f32; 3] + Sync) {
-    if comps != 4 || map([0.25, 0.5, 0.75]) == [0.25, 0.5, 0.75] {
+    if comps != 4 || map(IDENTITY_PROBE) == IDENTITY_PROBE {
         return;
     }
     data.par_chunks_mut(4).for_each(|pixel| {
@@ -1522,6 +1536,7 @@ fn halo(
         Filter::DropShadow { spread, opacity, color, .. } => (false, false, spread, opacity, color, true),
         _ => return,
     };
+    // Rec. 709 luminance
     let luminance = 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2];
     let tint = match (comps, kind) {
         (4, ChannelKind::Color) => color,
@@ -1589,7 +1604,7 @@ fn halo(
 /// Lay Mask Outline `outline` over premultiplied `data` (shapes of content from its luminance), mixed in by `opacity`
 fn mask_outline(data: &mut [f32], cover: &[f32], comps: usize, (width, height, radius): (usize, usize, usize), outline: &MaskOutline, opacity: f32) {
     let value = |pixel: &[f32]| match pixel {
-        [r, g, b, alpha] if *alpha > 1e-5 => lum([r / alpha, g / alpha, b / alpha]),
+        [r, g, b, alpha] if *alpha > MIN_ALPHA => lum([r / alpha, g / alpha, b / alpha]),
         [value] => *value,
         _ => 0.0,
     };
@@ -1606,7 +1621,7 @@ fn mask_outline(data: &mut [f32], cover: &[f32], comps: usize, (width, height, r
         // Content is premultiplied by its coverage, which stays
         let cov = if comps == 4 { pixel.get(3).copied().unwrap_or(0.0) } else { 1.0 };
         for slot in pixel.iter_mut().take(comps.min(3)) {
-            let before = if comps == 4 { if cov > 1e-5 { *slot / cov } else { 0.0 } } else { *slot };
+            let before = if comps == 4 { if cov > MIN_ALPHA { *slot / cov } else { 0.0 } } else { *slot };
             let result = outline.apply(before, band);
             *slot = (before + (result - before) * opacity) * cov;
         }
@@ -1616,13 +1631,16 @@ fn mask_outline(data: &mut [f32], cover: &[f32], comps: usize, (width, height, r
 /// The shapes' blurred share at their edge
 const OUTLINE_EDGE_SHARE: f32 = 0.5;
 
+/// Below this cover a texel is empty and has no straight colour
+const MIN_ALPHA: f32 = 1e-5;
+
 /// The blurred value a precise halo is solid from, and how soft a full spread leaves it
 const PRECISE_EDGE: f32 = 0.5;
 const HALO_SOFTEST: f32 = 0.01;
 
 /// Run point filter `filter` on blurred texels `data` (premultiplied content or masks) and mix the result over the unblurred `orig` by `opacity`
 fn map_blurred(data: &mut [f32], orig: &[f32], comps: usize, filter: &Filter, kind: ChannelKind, opacity: f32) {
-    let straight = |value: f32, cover: f32| if cover > 1e-5 { value / cover } else { 0.0 };
+    let straight = |value: f32, cover: f32| if cover > MIN_ALPHA { value / cover } else { 0.0 };
     data.par_chunks_mut(comps).zip(orig.par_chunks(comps)).for_each(|(pixel, original)| match (pixel, original) {
         ([value], [before]) => {
             let mapped = filter.point(kind, [*value; 3]).map_or(*value, |gray| gray[0]);

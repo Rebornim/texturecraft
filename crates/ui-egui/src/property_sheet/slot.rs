@@ -1,4 +1,4 @@
-use egui::{Align2, CornerRadius, FontId, Painter, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
+use egui::{Align2, CornerRadius, FontId, Painter, Rect, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};
 use egui_phosphor::regular as ic;
 
 use super::group::CARD_BLEED;
@@ -20,6 +20,23 @@ const THUMB_TO_NAME: f32 = 10.0;
 
 /// Size of a slot's source line
 const SOURCE_TEXT_SIZE: f32 = 10.0;
+
+/// The slot's name line above its centre and its source line below it
+const NAME_ABOVE_CENTER: f32 = 7.0;
+const SOURCE_BELOW_CENTER: f32 = 8.0;
+
+/// The square a slot's end glyph sits in
+const SLOT_GLYPH_BOX: f32 = 18.0;
+
+/// The on/off pill: its size, the extra margin it answers clicks in, its knob's radius and how far the knob sits from the middle
+const TOGGLE_WIDTH: f32 = 22.0;
+const TOGGLE_HEIGHT: f32 = 13.0;
+const TOGGLE_HIT_MARGIN: f32 = 3.0;
+const KNOB_RADIUS: f32 = 4.0;
+const KNOB_TRAVEL: f32 = 4.5;
+
+/// The seed's dice glyph size
+const DICE_ICON_SIZE: f32 = 14.0;
 
 /// From the right edge to the slot toggle's centre
 const SLOT_TOGGLE_INSET: f32 = 11.0;
@@ -104,8 +121,8 @@ impl PropertySheet<'_> {
         painter.rect_stroke(thumb, CornerRadius::ZERO, Stroke::new(1.0, if result.pick.hovered() { t.accent } else { t.field_border }), StrokeKind::Inside);
         let text_x = thumb.right() + THUMB_TO_NAME;
         let (name_font, name_color) = if enabled { (semibold(TEXT_SIZE), t.text) } else { (FontId::proportional(TEXT_SIZE), t.text_dim) };
-        painter.text(pos2(text_x, center_y - 7.0), Align2::LEFT_CENTER, name, name_font, name_color);
-        painter.text(pos2(text_x, center_y + 8.0), Align2::LEFT_CENTER, source, FontId::proportional(SOURCE_TEXT_SIZE), t.text_dim);
+        painter.text(pos2(text_x, center_y - NAME_ABOVE_CENTER), Align2::LEFT_CENTER, name, name_font, name_color);
+        painter.text(pos2(text_x, center_y + SOURCE_BELOW_CENTER), Align2::LEFT_CENTER, source, FontId::proportional(SOURCE_TEXT_SIZE), t.text_dim);
 
         for (shown, live, x, glyph, tip, slot) in [
             (clear, true, clear_x, ic::X, "Clear", &mut result.clear),
@@ -114,7 +131,7 @@ impl PropertySheet<'_> {
             if !shown {
                 continue;
             }
-            let glyph_rect = Rect::from_center_size(pos2(x, center_y), vec2(18.0, 18.0));
+            let glyph_rect = Rect::from_center_size(pos2(x, center_y), Vec2::splat(SLOT_GLYPH_BOX));
             let id = self.next_id();
             // At the defaults the ⟲ is faint and inert, as on a band: a click there picks the source like the rest of the row
             let response = if live {
@@ -133,16 +150,19 @@ impl PropertySheet<'_> {
         }
 
         if let Some(on) = on {
-            let pill = Rect::from_center_size(pos2(self.right - SLOT_TOGGLE_INSET, center_y), vec2(22.0, 13.0));
+            let pill = Rect::from_center_size(pos2(self.right - SLOT_TOGGLE_INSET, center_y), vec2(TOGGLE_WIDTH, TOGGLE_HEIGHT));
             let id = self.next_id();
-            if self.ui.interact(pill.expand(3.0), id, Sense::click()).clicked() {
+            if self.ui.interact(pill.expand(TOGGLE_HIT_MARGIN), id, Sense::click()).clicked() {
                 *on = !*on;
                 result.toggled = true;
             }
-            let (fill, border, knob, knob_x) =
-                if *on { (t.accent_dim, t.accent, t.text, pill.center().x + 4.5) } else { (t.button, t.button_border, t.text_dim, pill.center().x - 4.5) };
+            let (fill, border, knob, knob_x) = if *on {
+                (t.accent_dim, t.accent, t.text, pill.center().x + KNOB_TRAVEL)
+            } else {
+                (t.button, t.button_border, t.text_dim, pill.center().x - KNOB_TRAVEL)
+            };
             painter.rect(pill, CornerRadius::same(6), fill, Stroke::new(1.0, border), StrokeKind::Inside);
-            painter.circle_filled(pos2(knob_x, center_y), 4.0, knob);
+            painter.circle_filled(pos2(knob_x, center_y), KNOB_RADIUS, knob);
         }
         self.drawn(thumb.bottom());
         result
@@ -256,7 +276,7 @@ impl PropertySheet<'_> {
             Stroke::new(1.0, t.button_border),
             StrokeKind::Inside,
         );
-        painter.text(dice.center(), Align2::CENTER_CENTER, ic::DICE_FIVE, FontId::proportional(14.0), t.text);
+        painter.text(dice.center(), Align2::CENTER_CENTER, ic::DICE_FIVE, FontId::proportional(DICE_ICON_SIZE), t.text);
         dice_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr("Random")));
         if dice_response.clicked() {
             *seed = next_seed(*seed);

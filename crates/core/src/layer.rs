@@ -1201,9 +1201,12 @@ fn is_unit_divider(divider: &u16) -> bool {
     *divider == 1
 }
 
+/// The most steps a posterize keeps
+pub const POSTERIZE_LEVELS_MAX: f32 = 64.0;
+
 /// `x` (0..1) rounded to `levels` steps (2..64) from black to white
 pub fn posterize(x: f32, levels: f32) -> f32 {
-    let steps = (levels.clamp(2.0, 64.0).round() - 1.0).max(1.0);
+    let steps = (levels.clamp(2.0, POSTERIZE_LEVELS_MAX).round() - 1.0).max(1.0);
     let x = if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 };
     (x * steps).round() / steps
 }

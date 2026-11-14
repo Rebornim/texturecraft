@@ -13,6 +13,19 @@ const STACK_AIR: f32 = 4.0;
 /// Height of a stacked label's line, from its air to the control row under it
 const STACK_LABEL_LINE: f32 = 14.0;
 
+/// A stacked label's centre below its line's top
+const STACK_LABEL_CENTER: f32 = 8.0;
+
+/// A caption line's height
+const CAPTION_LINE: f32 = 18.0;
+
+/// How far small and regular text reach below their centre line
+const SMALL_TEXT_HALF_LINE: f32 = 6.0;
+const TEXT_HALF_LINE: f32 = 7.0;
+
+/// The square a row-end glyph answers the pointer in
+const GLYPH_BOX: f32 = 20.0;
+
 /// Air above a section caption that follows other rows, and the hairline's distance below it
 const SECTION_AIR: f32 = 6.0;
 
@@ -54,7 +67,7 @@ impl PropertySheet<'_> {
     pub(crate) fn section_reset(&mut self, title: &str, changed: bool) -> bool {
         let text = self.tokens.text;
         let center_y = self.section_caption(title, text);
-        let glyph = Rect::from_center_size(pos2(self.right - SECTION_RESET_INSET, center_y), egui::vec2(20.0, 20.0));
+        let glyph = Rect::from_center_size(pos2(self.right - SECTION_RESET_INSET, center_y), egui::Vec2::splat(GLYPH_BOX));
         let id = self.id.with(("section_reset", title));
         let sense = if changed { Sense::click() } else { Sense::hover() };
         let response = self.ui.interact(glyph, id, sense);
@@ -83,7 +96,7 @@ impl PropertySheet<'_> {
             return None;
         }
 
-        let glyph = Rect::from_center_size(pos2(self.right - EDGE_GLYPH_INSET, center_y), egui::vec2(20.0, 20.0));
+        let glyph = Rect::from_center_size(pos2(self.right - EDGE_GLYPH_INSET, center_y), egui::Vec2::splat(GLYPH_BOX));
         let id = self.id.with(("section_menu", title));
         let response = self.ui.interact(glyph, id, Sense::click());
         let color = if response.hovered() { self.tokens.text } else { self.tokens.text_dim };
@@ -113,7 +126,7 @@ impl PropertySheet<'_> {
         }
         let center_y = rect.top() + SECTION_CAPTION_CENTER;
         self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, title.to_uppercase(), semibold(SMALL_TEXT_SIZE), color);
-        self.drawn(center_y + 6.0);
+        self.drawn(center_y + SMALL_TEXT_HALF_LINE);
         self.air_at = None;
         center_y
     }
@@ -180,7 +193,7 @@ impl PropertySheet<'_> {
     fn stacked_label(&mut self, label: &str, shift: f32) -> f32 {
         self.space(STACK_AIR);
         let rect = self.take(STACK_LABEL_LINE);
-        let center_y = rect.top() + 8.0;
+        let center_y = rect.top() + STACK_LABEL_CENTER;
         self.paint_info(center_y);
         let text = self.tokens.text;
         self.ui.painter().text(pos2(self.left + shift, center_y), Align2::LEFT_CENTER, label, FontId::proportional(TEXT_SIZE), text);
@@ -189,9 +202,9 @@ impl PropertySheet<'_> {
 
     /// A dim caption line above its control (Offset, Size…)
     pub(crate) fn caption(&mut self, text: &str) {
-        let rect = self.take(18.0);
+        let rect = self.take(CAPTION_LINE);
         let dim = self.tokens.text_dim;
-        self.ui.painter().text(pos2(self.left, rect.top() + 9.0), Align2::LEFT_CENTER, text, FontId::proportional(SMALL_TEXT_SIZE), dim);
+        self.ui.painter().text(pos2(self.left, rect.top() + CAPTION_LINE / 2.0), Align2::LEFT_CENTER, text, FontId::proportional(SMALL_TEXT_SIZE), dim);
         self.drawn(rect.bottom());
     }
 
@@ -202,7 +215,7 @@ impl PropertySheet<'_> {
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, text));
         let dim = self.tokens.text_dim;
         self.ui.painter().text(rect.center(), Align2::CENTER_CENTER, text, FontId::proportional(TEXT_SIZE), dim);
-        self.drawn(rect.center().y + 7.0);
+        self.drawn(rect.center().y + TEXT_HALF_LINE);
     }
 
     /// A caret pointing down (open) or right (folded), centred on `center`

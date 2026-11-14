@@ -186,6 +186,12 @@ pub fn place_frame_uv(q: Vec2, uv: &UvTransform) -> Vec2 {
     place(q - FRAME_UV_CENTER, tiling, uv.rotation, Vec2::from(uv.offset)) + FRAME_UV_CENTER * tiling
 }
 
+/// The image placement a frame needs to lay images exactly as `uv` does from the top left (a frame turns its image round its centre)
+pub fn frame_uv_from_corner(uv: &UvTransform) -> UvTransform {
+    let offset = place_uv(FRAME_UV_CENTER, uv) - FRAME_UV_CENTER * Vec2::from(uv.tiling);
+    UvTransform { offset: offset.to_array(), ..*uv }
+}
+
 /// `c` inside a projector turned and scaled by `projector`; the default projector returns `c` unchanged
 pub fn projector_local(projector: &Projector, c: &Coords) -> Coords {
     if !projector.turns() {

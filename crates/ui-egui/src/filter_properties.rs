@@ -8,7 +8,10 @@ use texturecraft_engine::core::{
     MirrorCorner, MirrorMode, OutlinePosition, PbrValidate, SlopeBlending, SourceColorMode, SourceSlopeBlur, SourceWarp, StylizedLighting, TargetColorMode,
     ThresholdMode, ValidationMode, WarpBlending, WarpMode, WarpSourceMode,
 };
-use texturecraft_engine::filter_lib::{build, find, scalar_params};
+use texturecraft_engine::filter_lib::{
+    BEVEL_SMOOTHING_MAX, BLUR_INTENSITY_SLIDER_MAX, DISTANCE_BEVEL_SMOOTHING_MAX, MAX_CAVITY_SMOOTHNESS, MAX_DIELECTRIC_REFLECTANCE, MAX_HEIGHT_TO_NORMAL,
+    MAX_LIGHT_INTENSITY, SMOOTH_DISTANCE_MAX, SOURCE_TILING_MAX, SOURCE_TILING_MIN, SUN_INTENSITY_MAX, build, find, scalar_params,
+};
 
 use crate::TextureCraftApp;
 use crate::fill_material_panel::pill_name;
@@ -241,7 +244,7 @@ fn highpass(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, r
     if let (Some(picked), _) = sheet.dropdown(tr("Color Space"), space, &HighpassSpace::ALL, |space| tr(space.label()).to_owned(), None) {
         app.run("effect.set", json!({"effect": id, "colorSpace": picked.id()}));
     }
-    slider_rows(app, sheet, id, &[("intensity", tr("Radius"), radius / Filter::BLUR_INTENSITY, 0.0..=16.0)]);
+    slider_rows(app, sheet, id, &[("intensity", tr("Radius"), radius / Filter::BLUR_INTENSITY, 0.0..=BLUR_INTENSITY_SLIDER_MAX)]);
     let mut alpha = alpha;
     if sheet.toggle(tr("Apply To Alpha"), &mut alpha) {
         app.run("effect.set", json!({"effect": id, "applyToAlpha": alpha}));
@@ -501,7 +504,7 @@ fn bevel_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
     bevel_wrap(app, sheet, id, bevel.wrap);
     slider_rows(app, sheet, id, &[("distance", tr("Distance"), bevel.distance, -1.0..=1.0)]);
     choice_switch(app, sheet, id, (tr("Corner Type"), "cornerType"), &BevelCorner::ALL, bevel.corner, (BevelCorner::label, BevelCorner::id));
-    slider_rows(app, sheet, id, &[("smoothing", tr("Smoothing"), bevel.smoothing, 0.0..=5.0)]);
+    slider_rows(app, sheet, id, &[("smoothing", tr("Smoothing"), bevel.smoothing, 0.0..=DISTANCE_BEVEL_SMOOTHING_MAX)]);
     choice_switch(app, sheet, id, (tr("Blur Mode"), "blurMode"), &BevelBlur::ALL, bevel.blur, (BevelBlur::label, BevelBlur::id));
 }
 
@@ -513,8 +516,8 @@ fn bevel_smooth(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u6
         sheet,
         id,
         &[
-            ("distance", tr("Distance"), smooth.distance, 0.0..=0.3),
-            ("smoothing", tr("Smoothing"), smooth.smoothing, 0.0..=10.0),
+            ("distance", tr("Distance"), smooth.distance, 0.0..=SMOOTH_DISTANCE_MAX),
+            ("smoothing", tr("Smoothing"), smooth.smoothing, 0.0..=BEVEL_SMOOTHING_MAX),
             ("curveOffset", tr("Curve Offset"), smooth.curve_offset, -1.0..=1.0),
             ("curveShape", tr("Curve Shape"), smooth.curve_shape, -1.0..=1.0),
             ("maskThreshold", tr("Mask Threshold"), smooth.threshold, 0.0..=1.0),
@@ -575,7 +578,7 @@ fn source_warp(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64
                 ("sourceBlur", tr("Source Blur"), source.blur, 0.0..=1.0),
                 ("sourceBalance", tr("Source Balance"), source.balance, 0.0..=1.0),
                 ("sourceContrast", tr("Source Contrast"), source.contrast, 0.0..=1.0),
-                ("sourceTiling", tr("Source Tiling"), source.tiling, 0.01..=16.0),
+                ("sourceTiling", tr("Source Tiling"), source.tiling, SOURCE_TILING_MIN..=SOURCE_TILING_MAX),
             ],
         );
     }
@@ -619,7 +622,7 @@ fn slope_blur(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
                 ("sourceBlur", tr("Blur"), source.blur, 0.0..=1.0),
                 ("sourceBalance", tr("Position"), source.balance, 0.0..=1.0),
                 ("sourceContrast", tr("Contrast"), source.contrast, 0.0..=1.0),
-                ("sourceTiling", tr("Source Tiling"), source.tiling, 0.01..=16.0),
+                ("sourceTiling", tr("Source Tiling"), source.tiling, SOURCE_TILING_MIN..=SOURCE_TILING_MAX),
             ],
         );
     }
@@ -638,14 +641,14 @@ fn slope_blending_picture(painter: &Painter, rect: Rect, blending: SlopeBlending
             for (step, spread) in SLOPE_BLUR_SPREADS.iter().enumerate() {
                 let share = (step + 1) as f32 / SLOPE_BLUR_SPREADS.len() as f32;
                 let tint = tokens.text.gamma_multiply(share * SLOPE_BLUR_LAYER_ALPHA);
-                painter.rect_filled(bar(0.3 - spread, 0.62 + spread).expand2(egui::vec2(0.0, spread * rect.height() * 0.5)), 1, tint);
+                painter.rect_filled(bar(BLUR_BAR.0 - spread, BLUR_BAR.1 + spread).expand2(egui::vec2(0.0, spread * rect.height() * 0.5)), 1, tint);
             }
         }
         SlopeBlending::Min => {
-            painter.rect_filled(bar(0.42, 0.58), 0, tokens.text);
+            painter.rect_filled(bar(MIN_BAR.0, MIN_BAR.1), 0, tokens.text);
         }
         SlopeBlending::Max => {
-            painter.rect_filled(bar(0.18, 0.82), 0, tokens.text);
+            painter.rect_filled(bar(MAX_BAR.0, MAX_BAR.1), 0, tokens.text);
         }
     }
     painter.rect_stroke(rect, 0, Stroke::new(1.0, tokens.field_border), StrokeKind::Inside);
@@ -657,6 +660,11 @@ const SLOPE_BAR_TOP: f32 = 0.25;
 /// How far each soft layer of the Blur picture's bar spreads past the bar (shares of the square), widest first, and how opaque the layers stack up to
 const SLOPE_BLUR_SPREADS: [f32; 4] = [0.12, 0.08, 0.04, 0.0];
 const SLOPE_BLUR_LAYER_ALPHA: f32 = 0.45;
+
+/// The left and right ends of each slope blur mode's bar, as shares of the pictogram's width
+const BLUR_BAR: (f32, f32) = (0.3, 0.62);
+const MIN_BAR: (f32, f32) = (0.42, 0.58);
+const MAX_BAR: (f32, f32) = (0.18, 0.82);
 
 /// The tone groups' names and the `effect.set` keys they edit, in the order a panel shows them
 const SHADOWS: (&str, &str) = ("Shadows", "shadows");
@@ -747,7 +755,7 @@ fn gradient(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, f
             [("blur", tr("Blur Intensity"), input.blur), ("balance", tr("Balance"), input.balance), ("contrast", tr("Contrast"), input.contrast)]
         {
             let mut value = value;
-            let range = if key == "blur" { 0.0..=16.0 } else { 0.0..=1.0 };
+            let range = if key == "blur" { 0.0..=BLUR_INTENSITY_SLIDER_MAX } else { 0.0..=1.0 };
             if let Some(merge) = sheet.slider(label, &mut value, range, 2) {
                 set(app, json!({key: value, "merge": merge}));
             }
@@ -917,7 +925,7 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
 
     if sheet.card(tr("Sun"), Some(true)) {
         let mut value = *light;
-        if let Some(merge) = sheet.slider(tr("Sun Intensity"), &mut value, 0.0..=10.0, 2) {
+        if let Some(merge) = sheet.slider(tr("Sun Intensity"), &mut value, 0.0..=SUN_INTENSITY_MAX, 2) {
             set(app, json!({"light": value, "merge": merge}));
         }
         for (key, label, value, range) in
@@ -966,7 +974,7 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
             ("diffuseCavity", tr("Diffuse Cavity"), s.diffuse_cavity, 1.0),
             ("specularAo", tr("Specular AO"), s.specular_ao, 1.0),
             ("specularCavity", tr("Specular Cavity"), s.specular_cavity, 1.0),
-            ("cavitySmoothness", tr("Cavity Smoothness"), s.cavity_smoothness, 4.0),
+            ("cavitySmoothness", tr("Cavity Smoothness"), s.cavity_smoothness, MAX_CAVITY_SMOOTHNESS),
             ("edgesIntensity", tr("Edges Intensity"), s.edges_intensity, 1.0),
             ("edgesSmoothness", tr("Edges Smoothness"), s.edges_smoothness, 1.0),
         ];
@@ -989,7 +997,7 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
             set(app, json!({"output": picked.id()}));
         }
         let mut value = s.dielectric_reflectance;
-        if let Some(merge) = sheet.slider(tr("Dielectric Reflectance"), &mut value, 0.0..=0.16, 2) {
+        if let Some(merge) = sheet.slider(tr("Dielectric Reflectance"), &mut value, 0.0..=MAX_DIELECTRIC_REFLECTANCE, 2) {
             set(app, json!({"dielectricReflectance": value, "merge": merge}));
         }
     }
@@ -1001,7 +1009,7 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
             set(app, json!({"normalDetails": if mesh_only { "mesh" } else { "meshHeightNormal" }}));
         }
         let mut value = s.height_to_normal;
-        if let Some(merge) = sheet.slider(tr("Height to Normal Intensity"), &mut value, 0.0..=3.0, 2) {
+        if let Some(merge) = sheet.slider(tr("Height to Normal Intensity"), &mut value, 0.0..=MAX_HEIGHT_TO_NORMAL, 2) {
             set(app, json!({"heightToNormal": value, "merge": merge}));
         }
     }
@@ -1020,7 +1028,7 @@ fn extra_light(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64
         }
     }
     let mut intensity = light.intensity;
-    if let Some(merge) = sheet.slider(tr("Intensity"), &mut intensity, 0.0..=2.0, 2) {
+    if let Some(merge) = sheet.slider(tr("Intensity"), &mut intensity, 0.0..=MAX_LIGHT_INTENSITY, 2) {
         edits.push((json!({"intensity": intensity}), merge));
     }
     let pick = sheet.color_bar_led(tr("Color"), light.color, app.picking_color, swatches);
@@ -1067,13 +1075,16 @@ fn intensity_row(
     edit
 }
 
+/// A range wider than this shows one decimal
+const WIDE_RANGE: f32 = 10.0;
+
 /// Decimals a parameter's value shows: whole numbers for counts, two for blur intensities, one for wide ranges
 fn decimals(key: &str, min: f32, max: f32) -> usize {
     if matches!(key, "levels" | "pixelsAmount") {
         0
     } else if key == "intensity" {
         2
-    } else if max - min > 10.0 {
+    } else if max - min > WIDE_RANGE {
         1
     } else {
         2

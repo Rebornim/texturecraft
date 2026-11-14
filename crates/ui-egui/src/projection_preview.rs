@@ -82,7 +82,7 @@ pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Pro
     let side = ((rect.width() * ctx.pixels_per_point()).round() as usize).clamp(1, MAX_SIDE_PX);
     let shape = shape_for(&shown);
     let outline = ProjectorOutline::of(&shown, shape.half_size());
-    let half = view_half(outline.as_ref());
+    let (resting, half) = resting_fit(&shown, shape);
     let key = format!("{side}{half}{shown:?}{:?}{:?}{:?}", tokens.field, tokens.text, tokens.accent);
     let held = ctx.input(|input| input.pointer.any_down());
     let id = egui::Id::unique("projection_preview");
@@ -110,7 +110,9 @@ pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Pro
         let painter = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
         let screen = Screen { view: View::new(), rect, half };
         draw_outline(&painter, &screen, shape, outline, tokens);
-        edge_markers(&painter, rect, passed_sides(outline.points().map(|point| screen.at(point)), rect), tokens);
+        let center = resting.as_ref().map_or(rect.center(), |resting| screen.at(resting.center));
+        crate::preview_dots::preview_dots(&painter, center, screen.at(outline.center), tokens);
+        edge_markers(&painter, rect, passed_sides(outline.points().chain([outline.center]).map(|point| screen.at(point)), rect), tokens);
     }
     painter.rect_stroke(rect, 0, egui::Stroke::new(1.0, tokens.field_border), egui::StrokeKind::Inside);
     Some(())
@@ -148,6 +150,28 @@ fn shown_projection(projection: &Projection, bounds: (Vec3, Vec3)) -> Option<Pro
         Projection::Planar { .. } | Projection::Spherical { .. } | Projection::Cylindrical { .. } | Projection::Triplanar { .. } => Some(projection.clone()),
         Projection::Warp { .. } | Projection::Uv { .. } | Projection::UvTile => None,
     }
+}
+
+/// The projector `shown` round `shape` back at Offset 0, and how far the view reaches to fit it there: sliding the projector never zooms
+fn resting_fit(shown: &Projection, shape: PreviewShape) -> (Option<ProjectorOutline>, f32) {
+    let resting = ProjectorOutline::of(&at_rest(shown), shape.half_size());
+    let half = view_half(resting.as_ref());
+    (resting, half)
+}
+
+/// `projection` with its projector back at Offset 0 (its turn and size kept)
+fn at_rest(projection: &Projection) -> Projection {
+    let mut resting = projection.clone();
+    match &mut resting {
+        Projection::Planar { offset, .. }
+        | Projection::Triplanar { offset, .. }
+        | Projection::Spherical { offset, .. }
+        | Projection::Cylindrical { offset, .. } => {
+            *offset = [0.0; 3];
+        }
+        Projection::Warp { .. } | Projection::Uv { .. } | Projection::UvTile => {}
+    }
+    resting
 }
 
 impl PreviewShape {
@@ -254,7 +278,7 @@ fn draw_outline(painter: &Painter, screen: &Screen, shape: PreviewShape, outline
 }
 
 /// The sides of `rect` some of `points` lie past: left, right, top, bottom
-fn passed_sides(points: impl Iterator<Item = Pos2>, rect: Rect) -> [bool; 4] {
+pub(crate) fn passed_sides(points: impl Iterator<Item = Pos2>, rect: Rect) -> [bool; 4] {
     let past = 0.5;
     points.fold([false; 4], |[left, right, top, bottom], p| {
         [left || p.x < rect.left() - past, right || p.x > rect.right() + past, top || p.y < rect.top() - past, bottom || p.y > rect.bottom() + past]
@@ -262,7 +286,7 @@ fn passed_sides(points: impl Iterator<Item = Pos2>, rect: Rect) -> [bool; 4] {
 }
 
 /// A dashed line just inside each side of `rect` the projector runs past, with a chevron pointing out at its middle
-fn edge_markers(painter: &Painter, rect: Rect, sides: [bool; 4], tokens: &Tokens) {
+pub(crate) fn edge_markers(painter: &Painter, rect: Rect, sides: [bool; 4], tokens: &Tokens) {
     let inner = rect.shrink(EDGE_INSET);
     let center = rect.center();
     // Per side: its two ends, the chevron's point and the way into the square
@@ -551,7 +575,7 @@ mod tests {
 
     fn fitted_half(projection: &Projection) -> f32 {
         let shown = shown_projection(projection, BOUNDS).unwrap();
-        view_half(ProjectorOutline::of(&shown, shape_for(&shown).half_size()).as_ref())
+        resting_fit(&shown, shape_for(&shown)).1
     }
 
     fn sized(scale: f32) -> Projection {
@@ -585,6 +609,23 @@ mod tests {
             projector: Projector { scale: [10.0; 3], ..Projector::default() },
         };
         assert_eq!(fitted_half(&triplanar), MAX_VIEW_HALF, "every kind fits the same way");
+    }
+
+    /// Sliding a projector never zooms the view: it fits the projector at Offset 0, the ring stays in the middle and the projector's centre slides away from it
+    #[test]
+    fn the_offset_slides_the_projector_without_zooming_the_view() {
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0));
+        let Projection::Spherical { scale, uv, projector, .. } = sized(1.0) else { panic!("sized() makes a spherical projection") };
+        for offset in [[0.0, 0.0, 0.0], [0.3, 0.0, 0.0], [1.5, 0.8, 0.0]] {
+            let slid = Projection::Spherical { scale, uv, offset, projector };
+            assert_eq!(fitted_half(&slid), fitted_half(&sized(1.0)), "Offset {offset:?} keeps the view");
+            let (resting, half) = resting_fit(&slid, PreviewShape::Sphere);
+            let screen = Screen { view: View::new(), rect, half };
+            let ring = screen.at(resting.unwrap().center);
+            let dot = screen.at(ProjectorOutline::of(&slid, PreviewShape::Sphere.half_size()).unwrap().center);
+            assert!(ring.distance(rect.center()) < 1e-3, "the ring marks the middle: {ring:?}");
+            assert_eq!(dot.distance(ring) > 1.0, offset != [0.0; 3], "the filled dot leaves the ring only when slid: {dot:?}");
+        }
     }
 
     /// A huge spherical projector no longer fills the square with its own ball: the shape keeps half its size in the middle with background round it

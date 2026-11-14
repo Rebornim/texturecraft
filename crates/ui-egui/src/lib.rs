@@ -91,6 +91,7 @@ mod pattern_target;
 pub mod pbr_import;
 mod picker_group;
 mod picker_tab;
+mod pointer_lock;
 mod preview_image;
 mod preview_outline;
 mod preview_request;
@@ -977,6 +978,11 @@ impl TextureCraftApp {
 }
 
 impl eframe::App for TextureCraftApp {
+    /// A drag that holds the pointer reads the pointer's moves as moves of a pointer no screen edge stops
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        pointer_lock::rewrite(ctx, raw_input);
+    }
+
     /// The browser never tells eframe the page is closing, so save often there.
     fn auto_save_interval(&self) -> std::time::Duration {
         std::time::Duration::from_secs(if cfg!(target_arch = "wasm32") { 5 } else { 30 })
@@ -1111,6 +1117,7 @@ impl eframe::App for TextureCraftApp {
         if self.picking_color.is_some() {
             screen_pick::paint_cursor(&ctx, None);
         }
+        pointer_lock::settle(&ctx);
 
         let ended_ms = now_ms();
         let elapsed_ms = (ended_ms - started_ms) as f32;

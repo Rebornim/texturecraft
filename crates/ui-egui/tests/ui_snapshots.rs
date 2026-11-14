@@ -764,7 +764,7 @@ fn fill_symmetry_snapshots() {
     harness.run_steps(4);
     harness.get_by_role_and_label(egui::Role::Tab, "Symmetry").click();
     harness.run_steps(4);
-    harness.get_by_role_and_label(egui::Role::CheckBox, "Symmetry").hover();
+    harness.get_by_label("Not available with UV projection").hover();
     save(&mut harness, &output_dir, "symmetry-uv");
 }
 
@@ -925,6 +925,15 @@ fn fill_material_snapshots() {
     harness.run_steps(2);
     harness.get_all_by_role_and_label(egui::Role::Button, "Invert").next().unwrap().hover();
     save(&mut harness, &output_dir, "material-invert-hover");
+    // The procedural slot's Resolution: one row in its card, its one list holding the Relative factors and the Fixed sizes
+    let texture_set = harness.state().session.doc.project.texture_sets[0].resolution;
+    let resolution = format!("Texture set  ·  {texture_set}");
+    harness.get_by_role_and_label(egui::Role::ComboBox, &resolution).click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, "1024 × 1024").hover();
+    save(&mut harness, &output_dir, "material-procedural-resolution-list");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
     // The same plain fill on the Material side: one whole material, picked from the card's list
     harness.get_by_role_and_label(egui::Role::RadioButton, "Material").click();
     harness.run_steps(2);
@@ -1280,15 +1289,13 @@ fn mask_fill_snapshots() {
     shot(&mut harness, json!({"value": 1.0}), "mask-fill-uniform");
     shot(&mut harness, json!({"image": scratches}), "mask-fill-image");
     shot(&mut harness, json!({"procedural": "Clouds", "scale": 4.0, "seed": 12}), "mask-fill-procedural");
-    // The procedural's Resolution band open, then its Size list open with a size hovered
+    // The procedural's Resolution list open (Relative factors and Fixed sizes) with a size hovered
     let click_in_view = |harness: &mut Harness<'_, TextureCraftApp>, role: egui::Role, label: &str| {
         harness.get_by_role_and_label(role, label).scroll_to_me();
         harness.run_steps(3);
         harness.get_by_role_and_label(role, label).click();
         harness.run_steps(3);
     };
-    click_in_view(&mut harness, egui::Role::Button, "Resolution");
-    save(&mut harness, &output_dir, "mask-fill-resolution");
     click_in_view(&mut harness, egui::Role::ComboBox, "Texture set  ·  256");
     let hovered = harness.get_by_role_and_label(egui::Role::ListBoxOption, "×2  ·  512").rect().center();
     harness.hover_at(hovered);
@@ -1741,6 +1748,7 @@ fn filter_card_snapshots() {
     let blur = add(&mut session, json!({"layer": layer, "target": "mask", "filter": "blur"}));
     let slope = add(&mut session, json!({"layer": layer, "target": "content", "filter": "slopeBlur", "seed": 12}));
     execute(&mut session, "effect.set", &json!({"effect": slope.0, "divider": 10, "channels": {"metallic": false, "normal": false}})).unwrap();
+    let invert = add(&mut session, json!({"layer": layer, "target": "content", "filter": "invert"}));
     execute(&mut session, "layer.select", &json!({"layer": layer})).unwrap();
     session.target = StackTarget::Effect(empty);
     let mut harness =
@@ -1752,6 +1760,9 @@ fn filter_card_snapshots() {
     harness.state_mut().session.target = StackTarget::Effect(blur);
     harness.run_steps(4);
     save(&mut harness, &output_dir, "filter-blur-mask");
+    harness.state_mut().session.target = StackTarget::Effect(invert);
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "filter-invert-content");
     harness.state_mut().session.target = StackTarget::Effect(slope);
     harness.run_steps(4);
     save(&mut harness, &output_dir, "filter-slope");
@@ -1777,6 +1788,48 @@ fn filter_card_snapshots() {
     let option = harness.get_by_role_and_label(egui::Role::ListBoxOption, "÷100").rect().center();
     harness.hover_at(option);
     save(&mut harness, &output_dir, "filter-divider-open");
+}
+
+#[test]
+#[ignore = "writes the material picker (Material mode) to TC_UI_SNAPSHOTS; run with --ignored"]
+/// A whole-material fill's card opens the material picker: grouped under its categories, Copper chosen and Brass hovered, then a search
+fn material_picker_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::{StackTarget, execute};
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.fill.material", &json!({"layer": layer, "material": "copper"})).unwrap();
+    execute(&mut session, "layer.select", &json!({"layer": layer})).unwrap();
+    session.target = StackTarget::Content;
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 2000.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(4);
+    harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
+    harness.run_steps(4);
+    if harness.query_by_role_and_label(egui::Role::ComboBox, "Copper").is_none() {
+        harness.get_by_role_and_label(egui::Role::RadioButton, "Material").click();
+        harness.run_steps(4);
+    }
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Copper").click();
+    harness.run_steps(30);
+    let brass = harness.get_by_role_and_label(egui::Role::ListBoxOption, "Brass").rect().center();
+    harness.hover_at(brass);
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "material-picker-open");
+    harness.event(egui::Event::Text("steel".into()));
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "material-picker-search");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            harness.run_steps(4);
+            save(&mut harness, &output_dir, &format!("material-picker-search-{name}"));
+        }
+    }
 }
 
 #[test]

@@ -1,4 +1,4 @@
-//! Filter image inputs and Attributes in Properties: Bevel Smooth's Distance Map slot under Image inputs, Warp's Custom Noise slot under its Source Mode, the read-only Attributes band
+//! Filter image inputs and Attributes in Properties: Bevel Smooth's Distance Map card after the filter's, Warp's Custom Noise slot under its Source Mode, the read-only Attributes row ending the filter card
 
 use egui::accesskit::Role;
 use egui_kittest::Harness;
@@ -23,11 +23,17 @@ fn lowest(harness: &Harness<'_, TextureCraftApp>, role: Role, label: &str) -> eg
     harness.query_all_by_role_and_label(role, label).map(|node| node.rect()).max_by(|a, b| a.top().total_cmp(&b.top())).unwrap()
 }
 
+/// The highest control of `role` named `label` (the filter card's, above an input card showing the same name)
+fn highest(harness: &Harness<'_, TextureCraftApp>, role: Role, label: &str) -> egui::Rect {
+    harness.query_all_by_role_and_label(role, label).map(|node| node.rect()).min_by(|a, b| a.top().total_cmp(&b.top())).unwrap()
+}
+
 /// The Distance Map slot picks a pattern from the source picker, × puts it back to white, its ramp sets a gray
 #[test]
 fn the_distance_map_slot_picks_its_source() {
     let (mut harness, effect) = app_with("bevelSmooth");
-    assert!(harness.query_by_label("Image inputs").is_some());
+    assert!(harness.query_by_label("Image inputs").is_none(), "an input every mode reads is a card of its own, no band");
+    assert!(lowest(&harness, Role::ComboBox, "Distance Map").top() > highest(&harness, Role::Button, "Attributes").bottom(), "after the filter card");
     click(&mut harness, Role::ComboBox, "Distance Map");
     assert!(harness.query_by_role_and_label(Role::Tab, "Anchor points").is_some(), "the slot opens the source picker");
     click(&mut harness, Role::ListBoxOption, "Clouds");
@@ -66,20 +72,21 @@ fn the_custom_noise_slot_follows_the_source_mode() {
     assert!(scaled.scale < pattern.scale, "{} -> {}", pattern.scale, scaled.scale);
 }
 
-/// Attributes is closed at first; a click on its band shows the filter's read-only rows under Image inputs, another hides them
+/// Attributes is closed at first; a click on the filter card's last row shows the filter's read-only rows in the card, above the input cards; another hides them
 #[test]
-fn the_attributes_band_opens_on_a_click() {
+fn the_attributes_row_opens_on_a_click() {
     let (mut harness, _) = app_with("bevelSmooth");
     let category = "Category: Filter";
     assert!(harness.query_by_label(category).is_none(), "closed by default");
-    let band = lowest(&harness, Role::Button, "Attributes");
-    assert!(band.top() > lowest(&harness, Role::Button, "Image inputs").bottom(), "under Image inputs");
+    let band = highest(&harness, Role::Button, "Attributes");
+    assert!(band.bottom() < lowest(&harness, Role::ComboBox, "Distance Map").top(), "above the input's card");
     click_at(&mut harness, band.center());
     assert!(harness.query_by_label(category).is_some());
     assert!(harness.query_by_label("Description: Draws a smooth ramp from the edge of the shapes.").is_some());
     assert!(harness.query_by_label("Tags: bevel, edge, ramp").is_some());
     assert!(harness.query_by_label("Size: 256 × 256").is_some(), "the texture set's size");
-    assert!(harness.get_by_label(category).rect().top() > band.bottom(), "the rows hang under the band");
+    assert!(harness.get_by_label(category).rect().top() > band.bottom(), "the rows hang under the row");
+    assert!(harness.get_by_label(category).rect().bottom() < lowest(&harness, Role::ComboBox, "Distance Map").top(), "inside the filter card");
     click_at(&mut harness, band.center());
     assert!(harness.query_by_label(category).is_none());
 }
@@ -88,7 +95,8 @@ fn the_attributes_band_opens_on_a_click() {
 #[test]
 fn the_sheet_keeps_its_layout_when_the_scroll_bar_comes_in() {
     let (mut harness, _) = app_with("bevelSmooth");
-    click(&mut harness, Role::Button, "Attributes");
+    let attributes = highest(&harness, Role::Button, "Attributes").center();
+    click_at(&mut harness, attributes);
     let layout = |harness: &Harness<'_, TextureCraftApp>| -> Vec<egui::Rect> {
         harness.query_all_by_role(Role::ComboBox).chain(harness.query_all_by_role(Role::Button)).map(|node| node.rect()).collect()
     };

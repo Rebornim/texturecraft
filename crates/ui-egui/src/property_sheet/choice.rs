@@ -1,7 +1,7 @@
 use egui::{Align2, Color32, CornerRadius, FontId, Frame, Margin, Painter, Rect, RectAlign, Response, Role, Sense, Shadow, Stroke, WidgetInfo, pos2, vec2};
 use egui_phosphor::regular as ic;
 
-use super::{CONTROL_HEIGHT, ICON_SIZE, PropertySheet, RowLead, TEXT_SIZE};
+use super::{CONTROL_HEIGHT, ICON_SIZE, PropertySheet, RowLead, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Draws an option's picture into its square
@@ -89,6 +89,25 @@ impl PropertySheet<'_> {
         self.hanging_list(&response, current, options, &name, picture)
     }
 
+    /// [`Self::dropdown`] whose list holds its options in groups, each under its caption; returns the picked option
+    pub(crate) fn grouped_dropdown<T: Copy + PartialEq>(
+        &mut self,
+        label: &str,
+        current: T,
+        groups: &[(&str, &[T])],
+        name: impl Fn(T) -> String,
+        picture: ChoicePicture<'_, T>,
+    ) -> Option<T> {
+        let x0 = self.lead_with(RowLead::label(label));
+        let row = self.take(super::ROW_HEIGHT);
+        let center_y = row.center().y;
+        self.drawn(center_y + CONTROL_HEIGHT / 2.0);
+        let button = self.control_box(x0, center_y);
+        let response = self.dropdown_button(button, &name(current), Some(move |painter: &Painter, rect: Rect| picture(painter, rect, current)));
+        let groups: Vec<(Option<&str>, &[T])> = groups.iter().map(|(caption, options)| (Some(*caption), *options)).collect();
+        self.hanging_groups(&response, current, &groups, &name, Some(picture)).0
+    }
+
     /// Paints a dropdown's button in `rect` and returns its response
     pub(super) fn dropdown_button(&mut self, rect: Rect, value: &str, picture: Option<impl Fn(&Painter, Rect)>) -> Response {
         let id = self.next_id();
@@ -119,6 +138,18 @@ impl PropertySheet<'_> {
         name: &impl Fn(T) -> String,
         picture: Option<ChoicePicture<'_, T>>,
     ) -> (Option<T>, Option<T>) {
+        self.hanging_groups(button, current, &[(None, options)], name, picture)
+    }
+
+    /// [`Self::hanging_list`] of options in groups, each under its caption (a dim line that can't be picked) when it has one
+    fn hanging_groups<T: Copy + PartialEq>(
+        &mut self,
+        button: &Response,
+        current: T,
+        groups: &[(Option<&str>, &[T])],
+        name: &impl Fn(T) -> String,
+        picture: Option<ChoicePicture<'_, T>>,
+    ) -> (Option<T>, Option<T>) {
         let t = self.tokens;
         let width = button.rect.width() - 2.0 * LIST_BORDER;
         let frame = Frame::NONE
@@ -130,38 +161,52 @@ impl PropertySheet<'_> {
         let shown = egui::Popup::from_toggle_button_response(button).align(RectAlign::BOTTOM_START).gap(1.0).width(width).frame(frame).show(|ui| {
             let mut picked = None;
             let mut hovered = None;
-            for &option in options {
-                let (rect, response) = ui.allocate_exact_size(vec2(width, OPTION_HEIGHT), Sense::click());
-                let painter = ui.painter();
-                let chosen = option == current;
-                response.widget_info(|| WidgetInfo::selected(Role::ListBoxOption, true, chosen, name(option)));
-                if response.hovered() {
-                    hovered = Some(option);
-                    let fill = Rect::from_min_max(pos2(rect.left() + HOVER_INSET, rect.top()), pos2(rect.right() - HOVER_INSET, rect.bottom() - 2.0));
-                    painter.rect_filled(fill, CornerRadius::same(4), t.button);
-                }
-                if chosen {
-                    let bar = Rect::from_min_max(pos2(rect.left() + 2.0, rect.top() + 5.0), pos2(rect.left() + 4.0, rect.bottom() - 7.0));
-                    painter.rect_filled(bar, CornerRadius::same(1), t.accent);
-                }
-
-                let center_y = rect.top() + OPTION_HEIGHT / 2.0 - 1.0;
-                let mut text_x = rect.left() + VALUE_INSET;
-                if let Some(draw) = picture {
-                    draw(
-                        painter,
-                        Rect::from_min_size(pos2(rect.left() + PICTURE_INSET, center_y - PICTURE_SIZE / 2.0), vec2(PICTURE_SIZE, PICTURE_SIZE)),
-                        option,
+            for (caption, options) in groups {
+                if let Some(caption) = caption {
+                    let (rect, response) = ui.allocate_exact_size(vec2(width, OPTION_HEIGHT), Sense::hover());
+                    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, *caption));
+                    let center_y = rect.top() + OPTION_HEIGHT / 2.0 - 1.0;
+                    ui.painter().text(
+                        pos2(rect.left() + VALUE_INSET, center_y),
+                        Align2::LEFT_CENTER,
+                        *caption,
+                        FontId::proportional(SMALL_TEXT_SIZE),
+                        t.text_dim,
                     );
-                    text_x = rect.left() + PICTURE_INSET + PICTURE_SIZE + PICTURE_TO_TEXT;
                 }
-                let font = if chosen { semibold(TEXT_SIZE) } else { FontId::proportional(TEXT_SIZE) };
-                painter.text(pos2(text_x, center_y), Align2::LEFT_CENTER, name(option), font, t.text);
-                if response.hovered() && width >= EYE_MIN_LIST_WIDTH {
-                    painter.text(pos2(rect.right() - EYE_INSET, center_y), Align2::CENTER_CENTER, ic::EYE, FontId::proportional(13.0), t.accent);
-                }
-                if response.clicked() && !chosen {
-                    picked = Some(option);
+                for &option in *options {
+                    let (rect, response) = ui.allocate_exact_size(vec2(width, OPTION_HEIGHT), Sense::click());
+                    let painter = ui.painter();
+                    let chosen = option == current;
+                    response.widget_info(|| WidgetInfo::selected(Role::ListBoxOption, true, chosen, name(option)));
+                    if response.hovered() {
+                        hovered = Some(option);
+                        let fill = Rect::from_min_max(pos2(rect.left() + HOVER_INSET, rect.top()), pos2(rect.right() - HOVER_INSET, rect.bottom() - 2.0));
+                        painter.rect_filled(fill, CornerRadius::same(4), t.button);
+                    }
+                    if chosen {
+                        let bar = Rect::from_min_max(pos2(rect.left() + 2.0, rect.top() + 5.0), pos2(rect.left() + 4.0, rect.bottom() - 7.0));
+                        painter.rect_filled(bar, CornerRadius::same(1), t.accent);
+                    }
+
+                    let center_y = rect.top() + OPTION_HEIGHT / 2.0 - 1.0;
+                    let mut text_x = rect.left() + VALUE_INSET;
+                    if let Some(draw) = picture {
+                        draw(
+                            painter,
+                            Rect::from_min_size(pos2(rect.left() + PICTURE_INSET, center_y - PICTURE_SIZE / 2.0), vec2(PICTURE_SIZE, PICTURE_SIZE)),
+                            option,
+                        );
+                        text_x = rect.left() + PICTURE_INSET + PICTURE_SIZE + PICTURE_TO_TEXT;
+                    }
+                    let font = if chosen { semibold(TEXT_SIZE) } else { FontId::proportional(TEXT_SIZE) };
+                    painter.text(pos2(text_x, center_y), Align2::LEFT_CENTER, name(option), font, t.text);
+                    if response.hovered() && width >= EYE_MIN_LIST_WIDTH {
+                        painter.text(pos2(rect.right() - EYE_INSET, center_y), Align2::CENTER_CENTER, ic::EYE, FontId::proportional(13.0), t.accent);
+                    }
+                    if response.clicked() && !chosen {
+                        picked = Some(option);
+                    }
                 }
             }
             (picked, hovered)

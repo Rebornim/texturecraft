@@ -78,10 +78,11 @@ fn the_symmetry_switch_shows_its_rows_and_each_row_changes_the_symmetry() {
 }
 
 #[test]
-fn a_uv_fill_greys_the_symmetry_switch_out() {
+fn a_uv_fill_says_why_in_place_of_the_symmetry_switch() {
     let (mut harness, layer) = app_with_fill("uv");
-    harness.get_by_role_and_label(Role::CheckBox, "Symmetry").click();
+    assert!(harness.query_by_role_and_label(Role::CheckBox, "Symmetry").is_none(), "no switch to click");
+    harness.get_by_label("Not available with UV projection").click();
     harness.run_steps(SETTLE_FRAMES);
     assert!(!symmetry(&harness, layer).on, "a UV projection has no symmetry to switch on");
-    assert!(harness.query_by_label("Type").is_none());
+    assert!(harness.query_by_label("Type").is_none(), "its settings stay hidden, not greyed");
 }

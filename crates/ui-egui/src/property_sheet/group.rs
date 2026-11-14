@@ -23,6 +23,23 @@ const CARD_RADIUS: u8 = 6;
 /// From a card's top to its name's centre
 const CARD_NAME_CENTER: f32 = CARD_PADDING + 6.0;
 
+/// Air above a sub-group's name inside a held card, and the name row under it
+const INNER_CAPTION_AIR: f32 = 6.0;
+const INNER_CAPTION_ROW: f32 = 22.0;
+
+/// From an inner caption's row top to its name's centre
+const INNER_CAPTION_CENTER: f32 = 10.0;
+
+/// Air between an inner caption's name and its hairline, and from the hairline's end to the right edge
+const INNER_RULE_AIR: f32 = 8.0;
+const INNER_RULE_END: f32 = 16.0;
+
+/// Air above the folded row that ends a held card
+const CLOSING_FOLD_AIR: f32 = 2.0;
+
+/// The room a rule under a card's slot takes: the hairline 1 px down, then air (the next row starts 6 under the slot)
+const SLOT_RULE_ROOM: f32 = 6.0;
+
 /// From the right edge to the centre of a band's reset button
 const BAND_RESET_INSET: f32 = 26.0;
 
@@ -48,6 +65,8 @@ impl PropertySheet<'_> {
         if self.card.is_none() {
             self.space(GROUP_GAP);
         }
+        // A band is top-level: it ends a held card too
+        self.held = false;
         self.close_card();
 
         let id = self.next_id();
@@ -112,6 +131,9 @@ impl PropertySheet<'_> {
 
     /// A folded group inside a card: bold name, its value (dim) and a caret; returns whether it is open
     pub(crate) fn card(&mut self, title: &str, foldable: Option<bool>) -> bool {
+        if self.held && self.card.is_some() {
+            return self.inner_caption(title, foldable);
+        }
         self.open_card();
         let id = self.next_id();
         let rect = self.take(CARD_NAME_CENTER + ROW_HEIGHT / 2.0);
@@ -137,8 +159,62 @@ impl PropertySheet<'_> {
         open
     }
 
-    /// Starts a card with no name row: a slot card, whose slot is its top row
+    /// A sub-group inside the held card: its bold name on a hairline (no card in a card), a caret when it folds
+    fn inner_caption(&mut self, title: &str, foldable: Option<bool>) -> bool {
+        self.space(INNER_CAPTION_AIR);
+        let id = self.next_id();
+        let rect = self.take(INNER_CAPTION_ROW);
+        let center_y = rect.top() + INNER_CAPTION_CENTER;
+        let mut open = true;
+        if let Some(default_open) = foldable {
+            open = self.ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
+            let hit = Rect::from_x_y_ranges(self.left..=self.right, rect.y_range());
+            let response = self.ui.interact(hit, id, Sense::click());
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, title));
+            if response.clicked() {
+                open = !open;
+                self.ui.data_mut(|data| data.insert_temp(id, open));
+            }
+        }
+
+        let t = self.tokens;
+        let painter = self.ui.painter();
+        let name = painter.text(pos2(self.left, center_y), Align2::LEFT_CENTER, title, semibold(TEXT_SIZE), t.text);
+        let rule_end = self.right - INNER_RULE_END;
+        if name.right() + INNER_RULE_AIR < rule_end {
+            painter.line_segment([pos2(name.right() + INNER_RULE_AIR, center_y), pos2(rule_end, center_y)], Stroke::new(1.0, t.separator));
+        }
+        if foldable.is_some() {
+            self.caret(pos2(self.right - EDGE_GLYPH_INSET, center_y), open, t.text_dim);
+        }
+        self.drawn(center_y + 7.0);
+        open
+    }
+
+    /// Keeps the card open now open through what follows: groups inside it become inner captions, and slots and cards join it, until [`Self::release_card`]
+    pub(crate) fn hold_card(&mut self) {
+        self.held = self.card.is_some();
+    }
+
+    /// Ends [`Self::hold_card`] and closes the held card
+    pub(crate) fn release_card(&mut self) {
+        self.held = false;
+        self.close_card();
+    }
+
+    /// A hairline across the open card under its slot row, then air before its settings
+    pub(crate) fn slot_rule(&mut self) {
+        let rect = self.take(SLOT_RULE_ROOM);
+        let y = rect.top() + 1.0;
+        self.ui.painter().line_segment([pos2(self.left, y), pos2(self.right, y)], Stroke::new(1.0, self.tokens.separator));
+        self.drawn(y);
+    }
+
+    /// Starts a card with no name row: a slot card, whose slot is its top row; inside a held card it joins that card
     pub(crate) fn open_card(&mut self) {
+        if self.held && self.card.is_some() {
+            return;
+        }
         if self.card.is_none() && self.air_at != Some(self.cursor_y()) && !self.empty {
             self.space(GROUP_GAP);
         }
@@ -172,8 +248,17 @@ impl PropertySheet<'_> {
         open
     }
 
-    /// Ends the open card: its face reaches [`CARD_PADDING`] below what its rows painted
+    /// The folded row that ends a held card (its Attributes), [`CLOSING_FOLD_AIR`] under the rows before it; returns whether it is open
+    pub(crate) fn closing_fold(&mut self, title: &str) -> bool {
+        self.space(CLOSING_FOLD_AIR);
+        self.fold(title, None, false)
+    }
+
+    /// Ends the open card (not a held one: [`Self::release_card`] ends that): its face reaches [`CARD_PADDING`] below what its rows painted
     pub(crate) fn close_card(&mut self) {
+        if self.held {
+            return;
+        }
         let Some(card) = self.card.take() else { return };
 
         let bottom = self.drawn_bottom + CARD_PADDING;

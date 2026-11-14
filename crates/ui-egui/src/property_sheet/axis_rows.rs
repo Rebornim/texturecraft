@@ -15,6 +15,9 @@ const CAPTION_SWITCH_INSET: f32 = 14.0;
 /// The click area around a caption's switch
 const CAPTION_SWITCH_HIT: egui::Vec2 = vec2(30.0, 20.0);
 
+/// Least air between a caption and the reason standing in for its switch
+const UNAVAILABLE_AIR: f32 = 12.0;
+
 /// From the controls column to where a lettered slider's track starts, past its axis letter
 const LETTER_TO_TRACK: f32 = 16.0;
 
@@ -35,18 +38,37 @@ const PICTURE_SHORTER: f32 = 10.0;
 const PICTURE_TO_COLUMN: f32 = 6.0;
 
 impl PropertySheet<'_> {
-    /// A section caption with its on/off switch at the right edge; greyed with both out when not `enabled`
-    pub(crate) fn section_switch(&mut self, title: &str, on: bool, enabled: bool) -> Response {
-        let t = self.tokens;
-        self.section_in(title, false, if enabled { t.text } else { t.text_dim });
+    /// A section caption with its on/off switch at the right edge
+    pub(crate) fn section_switch(&mut self, title: &str, on: bool) -> Response {
+        self.section_in(title, false, self.tokens.text);
         let top = self.sections.last().map_or(self.cursor_y(), |(_, top)| *top);
         let center = pos2(self.right - CAPTION_SWITCH_INSET, top + SECTION_CAPTION_CENTER);
         let id = self.next_id();
-        let sense = if enabled { Sense::click() } else { Sense::hover() };
-        let response = self.ui.interact(Rect::from_center_size(center, CAPTION_SWITCH_HIT), id, sense);
-        response.widget_info(|| WidgetInfo::selected(Role::CheckBox, enabled, on, title));
-        self.pill(center, on && enabled, enabled);
+        let response = self.ui.interact(Rect::from_center_size(center, CAPTION_SWITCH_HIT), id, Sense::click());
+        response.widget_info(|| WidgetInfo::selected(Role::CheckBox, true, on, title));
+        self.pill(center, on, true);
         response
+    }
+
+    /// A dim section caption whose switch can't be used: `reason` stands in its place at the right edge, cut with "…" to fit (then its tooltip reads it whole)
+    pub(crate) fn section_unavailable(&mut self, title: &str, reason: &str) {
+        let t = self.tokens;
+        self.section_in(title, false, t.text_dim);
+        let top = self.sections.last().map_or(self.cursor_y(), |(_, top)| *top);
+        let center_y = top + SECTION_CAPTION_CENTER;
+        let painter = self.ui.painter().clone();
+        let caption = painter.layout_no_wrap(title.to_uppercase(), semibold(SMALL_TEXT_SIZE), t.text_dim).size().x;
+        let room = self.right - self.left - caption - UNAVAILABLE_AIR;
+        let galley = crate::widgets::elided(&painter, reason, SMALL_TEXT_SIZE, t.text_dim, room);
+        let cut = galley.text() != reason;
+        let rect = Rect::from_min_size(pos2(self.right - galley.size().x, center_y - galley.size().y / 2.0), galley.size());
+        painter.galley(rect.min, galley, t.text_dim);
+        let id = self.next_id();
+        let response = self.ui.interact(rect, id, Sense::hover());
+        response.widget_info(|| WidgetInfo::labeled(Role::Label, false, reason));
+        if cut {
+            self.tip(response, reason);
+        }
     }
 
     /// One value's parts on lettered signed sliders (Axis position X, Y): the label on the first row, each part's axis letter in its colour; returns the part edited and whether it merges

@@ -124,6 +124,7 @@ pub(crate) struct PropertySheet<'u> {
     sections: Vec<(String, f32)>,
     info: Option<String>,
     child_shift: f32,
+    held: bool,
 }
 
 impl<'u> PropertySheet<'u> {
@@ -147,6 +148,7 @@ impl<'u> PropertySheet<'u> {
             sections: Vec::new(),
             info: None,
             child_shift: 0.0,
+            held: false,
             ui,
         };
         let result = body(&mut sheet);

@@ -29,16 +29,15 @@ const SPAN_RANGE: RangeInclusive<f32> = 1.0..=360.0;
 pub(crate) fn symmetry_section(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, projection: &Projection, sampling: Sampling, base: &Value) {
     let symmetry = sampling.symmetry;
     let run = |app: &mut TextureCraftApp, fields: Value| app.run("layer.fill.projection", with(base, fields));
-    let available = projection.takes_symmetry();
-    let switch = sheet.section_switch(tr("Symmetry"), symmetry.on, available);
-    if !available {
+    if !projection.takes_symmetry() {
         let reason = match projection {
             Projection::UvTile => tr("Not available with Fill (Match per UV Tile)"),
             _ => tr("Not available with UV projection"),
         };
-        sheet.tip(switch, reason);
+        sheet.section_unavailable(tr("Symmetry"), reason);
         return;
     }
+    let switch = sheet.section_switch(tr("Symmetry"), symmetry.on);
     if switch.clicked() {
         run(app, json!({"symmetry": !symmetry.on}));
     }

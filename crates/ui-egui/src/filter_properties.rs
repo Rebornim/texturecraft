@@ -1,4 +1,4 @@
-//! The Filter effect's properties: FILTER over the channel pills (content), the filter card, its Parameters, Image inputs and Attributes bands
+//! The Filter effect's properties: FILTER over the channel pills (content), the filter card holding its parameters and Attributes, then its image inputs' cards
 
 use egui::{Painter, Rect, Stroke, StrokeKind, Ui};
 use serde_json::{Value, json};
@@ -31,27 +31,30 @@ pub(crate) fn filter_properties(app: &mut TextureCraftApp, ui: &mut Ui, effect: 
         if !on_mask {
             channel_pills(app, sheet, effect, &off);
         }
-        filter_card(app, sheet, effect, filter);
+        let defaults = defaults_of(filter);
+        let changed = defaults.as_ref().is_some_and(|defaults| defaults != filter);
+        if filter_card(app, sheet, effect, filter, changed) {
+            app.run("effect.filter.restoreDefaults", json!({"effect": effect.0}));
+        }
         if *filter == Filter::Empty {
             return;
         }
 
-        let defaults = defaults_of(filter);
-        let band = sheet.band(tr("Parameters"), true, Some(defaults.as_ref().is_some_and(|defaults| defaults != filter)), None);
-        if band.reset {
-            app.run("effect.filter.restoreDefaults", json!({"effect": effect.0}));
-        }
-        if band.open {
-            parameters(app, sheet, effect.0, filter);
-        }
-        let inputs: Vec<ImageInput> = ImageInput::of(filter).into_iter().filter(|input| !input.by_mode).collect();
-        if !inputs.is_empty() && sheet.band(tr("Image inputs"), true, None, None).open {
-            for input in inputs {
-                input_slot(app, sheet, effect, input, false);
-            }
-        }
-        if sheet.band(tr("Attributes"), false, None, None).open {
+        // The card holds the filter's settings, as a material channel's card does: sub-groups are captions in it, Attributes its last folded row
+        sheet.slot_rule();
+        sheet.hold_card();
+        parameters(app, sheet, effect.0, filter);
+        if sheet.closing_fold(tr("Attributes")) {
             attributes(app, sheet, filter);
+        }
+        sheet.release_card();
+
+        // Inputs every mode reads: their own slot cards after the filter's
+        for input in ImageInput::of(filter).into_iter().filter(|input| !input.by_mode) {
+            input_slot(app, sheet, effect, input, false);
+        }
+        if let Filter::GradientDynamic { color, .. } = filter {
+            gradient_source(app, sheet, effect.0, *color);
         }
     });
 }
@@ -108,8 +111,8 @@ fn channel_pills(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effec
 /// How soon a filter card whose picture is still rendering looks for it again
 const THUMBNAIL_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
-/// The card naming the filter (or None): a click opens the filter picker under it, × empties it
-fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect: LayerId, filter: &Filter) {
+/// The card naming the filter (or None): a click opens the filter picker under it, × empties it; returns whether its ⟲ (live while `changed`) was clicked
+fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect: LayerId, filter: &Filter, changed: bool) -> bool {
     let ctx = sheet.ui.ctx().clone();
     let empty = *filter == Filter::Empty;
     let thumbnail = find(filter.label()).and_then(|def| app.thumbs.filter(&ctx, def.id));
@@ -135,11 +138,12 @@ fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect:
         }
     };
     let (name, source) = if empty { (tr("Filter"), tr("None")) } else { (tr(filter.label()), tr("Filter")) };
-    let slot = sheet.slot(&picture, name, source, None, !empty, false);
+    let slot = if empty { sheet.slot(&picture, name, source, None, false, false) } else { sheet.slot_restorable(&picture, name, source, changed) };
     if slot.clear {
         app.run("effect.set", json!({"effect": effect.0, "filter": "none"}));
     }
     crate::filter_slot::picker(app, &slot.pick, effect.0, filter);
+    slot.reset
 }
 
 /// The filter's own rows: Seed first, Intensity with its Divider chip, angles with their dial, then the color editors
@@ -155,7 +159,7 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
         Filter::Hsl { hue, saturation, lightness, perceptive } => return hsl(app, sheet, id, [*hue, *saturation, *lightness], *perceptive),
         Filter::GradientMap { .. } => return gradient(app, sheet, id, filter),
         Filter::GradientCurve { preset, invert, balance, contrast } => return gradient_curve(app, sheet, id, *preset, *invert, [*balance, *contrast]),
-        Filter::GradientDynamic { vertical, position, color } => return gradient_dynamic(app, sheet, id, *vertical, *position, *color),
+        Filter::GradientDynamic { vertical, position, .. } => return gradient_dynamic(app, sheet, id, *vertical, *position),
         Filter::HaloGlow { on_mask, precise, color, .. } => return glow(app, sheet, id, filter, (*on_mask, *precise), *color),
         Filter::DropShadow { color, .. } => return drop_shadow(app, sheet, id, filter, *color),
         Filter::BakedLighting { .. } => return baked_lighting_stylized(app, sheet, id, filter),
@@ -251,7 +255,7 @@ fn grayscale_conversion(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>
         app.run("effect.set", json!({"effect": id, "channelInput": if picked == 1 { "customInput" } else { "currentChannel" }}));
     }
     if conversion.custom_input {
-        input_slot(app, sheet, LayerId(id), ImageInput::CUSTOM_INPUT, false);
+        input_slot(app, sheet, LayerId(id), ImageInput::CUSTOM_INPUT, true);
     }
     let mut invert = conversion.invert;
     if sheet.toggle(tr("Invert"), &mut invert) {
@@ -280,7 +284,7 @@ fn anisotropic_kuwahara(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>
         app.run("effect.set", json!({"effect": id, "extractDirection": if picked == 1 { "customInput" } else { "currentChannel" }}));
     }
     if kuwahara.custom_input {
-        input_slot(app, sheet, LayerId(id), ImageInput::CUSTOM_INPUT, false);
+        input_slot(app, sheet, LayerId(id), ImageInput::CUSTOM_INPUT, true);
     }
     let rows = [
         ("radius", tr("Radius"), kuwahara.radius, 0.0..=AnisotropicKuwahara::MAX_RADIUS),
@@ -354,7 +358,7 @@ fn color_match(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64
     }
     match matcher.source_mode {
         SourceColorMode::Parameter => color(app, sheet, "sourceColor", tr("Source Color"), matcher.source_color),
-        SourceColorMode::Input => input_slot(app, sheet, LayerId(id), ImageInput::SOURCE_INPUT, false),
+        SourceColorMode::Input => input_slot(app, sheet, LayerId(id), ImageInput::SOURCE_INPUT, true),
         SourceColorMode::Average => {}
     }
     let targets: Vec<&str> = TargetColorMode::ALL.iter().map(|mode| tr(mode.label())).collect();
@@ -364,7 +368,7 @@ fn color_match(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64
     }
     match matcher.target_mode {
         TargetColorMode::Parameter => color(app, sheet, "targetColor", tr("Target Color"), matcher.target_color),
-        TargetColorMode::ImageInput => input_slot(app, sheet, LayerId(id), ImageInput::TARGET_INPUT, false),
+        TargetColorMode::ImageInput => input_slot(app, sheet, LayerId(id), ImageInput::TARGET_INPUT, true),
     }
     let mut custom = matcher.custom_variation;
     if sheet.toggle(tr("Custom Color Variation"), &mut custom) {
@@ -837,8 +841,8 @@ const CURVE_PICTURE_INSET: f32 = 2.0;
 const CURVE_PICTURE_STEPS: usize = 30;
 const CURVE_PICTURE_STROKE: f32 = 1.5;
 
-/// Gradient Dynamic: Gradient Orientation and Gradient Input Position, then its Gradient Source under Image inputs
-fn gradient_dynamic(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, vertical: bool, position: f32, color: [f32; 3]) {
+/// Gradient Dynamic: Gradient Orientation and Gradient Input Position (its Gradient Source is a card after the filter's)
+fn gradient_dynamic(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, vertical: bool, position: f32) {
     if let Some(picked) = sheet.switch(tr("Gradient Orientation"), &[tr("Horizontal"), tr("Vertical")], usize::from(vertical)) {
         app.run("effect.set", json!({"effect": id, "orientation": if picked == 1 { "vertical" } else { "horizontal" }}));
     }
@@ -846,10 +850,10 @@ fn gradient_dynamic(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id
     if let Some(merge) = sheet.slider(tr("Gradient Input Position"), &mut value, 0.0..=1.0, 2) {
         app.run("effect.set", json!({"effect": id, "position": value, "merge": merge}));
     }
+}
 
-    if !sheet.band(tr("Image inputs"), true, None, None).open {
-        return;
-    }
+/// Gradient Dynamic's Gradient Source: its own slot card after the filter's, a uniform color whose bar opens the picker
+fn gradient_source(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, color: [f32; 3]) {
     let swatch = |painter: &Painter, rect: Rect| {
         painter.rect_filled(rect, 3, crate::fill_material_panel::shown_color(color));
     };

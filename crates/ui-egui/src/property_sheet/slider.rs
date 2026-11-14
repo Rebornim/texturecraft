@@ -1,6 +1,6 @@
 use std::ops::RangeInclusive;
 
-use egui::{Align2, Color32, CornerRadius, FontId, Id, Rect, Response, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, FontId, Id, Rect, Response, Sense, Stroke, StrokeKind, WidgetInfo, pos2};
 use egui_phosphor::regular as ic;
 
 use super::value_text::ValueText;
@@ -272,15 +272,19 @@ impl PropertySheet<'_> {
         let Some(mut text) = editing else {
             let response = self.ui.interact(rect, id.with("value"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
             self.ui.painter().text(pos2(right, center_y), Align2::RIGHT_CENTER, shown, semibold(TEXT_SIZE), t.text);
+            if response.hovered() {
+                self.value_line(rect.left(), right, center_y, t.field_border);
+            }
             if response.clicked() {
-                self.ui.data_mut(|data| data.insert_temp(field_id, format!("{value:.decimals$}")));
-                self.ui.memory_mut(|memory| memory.request_focus(field_id));
+                self.start_typing(field_id, format!("{value:.decimals$}"));
             }
             return None;
         };
 
-        let edit = egui::TextEdit::singleline(&mut text).id(field_id).font(semibold(TEXT_SIZE)).align(egui::Align2::RIGHT_CENTER).margin(vec2(2.0, 0.0));
-        let response = self.ui.put(rect, edit);
+        // Typing happens on the value's own line: no box, the line under it goes accent
+        let edit = egui::TextEdit::singleline(&mut text).id(field_id).font(semibold(TEXT_SIZE)).align(egui::Align2::RIGHT_CENTER);
+        let response = self.typing_edit(rect.left(), right, center_y, edit);
+        self.value_line(rect.left(), right, center_y, t.accent);
         if !response.lost_focus() {
             self.ui.data_mut(|data| data.insert_temp(field_id, text));
             return None;

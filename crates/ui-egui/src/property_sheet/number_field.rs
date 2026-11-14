@@ -110,14 +110,9 @@ impl PropertySheet<'_> {
 
         let decimals = field.decimals;
         if let Some(mut text) = self.ui.data(|data| data.get_temp::<String>(typing_id)) {
-            let inner = Rect::from_min_max(pos2(rect.left() + 2.0 * TAG_LETTER_INSET + 6.0, rect.top() + 2.0), pos2(rect.right() - 2.0, rect.bottom() - 2.0));
-            let edit = egui::TextEdit::singleline(&mut text)
-                .id(typing_id)
-                .font(semibold(TEXT_SIZE))
-                .align(egui::Align2::RIGHT_CENTER)
-                .frame(egui::Frame::NONE)
-                .margin(vec2(VALUE_INSET - 2.0, 0.0));
-            let response = self.ui.put(inner, edit);
+            let edit = egui::TextEdit::singleline(&mut text).id(typing_id).font(semibold(TEXT_SIZE)).align(egui::Align2::RIGHT_CENTER);
+            let response = self.typing_edit(rect.left() + 2.0 * TAG_LETTER_INSET + 6.0, rect.right() - VALUE_INSET, rect.center().y, edit);
+            painter.rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, t.accent), StrokeKind::Inside);
             if !response.lost_focus() {
                 self.ui.data_mut(|data| data.insert_temp(typing_id, text));
                 return None;
@@ -150,8 +145,7 @@ impl PropertySheet<'_> {
         }
 
         if response.clicked() {
-            self.ui.data_mut(|data| data.insert_temp(typing_id, shown_number(field.value, decimals)));
-            self.ui.memory_mut(|memory| memory.request_focus(typing_id));
+            self.start_typing(typing_id, shown_number(field.value, decimals));
             return None;
         }
         let delta = response.drag_delta().x;

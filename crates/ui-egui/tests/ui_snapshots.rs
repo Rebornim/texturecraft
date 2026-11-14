@@ -704,6 +704,21 @@ fn fill_properties_snapshots() {
     save(&mut harness, &output_dir, "fill-planar-pad-held");
     harness.event(egui::Event::PointerButton { pos: pad, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
     harness.run_steps(2);
+    // A slid projector: the object stays put, the ring marks Offset 0 and the filled dot where the projector went
+    for (kind, offset, name) in [("planar", [0.3, 0.15, 0.0], "fill-planar-slid"), ("spherical", [0.5, 0.3, 0.0], "fill-spherical-slid")] {
+        execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": layer, "projection": kind, "offset": offset})).unwrap();
+        save(&mut harness, &output_dir, name);
+    }
+    // The Projection row's eye: hovered, then the gizmos hidden
+    execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": layer, "projection": "planar", "offset": [0.0, 0.0, 0.0]})).unwrap();
+    harness.run_steps(2);
+    harness.get_by_label("Hide projection gizmos").hover();
+    save(&mut harness, &output_dir, "fill-planar-eye-hover");
+    harness.get_by_role_and_label(egui::accesskit::Role::CheckBox, "Hide projection gizmos").click();
+    harness.run_steps(2);
+    save(&mut harness, &output_dir, "fill-planar-eye-hidden");
+    harness.get_by_role_and_label(egui::accesskit::Role::CheckBox, "Show projection gizmos").click();
+    harness.run_steps(2);
     execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": layer, "projection": "uvTile"})).unwrap();
     harness.run_steps(2);
     harness.get_by_label("Fill (Match per UV Tile)").click();

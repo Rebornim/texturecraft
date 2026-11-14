@@ -26,7 +26,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Display settings",
             [],
             None,
-            "{environment?: <built-in>|resource:<image resource>, exposure?, blur?, rotation?, opacity?, toneMapping?: linear|aces, fov?, shadows?, aoIntensity?, bloom?, vignette?, sharpen?, grain?, postEffects?, taa?, specGloss?, parallax?, displacement? (the viewport moves the surface by the height channel), scatterColor?: [r,g,b] (linear) | \"#rrggbb\", scatterRadius? (0..1 of the mesh radius), ior? (1..3, transmission), dof?: {enabled?, focusDistance? (view depth, world units; 0 = the orbit target), aperture? (lens radius, 0..1 of the mesh radius)}}",
+            "{environment?: <built-in>|resource:<image resource>, exposure?, blur?, rotation?, opacity?, toneMapping?: linear|aces, fov?, shadows?, aoIntensity?, bloom?, vignette?, sharpen?, grain?, postEffects?, taa?, specGloss?, parallax?, displacement? (the viewport moves the surface by the height channel), scatterColor?: [r,g,b] (linear) | \"#rrggbb\", scatterRadius? (0..1 of the mesh radius), ior? (1..3, transmission), dof?: {enabled?, focusDistance? (view depth, world units; 0 = the orbit target), aperture? (lens radius, 0..1 of the mesh radius)}, projectionGizmos? (the selected fill's projection gizmos show in the 3D view)}",
             always,
             display
         ),
@@ -261,6 +261,7 @@ fn display(s: &mut Session, p: &Value) -> Result<Value> {
         ("specGloss", &mut d.spec_gloss),
         ("parallax", &mut d.parallax),
         ("displacement", &mut d.displacement),
+        ("projectionGizmos", &mut d.projection_gizmos),
     ] {
         if let Some(b) = boolp(p, k) {
             *slot = b;
@@ -319,5 +320,22 @@ mod tests {
         assert_eq!(d.environment_resource(), Some(name.as_str()));
         execute(&mut s, "file.removeUnused", &Value::Null).unwrap();
         assert!(s.doc.resources.contains_key(&name), "the environment's image counts as used");
+    }
+
+    #[test]
+    fn the_projection_gizmos_hide_per_project_and_old_projects_show_them() {
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::sphere(1.0, 16, 8), "builtin:sphere", None, 128).unwrap();
+        let shown = serde_json::to_value(&s.doc.project.display).unwrap();
+        assert!(s.doc.project.display.projection_gizmos && shown.get("projection_gizmos").is_none(), "shown by default and saved as before: {shown}");
+
+        let hidden = execute(&mut s, "display.set", &json!({"projectionGizmos": false})).unwrap();
+        assert!(!s.doc.project.display.projection_gizmos);
+        assert_eq!(hidden["projection_gizmos"], json!(false), "hidden is saved with the project");
+        assert!(s.history_labels().is_empty(), "a view flag is no undo step");
+
+        let reopened: texturecraft_core::project::DisplaySettings = serde_json::from_value(hidden).unwrap();
+        assert!(!reopened.projection_gizmos, "a saved project opens with its gizmos hidden");
+        let old: texturecraft_core::project::DisplaySettings = serde_json::from_value(shown).unwrap();
+        assert!(old.projection_gizmos, "a project saved before the flag shows them");
     }
 }

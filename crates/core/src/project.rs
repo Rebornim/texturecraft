@@ -302,6 +302,14 @@ pub struct DisplaySettings {
     pub ior: f32,
     /// Depth of field of the viewport and the path tracer (thin lens).
     pub dof: DepthOfField,
+    /// The selected fill's projection gizmos show in the 3D view (the Projection row's eye)
+    #[serde(skip_serializing_if = "is_shown")]
+    pub projection_gizmos: bool,
+}
+
+/// Whether a view flag is at its default, shown (saved projects then stay as they were)
+fn is_shown(shown: &bool) -> bool {
+    *shown
 }
 
 /// A thin-lens camera's depth of field (Display settings: focus distance and aperture).
@@ -384,6 +392,7 @@ impl Default for DisplaySettings {
             scatter_radius: 0.1,
             ior: 1.5,
             dof: DepthOfField::default(),
+            projection_gizmos: true,
         }
     }
 }

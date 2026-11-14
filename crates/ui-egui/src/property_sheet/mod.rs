@@ -11,6 +11,7 @@ mod color_bar;
 mod color_picker_rows;
 mod compare_row;
 mod compare_row_response;
+mod eye_toggle;
 mod factor_slider;
 mod gradient_rows;
 mod group;

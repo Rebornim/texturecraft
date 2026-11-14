@@ -5,7 +5,7 @@ use super::{CONTROL_HEIGHT, ICON_SIZE, PropertySheet, RowLead, SMALL_TEXT_SIZE, 
 use crate::theme::semibold;
 
 /// Draws an option's picture into its square
-type ChoicePicture<'a, T> = &'a dyn Fn(&Painter, Rect, T);
+pub(super) type ChoicePicture<'a, T> = &'a dyn Fn(&Painter, Rect, T);
 
 /// Size of a picture in a dropdown button and in its list
 const PICTURE_SIZE: f32 = 18.0;

@@ -53,6 +53,22 @@ fn a_put_back_pointer_never_reaches_the_edge_and_comes_back_where_the_press_bega
     assert_eq!(*harness.state(), moved, "and drags nothing");
 }
 
+/// A system that folds the put-back into the next move (Windows) reads that move from the press point: the drag counts in full and never stalls
+#[test]
+fn a_folded_put_back_counts_every_move_from_the_press() {
+    let mut harness = scrub_strip(Hold::PutBackFolded);
+    let mut pointer = SystemPointer::at(&mut harness, PRESS);
+    pointer.folds = true;
+    pointer.button(&mut harness, PointerButton::Primary, true, Modifiers::NONE);
+    pointer.drags(&mut harness, vec2(1500.0, -40.0), 30, Modifiers::NONE);
+    assert!(pointer.hidden && pointer.put_backs >= 30, "hidden, and put back after every move: {pointer:?}");
+    assert!((*harness.state() - vec2(1500.0, -40.0)).length() < 0.01, "every move counts: {:?}", harness.state());
+
+    pointer.button(&mut harness, PointerButton::Primary, false, Modifiers::NONE);
+    pointer.frame(&mut harness);
+    assert!(!pointer.hidden && pointer.at == PRESS, "let go, it shows again where the press began: {pointer:?}");
+}
+
 #[test]
 fn a_locked_pointer_reads_raw_motion_and_is_let_go_where_the_press_began() {
     let mut harness = scrub_strip(Hold::Locked);

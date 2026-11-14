@@ -163,11 +163,6 @@ impl PropertySheet<'_> {
         self.button_sensing(icon.into(), text, lit, if enabled { Sense::click() } else { Sense::hover() })
     }
 
-    /// [`Self::button_lit`] for a press-and-hold control: it also follows a drag that starts on it, wherever the pointer goes
-    pub(crate) fn hold_button(&mut self, icon: &str, text: &str, lit: bool) -> egui::Response {
-        self.button_sensing(icon.into(), text, lit, Sense::click_and_drag())
-    }
-
     fn button_sensing(&mut self, icon: ButtonIcon<'_>, text: &str, lit: bool, sense: Sense) -> egui::Response {
         let enabled = sense != Sense::hover();
         let rect = self.take(ROW_HEIGHT);

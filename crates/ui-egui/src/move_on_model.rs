@@ -1,4 +1,4 @@
-//! Move on model: hold the button and drag to slide the selected fill's projection, with Shift or the right button held to turn it, and turn the wheel to scale it. The pointer is held while it lasts (hidden, no screen edge stops it, back on the button when let go). Letting go ends it, as one undo step; the 3D view keeps its own drags and wheel
+//! Move on model: hold the preview square and drag to slide the selected fill's projection, with Shift or the right button held to turn it, and turn the wheel to scale it. The pointer is held while it lasts (hidden, no screen edge stops it, back where the press began when let go). Letting go ends it, as one undo step; the 3D view keeps its own drags and wheel
 
 use egui::{CursorIcon, Pos2, Rect};
 use egui_phosphor::regular as ic;
@@ -70,15 +70,18 @@ const TURN_PER_POINT: f32 = 0.5;
 /// Growth per wheel point (exponential)
 const SCALE_PER_WHEEL_POINT: f32 = 0.0015;
 
-/// The Move on model button of `target`'s projection rows; while it is held down it moves the projection
-pub(crate) fn button(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, target: MoveOnModel) {
-    let response = sheet.hold_button(ic::HAND, tr("Move on model"), app.moving_on_model == Some(target));
-    let response = sheet.tip(response, tr("Hold and drag to slide the projection; Shift or the right button turns it, the wheel scales it"));
+/// Move on model on `target`'s preview square: while it is held down it moves the projection
+pub(crate) fn pad(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, square: Rect, target: MoveOnModel) {
+    let held = app.moving_on_model == Some(target);
+    let mut response = sheet.hold_pad(square, ic::HAND, tr("Move on model"), held);
+    if !held {
+        response = sheet.tip_beside(response, tr("Hold and drag to slide the projection; Shift or the right button turns it, the wheel scales it"));
+    }
     let ctx = sheet.ui.ctx().clone();
     hold(app, &ctx, &response, target);
 }
 
-/// Whether a Move on model hold is under way, or let go this frame (that release is no click in the view); the 3D view then keeps its camera, brush and gizmos still. Ends a hold whose button went away
+/// Whether a Move on model hold is under way, or let go this frame (that release is no click in the view); the 3D view then keeps its camera, brush and gizmos still. Ends a hold whose pad went away
 pub(crate) fn holding(app: &mut TextureCraftApp, ctx: &egui::Context) -> bool {
     let held = app.moving_on_model.is_some();
     if held && !ctx.input(|input| input.pointer.primary_down()) {
@@ -92,15 +95,15 @@ fn end(app: &mut TextureCraftApp, ctx: &egui::Context) {
     ctx.data_mut(|data| data.remove::<MoveHold>(hold_id()));
 }
 
-/// A press on the button starts the hold; each frame until the left button lets go, pointer moves and wheel steps edit the projection
-fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, button: &egui::Response, target: MoveOnModel) {
+/// A press on the pad starts the hold; each frame until the left button lets go, pointer moves and wheel steps edit the projection
+fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, pad: &egui::Response, target: MoveOnModel) {
     let (primary, turn, pointer) =
         ctx.input(|input| (input.pointer.primary_down(), input.modifiers.shift || input.pointer.secondary_down(), input.pointer.latest_pos()));
     let pass = ctx.cumulative_pass_nr();
     let mut held = ctx.data(|data| data.get_temp::<MoveHold>(hold_id())).filter(|held| held.target == target);
     if held.is_none()
         && primary
-        && button.is_pointer_button_down_on()
+        && pad.is_pointer_button_down_on()
         && let Some(at) = pointer
     {
         held = Some(MoveHold { target, last: at, stepped: false, pass: pass.wrapping_sub(1) });
@@ -109,7 +112,7 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, button: &egui::Response,
         if app.moving_on_model == Some(target) {
             end(app, ctx);
         }
-        if button.hovered() {
+        if pad.hovered() {
             ctx.set_cursor_icon(CursorIcon::Grab);
         }
         return;
@@ -129,7 +132,7 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, button: &egui::Response,
         }
         held.last = at;
     }
-    // The wheel scales the projection instead of scrolling the panel or zooming the camera while the button is held
+    // The wheel scales the projection instead of scrolling the panel or zooming the camera while the pad is held
     let wheel = ctx.input_mut(|input| std::mem::take(&mut input.smooth_scroll_delta).y);
     if wheel != 0.0
         && let Some((command, params)) = resized(app, target, (SCALE_PER_WHEEL_POINT * wheel).exp(), rect)
@@ -238,7 +241,7 @@ mod tests {
         }
     }
 
-    /// Presses the left button on Move on model and holds it; returns the system's pointer, resting there
+    /// Presses the left button on Move on model (the preview square) and holds it; returns the system's pointer, resting there
     fn press_the_button(harness: &mut Harness) -> SystemPointer {
         let at = harness.get_by_label("Move on model").rect().center();
         let mut pointer = SystemPointer::at(harness, at);
@@ -266,7 +269,7 @@ mod tests {
         pointer.frame(harness);
     }
 
-    /// Holding the button and dragging carries the projector with the mouse, the pointer hidden and kept on the button; letting go ends it there
+    /// Holding the pad and dragging carries the projector with the mouse, the pointer hidden and kept on the pad; letting go ends it there
     #[test]
     fn holding_the_button_and_dragging_carries_the_projector_as_one_undo_step() {
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -283,7 +286,7 @@ mod tests {
         let after = RoundGizmo::of(harness.state(), rect).unwrap();
         assert!((after.center - (before.center + moved)).length() < 2.0, "the projector follows the mouse: {:?} -> {:?}", before.center, after.center);
         assert!(pointer.hidden, "the pointer hides while held");
-        assert!(pointer.at.distance(from) < 1.0, "and stays on the button, so no screen edge stops the drag: {:?}", pointer.at);
+        assert!(pointer.at.distance(from) < 1.0, "and stays on the pad, so no screen edge stops the drag: {:?}", pointer.at);
         let slid = projection(&harness, layer);
         assert_ne!(projector_offset(&slid), [0.0; 3], "the projector itself moved: {slid:?}");
         assert_eq!(uv_of(&slid), UvTransform::default(), "not only the image inside it");
@@ -298,6 +301,24 @@ mod tests {
         let off = rect.center() + vec2(-100.0, 80.0);
         drag(&mut harness, off, off + vec2(60.0, 0.0), Modifiers::NONE);
         assert_eq!(projection(&harness, layer), slid, "no mode is left on");
+    }
+
+    /// The preview square is the pad: a press anywhere on it, its corner too, starts the hold and holds the pointer
+    #[test]
+    fn the_preview_square_is_the_pad_from_corner_to_corner() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app("triplanar");
+        let pad = harness.get_by_label("Move on model").rect();
+        assert!((pad.width() - pad.height()).abs() < 1.0 && pad.width() > 60.0, "Move on model is the preview square, no row of its own: {pad:?}");
+        let before = projection(&harness, layer);
+        let mut pointer = SystemPointer::at(&mut harness, pad.left_top() + vec2(4.0, 4.0));
+        pointer.button(&mut harness, PointerButton::Primary, true, Modifiers::NONE);
+        assert_eq!(harness.state().moving_on_model, Some(MoveOnModel::layer(layer)), "a press at its corner starts the hold");
+        pointer.drags(&mut harness, vec2(40.0, 0.0), 10, Modifiers::NONE);
+        assert!(pointer.hidden, "the pointer is held");
+        let_go(&mut harness, &mut pointer);
+        assert_ne!(projection(&harness, layer), before, "the drag moved the projection");
+        assert_eq!(harness.state().moving_on_model, None);
     }
 
     /// While held, Shift or the right button turns the image and the wheel scales it, all in the hold's one undo step; the camera neither orbits nor zooms. Released, the wheel zooms again

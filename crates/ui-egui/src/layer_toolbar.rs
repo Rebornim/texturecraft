@@ -139,10 +139,10 @@ pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     }
 }
 
-/// The displayed channel: a list hanging from its button
+/// The displayed channel, or Material for the whole material: a list hanging from its button
 fn channel_list(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, tokens: &Tokens) {
     let response = ui.interact(rect, ui.scope_id().with("layer_channel"), Sense::click());
-    let current = tr(app.ui.layer_channel.label());
+    let current = if app.ui.layer_material_view { tr("Material") } else { tr(app.ui.layer_channel.label()) };
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, current));
     let painter = ui.painter();
     let fill = if response.hovered() { tokens.button.lerp_to_gamma(tokens.text, 0.06) } else { tokens.button };
@@ -156,8 +156,15 @@ fn channel_list(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, tokens: &Tok
     let channels = app.session.doc.project.texture_set(app.session.ts()).map(|set| set.channel_list()).unwrap_or_default();
     egui::Popup::menu(&response).id(ui.scope_id().with("layer_channel_list")).width(rect.width()).gap(1.0).show(|ui| {
         ui.set_min_width(rect.width());
+        if ui.selectable_label(app.ui.layer_material_view, tr("Material")).clicked() {
+            app.ui.layer_material_view = true;
+        }
         for channel in channels {
-            ui.selectable_value(&mut app.ui.layer_channel, channel, tr(channel.label()));
+            let picked = !app.ui.layer_material_view && app.ui.layer_channel == channel;
+            if ui.selectable_label(picked, tr(channel.label())).clicked() {
+                app.ui.layer_channel = channel;
+                app.ui.layer_material_view = false;
+            }
         }
     });
 }

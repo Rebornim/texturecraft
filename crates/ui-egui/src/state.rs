@@ -394,6 +394,11 @@ fn deserialize_shelf_panes_split<'de, D: serde::Deserializer<'de>>(deserializer:
     Ok(if share.is_finite() { share } else { default_shelf_panes_split() })
 }
 
+/// The Layers panel's channel list starts on Material, so the Material tab's orb shows the whole material
+fn default_layer_material_view() -> bool {
+    true
+}
+
 /// Settings that start on, for saved states that predate them
 fn default_true() -> bool {
     true
@@ -438,6 +443,9 @@ pub struct UiState {
     pub uv_pan: [f32; 2],
     /// Channel whose blending the layer rows show.
     pub layer_channel: Channel,
+    /// The Layers panel's channel list is on Material: the Material tab's orb shows the whole material, else `layer_channel` alone
+    #[serde(default = "default_layer_material_view")]
+    pub layer_material_view: bool,
     pub shelf_filter: String,
     /// The asset shelf's picked type: an index into the shelf's types, or past them for every type
     #[serde(default)]
@@ -595,6 +603,7 @@ impl Default for UiState {
             uv_pan: [0.0, 0.0],
             layer_channel: Channel::BaseColor,
             blend_clipboard: None,
+            layer_material_view: true,
             shelf_filter: String::new(),
             shelf_tab: 0,
             shelf_path: Vec::new(),

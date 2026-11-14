@@ -37,6 +37,7 @@ mod pen_pressure;
 mod polygon_fill;
 mod properties_min_width;
 mod properties_popup;
+mod properties_scroll;
 mod rail;
 mod shelf_drop;
 mod shelf_hover_preview;

@@ -281,7 +281,7 @@ impl Default for ToolState {
 }
 
 /// What is selected in the layer stack.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum StackTarget {
     #[default]
     Content,

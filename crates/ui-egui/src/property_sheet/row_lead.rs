@@ -12,7 +12,7 @@ pub(crate) enum RowLead<'a> {
     /// A picture at the left edge with its label after it (culling rows)
     Picture { picture: &'a dyn Fn(&Painter, Rect), text: &'a str },
 
-    /// A setting of the row above, dim, its label under its parent's label
+    /// A setting of the row above, dim, its label on the label column like its parent's
     Child(&'a str),
 
     /// A label beside the controls column in a color of its own (Color Balance's color names)

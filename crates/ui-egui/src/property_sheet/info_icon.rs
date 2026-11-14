@@ -3,7 +3,7 @@ use egui_phosphor::regular as ic;
 
 use super::{PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE};
 
-/// The i's slot at the panel edge; a row with an i, and the child rows under it, start this much further right
+/// The i's slot at the panel edge; a row with an i at its left starts this much further right
 pub(super) const INFO_SLOT: f32 = 16.0;
 
 /// The i's centre, from the panel's left padding
@@ -31,27 +31,33 @@ impl PropertySheet<'_> {
         self
     }
 
-    /// How far the next row's lead moves right: past a pending i, or under its parent's label for a child row
-    pub(super) fn lead_shift(&mut self, child: bool) -> f32 {
-        if child {
-            return self.child_shift;
-        }
-        self.child_shift = if self.info.is_some() { INFO_SLOT } else { 0.0 };
-        self.child_shift
+    /// How far the next row's lead moves right: past a pending i
+    pub(super) fn lead_shift(&self) -> f32 {
+        if self.info.is_some() { INFO_SLOT } else { 0.0 }
     }
 
-    /// Paints the pending i on the row centred at `center_y`, and its tooltip while the pointer rests on it
+    /// Paints the pending i at the panel edge on the row centred at `center_y`, and its tooltip while the pointer rests on it
     pub(super) fn paint_info(&mut self, center_y: f32) {
+        self.paint_info_in(self.left, self.left + INFO_CENTER, center_y);
+    }
+
+    /// [`Self::paint_info`] at the row's right end, the i's right edge on the values' edge
+    pub(super) fn paint_info_at_end(&mut self, center_y: f32) {
+        self.paint_info_in(self.right - INFO_SLOT, self.right - INFO_ICON_SIZE / 2.0, center_y);
+    }
+
+    /// Paints the pending i at `glyph_x` in its slot from `slot_left`
+    fn paint_info_in(&mut self, slot_left: f32, glyph_x: f32, center_y: f32) {
         let Some(tip) = self.info.take() else { return };
         let row_top = center_y - ROW_HEIGHT / 2.0;
-        let slot = Rect::from_min_size(pos2(self.left, row_top), vec2(INFO_SLOT, ROW_HEIGHT));
+        let slot = Rect::from_min_size(pos2(slot_left, row_top), vec2(INFO_SLOT, ROW_HEIGHT));
         let id = self.next_id();
         let response = self.ui.interact(slot, id, Sense::hover());
         response.widget_info(|| WidgetInfo::labeled(Role::Image, true, &tip));
 
         let t = self.tokens;
         let color = if response.hovered() { t.text } else { t.text_dim };
-        self.ui.painter().text(pos2(self.left + INFO_CENTER, center_y), Align2::CENTER_CENTER, ic::INFO, FontId::proportional(INFO_ICON_SIZE), color);
+        self.ui.painter().text(pos2(glyph_x, center_y), Align2::CENTER_CENTER, ic::INFO, FontId::proportional(INFO_ICON_SIZE), color);
 
         // Under the row from the i, ending before the value column; above it where the window ends first
         let anchor = Rect::from_min_max(pos2(self.left, row_top), pos2(self.right - TIP_VALUE_ROOM, row_top + ROW_HEIGHT));

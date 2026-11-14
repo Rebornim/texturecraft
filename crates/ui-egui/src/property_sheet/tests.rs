@@ -80,6 +80,9 @@ impl Default for Gallery {
     }
 }
 
+/// The i of the gallery's Depth Culling row
+const DEPTH_CULLING_TIP: &str = "Paints only the surface the projector sees first";
+
 fn swatch(color: Color32) -> impl Fn(&Painter, Rect) {
     move |painter: &Painter, rect: Rect| {
         painter.rect_filled(rect, CornerRadius::ZERO, color);
@@ -151,8 +154,9 @@ fn gallery(ui: &mut egui::Ui, g: &mut Gallery) {
             if s.card("Edges", Some(true)) {
                 s.toggle("Wrap", &mut g.wrap);
                 s.toggle("Shape Crop", &mut g.crop);
-                s.picture_toggle(Some(&swatch(Color32::from_gray(160))), "Depth Culling", &mut g.depth_culling, false);
-                s.picture_toggle(None, "Backface Culling", &mut g.backface_culling, true);
+                s.info(DEPTH_CULLING_TIP);
+                s.picture_toggle(&swatch(Color32::from_gray(160)), "Depth Culling", &mut g.depth_culling);
+                s.picture_toggle(&swatch(Color32::from_gray(100)), "Backface Culling", &mut g.backface_culling);
             }
             s.slot(&swatch(Color32::from_rgb(0xb0, 0x5a, 0x3a)), "Base color", "Uniform color", Some(&mut g.channel_on), false, false);
             s.slider("Value", &mut g.channel_value, 0.0..=1.0, 2);
@@ -210,6 +214,23 @@ fn toggles_switches_and_pills_change_their_state() {
     assert!(h.state().crop);
     assert_eq!(h.state().scale, 1);
     assert_eq!(h.state().channels, [true, true, true, true, true]);
+}
+
+/// A culling row sits on the panel's grid like a plain toggle: its name on the label column, its picture and switch where the controls start, its i at the row's end
+#[test]
+fn a_culling_row_reads_name_then_picture_and_switch_with_its_i_at_the_end() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = harness(Brightness::MediumDark, Gallery::default());
+    let culling = h.get_by_label("Depth Culling").rect();
+    let plain = h.get_by_label("Wrap").rect();
+    let info = h.get_by_label(DEPTH_CULLING_TIP).rect();
+    assert_eq!(culling.left(), plain.left(), "the name starts where a plain toggle's does: {culling:?} vs {plain:?}");
+    assert!(info.left() > culling.right(), "the i sits after the switch, at the row's end: {info:?} vs {culling:?}");
+
+    let was = h.state().depth_culling;
+    h.get_by_label("Depth Culling").click();
+    h.run_steps(2);
+    assert_ne!(h.state().depth_culling, was, "a click on the row flips it");
 }
 
 #[test]

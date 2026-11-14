@@ -153,40 +153,53 @@ impl PropertySheet<'_> {
 
     /// An on/off beside its label; every toggle in a panel lines up past the longest toggle label
     pub(crate) fn toggle(&mut self, label: &str, on: &mut bool) -> bool {
-        self.picture_toggle(None, label, on, false)
-    }
-
-    /// A toggle row led by a picture (culling rows); a `child` row is dim, its label under its parent's label
-    pub(crate) fn picture_toggle(&mut self, picture: Option<RowPicture<'_>>, label: &str, on: &mut bool, child: bool) -> bool {
         let rect = self.take(ROW_HEIGHT);
         let center_y = rect.center().y;
-        let shift = self.lead_shift(child);
+        let label_x = self.left + self.lead_shift();
         self.paint_info(center_y);
-        let lead_x = self.left + shift;
-        let label_x = if picture.is_some() || child { lead_x + ROW_PICTURE_SIZE + ROW_PICTURE_AIR } else { lead_x };
         let font = FontId::proportional(TEXT_SIZE);
         let label_end = label_x - self.left + self.text_width(label, font.clone()) + TOGGLE_LABEL_AIR;
         self.seen.toggle_label_end = self.seen.toggle_label_end.max(label_end);
 
         let column = (self.column() - self.left).max(self.used.toggle_label_end).max(label_end);
         let pill = Rect::from_center_size(pos2(self.left + column + TOGGLE_CENTER_OFFSET, center_y), PILL_SIZE);
-        let hit = Rect::from_min_max(pos2(label_x, rect.top()), pos2(pill.right(), rect.bottom()));
+        let clicked = self.toggle_hit(Rect::from_min_max(pos2(label_x, rect.top()), pos2(pill.right(), rect.bottom())), label, on);
+
+        let text = self.tokens.text;
+        self.ui.painter().text(pos2(label_x, center_y), Align2::LEFT_CENTER, label, font, text);
+        self.pill(pill.center(), *on, true);
+        self.drawn(center_y + PILL_SIZE.y / 2.0);
+        clicked
+    }
+
+    /// A culling row on the panel's grid: its name on the label column, its picture where the controls start with the switch after it, a pending i at the row's right end
+    pub(crate) fn picture_toggle(&mut self, picture: RowPicture<'_>, label: &str, on: &mut bool) -> bool {
+        let rect = self.take(ROW_HEIGHT);
+        let center_y = rect.center().y;
+        self.paint_info_at_end(center_y);
+        let font = FontId::proportional(TEXT_SIZE);
+        // A name too long for the label column pushes the picture right instead of running under it
+        let picture_x = self.column().max(self.left + self.text_width(label, font.clone()) + super::LABEL_MIN_AIR);
+        let square = Rect::from_min_size(pos2(picture_x, center_y - ROW_PICTURE_SIZE / 2.0), vec2(ROW_PICTURE_SIZE, ROW_PICTURE_SIZE));
+        let pill = Rect::from_min_size(pos2(square.right() + ROW_PICTURE_AIR, center_y - PILL_SIZE.y / 2.0), PILL_SIZE);
+        let clicked = self.toggle_hit(Rect::from_min_max(pos2(self.left, rect.top()), pos2(pill.right(), rect.bottom())), label, on);
+
+        let text = self.tokens.text;
+        picture(self.ui.painter(), square);
+        self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, label, font, text);
+        self.pill(pill.center(), *on, true);
+        self.drawn(square.bottom());
+        clicked
+    }
+
+    /// A toggle's clickable area: a click flips `on`; returns whether it was clicked
+    fn toggle_hit(&mut self, hit: Rect, label: &str, on: &mut bool) -> bool {
         let id = self.next_id();
         let response = self.ui.interact(hit, id, Sense::click());
         if response.clicked() {
             *on = !*on;
         }
         response.widget_info(|| WidgetInfo::selected(Role::CheckBox, true, *on, label));
-
-        let t = self.tokens;
-        let painter = self.ui.painter();
-        if let Some(draw) = picture {
-            draw(painter, Rect::from_center_size(pos2(lead_x + ROW_PICTURE_SIZE / 2.0, center_y), vec2(ROW_PICTURE_SIZE, ROW_PICTURE_SIZE)));
-        }
-        painter.text(pos2(label_x, center_y), Align2::LEFT_CENTER, label, font, if child { t.text_dim } else { t.text });
-        self.pill(pill.center(), *on, true);
-        let bottom = if picture.is_some() { ROW_PICTURE_SIZE } else { PILL_SIZE.y } / 2.0;
-        self.drawn(center_y + bottom);
         response.clicked()
     }
 

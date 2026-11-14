@@ -14,6 +14,7 @@ mod compare_row_response;
 mod factor_slider;
 mod gradient_rows;
 mod group;
+mod hold_pad;
 mod id_color_row;
 mod id_color_row_response;
 mod info_icon;
@@ -123,7 +124,6 @@ pub(crate) struct PropertySheet<'u> {
     empty: bool,
     sections: Vec<(String, f32)>,
     info: Option<String>,
-    child_shift: f32,
     held: bool,
 }
 
@@ -147,7 +147,6 @@ impl<'u> PropertySheet<'u> {
             empty: true,
             sections: Vec::new(),
             info: None,
-            child_shift: 0.0,
             held: false,
             ui,
         };

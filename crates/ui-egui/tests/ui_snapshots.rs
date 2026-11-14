@@ -694,6 +694,18 @@ fn fill_properties_snapshots() {
         execute(session, "layer.fill.projection", &settings).unwrap();
         save(&mut harness, &output_dir, name);
     }
+    // The preview square is Move on model's pad: lit on hover and while held
+    execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": layer, "projection": "planar"})).unwrap();
+    harness.run_steps(2);
+    harness.get_by_label("Move on model").hover();
+    save(&mut harness, &output_dir, "fill-planar-pad-hover");
+    let pad = harness.get_by_label("Move on model").rect().center();
+    harness.event(egui::Event::PointerButton { pos: pad, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    save(&mut harness, &output_dir, "fill-planar-pad-held");
+    harness.event(egui::Event::PointerButton { pos: pad, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    harness.run_steps(2);
+    execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": layer, "projection": "uvTile"})).unwrap();
+    harness.run_steps(2);
     harness.get_by_label("Fill (Match per UV Tile)").click();
     harness.run_steps(2);
     harness.get_by_label("Warp projection").hover();

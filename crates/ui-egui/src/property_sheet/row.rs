@@ -137,7 +137,7 @@ impl PropertySheet<'_> {
     pub(crate) fn lead_with(&mut self, lead: RowLead<'_>) -> f32 {
         let font = FontId::proportional(TEXT_SIZE);
         let center_y = self.cursor_y() + ROW_HEIGHT / 2.0;
-        let shift = self.lead_shift(matches!(lead, RowLead::Child(_)));
+        let shift = self.lead_shift();
         let label_x = self.left + shift + ROW_PICTURE_SIZE + ROW_PICTURE_AIR;
         let (label, stack, text_color) = match lead {
             RowLead::Label { text, stack } => (text, stack, self.tokens.text),
@@ -156,7 +156,7 @@ impl PropertySheet<'_> {
                 return self.column();
             }
             RowLead::Child(text) => {
-                self.ui.painter().text(pos2(label_x, center_y), Align2::LEFT_CENTER, text, font, self.tokens.text_dim);
+                self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, text, font, self.tokens.text_dim);
                 return self.column();
             }
         };

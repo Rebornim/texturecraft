@@ -3,8 +3,8 @@
 
 use super::CursorImage;
 
-/// The pointer's size in points
-const CURSOR_POINTS: f32 = 24.0;
+/// The pointer cell's size in points (a system pointer's 32 pixels at 100 %)
+const CURSOR_POINTS: f32 = 32.0;
 
 /// The eyedropper picture uploaded for one pixel size, kept between frames
 #[derive(Clone)]

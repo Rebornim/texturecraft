@@ -106,6 +106,11 @@ pub(crate) const TURN_RING_POINTS: usize = 49;
 const MIN_STRETCH: f32 = 0.02;
 
 impl FrameGizmo {
+    /// The frame as the 3D view shows it: none while the Projection row's eye hides the projection gizmos
+    pub(crate) fn shown(app: &TextureCraftApp, rect: Rect) -> Option<FrameGizmo> {
+        FrameGizmo::of(app, rect).filter(|_| app.session.doc.project.display.projection_gizmos)
+    }
+
     /// The frame of the selected fill layer, or of the selected mask fill effect, with a planar or warp projection
     pub(crate) fn of(app: &TextureCraftApp, rect: Rect) -> Option<FrameGizmo> {
         use texturecraft_engine::StackTarget;
@@ -302,18 +307,18 @@ pub(crate) fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
 /// Whether the pointer is over one of the selected frame's handles (the brush cursor hides there)
 pub(crate) fn hovered(app: &TextureCraftApp, ui: &Ui, rect: Rect) -> bool {
     let dragging = ui.ctx().data(|data| data.get_temp::<FrameDrag>(drag_id())).is_some();
-    dragging || ui.ctx().pointer_hover_pos().is_some_and(|hover| FrameGizmo::of(app, rect).is_some_and(|gizmo| gizmo.grab(hover).is_some()))
+    dragging || ui.ctx().pointer_hover_pos().is_some_and(|hover| FrameGizmo::shown(app, rect).is_some_and(|gizmo| gizmo.grab(hover).is_some()))
 }
 
 /// Whether screen point `at` is on one of the selected frame's handles
 pub(crate) fn handle_at(app: &TextureCraftApp, rect: Rect, at: Pos2) -> bool {
-    rect.contains(at) && FrameGizmo::of(app, rect).is_some_and(|gizmo| gizmo.grab(at).is_some())
+    rect.contains(at) && FrameGizmo::shown(app, rect).is_some_and(|gizmo| gizmo.grab(at).is_some())
 }
 
 /// Drags on the selected frame's handles (one undo step per drag, the projection updates live); returns whether a frame drag owns the pointer
 pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response, rect: Rect) -> bool {
     let ctx = ui.ctx();
-    let gizmo = FrameGizmo::of(app, rect);
+    let gizmo = FrameGizmo::shown(app, rect);
     let on_frame = |drag: &FrameDrag| gizmo.as_ref().is_some_and(|gizmo| gizmo.layer == drag.layer && gizmo.effect == drag.effect);
     let mut drag = ctx.data(|data| data.get_temp::<FrameDrag>(drag_id())).filter(on_frame);
     if response.drag_started_by(PointerButton::Primary)
@@ -350,7 +355,7 @@ pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Respons
 
 /// The selected frame over the 3D view: dashed outline, corner and edge dots, and the centre square with its axis arrows
 pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
-    let Some(gizmo) = FrameGizmo::of(app, rect) else { return };
+    let Some(gizmo) = FrameGizmo::shown(app, rect) else { return };
 
     let tokens = Tokens::get(ui.ctx());
     let painter = ui.painter_at(rect);
@@ -589,6 +594,44 @@ pub(crate) mod tests {
         let Projection::Warp { frame, corners, .. } = projection(&harness, layer) else { panic!("still a warp") };
         assert!(frame.size[0] < warp.decal.size[0] * 0.75 && (frame.size[1] - warp.decal.size[1]).abs() < 1e-4, "the right edge dot narrows it: {frame:?}");
         assert_eq!(corners, Projection::FRAME_CORNERS, "its corners stay where they are on the frame");
+    }
+
+    /// A click as a mouse sends it: move there, press, release
+    fn click(harness: &mut egui_kittest::Harness<'_, TextureCraftApp>, at: Pos2) {
+        harness.event(egui::Event::PointerMoved(at));
+        harness.event(egui::Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        harness.run_steps(1);
+        harness.event(egui::Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        harness.run_steps(2);
+    }
+
+    /// The Projection row's eye hides the gizmo: not drawn, a press on where its handle was moves nothing, and the eye brings it back
+    #[test]
+    fn the_projection_rows_eye_hides_and_shows_the_gizmo() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app_with(json!({"projection": "planar", "scale": 3}));
+        let shown = gizmo(&harness);
+        let eye = harness.get_by_label("Hide projection gizmos").rect();
+        let projection_row = harness.get_by_label("Planar projection").rect();
+        assert!(eye.left() > projection_row.right() && (eye.center().y - projection_row.center().y).abs() < 0.5, "the eye ends the Projection row");
+
+        click(&mut harness, eye.center());
+        assert!(!harness.state().session.doc.project.display.projection_gizmos, "the eye hides the gizmos");
+        assert!(FrameGizmo::shown(harness.state(), harness.state().viewport_rect).is_none(), "the 3D view has no frame to draw or grab");
+        let before = projection(&harness, layer);
+        drag(&mut harness, shown.center, shown.center + vec2(30.0, 0.0), Modifiers::NONE);
+        assert_eq!(projection(&harness, layer), before, "a drag where the centre square was moves nothing");
+
+        let eye = harness.get_by_label("Show projection gizmos").rect();
+        click(&mut harness, eye.center());
+        assert!(harness.state().session.doc.project.display.projection_gizmos, "the eye shows them again");
+        drag(&mut harness, shown.center, shown.center + vec2(30.0, 0.0), Modifiers::NONE);
+        assert_ne!(projection(&harness, layer), before, "shown, the centre square slides it again");
+
+        // A UV projection has no gizmo: its row keeps the whole width for the dropdown
+        harness.state_mut().run("layer.fill.projection", json!({"layer": layer.0, "projection": "uv"})).unwrap();
+        harness.run_steps(2);
+        assert!(harness.query_by_label("Hide projection gizmos").is_none(), "no eye without a gizmo");
     }
 
     #[test]

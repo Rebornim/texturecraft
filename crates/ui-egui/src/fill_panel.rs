@@ -106,9 +106,20 @@ fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fil
     };
 
     let picture = |painter: &Painter, rect: Rect, kind: ProjectionKind| projection_picture(painter, rect, kind, &tokens);
-    let (picked, _) = sheet.dropdown(tr("Projection"), kind, &ProjectionKind::ALL, |kind| tr(kind.label()).to_owned(), Some(&picture));
+    // A projection with a gizmo in the 3D view ends its row in the eye that shows or hides it (a view setting saved with the project)
+    let gizmos = app.session.doc.project.display.projection_gizmos;
+    let tip = if gizmos { tr("Hide projection gizmos") } else { tr("Show projection gizmos") };
+    let name = |kind: ProjectionKind| tr(kind.label()).to_owned();
+    let (picked, eye) = if matches!(kind, ProjectionKind::Uv | ProjectionKind::UvTile) {
+        (sheet.dropdown(tr("Projection"), kind, &ProjectionKind::ALL, name, Some(&picture)).0, false)
+    } else {
+        sheet.dropdown_with_eye(tr("Projection"), kind, &ProjectionKind::ALL, name, Some(&picture), (gizmos, tip))
+    };
     if let Some(kind) = picked {
         run(app, json!({"projection": kind.id()}));
+    }
+    if eye {
+        app.run("display.set", json!({"projectionGizmos": !gizmos}));
     }
     // Per UV tile, the source fills each tile once: nothing to place
     if kind == ProjectionKind::UvTile {

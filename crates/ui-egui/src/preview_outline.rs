@@ -20,6 +20,8 @@ pub(crate) struct ProjectorOutline {
     pub lines: Vec<Vec<Vec3>>,
     /// Where a planar's image travels to from its frame: the direction dot
     pub tip: Option<Vec3>,
+    /// The projector's centre: a frame's middle, a round projector's centre
+    pub center: Vec3,
 }
 
 impl ProjectorOutline {
@@ -44,14 +46,14 @@ impl ProjectorOutline {
                         }
                     }
                 }
-                ProjectorOutline { lines, tip: None }
+                ProjectorOutline { lines, tip: None, center: place.world(place.local) }
             }
             Projection::Spherical { offset, projector, .. } => {
                 let place = Place::new(projector.rotation, projector.scale, Vec3::from(*offset), 1.0);
                 let r = object.max_element() * SPHERE_REACH;
                 let (u, v) = place.facing().any_orthonormal_pair();
                 let ring = |a: Vec3, b: Vec3| circle(|t| place.world(place.local + (a * t.x + b * t.y) * r));
-                ProjectorOutline { lines: vec![ring(u, v), ring(Vec3::X, Vec3::Z), ring(Vec3::Y, Vec3::Z)], tip: None }
+                ProjectorOutline { lines: vec![ring(u, v), ring(Vec3::X, Vec3::Z), ring(Vec3::Y, Vec3::Z)], tip: None, center: place.world(place.local) }
             }
             Projection::Cylindrical { axis, offset, projector, .. } => {
                 let place = Place::new(projector.rotation, projector.scale, Vec3::from(*offset), 1.0);
@@ -69,11 +71,11 @@ impl ProjectorOutline {
                         lines.push(vec![place.world(place.local + edge * r + along * h), place.world(place.local + edge * r - along * h)]);
                     }
                 }
-                ProjectorOutline { lines, tip: None }
+                ProjectorOutline { lines, tip: None, center: place.world(place.local) }
             }
             Projection::Planar { placed: Some(_), .. } | Projection::Warp { .. } | Projection::Uv { .. } | Projection::UvTile => return None,
         };
-        let finite = outline.points().all(|point| point.is_finite());
+        let finite = outline.points().all(|point| point.is_finite()) && outline.center.is_finite();
         finite.then_some(outline)
     }
 
@@ -89,7 +91,7 @@ fn planar(size: [f32; 2], (origin, across, up, out): (Vec3, Vec3, Vec3, Vec3), o
     let (across, up) = (across * size[0] * 0.5, up * size[1] * 0.5);
     let corners = [center - across - up, center + across - up, center + across + up, center - across + up, center - across - up];
     let tip = center - out * DIRECTION_LENGTH;
-    ProjectorOutline { lines: vec![corners.to_vec(), vec![center, tip]], tip: Some(tip) }
+    ProjectorOutline { lines: vec![corners.to_vec(), vec![center, tip]], tip: Some(tip), center }
 }
 
 /// A round projector's turn, stretch and centre: a point in its own units lands at `turn × (stretch × point)` (the gizmo's placement)

@@ -22,6 +22,8 @@ const WINDOW_MARGIN: f32 = 8.0;
 /// Where the popup goes when it doesn't fit under its slot: above it, then flush with the slot's right edge below or above
 const HANG_FALLBACKS: [egui::RectAlign; 3] = [egui::RectAlign::TOP_START, egui::RectAlign::BOTTOM_END, egui::RectAlign::TOP_END];
 const TILE_GAP: f32 = 4.0;
+/// Air on each side of a tile inside its grid cell, so neighbouring tiles' hover fills never touch
+const TILE_SIDE_GAP: f32 = 1.0;
 const PICTURE_SIZE: f32 = 52.0;
 const PICTURE_TOP: f32 = 6.0;
 const PICTURE_ROUNDING: u8 = 3;
@@ -33,6 +35,8 @@ const NAME_LINE: f32 = 12.0;
 const NAME_MARGIN: f32 = 4.0;
 const IMPORT_GLYPH_SIZE: f32 = 16.0;
 const LOADING_GLYPH_SIZE: f32 = 24.0;
+/// The loading glyph is fainter than the other glyphs: it stands in for a picture still coming
+const LOADING_GLYPH_OPACITY: f32 = 0.5;
 const GLYPH_SIZE: f32 = 22.0;
 
 /// The bright group header row and the dim sub-caption row
@@ -96,15 +100,14 @@ pub(crate) fn show<K: Clone + PartialEq>(
         return None;
     }
 
-    let tk = Tokens::get(&ctx);
+    let tokens = Tokens::get(&ctx);
     let tabs = tabs(thumbs);
     let width = slot.rect.width() - 2.0 * BORDER;
-    let frame = Frame::NONE.fill(tk.panel).stroke(Stroke::new(BORDER, tk.field_border)).corner_radius(CornerRadius::same(POPUP_ROUNDING)).shadow(Shadow {
-        offset: SHADOW_OFFSET,
-        blur: 0,
-        spread: 0,
-        color: HARD_SHADOW,
-    });
+    let frame = Frame::NONE
+        .fill(tokens.panel)
+        .stroke(Stroke::new(BORDER, tokens.field_border))
+        .corner_radius(CornerRadius::same(POPUP_ROUNDING))
+        .shadow(Shadow { offset: SHADOW_OFFSET, blur: 0, spread: 0, color: HARD_SHADOW });
 
     // Always its full size, under the slot or above it where the window ends first; only a window too short for it anywhere gets a shorter grid
     let head = if tabs.len() > 1 { STRIP_HEIGHT } else { 0.0 } + SEARCH_ROW;
@@ -124,9 +127,10 @@ pub(crate) fn show<K: Clone + PartialEq>(
             ui.set_width(width);
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
             let just_opened = !ui.is_sizing_pass() && ui.data_mut(|data| data.remove_temp::<bool>(opened_id(popup_id))).unwrap_or(false);
-            let current_tab = current.and_then(|current| tabs.iter().position(|tab| tab.items().any(|item| &item.id == current)));
+            let current_tab = || current.and_then(|current| tabs.iter().position(|tab| tab.items().any(|item| &item.id == current)));
             let stored_tab = ui.data(|data| data.get_temp::<usize>(tab_id(popup_id)));
-            let mut open_tab = if just_opened { current_tab.or(stored_tab) } else { stored_tab.or(current_tab) }.unwrap_or(0).min(tabs.len().saturating_sub(1));
+            let mut open_tab =
+                if just_opened { current_tab().or(stored_tab) } else { stored_tab.or_else(current_tab) }.unwrap_or(0).min(tabs.len().saturating_sub(1));
 
             let query = ui.data(|data| data.get_temp::<String>(search_id(popup_id))).unwrap_or_default().trim().to_lowercase();
             if tabs.len() > 1
@@ -162,28 +166,28 @@ pub(crate) fn show<K: Clone + PartialEq>(
 
 /// The edge tabs on the popup's top: a chrome strip, the open tab a panel-coloured box joined to the body; while searching each counts its matches
 fn tab_strip<K>(ui: &mut Ui, tabs: &[PickerTab<K>], open: usize, query: &str) -> Option<usize> {
-    let tk = Tokens::get(ui.ctx());
+    let tokens = Tokens::get(ui.ctx());
     let (strip, _) = ui.allocate_exact_size(vec2(ui.available_width(), STRIP_HEIGHT), Sense::hover());
     let top_only = CornerRadius { nw: STRIP_ROUNDING, ne: STRIP_ROUNDING, sw: 0, se: 0 };
-    ui.painter().rect_filled(strip, top_only, tk.chrome);
+    ui.painter().rect_filled(strip, top_only, tokens.chrome);
 
     let mut clicked = None;
     let mut left = strip.left() + SIDE;
     for (index, tab) in tabs.iter().enumerate() {
         let is_open = index == open;
-        let empty = !tab.items().next().is_some();
+        let empty = tab.items().next().is_none();
         let color = if is_open {
-            tk.text
+            tokens.text
         } else if empty {
-            tk.button_border
+            tokens.button_border
         } else {
-            tk.text_dim
+            tokens.text_dim
         };
         let name_font = if is_open { semibold(TAB_TEXT_SIZE) } else { FontId::proportional(TAB_TEXT_SIZE) };
         let name = ui.painter().layout_no_wrap(tab.name.to_owned(), name_font, color);
         let count = (!query.is_empty()).then(|| tab.items().filter(|item| item.matches(query)).count());
         let count_galley = count.map(|count| {
-            let count_color = if count > 0 { tk.accent } else { tk.button_border };
+            let count_color = if count > 0 { tokens.accent } else { tokens.button_border };
             ui.painter().layout_no_wrap(count.to_string(), FontId::proportional(COUNT_SIZE), count_color)
         });
         let width = name.size().x + TAB_PADDING + count_galley.as_ref().map_or(0.0, |galley| COUNT_GAP + galley.size().x);
@@ -192,9 +196,9 @@ fn tab_strip<K>(ui: &mut Ui, tabs: &[PickerTab<K>], open: usize, query: &str) ->
         let response = ui.interact(rect, ui.scope_id().with(("picker_tab", index)), Sense::click());
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_open, tab.name));
         if is_open {
-            ui.painter().rect_filled(rect, CornerRadius { nw: TAB_ROUNDING, ne: TAB_ROUNDING, sw: 0, se: 0 }, tk.panel);
+            ui.painter().rect_filled(rect, CornerRadius { nw: TAB_ROUNDING, ne: TAB_ROUNDING, sw: 0, se: 0 }, tokens.panel);
         }
-        let text_color = if response.hovered() && !is_open { tk.text } else { color };
+        let text_color = if response.hovered() && !is_open { tokens.text } else { color };
         let center_y = strip.center().y + TAB_TOP / 2.0;
         ui.painter().text(pos2(left + TAB_ICON_CENTER, center_y), Align2::CENTER_CENTER, tab.icon, FontId::proportional(TAB_ICON_SIZE), text_color);
         let name_left = left + TAB_NAME_LEFT;
@@ -212,27 +216,27 @@ fn tab_strip<K>(ui: &mut Ui, tabs: &[PickerTab<K>], open: usize, query: &str) ->
 
 /// The neutral search field (no accent outline, focused or not), focused the frame the picker opens, × clearing it; returns the lowercase query
 fn search_field(ui: &mut Ui, popup_id: Id, just_opened: bool) -> String {
-    let tk = Tokens::get(ui.ctx());
+    let tokens = Tokens::get(ui.ctx());
     let mut search: String = ui.data(|data| data.get_temp(search_id(popup_id))).unwrap_or_default();
     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), SEARCH_ROW), Sense::hover());
     let field = Rect::from_center_size(row.center(), vec2(row.width() - 2.0 * SIDE, FIELD_HEIGHT));
     let painter = ui.painter();
-    painter.rect(field, CornerRadius::same(FIELD_ROUNDING), tk.field, Stroke::new(BORDER, tk.field_border), StrokeKind::Inside);
+    painter.rect(field, CornerRadius::same(FIELD_ROUNDING), tokens.field, Stroke::new(BORDER, tokens.field_border), StrokeKind::Inside);
     painter.text(
         pos2(field.left() + SEARCH_ICON_X, field.center().y),
         Align2::CENTER_CENTER,
         ic::MAGNIFYING_GLASS,
         FontId::proportional(SEARCH_ICON_SIZE),
-        tk.text_dim,
+        tokens.text_dim,
     );
 
     let text_rect = Rect::from_min_max(pos2(field.left() + SEARCH_TEXT_X, field.top()), pos2(field.right() - 2.0 * CLEAR_X, field.bottom()));
-    let hint = egui::RichText::new(tr("Search")).color(tk.text_dim).size(SEARCH_TEXT_SIZE);
+    let hint = egui::RichText::new(tr("Search")).color(tokens.text_dim).size(SEARCH_TEXT_SIZE);
     let edit = egui::TextEdit::singleline(&mut search)
         .frame(Frame::NONE)
         .hint_text(hint)
         .font(semibold(SEARCH_TEXT_SIZE))
-        .text_color(tk.text)
+        .text_color(tokens.text)
         .align(Align2::LEFT_CENTER)
         .desired_width(text_rect.width());
     let response = ui.put(text_rect, edit);
@@ -244,7 +248,7 @@ fn search_field(ui: &mut Ui, popup_id: Id, just_opened: bool) -> String {
         let clear = Rect::from_center_size(pos2(field.right() - CLEAR_X, field.center().y), vec2(FIELD_HEIGHT, FIELD_HEIGHT));
         let clear = ui.interact(clear, popup_id.with("clear"), Sense::click());
         clear.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tr("Clear search")));
-        let color = if clear.hovered() { tk.text_strong } else { tk.text };
+        let color = if clear.hovered() { tokens.text_strong } else { tokens.text };
         ui.painter().text(clear.rect.center(), Align2::CENTER_CENTER, ic::X, FontId::proportional(CLEAR_SIZE), color);
         if clear.clicked() {
             search.clear();
@@ -259,7 +263,7 @@ fn search_field(ui: &mut Ui, popup_id: Id, just_opened: bool) -> String {
 
 /// The open tab's items matching `query` as tiles under their headers and captions, `current` outlined and, given the grid's height in `reveal_in`, scrolled to; returns the one clicked
 fn grid<K: Clone + PartialEq>(ui: &mut Ui, tab: &PickerTab<K>, query: &str, current: Option<&K>, reveal_in: Option<f32>) -> Option<K> {
-    let tk = Tokens::get(ui.ctx());
+    let tokens = Tokens::get(ui.ctx());
     let left = ui.max_rect().left() + SIDE;
     let cell = (ui.available_width() - SIDE - SCROLL_ROOM) / COLUMNS as f32;
     let mut picked = None;
@@ -272,7 +276,7 @@ fn grid<K: Clone + PartialEq>(ui: &mut Ui, tab: &PickerTab<K>, query: &str, curr
 
         let group_top = ui.cursor().top();
         if let Some(header) = group.header {
-            caption_row(ui, left, HEADER_HEIGHT, header, semibold(HEADER_SIZE), tk.text);
+            caption_row(ui, left, HEADER_HEIGHT, header, semibold(HEADER_SIZE), tokens.text);
         }
         let mut caption_top = group_top;
         let mut row: Vec<(usize, &ResourcePickerItem<K>)> = Vec::new();
@@ -282,7 +286,7 @@ fn grid<K: Clone + PartialEq>(ui: &mut Ui, tab: &PickerTab<K>, query: &str, curr
                 flush_row(ui, &mut row, left, cell, current, &mut picked);
                 if let Some(caption) = item.caption {
                     caption_top = ui.cursor().top();
-                    caption_row(ui, left, CAPTION_HEIGHT, caption, FontId::proportional(CAPTION_SIZE), tk.text_dim);
+                    caption_row(ui, left, CAPTION_HEIGHT, caption, FontId::proportional(CAPTION_SIZE), tokens.text_dim);
                 }
                 last_caption = item.caption;
             }
@@ -327,7 +331,7 @@ fn flush_row<K: Clone + PartialEq>(
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
     for (column, (place, item)) in row.drain(..).enumerate() {
         let x = left + column as f32 * cell;
-        let tile = Rect::from_min_max(pos2(x + 1.0, rect.top()), pos2(x + cell - 1.0, rect.bottom() - TILE_GAP));
+        let tile = Rect::from_min_max(pos2(x + TILE_SIDE_GAP, rect.top()), pos2(x + cell - TILE_SIDE_GAP, rect.bottom() - TILE_GAP));
         if tile_ui(ui, tile, (place, item), current == Some(&item.id)).clicked() {
             *picked = Some(item.id.clone());
         }
@@ -336,7 +340,7 @@ fn flush_row<K: Clone + PartialEq>(
 
 /// One tile, `place` its order in the tab: its picture, its name in up to two lines; hovered = button fill, current = accent outline and a bold name
 fn tile_ui<K>(ui: &mut Ui, rect: Rect, (place, item): (usize, &ResourcePickerItem<K>), chosen: bool) -> Response {
-    let tk = Tokens::get(ui.ctx());
+    let tokens = Tokens::get(ui.ctx());
     let response = ui.interact(rect, ui.scope_id().with(("picker_tile", place)), Sense::click());
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::ListBoxOption, true, chosen, &item.label));
     if !ui.is_rect_visible(rect) {
@@ -346,10 +350,10 @@ fn tile_ui<K>(ui: &mut Ui, rect: Rect, (place, item): (usize, &ResourcePickerIte
     let hovered = response.hovered();
     let painter = ui.painter();
     if hovered {
-        painter.rect_filled(rect, CornerRadius::same(TILE_ROUNDING), tk.button);
+        painter.rect_filled(rect, CornerRadius::same(TILE_ROUNDING), tokens.button);
     }
     if chosen {
-        painter.rect_stroke(rect, CornerRadius::same(TILE_ROUNDING), Stroke::new(BORDER, tk.accent), StrokeKind::Inside);
+        painter.rect_stroke(rect, CornerRadius::same(TILE_ROUNDING), Stroke::new(BORDER, tokens.accent), StrokeKind::Inside);
     }
 
     let picture = Rect::from_min_size(pos2(rect.center().x - PICTURE_SIZE / 2.0, rect.top() + PICTURE_TOP), vec2(PICTURE_SIZE, PICTURE_SIZE));
@@ -364,19 +368,19 @@ fn tile_ui<K>(ui: &mut Ui, rect: Rect, (place, item): (usize, &ResourcePickerIte
                 Align2::CENTER_CENTER,
                 ic::ARROWS_CLOCKWISE,
                 FontId::proportional(LOADING_GLYPH_SIZE),
-                tk.text_dim.gamma_multiply(0.5),
+                tokens.text_dim.gamma_multiply(LOADING_GLYPH_OPACITY),
             );
         }
         TilePicture::Swatch(color) => {
             painter.rect_filled(picture, rounding, *color);
         }
         TilePicture::Glyph(glyph) => {
-            painter.rect(picture, rounding, tk.field, Stroke::new(BORDER, tk.field_border), StrokeKind::Inside);
-            painter.text(picture.center(), Align2::CENTER_CENTER, *glyph, FontId::proportional(GLYPH_SIZE), tk.text_dim);
+            painter.rect(picture, rounding, tokens.field, Stroke::new(BORDER, tokens.field_border), StrokeKind::Inside);
+            painter.text(picture.center(), Align2::CENTER_CENTER, *glyph, FontId::proportional(GLYPH_SIZE), tokens.text_dim);
         }
         TilePicture::Import => {
-            painter.rect(picture, rounding, tk.field, Stroke::new(BORDER, tk.field_border), StrokeKind::Inside);
-            let color = if hovered { tk.text } else { tk.text_dim };
+            painter.rect(picture, rounding, tokens.field, Stroke::new(BORDER, tokens.field_border), StrokeKind::Inside);
+            let color = if hovered { tokens.text } else { tokens.text_dim };
             painter.text(picture.center(), Align2::CENTER_CENTER, ic::PLUS, FontId::proportional(IMPORT_GLYPH_SIZE), color);
         }
     }
@@ -387,21 +391,29 @@ fn tile_ui<K>(ui: &mut Ui, rect: Rect, (place, item): (usize, &ResourcePickerIte
 
 /// The tile's name under its picture: whole words on the first line, the rest on a second, each cut with "…" when too long
 fn name_lines(ui: &Ui, rect: Rect, label: &str, bright: bool, bold: bool) {
-    let tk = Tokens::get(ui.ctx());
+    let tokens = Tokens::get(ui.ctx());
     let painter = ui.painter();
-    let color = if bright { tk.text } else { tk.text_dim };
+    let color = if bright { tokens.text } else { tokens.text_dim };
     let font = if bold { semibold(NAME_SIZE) } else { FontId::proportional(NAME_SIZE) };
     let room = rect.width() - NAME_MARGIN;
     let fits = |text: &str| painter.layout_no_wrap(text.to_owned(), font.clone(), color).size().x <= room;
 
-    let words: Vec<&str> = label.split_whitespace().collect();
-    let mut taken = 0;
-    while taken < words.len() && fits(&words[..=taken].join(" ")) {
-        taken += 1;
-    }
-    let lines = if taken == 0 || taken == words.len() { vec![label.to_owned()] } else { vec![words[..taken].join(" "), words[taken..].join(" ")] };
-    for (index, line) in lines.iter().enumerate() {
-        let mut job = egui::text::LayoutJob::simple_singleline(line.clone(), font.clone(), color);
+    // Each word's end in the trimmed name, so a first line of whole words is measured as a slice of it
+    let trimmed = label.trim();
+    let prefix = |end: usize| trimmed.get(..end).unwrap_or_default();
+    let word_ends = trimmed
+        .char_indices()
+        .filter(|(at, character)| character.is_whitespace() && !prefix(*at).ends_with(char::is_whitespace))
+        .map(|(at, _)| at)
+        .chain(std::iter::once(trimmed.len()));
+    let first_line_end = word_ends.take_while(|end| fits(prefix(*end))).last();
+
+    let (first, second) = match first_line_end {
+        Some(end) if end < trimmed.len() => (prefix(end), trimmed.get(end..).map(str::trim_start)),
+        _ => (label, None),
+    };
+    for (index, line) in std::iter::once(first).chain(second).enumerate() {
+        let mut job = egui::text::LayoutJob::simple_singleline(line.to_owned(), font.clone(), color);
         job.wrap = egui::text::TextWrapping::truncate_at_width(room);
         let galley = painter.layout_job(job);
         let center = pos2(rect.center().x, rect.top() + NAME_CENTER + index as f32 * NAME_LINE);

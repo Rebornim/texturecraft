@@ -65,3 +65,28 @@ mod filter_stylize;
 mod filter_support;
 mod filter_transform;
 mod symmetry;
+
+/// Window of the Properties tests: tall enough that a whole sheet shows without scrolling
+const PROPERTIES_WINDOW: egui::Vec2 = egui::vec2(1600.0, 1400.0);
+
+// Small texture and bake sizes keep the sample session fast; the panels don't depend on them
+const TEXTURE_RESOLUTION: u32 = 256;
+const BAKE_RESOLUTION: u32 = 64;
+
+/// One frame at 60 Hz, so timed steps run as on a common display
+const FRAME_SECONDS: f32 = 1.0 / 60.0;
+
+/// Frames for the first layout and fonts to settle
+const STARTUP_FRAMES: usize = 4;
+
+/// Frames for a click or key to reach the panels and its change to show
+const SETTLE_FRAMES: usize = 3;
+
+/// Frames between the moves of a drag, and between a press and its release
+const DRAG_STEP_FRAMES: usize = 2;
+
+/// How far in from a slider track's ends a drag's points stay, so they land on the track
+const SLIDER_END_INSET: f32 = 5.0;
+
+/// Frames for an input that redraws Properties (another selection, source or operator) to show
+const REDRAW_FRAMES: usize = 4;

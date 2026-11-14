@@ -43,17 +43,17 @@ impl PropertySheet<'_> {
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, !missing, format!("{name} {set}")));
         let hovered = !missing && response.hovered();
 
-        let t = self.tokens;
+        let tokens = self.tokens;
         let painter = self.ui.painter().clone();
-        painter.rect_filled(face, CornerRadius::same(CARD_RADIUS), if hovered { t.button } else { t.row });
+        painter.rect_filled(face, CornerRadius::same(CARD_RADIUS), if hovered { tokens.button } else { tokens.row });
         thumbnail(&painter, Rect::from_min_size(pos2(self.left, center_y - THUMB_SIZE / 2.0), vec2(THUMB_SIZE, THUMB_SIZE)));
-        let (name_font, name_color) = if missing { (FontId::proportional(TEXT_SIZE), t.text_dim) } else { (semibold(TEXT_SIZE), t.text) };
+        let (name_font, name_color) = if missing { (FontId::proportional(TEXT_SIZE), tokens.text_dim) } else { (semibold(TEXT_SIZE), tokens.text) };
         painter.text(pos2(self.left + NAME_LEFT, center_y - NAME_RISE), Align2::LEFT_CENTER, name, name_font, name_color);
         let link = if missing { ic::LINK_BREAK } else { ic::LINK };
-        painter.text(pos2(self.left + LINK_CENTER, center_y + SET_DROP), Align2::CENTER_CENTER, link, FontId::proportional(LINK_SIZE), t.text_dim);
-        painter.text(pos2(self.left + SET_LEFT, center_y + SET_DROP), Align2::LEFT_CENTER, set, FontId::proportional(SMALL_TEXT_SIZE), t.text_dim);
+        painter.text(pos2(self.left + LINK_CENTER, center_y + SET_DROP), Align2::CENTER_CENTER, link, FontId::proportional(LINK_SIZE), tokens.text_dim);
+        painter.text(pos2(self.left + SET_LEFT, center_y + SET_DROP), Align2::LEFT_CENTER, set, FontId::proportional(SMALL_TEXT_SIZE), tokens.text_dim);
         if !missing {
-            let arrow_color = if hovered { t.text } else { t.text_dim };
+            let arrow_color = if hovered { tokens.text } else { tokens.text_dim };
             painter.text(pos2(self.right - ARROW_INSET, center_y), Align2::CENTER_CENTER, ic::ARROW_RIGHT, FontId::proportional(ARROW_SIZE), arrow_color);
         }
         self.drawn(rect.bottom());

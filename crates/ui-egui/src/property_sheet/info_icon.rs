@@ -25,10 +25,10 @@ const TIP_LINE_HEIGHT: f32 = 15.0;
 const TIP_ROUNDING: u8 = 5;
 const TIP_SHADOW: Shadow = Shadow { offset: [2, 3], blur: 0, spread: 0, color: HARD_SHADOW };
 
-impl PropertySheet<'_> {
+impl<'u> PropertySheet<'u> {
     /// Gives the next row led by a label or picture an i at the panel edge that explains it on hover; its lead and its child rows move right to make room
-    pub(crate) fn info(&mut self, tip: &str) -> &mut Self {
-        self.info = Some(tip.to_owned());
+    pub(crate) fn info(&mut self, tip: &'u str) -> &mut Self {
+        self.info = Some(tip);
         self
     }
 
@@ -54,17 +54,17 @@ impl PropertySheet<'_> {
         let slot = Rect::from_min_size(pos2(slot_left, row_top), vec2(INFO_SLOT, ROW_HEIGHT));
         let id = self.next_id();
         let response = self.ui.interact(slot, id, Sense::hover());
-        response.widget_info(|| WidgetInfo::labeled(Role::Image, true, &tip));
+        response.widget_info(|| WidgetInfo::labeled(Role::Image, true, tip));
 
-        let t = self.tokens;
-        let color = if response.hovered() { t.text } else { t.text_dim };
+        let tokens = self.tokens;
+        let color = if response.hovered() { tokens.text } else { tokens.text_dim };
         self.ui.painter().text(pos2(glyph_x, center_y), Align2::CENTER_CENTER, ic::INFO, FontId::proportional(INFO_ICON_SIZE), color);
 
         // Under the row from the i, ending before the value column; above it where the window ends first
         let anchor = Rect::from_min_max(pos2(self.left, row_top), pos2(self.right - TIP_VALUE_ROOM, row_top + ROW_HEIGHT));
         let frame = Frame::NONE
-            .fill(t.chrome)
-            .stroke(Stroke::new(1.0, t.field_border))
+            .fill(tokens.chrome)
+            .stroke(Stroke::new(1.0, tokens.field_border))
             .corner_radius(CornerRadius::same(TIP_ROUNDING))
             .inner_margin(TIP_MARGIN)
             .shadow(TIP_SHADOW);
@@ -80,7 +80,7 @@ impl PropertySheet<'_> {
             .width(text_width);
         tooltip.show(|ui| {
             ui.set_width(text_width);
-            ui.label(RichText::new(tip.as_str()).size(SMALL_TEXT_SIZE).color(t.text).line_height(Some(TIP_LINE_HEIGHT)));
+            ui.label(RichText::new(tip).size(SMALL_TEXT_SIZE).color(tokens.text).line_height(Some(TIP_LINE_HEIGHT)));
         });
     }
 }

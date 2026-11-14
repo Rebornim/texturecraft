@@ -3,7 +3,7 @@
 use egui::{Color32, CornerRadius, Painter, Rect, Stroke, StrokeKind, Ui};
 use egui_phosphor::regular as ic;
 use serde_json::json;
-use texturecraft_engine::core::{BakedMap, ColorSelection, LayerId, SelectionBackground};
+use texturecraft_engine::core::{ColorSelection, LayerId, SelectionBackground};
 
 use crate::TextureCraftApp;
 use crate::drawn_icon::DrawnIcon;
@@ -14,7 +14,7 @@ use crate::picker_tab::PickerTab;
 use crate::property_sheet::PropertySheet;
 use crate::resource_picker;
 use crate::resource_picker_item::ResourcePickerItem;
-use crate::slot_thumbnail::{Thumbnail, paint_thumbnail};
+use crate::slot_thumbnail::{SlotThumbnail, paint_empty_slot, paint_thumbnail};
 use crate::theme::Tokens;
 use crate::thumbs::Thumbs;
 use crate::tile_picture::TilePicture;
@@ -29,16 +29,19 @@ const CHECKER_GRAYS: [u8; 2] = [150, 90];
 pub fn color_selection_properties(app: &mut TextureCraftApp, ui: &mut Ui, effect: LayerId, selection: &ColorSelection) {
     let id = effect.0;
     let set_index = app.session.doc.project.locate(effect_owner(app, effect)).map_or(app.session.ts(), |(set_index, _, _)| set_index);
-    let mesh_map = app.session.baked(set_index).filter(|baked| baked.maps.contains_key(&BakedMap::Id)).cloned();
     let ctx = ui.ctx().clone();
     let (picture, line) = match &selection.id_map {
         Some(name) => {
-            let picture =
-                app.session.images.get(name).cloned().map_or(Thumbnail::Glyph(ic::IMAGE), |image| Thumbnail::Texture(app.thumbs.image(&ctx, name, &image)));
+            let picture = app
+                .session
+                .images
+                .get(name)
+                .cloned()
+                .map_or(SlotThumbnail::Glyph(ic::IMAGE), |image| SlotThumbnail::Texture(app.thumbs.image(&ctx, name, &image)));
             (Some(picture), format!("{name} · {}", tr("texture")))
         }
-        None => match mesh_map.as_ref().and_then(|baked| app.thumbs.id_mesh_map(&ctx, baked)) {
-            Some(texture) => (Some(Thumbnail::Texture(texture)), format!("{} · {}", tr("ID"), tr("mesh map"))),
+        None => match app.session.baked(set_index).and_then(|baked| app.thumbs.id_mesh_map(&ctx, set_index, baked)) {
+            Some(texture) => (Some(SlotThumbnail::Texture(texture)), format!("{} · {}", tr("ID"), tr("mesh map"))),
             None => (None, tr("None").to_owned()),
         },
     };
@@ -51,7 +54,7 @@ pub fn color_selection_properties(app: &mut TextureCraftApp, ui: &mut Ui, effect
         sheet.section(tr("Color selection"), false);
         let thumbnail = |painter: &Painter, rect: Rect| match &picture {
             Some(picture) => paint_thumbnail(painter, rect, picture, &tokens),
-            None => empty_slot(painter, rect, &tokens),
+            None => paint_empty_slot(painter, rect, &tokens),
         };
         let slot = sheet.slot(&thumbnail, tr("ID Mask"), &line, None, selection.id_map.is_some(), false);
         let popup = sheet.ui.make_persistent_id(("id_map_picker", id));
@@ -150,11 +153,6 @@ fn texture_tabs(thumbs: &mut Thumbs, ctx: &egui::Context, images: &texturecraft_
         picture: TilePicture::Texture(Some(thumbs.image(ctx, name, image))),
     }));
     vec![PickerTab { icon: ic::SQUARES_FOUR, name: tr("Resources"), groups: vec![PickerGroup { header: Some(tr("Textures")), items: textures }] }]
-}
-
-/// The slot's picture while there is no ID map: an empty outlined square
-fn empty_slot(painter: &Painter, rect: Rect, tokens: &Tokens) {
-    painter.rect_stroke(rect.shrink(1.0), CornerRadius::same(3), Stroke::new(1.0, tokens.text_dim), StrokeKind::Inside);
 }
 
 /// The swatch of a background choice: its gray, or a checker for transparent

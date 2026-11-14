@@ -9,7 +9,7 @@ use texturecraft_engine::fill_alpha::library_alpha_of;
 
 use crate::TextureCraftApp;
 use crate::fill_material_panel::{shown_color, source_line};
-use crate::i18n::tr;
+use crate::i18n::{n_, tr};
 use crate::mask_source_choice::MaskSourceChoice;
 use crate::picker_group::PickerGroup;
 use crate::picker_tab::PickerTab;
@@ -86,7 +86,8 @@ fn source_tabs(thumbs: &mut Thumbs, ctx: &egui::Context, images: &ImageStore, un
         tile(MaskSourceChoice::Image(name.clone()), name, picture)
     }));
     let uniform = vec![tile(MaskSourceChoice::Uniform, tr("Uniform value"), TilePicture::Swatch(uniform))];
-    let groups = [("Textures", textures), ("Uniform", uniform)].into_iter().map(|(header, items)| PickerGroup { header: Some(tr(header)), items }).collect();
+    let groups =
+        [(n_("Textures"), textures), (n_("Uniform"), uniform)].into_iter().map(|(header, items)| PickerGroup { header: Some(tr(header)), items }).collect();
     vec![PickerTab { icon: ic::SQUARES_FOUR, name: tr("Resources"), groups }]
 }
 

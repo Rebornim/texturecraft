@@ -1,7 +1,7 @@
 use egui::{Align2, Color32, CornerRadius, FontId, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use egui_phosphor::regular as ic;
 
-use super::{ICON_SIZE, PropertySheet, SMALL_TEXT_SIZE, TEXT_SIZE};
+use super::{CONTROL_RADIUS, ICON_SIZE, PropertySheet, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Air between neighbouring fields of one row
@@ -80,12 +80,12 @@ impl PropertySheet<'_> {
             *linked = !*linked;
         }
 
-        let t = self.tokens;
-        let (fill, border) = if *linked { (t.accent_dim, t.accent) } else { (t.button, t.button_border) };
+        let tokens = self.tokens;
+        let (fill, border) = if *linked { (tokens.accent_dim, tokens.accent) } else { (tokens.button, tokens.button_border) };
         let painter = self.ui.painter();
-        painter.rect(rect, CornerRadius::same(4), fill, Stroke::new(1.0, border), StrokeKind::Inside);
+        painter.rect(rect, CornerRadius::same(CONTROL_RADIUS), fill, Stroke::new(1.0, border), StrokeKind::Inside);
         let glyph = if *linked { ic::LINK_SIMPLE_HORIZONTAL } else { ic::LINK_SIMPLE_HORIZONTAL_BREAK };
-        painter.text(rect.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(ICON_SIZE), t.text);
+        painter.text(rect.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(ICON_SIZE), tokens.text);
         response.clicked()
     }
 
@@ -93,9 +93,9 @@ impl PropertySheet<'_> {
     fn number_field(&mut self, rect: Rect, label: &str, field: &mut NumberField) -> Option<bool> {
         let id = self.next_id();
         let typing_id = id.with("typed");
-        let t = self.tokens;
+        let tokens = self.tokens;
         let painter = self.ui.painter().clone();
-        painter.rect(rect, CornerRadius::same(4), t.field, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
+        painter.rect(rect, CornerRadius::same(CONTROL_RADIUS), tokens.field, Stroke::new(1.0, tokens.field_border), StrokeKind::Inside);
         match field.tag_color {
             Some(color) => {
                 painter.text(pos2(rect.left() + TAG_LETTER_INSET, rect.center().y), Align2::LEFT_CENTER, field.tag, semibold(SMALL_TEXT_SIZE), color);
@@ -106,7 +106,7 @@ impl PropertySheet<'_> {
                     Align2::CENTER_CENTER,
                     field.tag,
                     FontId::proportional(ICON_SIZE),
-                    t.text_dim,
+                    tokens.text_dim,
                 );
             }
         }
@@ -115,7 +115,7 @@ impl PropertySheet<'_> {
         if let Some(mut text) = self.ui.data(|data| data.get_temp::<String>(typing_id)) {
             let edit = egui::TextEdit::singleline(&mut text).id(typing_id).font(semibold(TEXT_SIZE)).align(egui::Align2::RIGHT_CENTER);
             let response = self.typing_edit(rect.left() + 2.0 * TAG_LETTER_INSET + TAG_TO_TYPING, rect.right() - VALUE_INSET, rect.center().y, edit);
-            painter.rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, t.accent), StrokeKind::Inside);
+            painter.rect_stroke(rect, CornerRadius::same(CONTROL_RADIUS), Stroke::new(1.0, tokens.accent), StrokeKind::Inside);
             if !response.lost_focus() {
                 self.ui.data_mut(|data| data.insert_temp(typing_id, text));
                 return None;
@@ -138,15 +138,16 @@ impl PropertySheet<'_> {
         let response = self.ui.interact(rect, id, Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
         response.widget_info(|| egui::WidgetInfo::slider(true, f64::from(field.value), format!("{label} {}", field.tag)));
         let tag_right = match field.tag_color {
-            Some(_) => rect.left() + TAG_LETTER_INSET + painter.layout_no_wrap(field.tag.to_owned(), semibold(SMALL_TEXT_SIZE), t.text).size().x,
+            Some(_) => rect.left() + TAG_LETTER_INSET + painter.layout_no_wrap(field.tag.to_owned(), semibold(SMALL_TEXT_SIZE), tokens.text).size().x,
             None => rect.left() + TAG_GLYPH_CENTER + ICON_SIZE / 2.0,
         };
         let room = rect.right() - VALUE_INSET - tag_right - TAG_VALUE_GAP;
-        let shown =
-            fitting_number(field.value, decimals, field.suffix, room, |text| painter.layout_no_wrap(text.to_owned(), semibold(TEXT_SIZE), t.text).size().x);
-        painter.text(pos2(rect.right() - VALUE_INSET, rect.center().y), Align2::RIGHT_CENTER, shown, semibold(TEXT_SIZE), t.text);
+        let shown = fitting_number(field.value, decimals, field.suffix, room, |text| {
+            painter.layout_no_wrap(text.to_owned(), semibold(TEXT_SIZE), tokens.text).size().x
+        });
+        painter.text(pos2(rect.right() - VALUE_INSET, rect.center().y), Align2::RIGHT_CENTER, shown, semibold(TEXT_SIZE), tokens.text);
         if response.hovered() || response.dragged() {
-            painter.rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, t.button_border), StrokeKind::Inside);
+            painter.rect_stroke(rect, CornerRadius::same(CONTROL_RADIUS), Stroke::new(1.0, tokens.button_border), StrokeKind::Inside);
         }
 
         if response.clicked() {
@@ -158,12 +159,11 @@ impl PropertySheet<'_> {
             crate::pointer_lock::hold(self.ui.ctx());
         }
         let delta = response.drag_delta().x;
-        if !response.dragged() || delta == 0.0 {
-            return None;
+        let moved = response.dragged() && delta != 0.0;
+        if moved {
+            field.value += delta * field.speed;
         }
-
-        field.value += delta * field.speed;
-        Some(!response.drag_started())
+        crate::widgets::press_edit(self.ui, response.id, moved)
     }
 }
 

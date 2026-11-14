@@ -1,6 +1,7 @@
 //! What a material orb shows: every channel the orb lights with, read from the fill's own sources through its own projection
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
@@ -11,13 +12,19 @@ use texturecraft_engine::core::{Channel, ChannelKind, Fill, NormalFormat, Projec
 use texturecraft_engine::geom::glam::{Vec2, Vec3};
 use texturecraft_engine::texel::srgb_to_linear;
 
+mod hash_writer;
 mod orb_sample;
 
+use hash_writer::HashWriter;
 pub(crate) use orb_sample::OrbSample;
 
 /// The channels the orb reads; the others do not change how it looks
 pub(crate) const ORB_CHANNELS: [Channel; 7] =
     [Channel::BaseColor, Channel::Metallic, Channel::Roughness, Channel::Normal, Channel::Height, Channel::Emissive, Channel::Opacity];
+
+/// Fewest and most image repeats the orb's filtering assumes, so a tiny or huge projection scale neither blurs nor aliases without bound
+const MIN_IMAGE_SCALE: f32 = 0.01;
+const MAX_IMAGE_SCALE: f32 = 64.0;
 
 /// A material as the orb shows it
 #[derive(Clone, Debug)]
@@ -78,7 +85,9 @@ impl OrbMaterial {
     /// A key that changes whenever the orb would look different
     pub(crate) fn key(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
-        format!("{:?}{:?}{:?}{:?}", self.sources, self.projection, self.sampling, self.alone).hash(&mut hasher);
+
+        // Writing to a hasher cannot fail
+        let _ = write!(HashWriter(&mut hasher), "{:?}{:?}{:?}{:?}", self.sources, self.projection, self.sampling, self.alone);
         for (name, image) in &self.images {
             // The same name re-imported is a new image
             (name, Arc::as_ptr(image) as usize, image.width, image.height).hash(&mut hasher);
@@ -154,7 +163,7 @@ fn image_scale(projection: &Projection) -> f32 {
         Projection::Uv { scale, .. } => scale[0].abs().max(scale[1].abs()),
         Projection::UvTile | Projection::Warp { .. } => 1.0,
     };
-    if scale.is_finite() { scale.abs().clamp(0.01, 64.0) } else { 1.0 }
+    if scale.is_finite() { scale.abs().clamp(MIN_IMAGE_SCALE, MAX_IMAGE_SCALE) } else { 1.0 }
 }
 
 /// Where a point of the unit orb lies for a fill's projection: its position and normal (both the unit direction `direction`), and UVs wrapping once around the equator (two across) and once from pole to pole

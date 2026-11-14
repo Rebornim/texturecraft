@@ -54,7 +54,8 @@ pub(crate) fn blocks_view_press(ctx: &egui::Context) -> bool {
 
 /// `rgb` (0..1 each) as six hex digits, as the hex field shows it
 pub(crate) fn hex(rgb: [f32; 3]) -> String {
-    rgb.iter().map(|c| format!("{:02X}", (c.clamp(0.0, 1.0) * 255.0).round() as u8)).collect()
+    let [red, green, blue] = rgb.map(|component| (component.clamp(0.0, 1.0) * 255.0).round() as u8);
+    format!("{red:02X}{green:02X}{blue:02X}")
 }
 
 /// A typed hex code (`#` optional, 6 or 3 digits) as 0..1 components; None when it isn't one

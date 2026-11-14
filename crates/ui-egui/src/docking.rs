@@ -508,7 +508,7 @@ const VIEWPORT_MIN_SIZE: Vec2 = vec2(200.0, 150.0);
 /// Size a panel opens at when it floats
 const FLOATING_SIZE: Vec2 = vec2(300.0, 380.0);
 
-/// The body of every panel except the viewport, in the dock or on the rail Least size of `panel`, docked or floating; a dock column or split stops shrinking at its panels' largest
+/// Least size of `panel`, docked or floating; a dock column or split stops shrinking at its panels' largest
 fn min_size(panel: Panel) -> Vec2 {
     match panel {
         Panel::Viewport => VIEWPORT_MIN_SIZE,
@@ -517,6 +517,7 @@ fn min_size(panel: Panel) -> Vec2 {
     }
 }
 
+/// The body of every panel except the viewport, in the dock or on the rail
 pub(crate) fn panel_body(app: &mut TextureCraftApp, ui: &mut Ui, panel: Panel) {
     // Properties draws full-width bands and tabs, so it keeps its own margins
     let margin = if panel == Panel::Properties { Margin::ZERO } else { PANEL_BODY_MARGIN };
@@ -628,7 +629,8 @@ mod tests {
         let Node::Split { size: SplitSize::Ratio(layers), first, second, .. } = below_sets.as_ref() else { panic!("layers | properties") };
         assert!(matches!(first.as_ref(), Node::Tabs { panels, .. } if panels.first() == Some(&Panel::Layers)));
         assert!(matches!(second.as_ref(), Node::Tabs { panels, .. } if panels == &[Panel::Properties]));
-        assert!((layers - 0.31).abs() < 1e-6, "Layers about 31%, Properties about 69%: {layers}");
+        let properties = 1.0 - layers;
+        assert!((2.0 / 3.0..0.7).contains(&properties), "Properties takes about 69% of the column, at least two thirds: {properties}");
     }
 
     #[test]

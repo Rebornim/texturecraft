@@ -7,18 +7,10 @@ use serde_json::json;
 use texturecraft_engine::core::{LayerId, LayerKind, Projection, ShapeCrop};
 use texturecraft_ui_egui::TextureCraftApp;
 
+use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+
 /// Tall enough that Properties shows the whole fill without scrolling
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1400.0);
-
-/// Small texture and bake sizes keep the sample session fast; the panel doesn't depend on them
-const TEXTURE_RESOLUTION: u32 = 256;
-const BAKE_RESOLUTION: u32 = 64;
-
-/// Frames for the first layout and fonts to settle
-const STARTUP_FRAMES: usize = 4;
-
-/// Frames for a click or selection change to reach the panel
-const SETTLE_FRAMES: usize = 3;
 
 /// The app with a new fill layer (projected as `projection`) selected in Properties, and its layer id
 fn app_with_fill(projection: &str) -> (Harness<'static, TextureCraftApp>, u64) {

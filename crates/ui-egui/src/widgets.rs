@@ -22,6 +22,18 @@ pub fn slider(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeI
     slider_inner(ui, label, value, range, decimals).0
 }
 
+/// For an editor `id` drawn every frame: `Some(merge)` when it `changed`, merge true for a press's later changes (one undo step per drag; typing never merges)
+pub(crate) fn press_edit(ui: &Ui, id: egui::Id, changed: bool) -> Option<bool> {
+    let held = ui.input(|input| input.pointer.any_down());
+    if !held {
+        // The press is over: the next one starts its own undo step
+        ui.data_mut(|data| data.remove_temp::<bool>(id));
+        return changed.then_some(false);
+    }
+
+    changed.then(|| ui.data_mut(|data| std::mem::replace(data.get_temp_mut_or_default::<bool>(id), true)))
+}
+
 /// [`slider`] for a value re-read from the document every frame: `Some(merge)` on every frame
 /// that changes `value` (live while dragging, a click on the track, a typed value). `merge` is
 /// true for the later changes of one drag, so the edit that applies them (with the command's
@@ -29,6 +41,19 @@ pub fn slider(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeI
 pub fn slider_edit(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, decimals: usize) -> Option<bool> {
     slider_inner(ui, label, value, range, decimals).1
 }
+
+/// Least width of a slider's value field, wide enough for a short number
+const SLIDER_VALUE_MIN_WIDTH: f32 = 44.0;
+
+/// Height of a slider's track row
+const SLIDER_TRACK_HEIGHT: f32 = 14.0;
+
+/// From the track row's sides to the track's ends, so the knob stays inside the row
+const SLIDER_TRACK_INSET: f32 = 5.0;
+
+/// Thickness of a slider's rail and its knob's radius
+const SLIDER_RAIL_WIDTH: f32 = 2.0;
+const SLIDER_KNOB_RADIUS: f32 = 4.5;
 
 fn slider_inner(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, decimals: usize) -> (Response, Option<bool>) {
     let tokens = Tokens::get(ui.ctx());
@@ -38,7 +63,7 @@ fn slider_inner(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::Rang
     let value_width = [minimum, maximum]
         .into_iter()
         .map(|bound| ui.painter().layout_no_wrap(format!("{bound:.decimals$}"), font.clone(), tokens.text).size().x)
-        .fold(44.0, f32::max);
+        .fold(SLIDER_VALUE_MIN_WIDTH, f32::max);
     let mut edit = None;
     let field = ui
         .horizontal(|ui| {
@@ -79,7 +104,8 @@ fn slider_inner(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::Rang
             .inner
         })
         .inner;
-    let (rect, mut response) = ui.allocate_exact_size(vec2(width, 14.0), Sense::click_and_drag());
+
+    let (rect, mut response) = ui.allocate_exact_size(vec2(width, SLIDER_TRACK_HEIGHT), Sense::click_and_drag());
     if response.is_pointer_button_down_on() {
         ui.data_mut(|data| data.remove_temp::<String>(field));
         ui.memory_mut(|memory| memory.surrender_focus(field));
@@ -87,24 +113,26 @@ fn slider_inner(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::Rang
     if edit.is_some() {
         response.mark_changed();
     }
+
+    let mut moved = false;
     if (response.dragged() || response.clicked())
         && let Some(pointer) = response.interact_pointer_pos()
     {
-        let fraction = ((pointer.x - rect.left() - 5.0) / (rect.width() - 10.0).max(1.0)).clamp(0.0, 1.0);
+        let fraction = ((pointer.x - rect.left() - SLIDER_TRACK_INSET) / (rect.width() - 2.0 * SLIDER_TRACK_INSET).max(1.0)).clamp(0.0, 1.0);
         let next = minimum + (maximum - minimum) * fraction;
         if (next - *value).abs() > f32::EPSILON {
             *value = next;
             response.mark_changed();
-            // Later frames of one drag share its undo step
-            edit = Some(ui.data_mut(|data| std::mem::replace(data.get_temp_mut_or_default::<bool>(response.id), true)));
+            moved = true;
         }
     }
-    if response.drag_stopped() || response.clicked() {
-        ui.data_mut(|data| data.remove_temp::<bool>(response.id));
-    }
+
+    // Later frames of one drag share its undo step, and a drag wins over typing in the same frame
+    edit = press_edit(ui, response.id, moved).or(edit);
 
     let fraction = if maximum > minimum { ((*value - minimum) / (maximum - minimum)).clamp(0.0, 1.0) } else { 0.0 };
-    track(ui, &response, rect.left() + 5.0..=rect.right() - 5.0, rect.center().y, fraction, 2.0, 4.5);
+    let track_ends = rect.left() + SLIDER_TRACK_INSET..=rect.right() - SLIDER_TRACK_INSET;
+    track(ui, &response, track_ends, rect.center().y, fraction, SLIDER_RAIL_WIDTH, SLIDER_KNOB_RADIUS);
     (response, edit)
 }
 
@@ -417,7 +445,7 @@ pub fn color_swatch(ui: &mut Ui, id: &str, linear: &mut [f32; 3], width: f32) ->
 
 /// A color picker `width` wide: R, G, B (sRGB 0–255) with a copy button, a saturation/value
 /// square and a hue strip. Returns true when the color changed.
-pub(crate) fn color_picker(ui: &mut Ui, id: egui::Id, c: &mut Color32, width: f32) -> bool {
+fn color_picker(ui: &mut Ui, id: egui::Id, c: &mut Color32, width: f32) -> bool {
     use egui::ecolor::{hsv_from_rgb, rgb_from_hsv};
     let tk = Tokens::get(ui.ctx());
     let mut srgb = [c.r(), c.g(), c.b()];
@@ -470,20 +498,23 @@ pub(crate) fn color_picker(ui: &mut Ui, id: egui::Id, c: &mut Color32, width: f3
 
 /// Fill `rect` with `rgb(x, y)` (sRGB 0..1 over 0..1 across and down), as a shaded mesh.
 pub(crate) fn gradient(painter: &egui::Painter, rect: egui::Rect, rgb: impl Fn(f32, f32) -> [f32; 3]) {
-    const N: u32 = 24;
+    /// Cells across and down: fine enough that a hue strip's six ramps read smooth
+    const GRID_CELLS: u32 = 24;
+
     let mut mesh = egui::Mesh::default();
-    for j in 0..=N {
-        for i in 0..=N {
-            let (x, y) = (i as f32 / N as f32, j as f32 / N as f32);
-            let [r, g, b] = rgb(x, y).map(|c| (c.clamp(0.0, 1.0) * 255.0 + 0.5) as u8);
+    for j in 0..=GRID_CELLS {
+        for i in 0..=GRID_CELLS {
+            let (x, y) = (i as f32 / GRID_CELLS as f32, j as f32 / GRID_CELLS as f32);
+            let [r, g, b] = rgb(x, y).map(|component| (component.clamp(0.0, 1.0) * 255.0 + 0.5) as u8);
             mesh.colored_vertex(rect.lerp_inside(vec2(x, y)), Color32::from_rgb(r, g, b));
         }
     }
-    for j in 0..N {
-        for i in 0..N {
-            let k = j * (N + 1) + i;
-            mesh.add_triangle(k, k + 1, k + N + 1);
-            mesh.add_triangle(k + 1, k + N + 2, k + N + 1);
+    for j in 0..GRID_CELLS {
+        for i in 0..GRID_CELLS {
+            let top_left = j * (GRID_CELLS + 1) + i;
+            let bottom_left = top_left + GRID_CELLS + 1;
+            mesh.add_triangle(top_left, top_left + 1, bottom_left);
+            mesh.add_triangle(top_left + 1, bottom_left + 1, bottom_left);
         }
     }
     painter.add(mesh);

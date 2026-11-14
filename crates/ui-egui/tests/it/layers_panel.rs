@@ -128,3 +128,34 @@ fn deeply_nested_effect_visibility_is_reachable_in_a_narrow_panel() {
     let content = &h.state().session.doc.project.layers[&layer].content_effects;
     assert!(!content.iter().find(|effect| effect.name == "Effect A").unwrap().visible, "the compact eye toggles the effect instead of missing the panel");
 }
+
+/// A drag on a row's opacity cell is one undo step, however many frames it spans
+#[test]
+fn dragging_a_row_opacity_adds_one_undo_step() {
+    let (mut h, layer) = harness();
+    let row = h.get_by_label("Masked fill").rect();
+    let cell = h.get_all_by_role(egui::accesskit::Role::SpinButton).map(|node| node.rect()).find(|cell| row.contains(cell.center())).unwrap();
+    let opacity = |h: &Harness<'_, TextureCraftApp>| h.state().session.doc.project.layers[&layer].blend(Channel::BaseColor).unwrap().opacity;
+    let (before, steps) = (opacity(&h), h.state().session.history_labels().len());
+
+    // A leftward drag lowers it from 100 %, a frame per move as a real drag arrives
+    let from = cell.center();
+    h.hover_at(from);
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.run_steps(1);
+    for step in 1..=4 {
+        h.hover_at(from - egui::vec2(10.0 * step as f32, 0.0));
+        h.run_steps(1);
+    }
+    h.event(egui::Event::PointerButton {
+        pos: from - egui::vec2(40.0, 0.0),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(3);
+
+    assert!(opacity(&h) < before, "the drag lowers the opacity: {}", opacity(&h));
+    assert_eq!(h.state().session.history_labels().len(), steps + 1, "every frame of the drag merges into one step");
+}

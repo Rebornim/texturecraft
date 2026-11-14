@@ -1,14 +1,14 @@
-//! Properties of a compare mask: its channel, the two sources with the operator between them, the constant (a side reads it), the tolerance
-//! (within tolerance), the hardness, and the two sources' histograms in their colours
+//! Properties of a compare mask: its channel, both sources and their operator, constant, tolerance, hardness and histograms
 
 use std::sync::Arc;
 
 use egui::{Align2, Color32, FontId, Mesh, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use serde_json::json;
-use texturecraft_engine::core::{Channel, CompareOp, CompareSource, Layer, LayerId};
+use texturecraft_engine::core::{CompareOp, CompareSource, Layer, LayerId};
 
 use crate::TextureCraftApp;
-use crate::i18n::tr;
+use crate::compare_settings::CompareSettings;
+use crate::i18n::{n_, tr};
 use crate::property_sheet::PropertySheet;
 use crate::theme::{AXIS_COLORS, Tokens};
 
@@ -34,29 +34,19 @@ const HISTOGRAM_TINT: f32 = 0.5;
 /// Width of the constant's line in the well
 const CONSTANT_LINE_WIDTH: f32 = 2.0;
 
+/// Gap between the well's top and the top of the constant's line
+const CONSTANT_LINE_INSET: f32 = 2.0;
+
 /// The colours that tag the left and the right source
 const SOURCE_TAGS: [Color32; 2] = [AXIS_COLORS[1], AXIS_COLORS[2]];
 
 /// The operator switch's words, in [`CompareOp::ALL`] order
 const OPERATOR_WORDS: [&str; 3] = ["<", "≈", ">"];
 
-/// What compare mask `effect_id` holds
-#[derive(Clone, Copy)]
-pub(crate) struct CompareSettings {
-    pub(crate) op: CompareOp,
-    pub(crate) constant: f32,
-    pub(crate) tolerance: f32,
-    pub(crate) left: CompareSource,
-    pub(crate) right: CompareSource,
-    pub(crate) channel: Channel,
-    pub(crate) hardness: f32,
-}
-
 /// The properties of compare mask `effect_id` on `layer`; every edit goes through `effect.set`
 pub(crate) fn compare_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, effect_id: LayerId, settings: CompareSettings) {
     let project = &app.session.doc.project;
     let channels = project.locate(layer.id).and_then(|(set, _, _)| project.texture_set(set).ok()).map(|set| set.channel_list()).unwrap_or_default();
-    let histograms = histogram_counts(app, ui, effect_id);
     let id = effect_id.0;
     let CompareSettings { op, mut constant, mut tolerance, left, right, channel, mut hardness } = settings;
 
@@ -93,6 +83,8 @@ pub(crate) fn compare_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: 
         }
 
         if sheet.band(tr("Source histograms"), true, None, None).open {
+            let histograms = histogram_counts(app, sheet.ui, effect_id);
+
             // A constant has no spread: it shows as a line at its value in its side's colour
             let constants = [left, right].map(|side| (side == CompareSource::Constant).then_some(constant));
             sheet.embed(|ui| source_histograms(ui, histograms.as_deref(), constants));
@@ -103,10 +95,10 @@ pub(crate) fn compare_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: 
 /// A source's name in its list
 fn source_name(source: CompareSource) -> String {
     tr(match source {
-        CompareSource::LayersBelow => "Layers below",
-        CompareSource::ThisLayer => "This layer",
-        CompareSource::ThisMask => "This mask",
-        CompareSource::Constant => "Constant",
+        CompareSource::LayersBelow => n_("Layers below"),
+        CompareSource::ThisLayer => n_("This layer"),
+        CompareSource::ThisMask => n_("This mask"),
+        CompareSource::Constant => n_("Constant"),
     })
     .to_string()
 }
@@ -153,7 +145,7 @@ fn source_histograms(ui: &mut Ui, counts: Option<&[Vec<u32>; 2]>, constants: [Op
     for (side, constant) in constants.iter().enumerate() {
         if let (Some(value), Some(tag)) = (constant, SOURCE_TAGS.get(side)) {
             let x = at(value.clamp(0.0, 1.0));
-            painter.line_segment([pos2(x, well.top() + 2.0), pos2(x, well.bottom())], Stroke::new(CONSTANT_LINE_WIDTH, *tag));
+            painter.line_segment([pos2(x, well.top() + CONSTANT_LINE_INSET), pos2(x, well.bottom())], Stroke::new(CONSTANT_LINE_WIDTH, *tag));
         }
     }
 

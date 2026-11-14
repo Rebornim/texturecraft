@@ -1,7 +1,8 @@
 //! Where a slider's value sits and how it reads
 
-/// A value drawn right-aligned at `right` in a `width` wide box centred on `center_y`, reading `shown`; typing may end in `suffix`
+/// A value drawn right-aligned at `right` in a `width` wide box centred on `center_y`, reading `shown`; typing may end in `suffix`; it answers as `label`'s value
 pub(super) struct ValueText<'a> {
+    pub(super) label: &'a dyn std::fmt::Display,
     pub(super) right: f32,
     pub(super) width: f32,
     pub(super) center_y: f32,

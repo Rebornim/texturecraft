@@ -4,7 +4,7 @@ use egui::{Align2, CornerRadius, FontId, Painter, Rect, Role, Sense, Stroke, Str
 use egui_phosphor::regular as ic;
 
 use super::choice::ChoicePicture;
-use super::{CONTROL_HEIGHT, PropertySheet};
+use super::{CONTROL_HEIGHT, CONTROL_RADIUS, PropertySheet};
 
 /// Air between the dropdown and its eye
 const EYE_GAP: f32 = 6.0;
@@ -40,9 +40,9 @@ impl PropertySheet<'_> {
 }
 
 /// The eye's square: button fill, its edge lit while hovered; the eye open, or slashed and dim
-fn paint_eye(painter: &Painter, rect: Rect, shown: bool, hovered: bool, t: &crate::theme::Tokens) {
-    let border = if hovered { t.accent } else { t.button_border };
-    painter.rect(rect, CornerRadius::same(4), t.button, Stroke::new(1.0, border), StrokeKind::Inside);
-    let (glyph, color) = if shown { (ic::EYE, t.text) } else { (ic::EYE_SLASH, t.text_dim) };
+fn paint_eye(painter: &Painter, rect: Rect, shown: bool, hovered: bool, tokens: &crate::theme::Tokens) {
+    let border = if hovered { tokens.accent } else { tokens.button_border };
+    painter.rect(rect, CornerRadius::same(CONTROL_RADIUS), tokens.button, Stroke::new(1.0, border), StrokeKind::Inside);
+    let (glyph, color) = if shown { (ic::EYE, tokens.text) } else { (ic::EYE_SLASH, tokens.text_dim) };
     painter.text(rect.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(EYE_GLYPH_SIZE), color);
 }

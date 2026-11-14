@@ -8,7 +8,7 @@ use texturecraft_engine::compose::EffectHistogram;
 use texturecraft_engine::core::{Channel, ChannelKind, Layer, LayerId, Levels};
 
 use crate::TextureCraftApp;
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use crate::levels_display::LevelsDisplay;
 use crate::levels_editor::levels_editor;
 use crate::property_sheet::PropertySheet;
@@ -20,6 +20,11 @@ const HISTOGRAM_BUCKETS: usize = 64;
 /// Share of the counted texels a bucket needs to hold for Auto to keep it in the input range
 const AUTO_MIN_SHARE: f64 = 0.001;
 
+/// The action row's buttons, by their place in it
+const RESET_ACTION: usize = 0;
+const AUTO_ACTION: usize = 1;
+const INVERT_ACTION: usize = 2;
+
 /// The properties of levels effect `effect_id` of `layer`; every edit goes through `effect.set`
 pub(crate) fn levels_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, effect_id: LayerId, levels: &Levels) {
     let is_content = layer.content_effects.iter().any(|effect| effect.id == effect_id);
@@ -28,14 +33,14 @@ pub(crate) fn levels_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &
     let histogram = histogram_counts(app, ui, effect_id, channel);
     let shows_colors = is_content && channel.kind() == ChannelKind::Color;
     let display_id = egui::Id::unique(("levels_display", effect_id.0));
-    let display = if shows_colors { ui.data(|data| data.get_temp(display_id)).unwrap_or_default() } else { LevelsDisplay::Lum };
+    let display = if shows_colors { ui.data(|data| data.get_temp(display_id)).unwrap_or_default() } else { LevelsDisplay::Luminance };
     let tokens = Tokens::get(ui.ctx());
 
     let mut edited = *levels;
     let mut edit = None;
     PropertySheet::show(ui, ("levels_sheet", effect_id.0), |sheet| {
         let target = if is_content { affects_name(levels.affects) } else { tr("Mask").to_string() };
-        sheet.section(&format!("{} - {target}", tr("Levels")), false);
+        sheet.section(&trf("Levels - {target}", &[("target", &target)]), false);
         if is_content && let (Some(Some(picked)), _) = sheet.dropdown(tr("Affects"), levels.affects, &choices, affects_name, None) {
             app.run("effect.set", json!({"effect": effect_id.0, "affects": picked.id()}));
         }
@@ -43,8 +48,8 @@ pub(crate) fn levels_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &
         let series = histogram.as_ref().map(|histogram| display.series(histogram, &tokens)).unwrap_or_default();
         edit = sheet.embed(|ui| levels_editor(ui, effect_id, &series, &mut edited));
         if shows_colors {
-            let words: Vec<&str> = LevelsDisplay::ALL.iter().map(|view| view.word()).collect();
-            let tints: Vec<&[egui::Color32]> = LevelsDisplay::ALL.iter().map(|view| view.tints()).collect();
+            let words = LevelsDisplay::ALL.map(|view| tr(view.word()));
+            let tints = LevelsDisplay::ALL.map(LevelsDisplay::tints);
             let chosen = LevelsDisplay::ALL.iter().position(|view| *view == display).unwrap_or_default();
             if let Some(view) = sheet.wide_switch(&words, chosen, &tints).and_then(|index| LevelsDisplay::ALL.get(index).copied()) {
                 sheet.ui.data_mut(|data| data.insert_temp(display_id, view));
@@ -54,11 +59,14 @@ pub(crate) fn levels_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &
         let auto_range = histogram.as_ref().and_then(|histogram| auto_input_range(display.auto_counts(histogram)));
         let mut clamp = levels.clamp;
         let (reset, auto, invert) = (tr("Reset"), tr("Auto"), tr("Invert"));
-        let actions = sheet.action_row(&[(reset, edited != edited.reset()), (auto, auto_range.is_some()), (invert, true)], tr("Clamp"), &mut clamp);
+
+        // In RESET_ACTION, AUTO_ACTION, INVERT_ACTION order
+        let buttons = [(reset, edited != edited.reset()), (auto, auto_range.is_some()), (invert, true)];
+        let actions = sheet.action_row(&buttons, tr("Clamp"), &mut clamp);
         match (actions.clicked, auto_range) {
-            (Some(0), _) => edited = edited.reset(),
-            (Some(1), Some((low, high))) => (edited.in_low, edited.in_high) = (low, high),
-            (Some(2), _) => std::mem::swap(&mut edited.out_low, &mut edited.out_high),
+            (Some(RESET_ACTION), _) => edited = edited.reset(),
+            (Some(AUTO_ACTION), Some((low, high))) => (edited.in_low, edited.in_high) = (low, high),
+            (Some(INVERT_ACTION), _) => std::mem::swap(&mut edited.out_low, &mut edited.out_high),
             _ => {}
         }
         if actions.clicked.is_some() {

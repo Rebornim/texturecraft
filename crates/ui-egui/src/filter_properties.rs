@@ -82,8 +82,7 @@ fn attributes(app: &TextureCraftApp, sheet: &mut PropertySheet<'_>, filter: &Fil
 /// The slot card of image input `input` of filter effect `effect` (its row only, inside the card open now, when `in_card`): the source it reads, picked like a mask fill's
 fn input_slot(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect: LayerId, input: ImageInput, in_card: bool) {
     let Some((reader, source)) = app.session.doc.project.effect(effect).map(|(owner, found)| (owner, found.input(&input))) else { return };
-    let anchors = crate::dock::anchors_below(app, reader);
-    crate::fill_material_panel::source_card(app, sheet, source, &json!({"effect": effect.0}), crate::source_slot::SourceSlot::Input(input), &anchors, in_card);
+    crate::fill_material_panel::source_card(app, sheet, source, &json!({"effect": effect.0}), crate::source_slot::SourceSlot::Input(input), reader, in_card);
 }
 
 /// The library defaults of `filter` (None for an empty filter)

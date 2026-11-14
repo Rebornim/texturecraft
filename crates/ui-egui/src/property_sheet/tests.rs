@@ -11,6 +11,9 @@ use crate::theme::{Accent, Brightness, Tokens};
 /// Width of the Properties panel the mockups are drawn at
 const PANEL_WIDTH: f32 = 300.0;
 
+/// The harness window: the panel plus room on its right for popups and tips, tall enough for the whole gallery unscrolled
+const HARNESS_SIZE: egui::Vec2 = egui::vec2(PANEL_WIDTH + 260.0, 1000.0);
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Filtering {
     BilinearHq,
@@ -38,6 +41,7 @@ struct Gallery {
     offset: f32,
     rotation: f32,
     position: [f32; 3],
+    position_merges: Vec<bool>,
     linked: bool,
     wrap: bool,
     crop: bool,
@@ -63,6 +67,7 @@ impl Default for Gallery {
             offset: -0.25,
             rotation: 30.0,
             position: [0.0, 1.25, -0.5],
+            position_merges: Vec::new(),
             linked: true,
             wrap: true,
             crop: false,
@@ -138,16 +143,17 @@ fn gallery(ui: &mut egui::Ui, g: &mut Gallery) {
             if reset.open {
                 let mut fields = [("X", 0), ("Y", 1), ("Z", 2)].map(|(tag, axis)| NumberField {
                     tag,
-                    tag_color: Some([Color32::from_rgb(0xd8, 0x60, 0x4f), Color32::from_rgb(0x6c, 0xbc, 0x5a), Color32::from_rgb(0x5a, 0x8c, 0xe0)][axis]),
+                    tag_color: crate::theme::AXIS_COLORS.get(axis).copied(),
                     value: g.position[axis],
                     speed: 0.01,
                     decimals: 2,
                     suffix: "",
                 });
-                if let Some((axis, _)) = s.number_fields("Position", &mut fields, Some(&mut g.linked), false)
+                if let Some((axis, merge)) = s.number_fields("Position", &mut fields, Some(&mut g.linked), false)
                     && let Some(slot) = g.position.get_mut(axis)
                 {
                     *slot = fields[axis].value;
+                    g.position_merges.push(merge);
                 }
             }
 
@@ -188,9 +194,9 @@ fn gallery(ui: &mut egui::Ui, g: &mut Gallery) {
     });
 }
 
-/// A harness showing the gallery in `brightness`, with the app's fonts from the first frame
-fn builder(brightness: Brightness) -> egui_kittest::HarnessBuilder<Gallery> {
-    Harness::builder().with_size(egui::vec2(PANEL_WIDTH + 260.0, 1000.0)).with_context_setup(move |ctx| {
+/// A harness in `brightness`, with the app's fonts from the first frame
+fn builder<State>(brightness: Brightness) -> egui_kittest::HarnessBuilder<State> {
+    Harness::builder().with_size(HARNESS_SIZE).with_context_setup(move |ctx| {
         crate::theme::install(ctx);
         crate::theme::apply(ctx, brightness, Accent::default());
     })
@@ -242,7 +248,7 @@ fn dropdown_list_hangs_from_its_button_at_its_width_and_picks() {
     h.run_steps(2);
 
     let option = h.get_by_label("Nearest").rect();
-    let list = option.expand(1.0);
+    let list = option.expand(super::choice::LIST_BORDER);
     assert_eq!(list.left(), button.left(), "the list starts at the button's left edge");
     assert_eq!(list.width(), button.width(), "the list is the button's width");
     assert!(option.top() > button.bottom(), "the list hangs below the button");
@@ -267,12 +273,12 @@ fn type_at(h: &mut Harness<'_, Gallery>, at: egui::Pos2, text: &str) {
 fn a_click_on_a_value_or_the_seed_selects_it_so_typing_replaces_it() {
     let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut h = harness(Brightness::MediumDark, Gallery::default());
-    let track = h.get_by_label("Hardness").rect();
-    type_at(&mut h, egui::pos2(track.right() + 20.0, track.center().y), "0.4");
+    let value = h.get_by_label("Hardness value").rect();
+    type_at(&mut h, value.center(), "0.4");
     assert_eq!(h.state().hardness, 0.4, "the slider's value is replaced, not appended to");
 
-    let dice = h.get_by_label("Random").rect();
-    type_at(&mut h, egui::pos2(dice.left() - 20.0, dice.center().y), "77");
+    let seed = h.get_by_label("Seed value").rect();
+    type_at(&mut h, seed.center(), "77");
     assert_eq!(h.state().seed, 77, "the seed is replaced, not appended to");
 }
 
@@ -289,9 +295,97 @@ fn a_drag_merges_after_its_first_step_and_a_click_does_not() {
     h.run();
     h.drop_at(track.center() + egui::vec2(40.0, 0.0));
     h.run();
+    let drag_merges = h.state().hardness_merges.clone();
+
+    let click = track.left_center() + egui::vec2(20.0, 0.0);
+    h.drag_at(click);
+    h.drop_at(click);
+    h.run();
+
+    assert_eq!(drag_merges.first(), Some(&false), "the drag's first change starts an undo step: {drag_merges:?}");
+    assert!(drag_merges.iter().skip(1).all(|merge| *merge), "later changes continue it: {drag_merges:?}");
+    let merges = &h.state().hardness_merges;
+    assert_eq!(merges.len(), drag_merges.len() + 1, "the click changes the value once: {merges:?}");
+    assert_eq!(merges.last(), Some(&false), "the click starts its own undo step: {merges:?}");
+}
+
+/// A drag whose first frames change nothing (the knob held at its end) still starts its own undo step with its first change
+#[test]
+fn a_drag_pressed_past_the_tracks_end_starts_an_undo_step_with_its_first_change() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = harness(Brightness::MediumDark, Gallery { hardness: 1.0, ..Gallery::default() });
+    let track = h.get_by_label("Hardness").rect();
+    let past_end = track.right_center() - egui::vec2(1.0, 0.0);
+    h.drag_at(past_end);
+    h.run();
+    h.hover_at(past_end + egui::vec2(20.0, 0.0));
+    h.run();
+    h.hover_at(track.center());
+    h.run();
+    h.hover_at(track.center() - egui::vec2(20.0, 0.0));
+    h.run();
+    h.drop_at(track.center() - egui::vec2(20.0, 0.0));
+    h.run();
 
     let merges = &h.state().hardness_merges;
-    assert_eq!(merges.first(), Some(&false), "the drag's first change starts an undo step: {merges:?}");
+    assert_eq!(merges.first(), Some(&false), "the first real change starts an undo step: {merges:?}");
+    assert!(merges.iter().skip(1).all(|merge| *merge), "later changes continue it: {merges:?}");
+}
+
+/// A number field held still until egui starts its drag, then moved, starts its own undo step with its first change
+#[test]
+fn a_number_field_held_still_then_dragged_starts_an_undo_step_with_its_first_change() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = harness(Brightness::MediumDark, Gallery::default());
+    let field = h.get_by_label("Position X").rect();
+    h.drag_at(field.center());
+
+    // Past egui's longest click, the press becomes a drag that has not moved
+    h.run_steps(5);
+    h.hover_at(field.center() + egui::vec2(10.0, 0.0));
+    h.run();
+    h.hover_at(field.center() + egui::vec2(20.0, 0.0));
+    h.run();
+    h.drop_at(field.center() + egui::vec2(20.0, 0.0));
+    h.run();
+
+    let merges = &h.state().position_merges;
+    assert_eq!(merges.first(), Some(&false), "the first move starts an undo step: {merges:?}");
+    assert!(merges.iter().skip(1).all(|merge| *merge), "later moves continue it: {merges:?}");
+}
+
+/// A ramp with one marker at `state.0`, recording each marker drag's merge in `state.1`
+fn one_marker_ramp(ui: &mut egui::Ui, state: &mut (f32, Vec<bool>)) {
+    ui.set_width(PANEL_WIDTH);
+    PropertySheet::show(ui, "ramp", |s| {
+        if let Some(drag) = s.gradient_ramp(&[[1.0, 0.0, 0.0]], &[state.0], &|_| [0.5; 3]) {
+            state.0 = drag.position;
+            state.1.push(drag.merge);
+        }
+    });
+}
+
+/// A marker pressed past the ramp's end changes nothing at first; its first move inward still starts its own undo step
+#[test]
+fn a_gradient_marker_pressed_past_the_ramps_end_starts_an_undo_step_with_its_first_change() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = builder(Brightness::MediumDark).build_ui_state(one_marker_ramp, (1.0, Vec::new()));
+    h.run_steps(2);
+    let marker = h.get_by_label("Color 1").rect();
+    let past_end = marker.right_center() - egui::vec2(1.0, 0.0);
+    h.drag_at(past_end);
+    h.run();
+    h.hover_at(past_end + egui::vec2(20.0, 0.0));
+    h.run();
+    h.hover_at(past_end - egui::vec2(40.0, 0.0));
+    h.run();
+    h.hover_at(past_end - egui::vec2(60.0, 0.0));
+    h.run();
+    h.drop_at(past_end - egui::vec2(60.0, 0.0));
+    h.run();
+
+    let merges = &h.state().1;
+    assert_eq!(merges.first(), Some(&false), "the first real change starts an undo step: {merges:?}");
     assert!(merges.iter().skip(1).all(|merge| *merge), "later changes continue it: {merges:?}");
 }
 
@@ -344,8 +438,7 @@ fn property_sheet_gallery_snapshots() {
         h.run_steps(2);
 
         // A value: the grey line on hover, then typing on that line in accent; the seed's box lights the same way
-        let track = h.get_by_label("Hardness").rect();
-        let value = egui::pos2(track.right() + 20.0, track.center().y);
+        let value = h.get_by_label("Hardness value").rect().center();
         h.hover_at(value);
         h.run_steps(2);
         h.render().unwrap().save(output_dir.join(format!("sheet-{name}-value-hover.png"))).unwrap();
@@ -357,8 +450,7 @@ fn property_sheet_gallery_snapshots() {
         h.render().unwrap().save(output_dir.join(format!("sheet-{name}-value-typing.png"))).unwrap();
         h.key_press(egui::Key::Escape);
         h.run_steps(2);
-        let dice = h.get_by_label("Random").rect();
-        let seed = egui::pos2(dice.left() - 20.0, dice.center().y);
+        let seed = h.get_by_label("Seed value").rect().center();
         h.hover_at(seed);
         h.run_steps(2);
         h.render().unwrap().save(output_dir.join(format!("sheet-{name}-seed-hover.png"))).unwrap();
@@ -377,4 +469,117 @@ fn a_number_field_reads_zero_without_a_minus_sign() {
     assert_eq!(shown_number(-0.6, 0), "-1");
     assert_eq!(shown_number(-1.25, 2), "-1.25");
     assert_eq!(shown_number(2.5, 1), "2.5");
+}
+
+/// Folds keep their own open state when a fold above them comes and goes (the state follows the name, not the row's place)
+#[test]
+fn a_fold_keeps_its_state_when_rows_above_it_come_and_go() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let folds = |ui: &mut egui::Ui, extra_shown: &mut bool| {
+        PropertySheet::show(ui, "folds", |s| {
+            if *extra_shown && s.fold("Extra", None, true) {
+                s.empty_note("Extra rows");
+            }
+            if s.fold("Edges", None, true) {
+                s.empty_note("Edge rows");
+            }
+            if s.fold("Parameters", None, false) {
+                s.empty_note("Parameter rows");
+            }
+        });
+    };
+    let mut h = builder(Brightness::MediumDark).build_ui_state(folds, true);
+    h.run_steps(2);
+    h.get_by_label("Edges").click();
+    h.run_steps(2);
+    assert!(h.query_by_label("Edge rows").is_none());
+
+    *h.state_mut() = false;
+    h.run_steps(2);
+
+    assert!(h.query_by_label("Edge rows").is_none(), "Edges stays folded");
+    assert!(h.query_by_label("Parameter rows").is_none(), "Parameters stays folded");
+}
+
+/// Two colour bars, one under the other, each opening its own picker
+fn two_color_bars(ui: &mut egui::Ui) {
+    PropertySheet::show(ui, "color_bars", |s| {
+        s.color_bar("Bar A", [0.2, 0.4, 0.6], None, &[]);
+        s.color_bar("Bar B", [0.6, 0.4, 0.2], None, &[]);
+    });
+}
+
+/// The colour space picked in one picker is the one the next picker opens in, even for a bar drawn before it all along
+#[test]
+fn the_next_picker_opens_in_the_colour_space_last_picked() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = builder(Brightness::MediumDark).build_ui(two_color_bars);
+    h.run_steps(2);
+    h.get_by_role_and_label(egui::Role::Button, "Bar B").click();
+    h.run_steps(2);
+    h.get_by_role_and_label(egui::Role::ComboBox, "sRGB").click();
+    h.run_steps(2);
+    h.get_by_role_and_label(egui::Role::ListBoxOption, "Linear").click();
+    h.run_steps(2);
+    assert!(h.query_by_role_and_label(egui::Role::ComboBox, "Linear").is_some(), "Bar B's picker shows Linear");
+
+    h.get_by_role_and_label(egui::Role::Button, "Close").click();
+    h.run_steps(2);
+    h.get_by_role_and_label(egui::Role::Button, "Bar A").click();
+    h.run_steps(2);
+
+    assert!(h.query_by_role_and_label(egui::Role::TitleBar, "Bar A").is_some(), "Bar A's picker is open");
+    assert!(h.query_by_role_and_label(egui::Role::ComboBox, "Linear").is_some(), "Bar A's picker opens in Linear");
+}
+
+/// A colour bar's picker stays open when a colour bar above it comes and goes (its state follows its name, not its place)
+#[test]
+fn a_color_bars_picker_stays_open_when_a_row_above_it_goes_away() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let bars = |ui: &mut egui::Ui, extra_shown: &mut bool| {
+        PropertySheet::show(ui, "color_bars", |s| {
+            if *extra_shown {
+                s.color_bar("Extra", [0.5; 3], None, &[]);
+            }
+            s.color_bar("Tint", [0.2, 0.4, 0.6], None, &[]);
+        });
+    };
+    let mut h = builder(Brightness::MediumDark).build_ui_state(bars, true);
+    h.run_steps(2);
+    h.get_by_role_and_label(egui::Role::Button, "Tint").click();
+    h.run_steps(2);
+    assert!(h.query_by_role_and_label(egui::Role::TitleBar, "Tint").is_some(), "the picker opened");
+
+    *h.state_mut() = false;
+    h.run_steps(2);
+
+    assert!(h.query_by_role_and_label(egui::Role::TitleBar, "Tint").is_some(), "the picker stays open");
+}
+
+/// A fold under a later section, before that section's first band, keeps its state when a band of the section above comes and goes
+#[test]
+fn a_fold_before_a_sections_first_band_keeps_its_state_when_the_band_above_goes_away() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let sections = |ui: &mut egui::Ui, band_shown: &mut bool| {
+        PropertySheet::show(ui, "sections", |s| {
+            s.section("First", false);
+            if *band_shown && s.band("Band", true, None, None).open {
+                s.empty_note("Band rows");
+            }
+            s.section("Second", false);
+            if s.fold("Edges", None, true) {
+                s.empty_note("Edge rows");
+            }
+        });
+    };
+    let mut h = builder(Brightness::MediumDark).build_ui_state(sections, true);
+    h.run_steps(2);
+    h.get_by_label("Edges").click();
+    h.run_steps(2);
+    assert!(h.query_by_label("Edge rows").is_none());
+
+    *h.state_mut() = false;
+    h.run_steps(2);
+
+    assert!(h.query_by_label("Edge rows").is_none(), "Edges stays folded");
 }

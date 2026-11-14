@@ -24,6 +24,9 @@ use worker::Worker;
 /// Pictures kept; the least recently drawn go first (a list of every plain material holds about fifty)
 const MAX_PICTURES: usize = 160;
 
+/// Most places that keep their last drawn picture (an orb place outlives its look, so places can outnumber pictures)
+const MAX_SHOWN_PLACES: usize = MAX_PICTURES * 2;
+
 /// The quick first picture is this many times smaller than the full one, and pictures this small skip it
 const QUICK_DIVISOR: usize = 4;
 const QUICK_BELOW_PX: usize = 48;
@@ -32,8 +35,8 @@ const QUICK_BELOW_PX: usize = 48;
 #[derive(Default)]
 pub struct OrbPreviews {
     pictures: HashMap<u64, Picture>,
-    /// The picture last drawn at each place, shown while that place's new one renders
-    shown: HashMap<Id, TextureHandle>,
+    /// The picture last drawn at each place and the pass it was drawn in, shown while that place's new one renders
+    shown: HashMap<Id, (TextureHandle, u64)>,
     #[cfg(not(target_arch = "wasm32"))]
     worker: Option<Worker>,
 }
@@ -41,31 +44,38 @@ pub struct OrbPreviews {
 type Shared = Arc<Mutex<OrbPreviews>>;
 
 impl OrbPreviews {
-    /// The picture to draw at `place` for `job`: its own once rendered, else the last one drawn there (None before the first)
-    pub(crate) fn texture(ctx: &Context, place: Id, job: OrbJob) -> Option<TextureHandle> {
+    /// The picture to draw at `place` for the look `key` (see [`OrbJob::key_of`]): its own once rendered, else the last one drawn there (None before the first); `job` builds the render only when the look is new
+    pub(crate) fn texture(ctx: &Context, place: Id, key: u64, job: impl FnOnce() -> OrbJob) -> Option<TextureHandle> {
         let shared = ctx.data_mut(|data| data.get_temp_mut_or_default::<Shared>(Id::unique("orb_previews")).clone());
         let mut previews = shared.lock().ok()?;
         previews.take_results(ctx);
         let pass = ctx.cumulative_pass_nr();
-        #[cfg(not(target_arch = "wasm32"))]
-        let job = OrbJob { place, ..job };
-        let key = job.key;
         if let Entry::Vacant(slot) = previews.pictures.entry(key) {
             slot.insert(Picture { texture: None, full: false, drawn: pass });
+            #[cfg(not(target_arch = "wasm32"))]
+            let job = OrbJob { place, ..job() };
+            #[cfg(target_arch = "wasm32")]
+            let job = job();
             previews.start(ctx, job);
-            previews.forget_old();
         }
         let ready = previews.pictures.get_mut(&key).and_then(|picture| {
             picture.drawn = pass;
             picture.texture.clone()
         });
-        match ready {
+        let on_screen = match ready {
             Some(texture) => {
-                previews.shown.insert(place, texture.clone());
+                previews.shown.insert(place, (texture.clone(), pass));
                 Some(texture)
             }
-            None => previews.shown.get(&place).cloned(),
-        }
+            None => previews.shown.get_mut(&place).map(|(texture, drawn)| {
+                *drawn = pass;
+                texture.clone()
+            }),
+        };
+
+        // A new look or a new place may pass the cap
+        previews.forget_old();
+        on_screen
     }
 
     /// Whether every orb asked for has its full picture (tests and captures wait for this)
@@ -81,7 +91,7 @@ impl OrbPreviews {
     pub(crate) fn shown_size(ctx: &Context, place: &str) -> Option<[usize; 2]> {
         let shared = ctx.data_mut(|data| data.get_temp_mut_or_default::<Shared>(Id::unique("orb_previews")).clone());
         let previews = shared.lock().ok()?;
-        previews.shown.get(&Id::unique(("material_orb", place))).map(TextureHandle::size)
+        previews.shown.get(&Id::unique(("material_orb", place))).map(|(texture, _)| texture.size())
     }
 
     fn store(&mut self, ctx: &Context, key: u64, full: bool, image: ColorImage) {
@@ -93,11 +103,17 @@ impl OrbPreviews {
         }
     }
 
-    /// Drop the least recently drawn pictures past [`MAX_PICTURES`]
+    /// Drop the least recently drawn pictures past [`MAX_PICTURES`] and places' last shown pictures past [`MAX_SHOWN_PLACES`]
     fn forget_old(&mut self) {
         while self.pictures.len() > MAX_PICTURES {
             let Some(oldest) = self.pictures.iter().min_by_key(|(_, picture)| picture.drawn).map(|(key, _)| *key) else { break };
             self.pictures.remove(&oldest);
+        }
+
+        // A place no longer drawn (a deleted layer) must not keep its texture alive
+        while self.shown.len() > MAX_SHOWN_PLACES {
+            let Some(oldest) = self.shown.iter().min_by_key(|(_, (_, drawn))| *drawn).map(|(place, _)| *place) else { break };
+            self.shown.remove(&oldest);
         }
     }
 
@@ -194,14 +210,14 @@ mod tests {
         let mut sizes = Vec::new();
         while start.elapsed() < Duration::from_secs(20) {
             let mut size = None;
-            run(ctx, |ctx| size = OrbPreviews::texture(ctx, place, job.clone()).map(|texture| texture.size()));
+            run(ctx, |ctx| size = OrbPreviews::texture(ctx, place, job.key, || job.clone()).map(|texture| texture.size()));
             if let Some(size) = size
                 && sizes.last() != Some(&size)
             {
                 sizes.push(size);
             }
             if OrbPreviews::settled(ctx) {
-                run(ctx, |ctx| size = OrbPreviews::texture(ctx, place, job.clone()).map(|texture| texture.size()));
+                run(ctx, |ctx| size = OrbPreviews::texture(ctx, place, job.key, || job.clone()).map(|texture| texture.size()));
                 if let Some(size) = size
                     && sizes.last() != Some(&size)
                 {
@@ -220,7 +236,7 @@ mod tests {
         let place = Id::unique("orb");
         let job = OrbJob::new(copper(0.3), 200, Color32::BLACK);
         let mut first = None;
-        run(&ctx, |ctx| first = OrbPreviews::texture(ctx, place, job.clone()));
+        run(&ctx, |ctx| first = OrbPreviews::texture(ctx, place, job.key, || job.clone()));
         assert!(first.is_none(), "the first pass does not wait for the render");
         let sizes = draw_until_settled(&ctx, place, &job);
         assert_eq!(sizes.last(), Some(&[200, 200]), "the full picture arrives: {sizes:?}");
@@ -229,14 +245,14 @@ mod tests {
 
         // The same look again: drawn at once from the cache, nothing new to render
         let mut again = None;
-        run(&ctx, |ctx| again = OrbPreviews::texture(ctx, place, job.clone()));
+        run(&ctx, |ctx| again = OrbPreviews::texture(ctx, place, job.key, || job.clone()));
         assert_eq!(again.map(|texture| texture.size()), Some([200, 200]));
         assert!(OrbPreviews::settled(&ctx), "a cached look renders nothing");
 
         // A new look keeps the old picture on screen until its own arrives
         let rougher = OrbJob::new(copper(0.8), 200, Color32::BLACK);
         let mut meanwhile = None;
-        run(&ctx, |ctx| meanwhile = OrbPreviews::texture(ctx, place, rougher.clone()));
+        run(&ctx, |ctx| meanwhile = OrbPreviews::texture(ctx, place, rougher.key, || rougher.clone()));
         assert!(meanwhile.is_some(), "the last picture stays while the new one renders");
         assert!(!OrbPreviews::settled(&ctx), "the new look is rendering");
         draw_until_settled(&ctx, place, &rougher);
@@ -251,6 +267,23 @@ mod tests {
         let dropped = newest_per_place(&mut waiting);
         assert_eq!(dropped.len(), 2);
         assert_eq!(waiting.iter().map(|job| job.key).collect::<Vec<_>>(), vec![other.key, job(0.3).key]);
+    }
+
+    #[test]
+    fn places_no_longer_drawn_let_go_of_their_last_picture_past_the_cap() {
+        let ctx = Context::default();
+        let texture = ctx.load_texture("orb", ColorImage::filled([1, 1], Color32::BLACK), TextureOptions::LINEAR);
+        let mut previews = OrbPreviews::default();
+        let places = MAX_SHOWN_PLACES as u64 + 10;
+        for pass in 0..places {
+            previews.shown.insert(Id::unique(("orb", pass)), (texture.clone(), pass));
+        }
+
+        previews.forget_old();
+
+        assert_eq!(previews.shown.len(), MAX_SHOWN_PLACES, "the cap holds for places too");
+        assert!(!previews.shown.contains_key(&Id::unique(("orb", 0_u64))), "the least recently drawn place goes first");
+        assert!(previews.shown.contains_key(&Id::unique(("orb", places - 1))), "the latest drawn place stays");
     }
 
     #[test]

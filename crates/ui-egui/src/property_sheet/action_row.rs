@@ -2,7 +2,7 @@
 
 use egui::{Align2, CornerRadius, FontId, Rect, Role, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
 
-use super::{ActionRowResponse, CONTROL_HEIGHT, PropertySheet, ROW_HEIGHT, TEXT_SIZE};
+use super::{ActionRowResponse, CONTROL_HEIGHT, CONTROL_RADIUS, PropertySheet, ROW_HEIGHT, TEXT_SIZE};
 
 /// Air on each side of a button's word
 const BUTTON_WORD_AIR: f32 = 9.0;
@@ -21,7 +21,7 @@ impl PropertySheet<'_> {
         let center_y = row.center().y;
         self.drawn(center_y + CONTROL_HEIGHT / 2.0);
         let font = FontId::proportional(TEXT_SIZE);
-        let t = self.tokens;
+        let tokens = self.tokens;
 
         let mut clicked = None;
         let mut x = self.left;
@@ -35,10 +35,10 @@ impl PropertySheet<'_> {
                 clicked = Some(index);
             }
 
-            let fill = if *enabled && response.hovered() { t.row_hover } else { t.button };
+            let fill = if *enabled && response.hovered() { tokens.row_hover } else { tokens.button };
             let painter = self.ui.painter();
-            painter.rect(button, CornerRadius::same(4), fill, Stroke::new(1.0, t.button_border), StrokeKind::Inside);
-            painter.text(button.center(), Align2::CENTER_CENTER, *word, font.clone(), if *enabled { t.text } else { t.text_dim });
+            painter.rect(button, CornerRadius::same(CONTROL_RADIUS), fill, Stroke::new(1.0, tokens.button_border), StrokeKind::Inside);
+            painter.text(button.center(), Align2::CENTER_CENTER, *word, font.clone(), if *enabled { tokens.text } else { tokens.text_dim });
             x = button.right() + BUTTON_GAP;
         }
 
@@ -51,7 +51,7 @@ impl PropertySheet<'_> {
             *on = !*on;
         }
         response.widget_info(|| WidgetInfo::selected(Role::CheckBox, true, *on, toggle_label));
-        self.ui.painter().text(pos2(label_end, center_y), Align2::RIGHT_CENTER, toggle_label, font, t.text);
+        self.ui.painter().text(pos2(label_end, center_y), Align2::RIGHT_CENTER, toggle_label, font, tokens.text);
         self.pill(pill, *on, true);
         ActionRowResponse { clicked, toggled: response.clicked() }
     }

@@ -4,7 +4,6 @@ use serde_json::json;
 use texturecraft_engine::core::{Fill, LayerId, Projection, Sampling, Source};
 
 use crate::TextureCraftApp;
-use crate::dock::anchors_below;
 use crate::fill_material_panel::source_card;
 use crate::i18n::tr;
 use crate::property_sheet::PropertySheet;
@@ -25,6 +24,5 @@ pub(crate) fn mask_fill_sheet(
     crate::fill_panel::placement_sections(app, sheet, &placement, &base, reader);
 
     sheet.section(tr("Grayscale"), false);
-    let anchors = anchors_below(app, reader);
-    source_card(app, sheet, source, &base, SourceSlot::Grayscale, &anchors, false);
+    source_card(app, sheet, source, &base, SourceSlot::Grayscale, reader, false);
 }

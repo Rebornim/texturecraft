@@ -19,7 +19,8 @@ use texturecraft_engine::texel::linear_to_srgb;
 use crate::TextureCraftApp;
 use crate::color_picker::{ColorPick, SwatchEdit};
 use crate::dock::{anchors_below, with};
-use crate::i18n::tr;
+use crate::fill_panel::{FillKey, fill_key};
+use crate::i18n::{n_, tr};
 use crate::material_orb::material_orb;
 use crate::orb_material::OrbMaterial;
 use crate::picker_group::PickerGroup;
@@ -29,6 +30,7 @@ use crate::resolution_band::{resolution_band, resolution_row};
 use crate::resource_picker;
 use crate::resource_picker_item::ResourcePickerItem;
 use crate::slot_thumbnail::{paint_thumbnail, thumbnail};
+use crate::source_choice::SourceChoice;
 use crate::source_slot::SourceSlot;
 use crate::state::UiState;
 use crate::theme::Tokens;
@@ -36,7 +38,7 @@ use crate::thumbs::Thumbs;
 use crate::tile_picture::TilePicture;
 
 /// The switch's two sides: the fill's whole material, or one source per channel
-const MODES: [&str; 2] = ["Material", "Channels"];
+const MODES: [&str; 2] = [n_("Material"), n_("Channels")];
 const MATERIAL_MODE: usize = 0;
 const CHANNELS_MODE: usize = 1;
 
@@ -44,16 +46,8 @@ const CHANNELS_MODE: usize = 1;
 const PATTERN_SCALE: std::ops::RangeInclusive<f32> = 0.1..=32.0;
 const PATTERN_CONTRAST: std::ops::RangeInclusive<f32> = 0.0..=2.0;
 
-/// A source the slot's picker offers
-#[derive(Clone, Debug, PartialEq)]
-enum SourceChoice {
-    Uniform,
-    Procedural(ProceduralKind),
-    Image(String),
-    Alpha(&'static str),
-    Import,
-    Anchor(LayerId),
-}
+/// The size a pattern's Resolution reads the texture set at when none is open: a new project's default
+const FALLBACK_TEXTURE_SET_SIZE: u32 = 2048;
 
 /// The Material section of the fill at `base`; `on` holds the channels the fill writes
 pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, on: &[Channel], reader: LayerId) {
@@ -69,12 +63,13 @@ pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
     }
 
     let tokens = Tokens::get(sheet.ui.ctx());
+    let salt = fill_key(base);
     let look = OrbMaterial::of_fill(fill, on, &app.session.images);
-    let shown = orb_look(&app.ui, fill, on, &app.session.images);
-    let place = base.to_string();
-    let orb = |painter: &Painter, rect: Rect| material_orb(painter, rect, &shown, &tokens, &format!("orb{place}"));
-    let link = fill.link.as_deref().zip(base.get("layer").and_then(Value::as_u64)).map(|(link, layer)| (link.clone(), LayerId(layer)));
-    let mode_id = sheet.ui.make_persistent_id(("material_mode", base.to_string()));
+    let channel_look = channel_orb_look(&app.ui, fill, on, &app.session.images);
+    let shown = channel_look.as_ref().unwrap_or(&look);
+    let orb = |painter: &Painter, rect: Rect| material_orb(painter, rect, shown, &tokens, ("orb", salt));
+    let link = fill.link.as_deref().zip(base.get("layer").and_then(Value::as_u64)).map(|(link, layer)| (link, LayerId(layer)));
+    let mode_id = sheet.ui.make_persistent_id(("material_mode", salt));
 
     // A fill opens on the side that made it: a material (linked or built-in) on Material, separate sources on Channels
     let made_whole = link.is_some() || fill.material.is_some();
@@ -87,47 +82,56 @@ pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
     match link {
         Some((link, layer)) if mode == MATERIAL_MODE => {
             let shown: Vec<Channel> = channels.into_iter().filter(|channel| on.contains(channel)).collect();
-            material_card(app, sheet, &link, layer, &look, &place);
+            material_card(app, sheet, link, layer, &look, salt);
             mapping_band(app, sheet, fill, &shown, layer);
-            let texture_set = app.session.doc.project.texture_set(app.session.ts()).map_or(link.size, |texture_set| texture_set.resolution);
+            let texture_set = texture_set_size(app, link.size);
             if let Some(picked) = resolution_band(sheet, link.resolution.unwrap_or(CookResolution::TEXTURE_SET), texture_set) {
-                let size = match picked {
-                    CookResolution::Relative(factor) => json!({"relative": factor}),
-                    CookResolution::Fixed(size) => json!({"fixed": size}),
-                };
+                let size = resolution_json(picked);
                 if app.run("material.link.resolution", with(&json!({"layer": layer.0, "cook": false}), size)).is_some() {
                     app.cook_link(layer);
                 }
             }
             #[cfg(not(target_arch = "wasm32"))]
-            if sheet.button(egui_phosphor::regular::ARROW_SQUARE_OUT, tr("Open in MaterialCraft")).clicked() {
-                crate::dock::open_link_in_materialcraft(app, layer, &link);
+            if sheet.button(ic::ARROW_SQUARE_OUT, tr("Open in MaterialCraft")).clicked() {
+                crate::dock::open_link_in_materialcraft(app, layer, link);
             }
         }
-        None if mode == MATERIAL_MODE => whole_material_card(app, sheet, fill, base, &look, &place),
+        None if mode == MATERIAL_MODE => whole_material_card(app, sheet, fill, base, &look, salt),
         _ => {
-            let anchors = anchors_below(app, reader);
             for channel in channels.into_iter().filter(|channel| on.contains(channel)) {
-                source_card(app, sheet, fill.source(channel), base, SourceSlot::Channel(channel), &anchors, false);
+                source_card(app, sheet, fill.source(channel), base, SourceSlot::Channel(channel), reader, false);
             }
         }
     }
 }
 
-/// What the orb shows, following the Layers panel's channel list: the whole material, or the channel picked there alone
-fn orb_look(ui: &UiState, fill: &Fill, on: &[Channel], images: &HashMap<String, Arc<ImageRes>>) -> OrbMaterial {
-    if ui.layer_material_view { OrbMaterial::of_fill(fill, on, images) } else { OrbMaterial::of_channel(fill, ui.layer_channel, on, images) }
+/// What the orb shows instead of the whole material, following the Layers panel's channel list: the channel picked there alone (None: the whole material)
+fn channel_orb_look(ui: &UiState, fill: &Fill, on: &[Channel], images: &HashMap<String, Arc<ImageRes>>) -> Option<OrbMaterial> {
+    (!ui.layer_material_view).then(|| OrbMaterial::of_channel(fill, ui.layer_channel, on, images))
+}
+
+/// `resolution` as the commands read it: `{"relative": factor}` or `{"fixed": size}`
+fn resolution_json(resolution: CookResolution) -> Value {
+    match resolution {
+        CookResolution::Relative(factor) => json!({"relative": factor}),
+        CookResolution::Fixed(size) => json!({"fixed": size}),
+    }
+}
+
+/// The size of the texture set being painted, `fallback` when none is
+fn texture_set_size(app: &TextureCraftApp, fallback: u32) -> u32 {
+    app.session.doc.project.texture_set(app.session.ts()).map_or(fallback, |texture_set| texture_set.resolution)
 }
 
 /// A channel's name on its pill: the reference strip's short Title Case words, the full name where it has none
 pub(crate) fn pill_name(channel: Channel) -> &'static str {
     match channel {
-        Channel::BaseColor => "Color",
-        Channel::Metallic => "Metal",
-        Channel::Roughness => "Rough",
-        Channel::Normal => "Normal",
-        Channel::Height => "Height",
-        Channel::Opacity => "Opacity",
+        Channel::BaseColor => n_("Color"),
+        Channel::Metallic => n_("Metal"),
+        Channel::Roughness => n_("Rough"),
+        Channel::Normal => n_("Normal"),
+        Channel::Height => n_("Height"),
+        Channel::Opacity => n_("Opacity"),
         other => other.label(),
     }
 }
@@ -161,7 +165,7 @@ pub(crate) fn source_card(
     source: Source,
     base: &Value,
     slot_of: SourceSlot,
-    anchors: &[(LayerId, String)],
+    reader: LayerId,
     in_card: bool,
 ) {
     let set = |extra: Value| with(base, with(&slot_of.fields(), extra));
@@ -177,7 +181,7 @@ pub(crate) fn source_card(
         sheet.slot(&thumb, slot_of.name(), &line, None, !uniform, procedural)
     };
 
-    let popup = sheet.ui.make_persistent_id(("source_picker", base.to_string(), slot_of.key()));
+    let popup = sheet.ui.make_persistent_id(("source_picker", fill_key(base), slot_of.key()));
     if slot.pick.clicked() {
         resource_picker::toggle(sheet.ui.ctx(), popup);
     }
@@ -190,7 +194,12 @@ pub(crate) fn source_card(
         _ => slot_of.default_value(),
     };
     let ctx = sheet.ui.ctx().clone();
-    let tabs = |thumbs: &mut Thumbs| source_tabs(thumbs, &ctx, &app.session.images, anchors, shown_color(uniform));
+
+    // The anchors above the reader are listed only while the picker is open
+    let tabs = |thumbs: &mut Thumbs| {
+        let anchors = anchors_below(&app.session.doc.project, reader);
+        source_tabs(thumbs, &ctx, &app.session.images, &anchors, shown_color(uniform))
+    };
     let picked = resource_picker::show(&slot.pick, popup, &mut app.thumbs, Some(&current), reveal, tabs);
     if let Some(choice) = picked.filter(|choice| *choice != current) {
         pick_source(app, sheet.ui.ctx(), slot_of, choice, &set);
@@ -284,7 +293,7 @@ fn source_tabs(thumbs: &mut Thumbs, ctx: &egui::Context, images: &ImageStore, an
         })
         .collect();
     let uniform = vec![tile(SourceChoice::Uniform, tr("Uniform value"), None, TilePicture::Swatch(uniform))];
-    let resources = [("Procedurals", procedurals), ("Textures", textures), ("Alphas", alphas), ("Uniform", uniform)]
+    let resources = [(n_("Procedurals"), procedurals), (n_("Textures"), textures), (n_("Alphas"), alphas), (n_("Uniform"), uniform)]
         .into_iter()
         .map(|(header, items)| PickerGroup { header: Some(tr(header)), items })
         .collect();
@@ -377,7 +386,7 @@ fn procedural_rows(
         let settings = json!({
             "procedural": kind, "scale": fresh.scale, "contrast": fresh.contrast, "seed": fresh.seed,
             "balance": fresh.balance, "invert": fresh.invert, "low": low, "high": high, "merge": false,
-            "resolution": {"relative": 0},
+            "resolution": resolution_json(CookResolution::TEXTURE_SET),
         });
         app.run("layer.fill.set", set(settings));
         return;
@@ -417,13 +426,9 @@ fn procedural_rows(
     }
 
     // The size the pattern is made at, as a cooked texture would be (the texture set's own by default)
-    let texture_set = app.session.doc.project.texture_set(app.session.ts()).map_or(2048, |texture_set| texture_set.resolution);
+    let texture_set = texture_set_size(app, FALLBACK_TEXTURE_SET_SIZE);
     if let Some(picked) = resolution_row(sheet, pattern.resolution.unwrap_or(CookResolution::TEXTURE_SET), texture_set) {
-        let size = match picked {
-            CookResolution::Relative(factor) => json!({"relative": factor}),
-            CookResolution::Fixed(size) => json!({"fixed": size}),
-        };
-        edit = edit.or(Some(("resolution", size, false)));
+        edit = edit.or(Some(("resolution", resolution_json(picked), false)));
     }
     if let Some((key, value, merge)) = edit {
         let mut settings = json!({"procedural": kind, "merge": merge});
@@ -433,10 +438,10 @@ fn procedural_rows(
 }
 
 /// The Material side: the fill's whole material in one card (the row lists its presets), its inputs, then opening it in MaterialCraft
-fn material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, link: &MaterialLink, layer: LayerId, look: &OrbMaterial, place: &str) {
+fn material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, link: &MaterialLink, layer: LayerId, look: &OrbMaterial, salt: FillKey) {
     let tokens = Tokens::get(sheet.ui.ctx());
     let base = json!({"layer": layer.0, "cook": false});
-    let slot = sheet.slot(&|painter, rect| material_orb(painter, rect, look, &tokens, &format!("card{place}")), &link.name, tr("Material"), None, false, false);
+    let slot = sheet.slot(&|painter, rect| material_orb(painter, rect, look, &tokens, ("card", salt)), &link.name, tr("Material"), None, false, false);
     let presets: Vec<usize> = (0..link.presets.len()).collect();
     let preset_name = |index: usize| link.presets.get(index).map(|preset| preset.name.clone()).unwrap_or_default();
     let editable = cfg!(not(target_arch = "wasm32"));
@@ -449,8 +454,8 @@ fn material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, link:
 
     let pending = sheet.ui.make_persistent_id(("material_cook_pending", layer.0));
     for param in &link.params {
-        if let Some(value) = link_input(sheet, layer, param, editable)
-            && app.run("material.link.set", with(&base, json!({"id": param.id, "value": value}))).is_some()
+        if let Some((value, merge)) = link_input(sheet, layer, param, editable)
+            && app.run("material.link.set", with(&base, json!({"id": param.id, "value": value, "merge": merge}))).is_some()
         {
             sheet.ui.data_mut(|data| data.insert_temp(pending, true));
         }
@@ -466,13 +471,12 @@ fn material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, link:
 }
 
 /// The Material side of a fill without a linked material: one card holding the built-in material its sources came from (the row lists every plain material, × returns the channels to their defaults)
-fn whole_material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, look: &OrbMaterial, place: &str) {
+fn whole_material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, look: &OrbMaterial, salt: FillKey) {
     let tokens = Tokens::get(sheet.ui.ctx());
     let held = fill.material.as_deref().and_then(find);
     let name = held.map_or_else(|| tr("None"), |material| tr(material.label));
-    let slot =
-        sheet.slot(&|painter, rect| material_orb(painter, rect, look, &tokens, &format!("card{place}")), name, tr("Material"), None, held.is_some(), false);
-    let popup = sheet.ui.make_persistent_id(("material_picker", base.to_string()));
+    let slot = sheet.slot(&|painter, rect| material_orb(painter, rect, look, &tokens, ("card", salt)), name, tr("Material"), None, held.is_some(), false);
+    let popup = sheet.ui.make_persistent_id(("material_picker", salt));
     if slot.pick.clicked() {
         resource_picker::toggle(sheet.ui.ctx(), popup);
     }
@@ -528,8 +532,8 @@ fn mapping_band(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: 
     }
 }
 
-/// One input of the material: a slider for numbers, a toggle, a dropdown for choices; its new typed value when it changed
-fn link_input(sheet: &mut PropertySheet<'_>, layer: LayerId, param: &LinkParam, editable: bool) -> Option<Value> {
+/// One input of the material: a slider for numbers, a toggle, a dropdown for choices, an egui editor for colours and vectors; its new typed value when it changed and whether it continues a drag
+fn link_input(sheet: &mut PropertySheet<'_>, layer: LayerId, param: &LinkParam, editable: bool) -> Option<(Value, bool)> {
     let kind = param.default.get("t").and_then(Value::as_str).unwrap_or("");
     let value = param.value.get("v").unwrap_or(&Value::Null);
     let number = value.as_f64().unwrap_or(0.0) as f32;
@@ -537,17 +541,17 @@ fn link_input(sheet: &mut PropertySheet<'_>, layer: LayerId, param: &LinkParam, 
     let changed = match kind {
         "bool" => {
             let mut on = value.as_bool().unwrap_or(number != 0.0);
-            sheet.toggle(&param.label, &mut on).then(|| json!(on))
+            sheet.toggle(&param.label, &mut on).then(|| (json!(on), false))
         }
         "enum" if !param.options.is_empty() => {
             let options: Vec<usize> = (0..param.options.len()).collect();
             let name = |index: usize| param.options.get(index).cloned().unwrap_or_default();
-            sheet.dropdown(&param.label, number.max(0.0) as usize, &options, name, None).0.map(|index| json!(index))
+            sheet.dropdown(&param.label, number.max(0.0) as usize, &options, name, None).0.map(|index| (json!(index), false))
         }
         "float" | "int" | "enum" => {
             let mut edited = number;
             let decimals = if kind == "float" { 2 } else { 0 };
-            sheet.slider(&param.label, &mut edited, low.min(number)..=high.max(number), decimals).map(|_| json!(edited))
+            sheet.slider(&param.label, &mut edited, low.min(number)..=high.max(number), decimals).map(|merge| (json!(edited), merge))
         }
 
         // Colours and vectors keep their egui editors until the sheet draws them
@@ -565,12 +569,14 @@ mod tests {
         let mut ui = UiState::default();
         let on = [Channel::BaseColor, Channel::Roughness];
 
-        let whole = orb_look(&ui, &Fill::default(), &on, &HashMap::new());
+        let whole = OrbMaterial::of_fill(&Fill::default(), &on, &HashMap::new());
+        let starting = channel_orb_look(&ui, &Fill::default(), &on, &HashMap::new());
         ui.layer_material_view = false;
         ui.layer_channel = Channel::Roughness;
-        let roughness = orb_look(&ui, &Fill::default(), &on, &HashMap::new());
+        let roughness = channel_orb_look(&ui, &Fill::default(), &on, &HashMap::new()).unwrap();
 
-        assert_eq!(whole.alone(), None, "the list starts on Material: the whole material");
+        assert!(starting.is_none(), "the list starts on Material: the whole material");
+        assert_eq!(whole.alone(), None);
         assert_eq!(roughness.alone(), Some(Channel::Roughness));
         assert_ne!(whole.key(), roughness.key(), "a new pick draws a new orb");
     }

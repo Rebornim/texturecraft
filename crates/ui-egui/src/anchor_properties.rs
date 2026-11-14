@@ -6,17 +6,9 @@ use serde_json::json;
 use texturecraft_engine::core::{EffectKind, LayerId, LayerKind, Project};
 
 use crate::TextureCraftApp;
-use crate::i18n::tr;
+use crate::i18n::{n_, tr};
 use crate::property_sheet::PropertySheet;
-
-/// One reader of an anchor point: the layer, its name, what reads (kind name and its icon) and the effect (None: the fill layer itself)
-struct Reference {
-    layer: LayerId,
-    name: String,
-    kind: &'static str,
-    glyph: &'static str,
-    effect: Option<LayerId>,
-}
+use crate::reference::Reference;
 
 /// The properties of anchor point `anchor` named `name`; renaming goes through `effect.set`, a reference's click through `layer.select`
 pub(crate) fn anchor_properties(app: &mut TextureCraftApp, ui: &mut Ui, anchor: LayerId, name: &str) {
@@ -50,13 +42,13 @@ fn references(project: &Project, anchor: LayerId) -> Vec<Reference> {
         .filter_map(|(layer_id, effect)| {
             let layer = project.layers.get(&layer_id)?;
             let (kind, glyph) = match effect {
-                None if matches!(layer.kind, LayerKind::Fill(_)) => ("Fill", ic::PAINT_BUCKET),
+                None if matches!(layer.kind, LayerKind::Fill(_)) => (n_("Fill"), ic::PAINT_BUCKET),
                 None => return None,
                 Some(effect) => {
-                    let in_content = layer.content_effects.iter().any(|e| e.id == effect);
+                    let in_content = layer.content_effects.iter().any(|content_effect| content_effect.id == effect);
                     match project.effect(effect).map(|(_, found)| &found.kind) {
-                        Some(EffectKind::Fill { .. } | EffectKind::Material(_)) if in_content => ("Fill", ic::PAINT_BUCKET),
-                        Some(EffectKind::Fill { .. }) => ("Mask fill", ic::PAINT_BUCKET),
+                        Some(EffectKind::Fill { .. } | EffectKind::Material(_)) if in_content => (n_("Fill"), ic::PAINT_BUCKET),
+                        Some(EffectKind::Fill { .. }) => (n_("Mask fill"), ic::PAINT_BUCKET),
                         Some(other) => (other.name(), reader_glyph(other)),
                         None => return None,
                     }

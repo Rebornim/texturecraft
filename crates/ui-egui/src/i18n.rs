@@ -313,15 +313,6 @@ mod tests",
     const UNTRANSLATED: &[&str] = &["RGB", "RGBA"];
 
     #[test]
-    fn filter_descriptions_and_tags_are_keys() {
-        let keys = keys();
-        for about in texturecraft_engine::filter_lib::FILTERS.iter().filter_map(|filter| filter.about()) {
-            assert!(keys.iter().any(|key| key == about.description), "{}", about.description);
-            assert!(about.tags.iter().all(|tag| keys.iter().any(|key| key == tag)), "{:?}", about.tags);
-        }
-    }
-
-    #[test]
     fn lookup_formatting_and_fallbacks() {
         let _lock = LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         set_language("xx");

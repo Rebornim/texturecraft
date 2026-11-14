@@ -77,13 +77,13 @@ impl PropertySheet<'_> {
             // Left of the glyph, on the caption's line: it covers no value
             let mut tooltip = egui::Tooltip::for_enabled(&response);
             tooltip.popup = tooltip.popup.anchor(glyph).align(egui::RectAlign::LEFT).align_alternatives(&[egui::RectAlign::BOTTOM_END]);
-            tooltip.show(|ui| ui.label(label));
+            tooltip.show(|ui| ui.label(crate::i18n::tr("Restore defaults")));
         }
-        let t = self.tokens;
+        let tokens = self.tokens;
         let color = match (changed, response.hovered()) {
-            (false, _) => t.text_dim.gamma_multiply(RESET_AT_DEFAULT_OPACITY),
-            (true, true) => t.text_strong,
-            (true, false) => t.text_dim,
+            (false, _) => tokens.text_dim.gamma_multiply(RESET_AT_DEFAULT_OPACITY),
+            (true, true) => tokens.text_strong,
+            (true, false) => tokens.text_dim,
         };
         self.ui.painter().text(glyph.center(), Align2::CENTER_CENTER, ic::CLOCK_COUNTER_CLOCKWISE, FontId::proportional(RESET_ICON_SIZE), color);
         changed && response.clicked()
@@ -107,6 +107,14 @@ impl PropertySheet<'_> {
     /// A section caption in capitals in `color`, a hairline above a later one; returns the caption's centre line
     fn section_caption(&mut self, title: &str, color: egui::Color32) -> f32 {
         self.close_card();
+
+        // Named state before the section's first band is keyed by the section, not by the band above it
+        if self.card.is_none() {
+            let section = self.id.with(("section", title));
+            self.band_scope = section;
+            self.scope = section;
+        }
+
         if !self.empty {
             self.space(SECTION_AIR);
             let y = self.cursor_y();
@@ -228,6 +236,18 @@ impl PropertySheet<'_> {
     pub(super) fn next_id(&mut self) -> Id {
         let id = self.ui.next_auto_id();
         self.ui.skip_ahead_auto_ids(1);
+        id
+    }
+
+    /// The id of a group or colour bar whose state outlives the frame: keyed by its name inside the open band and card, so rows shown or hidden above it never hand it another's state
+    pub(super) fn named_id(&mut self, kind: &str, title: &str) -> Id {
+        let mut id = self.scope.with((kind, title));
+
+        // A repeated name in one scope (two cards of one effect) takes the next free id
+        while self.named.contains(&id) {
+            id = id.with(kind);
+        }
+        self.named.push(id);
         id
     }
 }

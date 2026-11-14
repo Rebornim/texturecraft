@@ -67,9 +67,7 @@ impl EnvironmentSh {
         light.max(Vec3::ZERO)
     }
 
-    /// Baked Lighting Environment's lit base color: linear `albedo` facing `nrm`, its metal read from `channels` (straight values by [`Channel::index`]),
-    /// in `light` (the environment's diffuse light at the surface, exposure applied), darkened by ambient occlusion `ao` by `[diffuse, specular]` occlusion.
-    /// The viewer looks straight at the surface, so what it reflects is the light around the normal
+    /// Baked Lighting Environment's lit base color: linear `albedo` facing `nrm`, its metal read from `channels` (straight values by [`Channel::index`]), in `light` (the environment's diffuse light at the surface, exposure applied), darkened by ambient occlusion `ao` by `[diffuse, specular]` occlusion. The viewer looks straight at the surface, so what it reflects is the light around the normal
     pub fn shade(albedo: [f32; 3], light: Vec3, ao: f32, [diffuse_occlusion, specular_occlusion]: [f32; 2], channels: &[[f32; 3]]) -> [f32; 3] {
         let unit = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 };
         let ao = if ao.is_finite() { ao.clamp(0.0, 1.0) } else { 1.0 };

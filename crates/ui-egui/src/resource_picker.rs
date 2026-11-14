@@ -92,8 +92,7 @@ pub(crate) fn toggle(ctx: &egui::Context, popup_id: Id) {
     });
 }
 
-/// Draws picker `popup_id` under `slot` (above it where the window ends first) at its width while open, on the tab holding `current` (scrolled to it
-/// when `reveal_current`, else at the top); returns the id clicked, and runs `tabs` only while open
+/// Draws picker `popup_id` under `slot` (above it where the window ends first) at its width while open, on the tab holding `current` (scrolled to it when `reveal_current`, else at the top); returns the id clicked, and runs `tabs` only while open
 pub(crate) fn show<K: Clone + PartialEq>(
     slot: &Response,
     popup_id: Id,

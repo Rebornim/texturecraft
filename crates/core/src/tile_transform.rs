@@ -2,85 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Whether a moved texture repeats across its UV tile or leaves empty where it no longer reaches
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum RepeatMode {
-    /// Past the tile's edge reads empty
-    None,
-    /// The tile repeats both ways, so the result stays seamless
-    #[default]
-    HorizontallyAndVertically,
-}
+mod flip_mode;
+mod repeat_mode;
 
-impl RepeatMode {
-    /// Every mode, in the order a list shows them
-    pub const ALL: [RepeatMode; 2] = [RepeatMode::None, RepeatMode::HorizontallyAndVertically];
-
-    /// The name a panel shows
-    pub fn label(self) -> &'static str {
-        match self {
-            RepeatMode::None => "None",
-            RepeatMode::HorizontallyAndVertically => "Horizontally & Vertically",
-        }
-    }
-
-    /// The id `effect.set {repeatMode}` takes
-    pub fn id(self) -> &'static str {
-        match self {
-            RepeatMode::None => "none",
-            RepeatMode::HorizontallyAndVertically => "horizontallyAndVertically",
-        }
-    }
-}
-
-/// Which way the Transform filter turns its result over
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum FlipMode {
-    #[default]
-    None,
-    /// Left and right swap
-    Horizontally,
-    /// Top and bottom swap
-    Vertically,
-    HorizontallyAndVertically,
-}
-
-impl FlipMode {
-    /// Every mode, in the order a list shows them
-    pub const ALL: [FlipMode; 4] = [FlipMode::None, FlipMode::Horizontally, FlipMode::Vertically, FlipMode::HorizontallyAndVertically];
-
-    /// The name a panel shows
-    pub fn label(self) -> &'static str {
-        match self {
-            FlipMode::None => "None",
-            FlipMode::Horizontally => "Horizontally",
-            FlipMode::Vertically => "Vertically",
-            FlipMode::HorizontallyAndVertically => "Horizontally & Vertically",
-        }
-    }
-
-    /// The id `effect.set {flipMode}` takes
-    pub fn id(self) -> &'static str {
-        match self {
-            FlipMode::None => "none",
-            FlipMode::Horizontally => "horizontally",
-            FlipMode::Vertically => "vertically",
-            FlipMode::HorizontallyAndVertically => "horizontallyAndVertically",
-        }
-    }
-
-    /// Whether it swaps across (left and right) and down (top and bottom)
-    pub fn sides(self) -> [bool; 2] {
-        match self {
-            FlipMode::None => [false, false],
-            FlipMode::Horizontally => [true, false],
-            FlipMode::Vertically => [false, true],
-            FlipMode::HorizontallyAndVertically => [true, true],
-        }
-    }
-}
+pub use flip_mode::FlipMode;
+pub use repeat_mode::RepeatMode;
 
 /// A Transform filter: each UV tile's content scaled, turned and moved about the tile's centre, then flipped
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -115,8 +41,7 @@ impl TileTransform {
     /// The farthest Offset it renders, in tiles
     pub const MAX_OFFSET: f32 = 64.0;
 
-    /// Where in the tile (0..1 across and down, before any repeat) the texel at `uv` reads from, as `linear · uv + shift`; the
-    /// columns of `linear` are what one step across and one step down the result move in the source
+    /// Where in the tile (0..1 across and down, before any repeat) the texel at `uv` reads from, as `linear · uv + shift`; the columns of `linear` are what one step across and one step down the result move in the source
     pub fn affine(&self) -> ([[f32; 2]; 2], [f32; 2]) {
         let finite = |value: f32, fallback: f32| if value.is_finite() { value } else { fallback };
         let (low, high) = Self::SCALING;

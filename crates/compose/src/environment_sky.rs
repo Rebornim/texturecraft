@@ -1,7 +1,7 @@
 //! The built-in environments (drawn in code, no image assets) and their diffuse light as spherical harmonics: the viewport
 //! lights with them and Baked Lighting Environment bakes them into the base color
 //!
-//! Equirect convention: `u = φ / 2π`, `v = θ / π`, direction `(sin θ cos φ, cos θ, sin θ sin φ)`; row 0 is straight up.
+//! Equirect convention: `u = φ / 2π`, `v = θ / π`, direction `(sin θ cos φ, cos θ, sin θ sin φ)`; row 0 is straight up
 
 use std::f32::consts::{PI, TAU};
 
@@ -88,8 +88,7 @@ pub fn sh_basis(d: Vec3) -> [f32; 9] {
     ]
 }
 
-/// Diffuse irradiance as 9 SH coefficients of the equirect image `width` x `height` whose texels `radiance` gives (already
-/// convolved with the cosine lobe and divided by π, so `Σ c·Y(n)` times albedo is the diffuse radiance)
+/// Diffuse irradiance as 9 SH coefficients of the equirect image `width` x `height` whose texels `radiance` gives (already convolved with the cosine lobe and divided by π, so `Σ c·Y(n)` times albedo is the diffuse radiance)
 pub fn sh9(width: u32, height: u32, radiance: impl Fn(u32, u32) -> Vec3) -> [[f32; 3]; 9] {
     let (w, h) = (width.max(1), height.max(1));
     let mut c = [Vec3::ZERO; 9];
@@ -98,7 +97,7 @@ pub fn sh9(width: u32, height: u32, radiance: impl Fn(u32, u32) -> Vec3) -> [[f3
         let dw = (TAU / w as f32) * (PI / h as f32) * theta.sin();
         for x in 0..w {
             let d = dir_of((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
-            // No firefly clamp: the projection integrates, so a bright sun lights diffuse fully.
+            // No firefly clamp: the projection integrates, so a bright sun lights diffuse fully
             let l = radiance(x, y) * dw;
             for (k, ylm) in sh_basis(d).iter().enumerate() {
                 c[k] += l * *ylm;

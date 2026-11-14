@@ -2,10 +2,10 @@
 
 use std::ops::RangeInclusive;
 
-use egui::{Color32, Mesh, Painter, Rect, Sense, pos2, vec2};
+use egui::{Color32, Mesh, Painter, Rect, Sense, Vec2, pos2, vec2};
 
 use super::slider::{KNOB_RADIUS, Track};
-use super::{CONTROL_HEIGHT, PropertySheet, ROW_HEIGHT};
+use super::{CONTROL_HEIGHT, GLYPH_TARGET, PropertySheet, ROW_HEIGHT};
 use crate::drawn_icon::DrawnIcon;
 
 /// Side of the material's orb
@@ -42,6 +42,9 @@ pub(crate) struct RampEdit {
     pub(crate) invert: bool,
 }
 
+/// The gaps between the widgets of a card's own body
+const CARD_ITEM_SPACING: Vec2 = vec2(8.0, 4.0);
+
 impl PropertySheet<'_> {
     /// The material's orb with the Material | Channels switch beside it (none without `options`); returns the segment clicked when it was not the chosen one
     pub(crate) fn orb_switch(&mut self, orb: &dyn Fn(&Painter, Rect), options: &[&str], selected: usize) -> Option<usize> {
@@ -70,7 +73,7 @@ impl PropertySheet<'_> {
         let dragged = self.track(id, label, &track, value, &range);
         let typed = self.value_field_at(id, self.right - RAMP_VALUE_INSET, RAMP_VALUE_WIDTH, center_y, *value, &range, 2, "");
 
-        let glyph = Rect::from_center_size(pos2(self.right - INVERT_INSET, center_y), vec2(18.0, 18.0));
+        let glyph = Rect::from_center_size(pos2(self.right - INVERT_INSET, center_y), vec2(GLYPH_TARGET, GLYPH_TARGET));
         let invert_id = self.next_id();
         let tip = crate::i18n::tr("Invert");
         let response = self.tip(self.ui.interact(glyph, invert_id, Sense::click()), tip);
@@ -90,7 +93,7 @@ impl PropertySheet<'_> {
             ui.add_space(self.left - ui.cursor().left());
             ui.vertical(|ui| {
                 ui.set_width(width);
-                ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
+                ui.spacing_mut().item_spacing = CARD_ITEM_SPACING;
                 body(ui)
             })
             .inner

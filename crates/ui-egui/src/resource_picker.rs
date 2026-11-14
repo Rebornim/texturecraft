@@ -5,8 +5,9 @@ use egui_phosphor::regular as ic;
 
 use crate::i18n::tr;
 use crate::picker_tab::PickerTab;
+use crate::property_sheet::{TAB_GAP, TAB_ICON_CENTER, TAB_ICON_SIZE, TAB_NAME_LEFT, TAB_PADDING, TAB_ROUNDING, TAB_TEXT_SIZE, TAB_TOP};
 use crate::resource_picker_item::ResourcePickerItem;
-use crate::theme::{Tokens, semibold};
+use crate::theme::{HARD_SHADOW, Tokens, semibold};
 use crate::thumbs::Thumbs;
 use crate::tile_picture::TilePicture;
 
@@ -45,16 +46,6 @@ const HEADER_INSET: f32 = 4.0;
 /// The edge tab strip and its tabs
 const STRIP_HEIGHT: f32 = 28.0;
 const STRIP_ROUNDING: u8 = 6;
-const TAB_ROUNDING: u8 = 5;
-/// Gap between the strip's top and an open tab's box
-const TAB_TOP: f32 = 4.0;
-/// A tab's width past its name: icon, gaps and padding
-const TAB_PADDING: f32 = 38.0;
-const TAB_GAP: f32 = 2.0;
-const TAB_ICON_X: f32 = 14.0;
-const TAB_TEXT_X: f32 = 26.0;
-const TAB_ICON_SIZE: f32 = 13.0;
-const TAB_TEXT_SIZE: f32 = 11.0;
 const COUNT_SIZE: f32 = 10.0;
 const COUNT_GAP: f32 = 4.0;
 
@@ -76,7 +67,6 @@ const BOTTOM: f32 = 6.0;
 const POPUP_ROUNDING: u8 = 7;
 const BORDER: f32 = 1.0;
 const SHADOW_OFFSET: [i8; 2] = [2, 4];
-const SHADOW: Color32 = Color32::from_rgb(12, 14, 18);
 
 /// Opens the picker `popup_id` with an empty, focused search field, or closes it
 pub(crate) fn toggle(ctx: &egui::Context, popup_id: Id) {
@@ -113,8 +103,9 @@ pub(crate) fn show<K: Clone + PartialEq>(
         offset: SHADOW_OFFSET,
         blur: 0,
         spread: 0,
-        color: SHADOW,
+        color: HARD_SHADOW,
     });
+
     // Always its full size, under the slot or above it where the window ends first; only a window too short for it anywhere gets a shorter grid
     let head = if tabs.len() > 1 { STRIP_HEIGHT } else { 0.0 } + SEARCH_ROW;
     let room = ctx.content_rect().height() - head - BOTTOM - 2.0 * BORDER - 2.0 * WINDOW_MARGIN;
@@ -149,6 +140,7 @@ pub(crate) fn show<K: Clone + PartialEq>(
             if let Some(tab) = tabs.get(open_tab) {
                 let reveal = just_opened && reveal_current;
                 let mut scroll = egui::ScrollArea::vertical().id_salt((popup_id, open_tab)).max_height(grid_height);
+
                 // A new opening with nothing to reveal starts at the top, not where the last one was left
                 if just_opened && !reveal {
                     scroll = scroll.vertical_scroll_offset(0.0);
@@ -204,8 +196,8 @@ fn tab_strip<K>(ui: &mut Ui, tabs: &[PickerTab<K>], open: usize, query: &str) ->
         }
         let text_color = if response.hovered() && !is_open { tk.text } else { color };
         let center_y = strip.center().y + TAB_TOP / 2.0;
-        ui.painter().text(pos2(left + TAB_ICON_X, center_y), Align2::CENTER_CENTER, tab.icon, FontId::proportional(TAB_ICON_SIZE), text_color);
-        let name_left = left + TAB_TEXT_X;
+        ui.painter().text(pos2(left + TAB_ICON_CENTER, center_y), Align2::CENTER_CENTER, tab.icon, FontId::proportional(TAB_ICON_SIZE), text_color);
+        let name_left = left + TAB_NAME_LEFT;
         ui.painter().galley(pos2(name_left, center_y - name.size().y / 2.0), name.clone(), text_color);
         if let Some(galley) = count_galley {
             ui.painter().galley(pos2(name_left + name.size().x + COUNT_GAP, center_y - galley.size().y / 2.0), galley, Color32::PLACEHOLDER);
@@ -277,6 +269,7 @@ fn grid<K: Clone + PartialEq>(ui: &mut Ui, tab: &PickerTab<K>, query: &str, curr
         if shown.is_empty() {
             continue;
         }
+
         let group_top = ui.cursor().top();
         if let Some(header) = group.header {
             caption_row(ui, left, HEADER_HEIGHT, header, semibold(HEADER_SIZE), tk.text);
@@ -330,6 +323,7 @@ fn flush_row<K: Clone + PartialEq>(
     if row.is_empty() {
         return;
     }
+
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
     for (column, (place, item)) in row.drain(..).enumerate() {
         let x = left + column as f32 * cell;

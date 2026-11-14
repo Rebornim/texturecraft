@@ -222,6 +222,7 @@ fn materials_cook_at_their_picked_resolution() {
     assert_eq!((link(&s, id).resolution, size(&s)), (None, 128));
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
     assert_eq!(size(&s), 512);
+
     // A hostile project's size falls back to the texture set's
     if let LayerKind::Fill(fill) = &mut s.doc.project.layer_mut(id).unwrap().kind {
         fill.link.as_mut().unwrap().resolution = Some(CookResolution::Fixed(u32::MAX));

@@ -18,8 +18,10 @@ pub fn warp_uv(corners: &[[f32; 2]; 4], p: Vec2) -> Option<Vec2> {
         if discriminant < 0.0 {
             return None;
         }
+
         let root = discriminant.sqrt();
         let near = |v: f32| across(e, f, g, h, v).map(|u| Vec2::new(u, v));
+
         // Two solutions: keep the one nearer the quad
         let candidates = [near((-k1 - root) / (2.0 * k2)), near((-k1 + root) / (2.0 * k2))];
         candidates.into_iter().flatten().min_by(|x, y| outside(*x).total_cmp(&outside(*y)))?

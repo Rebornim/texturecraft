@@ -41,9 +41,11 @@ impl LiveSwatch {
         if over_own_window(point) || over_windows(&shared.windows(), point.x, point.y) {
             return;
         }
+
         if !matches!(self.keeper_ready.WaitForSingleObject(Some(0)), Ok(co::WAIT::OBJECT_0)) {
             return;
         }
+
         let Some(color) = screen_pixel(point) else { return };
 
         let look = (color, side(point, self.cell));

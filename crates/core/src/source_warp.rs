@@ -76,6 +76,7 @@ impl SourceWarp {
         if self.source.mode != WarpSourceMode::PreviousInput {
             return moves;
         }
+
         let probe = if self.mode == WarpMode::Warp { Self::probe_texels(res) } else { 0.0 };
         moves + probe + self.source.blur_texels(res) * std::f32::consts::FRAC_1_SQRT_2
     }

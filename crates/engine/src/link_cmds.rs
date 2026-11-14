@@ -206,6 +206,7 @@ fn map(s: &mut Session, p: &Value) -> Result<Value> {
             } else {
                 link.mapping.insert(channel, output.to_string());
             }
+
             // Sources no longer name every output once one is mapped elsewhere
             link.outputs = outputs;
         }
@@ -244,6 +245,7 @@ fn resolution(s: &mut Session, p: &Value) -> Result<Value> {
         store(s)?;
         return Ok(json!({"layer": id.0, "cooked": false}));
     }
+
     // Cook first so a failed cook changes nothing, then store and swap the maps as one step
     let mut job = s.link_job(id, &Map::new())?;
     let (texture_set, _, _) = s.doc.project.locate(id).ok_or_else(|| bad(CMD, format!("layer {} is not in a stack", id.0)))?;

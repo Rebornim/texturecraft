@@ -79,6 +79,7 @@ fn a_folders_scale_and_rotation_lay_on_its_fills_without_changing_them_and_reset
 #[test]
 fn randomize_seeds_gives_every_pattern_inside_a_new_seed_in_one_undo_step() {
     let (mut s, folder, fill) = folder_with_fill();
+
     // The folder inside another: its seeds are inside that one too
     let outer = id(execute(&mut s, "layer.group", &json!({"layer": folder.0})).unwrap(), "layer");
     let seeds = |s: &Session| {

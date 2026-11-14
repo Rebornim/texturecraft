@@ -89,6 +89,7 @@ pub(crate) fn fill_sheet(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_
 /// The Fill section (with its reset) and the Symmetry section of the fill at `base`: a fill layer's, a content fill effect's or a mask fill's
 pub(crate) fn placement_sections(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, reader: LayerId) {
     let salt = base.to_string();
+
     // The section reset: projection, placement, sampling and culling back to a new fill's in one undo step
     if sheet.section_reset(tr("Fill"), !texturecraft_engine::fill_reset_cmds::at_defaults(&fill.projection, fill.sampling)) {
         app.run("layer.fill.resetProjection", base.clone());
@@ -106,6 +107,7 @@ fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fil
     };
 
     let picture = |painter: &Painter, rect: Rect, kind: ProjectionKind| projection_picture(painter, rect, kind, &tokens);
+
     // A projection with a gizmo in the 3D view ends its row in the eye that shows or hides it (a view setting saved with the project)
     let gizmos = app.session.doc.project.display.projection_gizmos;
     let tip = if gizmos { tr("Hide projection gizmos") } else { tr("Show projection gizmos") };
@@ -121,6 +123,7 @@ fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fil
     if eye {
         app.run("display.set", json!({"projectionGizmos": !gizmos}));
     }
+
     // Per UV tile, the source fills each tile once: nothing to place
     if kind == ProjectionKind::UvTile {
         return;
@@ -167,6 +170,7 @@ fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fil
         if let Some(filtering) = picked {
             run(app, json!({"filtering": filtering.id()}));
         }
+
         // Tri-planar has no tile to repeat
         if shows_wrap {
             let picture = |painter: &Painter, rect: Rect, wrap: UvWrap| wrap_picture(painter, rect, wrap, &tokens);
@@ -222,6 +226,7 @@ fn triplanar_sharpness(hardness: f32) -> f32 {
 fn frame_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value) {
     let Projection::Warp { depth, .. } = &fill.projection else { return };
     let mut depth = *depth;
+
     // Its i tells it apart from Depth culling; it keeps the column every projection shares
     sheet.info(tr("How far the warp projection reaches into the mesh, in front of and behind its frame, in lengths of the frame's longer side. It bounds the fill only when cropped to its shape."));
     if let Some(merge) = sheet.slider_led(RowLead::Loose(tr("Depth")), &mut depth, PROJECTION_DEPTH_TRACK, 2, "") {
@@ -273,6 +278,7 @@ fn culling_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: 
         if sheet.picture_toggle(&picture, tr("Backface culling"), &mut backface.on) {
             run(app, json!({"backfaceCulling": backface.on}));
         }
+
         // Cylindrical culls by the angle to its axis's outward direction alone
         if angle.is_none()
             && let Some(merge) = sheet.angle_led(RowLead::Child(tr("Angle")), &mut backface.angle, BACKFACE_ANGLE_RANGE)
@@ -331,6 +337,7 @@ fn placement_rows(
     };
     let placement = Placement { tiling, rotation, offset };
     let bounds = app.session.mesh.bounds();
+
     // A warp shows its frame's size and turn as its gizmo leaves them
     let warp = match &fill.projection {
         Projection::Warp { corners, .. } => {
@@ -397,6 +404,7 @@ fn world_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &F
     if !sheet.band(tr("3D projection settings"), true, None, None).open {
         return;
     }
+
     let edited = |fields: &[NumberField]| -> Vec<f32> { fields.iter().map(|field| field.value).collect() };
 
     // A placed planar or a warp: the frame, its projector folded in

@@ -69,6 +69,7 @@ impl CursorImage {
         let pixel_bytes = side * side * 4;
         let image_bytes = BITMAP_HEADER_BYTES + pixel_bytes + mask_row * side;
         let mut file = Vec::with_capacity((CUR_HEADER_BYTES + image_bytes) as usize);
+
         // The file's header: one cursor picture, a byte size of 0 standing for 256
         for word in [0_u16, CUR_TYPE, 1] {
             file.extend_from_slice(&word.to_le_bytes());
@@ -80,6 +81,7 @@ impl CursorImage {
         }
         file.extend_from_slice(&image_bytes.to_le_bytes());
         file.extend_from_slice(&CUR_HEADER_BYTES.to_le_bytes());
+
         // The bitmap's header: twice the height, the colour picture over its mask
         let side_signed = i32::try_from(side).unwrap_or(0);
         for word in [BITMAP_HEADER_BYTES as i32, side_signed, side_signed * 2] {
@@ -90,6 +92,7 @@ impl CursorImage {
         for word in [0, pixel_bytes + mask_row * side, 0, 0, 0, 0] {
             file.extend_from_slice(&word.to_le_bytes());
         }
+
         // Rows bottom up: blue, green, red, alpha; then the mask, set where the picture is clear
         for row in self.rgba.chunks_exact(side as usize * 4).rev() {
             for &[red, green, blue, alpha] in row.as_chunks::<4>().0 {

@@ -23,6 +23,7 @@ fn app_with_mask_fill(projection: &str) -> (Harness<'static, TextureCraftApp>, L
     let effect = LayerId(added["effect"].as_u64().unwrap());
     texturecraft_engine::execute(&mut session, "layer.select", &json!({"layer": layer.0, "target": effect.0})).unwrap();
     let mut harness = Harness::builder().with_size(WINDOW_SIZE).build_eframe(|cc| TextureCraftApp::new(cc, session));
+
     // The labels below are English; a first run would speak the system's language
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(STARTUP_FRAMES);
@@ -108,6 +109,7 @@ fn mouse_drag_watching(harness: &mut Harness<'_, TextureCraftApp>, from: Pos2, t
 #[test]
 fn a_mask_fills_projection_moves_on_the_model_and_resets_with_its_section() {
     let (mut harness, layer, effect) = app_with_mask_fill("uv");
+
     // A real drag that starts on the held button slides the mask fill's image
     let button = harness.get_by_role_and_label(Role::Button, "Move on model").rect().center();
     let mut held = None;

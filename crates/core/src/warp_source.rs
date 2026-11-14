@@ -33,9 +33,13 @@ impl WarpSource {
     /// How far noise is stretched from mid gray so it spans black to white
     pub const NOISE_STRETCH: f32 = 1.5;
 
+    /// The Tiling range
+    pub const TILING_MIN: f32 = 0.01;
+    pub const TILING_MAX: f32 = 16.0;
+
     /// Noise features per UV tile
     pub fn noise_scale(&self) -> f32 {
-        let tiling = if self.tiling.is_finite() { self.tiling.clamp(0.01, 16.0) } else { 1.0 };
+        let tiling = if self.tiling.is_finite() { self.tiling.clamp(Self::TILING_MIN, Self::TILING_MAX) } else { 1.0 };
         Self::NOISE_FEATURES * tiling
     }
 

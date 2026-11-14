@@ -32,22 +32,29 @@ impl AnisotropicKuwahara {
 
     /// How far around a texel its direction is read, as a share of the radius (Tensor Smoothness, 0..1)
     pub fn tensor_reach(&self) -> f32 {
-        if self.tensor_smoothness.is_finite() { self.tensor_smoothness.clamp(0.0, 1.0) } else { 0.1 }
+        if self.tensor_smoothness.is_finite() { self.tensor_smoothness.clamp(0.0, 1.0) } else { Self::LIBRARY.tensor_smoothness }
     }
 
     /// Sectors the ellipse is split into
     pub const SECTORS: usize = 8;
 
+    /// The sector weighing exponent at the least and the most Sharpness
+    const SHARPNESS_EXPONENT_MIN: f32 = 2.0;
+    const SHARPNESS_EXPONENT_MAX: f32 = 16.0;
+
+    /// The sample falloff exponent at no Smoothness (1 at full Smoothness)
+    const SECTOR_EXPONENT_MAX: f32 = 16.0;
+
     /// The exponent a sector's spread is weighed with: higher picks the calmest sector more sharply
     pub fn sharpness_exponent(&self) -> f32 {
-        let sharpness = if self.sharpness.is_finite() { self.sharpness.clamp(0.25, 1.0) } else { 0.25 };
-        2.0 + sharpness * 14.0
+        let sharpness = if self.sharpness.is_finite() { self.sharpness.clamp(Self::LIBRARY.sharpness, 1.0) } else { Self::LIBRARY.sharpness };
+        Self::SHARPNESS_EXPONENT_MIN + sharpness * (Self::SHARPNESS_EXPONENT_MAX - Self::SHARPNESS_EXPONENT_MIN)
     }
 
     /// How sharply a sample's weight falls off away from a sector's middle: smoother sectors overlap more
     pub fn sector_exponent(&self) -> f32 {
-        let smoothness = if self.smoothness.is_finite() { self.smoothness.clamp(0.0, 1.0) } else { 0.25 };
-        1.0 + (1.0 - smoothness) * 15.0
+        let smoothness = if self.smoothness.is_finite() { self.smoothness.clamp(0.0, 1.0) } else { Self::LIBRARY.smoothness };
+        1.0 + (1.0 - smoothness) * (Self::SECTOR_EXPONENT_MAX - 1.0)
     }
 
     /// The ellipse's semi-axes (along, across the direction) for `radius` texels where the direction is `clear` (0..1)

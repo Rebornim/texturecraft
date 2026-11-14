@@ -3,19 +3,11 @@
 //! Clamp, Smoothstep, Histogram Shift, Sharpen, Blur and Blur Directional; Highpass's and Grayscale Conversion's rows
 
 use egui::accesskit::Role;
-use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
-use texturecraft_engine::core::{ConversionMode, EffectKind, Filter, HighpassSpace, LayerId};
-use texturecraft_ui_egui::TextureCraftApp;
+use texturecraft_engine::core::{ConversionMode, Filter, HighpassSpace};
 
 use crate::filter_shape::{app_with, click_at, pick};
-
-fn filter_of(harness: &Harness<'_, TextureCraftApp>, effect: LayerId) -> Filter {
-    match &harness.state().session.doc.project.effect(effect).unwrap().1.kind {
-        EffectKind::Filter(filter) => filter.clone(),
-        other => panic!("not a filter: {other:?}"),
-    }
-}
+use crate::filter_support::filter_of;
 
 /// Invert's only row is its switch: a click turns it off, another back on
 #[test]
@@ -140,6 +132,7 @@ fn grayscale_conversion_rows() {
     pick(&mut harness, "Current Channel", "Custom Input");
     let Filter::GrayscaleConversion(conversion) = filter_of(&harness, effect) else { panic!() };
     assert!(conversion.custom_input);
+
     // The lowest: Channel Input shows the same name where its words don't fit a switch
     let slot = harness.query_all_by_role_and_label(Role::ComboBox, "Custom Input").map(|node| node.rect()).max_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
     let invert = harness.get_by_role_and_label(Role::CheckBox, "Invert").rect();

@@ -102,7 +102,7 @@ pub use image_input::ImageInput;
 pub use layer::{
     ChannelBlend, CompareOp, CurvatureDetail, CurvatureMode, Decal, Effect, EffectKind, Fill, Filter, Filtering, Generator, GeneratorKind, HeightMask, Layer,
     LayerId, LayerKind, Levels, LinkParam, LinkPreset, Mask, MaskBackground, MaterialLink, POSTERIZE_LEVELS_MAX, PathShape, Procedural, ProceduralKind,
-    Projection, Sampling, ScaleMode, Source, UvTransform, UvWrap, gradient, hsl_adjust, per_unit, posterize,
+    Projection, SIZE_REFERENCE_RES, Sampling, ScaleMode, Source, UvTransform, UvWrap, gradient, hsl_adjust, per_unit, posterize,
 };
 pub use lighting_output::LightingOutput;
 pub use mask_outline::MaskOutline;

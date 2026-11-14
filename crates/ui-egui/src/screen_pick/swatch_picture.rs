@@ -67,10 +67,12 @@ fn pipette_pixel(pipette: &CursorImage, x: f32, y: f32) -> [u8; 4] {
     if x < 0.0 || y < 0.0 {
         return [0; 4];
     }
+
     let (x, y) = (x as u32, y as u32);
     if x >= pipette.size || y >= pipette.size {
         return [0; 4];
     }
+
     let index = ((y * pipette.size + x) * 4) as usize;
     pipette.rgba.get(index..index + 4).and_then(|pixel| pixel.try_into().ok()).unwrap_or([0; 4])
 }
@@ -80,6 +82,7 @@ fn disc_pixel(distance: f32, unit: f32, color: [u8; 3]) -> [u8; 4] {
     let fill_radius = FILL_RADIUS_PX * unit;
     let outline_radius = fill_radius + OUTLINE_PX * unit;
     let ring_radius = outline_radius + (RING_PX * unit).max(1.0);
+
     // Each edge's coverage over the pixel's width, for smooth edges
     let coverage = |radius: f32| (radius - distance + 0.5).clamp(0.0, 1.0);
 
@@ -96,6 +99,7 @@ fn over(top: [u8; 4], bottom: [u8; 4]) -> [u8; 4] {
     if alpha <= 0.0 {
         return [0; 4];
     }
+
     let mix = |channel: usize| to_byte((f32::from(top[channel]) * top_alpha + f32::from(bottom[channel]) * bottom_alpha) / alpha / 255.0);
     [mix(0), mix(1), mix(2), to_byte(alpha)]
 }
@@ -140,6 +144,7 @@ mod tests {
         for (cell, unit) in [(32, 1.0), (48, 1.5), (64, 2.0)] {
             let image = CursorImage::eyedropper_with_swatch(cell, [10, 200, 10], SwatchSide::BelowRight);
             let [cx, cy] = disc_center(&image, SwatchSide::BelowRight, unit);
+
             // The faint ring stays below this alpha; the outline and the colour reach it
             let across = (0..image.size).filter(|&x| pixel(&image, x, cy)[3] >= 160).count();
 

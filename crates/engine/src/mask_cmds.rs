@@ -281,6 +281,7 @@ pub(crate) fn push_effect_with(
         if let Some(n) = name_param(p) {
             e.name = n.to_string();
         }
+
         // A filter that changes only some channels (lighting, validation) starts with the other channels' pills off
         if content
             && let EffectKind::Filter(f) = &e.kind
@@ -479,6 +480,7 @@ fn add_levels(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn add_filter(s: &mut Session, p: &Value) -> Result<Value> {
     let id = strp(p, "filter").unwrap_or("invert");
+
     // An empty filter changes nothing until one is picked into it
     let kind = if id == EMPTY_FILTER { EffectKind::Filter(Filter::Empty) } else { crate::filter_lib::build(id, p)? };
     // Library filters are named after their shelf entry (material finishes are fill effects).
@@ -591,9 +593,11 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
     if channel.is_some() && on_mask {
         return Err(bad(CMD, "a mask effect blends one channel: leave out `channel`"));
     }
+
     if on_mask && params.get("affects").is_some() {
         return Err(bad(CMD, "a mask's levels remap its one value: leave out `affects`"));
     }
+
     let switched = switched_channels(params)?;
     if !switched.is_empty() && on_mask {
         return Err(bad(CMD, "a mask effect has one value: leave out `channels`"));

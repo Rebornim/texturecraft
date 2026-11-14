@@ -71,6 +71,7 @@ pub fn radiance(name: &str, d: Vec3) -> Vec3 {
             base + SoftBox { azimuth: 20.0, elevation: 15.0, half_width: 10.0, half_height: 10.0, color: Vec3::new(0.4, 1.6, 4.0) }.eval(d)
                 + SoftBox { azimuth: -110.0, elevation: 10.0, half_width: 12.0, half_height: 8.0, color: Vec3::new(4.0, 0.8, 1.6) }.eval(d)
         }
+
         // "Studio Soft" (default)
         _ => {
             let base = sky(d, Vec3::new(0.5, 0.52, 0.56), Vec3::new(0.32, 0.32, 0.33), Vec3::new(0.08, 0.075, 0.07));
@@ -106,6 +107,7 @@ pub fn sh9(width: u32, height: u32, radiance: impl Fn(u32, u32) -> Vec3) -> [[f3
         let dw = (TAU / w as f32) * (PI / h as f32) * theta.sin();
         for x in 0..w {
             let d = dir_of((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+
             // No firefly clamp: the projection integrates, so a bright sun lights diffuse fully
             let l = radiance(x, y) * dw;
             for (k, ylm) in sh_basis(d).iter().enumerate() {

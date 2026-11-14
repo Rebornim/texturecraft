@@ -271,6 +271,7 @@ fn display(s: &mut Session, p: &Value) -> Result<Value> {
     if f32p(p, "fov").is_some() {
         s.camera.fov = s.doc.project.display.fov;
     }
+
     // Baked Lighting Environment lights with the viewport environment: the layers it lights composite again when that turns or changes
     let display = &s.doc.project.display;
     if (display.environment.as_str(), display.env_rotation) != (lighting.0.as_str(), lighting.1) && lit_by_environment(&s.doc.project) {

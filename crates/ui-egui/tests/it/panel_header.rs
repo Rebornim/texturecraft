@@ -64,6 +64,7 @@ fn every_docked_panel_header_ends_in_its_own_close_button() {
     let tabs: Vec<egui::Rect> = names.iter().map(|name| tab_rect(&harness, name)).collect();
     for (name, tab) in names.iter().zip(&tabs) {
         let close = header_close(&harness, *tab);
+
         // No other group's tab between a tab and its close button: the button is on its own bar
         let between = tabs.iter().any(|other| other.y_range().contains(close.center().y) && other.min.x > tab.max.x && other.max.x < close.min.x);
         assert!(!between, "{name} has no close button on its own header");

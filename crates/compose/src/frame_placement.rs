@@ -27,10 +27,12 @@ pub fn folded(proj: &Projection) -> Option<Projection> {
     if !projector.turns() {
         return Some(proj.clone());
     }
+
     let (origin, across, up, _) = decal_axes(frame)?;
     let [x, y, z] = projector.rotation.map(f32::to_radians);
     let turn = Mat3::from_cols(across, up, across.cross(up)) * Mat3::from_euler(EulerRot::ZYX, z, y, x);
     let stretch = Vec3::from(projector.scale).map(|s| if s.abs() < 1e-6 { 1e-6 } else { s });
+
     // A negative scale turns that side over
     let (across, up) = (turn.x_axis * stretch.x.signum(), turn.y_axis * stretch.y.signum());
     let size = [frame.size[0] * stretch.x.abs(), frame.size[1] * stretch.y.abs()];
@@ -96,6 +98,7 @@ pub fn placed(proj: &Projection, placement: &FramePlacement, bounds: (Vec3, Vec3
     if !values.copied().all(f32::is_finite) || placement.scale.iter().any(|scale| *scale <= 0.0) {
         return None;
     }
+
     let mut proj = folded(proj)?;
     let (center, radius) = mesh_frame(bounds);
     let diagonal = 2.0 * radius;
@@ -115,6 +118,7 @@ pub fn placed(proj: &Projection, placement: &FramePlacement, bounds: (Vec3, Vec3
         Projection::Planar { placed: Some(placed), .. } => *placed = frame,
         Projection::Warp { frame: warp, depth, .. } => {
             *depth = deep / width.max(height).max(1e-6);
+
             // The warp's own depth is what reaches; the frame's is unused
             *warp = Decal { depth: warp.depth, ..frame };
         }

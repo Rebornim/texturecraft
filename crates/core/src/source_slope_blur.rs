@@ -43,6 +43,7 @@ impl SourceSlopeBlur {
         if self.source.mode != WarpSourceMode::PreviousInput {
             return moves;
         }
+
         moves + SourceWarp::probe_texels(res) + self.source.blur_texels(res) * std::f32::consts::FRAC_1_SQRT_2
     }
 }

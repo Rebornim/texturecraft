@@ -6,7 +6,8 @@ use egui_phosphor::regular as ic;
 
 use texturecraft_engine::core::MAX_SWATCHES;
 
-use super::{CONTROL_HEIGHT, PAD, PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE, TEXT_SIZE};
+use super::slider::KNOB_RADIUS;
+use super::{CONTROL_HEIGHT, GLYPH_SIZE, GLYPH_TARGET, PAD, PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::color_picker::{ColorModel, ColorPick, ColorSpace, PickerState, SwatchEdit, hex, parse_hex};
 use crate::drawn_icon::DrawnIcon;
 use crate::fill_material_panel::shown_color as screen_color;
@@ -49,9 +50,6 @@ const DIGITS_INSET: f32 = 20.0;
 const EYEDROPPER_INSET: f32 = 7.0;
 const MENU_INSET: f32 = 6.0;
 
-/// Size of the eyedropper and ⋯ glyphs and of their click targets
-const GLYPH_SIZE: f32 = 13.0;
-const GLYPH_TARGET: f32 = 18.0;
 /// Size of the eyedropper's pipette
 const PIPETTE_SIZE: f32 = 15.0;
 
@@ -65,9 +63,8 @@ const SLIDER_ROW: f32 = 22.0;
 const TRACK_LEFT: f32 = 18.0;
 const TRACK_RIGHT_INSET: f32 = 44.0;
 
-/// Height of a slider's colour track and radius of its knob
+/// Height of a slider's colour track
 const TRACK_HEIGHT: f32 = 6.0;
-const KNOB_RADIUS: f32 = 5.0;
 
 /// Width of a slider's typed value
 const VALUE_WIDTH: f32 = 40.0;
@@ -277,6 +274,7 @@ impl PropertySheet<'_> {
         if self.ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             return None;
         }
+
         parse_hex(&text)
     }
 

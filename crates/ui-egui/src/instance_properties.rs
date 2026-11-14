@@ -23,6 +23,7 @@ pub(crate) fn instance_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer:
     let project = &app.session.doc.project;
     let missing = !project.layers.contains_key(&source);
     let name = project.layers.get(&source).map_or_else(|| tr("Missing layer").to_string(), |l| l.name.clone());
+
     // A missing source has no texture set left; the instance's own names where it was
     let set = set_name(project, if missing { layer.id } else { source });
     let picture =
@@ -51,6 +52,7 @@ fn paint_thumbnail(painter: &Painter, rect: Rect, picture: Option<TextureId>, mi
         painter.rect_stroke(rect.shrink(MISSING_INSET), radius, Stroke::new(1.0, tokens.text_dim), StrokeKind::Inside);
         return;
     }
+
     match picture {
         Some(texture) => {
             let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));

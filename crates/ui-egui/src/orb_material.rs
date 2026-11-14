@@ -121,6 +121,7 @@ impl OrbMaterial {
                 let Some(image) = self.images.get(name) else { return channel.default_value() };
                 self.image_value(image, channel.kind(), *normal_format, coords, footprint)
             }
+
             // An anchor reads another layer's result, which only the layer stack knows
             Source::Anchor { .. } => channel.default_value(),
         }

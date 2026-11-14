@@ -128,6 +128,7 @@ fn source_histograms(ui: &mut Ui, counts: Option<&[Vec<u32>; 2]>, constants: [Op
     let tallest = [0, 1].into_iter().filter_map(shown).flatten().copied().max().unwrap_or(0).max(1) as f32;
     for side in [1, 0] {
         let (Some(tag), Some(bins)) = (SOURCE_TAGS.get(side), shown(side)) else { continue };
+
         // One mesh from bucket centre to bucket centre (separate strips would leave seams between them)
         let step = well.width() / bins.len() as f32;
         let tops = bins.iter().enumerate().map(|(index, count)| {
@@ -156,8 +157,9 @@ fn source_histograms(ui: &mut Ui, counts: Option<&[Vec<u32>; 2]>, constants: [Op
         }
     }
 
-    for (index, label) in ["0", "0.25", "0.5", "0.75", "1"].iter().enumerate() {
-        let x = at(index as f32 / 4.0);
+    let labels = ["0", "0.25", "0.5", "0.75", "1"];
+    for (index, label) in labels.iter().enumerate() {
+        let x = at(index as f32 / (labels.len() - 1) as f32);
         painter.text(pos2(x, well.bottom() + AXIS_LABEL_OFFSET), Align2::CENTER_CENTER, *label, FontId::proportional(AXIS_LABEL_SIZE), tokens.text_dim);
     }
 }

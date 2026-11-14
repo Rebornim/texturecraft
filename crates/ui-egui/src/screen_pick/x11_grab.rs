@@ -93,6 +93,7 @@ fn follow(connection: &RustConnection, root: Window, argb: Pictformat, cell: u32
     if disc.as_ref().is_some_and(|disc| disc.look == look) {
         return;
     }
+
     let Some(pointer) = make_pointer(connection, root, argb, &CursorImage::eyedropper_with_swatch(cell, look.0, look.1)) else { return };
 
     let _ = connection.change_active_pointer_grab(pointer, x11rb::CURRENT_TIME, grab_mask());
@@ -157,6 +158,7 @@ fn make_pointer(connection: &RustConnection, root: Window, argb: Pictformat, ima
     let picture = connection.generate_id().ok()?;
     connection.render_create_picture(picture, pixmap, argb, &CreatePictureAux::new()).ok()?;
     let cursor = connection.generate_id().ok()?;
+
     // Checked: a pointer the server refused would make every grab fail
     let made = connection.render_create_cursor(cursor, picture, hot_x, hot_y).ok()?.check().is_ok();
     let _ = connection.render_free_picture(picture);

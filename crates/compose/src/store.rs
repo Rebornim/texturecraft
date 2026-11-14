@@ -151,6 +151,7 @@ impl ImageRes {
         if !u.is_finite() || !v.is_finite() {
             return [0.0; 4];
         }
+
         self.texel((u * self.width as f32).floor() as i64, (v * self.height as f32).floor() as i64, (true, true))
     }
 
@@ -176,6 +177,7 @@ impl ImageRes {
         if !u.is_finite() || !v.is_finite() {
             return [0.0; 4];
         }
+
         let repeat = sampling.wrap.repeats();
         let full = |u: f32, v: f32| bilinear(&self.rgba, self.width, self.height, u, v, repeat);
         match sampling.filtering {
@@ -193,6 +195,7 @@ impl ImageRes {
                 if t <= 0.0 {
                     return a;
                 }
+
                 let b = level(lo + 1);
                 [0, 1, 2, 3].map(|k| a[k] + (b[k] - a[k]) * t)
             }

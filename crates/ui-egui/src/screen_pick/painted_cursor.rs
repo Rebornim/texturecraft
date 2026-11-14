@@ -54,6 +54,7 @@ fn texture(ctx: &egui::Context, look: CursorLook) -> CursorTexture {
     if let Some(cursor) = ctx.data(|data| data.get_temp::<CursorTexture>(id)).filter(|cursor| cursor.look == look) {
         return cursor;
     }
+
     let image = match look {
         (cell, Some((color, side))) => CursorImage::eyedropper_with_swatch(cell, color, side),
         (cell, None) => CursorImage::eyedropper(cell),

@@ -82,6 +82,7 @@ fn invert_switches_off_and_on() {
     execute(&mut s, "effect.set", &json!({"effect": effect.0, "invert": false})).unwrap();
     execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap();
     assert_eq!(filter_of(&s, effect), Filter::Invert);
+
     // An old project's Invert still reads as before
     let old: Filter = serde_json::from_value(json!("Invert")).unwrap();
     assert_eq!(old, Filter::Invert);

@@ -52,9 +52,9 @@ impl ProjectorOutline {
             }
             Projection::Spherical { offset, projector, .. } => {
                 let place = Place::new(projector.rotation, projector.scale, Vec3::from(*offset), 1.0);
-                let r = object.max_element() * SPHERE_REACH;
+                let radius = object.max_element() * SPHERE_REACH;
                 let (u, v) = place.facing().any_orthonormal_pair();
-                let ring = |a: Vec3, b: Vec3| circle(|t| place.world(place.local + (a * t.x + b * t.y) * r));
+                let ring = |a: Vec3, b: Vec3| circle(|t| place.world(place.local + (a * t.x + b * t.y) * radius));
                 ProjectorOutline { lines: vec![ring(u, v), ring(Vec3::X, Vec3::Z), ring(Vec3::Y, Vec3::Z)], tip: None, center: place.world(place.local) }
             }
             Projection::Cylindrical { axis, offset, projector, .. } => {
@@ -62,15 +62,19 @@ impl ProjectorOutline {
                 let axis = usize::from((*axis).min(2));
                 let along = Vec3::AXES[axis];
                 let (u, v) = (Vec3::AXES[(axis + 1) % 3], Vec3::AXES[(axis + 2) % 3]);
-                let r = (object * (Vec3::ONE - along)).max_element() * CYLINDER_REACH;
-                let h = object[axis] * CYLINDER_HEIGHT;
-                let cap = |height: f32| circle(|t| place.world(place.local + along * height + (u * t.x + v * t.y) * r));
-                let mut lines = vec![cap(h), cap(-h)];
+                let radius = (object * (Vec3::ONE - along)).max_element() * CYLINDER_REACH;
+                let half_height = object[axis] * CYLINDER_HEIGHT;
+                let cap = |height: f32| circle(|t| place.world(place.local + along * height + (u * t.x + v * t.y) * radius));
+                let mut lines = vec![cap(half_height), cap(-half_height)];
+
                 // The two side lines, where the round side turns away from the camera
                 let facing = place.facing();
                 if let Some(side) = along.cross(facing - along * facing.dot(along)).try_normalize() {
                     for edge in [side, -side] {
-                        lines.push(vec![place.world(place.local + edge * r + along * h), place.world(place.local + edge * r - along * h)]);
+                        lines.push(vec![
+                            place.world(place.local + edge * radius + along * half_height),
+                            place.world(place.local + edge * radius - along * half_height),
+                        ]);
                     }
                 }
                 ProjectorOutline { lines, tip: None, center: place.world(place.local) }
@@ -134,7 +138,7 @@ mod tests {
         let cylinder =
             Projection::Cylindrical { scale: 1.0, axis: 1, uv: UvTransform::default(), offset: [0.0; 3], projector: Projector::default(), angle: 360.0 };
         assert_eq!(ProjectorOutline::of(&cylinder, Vec3::new(0.55, 0.7, 0.55)).unwrap().lines.len(), 4, "two caps, two side lines");
-        let triplanar = Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: UvTransform::default(), projector: Projector::default() };
+        let triplanar = Projection::triplanar();
         assert_eq!(ProjectorOutline::of(&triplanar, Vec3::splat(0.55)).unwrap().lines.len(), 12, "a box's edges");
         assert!(ProjectorOutline::of(&Projection::UvTile, BALL).is_none());
     }

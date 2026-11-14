@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::BevelDirection;
+use crate::{BevelDirection, SIZE_REFERENCE_RES};
 
 /// A smooth ramp from the edge of the shapes (values at or above `threshold`), outwards, inwards or across it
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -41,6 +41,9 @@ impl BevelSmooth {
     /// Texels at 2K a unit of Smoothing blurs over
     pub const SMOOTHING_TEXELS: f32 = 2.0;
 
+    /// The largest Smoothing
+    pub const SMOOTHING_MAX: f32 = 10.0;
+
     /// Whether `value` is inside the shapes
     pub fn inside(&self, value: f32) -> bool {
         let threshold = if self.threshold.is_finite() { self.threshold.clamp(0.0, 1.0) } else { 0.5 };
@@ -55,8 +58,8 @@ impl BevelSmooth {
 
     /// How many texels the ramp is blurred over at `res` texels across a UV tile
     pub fn smoothing_texels(&self, res: u32) -> f32 {
-        let smoothing = if self.smoothing.is_finite() { self.smoothing.clamp(0.0, 10.0) } else { 0.0 };
-        smoothing * Self::SMOOTHING_TEXELS * res as f32 / 2048.0
+        let smoothing = if self.smoothing.is_finite() { self.smoothing.clamp(0.0, Self::SMOOTHING_MAX) } else { 0.0 };
+        smoothing * Self::SMOOTHING_TEXELS * res as f32 / SIZE_REFERENCE_RES
     }
 
     /// The ramp at a texel `edge` texels from the shapes' edge, inside them or not

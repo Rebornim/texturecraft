@@ -34,6 +34,7 @@ impl PropertySheet<'_> {
             self.ui.data_mut(|data| data.insert_temp(typing_id, text));
             return None;
         }
+
         self.ui.data_mut(|data| data.remove::<String>(typing_id));
         let typed = text.trim();
         let escaped = self.ui.input(|input| input.key_pressed(egui::Key::Escape));

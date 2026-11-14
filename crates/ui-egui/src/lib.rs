@@ -793,6 +793,7 @@ impl eframe::App for TextureCraftApp {
         toasts(self, &ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.file_dialogs.show_pending(frame);
+
         // Last, so no widget's pointer replaces it: an armed eyedropper is the pointer over the whole window
         if self.picking_color.is_some() {
             screen_pick::paint_cursor(&ctx, None, screen_pick::SwatchColor::shown(&ctx));

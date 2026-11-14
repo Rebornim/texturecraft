@@ -378,6 +378,7 @@ fn style(ui: &Ui, t: &Tokens) -> DockStyle {
     s.min_pane = 60.0;
     s.background = t.panel;
     s.tab_background = t.chrome;
+
     // The shown and the hovered tab keep the bar's colour; their names brighten instead
     s.active_background = t.chrome;
     s.text = t.text_strong;
@@ -544,6 +545,7 @@ impl DockContent<Panel> for Panels<'_> {
         if !header_closes(active, floating) {
             return;
         }
+
         let rect = ui.max_rect();
         let button = egui::Rect::from_center_size(
             egui::pos2(rect.right() - HEADER_CLOSE_RIGHT_MARGIN - HEADER_CLOSE_SIZE / 2.0, rect.center().y),

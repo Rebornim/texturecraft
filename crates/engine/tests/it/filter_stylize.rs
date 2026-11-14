@@ -70,6 +70,7 @@ fn anisotropic_kuwahara_takes_its_settings_and_smooths() {
 fn pbr_validate_marks_implausible_base_colors() {
     let mut s = session();
     let texel = (SIZE / 4, SIZE / 2);
+
     // sRGB 20: darker than both dark thresholds
     let dark = 0.007;
     execute(&mut s, "layer.add.fill", &json!({"color": [dark, dark, dark], "metallic": 0.0})).unwrap();

@@ -35,6 +35,9 @@ pub(crate) fn thumbnail(app: &mut TextureCraftApp, ctx: &egui::Context, source: 
     }
 }
 
+/// The glyph size of a slot without a picture
+const GLYPH_SIZE: f32 = 14.0;
+
 /// Paints `thumbnail` into a slot's square
 pub(crate) fn paint_thumbnail(painter: &Painter, rect: Rect, thumbnail: &Thumbnail, tokens: &Tokens) {
     match thumbnail {
@@ -50,7 +53,7 @@ pub(crate) fn paint_thumbnail(painter: &Painter, rect: Rect, thumbnail: &Thumbna
         }
         Thumbnail::Glyph(glyph) => {
             painter.rect_filled(rect, CornerRadius::ZERO, tokens.field);
-            painter.text(rect.center(), Align2::CENTER_CENTER, *glyph, FontId::proportional(14.0), tokens.text_dim);
+            painter.text(rect.center(), Align2::CENTER_CENTER, *glyph, FontId::proportional(GLYPH_SIZE), tokens.text_dim);
         }
     }
 }

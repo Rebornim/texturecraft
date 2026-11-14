@@ -4,7 +4,7 @@ use egui::{Align2, Color32, CornerRadius, FontId, Id, Rect, Response, Sense, Str
 use egui_phosphor::regular as ic;
 
 use super::value_text::ValueText;
-use super::{ICON_SIZE, PropertySheet, RowLead, SMALL_TEXT_SIZE, TEXT_SIZE};
+use super::{ICON_SIZE, PropertySheet, ROW_HIT_HALF_HEIGHT, RowLead, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Radius of a slider's knob
@@ -48,6 +48,10 @@ pub(super) struct Track {
     /// The track is a picture of its range (a gray ramp) drawn by the caller: no line and no fill
     pub(super) ramp: bool,
 }
+
+/// Where a slider's unit chip draws its caret and its text, from the chip's right end
+const CHIP_CARET_INSET: f32 = 9.0;
+const CHIP_TEXT_INSET: f32 = 18.0;
 
 impl PropertySheet<'_> {
     /// A bounded number; `Some(merge)` when `value` changed, `merge` true for a drag's later steps
@@ -178,8 +182,8 @@ impl PropertySheet<'_> {
         if open {
             painter.rect_stroke(chip_rect, CornerRadius::same(4), Stroke::new(1.0, t.accent), StrokeKind::Inside);
         }
-        painter.text(pos2(chip_end - 9.0, center_y), Align2::CENTER_CENTER, ic::CARET_DOWN, FontId::proportional(ICON_SIZE), t.text);
-        painter.text(pos2(chip_end - 18.0, center_y), Align2::RIGHT_CENTER, chip, semibold(SMALL_TEXT_SIZE), t.text);
+        painter.text(pos2(chip_end - CHIP_CARET_INSET, center_y), Align2::CENTER_CENTER, ic::CARET_DOWN, FontId::proportional(ICON_SIZE), t.text);
+        painter.text(pos2(chip_end - CHIP_TEXT_INSET, center_y), Align2::RIGHT_CENTER, chip, semibold(SMALL_TEXT_SIZE), t.text);
 
         let track = Track { start: control.left() + KNOB_RADIUS, end: chip_rect.left() - DIAL_AIR - KNOB_RADIUS, center_y, zero: None, ramp: false };
         let dragged = self.track(id, label, &track, value, &range);
@@ -203,7 +207,10 @@ impl PropertySheet<'_> {
         let (minimum, maximum) = (*range.start(), *range.end());
         let span = (maximum - minimum).max(f32::EPSILON);
         let length = (track.end - track.start).max(1.0);
-        let hit = Rect::from_min_max(pos2(track.start - KNOB_RADIUS, track.center_y - 10.0), pos2(track.end + KNOB_RADIUS, track.center_y + 10.0));
+        let hit = Rect::from_min_max(
+            pos2(track.start - KNOB_RADIUS, track.center_y - ROW_HIT_HALF_HEIGHT),
+            pos2(track.end + KNOB_RADIUS, track.center_y + ROW_HIT_HALF_HEIGHT),
+        );
         let response = self.ui.interact(hit, id, Sense::click_and_drag());
         response.widget_info(|| WidgetInfo::slider(true, f64::from(*value), label));
 
@@ -264,7 +271,7 @@ impl PropertySheet<'_> {
     /// A value drawn as `text.shown` that turns into a field when clicked; returns the typed value (its `text.suffix` and a leading "×" or "x" allowed), kept in `range`
     pub(super) fn value_text_field(&mut self, id: Id, text: ValueText<'_>, value: f32, range: &RangeInclusive<f32>, decimals: usize) -> Option<f32> {
         let ValueText { right, width, center_y, shown, suffix } = text;
-        let rect = Rect::from_min_max(pos2(right - width, center_y - 10.0), pos2(right, center_y + 10.0));
+        let rect = Rect::from_min_max(pos2(right - width, center_y - ROW_HIT_HALF_HEIGHT), pos2(right, center_y + ROW_HIT_HALF_HEIGHT));
         let field_id = id.with("typed");
         let editing = self.ui.data(|data| data.get_temp::<String>(field_id));
 
@@ -294,6 +301,7 @@ impl PropertySheet<'_> {
         if self.ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             return None;
         }
+
         let typed: f32 = text.trim().trim_end_matches(suffix).trim_start_matches(['×', 'x']).trim().parse().ok()?;
         typed.is_finite().then(|| typed.clamp(*range.start(), *range.end()))
     }

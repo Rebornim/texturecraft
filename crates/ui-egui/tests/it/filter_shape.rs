@@ -1,12 +1,13 @@
 //! The shape filters in Properties: Threshold's Mode switch, Mirror's mode-dependent rows, Mask Outline's, Bevel's, Bevel Smooth's, Directional Distance's, Warp's and Blur Slope's rows
 
+use crate::filter_support::filter_of;
 use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::{Value, json};
 use texturecraft_engine::core::{
-    BevelBlur, BevelCorner, BevelDirection, EffectKind, Filter, LayerId, MirrorCorner, MirrorMode, OutlinePosition, SlopeBlending, ThresholdMode, WarpBlending,
-    WarpMode, WarpSourceMode,
+    BevelBlur, BevelCorner, BevelDirection, Filter, LayerId, MirrorCorner, MirrorMode, OutlinePosition, SlopeBlending, ThresholdMode, WarpBlending, WarpMode,
+    WarpSourceMode,
 };
 use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
@@ -35,13 +36,6 @@ pub(crate) fn click_at(harness: &mut Harness<'_, TextureCraftApp>, pos: egui::Po
     harness.run_steps(1);
     harness.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers });
     harness.run_steps(3);
-}
-
-fn filter_of(harness: &Harness<'_, TextureCraftApp>, effect: LayerId) -> Filter {
-    match &harness.state().session.doc.project.effect(effect).unwrap().1.kind {
-        EffectKind::Filter(filter) => filter.clone(),
-        other => panic!("not a filter: {other:?}"),
-    }
 }
 
 /// Threshold's slider is named Threshold and its ≤ segment sets Lower or equal
@@ -89,6 +83,7 @@ fn mirror_rows_follow_the_mode() {
 #[test]
 fn mask_outline_rows_set_the_band() {
     let (mut harness, effect) = app_with("maskOutline");
+
     // A boxed switch where its words fit the panel's width, the same choices as a dropdown where they don't
     if let Some(both) = harness.query_by_role_and_label(Role::RadioButton, "Both").map(|node| node.rect()) {
         click_at(&mut harness, both.center());
@@ -164,6 +159,7 @@ fn bevel_smooth_and_directional_distance_rows() {
 fn warp_rows_follow_the_mode() {
     let (mut harness, effect) = app_with("warp");
     assert!(harness.query_by_label("Angle").is_none() && harness.query_by_label("Source Parameters").is_some());
+
     // The filter card is named Warp too: the Warp Mode list is the lower one
     let mode = harness.query_all_by_role_and_label(Role::ComboBox, "Warp").map(|node| node.rect()).max_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
     click_at(&mut harness, mode.center());

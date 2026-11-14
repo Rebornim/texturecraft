@@ -99,6 +99,7 @@ pub fn color_selection_properties(app: &mut TextureCraftApp, ui: &mut Ui, effect
         if !sheet.band(tr("Colors"), true, None, Some(&count)).open {
             return;
         }
+
         let adding = picking.is_some_and(|pick| pick.index.is_none());
         if sheet.button_enabled(DrawnIcon::Pipette, tr("Pick color"), adding, has_id_map).clicked() {
             toggle_pick(app, effect, None, adding);

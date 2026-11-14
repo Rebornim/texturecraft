@@ -1,10 +1,11 @@
 //! The gradient filters in Properties: the ramp's markers, Color Quantity, Gradient Curve's Preset list and Gradient Dynamic's orientation
 
+use crate::filter_support::{click_at, filter_of};
 use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::{Value, json};
-use texturecraft_engine::core::{CurvePreset, EffectKind, Filter, LayerId};
+use texturecraft_engine::core::{CurvePreset, Filter, LayerId};
 use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 
@@ -21,22 +22,6 @@ fn app_with(filter: &str) -> (Harness<'static, TextureCraftApp>, LayerId) {
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(4);
     (harness, effect)
-}
-
-/// A press and release of the primary button at `pos`, as the pointer does it
-fn click_at(harness: &mut Harness<'_, TextureCraftApp>, pos: egui::Pos2) {
-    let modifiers = egui::Modifiers::NONE;
-    harness.event(egui::Event::PointerMoved(pos));
-    harness.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers });
-    harness.run_steps(1);
-    harness.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers });
-}
-
-fn filter_of(harness: &Harness<'_, TextureCraftApp>, effect: LayerId) -> Filter {
-    match &harness.state().session.doc.project.effect(effect).unwrap().1.kind {
-        EffectKind::Filter(filter) => filter.clone(),
-        other => panic!("not a filter: {other:?}"),
-    }
 }
 
 /// A press at `from`, a drag to `to` in steps and a release, as the pointer does it
@@ -104,6 +89,7 @@ fn gradient_dynamic_orientation_turns_vertical() {
 fn gradient_dynamic_source_card_opens_the_color_picker() {
     let (mut harness, _) = app_with("gradientDynamic");
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Gradient Source").is_none(), "no picker yet");
+
     // Through the pointer, on the card's name: the card's whole row picks its source
     let card = harness.get_by_role_and_label(Role::ComboBox, "Gradient Source").rect();
     click_at(&mut harness, egui::pos2(card.center().x, card.center().y));

@@ -293,6 +293,9 @@ pub fn semibold(size: f32) -> FontId {
 /// The semibold family: Inter SemiBold, the regular font without it.
 pub(crate) const SEMIBOLD: &str = "ui-semibold";
 
+/// Colour of the hard, unblurred shadow under the panel's own popups (pickers, menus, tips)
+pub(crate) const HARD_SHADOW: Color32 = Color32::from_rgb(12, 14, 18);
+
 /// The app's fonts: Inter (regular and semibold) when built with craft-fonts, egui's defaults
 /// otherwise, egui's monospace face for values, and the Phosphor icon font (`fonts::UiFonts`
 /// adds CJK).
@@ -402,14 +405,19 @@ pub fn legible_tint(tint: Color32, background: Color32, text: Color32) -> Color3
         .unwrap_or(text)
 }
 
+/// WCAG's flare term, added to both luminances so black still has a ratio
+const WCAG_FLARE: f32 = 0.05;
+
 /// The WCAG contrast ratio of two opaque colors (1..21)
 fn contrast_ratio(a: Color32, b: Color32) -> f32 {
     let luminance = |color: Color32| {
         let linear = egui::Rgba::from(color);
+
+        // Rec. 709 luminance
         0.2126 * linear.r() + 0.7152 * linear.g() + 0.0722 * linear.b()
     };
     let (high, low) = (luminance(a).max(luminance(b)), luminance(a).min(luminance(b)));
-    (high + 0.05) / (low + 0.05)
+    (high + WCAG_FLARE) / (low + WCAG_FLARE)
 }
 
 /// A section caption inside a panel: semibold in the strong colour, as written (no capitals).

@@ -398,6 +398,20 @@ impl Projection {
     /// A new warp's Projection Depth
     pub const WARP_DEPTH: f32 = 0.1;
 
+    /// A new tri-planar projection's blend sharpness
+    pub const TRIPLANAR_SHARPNESS: f32 = 8.0;
+
+    /// A tri-planar projection with a new fill's settings
+    pub fn triplanar() -> Projection {
+        Projection::Triplanar {
+            scale: 1.0,
+            sharpness: Self::TRIPLANAR_SHARPNESS,
+            offset: [0.0; 3],
+            uv: UvTransform::default(),
+            projector: Projector::default(),
+        }
+    }
+
     /// A warp projection from `frame` with its corners where the frame's are
     pub fn warp(frame: Decal) -> Projection {
         Projection::Warp {
@@ -723,6 +737,7 @@ impl Fill {
         if !link.outputs.is_empty() {
             return link.outputs.clone();
         }
+
         self.sources
             .iter()
             .filter_map(|(c, s)| match s {
@@ -785,6 +800,7 @@ impl Default for Levels {
 impl Levels {
     pub fn apply(&self, x: f32) -> f32 {
         let t = (x - self.in_low) / (self.in_high - self.in_low).max(1e-5);
+
         // Past the input handles an unclamped remap carries on in a straight line (gamma only bends the part between them)
         let t = if self.clamp || (0.0..=1.0).contains(&t) { t.clamp(0.0, 1.0).powf(1.0 / self.gamma.max(1e-3)) } else { t };
         self.out_low + (self.out_high - self.out_low) * t
@@ -1204,6 +1220,9 @@ fn is_unit_divider(divider: &u16) -> bool {
 /// The most steps a posterize keeps
 pub const POSTERIZE_LEVELS_MAX: f32 = 64.0;
 
+/// Filter sizes are given in texels at 2K, as in the reference workflow
+pub const SIZE_REFERENCE_RES: f32 = 2048.0;
+
 /// `x` (0..1) rounded to `levels` steps (2..64) from black to white
 pub fn posterize(x: f32, levels: f32) -> f32 {
     let steps = (levels.clamp(2.0, POSTERIZE_LEVELS_MAX).round() - 1.0).max(1.0);
@@ -1212,14 +1231,16 @@ pub fn posterize(x: f32, levels: f32) -> f32 {
 }
 
 /// 0 at or below `min`, 1 at or above `max`, eased between them (swapped bounds are read in order; equal bounds are a step)
-fn smoothstep(min: f32, max: f32, x: f32) -> f32 {
+pub(crate) fn smoothstep(min: f32, max: f32, x: f32) -> f32 {
     let (lo, hi) = (finite_or(min.min(max), 0.0), finite_or(min.max(max), 1.0));
     if !x.is_finite() {
         return 0.0;
     }
+
     if hi - lo <= 1e-6 {
         return if x >= hi { 1.0 } else { 0.0 };
     }
+
     let t = ((x - lo) / (hi - lo)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
@@ -1370,6 +1391,7 @@ impl Filter {
     pub fn ramp_at(&self, t: f32) -> Option<[f32; 3]> {
         let Filter::GradientMap { positions, linear, .. } = self else { return None };
         let colors = self.ramp_colors();
+
         // Evenly spaced linear ramps take the path projects saved before took, so they render bit for bit as before
         if positions.is_empty() && *linear { gradient(colors, t) } else { ramp(colors, positions, *linear, t) }
     }
@@ -1425,8 +1447,8 @@ impl Filter {
             Filter::ColorCorrect { shadows, midtones, highlights } => {
                 // [contrast, luminosity, saturation] at the texel's lightness, weighted as color balance
                 let at = |l: f32| -> [f32; 3] {
-                    let (s, m, h) = tone_weights(unit(l));
-                    std::array::from_fn(|k| shadows[k] * s + midtones[k] * m + highlights[k] * h)
+                    let (in_shadows, in_midtones, in_highlights) = tone_weights(unit(l));
+                    std::array::from_fn(|k| shadows[k] * in_shadows + midtones[k] * in_midtones + highlights[k] * in_highlights)
                 };
                 let correct = |x: f32, [contrast, luminosity, _]: [f32; 3]| (x - 0.5) * (1.0 + contrast.clamp(-1.0, 1.0)) + 0.5 + luminosity.clamp(-1.0, 1.0);
                 match kind {
@@ -1442,8 +1464,10 @@ impl Filter {
             }
             Filter::ColorBalance { shadows, midtones, highlights } => {
                 let shift = |k: usize, l: f32| {
-                    let (s, m, h) = tone_weights(unit(l));
-                    shadows.get(k).copied().unwrap_or(0.0) * s + midtones.get(k).copied().unwrap_or(0.0) * m + highlights.get(k).copied().unwrap_or(0.0) * h
+                    let (in_shadows, in_midtones, in_highlights) = tone_weights(unit(l));
+                    shadows.get(k).copied().unwrap_or(0.0) * in_shadows
+                        + midtones.get(k).copied().unwrap_or(0.0) * in_midtones
+                        + highlights.get(k).copied().unwrap_or(0.0) * in_highlights
                 };
                 match kind {
                     ChannelKind::Color => {
@@ -1758,6 +1782,7 @@ impl CompareOp {
         if width <= 0.0 || past.is_nan() {
             return if pass { 1.0 } else { 0.0 };
         }
+
         let ramp = if self == CompareOp::WithinTolerance { 1.0 + past / width } else { past / width };
         ramp.clamp(0.0, 1.0)
     }

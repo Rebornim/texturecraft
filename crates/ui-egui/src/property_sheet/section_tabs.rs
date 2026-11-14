@@ -15,22 +15,26 @@ const STRIP_HEIGHT: f32 = 30.0;
 /// From the panel's left edge to the first tab
 const FIRST_TAB: f32 = PAD - 4.0;
 
-/// A tab's width beyond its name: icon and air
-const TAB_PADDING: f32 = 38.0;
+/// A tab's width beyond its name: icon and air (the resource picker's tabs share these measures)
+pub(crate) const TAB_PADDING: f32 = 38.0;
 
 /// Air between tabs
-const TAB_GAP: f32 = 2.0;
+pub(crate) const TAB_GAP: f32 = 2.0;
 
 /// The chosen tab starts this far below the strip's top and reaches this far into the panel
-const TAB_TOP: f32 = 4.0;
+pub(crate) const TAB_TOP: f32 = 4.0;
 const TAB_BELOW: f32 = 6.0;
 
-/// From a tab's left edge to its icon's centre, and to its name
-const ICON_CENTER: f32 = 14.0;
-const NAME_LEFT: f32 = 26.0;
+/// Corner rounding of the chosen tab
+pub(crate) const TAB_ROUNDING: u8 = 5;
 
-/// Size of a tab's icon
-const TAB_ICON_SIZE: f32 = 13.0;
+/// From a tab's left edge to its icon's centre, and to its name
+pub(crate) const TAB_ICON_CENTER: f32 = 14.0;
+pub(crate) const TAB_NAME_LEFT: f32 = 26.0;
+
+/// Size of a tab's icon and of its name
+pub(crate) const TAB_ICON_SIZE: f32 = 13.0;
+pub(crate) const TAB_TEXT_SIZE: f32 = SMALL_TEXT_SIZE;
 
 /// A section counts as in view once its caption is this close to the top of the scrolled area
 const IN_VIEW_SLACK: f32 = 30.0;
@@ -91,7 +95,7 @@ pub(crate) fn section_tabs(ui: &mut Ui, scope: SectionScope, top_corner: u8, tab
     let mut x = strip.left() + FIRST_TAB;
     for (index, (icon, title)) in tabs.iter().enumerate() {
         let on = lit.as_deref().map_or(index == 0, |lit| lit == *title);
-        let width = ui.painter().layout_no_wrap((*title).to_owned(), semibold(SMALL_TEXT_SIZE), Color32::WHITE).size().x + TAB_PADDING;
+        let width = ui.painter().layout_no_wrap((*title).to_owned(), semibold(TAB_TEXT_SIZE), Color32::WHITE).size().x + TAB_PADDING;
         let tab = Rect::from_min_max(pos2(x, strip.top() + TAB_TOP), pos2(x + width, strip.bottom() + TAB_BELOW));
         let response = ui.interact(tab, ui.scope_id().with(("section_tab", index)), Sense::click());
         response.widget_info(|| WidgetInfo::selected(Role::Tab, true, on, *title));
@@ -102,12 +106,12 @@ pub(crate) fn section_tabs(ui: &mut Ui, scope: SectionScope, top_corner: u8, tab
         let color = if on || response.hovered() { tokens.text } else { tokens.text_dim };
         let painter = ui.painter();
         if on {
-            painter.rect_filled(tab, CornerRadius::same(5), tokens.panel);
+            painter.rect_filled(tab, CornerRadius::same(TAB_ROUNDING), tokens.panel);
         }
         let center_y = strip.center().y + TAB_TOP / 2.0;
-        painter.text(pos2(x + ICON_CENTER, center_y), Align2::CENTER_CENTER, *icon, FontId::proportional(TAB_ICON_SIZE), color);
-        let font = if on { semibold(SMALL_TEXT_SIZE) } else { FontId::proportional(SMALL_TEXT_SIZE) };
-        painter.text(pos2(x + NAME_LEFT, center_y), Align2::LEFT_CENTER, *title, font, color);
+        painter.text(pos2(x + TAB_ICON_CENTER, center_y), Align2::CENTER_CENTER, *icon, FontId::proportional(TAB_ICON_SIZE), color);
+        let font = if on { semibold(TAB_TEXT_SIZE) } else { FontId::proportional(TAB_TEXT_SIZE) };
+        painter.text(pos2(x + TAB_NAME_LEFT, center_y), Align2::LEFT_CENTER, *title, font, color);
         x += width + TAB_GAP;
     }
 }

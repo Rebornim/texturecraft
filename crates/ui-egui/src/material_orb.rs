@@ -47,6 +47,7 @@ pub(crate) fn render(material: &OrbMaterial, side: usize, backdrop: Color32) -> 
     let side = side.clamp(1, MAX_SIDE_PX);
     let env = OrbEnvironment::get();
     let back = [backdrop.r(), backdrop.g(), backdrop.b()].map(|c| f32::from(c) / 255.0);
+
     // One pixel in orb radii: the step for the height slope and the reach of the anti-aliased outline
     let pixel = 2.0 / (side as f32 * SPHERE_RADIUS);
     let uniform = (!material.varies()).then(|| material.sample(&orb_coords(Vec3::Y), 1.0));
@@ -61,6 +62,7 @@ pub(crate) fn render(material: &OrbMaterial, side: usize, backdrop: Color32) -> 
                 *out = backdrop;
                 continue;
             }
+
             // Pixels on the outline shade the sphere's rim
             let (u, v) = if distance > 1.0 { (u / distance, v / distance) } else { (u, v) };
             let normal = Vec3::new(u, v, (1.0 - u * u - v * v).max(0.0).sqrt());
@@ -87,6 +89,7 @@ fn shade(material: &OrbMaterial, env: &OrbEnvironment, direction: Vec3, pixel: f
     let coords = orb_coords(direction);
     let footprint = pixel * std::f32::consts::FRAC_1_PI;
     let sample = uniform.unwrap_or_else(|| material.sample(&coords, footprint));
+
     // Tangent frame on the material: east along the UVs, then north
     let east = Vec3::new(-direction.z, 0.0, direction.x).try_normalize().unwrap_or(Vec3::X);
     let north = direction.cross(east).try_normalize().unwrap_or(Vec3::Y);
@@ -102,6 +105,7 @@ fn shade(material: &OrbMaterial, env: &OrbEnvironment, direction: Vec3, pixel: f
     let roughness = sample.roughness.clamp(MIN_ROUGHNESS, 1.0);
     let metallic = sample.metallic.clamp(0.0, 1.0);
     let normal_dot_view = normal.z.max(1e-4);
+
     // Mirror the direction towards the viewer (+Z) about the normal
     let reflected = (2.0 * normal_dot_view * normal - Vec3::Z).normalize_or_zero();
     let specular_light = env.reflected(reflected, roughness);
@@ -259,6 +263,7 @@ mod tests {
                     let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(160.0, 160.0));
                     material_orb(&painter, rect, &material, &Tokens::get(ctx), "hidpi");
                 });
+
                 // Nothing draws these textures here
                 output.textures_delta.clear();
                 std::thread::sleep(Duration::from_millis(5));

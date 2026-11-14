@@ -17,7 +17,7 @@ const STACK_LABEL_LINE: f32 = 14.0;
 const STACK_LABEL_CENTER: f32 = 8.0;
 
 /// A caption line's height
-const CAPTION_LINE: f32 = 18.0;
+pub(super) const CAPTION_LINE: f32 = 18.0;
 
 /// How far small and regular text reach below their centre line
 const SMALL_TEXT_HALF_LINE: f32 = 6.0;

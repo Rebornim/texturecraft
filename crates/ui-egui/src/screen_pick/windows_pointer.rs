@@ -64,6 +64,7 @@ impl SystemPointer {
         let cell = args.pointer_px(winsafe::GetSystemMetricsForDpi(co::SM::CXCURSOR, dpi).ok());
         let command_line = args.command_line(program.to_str()?);
         let mut startup = STARTUPINFO::default();
+
         // No "app starting" pointer for the keeper: it shows no window and never asks for input
         startup.dwFlags = co::STARTF::FORCEOFFFEEDBACK;
         let keeper = winsafe::CreateProcess(None, Some(&command_line), None, None, false, co::CREATE::NO_WINDOW, &[], None, &mut startup);
@@ -96,10 +97,12 @@ pub fn keep_pointer() -> i32 {
     if ended(stop.WaitForSingleObject(Some(0))) {
         return 0;
     }
+
     let size = keeper.pointer_px(winsafe::GetSystemMetricsForDpi(co::SM::CXCURSOR, keeper.dpi).ok());
     let Some(eyedropper) = load(&CursorImage::eyedropper(size)) else { return 1 };
     let originals: Vec<_> = POINTERS.iter().filter_map(|&pointer| Some((pointer, current(pointer)?))).collect();
     swap_all(&eyedropper);
+
     // The app may change the picture from now on: the user's own pointers are kept
     if let Ok(shown) = HEVENT::NULL.OpenEvent(co::EVENT_RIGHTS::MODIFY_STATE, false, &keeper.shown_event()) {
         let _ = shown.SetEvent();
@@ -136,6 +139,7 @@ fn ended(wait: winsafe::SysResult<co::WAIT>) -> bool {
 fn current(pointer: co::OCR) -> Option<DestroyCursorGuard> {
     let mut shared = HINSTANCE::NULL.LoadImageCursor(IdOcrStr::Ocr(pointer), SIZE::default(), co::LR::SHARED | co::LR::DEFAULTSIZE).ok()?;
     let copy = shared.CopyCursor().ok();
+
     // A shared pointer belongs to the system and is never destroyed
     let _ = shared.leak();
     copy

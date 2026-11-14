@@ -79,6 +79,7 @@ pub(crate) fn transform_rows(app: &mut TextureCraftApp, sheet: &mut PropertyShee
 fn flip_picture(painter: &Painter, rect: Rect, mode: FlipMode, tokens: &Tokens) {
     const L_SHAPE: [[f32; 2]; 6] = [[0.3, 0.2], [0.45, 0.2], [0.45, 0.65], [0.75, 0.65], [0.75, 0.8], [0.3, 0.8]];
     let [across, down] = mode.sides();
+
     // An L is not convex: two rectangles draw it
     let [top, _, joint, _, far, bottom] = L_SHAPE.map(|[u, v]| {
         let (u, v) = (if across { 1.0 - u } else { u }, if down { 1.0 - v } else { v });

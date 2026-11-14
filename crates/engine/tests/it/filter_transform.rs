@@ -44,6 +44,7 @@ fn transform_moves_scales_and_flips_each_tile() {
     execute(&mut s, "effect.set", &json!({"effect": effect.0, "flipMode": "none", "scaling": [2.0, 2.0], "repeatMode": "none"})).unwrap();
     assert!((roughness(&mut s, (SIZE / 2, row)) - was(SIZE / 2)).abs() < 2e-2, "the centre stays");
     assert!((roughness(&mut s, (8, row)) - empty).abs() < 1e-4, "past the content reads empty");
+
     // Repeating, texel 8 reads 2 · 8.5 / 128 − 0.5 of a tile on: between texels 80 and 81
     execute(&mut s, "effect.set", &json!({"effect": effect.0, "repeatMode": "horizontallyAndVertically"})).unwrap();
     assert!((roughness(&mut s, (8, row)) - (was(80) + was(81)) / 2.0).abs() < 2e-3, "the tile comes round again");

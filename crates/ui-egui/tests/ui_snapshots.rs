@@ -27,6 +27,7 @@ fn lowest_list<'a>(harness: &'a Harness<'_, TextureCraftApp>, label: &'a str) ->
 
 fn save(h: &mut Harness<'_, TextureCraftApp>, dir: &Path, name: &str) {
     h.run_steps(6);
+
     // Material orbs render off the UI thread: wait for their full pictures
     let start = std::time::Instant::now();
     while !texturecraft_ui_egui::orb_previews::OrbPreviews::settled(&h.ctx) && start.elapsed() < std::time::Duration::from_secs(20) {
@@ -609,6 +610,7 @@ fn fill_reset_snapshots() {
     let reset = harness.get_by_label("Fill: Reset to defaults").rect().center();
     harness.hover_at(reset);
     save(&mut harness, &output_dir, "fill-reset-hovered");
+
     // The band sits under the fold at this height: scroll Properties down to it
     harness.hover_at(reset);
     harness.event(egui::Event::MouseWheel {
@@ -658,6 +660,7 @@ fn fill_properties_snapshots() {
         save(&mut harness, &output_dir, &format!("fill-uv-{name}"));
     }
     harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+
     // A UV pad drag right, held mid-way: the ring stays in the middle, the filled dot and the checker go right; then a dot past the edge
     execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": layer, "offset": [0.0, 0.0]})).unwrap();
     harness.run_steps(2);
@@ -692,6 +695,7 @@ fn fill_properties_snapshots() {
     save(&mut harness, &output_dir, "fill-uv-physical");
     harness.get_by_label("Link").click();
     save(&mut harness, &output_dir, "fill-uv-physical-unlinked");
+
     // Screen 02: every other projection, with the lists that open from its new rows
     let cases = [
         ("spherical", json!({}), "fill-spherical"),
@@ -712,6 +716,7 @@ fn fill_properties_snapshots() {
         execute(session, "layer.fill.projection", &settings).unwrap();
         save(&mut harness, &output_dir, name);
     }
+
     // The preview square is Move on model's pad: lit on hover and while held
     execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": layer, "projection": "planar"})).unwrap();
     harness.run_steps(2);
@@ -722,11 +727,13 @@ fn fill_properties_snapshots() {
     save(&mut harness, &output_dir, "fill-planar-pad-held");
     harness.event(egui::Event::PointerButton { pos: pad, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
     harness.run_steps(2);
+
     // A slid projector: the object stays put, the ring marks Offset 0 and the filled dot where the projector went
     for (kind, offset, name) in [("planar", [0.3, 0.15, 0.0], "fill-planar-slid"), ("spherical", [0.5, 0.3, 0.0], "fill-spherical-slid")] {
         execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": layer, "projection": kind, "offset": offset})).unwrap();
         save(&mut harness, &output_dir, name);
     }
+
     // The Projection row's eye: hovered, then the gizmos hidden
     execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": layer, "projection": "planar", "offset": [0.0, 0.0, 0.0]})).unwrap();
     harness.run_steps(2);
@@ -746,6 +753,7 @@ fn fill_properties_snapshots() {
     harness.key_press(egui::Key::Escape);
     harness.run_steps(2);
     let session = &mut harness.state_mut().session;
+
     // Tri-planar's Shape crop sits highest in the panel: its list opens in view
     execute(session, "layer.fill.projection", &json!({"layer": layer, "projection": "triplanar"})).unwrap();
     harness.run_steps(2);
@@ -755,6 +763,7 @@ fn fill_properties_snapshots() {
     save(&mut harness, &output_dir, "fill-triplanar-crop-open");
     harness.key_press(egui::Key::Escape);
     harness.run_steps(2);
+
     // The shape previews take their colours from the theme
     for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
         harness.state_mut().ui.prefs.brightness = brightness;
@@ -862,6 +871,7 @@ fn fill_color_picker_snapshots() {
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(4);
     harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
+
     // The tab scrolls the panel to its section (the scroll animates for about twenty frames)
     harness.run_steps(25);
     harness.get_by_role_and_label(egui::Role::Button, "Base color").click();
@@ -902,6 +912,7 @@ fn fill_color_picker_snapshots() {
     harness.get_by_role_and_label(egui::Role::ListBoxOption, "RGB").click();
     harness.run_steps(2);
     save(&mut harness, &output_dir, "picker-rgb");
+
     // The window stands at the screen's bottom here, so it grows from its top left corner
     let corner = harness.get_by_role_and_label(egui::Role::TitleBar, "Base color").rect().left_top() + egui::vec2(2.0, 2.0);
     let by = egui::vec2(-120.0, -90.0);
@@ -957,6 +968,7 @@ fn fill_material_snapshots() {
     harness.run_steps(4);
     harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
     save(&mut harness, &output_dir, "material-channels");
+
     // The orb follows the Layers panel's channel list: its list open, then one channel alone each
     harness.get_all_by_role_and_label(egui::Role::ComboBox, "Material").min_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).unwrap().click();
     harness.run_steps(2);
@@ -975,6 +987,7 @@ fn fill_material_snapshots() {
         harness.state_mut().ui.prefs.brightness = Brightness::default();
     }
     harness.state_mut().ui.layer_material_view = true;
+
     // The Base color slot (the lowest "Base color" list: the Layers panel has one too) with its list open
     lowest_list(&harness, "Base color").click();
     harness.run_steps(2);
@@ -988,6 +1001,7 @@ fn fill_material_snapshots() {
     harness.run_steps(2);
     harness.get_all_by_role_and_label(egui::Role::Button, "Invert").next().unwrap().hover();
     save(&mut harness, &output_dir, "material-invert-hover");
+
     // The procedural slot's Resolution: one row in its card, its one list holding the Relative factors and the Fixed sizes
     let texture_set = harness.state().session.doc.project.texture_sets[0].resolution;
     let resolution = format!("Texture set  ·  {texture_set}");
@@ -997,6 +1011,7 @@ fn fill_material_snapshots() {
     save(&mut harness, &output_dir, "material-procedural-resolution-list");
     harness.key_press(egui::Key::Escape);
     harness.run_steps(2);
+
     // The same plain fill on the Material side: one whole material, picked from the card's list
     harness.get_by_role_and_label(egui::Role::RadioButton, "Material").click();
     harness.run_steps(2);
@@ -1019,6 +1034,7 @@ fn fill_material_snapshots() {
     save(&mut harness, &output_dir, "material-whole-copper-channels");
     harness.get_by_role_and_label(egui::Role::RadioButton, "Material").click();
     harness.run_steps(2);
+
     // Back to the fill the linked shots below expect (the pick was one undo step)
     execute(&mut harness.state_mut().session, "edit.undo", &json!({})).unwrap();
 
@@ -1029,11 +1045,13 @@ fn fill_material_snapshots() {
     harness.run_steps(4);
     harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
     save(&mut harness, &output_dir, "material-linked");
+
     // The bands sit below the panel's fold: scroll each control into view (the scroll animates for about twenty frames)
     let reach = |harness: &mut Harness<'_, TextureCraftApp>, role: egui::Role, label: &str| {
         harness.get_by_role_and_label(role, label).scroll_to_me();
         harness.run_steps(25);
     };
+
     // The band is folded by the time it is reached in this run: unfold it first
     if harness.query_by_role_and_label(egui::Role::ComboBox, "normal").is_none() {
         reach(&mut harness, egui::Role::Button, "Channels mapping");
@@ -1061,6 +1079,7 @@ fn fill_material_snapshots() {
     harness.run_steps(2);
     harness.get_by_role_and_label(egui::Role::RadioButton, "Fixed").click();
     harness.run_steps(2);
+
     // This link has no package, so the re-cook fails with a toast over the panel
     harness.state_mut().toasts.clear();
     harness.get_by_role_and_label(egui::Role::ComboBox, "256 × 256").click();
@@ -1090,6 +1109,7 @@ fn eyedropper_pointer_snapshots() {
 
     let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
     std::fs::create_dir_all(&output_dir).unwrap();
+
     // A light and a dark model: the disc's white outline and faint dark ring must read on both
     for (name, color) in [("light", [0.92, 0.92, 0.9]), ("dark", [0.01, 0.01, 0.012])] {
         let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
@@ -1097,6 +1117,7 @@ fn eyedropper_pointer_snapshots() {
         let mut harness =
             Harness::builder().with_size(egui::vec2(1600.0, 960.0)).with_pixels_per_point(1.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
         harness.state_mut().ui.prefs.language = "en".into();
+
         // Only the app's own pointer shows, not the test's stand-in arrow
         harness.set_render_cursor(false);
         harness.run_steps(4);
@@ -1239,6 +1260,7 @@ fn info_icon_snapshots() {
     let mut harness =
         Harness::builder().with_size(egui::vec2(1600.0, 1500.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
     harness.state_mut().ui.prefs.language = "en".into();
+
     // The test's stand-in arrow would hide the hovered i
     harness.set_render_cursor(false);
     harness.run_steps(4);
@@ -1365,6 +1387,7 @@ fn mask_fill_snapshots() {
     shot(&mut harness, json!({"value": 1.0}), "mask-fill-uniform");
     shot(&mut harness, json!({"image": scratches}), "mask-fill-image");
     shot(&mut harness, json!({"procedural": "Clouds", "scale": 4.0, "seed": 12}), "mask-fill-procedural");
+
     // The procedural's Resolution list open (Relative factors and Fixed sizes) with a size hovered
     let click_in_view = |harness: &mut Harness<'_, TextureCraftApp>, role: egui::Role, label: &str| {
         harness.get_by_role_and_label(role, label).scroll_to_me();
@@ -1378,6 +1401,7 @@ fn mask_fill_snapshots() {
     save(&mut harness, &output_dir, "mask-fill-resolution-list");
     harness.key_press(egui::Key::Escape);
     harness.run_steps(3);
+
     // The picker opened from the slot in view (Properties still scrolled to the card), a tile hovered
     harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").click();
     harness.run_steps(3);
@@ -1395,6 +1419,7 @@ fn mask_fill_snapshots() {
     harness.key_press(egui::Key::Escape);
     harness.run_steps(3);
     shot(&mut harness, json!({"anchor": anchor}), "mask-fill-anchor");
+
     // Again once the anchored stack's picture has rendered
     settle_thumbnails(&mut harness);
     save(&mut harness, &output_dir, "mask-fill-anchor");
@@ -1830,6 +1855,7 @@ fn filter_card_snapshots() {
         Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(6);
+
     // Add filter opens the picker; a filter selected from its row does not
     save(&mut harness, &output_dir, "filter-empty");
     harness.state_mut().session.target = StackTarget::Effect(blur);
@@ -2243,17 +2269,21 @@ fn simple_filter_snapshots() {
         "anisotropicKuwahara",
     ]
     .map(|id| (id, add(id)));
+
     // PBR Validate goes on the layer content (its Color and Metal pills)
     let params = json!({"layer": layer.clone(), "target": "content", "filter": "pbrValidate"});
     let pbr = LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap());
+
     // Height To Normal too (its Normal pill), once with world units and once without
     let params = json!({"layer": layer.clone(), "target": "content", "filter": "heightToNormal"});
     let normals = [(); 2].map(|_| LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap()));
     execute(&mut session, "effect.set", &json!({"effect": normals[1].0, "useWorldUnits": false})).unwrap();
+
     // Color Match too (its Color pill): a new one, and one reading its Input and Image Input
     let params = json!({"layer": layer.clone(), "target": "content", "filter": "colorMatch"});
     let matches = [(); 2].map(|_| LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap()));
     execute(&mut session, "effect.set", &json!({"effect": matches[1].0, "sourceColorMode": "input", "targetColorMode": "imageInput"})).unwrap();
+
     // Replace Color too (its two colour bars)
     let params = json!({"layer": layer.clone(), "target": "content", "filter": "replaceColor"});
     let replace = LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap());

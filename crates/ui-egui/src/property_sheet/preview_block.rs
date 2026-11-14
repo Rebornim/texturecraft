@@ -5,20 +5,15 @@ use super::number_field::LINK_SIZE;
 use super::preview_edit::PreviewEdit;
 use super::preview_lower::PreviewLower;
 use super::preview_size::PreviewSize;
+use super::row::CAPTION_LINE;
 use super::slider::Track;
-use super::{ICON_SIZE, PropertySheet, SMALL_TEXT_SIZE};
-
-/// A caption line beside the preview square
-const CAPTION_LINE: f32 = 18.0;
+use super::{BLOCK_MARGIN, ICON_SIZE, PropertySheet, SMALL_TEXT_SIZE};
 
 /// One slider line beside the preview square
 const PART_LINE: f32 = 22.0;
 
 /// Air between the size and what follows it
 const PART_GAP: f32 = 6.0;
-
-/// Margin above and below the block, as a control has in its row
-const BLOCK_MARGIN: f32 = 2.0;
 
 /// From the block's top to the square's top: the first caption's letters
 const SQUARE_TOP: f32 = 4.0;
@@ -38,6 +33,9 @@ const LINK_ROOM: f32 = 24.0;
 
 /// The value column's width beside the square: every track ends this far left of the value's end
 const SIDE_VALUE_WIDTH: f32 = 46.0;
+
+/// The air kept between a side slider's track and its value
+const SIDE_VALUE_AIR: f32 = 8.0;
 
 impl PropertySheet<'_> {
     /// A preview square beside its stack (the size, then Offset or one setting), exactly as tall as the stack
@@ -144,7 +142,7 @@ impl PropertySheet<'_> {
     ) -> Option<bool> {
         let id = self.next_id();
         let dragged = self.track(id, label, &Track { start, end, center_y, zero: signed.then_some(0.0), ramp: false }, value, range);
-        let typed = self.value_field_at(id, value_right, SIDE_VALUE_WIDTH - 8.0, center_y, *value, typed_range, decimals, "");
+        let typed = self.value_field_at(id, value_right, SIDE_VALUE_WIDTH - SIDE_VALUE_AIR, center_y, *value, typed_range, decimals, "");
         Self::apply_typed(value, typed, dragged)
     }
 }

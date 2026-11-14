@@ -19,11 +19,13 @@ pub fn projector_cover(proj: &Projection, c: &Coords) -> f32 {
     if projector.crop == ShapeCrop::ExtendsOutside && !projector.backface.on {
         return 1.0;
     }
+
     let local = projector_local(projector, c);
     let (inside, facing) = match proj {
         Projection::Triplanar { .. } => (local.pos.abs().max_element() <= 1.0, None),
         Projection::Planar { scale, axis, offset, .. } => {
             let p = local.pos * *scale + Vec3::from(*offset);
+
             // The frame across the axis, and the side the image reads the right way round from
             let (frame, facing) = match axis {
                 0 => (p.z.abs().max(p.y.abs()), -local.nrm.x),
@@ -50,6 +52,7 @@ pub fn projector_cover(proj: &Projection, c: &Coords) -> f32 {
     if projector.crop == ShapeCrop::Cropped && !inside {
         return 0.0;
     }
+
     match facing {
         Some(facing) if projector.backface.on => backface_cover(&projector.backface, facing),
         _ => 1.0,
@@ -64,6 +67,7 @@ pub fn backface_cover(backface: &Backface, facing: f32) -> f32 {
     if width <= f32::EPSILON {
         return f32::from(u8::from(facing > threshold));
     }
+
     smoothstep(threshold, threshold + width, facing)
 }
 
@@ -93,6 +97,7 @@ pub fn warp_cover(frame: &Decal, corners: &[[f32; 2]; 4], depth: f32, projector:
     if projector.crop == ShapeCrop::ExtendsOutside {
         return Some((uv, 1.0));
     }
+
     let inside = (0.0..=1.0).contains(&uv.x) && (0.0..=1.0).contains(&uv.y);
     let reach = depth * frame.size[0].max(frame.size[1]);
     Some((uv, if inside { depth_fade(local.z, reach) } else { 0.0 }))
@@ -115,6 +120,7 @@ mod tests {
         if facing <= 0.0 || lx.abs() > 0.5 || ly.abs() > 0.5 || lz > depth || !(lx.is_finite() && ly.is_finite()) {
             return None;
         }
+
         let w = smoothstep(0.0, 0.3, facing) * (1.0 - smoothstep(0.75 * depth, depth, lz));
         Some((Vec2::new(lx + 0.5, 0.5 - ly), w))
     }

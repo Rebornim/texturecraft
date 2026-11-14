@@ -1,10 +1,11 @@
 //! The Filter effect card in Properties: channel pills, Intensity's Divider chip, the card holding the parameters with its ⟲ beside × and Attributes as its last row
 
+use crate::filter_support::filter_of;
 use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, EffectKind, Filter, LayerId, SourceWarp};
+use texturecraft_engine::core::{Channel, Filter, LayerId, SourceWarp};
 use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 
@@ -21,13 +22,6 @@ fn app_with(filter: &str) -> (Harness<'static, TextureCraftApp>, LayerId) {
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(4);
     (harness, effect)
-}
-
-fn filter_of(harness: &Harness<'_, TextureCraftApp>, effect: LayerId) -> Filter {
-    match &harness.state().session.doc.project.effect(effect).unwrap().1.kind {
-        EffectKind::Filter(filter) => filter.clone(),
-        other => panic!("not a filter: {other:?}"),
-    }
 }
 
 #[test]
@@ -76,6 +70,7 @@ fn the_filter_card_holds_its_parameters() {
     let card = harness.get_by_role_and_label(Role::ComboBox, "Blur Slope").rect();
     let attributes = harness.get_by_role_and_label(Role::Button, "Attributes").rect();
     let sub_group = harness.get_by_role_and_label(Role::Button, "Source Parameters").rect();
+
     // A row inside the card keeps the card's bleed on both sides; a band would span the panel
     assert_eq!(attributes.left(), card.left() + 6.0, "{attributes:?} {card:?}");
     assert_eq!(sub_group.left(), attributes.left(), "a sub-group is a caption in the card, not a card of its own");

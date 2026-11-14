@@ -4,17 +4,13 @@ use egui::{Align2, CornerRadius, FontId, Painter, Rect, Sense, pos2, vec2};
 use egui_phosphor::regular as ic;
 
 use super::group::CARD_BLEED;
+use super::group::CARD_RADIUS;
+use super::slot::THUMB_SIZE;
 use super::{GROUP_GAP, PropertySheet, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Height of the card
 const CARD_HEIGHT: f32 = 44.0;
-
-/// Corner radius of the card
-const CARD_RADIUS: u8 = 6;
-
-/// Size of the thumbnail
-const THUMB_SIZE: f32 = 26.0;
 
 /// From the left edge to the name, to the link glyph's centre and to the texture set
 const NAME_LEFT: f32 = 36.0;

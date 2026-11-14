@@ -21,6 +21,7 @@ fn a_fill_channel_takes_an_image_from_its_source_menu() {
 
     h.get_by_role_and_label(egui::Role::Tab, "Material").click();
     h.run_steps(3);
+
     // The Roughness slot's row opens its source picker, whose search field has the focus and finds the image under Textures
     h.get_by_role_and_label(egui::Role::ComboBox, "Roughness").click();
     h.run_steps(2);
@@ -49,8 +50,10 @@ fn a_normal_image_can_be_marked_directx() {
 
     h.get_by_role_and_label(egui::Role::Tab, "Material").click();
     h.run_steps(3);
+
     // The normal image's convention sits in the slot's folded Attributes
     h.get_by_role_and_label(egui::Role::Button, "Attributes").scroll_to_me();
+
     // The scroll animates for about twenty frames
     h.run_steps(30);
     h.get_by_role_and_label(egui::Role::Button, "Attributes").click();

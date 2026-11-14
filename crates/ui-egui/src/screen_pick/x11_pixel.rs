@@ -44,6 +44,7 @@ fn channel(value: u32, mask: u32) -> u8 {
     if mask == 0 {
         return 0;
     }
+
     let shift = mask.trailing_zeros();
     let max = mask >> shift;
     let raw = (value & mask) >> shift;

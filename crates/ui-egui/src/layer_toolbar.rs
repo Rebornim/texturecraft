@@ -15,7 +15,7 @@ use crate::picker_group::PickerGroup;
 use crate::picker_tab::PickerTab;
 use crate::resource_picker;
 use crate::resource_picker_item::ResourcePickerItem;
-use crate::theme::Tokens;
+use crate::theme::{HARD_SHADOW, Tokens};
 use crate::thumbs::Thumbs;
 use crate::tile_picture::TilePicture;
 
@@ -72,7 +72,6 @@ const MENU_RIGHT: f32 = 22.0;
 const MENU_MIN_WIDTH: f32 = 120.0;
 const MENU_ROUNDING: u8 = 6;
 const SHADOW_OFFSET: [i8; 2] = [3, 4];
-const SHADOW: Color32 = Color32::from_rgb(12, 14, 18);
 /// The two swatches of Add mask's White and Black
 const WHITE_SWATCH: u8 = 235;
 const BLACK_SWATCH: u8 = 10;
@@ -126,13 +125,16 @@ pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     }
 }
 
+/// How far a hovered dropdown lightens towards the text colour
+const HOVER_TINT: f32 = 0.06;
+
 /// The displayed channel, or Material for the whole material: a list hanging from its button
 fn channel_list(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, tokens: &Tokens) {
     let response = ui.interact(rect, ui.scope_id().with("layer_channel"), Sense::click());
     let current = if app.ui.layer_material_view { tr("Material") } else { tr(app.ui.layer_channel.label()) };
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, current));
     let painter = ui.painter();
-    let fill = if response.hovered() { tokens.button.lerp_to_gamma(tokens.text, 0.06) } else { tokens.button };
+    let fill = if response.hovered() { tokens.button.lerp_to_gamma(tokens.text, HOVER_TINT) } else { tokens.button };
     painter.rect(rect, CornerRadius::same(CONTROL_ROUNDING), fill, Stroke::new(1.0, tokens.button_border), StrokeKind::Inside);
     let caret_x = rect.right() - CHANNEL_CARET_INSET;
     let text =
@@ -156,6 +158,10 @@ fn channel_list(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, tokens: &Tok
     });
 }
 
+/// How far the open dropdown's tab reaches into its list, and how much of the seam under it the tab covers
+const TAB_OVERLAP: f32 = 1.5;
+const TAB_SEAM_COVER: f32 = 2.5;
+
 /// A button with its icon and a caret whose menu hangs from it (caption, then `items`); the item picked
 fn menu_button(ui: &mut Ui, rect: Rect, label: &str, icon: MenuIcon, caption: &str, items: &[AddItem], tokens: &Tokens) -> Option<Pick> {
     let response = tip_above(ui.interact(rect, ui.scope_id().with(("layer_toolbar_menu", label)), Sense::click()), label);
@@ -173,7 +179,7 @@ fn menu_button(ui: &mut Ui, rect: Rect, label: &str, icon: MenuIcon, caption: &s
         .fill(tokens.chrome)
         .stroke(Stroke::new(1.0, tokens.field_border))
         .corner_radius(CornerRadius { nw: 0, ..CornerRadius::same(MENU_ROUNDING) })
-        .shadow(Shadow { offset: SHADOW_OFFSET, blur: 0, spread: 0, color: SHADOW });
+        .shadow(Shadow { offset: SHADOW_OFFSET, blur: 0, spread: 0, color: HARD_SHADOW });
     let mut picked = None;
     let shown = egui::Popup::menu(&response).id(popup).align(egui::RectAlign::BOTTOM_START).gap(-1.0).frame(frame).width(width).show(|ui| {
         ui.set_width(width);
@@ -191,14 +197,15 @@ fn menu_button(ui: &mut Ui, rect: Rect, label: &str, icon: MenuIcon, caption: &s
         }
         ui.add_space(MENU_PADDING);
     });
+
     // The open button becomes the menu's tab: same fill and border, no line between them
     if let Some(shown) = shown {
         let painter = ui.ctx().layer_painter(shown.response.layer_id);
-        let tab = Rect::from_min_max(rect.min, pos2(rect.right(), shown.response.rect.top() + 1.5));
+        let tab = Rect::from_min_max(rect.min, pos2(rect.right(), shown.response.rect.top() + TAB_OVERLAP));
         let top = CornerRadius { nw: CONTROL_ROUNDING, ne: CONTROL_ROUNDING, sw: 0, se: 0 };
         painter.rect(tab, top, tokens.chrome, Stroke::new(1.0, tokens.field_border), StrokeKind::Inside);
         painter.rect_filled(
-            Rect::from_min_max(pos2(tab.left() + 1.0, tab.bottom() - 2.5), pos2(tab.right() - 1.0, tab.bottom())),
+            Rect::from_min_max(pos2(tab.left() + 1.0, tab.bottom() - TAB_SEAM_COVER), pos2(tab.right() - 1.0, tab.bottom())),
             CornerRadius::ZERO,
             tokens.chrome,
         );
@@ -273,12 +280,15 @@ fn plain_button(ui: &mut Ui, rect: Rect, glyph: &str, label: &str, tokens: &Toke
     response
 }
 
+/// The outline width of a drawn toolbar icon
+const ICON_LINE_WIDTH: f32 = 1.5;
+
 /// Add mask's icon: a square, half of it filled corner to corner
 pub(crate) fn mask_icon(painter: &Painter, center: Pos2, size: f32, color: Color32) {
     let half = size * 0.5;
     let filled = vec![pos2(center.x + half, center.y - half), pos2(center.x + half, center.y + half), pos2(center.x - half, center.y + half)];
     painter.add(egui::Shape::convex_polygon(filled, color, Stroke::NONE));
-    painter.rect_stroke(Rect::from_center_size(center, vec2(size, size)), CornerRadius::same(2), Stroke::new(1.5, color), StrokeKind::Inside);
+    painter.rect_stroke(Rect::from_center_size(center, vec2(size, size)), CornerRadius::same(2), Stroke::new(ICON_LINE_WIDTH, color), StrokeKind::Inside);
 }
 
 /// Selects `layer` when it isn't, runs `command` on it, and shows a filter Add filter added in Properties with its picker open
@@ -303,6 +313,7 @@ fn run_on(app: &mut TextureCraftApp, ui: &Ui, layer: &Layer, command: &str, para
 fn effect_items(app: &TextureCraftApp, layer: Option<&Layer>) -> Vec<AddItem> {
     let content = layer.is_some_and(|layer| !layer.is_group() && app.session.selected_layer() == Some(layer.id) && crate::dock::targets_content(app));
     let target = if content { "content" } else { "mask" };
+
     // Generators, compare masks and colour selections go in masks only
     let anywhere = layer.is_some();
     let mask_only = anywhere && !content;

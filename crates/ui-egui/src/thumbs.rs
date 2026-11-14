@@ -76,6 +76,7 @@ impl Thumbs {
         if let Some(texture) = self.images.get(&key) {
             return Some(texture.clone());
         }
+
         let mut image = ColorImage::filled([IMAGE_PX, IMAGE_PX], Color32::TRANSPARENT);
         for (index, pixel) in image.pixels.iter_mut().enumerate() {
             let uv = [((index % IMAGE_PX) as f32 + 0.5) / IMAGE_PX as f32, ((index / IMAGE_PX) as f32 + 0.5) / IMAGE_PX as f32];

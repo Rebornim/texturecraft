@@ -855,6 +855,7 @@ mod tests {
         let back: Project = serde_json::from_str(&json).unwrap();
         assert_eq!(back, p);
         assert_eq!(back.effect(anchor).map(|(owner, _)| owner), Some(id));
+
         // The mask fill of the layer above reads it
         let top = back.layers.values().find(|l| l.name == "y").unwrap();
         let reader = top.mask.as_ref().unwrap().effects[0].id;
@@ -917,6 +918,7 @@ mod tests {
             (p.contents_around(outer), p.contents_around(top), p.contents_offset(a)),
             (ContentsOffset::NONE, ContentsOffset::NONE, ContentsOffset::NONE)
         );
+
         // A folder saved before folders had an offset has none, and one without an offset saves as before
         let old: LayerKind = serde_json::from_str(r#"{"Group":{"children":[],"collapsed":true}}"#).unwrap();
         assert_eq!(old, LayerKind::Group { children: vec![], collapsed: true, contents: ContentsOffset::NONE, randomized: Vec::new() });

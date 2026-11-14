@@ -178,6 +178,7 @@ fn its_jump_tabs_scroll_to_a_section_and_light_it_without_moving_the_docked_pane
     click(&mut harness, PointerButton::Secondary, center);
     let popup = harness.ctx.memory(|memory| memory.area_rect(properties_popup::area_id())).unwrap();
     let docked_fill = harness.get_all_by_role_and_label(Role::Tab, "Fill").map(|tab| tab.rect()).find(|tab| !popup.contains_rect(*tab)).unwrap();
+
     // The docked strip: from its Fill tab across its other two
     let docked = egui::Rect::from_min_max(docked_fill.min, docked_fill.max + vec2(300.0, 0.0));
     let in_popup = |harness: &Harness<'_, TextureCraftApp>, label: &str| harness.query_all_by_label(label).any(|node| popup.contains_rect(node.rect()));
@@ -219,6 +220,7 @@ fn the_colour_picker_opened_in_the_popup_takes_its_presses_and_the_first_escape(
     let popup = harness.ctx.memory(|memory| memory.area_rect(properties_popup::area_id())).unwrap();
     let in_popup = |rect: egui::Rect| popup.x_range().contains(rect.center().x);
     harness.get_all_by_role_and_label(Role::Button, "Base color").find(|node| in_popup(node.rect())).unwrap().scroll_to_me();
+
     // The scroll animates for about twenty frames
     harness.run_steps(25);
     harness.get_all_by_role_and_label(Role::Button, "Base color").find(|node| in_popup(node.rect())).unwrap().click();
@@ -249,6 +251,7 @@ fn an_eyedropper_pick_from_the_popup_keeps_the_popup_open_for_its_colour() {
     let popup = harness.ctx.memory(|memory| memory.area_rect(properties_popup::area_id())).unwrap();
     let in_popup = |rect: egui::Rect| popup.x_range().contains(rect.center().x);
     harness.get_all_by_role_and_label(Role::Button, "Pick color").find(|node| in_popup(node.rect())).unwrap().scroll_to_me();
+
     // The scroll animates for about twenty frames
     harness.run_steps(25);
     harness.get_all_by_role_and_label(Role::Button, "Pick color").find(|node| in_popup(node.rect())).unwrap().click();

@@ -92,6 +92,7 @@ fn a_toolbar_tooltip_shows_above_its_button_off_the_layer_rows() {
     let (mut harness, _) = app();
     let button = harness.get_by_role_and_label(Role::Button, "Add effect").rect();
     harness.hover_at(button.center());
+
     // Past the tooltip delay
     harness.run_steps(60);
     let tip =
@@ -115,6 +116,7 @@ fn pick_channel(harness: &mut Harness<'_, TextureCraftApp>, current: &str, item:
     harness.run_steps(3);
     let below = |rect: egui::Rect| rect.top() >= list.bottom() - 1.0 && rect.left() < list.right() && rect.right() > list.left();
     let row = harness.query_all_by_label(item).map(|node| node.rect()).filter(|rect| below(*rect)).min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
+
     // A real press and release on the row, as a mouse would
     let at = row.center();
     harness.hover_at(at);

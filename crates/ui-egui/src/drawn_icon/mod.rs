@@ -57,6 +57,7 @@ impl DrawnIcon {
         if let Some(texture) = ctx.data(|data| data.get_temp::<egui::TextureHandle>(id)) {
             return texture;
         }
+
         let rgba: Vec<u8> = self.coverage(side).into_iter().flat_map(|alpha| [u8::MAX, u8::MAX, u8::MAX, alpha]).collect();
         let image = egui::ColorImage::from_rgba_unmultiplied([side as usize; 2], &rgba);
         let texture = ctx.load_texture(format!("drawn_icon_{self:?}_{side}"), image, egui::TextureOptions::LINEAR);

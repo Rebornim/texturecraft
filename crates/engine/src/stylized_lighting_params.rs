@@ -94,6 +94,7 @@ fn set_light(p: &Value, light: &mut DirectionalLight, key: &str, cmd: &str) -> R
     if !p.is_object() {
         return Err(bad(cmd, format!("`{key}` must be an object {{azimuth, elevation, intensity, color}}")));
     }
+
     if let Some(v) = f32p(p, "azimuth") {
         light.azimuth = v.rem_euclid(360.0);
     }

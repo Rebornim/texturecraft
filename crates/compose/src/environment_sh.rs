@@ -40,11 +40,13 @@ impl EnvironmentSh {
             _ => false,
         };
         let rotation = display.env_rotation.to_radians();
+
         // Worked out with the cache locked: tiles asking for the same light wait for it instead of working it out again
         let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(entry) = cache.as_ref().filter(|entry| same(entry)) {
             return EnvironmentSh { coefficients: *entry.2, rotation };
         }
+
         let coefficients = match &image {
             Some(image) => image_sh(image),
             None => sh9(BUILT_IN_WIDTH, BUILT_IN_WIDTH / 2, |x, y| {
@@ -60,6 +62,7 @@ impl EnvironmentSh {
     pub fn irradiance(&self, nrm: Vec3, horizontal: f32, vertical: f32) -> Vec3 {
         let (sv, cv) = vertical.sin_cos();
         let tilted = Vec3::new(nrm.x, cv * nrm.y - sv * nrm.z, sv * nrm.y + cv * nrm.z);
+
         // Turned as the viewport turns its environment
         let (s, c) = (self.rotation + horizontal).sin_cos();
         let d = Vec3::new(c * tilted.x - s * tilted.z, tilted.y, s * tilted.x + c * tilted.z);

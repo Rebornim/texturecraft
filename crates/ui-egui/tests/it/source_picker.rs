@@ -29,6 +29,7 @@ fn app_with_fill(prepare: impl FnOnce(&mut texturecraft_engine::Session, LayerId
     let layer = LayerId(added["layer"].as_u64().unwrap());
     prepare(&mut session, layer);
     let mut harness = Harness::builder().with_size(WINDOW_SIZE).build_eframe(|cc| TextureCraftApp::new(cc, session));
+
     // The labels below are English; a first run would speak the system's language
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(STARTUP_FRAMES);
@@ -83,6 +84,7 @@ fn a_procedural_tile_sets_the_channel_and_closes_the_picker() {
 fn an_alpha_from_the_search_becomes_the_channels_source() {
     let (mut harness, layer) = app_with_fill(|_, _| {});
     click_slot(&mut harness, "Roughness");
+
     // The search field has the focus as the picker opens and searches every Resources group
     type_search(&mut harness, "crack");
     assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Clouds").is_none(), "the search hides what doesn't match");

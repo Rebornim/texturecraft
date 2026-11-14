@@ -375,6 +375,7 @@ fn the_invert_tooltip_shows_right_above_its_button() {
     let (mut harness, _) = app_with_color_selection(true);
     let invert = harness.get_by_role_and_label(Role::Button, "Invert").rect();
     harness.hover_at(invert.center());
+
     // Past the tooltip delay
     harness.run_steps(60);
     let tip =

@@ -119,6 +119,7 @@ pub(crate) fn sync(app: &mut TextureCraftApp, ctx: &egui::Context) {
             app.picking_color = None;
             app.screen_pick = None;
         }
+
         // The pick stays on the model; the finished wait is kept so it does not start again
         Ok(PickOutcome::Unavailable) | Err(_) => {
             // Another app came forward (Alt+Tab, the Start menu): the pick ends there and the pointer is the user's again
@@ -135,10 +136,13 @@ fn ends_on_focus_loss() -> bool {
     cfg!(windows) || (cfg!(all(unix, not(target_os = "macos"))) && std::env::var_os("WAYLAND_DISPLAY").is_none())
 }
 
+/// The highest window DPI read, far past any display, so a broken scale cannot size a huge pointer
+const MAX_WINDOW_DPI: f32 = 4096.0;
+
 /// The app window's dots per inch, which size the eyedropper as the system's pointers are sized there
 fn window_dpi(ctx: &egui::Context) -> u32 {
     let scale = ctx.input(|input| input.viewport().native_pixels_per_point).filter(|scale| scale.is_finite() && *scale > 0.0);
-    (scale.unwrap_or(1.0) * keeper_args::BASE_DPI as f32).round().clamp(1.0, 4096.0) as u32
+    (scale.unwrap_or(1.0) * keeper_args::BASE_DPI as f32).round().clamp(1.0, MAX_WINDOW_DPI) as u32
 }
 
 /// A window's outer rectangle as `[left, top, right, bottom]` in physical screen pixels, where the system reports one
@@ -149,6 +153,7 @@ fn physical_rect(viewport: &egui::ViewportInfo) -> Option<[i32; 4]> {
     if edges.iter().any(|edge| !edge.is_finite()) {
         return None;
     }
+
     Some(edges.map(|edge| edge.round() as i32))
 }
 

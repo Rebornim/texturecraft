@@ -104,6 +104,7 @@ fn mask_outline_draws_a_band_along_the_threshold_edge() {
     execute(&mut s, "layer.fill.set", &json!({"channel": "roughness", "procedural": "gradient"})).unwrap();
     let row = SIZE / 2;
     let values: Vec<f32> = (0..SIZE).map(|x| roughness(&mut s, (x, row))).collect();
+
     // The gradient repeats: an edge where it crosses 0.5 away from the tile's sides, its first texel inside the shapes and the way out of them
     let edge = (SIZE / 4..SIZE * 3 / 4).find(|x| (values[*x as usize] >= 0.5) != (values[*x as usize - 1] >= 0.5)).unwrap();
     let rising = values[edge as usize] >= 0.5;

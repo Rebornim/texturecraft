@@ -3,6 +3,7 @@
 use egui::Pos2;
 use texturecraft_engine::compose::pattern::FRAME_UV_CENTER;
 
+use crate::fill_pictures::PREVIEW_MIN_TILES;
 use crate::fill_placement::Placement;
 
 /// Checker cells along each axis of one repeat of the image (an untiled, unturned image shows 4 × 4 cells across the frame)
@@ -18,12 +19,14 @@ pub(crate) fn warp_checker(quad: [Pos2; 4], placement: Placement) -> Vec<(Vec<Po
         let bottom = bottom_left + (bottom_right - bottom_left) * u;
         top + (bottom - top) * v
     };
-    let tiling = placement.tiling.map(|tiles| if tiles.is_finite() { tiles.clamp(1e-3, MAX_TILES) } else { 1.0 });
+    let tiling = placement.tiling.map(|tiles| if tiles.is_finite() { tiles.clamp(PREVIEW_MIN_TILES, MAX_TILES) } else { 1.0 });
+
     // The checker repeats every tile, so only the offset within one tile matters (and the cell numbers stay small)
     let offset = placement.offset.map(|offset| if offset.is_finite() { offset.rem_euclid(1.0) } else { 0.0 });
     let rotation = if placement.rotation.is_finite() { placement.rotation.rem_euclid(360.0) } else { 0.0 };
     let (sin, cos) = rotation.to_radians().sin_cos();
     let [middle_u, middle_v] = FRAME_UV_CENTER.to_array();
+
     // The frame (0..1 across and down) → image coordinates in cells: turn round the frame's centre, tile, offset, as the compositor places a warp's image
     let to_cells = |[u, v]: [f32; 2]| -> [f32; 2] {
         let (u, v) = (u - middle_u, v - middle_v);

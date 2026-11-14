@@ -13,7 +13,7 @@ const SLOT_CARD_TOP: f32 = 6.0;
 const SLOT_HEIGHT: f32 = 36.0;
 
 /// Size of a slot's thumbnail
-const THUMB_SIZE: f32 = 26.0;
+pub(super) const THUMB_SIZE: f32 = 26.0;
 
 /// Air between the thumbnail and the slot's name
 const THUMB_TO_NAME: f32 = 10.0;
@@ -108,6 +108,7 @@ impl PropertySheet<'_> {
         let thumb = Rect::from_min_size(pos2(self.left, center_y - THUMB_SIZE / 2.0), vec2(THUMB_SIZE, THUMB_SIZE));
         let clear_x = self.right - if has_toggle { CLEAR_INSET_WITH_TOGGLE } else { CLEAR_INSET };
         let reset_x = if clear { clear_x - RESET_STEP } else { clear_x };
+
         // The whole row across the card picks the source, so its list hangs at the card's width; the glyphs on the right take their clicks first
         let row = Rect::from_min_max(pos2(self.left - CARD_BLEED, rect.top()), pos2(self.right + CARD_BLEED, rect.bottom()));
         let pick_id = self.next_id();
@@ -131,8 +132,10 @@ impl PropertySheet<'_> {
             if !shown {
                 continue;
             }
+
             let glyph_rect = Rect::from_center_size(pos2(x, center_y), Vec2::splat(SLOT_GLYPH_BOX));
             let id = self.next_id();
+
             // At the defaults the ⟲ is faint and inert, as on a band: a click there picks the source like the rest of the row
             let response = if live {
                 self.tip(self.ui.interact(glyph_rect, id, Sense::click()), crate::i18n::tr(tip))

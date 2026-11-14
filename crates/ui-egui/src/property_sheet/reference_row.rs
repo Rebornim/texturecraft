@@ -4,14 +4,13 @@ use egui::{Align2, CornerRadius, FontId, Rect, Sense, pos2};
 use egui_phosphor::regular as ic;
 
 use super::group::CARD_BLEED;
-use super::{PropertySheet, ROW_HEIGHT, TEXT_SIZE};
+use super::{GLYPH_SIZE, PropertySheet, ROW_HEIGHT, ROW_RADIUS, TEXT_SIZE};
 
 /// From the left edge to the glyph's centre, and from there to the name
 const GLYPH_CENTER: f32 = 6.0;
 const GLYPH_TO_NAME: f32 = 14.0;
 
-/// Size of the glyph and of the arrow
-const GLYPH_SIZE: f32 = 13.0;
+/// Size of the arrow
 const ARROW_SIZE: f32 = 12.0;
 
 /// Air between the name and its kind
@@ -19,9 +18,6 @@ const NAME_TO_KIND: f32 = 6.0;
 
 /// From the right edge to the arrow's centre
 const ARROW_INSET: f32 = 6.0;
-
-/// Corner radius of the hovered row's face
-const ROW_RADIUS: u8 = 6;
 
 impl PropertySheet<'_> {
     /// The row of `name` (a `kind`, drawn with `glyph`); returns true when it was clicked

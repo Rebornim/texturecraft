@@ -123,6 +123,7 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, pad: &egui::Response, ta
     if held.pass == pass {
         return;
     }
+
     held.pass = pass;
 
     let rect = app.viewport_rect;
@@ -132,6 +133,7 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, pad: &egui::Response, ta
         }
         held.last = at;
     }
+
     // The wheel scales the projection instead of scrolling the panel or zooming the camera while the pad is held
     let wheel = ctx.input_mut(|input| std::mem::take(&mut input.smooth_scroll_delta).y);
     if wheel != 0.0
@@ -141,6 +143,7 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, pad: &egui::Response, ta
     }
 
     ctx.data_mut(|data| data.insert_temp(hold_id(), held));
+
     // The panel drew before this edit: one more frame shows its fields and preview where the projection is now
     ctx.request_repaint();
 }

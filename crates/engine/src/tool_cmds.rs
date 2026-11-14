@@ -298,6 +298,7 @@ fn material(s: &mut Session, p: &Value) -> Result<Value> {
             if !s.doc.resources.contains_key(name) {
                 return Err(bad("tool.material", format!("no image resource '{name}'")));
             }
+
             s.tool.mask_image = Some(name.to_owned());
         }
         None => {}

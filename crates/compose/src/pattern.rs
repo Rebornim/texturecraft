@@ -197,6 +197,7 @@ pub fn projector_local(projector: &Projector, c: &Coords) -> Coords {
     if !projector.turns() {
         return *c;
     }
+
     let [x, y, z] = projector.rotation.map(f32::to_radians);
     let to_local = Mat3::from_euler(EulerRot::ZYX, z, y, x).transpose();
     let scale = Vec3::from(projector.scale).map(|s| if s.abs() < 1e-6 { 1e-6 } else { s });
@@ -226,6 +227,7 @@ fn flat_on_grid(kind: ProceduralKind, seed: u32, q: Vec2, scale: f32, grid: u32)
 
 fn evaluate(pr: &Procedural, proj: &Projection, c: &Coords, grid: Option<u32>) -> f32 {
     let s = pr.scale.max(1e-4);
+
     // 2D patterns sample a slice of the 3D pattern
     let flat = |q: Vec2| match grid {
         Some(grid) if grid > 0 => flat_on_grid(pr.kind, pr.seed, q, s, grid),
@@ -241,6 +243,7 @@ fn evaluate(pr: &Procedural, proj: &Projection, c: &Coords, grid: Option<u32>) -
             let w = w / (w.x + w.y + w.z).max(1e-6);
             flat(place_uv(Vec2::new(p.z, p.y), uv)) * w.x + flat(place_uv(Vec2::new(p.x, p.z), uv)) * w.y + flat(place_uv(Vec2::new(p.x, p.y), uv)) * w.z
         }
+
         // `c.uv` is already in the placed or warped frame (see [`placed_uv`] and [`crate::warp::warp_uv`])
         Projection::Planar { uv, placed: Some(_), .. } | Projection::Warp { uv, .. } => flat(place_frame_uv(c.uv, uv) * s),
         Projection::Planar { scale, axis, offset, uv, projector, .. } => {
@@ -355,6 +358,7 @@ pub fn frame_facing(d: &Decal, projector: &Projector, nrm: Vec3) -> f32 {
     if !projector.turns() {
         return nrm.dot(n);
     }
+
     let turned = Vec3::new(nrm.dot(r), nrm.dot(u), nrm.dot(n));
     projector_local(projector, &Coords { uv: Vec2::ZERO, pos: Vec3::ZERO, nrm: turned }).nrm.z
 }
@@ -369,6 +373,7 @@ pub fn frame_crop(d: &Decal, local: Vec3) -> f32 {
     if local.x.abs() > 0.5 || local.y.abs() > 0.5 {
         return 0.0;
     }
+
     depth_fade(local.z, d.depth)
 }
 
@@ -378,6 +383,7 @@ pub fn depth_fade(z: f32, depth: f32) -> f32 {
     if lz > depth {
         return 0.0;
     }
+
     1.0 - smoothstep(0.75 * depth, depth, lz)
 }
 

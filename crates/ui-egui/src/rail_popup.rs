@@ -157,6 +157,7 @@ pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     };
 
     let shown = ctx.memory(|memory| memory.area_rect(area_id()));
+
     // An eyedropper pick's click on the model hands its colour back to the popup
     if app.picking_color.is_none() && closed_by_input(ctx, shown, strip) {
         app.ui.rail_panel = None;

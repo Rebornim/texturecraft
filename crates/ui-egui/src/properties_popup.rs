@@ -58,6 +58,7 @@ pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
             let shown = ctx.memory(|memory| memory.area_rect(area_id()));
             let in_picker = |at: egui::Pos2| crate::color_picker::open_window(ctx).is_some_and(|picker| picker.contains(at));
             let outside = pressed_at.is_some_and(|at| shown.is_some_and(|rect| !rect.contains(at)) && !in_picker(at));
+
             // A press in one of the popup's own dropdowns or its colour picker window lands outside its area; an eyedropper pick's click on the model hands its colour back to the popup
             if outside && !egui::Popup::is_any_open(ctx) && app.picking_color.is_none() {
                 app.properties_popup = Some(PropertiesPopup::Closing);
@@ -75,6 +76,7 @@ pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
             ui.set_max_height(bounds.height() * PROPERTIES_POPUP_MAX_HEIGHT_SHARE);
             // A floating bar would cover the sliders' right-aligned values
             ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+
             // The docked panel's jump tabs on the top edge stay put while the sections scroll under them
             let scope = SectionScope::Popup;
             if let Some(tabs) = crate::dock::properties_fill_tabs(app) {

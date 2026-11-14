@@ -31,6 +31,7 @@ impl ProjectorDepth {
     pub fn of(mesh: &Mesh, bounds: (Vec3, Vec3), proj: &Projection) -> Option<Arc<ProjectorDepth>> {
         let view = ProjectorView::of(proj, bounds)?;
         let mesh_key = fingerprint(mesh);
+
         // Built with the cache locked: the build runs no parallel work, and tiles asking for the same map wait for it instead of building it again
         let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(at) = cache.iter().position(|(v, m, _)| *v == view && *m == mesh_key) {
@@ -39,6 +40,7 @@ impl ProjectorDepth {
             cache.insert(0, entry);
             return Some(depth);
         }
+
         let depth = Arc::new(ProjectorDepth::build(view, mesh)?);
         cache.insert(0, (view, mesh_key, depth.clone()));
         cache.truncate(CACHE_MAPS);
@@ -52,6 +54,7 @@ impl ProjectorDepth {
         if lo.x > hi.x || lo.y > hi.y {
             return None;
         }
+
         let cell = ((hi - lo) / SIZE as f32).max(Vec2::splat(1e-6));
         let mut depth = ProjectorDepth { view, origin: lo, cell, front: vec![[f32::NEG_INFINITY, 0.0, 0.0]; SIZE * SIZE] };
         let mut budget = CELL_BUDGET;
@@ -70,11 +73,13 @@ impl ProjectorDepth {
         let [a, b, c] = t;
         let (d1, d2) = (b - a, c - a);
         let det = d1.x * d2.y - d1.y * d2.x;
-        if !det.is_finite() || det.abs() < 1e-12 {
+        if !det.is_finite() || det.abs() < MIN_SCREEN_AREA {
             // Seen edge on, it covers nothing
             return true;
         }
+
         let slope = Vec2::new((d1.z * d2.y - d2.z * d1.y) / det, (d1.x * d2.z - d2.x * d1.z) / det).clamp(Vec2::splat(-MAX_SLOPE), Vec2::splat(MAX_SLOPE));
+
         // Corners in cells: cell (i, j) has its centre at (i + 0.5, j + 0.5)
         let [pa, pb, pc] = t.map(|p| (p.truncate() - self.origin) / self.cell);
         let (lo, hi) = (pa.min(pb).min(pc), pa.max(pb).max(pc));
@@ -93,6 +98,7 @@ impl ProjectorDepth {
                 if !inside {
                     continue;
                 }
+
                 let near = a.z + slope.dot(self.origin + q * self.cell - a.truncate());
                 if let Some(cell) = self.front.get_mut(y * SIZE + x)
                     && near > cell[0]
@@ -111,19 +117,23 @@ impl ProjectorDepth {
         if !(at.x >= 0.0 && at.y >= 0.0 && at.x < SIZE as f32 && at.y < SIZE as f32) {
             return 1.0;
         }
+
         let (x, y) = (at.x as usize, at.y as usize);
         let Some(&[near, across, up]) = self.front.get(y * SIZE + x).filter(|cell| cell[0].is_finite()) else { return 1.0 };
+
         // The nearest surface's plane carried from the cell centre to the point, so a surface is never behind itself
         let centre = self.origin + (Vec2::new(x as f32, y as f32) + 0.5) * self.cell;
         let slope = Vec2::new(across, up);
         let behind = near + slope.dot(l.truncate() - centre) - l.z;
         let unit = self.view.unit();
+
         // Neighbouring triangles of a curved surface part from the carried plane by about one cell of its slope
         let bias = BIAS * unit + (slope.abs() * self.cell).element_sum().min(MAX_SLOPE_BIAS * unit);
         let width = (1.0 - hardness.clamp(0.0, 1.0)) * FADE * unit;
         if width <= f32::EPSILON {
             return f32::from(u8::from(behind <= bias));
         }
+
         1.0 - smoothstep(bias, bias + width, behind)
     }
 }
@@ -148,6 +158,9 @@ fn fingerprint(mesh: &Mesh) -> u64 {
 
 /// Cells across and up the grid
 const SIZE: usize = 512;
+
+/// A triangle flatter than this on screen is seen edge on
+const MIN_SCREEN_AREA: f32 = 1e-12;
 
 /// Most cells all triangles together may visit before the rest are left out (hostile meshes of huge overlapping triangles)
 const CELL_BUDGET: usize = 256 * SIZE * SIZE;

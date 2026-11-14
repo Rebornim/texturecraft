@@ -101,6 +101,7 @@ fn mask_anchor_points_feed_layers_above_and_folders_take_them() {
     let mut s = session();
     let low = id(execute(&mut s, "layer.add.fill", &json!({"height": 0.5})).unwrap(), "layer");
     let name = s.doc.project.layer(LayerId(low)).unwrap().name.clone();
+
     // No target (or null params) still goes on the content, named after the layer
     let content = id(execute(&mut s, "effect.add.anchor", &Value::Null).unwrap(), "effect");
     assert!(s.doc.project.layer(LayerId(low)).unwrap().content_effects.iter().any(|e| e.id.0 == content));
@@ -123,6 +124,7 @@ fn mask_anchor_points_feed_layers_above_and_folders_take_them() {
     assert!(close(anchored, center(&mut s, Channel::BaseColor)), "{anchored:?}");
     execute(&mut s, "effect.set", &json!({"effect": reader, "anchor": anchor, "anchorChannel": "roughness"})).unwrap();
     assert!(close(anchored, center(&mut s, Channel::BaseColor)), "every channel reads the gray");
+
     // Inspect lists what reads an anchor point
     let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap().to_string();
     assert!(inspect.contains(&format!("\"references\":[{{\"effect\":{reader},\"layer\":{top}}}]")), "{inspect}");

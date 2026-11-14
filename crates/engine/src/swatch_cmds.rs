@@ -28,6 +28,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     if s.doc.project.swatches.len() >= MAX_SWATCHES {
         return Err(bad("swatch.add", format!("a project keeps at most {MAX_SWATCHES} swatches; remove one first")));
     }
+
     let color = color.map(|part| part.clamp(0.0, 1.0));
     s.edit("Add swatch", |s| {
         s.doc.project.swatches.push(color);

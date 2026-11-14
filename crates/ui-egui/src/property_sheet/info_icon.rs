@@ -2,6 +2,7 @@ use egui::{Align2, CornerRadius, FontId, Frame, Margin, Rect, RectAlign, RichTex
 use egui_phosphor::regular as ic;
 
 use super::{PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE};
+use crate::theme::HARD_SHADOW;
 
 /// The i's slot at the panel edge; a row with an i at its left starts this much further right
 pub(super) const INFO_SLOT: f32 = 16.0;
@@ -22,7 +23,7 @@ const TIP_OVERLAP: f32 = 2.0;
 const TIP_MARGIN: Margin = Margin::symmetric(8, 5);
 const TIP_LINE_HEIGHT: f32 = 15.0;
 const TIP_ROUNDING: u8 = 5;
-const TIP_SHADOW: Shadow = Shadow { offset: [2, 3], blur: 0, spread: 0, color: egui::Color32::from_rgb(12, 14, 18) };
+const TIP_SHADOW: Shadow = Shadow { offset: [2, 3], blur: 0, spread: 0, color: HARD_SHADOW };
 
 impl PropertySheet<'_> {
     /// Gives the next row led by a label or picture an i at the panel edge that explains it on hover; its lead and its child rows move right to make room

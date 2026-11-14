@@ -1708,7 +1708,17 @@ pub(crate) fn properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     if let Some(tabs) = properties_fill_tabs(app) {
         crate::property_sheet::section_tabs(ui, scope, 0, &tabs);
     }
-    crate::property_sheet::in_scope(ui, scope, |ui| properties_scrolled(app, ui, egui::ScrollArea::vertical().id_salt("props").auto_shrink([false, false])));
+    let area = egui::ScrollArea::vertical().id_salt(("props", properties_place(app))).auto_shrink([false, false]);
+    crate::property_sheet::in_scope(ui, scope, |ui| properties_scrolled(app, ui, area));
+}
+
+/// What the docked Properties list keeps its own scroll place for: the selected layer and the part of it edited, none for the tool
+fn properties_place(app: &TextureCraftApp) -> Option<(LayerId, StackTarget)> {
+    // A short panel in between would clamp a shared place back to the top
+    if app.session.tool.tool == Tool::PolygonFill {
+        return None;
+    }
+    app.session.selected_layer().map(|layer| (layer, app.session.target))
 }
 
 /// The sections in `area`, leaving the solid bar's room even without it, so the bar coming in refits no row (flipped it every frame)

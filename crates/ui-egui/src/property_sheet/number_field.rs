@@ -148,6 +148,9 @@ impl PropertySheet<'_> {
             self.start_typing(typing_id, shown_number(field.value, decimals));
             return None;
         }
+        if response.dragged() {
+            crate::pointer_lock::hold(self.ui.ctx());
+        }
         let delta = response.drag_delta().x;
         if !response.dragged() || delta == 0.0 {
             return None;

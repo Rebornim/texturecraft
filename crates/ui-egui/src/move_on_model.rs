@@ -1,4 +1,4 @@
-//! Move on model: hold the button and drag to slide the selected fill's projection, with Shift or the right button held to turn it, and turn the wheel to scale it. Letting go ends it, as one undo step; the 3D view keeps its own drags and wheel
+//! Move on model: hold the button and drag to slide the selected fill's projection, with Shift or the right button held to turn it, and turn the wheel to scale it. The pointer is held while it lasts (hidden, no screen edge stops it, back on the button when let go). Letting go ends it, as one undo step; the 3D view keeps its own drags and wheel
 
 use egui::{CursorIcon, Pos2, Rect};
 use egui_phosphor::regular as ic;
@@ -69,8 +69,6 @@ const SLIDE_PER_HEIGHT: f32 = 1.0;
 const TURN_PER_POINT: f32 = 0.5;
 /// Growth per wheel point (exponential)
 const SCALE_PER_WHEEL_POINT: f32 = 0.0015;
-/// Seconds the cursor shows a wheel step's zoom in or out
-const WHEEL_CURSOR_SECONDS: f64 = 0.3;
 
 /// The Move on model button of `target`'s projection rows; while it is held down it moves the projection
 pub(crate) fn button(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, target: MoveOnModel) {
@@ -96,8 +94,8 @@ fn end(app: &mut TextureCraftApp, ctx: &egui::Context) {
 
 /// A press on the button starts the hold; each frame until the left button lets go, pointer moves and wheel steps edit the projection
 fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, button: &egui::Response, target: MoveOnModel) {
-    let (primary, turn, pointer, now) =
-        ctx.input(|input| (input.pointer.primary_down(), input.modifiers.shift || input.pointer.secondary_down(), input.pointer.latest_pos(), input.time));
+    let (primary, turn, pointer) =
+        ctx.input(|input| (input.pointer.primary_down(), input.modifiers.shift || input.pointer.secondary_down(), input.pointer.latest_pos()));
     let pass = ctx.cumulative_pass_nr();
     let mut held = ctx.data(|data| data.get_temp::<MoveHold>(hold_id())).filter(|held| held.target == target);
     if held.is_none()
@@ -105,7 +103,7 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, button: &egui::Response,
         && button.is_pointer_button_down_on()
         && let Some(at) = pointer
     {
-        held = Some(MoveHold { target, last: at, stepped: false, pass: pass.wrapping_sub(1), wheeled: None });
+        held = Some(MoveHold { target, last: at, stepped: false, pass: pass.wrapping_sub(1) });
     }
     let Some(mut held) = held.filter(|_| primary && target.projection(app).is_some()) else {
         if app.moving_on_model == Some(target) {
@@ -118,6 +116,7 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, button: &egui::Response,
     };
 
     app.moving_on_model = Some(target);
+    crate::pointer_lock::hold(ctx);
     if held.pass == pass {
         return;
     }
@@ -136,20 +135,8 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, button: &egui::Response,
         && let Some((command, params)) = resized(app, target, (SCALE_PER_WHEEL_POINT * wheel).exp(), rect)
     {
         step(app, &mut held, command, &params);
-        held.wheeled = Some((now, wheel > 0.0));
     }
 
-    ctx.set_cursor_icon(match held.wheeled {
-        Some((at, grew)) if now - at < WHEEL_CURSOR_SECONDS => {
-            if grew {
-                CursorIcon::ZoomIn
-            } else {
-                CursorIcon::ZoomOut
-            }
-        }
-        _ if turn => CursorIcon::ResizeHorizontal,
-        _ => CursorIcon::Move,
-    });
     ctx.data_mut(|data| data.insert_temp(hold_id(), held));
     // The panel drew before this edit: one more frame shows its fields and preview where the projection is now
     ctx.request_repaint();
@@ -233,6 +220,7 @@ mod tests {
 
     use super::*;
     use crate::frame_gizmo::tests::{drag, fill_app, projection};
+    use crate::pointer_lock::system_pointer::SystemPointer;
 
     type Harness = egui_kittest::Harness<'static, TextureCraftApp>;
 
@@ -250,42 +238,35 @@ mod tests {
         }
     }
 
-    fn button_event(harness: &mut Harness, at: Pos2, button: PointerButton, pressed: bool, modifiers: Modifiers) {
-        harness.event_modifiers(egui::Event::PointerButton { pos: at, button, pressed, modifiers }, modifiers);
-        harness.run_steps(2);
-    }
-
-    /// Presses the left button on Move on model and holds it; returns where
-    fn press_the_button(harness: &mut Harness) -> Pos2 {
+    /// Presses the left button on Move on model and holds it; returns the system's pointer, resting there
+    fn press_the_button(harness: &mut Harness) -> SystemPointer {
         let at = harness.get_by_label("Move on model").rect().center();
-        harness.event(egui::Event::PointerMoved(at));
-        harness.run_steps(1);
-        button_event(harness, at, PointerButton::Primary, true, Modifiers::NONE);
-        at
+        let mut pointer = SystemPointer::at(harness, at);
+        pointer.button(harness, PointerButton::Primary, true, Modifiers::NONE);
+        pointer
     }
 
-    /// Moves the pointer from `from` to `to` as a mouse sends it, one small move per frame
-    fn move_pointer(harness: &mut Harness, from: Pos2, to: Pos2, modifiers: Modifiers) {
-        const STEPS: usize = 30;
-        for step in 1..=STEPS {
-            harness.event_modifiers(egui::Event::PointerMoved(from.lerp(to, step as f32 / STEPS as f32)), modifiers);
-            harness.run_steps(1);
-        }
-    }
-
-    fn wheel(harness: &mut Harness, at: Pos2) {
-        harness.event(egui::Event::PointerMoved(at));
-        harness.event(egui::Event::MouseWheel {
+    /// A wheel step up where the pointer is, over a few frames as the wheel scrolls smoothly
+    fn wheel(harness: &mut Harness, pointer: &mut SystemPointer) {
+        harness.input_mut().events.push(egui::Event::MouseWheel {
             unit: egui::MouseWheelUnit::Point,
             delta: vec2(0.0, 120.0),
             phase: egui::TouchPhase::Move,
             source: egui::MouseWheelSource::Unknown,
             modifiers: Modifiers::NONE,
         });
-        harness.run_steps(6);
+        for _ in 0..6 {
+            pointer.frame(harness);
+        }
     }
 
-    /// Holding the button and dragging (the pointer runs off the button into the 3D view) carries the projector with the pointer; letting go ends it
+    /// Lets go of the left button, and lets a frame show where the pointer came back to
+    fn let_go(harness: &mut Harness, pointer: &mut SystemPointer) {
+        pointer.button(harness, PointerButton::Primary, false, Modifiers::NONE);
+        pointer.frame(harness);
+    }
+
+    /// Holding the button and dragging carries the projector with the mouse, the pointer hidden and kept on the button; letting go ends it there
     #[test]
     fn holding_the_button_and_dragging_carries_the_projector_as_one_undo_step() {
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -294,18 +275,22 @@ mod tests {
         let before = RoundGizmo::of(harness.state(), rect).unwrap();
         let (steps, camera) = (harness.state().session.history_labels().len(), harness.state().session.camera);
 
-        let from = press_the_button(&mut harness);
+        let mut pointer = press_the_button(&mut harness);
+        let from = pointer.at;
         assert_eq!(harness.state().moving_on_model, Some(MoveOnModel::layer(layer)), "a press starts the hold");
         let moved = vec2(-300.0, -20.0);
-        move_pointer(&mut harness, from, from + moved, Modifiers::NONE);
+        pointer.drags(&mut harness, moved, 30, Modifiers::NONE);
         let after = RoundGizmo::of(harness.state(), rect).unwrap();
-        assert!((after.center - (before.center + moved)).length() < 2.0, "the projector follows the pointer: {:?} -> {:?}", before.center, after.center);
+        assert!((after.center - (before.center + moved)).length() < 2.0, "the projector follows the mouse: {:?} -> {:?}", before.center, after.center);
+        assert!(pointer.hidden, "the pointer hides while held");
+        assert!(pointer.at.distance(from) < 1.0, "and stays on the button, so no screen edge stops the drag: {:?}", pointer.at);
         let slid = projection(&harness, layer);
         assert_ne!(projector_offset(&slid), [0.0; 3], "the projector itself moved: {slid:?}");
         assert_eq!(uv_of(&slid), UvTransform::default(), "not only the image inside it");
 
-        button_event(&mut harness, from + moved, PointerButton::Primary, false, Modifiers::NONE);
+        let_go(&mut harness, &mut pointer);
         assert_eq!(harness.state().moving_on_model, None, "letting go ends it");
+        assert!(!pointer.hidden && pointer.at == from, "the pointer shows again where the press began: {:?}", pointer.at);
         assert_eq!(harness.state().session.history_labels().len(), steps + 1, "one undo step per hold");
         assert_eq!(harness.state().session.camera, camera, "the camera kept still");
 
@@ -322,56 +307,65 @@ mod tests {
         let (mut harness, layer) = fill_app("triplanar");
         let rect = harness.state().viewport_rect;
         let (steps, camera) = (harness.state().session.history_labels().len(), harness.state().session.camera);
-        let from = press_the_button(&mut harness);
+        let mut pointer = press_the_button(&mut harness);
+        let from = pointer.at;
 
-        let turning = from + vec2(-40.0, 0.0);
-        move_pointer(&mut harness, from, turning, Modifiers::SHIFT);
+        pointer.drags(&mut harness, vec2(-40.0, 0.0), 30, Modifiers::SHIFT);
         let shifted = uv_of(&projection(&harness, layer));
         assert!(shifted.rotation > 0.0, "Shift turns the image: {shifted:?}");
         assert_eq!(projector_offset(&projection(&harness, layer)), [0.0; 3], "and does not slide it");
 
-        // The right button pressed over the 3D view while the left still holds the button
+        // The right button pressed once the drag has carried the held pointer over the 3D view, the left still holding the button
         let over_view = rect.center() + vec2(-100.0, 80.0);
-        move_pointer(&mut harness, turning, over_view, Modifiers::NONE);
+        pointer.drags(&mut harness, over_view - (from + vec2(-40.0, 0.0)), 30, Modifiers::NONE);
         let slid = projection(&harness, layer);
-        button_event(&mut harness, over_view, PointerButton::Secondary, true, Modifiers::NONE);
-        move_pointer(&mut harness, over_view, over_view + vec2(-40.0, 0.0), Modifiers::NONE);
+        pointer.button(&mut harness, PointerButton::Secondary, true, Modifiers::NONE);
+        pointer.drags(&mut harness, vec2(-40.0, 0.0), 30, Modifiers::NONE);
         let turned = projection(&harness, layer);
         assert!(uv_of(&turned).rotation < shifted.rotation, "the right button turns it: {shifted:?} -> {turned:?}");
         assert_eq!(projector_offset(&turned), projector_offset(&slid), "without sliding");
-        button_event(&mut harness, over_view + vec2(-40.0, 0.0), PointerButton::Secondary, false, Modifiers::NONE);
+        pointer.button(&mut harness, PointerButton::Secondary, false, Modifiers::NONE);
 
-        wheel(&mut harness, over_view);
+        wheel(&mut harness, &mut pointer);
         let scaled = uv_of(&projection(&harness, layer));
         assert!(scaled.tiling[0] < uv_of(&turned).tiling[0] && scaled.tiling[0] == scaled.tiling[1], "the wheel up makes the image bigger: {scaled:?}");
         assert_eq!(harness.state().session.camera, camera, "the camera neither orbited nor zoomed");
         assert!(harness.state().properties_popup.is_none(), "the right click opened no Properties popup");
 
-        button_event(&mut harness, over_view, PointerButton::Primary, false, Modifiers::NONE);
+        let_go(&mut harness, &mut pointer);
         assert_eq!(harness.state().session.history_labels().len(), steps + 1, "the whole hold is one undo step");
-        wheel(&mut harness, over_view);
+        let back = pointer.at;
+        pointer.moves(&mut harness, over_view - back, Modifiers::NONE);
+        wheel(&mut harness, &mut pointer);
         assert_ne!(harness.state().session.camera, camera, "let go, the wheel zooms the camera");
         assert_eq!(uv_of(&projection(&harness, layer)), scaled, "and leaves the projection alone");
     }
 
+    /// A UV image slides as far as the mouse goes, past the window's edge; a warp's frame slides across its plane
     #[test]
     fn a_hold_slides_a_uv_image_and_a_frame_across_its_plane() {
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (mut harness, layer) = fill_app("uv");
-        let from = press_the_button(&mut harness);
-        wheel(&mut harness, from);
+        let height = harness.state().viewport_rect.height();
+        let mut pointer = press_the_button(&mut harness);
+        let from = pointer.at;
+        wheel(&mut harness, &mut pointer);
         assert_eq!(harness.get_by_label("Move on model").rect().center(), from, "a wheel step over the panel while held scales, it does not scroll the panel");
         let Projection::Uv { scale, .. } = projection(&harness, layer) else { panic!("still UV") };
         assert!(scale[0] < 1.0, "the wheel up makes the image bigger: {scale:?}");
-        move_pointer(&mut harness, from, from + vec2(-60.0, 0.0), Modifiers::NONE);
-        button_event(&mut harness, from + vec2(-60.0, 0.0), PointerButton::Primary, false, Modifiers::NONE);
+        let far = vec2(-3.0 * from.x, 0.0);
+        pointer.drags(&mut harness, far, 60, Modifiers::NONE);
+        let_go(&mut harness, &mut pointer);
         let Projection::Uv { offset, .. } = projection(&harness, layer) else { panic!("still UV") };
-        assert!(offset[0] > 0.0 && offset[1] == 0.0, "a drag left slides the image left: {offset:?}");
+        assert!(
+            (offset[0] - (-far.x) * SLIDE_PER_HEIGHT / height).abs() < 0.01 && offset[1] == 0.0,
+            "a drag left slides the image left, all the way: {offset:?}"
+        );
 
         let (mut harness, layer) = fill_app("warp");
-        let from = press_the_button(&mut harness);
-        move_pointer(&mut harness, from, from + vec2(0.0, -40.0), Modifiers::NONE);
-        button_event(&mut harness, from + vec2(0.0, -40.0), PointerButton::Primary, false, Modifiers::NONE);
+        let mut pointer = press_the_button(&mut harness);
+        pointer.drags(&mut harness, vec2(0.0, -40.0), 30, Modifiers::NONE);
+        let_go(&mut harness, &mut pointer);
         let Projection::Warp { frame, .. } = projection(&harness, layer) else { panic!("still a warp") };
         assert!(frame.offset[1] > 0.0 && frame.offset[0].abs() < frame.offset[1] * 0.2, "a drag up slides the frame up: {frame:?}");
     }

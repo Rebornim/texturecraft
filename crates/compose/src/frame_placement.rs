@@ -3,7 +3,13 @@
 use texturecraft_core::{Decal, Projection, Projector};
 use texturecraft_geom::glam::{EulerRot, Mat3, Quat, Vec3};
 
-use crate::pattern::decal_axes;
+use crate::pattern::{decal_axes, mesh_frame, projector_stretch};
+
+/// The shortest frame side a depth is divided by, so a collapsed frame keeps a finite depth
+const MIN_FRAME_SIDE: f32 = 1e-6;
+
+/// Below this the frame faces nearly straight up or down, so world up gives no upright direction
+const MIN_UP_CROSS_SQUARED: f32 = 1e-6;
 
 /// A frame's Offset (its centre in mesh radii from the mesh's centre), Rotation (degrees round X, Y and Z, as a projector turns) and Scale (its width and height, then how far it reaches in front of and behind it, in mesh diagonals)
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -13,17 +19,13 @@ pub struct FramePlacement {
     pub scale: [f32; 3],
 }
 
-/// The mesh's centre and its radius (half the diagonal) from its bounds
-fn mesh_frame((lo, hi): (Vec3, Vec3)) -> (Vec3, f32) {
-    ((lo + hi) * 0.5, ((hi - lo).length() * 0.5).max(1e-4))
-}
-
 /// `proj` (a placed planar or a warp) with its projector's turn and scale moved into its frame, so the frame is where the projection lands; culling and crop stay. None for other projections
 pub fn folded(proj: &Projection) -> Option<Projection> {
     let (frame, projector) = match proj {
         Projection::Planar { placed: Some(frame), projector, .. } | Projection::Warp { frame, projector, .. } => (frame, projector),
         _ => return None,
     };
+
     if !projector.turns() {
         return Some(proj.clone());
     }
@@ -31,7 +33,7 @@ pub fn folded(proj: &Projection) -> Option<Projection> {
     let (origin, across, up, _) = decal_axes(frame)?;
     let [x, y, z] = projector.rotation.map(f32::to_radians);
     let turn = Mat3::from_cols(across, up, across.cross(up)) * Mat3::from_euler(EulerRot::ZYX, z, y, x);
-    let stretch = Vec3::from(projector.scale).map(|s| if s.abs() < 1e-6 { 1e-6 } else { s });
+    let stretch = projector_stretch(projector);
 
     // A negative scale turns that side over
     let (across, up) = (turn.x_axis * stretch.x.signum(), turn.y_axis * stretch.y.signum());
@@ -55,7 +57,7 @@ pub fn folded(proj: &Projection) -> Option<Projection> {
         }
         Projection::Warp { frame: warp, projector, depth, .. } => {
             // Its depth counts in lengths of the frame's longer side
-            let longer = |size: [f32; 2]| size[0].max(size[1]).max(1e-6);
+            let longer = |size: [f32; 2]| size[0].max(size[1]).max(MIN_FRAME_SIDE);
             *depth *= reach * longer(frame.size) / longer(size);
             *warp = new_frame;
             *projector = unturned;
@@ -117,7 +119,7 @@ pub fn placed(proj: &Projection, placement: &FramePlacement, bounds: (Vec3, Vec3
     match &mut proj {
         Projection::Planar { placed: Some(placed), .. } => *placed = frame,
         Projection::Warp { frame: warp, depth, .. } => {
-            *depth = deep / width.max(height).max(1e-6);
+            *depth = deep / width.max(height).max(MIN_FRAME_SIDE);
 
             // The warp's own depth is what reaches; the frame's is unused
             *warp = Decal { depth: warp.depth, ..frame };
@@ -130,7 +132,7 @@ pub fn placed(proj: &Projection, placement: &FramePlacement, bounds: (Vec3, Vec3
 /// A frame's turn round its own normal, as seen face on with the world's up (or, looking straight down, the far side) at the top: degrees
 pub fn upright_turn(frame: &Decal) -> Option<f32> {
     let (_, _, up, out) = decal_axes(frame)?;
-    let world_up = if out.cross(Vec3::Y).length_squared() > 1e-6 { Vec3::Y } else { Vec3::NEG_Z };
+    let world_up = if out.cross(Vec3::Y).length_squared() > MIN_UP_CROSS_SQUARED { Vec3::Y } else { Vec3::NEG_Z };
     let upright = (world_up - out * out.dot(world_up)).try_normalize()?;
     let upright_across = upright.cross(out);
     let turn = (-up.dot(upright_across)).atan2(up.dot(upright)).to_degrees();

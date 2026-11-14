@@ -23,6 +23,7 @@ pub mod frame_placement;
 mod held_fields;
 mod image_identity;
 mod mask_gray;
+pub mod mip_level;
 pub mod pattern;
 pub mod projector_cover;
 pub mod projector_depth;

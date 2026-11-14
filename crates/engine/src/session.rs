@@ -394,6 +394,10 @@ impl Session {
 
         let source = Arc::new(mesh);
         let mesh = tiled_mesh(&source, &doc.project);
+
+        // Depth maps built for the mesh this one replaces must not be taken for its own
+        texturecraft_compose::projector_depth::ProjectorDepth::forget_all();
+
         let bvh = Bvh::new(&mesh);
         let mut camera = OrbitCamera { yaw: 0.6, pitch: 0.25, ..OrbitCamera::default() };
         let (bounds_min, bounds_max) = mesh.bounds();

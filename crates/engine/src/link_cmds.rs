@@ -235,7 +235,7 @@ fn resolution(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "material.link.resolution";
     let id = layer_param(s, CMD, p)?;
     let size = picked_resolution(p).ok_or_else(|| bad(CMD, "give `relative` (-3..3) or `fixed` (a power of two from 128 to 8192)"))?;
-    link_of(s, CMD, id)?;
+    let link = link_of(s, CMD, id)?;
     let store = |s: &mut Session| {
         s.edit(EDIT, |s| {
             if let LayerKind::Fill(Fill { link: Some(link), .. }) = &mut s.doc.project.layer_mut(id)?.kind {
@@ -245,7 +245,11 @@ fn resolution(s: &mut Session, p: &Value) -> Result<Value> {
         })
     };
     if !boolp(p, "cook").unwrap_or(true) {
-        store(s)?;
+        // Only the stored size changes, so the size it already has adds no undo step
+        if link.resolution != size {
+            store(s)?;
+        }
+
         return Ok(json!({"layer": id.0, "cooked": false}));
     }
 
@@ -254,8 +258,9 @@ fn resolution(s: &mut Session, p: &Value) -> Result<Value> {
     let (texture_set, _, _) = s.doc.project.locate(id).ok_or_else(|| bad(CMD, format!("layer {} is not in a stack", id.0)))?;
     job.size = size.unwrap_or(CookResolution::TEXTURE_SET).size(s.doc.project.texture_set(texture_set)?.resolution);
     let bytes = job.run()?;
+    let (material, maps) = decode_cook(&bytes)?;
     store(s)?;
-    s.apply_link_cook(id, &bytes, true)?;
+    s.apply_decoded_cook(id, &material, maps, true)?;
     Ok(json!({"layer": id.0, "cooked": true, "size": job.size}))
 }
 
@@ -402,8 +407,18 @@ impl LinkJob {
     }
 }
 
+/// One cooked map: the channel it fills, its file bytes and its decoded image
+type DecodedMap = (Channel, Vec<u8>, texturecraft_formats::DecodedImage);
+
+/// A cook's material and its maps, read and decoded
+fn decode_cook(bytes: &[u8]) -> Result<(PortableMaterial, Vec<DecodedMap>)> {
+    let material = read_mcmat(bytes).map_err(|e| EngineError::Other(e.to_string()))?;
+    let maps = decoded_maps(&material)?;
+    Ok((material, maps))
+}
+
 /// Decode every map of `m` (validating them) with the channel it feeds.
-fn decoded_maps(m: &PortableMaterial) -> Result<Vec<(Channel, Vec<u8>, texturecraft_formats::DecodedImage)>> {
+fn decoded_maps(m: &PortableMaterial) -> Result<Vec<DecodedMap>> {
     m.maps
         .iter()
         .filter_map(|(usage, bytes)| Some((Channel::ALL.into_iter().find(|c| c.id() == usage)?, bytes)))
@@ -529,9 +544,12 @@ impl Session {
     /// With `merge`, this folds into the previous undo step when that was an edit of the same kind
     /// (a parameter set while the cook ran).
     pub fn apply_link_cook(&mut self, id: LayerId, bytes: &[u8], merge: bool) -> Result<()> {
-        let material = read_mcmat(bytes).map_err(|error| EngineError::Other(error.to_string()))?;
-        let maps = decoded_maps(&material)?;
+        let (material, maps) = decode_cook(bytes)?;
+        self.apply_decoded_cook(id, &material, maps, merge)
+    }
 
+    /// [`Session::apply_link_cook`] with the cook already read, so a caller can check it before changing anything
+    fn apply_decoded_cook(&mut self, id: LayerId, material: &PortableMaterial, maps: Vec<DecodedMap>, merge: bool) -> Result<()> {
         let names = self.edit_merging(EDIT, merge, |session| {
             let LayerKind::Fill(mut fill) = session.doc.project.layer(id)?.kind.clone() else {
                 return Err(EngineError::Other(format!("layer {} is not a fill", id.0)));
@@ -600,7 +618,8 @@ fn put_maps(s: &mut Session, stem: &str, maps: &[(Channel, Vec<u8>, texturecraft
     let channels: BTreeSet<Channel> = maps.iter().map(|(c, _, _)| *c).chain(link.mapping.keys().copied()).collect();
     for c in channels {
         let Some(name) = outputs.get(link.output_of(c)) else { continue };
-        // A normal map the user marked DirectX stays marked through re-cooks.
+
+        // A normal map the user marked DirectX stays marked through re-cooks
         let normal_format = match fill.sources.get(&c) {
             Some(Source::Image { normal_format, .. }) => *normal_format,
             _ => Default::default(),

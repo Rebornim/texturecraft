@@ -53,6 +53,17 @@ fn a_mask_stroke_paints_the_tools_image_gray_and_null_goes_back_to_the_value() {
 }
 
 #[test]
+fn a_refused_mask_image_leaves_the_mask_value_as_it_was() {
+    let (mut session, _) = masked_layer();
+    execute(&mut session, "tool.material", &json!({"maskValue": 0.25})).unwrap();
+
+    let refused = execute(&mut session, "tool.material", &json!({"maskValue": 0.75, "maskImage": "missing.png"}));
+
+    assert!(refused.is_err());
+    assert_eq!(execute(&mut session, "tool.material", &Value::Null).unwrap()["maskValue"], json!(0.25));
+}
+
+#[test]
 fn a_mask_image_that_is_gone_paints_the_value() {
     let (mut session, layer) = masked_layer();
     let image = session.import_resource_bytes("halves.png", halves_png()).unwrap();

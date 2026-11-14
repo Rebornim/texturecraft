@@ -8,6 +8,9 @@ use crate::commands::{CommandSpec, bad, has_layer};
 use crate::layer_cmds::{fill_target, placement_mut};
 use crate::{Result, Session, cmd};
 
+/// Reset frame's command id, the prefix of its errors
+const RESET_FRAME: &str = "layer.fill.resetFrame";
+
 pub fn specs() -> Vec<CommandSpec> {
     vec![cmd!(
         "layer.fill.resetFrame",
@@ -32,12 +35,20 @@ pub(crate) fn fitted_frame(mesh: &Mesh) -> Decal {
 const SMALLEST_SIDE: f32 = 1e-3;
 
 fn reset_frame(s: &mut Session, p: &Value) -> Result<Value> {
-    let command = "layer.fill.resetFrame";
-    let target = fill_target(s, p, command)?;
+    let target = fill_target(s, p, RESET_FRAME)?;
     let fitted = fitted_frame(&s.mesh);
+    let (Projection::Warp { frame, corners, .. }, _) = placement_mut(s, target)? else {
+        return Err(bad(RESET_FRAME, "the fill's projection is not a warp projection"));
+    };
+
+    // A frame already fitted with unpulled corners adds no undo step
+    if *frame == fitted && *corners == Projection::FRAME_CORNERS {
+        return Ok(Value::Null);
+    }
+
     s.edit("Reset frame", |s| {
         let (Projection::Warp { frame, corners, .. }, _) = placement_mut(s, target)? else {
-            return Err(bad(command, "the fill's projection is not a warp projection"));
+            return Err(bad(RESET_FRAME, "the fill's projection is not a warp projection"));
         };
 
         *frame = fitted;

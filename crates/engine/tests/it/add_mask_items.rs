@@ -13,6 +13,14 @@ fn fill() -> (Session, LayerId) {
     (s, layer)
 }
 
+/// A 2 × 2 mid-gray picture
+fn gray_png() -> Vec<u8> {
+    let image = image::RgbaImage::from_pixel(2, 2, image::Rgba([128, 128, 128, 255]));
+    let mut bytes = Vec::new();
+    image.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).unwrap();
+    bytes
+}
+
 /// The effect `command` added and selected, and its kind
 fn added(s: &mut Session, command: &str, params: Value) -> (LayerId, EffectKind) {
     let steps = s.history_labels().len();
@@ -40,6 +48,8 @@ fn a_bitmap_mask_is_a_black_mask_with_a_fill_reading_the_picked_alpha() {
     // Without a picture there is nothing to add
     assert!(execute(&mut s, "mask.add.bitmap", &json!({"layer": layer.0})).is_err());
     assert!(execute(&mut s, "mask.add.bitmap", &json!({"layer": layer.0, "image": "missing.png"})).is_err());
+    let image = s.import_resource_bytes("gray.png", gray_png()).unwrap();
+    assert!(execute(&mut s, "mask.add.bitmap", &json!({"layer": layer.0, "image": image, "alpha": "scratches"})).is_err(), "one picture, not two");
     assert!(s.doc.project.layer(layer).unwrap().mask.is_none());
 }
 

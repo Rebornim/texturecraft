@@ -39,18 +39,20 @@ impl ContentsOffset {
         ContentsOffset { scale, rotation }
     }
 
-    /// The offset of a folder inside one with offset `self` (`inner` is the inner folder's own): scales multiply, rotations add
+    /// The offset of a folder inside one with offset `self` (`inner` is the inner folder's own): scales multiply, rotations add, and the result stays in range however deep folders nest
     pub fn then(self, inner: ContentsOffset) -> ContentsOffset {
-        ContentsOffset { scale: self.scale * inner.scale, rotation: self.rotation + inner.rotation }
+        ContentsOffset::new(self.scale * inner.scale, self.rotation + inner.rotation)
     }
 
     /// `projection` with this offset laid on its tiling and rotation (a projection stretched once over each UV tile has neither)
     pub fn apply(self, projection: &Projection) -> Projection {
+        // A loaded offset never went through `new`
+        let offset = ContentsOffset::new(self.scale, self.rotation);
         let mut out = projection.clone();
         match &mut out {
             Projection::Uv { scale, rotation, .. } => {
-                *scale = scale.map(|s| s * self.scale);
-                *rotation += self.rotation;
+                *scale = scale.map(|s| s * offset.scale);
+                *rotation += offset.rotation;
             }
             Projection::UvTile => {}
             Projection::Triplanar { uv, .. }
@@ -58,8 +60,8 @@ impl ContentsOffset {
             | Projection::Spherical { uv, .. }
             | Projection::Cylindrical { uv, .. }
             | Projection::Warp { uv, .. } => {
-                uv.tiling = uv.tiling.map(|t| t * self.scale);
-                uv.rotation += self.rotation;
+                uv.tiling = uv.tiling.map(|t| t * offset.scale);
+                uv.rotation += offset.rotation;
             }
         }
         out
@@ -91,10 +93,20 @@ mod tests {
     #[test]
     fn nested_offsets_combine_and_hostile_values_are_kept_in_range() {
         let both = ContentsOffset::new(2.0, 170.0).then(ContentsOffset::new(1.5, 20.0));
-        assert_eq!((both.scale, both.rotation), (3.0, 190.0));
+        assert_eq!((both.scale, both.rotation), (3.0, -170.0));
         assert_eq!(ContentsOffset::new(f32::NAN, f32::INFINITY), ContentsOffset::NONE);
         assert_eq!(ContentsOffset::new(1e9, 190.0), ContentsOffset { scale: 100.0, rotation: -170.0 });
         assert_eq!(ContentsOffset::new(-3.0, -180.0), ContentsOffset { scale: 0.01, rotation: -180.0 });
         assert!(ContentsOffset::default().is_none());
+    }
+
+    #[test]
+    fn deep_nesting_and_loaded_offsets_keep_the_scale_in_range() {
+        let deep = (0..17).fold(ContentsOffset::NONE, |around, _| around.then(ContentsOffset::new(100.0, 0.0)));
+        assert_eq!(deep.scale, ContentsOffset::SCALE_RANGE.1);
+
+        let loaded: ContentsOffset = serde_json::from_str(r#"{"scale":0,"rotation":0}"#).unwrap();
+        let tiled = loaded.apply(&Projection::Uv { scale: [2.0, 2.0], rotation: 0.0, offset: [0.0; 2] });
+        assert_eq!(tiled, Projection::Uv { scale: [0.02, 0.02], rotation: 0.0, offset: [0.0; 2] }, "a loaded Scale of 0 is kept at the smallest");
     }
 }

@@ -6,6 +6,9 @@ use texturecraft_geom::glam::{Vec2, Vec3};
 use crate::pattern::{Coords, depth_fade, frame_crop, frame_facing, frame_local, placed_uv, projector_local, smoothstep};
 use crate::warp::warp_uv;
 
+/// Nearer a cylinder's axis than this a texel has no outward direction, so it counts as facing out
+const MIN_AXIS_DISTANCE: f32 = 1e-6;
+
 /// How much of the texel at `c` the projection reaches through its shape crop and backface culling
 pub fn projector_cover(proj: &Projection, c: &Coords) -> f32 {
     let projector = match proj {
@@ -36,16 +39,16 @@ pub fn projector_cover(proj: &Projection, c: &Coords) -> f32 {
         }
         Projection::Spherical { offset, .. } => ((local.pos + Vec3::from(*offset)).length() <= 1.0, None),
         Projection::Cylindrical { axis, offset, .. } => {
-            let p = local.pos + Vec3::from(*offset);
-            let n = local.nrm;
-            let ((a, h, b), (na, nb)) = match axis {
-                0 => ((p.y, p.x, p.z), (n.y, n.z)),
-                2 => ((p.x, p.z, p.y), (n.x, n.y)),
-                _ => ((p.x, p.y, p.z), (n.x, n.z)),
+            let position = local.pos + Vec3::from(*offset);
+            let normal = local.nrm;
+            let ((across, height, depth), (normal_across, normal_depth)) = match axis {
+                0 => ((position.y, position.x, position.z), (normal.y, normal.z)),
+                2 => ((position.x, position.z, position.y), (normal.x, normal.y)),
+                _ => ((position.x, position.y, position.z), (normal.x, normal.z)),
             };
-            let radius = a.hypot(b);
-            let outward = if radius > 1e-6 { (na * a + nb * b) / radius } else { 1.0 };
-            (radius <= 1.0 && h.abs() <= 1.0, Some(outward))
+            let radius = across.hypot(depth);
+            let outward = if radius > MIN_AXIS_DISTANCE { (normal_across * across + normal_depth * depth) / radius } else { 1.0 };
+            (radius <= 1.0 && height.abs() <= 1.0, Some(outward))
         }
         Projection::Warp { .. } | Projection::Uv { .. } | Projection::UvTile => (true, None),
     };

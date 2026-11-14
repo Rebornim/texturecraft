@@ -4,6 +4,11 @@ use std::f32::consts::TAU;
 
 use texturecraft_core::Projection;
 
+use crate::pattern::MIN_CYLINDER_ANGLE;
+
+/// Degrees in one turn of a cylindrical projection
+const FULL_TURN_DEGREES: f32 = 360.0;
+
 /// The mesh's size as the projections see it: the bounds radius (3D projections) and the mesh units one UV unit covers (UV)
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MeshSize {
@@ -13,13 +18,15 @@ pub struct MeshSize {
 
 /// Mesh units one tile covers across and down at a tiling of 1; None without a physical size (per UV tile, spherical)
 fn unit_tile(projection: &Projection, size: MeshSize) -> Option<[f32; 2]> {
-    let r = size.radius;
+    let radius = size.radius;
     match projection {
         Projection::Uv { .. } => Some([size.uv_density; 2]),
-        Projection::Triplanar { scale, .. } => Some([r / scale; 2]),
+        Projection::Triplanar { scale, .. } => Some([radius / scale; 2]),
         Projection::Planar { placed: Some(frame), .. } | Projection::Warp { frame, .. } => Some(frame.size),
-        Projection::Planar { scale, .. } => Some([2.0 * r / scale; 2]),
-        Projection::Cylindrical { scale, angle, .. } => Some([TAU * r * (angle / 360.0) / scale, 2.0 * r / scale]),
+        Projection::Planar { scale, .. } => Some([2.0 * radius / scale; 2]),
+        Projection::Cylindrical { scale, angle, .. } => {
+            Some([TAU * radius * (angle.max(MIN_CYLINDER_ANGLE) / FULL_TURN_DEGREES) / scale, 2.0 * radius / scale])
+        }
         Projection::UvTile | Projection::Spherical { .. } => None,
     }
 }
@@ -72,6 +79,14 @@ mod tests {
             let tiling = tiling_for_length(&projection, SIZE, length).unwrap();
             assert!((tiling[0] - 3.0).abs() < 1e-5 && (tiling[1] - 1.5).abs() < 1e-5, "{projection:?}: {tiling:?}");
         }
+    }
+
+    #[test]
+    fn a_cylinder_of_no_angle_still_has_a_length() {
+        let flat = Projection::Cylindrical { scale: 1.0, axis: 1, uv: UvTransform::default(), offset: [0.0; 3], projector: Default::default(), angle: 0.0 };
+        let length = tile_length(&flat, SIZE).unwrap();
+        assert!(length[0] > 0.0, "{length:?}");
+        assert!(tiling_for_length(&flat, SIZE, length).unwrap()[0] > 0.0, "a written-back tiling is never 0");
     }
 
     #[test]

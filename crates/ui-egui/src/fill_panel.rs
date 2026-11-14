@@ -97,7 +97,7 @@ pub(crate) fn placement_sections(app: &mut TextureCraftApp, sheet: &mut Property
     crate::fill_symmetry_panel::symmetry_section(app, sheet, &fill.projection, fill.sampling, base);
 }
 
-/// Projection, Move on model, Scale, the preview with size and offset, Rotation, the culling rows, then the Filtering and edges and 3D projection settings bands
+/// Projection, Scale, the preview with size and offset (held, it moves the projection on the model), Rotation, the culling rows, then the Filtering and edges and 3D projection settings bands
 fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, salt: &str, reader: LayerId) {
     let tokens = Tokens::get(sheet.ui.ctx());
     let kind = ProjectionKind::of(&fill.projection);
@@ -115,13 +115,6 @@ fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fil
         return;
     }
 
-    // Move on model: hold the button and drag to slide the projection
-    let target = match base.get("effect").and_then(Value::as_u64) {
-        Some(effect) => MoveOnModel { layer: reader, effect: Some(LayerId(effect)) },
-        None => MoveOnModel::layer(reader),
-    };
-    crate::move_on_model::button(app, sheet, target);
-
     let size = mesh_size(app);
     let length = tile_length(&fill.projection, size);
     let physical = length.is_some() && fill.sampling.scale == ScaleMode::PhysicalSize;
@@ -134,7 +127,12 @@ fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fil
         }
     }
 
-    placement_rows(app, sheet, fill, base, salt, length.filter(|_| physical), size);
+    // Move on model: hold the preview square and drag to slide the projection
+    let target = match base.get("effect").and_then(Value::as_u64) {
+        Some(effect) => MoveOnModel { layer: reader, effect: Some(LayerId(effect)) },
+        None => MoveOnModel::layer(reader),
+    };
+    placement_rows(app, sheet, fill, base, length.filter(|_| physical), size, target);
     frame_rows(app, sheet, fill, base);
     culling_rows(app, sheet, fill, base);
 
@@ -248,7 +246,7 @@ fn culling_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: 
         let mut culling = projector.depth;
         let picture = |painter: &Painter, rect: Rect| depth_picture(painter, rect, &tokens);
         sheet.info(tr("Paints only the surface the projector sees first; parts hidden behind it stay unpainted."));
-        if sheet.picture_toggle(Some(&picture), tr("Depth culling"), &mut culling.on, false) {
+        if sheet.picture_toggle(&picture, tr("Depth culling"), &mut culling.on) {
             run(app, json!({"depthCulling": culling.on}));
         }
         if let Some(merge) = sheet.slider_led(RowLead::Child(tr("Hardness")), &mut culling.hardness, HARDNESS_RANGE, 2, "") {
@@ -261,7 +259,7 @@ fn culling_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: 
         let culled = backface.on;
         let picture = |painter: &Painter, rect: Rect| backface_picture(painter, rect, culled, &tokens);
         sheet.info(tr("Leaves out faces turned away from the projector, so the fill doesn't run onto their back."));
-        if sheet.picture_toggle(Some(&picture), tr("Backface culling"), &mut backface.on, false) {
+        if sheet.picture_toggle(&picture, tr("Backface culling"), &mut backface.on) {
             run(app, json!({"backfaceCulling": backface.on}));
         }
         // Cylindrical culls by the angle to its axis's outward direction alone
@@ -276,8 +274,16 @@ fn culling_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: 
     }
 }
 
-/// The preview square beside the size (tiling, or the tile's length while Physical size) and offset; Rotation under it
-fn placement_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, salt: &str, length: Option<[f32; 2]>, size: MeshSize) {
+/// The preview square beside the size (tiling, or the tile's length while Physical size) and offset, held to move `target` on the model; Rotation under it
+fn placement_rows(
+    app: &mut TextureCraftApp,
+    sheet: &mut PropertySheet<'_>,
+    fill: &Fill,
+    base: &Value,
+    length: Option<[f32; 2]>,
+    size: MeshSize,
+    target: MoveOnModel,
+) {
     let tokens = Tokens::get(sheet.ui.ctx());
     let (tiling, rotation, offset, offset_key) = match &fill.projection {
         Projection::Uv { scale, rotation, offset } => (*scale, *rotation, *offset, "offset"),
@@ -289,7 +295,7 @@ fn placement_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill
         Projection::UvTile => return,
     };
 
-    let link_id = sheet.ui.make_persistent_id(("fill_tiling_link", salt));
+    let link_id = sheet.ui.make_persistent_id(("fill_tiling_link", base.to_string()));
     let mut linked = sheet.ui.data(|data| data.get_temp::<bool>(link_id)).unwrap_or(tiling[0] == tiling[1]);
     let was_linked = linked;
     let mut values = match length {
@@ -336,6 +342,7 @@ fn placement_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill
         }
     };
     let edit = sheet.preview_block(&picture, size_edit, lower);
+    crate::move_on_model::pad(app, sheet, edit.square, target);
 
     if linked != was_linked {
         sheet.ui.data_mut(|data| data.insert_temp(link_id, linked));

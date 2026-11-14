@@ -60,7 +60,7 @@ impl PropertySheet<'_> {
         let x0 = square.right() + SQUARE_TO_SIDE;
         let value_right = self.right - LINK_ROOM;
         let track_end = value_right - SIDE_VALUE_WIDTH;
-        let mut edit = PreviewEdit::default();
+        let mut edit = PreviewEdit { square, size: None, lower: None };
         let mut y = top;
 
         self.side_caption(x0, y, size.label);

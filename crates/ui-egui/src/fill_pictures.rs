@@ -76,18 +76,21 @@ const PREVIEW_MAX_SPAN: i32 = 64;
 const PREVIEW_DARK: f32 = 0.18;
 const PREVIEW_LIGHT: f32 = 0.55;
 
-/// A window that follows the projection: a UV checker (2 × 2 cells per tile, accent tile borders) tiled and turned as the fill is, the filled dot in the middle, the ring where the centre sits with Offset 0
+/// A window on the surface that never moves: a UV checker (2 × 2 cells per tile, accent tile borders) tiled, turned and slid as the fill is, the ring in the middle where Offset 0 puts the projection, the filled dot where its Offset carried that point
 pub(crate) fn window_preview(painter: &Painter, rect: Rect, placement: Placement, tokens: &Tokens) {
-    let (columns, rest) = followed_window(placement);
-    lattice_preview(painter, rect, (columns, [0.0, 0.0]), true, tokens);
-    let center = pos2(rect.left() + rest[0] * rect.width(), rect.top() + rest[1] * rect.height());
+    let (columns, carried) = slid_window(placement);
+    lattice_preview(painter, rect, (columns, placement.offset), true, tokens);
+    let position = pos2(rect.left() + carried[0] * rect.width(), rect.top() + carried[1] * rect.height());
     let painter = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
-    crate::preview_dots::preview_dots(&painter, center, rect.center(), tokens);
-    edge_markers(&painter, rect, passed_sides(std::iter::once(center), rect), tokens);
+    crate::preview_dots::preview_dots(&painter, rect.center(), position, tokens);
+    edge_markers(&painter, rect, passed_sides(std::iter::once(position), rect), tokens);
 }
 
-/// The window preview's map, and where the window's centre with Offset 0 lands in it (0..1): the view follows the Offset, so only that centre moves
-fn followed_window(placement: Placement) -> ([[f32; 2]; 2], [f32; 2]) {
+/// The window's centre (0..1) before any slide
+const WINDOW_MIDDLE: f32 = 0.5;
+
+/// The window preview's map, and where the Offset carried the window's middle (0..1): the checker slides with it, so a drag right moves both right
+fn slid_window(placement: Placement) -> ([[f32; 2]; 2], [f32; 2]) {
     let tiling = [placement.tiling[0].clamp(1e-3, PREVIEW_MAX_TILES), placement.tiling[1].clamp(1e-3, PREVIEW_MAX_TILES)];
     let (sin, cos) = placement.rotation.to_radians().sin_cos();
     // Turn, scale, then offset: one step across the window moves (cos, sin) scaled in the texture
@@ -95,10 +98,10 @@ fn followed_window(placement: Placement) -> ([[f32; 2]; 2], [f32; 2]) {
     let [[a, b], [c, d]] = columns;
     let det = a * d - c * b;
     let [x, y] = placement.offset;
-    // The window step the Offset is worth: the map undone
+    // The window step the Offset is worth: the map undone; the image moves against the Offset it samples at
     let moved = [(d * x - c * y) / det, (a * y - b * x) / det];
-    let rest = if moved.iter().all(|value| value.is_finite()) { [0.5 + moved[0], 0.5 + moved[1]] } else { [0.5, 0.5] };
-    (columns, rest)
+    let carried = if moved.iter().all(|value| value.is_finite()) { [WINDOW_MIDDLE - moved[0], WINDOW_MIDDLE - moved[1]] } else { [WINDOW_MIDDLE; 2] };
+    (columns, carried)
 }
 
 /// The window preview for any linear map: window point (u, v) shows the texture at `columns[0] · u + columns[1] · v + shift`; without `repeat` only tile 0..1
@@ -275,16 +278,22 @@ fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
 mod tests {
     use super::*;
 
-    /// The UV view follows the projection: the checker shows as at Offset 0 whatever the Offset, and the ring (the window's centre at Offset 0) moves the other way
+    /// The UV view stands still: the checker slides with the Offset as on the model, and the filled dot (the window's middle, carried) slides with it, the way a drag moves them
     #[test]
-    fn the_uv_view_follows_the_offset_and_the_ring_moves_away() {
+    fn the_uv_view_stands_still_and_the_dot_slides_with_the_checker() {
         let placement = |offset: [f32; 2]| Placement { tiling: [2.0, 2.0], rotation: 30.0, offset };
-        let (still, rest) = followed_window(placement([0.0, 0.0]));
-        assert_eq!(rest, [0.5, 0.5], "at Offset 0 the ring holds the dot in the middle");
-        let (columns, ring) = followed_window(placement([0.25, 0.0]));
-        assert_eq!(columns, still, "the checker stands still");
-        // 0.25 along U with a 30 degree turn and Tiling 2: an eighth of the window along the turned U
+        let (still, rest) = slid_window(placement([0.0, 0.0]));
+        assert_eq!(rest, [0.5, 0.5], "at Offset 0 the dot sits in the ring");
+        let slid = placement([-0.25, 0.0]);
+        let (columns, dot) = slid_window(slid);
+        assert_eq!(columns, still, "the view never zooms or turns for the Offset");
+        // A pad drag right lowers the Offset: the dot goes right, an eighth of the window along the turned U
         let expected = [0.5 + 0.125 * 30f32.to_radians().cos(), 0.5 - 0.125 * 30f32.to_radians().sin()];
-        assert!((ring[0] - expected[0]).abs() < 1e-5 && (ring[1] - expected[1]).abs() < 1e-5, "{ring:?} vs {expected:?}");
+        assert!((dot[0] - expected[0]).abs() < 1e-5 && (dot[1] - expected[1]).abs() < 1e-5, "{dot:?} vs {expected:?}");
+        // The checker point under the middle at Offset 0 shows under the dot now
+        let [[a, b], [c, d]] = columns;
+        let texture_at = |[u, v]: [f32; 2], offset: [f32; 2]| [a * u + c * v + offset[0], b * u + d * v + offset[1]];
+        let (before, after) = (texture_at([0.5, 0.5], [0.0, 0.0]), texture_at(dot, slid.offset));
+        assert!((before[0] - after[0]).abs() < 1e-5 && (before[1] - after[1]).abs() < 1e-5, "{before:?} vs {after:?}");
     }
 }

@@ -249,7 +249,7 @@ impl ThumbService {
         ThumbService::default()
     }
 
-    /// Start of a frame: forget what the last frame asked for (but what it asked for after its poll) and notice document changes.
+    /// Start of a frame: forget what the last frame asked for (but what it asked for after its poll) and notice document changes
     pub fn begin_frame(&mut self, session: &Session, now: f64) {
         self.wanted = std::mem::take(&mut self.late);
         self.polled = false;

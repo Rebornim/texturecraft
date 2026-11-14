@@ -206,7 +206,7 @@ fn map(s: &mut Session, p: &Value) -> Result<Value> {
             } else {
                 link.mapping.insert(channel, output.to_string());
             }
-            // Sources no longer name every output once one is mapped elsewhere.
+            // Sources no longer name every output once one is mapped elsewhere
             link.outputs = outputs;
         }
         Ok(())
@@ -244,7 +244,7 @@ fn resolution(s: &mut Session, p: &Value) -> Result<Value> {
         store(s)?;
         return Ok(json!({"layer": id.0, "cooked": false}));
     }
-    // Cook first so a failed cook changes nothing, then store and swap the maps as one step.
+    // Cook first so a failed cook changes nothing, then store and swap the maps as one step
     let mut job = s.link_job(id, &Map::new())?;
     let (texture_set, _, _) = s.doc.project.locate(id).ok_or_else(|| bad(CMD, format!("layer {} is not in a stack", id.0)))?;
     job.size = size.unwrap_or(CookResolution::TEXTURE_SET).size(s.doc.project.texture_set(texture_set)?.resolution);
@@ -468,7 +468,7 @@ impl Session {
         Ok(LinkJob { layer: id, package: self.link_package(id)?, size: self.link_size(id)?, values, inputs })
     }
 
-    /// Pixels across linked layer `id` cooks at: its picked resolution, else its texture set's.
+    /// Pixels across linked layer `id` cooks at: its picked resolution, else its texture set's
     pub fn link_size(&self, id: LayerId) -> Result<u32> {
         let link = link_of(self, "material.link", id)?;
         let (texture_set, _, _) = self.doc.project.locate(id).ok_or_else(|| EngineError::Other(format!("layer {} is not in a stack", id.0)))?;
@@ -529,9 +529,7 @@ fn unique(s: &Session, name: &str) -> String {
     (1..).map(|n| if n == 1 { name.to_string() } else { format!("{n}_{name}") }).find(|n| !s.doc.resources.contains_key(n)).unwrap_or_else(|| name.to_string())
 }
 
-/// Store `maps` as new resources (names carry a fresh id, so the decoded-image cache never
-/// confuses two cooks), list them as the link's outputs and point `fill`'s channels at them: each
-/// channel at its mapped output, else at the output named like it. Returns the names, in map order.
+/// Store `maps` as new resources (names carry a fresh id, so the decoded-image cache never confuses two cooks), list them as the link's outputs and point `fill`'s channels at them: each channel at its mapped output, else at the output named like it. Returns the names, in map order
 fn put_maps(s: &mut Session, stem: &str, maps: &[(Channel, Vec<u8>, texturecraft_formats::DecodedImage)], fill: &mut Fill) -> Vec<String> {
     let cook = s.doc.project.alloc_id().0;
     let mut names = Vec::new();

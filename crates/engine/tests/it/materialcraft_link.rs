@@ -151,8 +151,7 @@ fn parameters_are_checked_stored_and_recooked_in_one_undo_step() {
     assert_eq!(link(&s, id).params[0].value, json!({"t": "float", "v": 1.0}));
 }
 
-/// A channel can read another output of the material; the choice survives re-cooks, undo and
-/// saving, and links saved before it existed map their channels too.
+/// A channel can read another output of the material; the choice survives re-cooks, undo and saving, and links saved before it existed map their channels too
 #[test]
 fn channels_read_the_output_they_are_mapped_to() {
     let mut s = session();
@@ -161,7 +160,7 @@ fn channels_read_the_output_they_are_mapped_to() {
     assert!(map(&mut s, "curvature").is_err(), "outputs the material lacks are errors");
     assert!(execute(&mut s, "material.link.map", &json!({"layer": id.0, "output": "roughness"})).is_err());
 
-    // Roughness reads the ambient occlusion output (all white).
+    // Roughness reads the ambient occlusion output (all white)
     map(&mut s, "ambientOcclusion").unwrap();
     assert!((roughness(&mut s) - 1.0).abs() < 2e-3);
     assert_eq!(link(&s, id).output_of(Channel::Roughness), "ambientOcclusion");
@@ -175,7 +174,7 @@ fn channels_read_the_output_they_are_mapped_to() {
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
     assert!((roughness(&mut s) - 1.0).abs() < 2e-3);
 
-    // A link saved before mappings (no outputs list) maps from its channels' maps.
+    // A link saved before mappings (no outputs list) maps from its channels' maps
     let mut old = session();
     let id = old.add_linked_material_bytes_at(&mcmat(0.25, 0.5), Place::Selection).unwrap();
     if let LayerKind::Fill(fill) = &mut old.doc.project.layer_mut(id).unwrap().kind {
@@ -192,7 +191,7 @@ fn channels_read_the_output_they_are_mapped_to() {
     assert_eq!(old.doc.resources.len(), kept, "outputs no channel reads are kept");
 }
 
-/// The cook size: relative sizes follow the texture set, a fixed size is stored and cooked at.
+/// The cook size: relative sizes follow the texture set, a fixed size is stored and cooked at
 #[test]
 fn materials_cook_at_their_picked_resolution() {
     let mut s = session();
@@ -223,7 +222,7 @@ fn materials_cook_at_their_picked_resolution() {
     assert_eq!((link(&s, id).resolution, size(&s)), (None, 128));
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
     assert_eq!(size(&s), 512);
-    // A hostile project's size falls back to the texture set's.
+    // A hostile project's size falls back to the texture set's
     if let LayerKind::Fill(fill) = &mut s.doc.project.layer_mut(id).unwrap().kind {
         fill.link.as_mut().unwrap().resolution = Some(CookResolution::Fixed(u32::MAX));
     }

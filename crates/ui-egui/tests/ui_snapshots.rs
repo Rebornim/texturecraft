@@ -1712,8 +1712,7 @@ fn levels_snapshots() {
     }
 }
 
-/// Screen 14: the Layers panel's top row (Add fill layer hovered), Add effect on a layer and on its mask, Add mask, and Bitmap's texture
-/// picker; the panel's left edge goes to stderr for cropping
+/// Screen 14: the Layers panel's top row (Add fill layer hovered), Add effect on a layer and on its mask, Add mask, and Bitmap's texture picker; the panel's left edge goes to stderr for cropping
 #[test]
 #[ignore]
 fn layer_toolbar_snapshots() {
@@ -2453,8 +2452,7 @@ fn filter_picker_snapshots() {
     save(&mut harness, &output_dir, "filter-picker-mask");
 }
 
-/// The Properties panel at its minimum width (the right column dragged as narrow as it goes), on the Fill tab's widest row
-/// (3D projection settings) and on a filter
+/// The Properties panel at its minimum width (the right column dragged as narrow as it goes), on the Fill tab's widest row (3D projection settings) and on a filter
 #[test]
 #[ignore]
 fn properties_min_width_snapshot() {

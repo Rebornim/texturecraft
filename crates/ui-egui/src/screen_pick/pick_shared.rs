@@ -18,6 +18,7 @@ impl PickShared {
         self.stop.store(true, Ordering::Relaxed);
     }
 
+    #[cfg(any(windows, all(unix, not(target_os = "macos"))))]
     pub(crate) fn stopped(&self) -> bool {
         self.stop.load(Ordering::Relaxed)
     }
@@ -29,7 +30,7 @@ impl PickShared {
     }
 
     /// The app's windows, or none while they are unknown (a system without global window positions)
-    #[cfg_attr(target_os = "macos", allow(dead_code, reason = "macOS has no pick outside the app"))]
+    #[cfg(any(windows, all(unix, not(target_os = "macos")), test))]
     pub(crate) fn windows(&self) -> Vec<[i32; 4]> {
         self.windows.lock().map(|known| known.clone()).unwrap_or_default()
     }
@@ -46,7 +47,7 @@ impl PickShared {
 }
 
 /// Whether the screen pixel `(x, y)` lies on one of `windows`
-#[cfg_attr(target_os = "macos", allow(dead_code, reason = "macOS has no pick outside the app"))]
+#[cfg(any(windows, all(unix, not(target_os = "macos")), test))]
 pub(crate) fn over_windows(windows: &[[i32; 4]], x: i32, y: i32) -> bool {
     windows.iter().any(|&[left, top, right, bottom]| x >= left && x < right && y >= top && y < bottom)
 }

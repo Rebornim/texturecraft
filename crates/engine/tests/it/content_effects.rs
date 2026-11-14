@@ -323,8 +323,7 @@ fn merged_edits_are_one_undo_step() {
     assert_eq!(opacity(&s), 1.0, "one undo reverts the whole drag");
 }
 
-/// A content levels remaps the one channel it affects (Base color when added); levels saved before
-/// the choice remap every channel; Clamp stops values past the input handles at the output ends
+/// A content levels remaps the one channel it affects (Base color when added); levels saved before the choice remap every channel; Clamp stops values past the input handles at the output ends
 #[test]
 fn content_levels_remap_the_channel_they_affect() {
     let mut s = session();

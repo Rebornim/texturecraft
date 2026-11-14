@@ -117,6 +117,7 @@ fn baked_lighting_environment_rows_set_rotation_exposure_and_occlusion() {
     let Filter::EnvironmentLighting { horizontal, exposure, specular_occlusion, ambient_occlusion, .. } = filter_of(&harness, effect) else {
         panic!("{:?}", filter_of(&harness, effect))
     };
+
     assert!((150.0..210.0).contains(&horizontal), "half way round: {horizontal}");
     assert!(exposure < -4.5, "darker: {exposure}");
     assert!(specular_occlusion > 0.95 && ambient_occlusion == 1.0, "{specular_occlusion} {ambient_occlusion}");

@@ -95,6 +95,7 @@ fn a_number_field_scrubs_past_the_edge_with_the_pointer_held() {
     let texturecraft_engine::core::Projection::Triplanar { offset, .. } = crate::frame_gizmo::tests::projection(&harness, layer) else {
         panic!("still tri-planar")
     };
+
     let expected = 2.0 * window * crate::fill_panel::OFFSET_FIELD_SPEED;
     assert!((offset[0] - expected).abs() < 0.05 * expected, "the whole drag counts, not only the part inside the window: {offset:?}, {expected}");
 }

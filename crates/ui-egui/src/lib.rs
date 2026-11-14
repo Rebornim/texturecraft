@@ -136,7 +136,7 @@ pub struct LinkCook {
     pub layer: texturecraft_engine::core::LayerId,
     /// The parameter values it cooks: a result whose values are no longer the layer's is redone.
     pub values: serde_json::Map<String, Value>,
-    /// The size it cooks at: a result cooked at another size than the layer's is redone too.
+    /// The size it cooks at: a result cooked at another size than the layer's is redone too
     pub size: u32,
     pub rx: std::sync::mpsc::Receiver<texturecraft_engine::Result<Vec<u8>>>,
 }

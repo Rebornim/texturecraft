@@ -2,7 +2,7 @@
 
 use texturecraft_geom::glam::Vec3;
 
-/// A soft rectangular light: azimuth/elevation center (degrees), half sizes (degrees).
+/// A soft rectangular light: azimuth/elevation center (degrees), half sizes (degrees)
 pub(crate) struct SoftBox {
     pub az: f32,
     pub el: f32,

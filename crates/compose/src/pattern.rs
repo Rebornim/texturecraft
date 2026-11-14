@@ -198,7 +198,7 @@ pub fn projector_local(projector: &Projector, c: &Coords) -> Coords {
     Coords { pos: to_local * c.pos / scale, nrm, ..*c }
 }
 
-/// Evaluate a procedural through a projection, at every texel (its resolution aside).
+/// Evaluate a procedural through a projection, at every texel (its resolution aside)
 pub fn procedural(pr: &Procedural, proj: &Projection, c: &Coords) -> f32 {
     evaluate(pr, proj, c, None)
 }

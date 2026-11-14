@@ -10,8 +10,7 @@ pub(crate) const CELLS_PER_TILE: f32 = 4.0;
 /// Most repeats drawn across the frame: beyond this the checker is too fine to read and too many cells to draw each frame
 const MAX_TILES: f32 = 6.0;
 
-/// The checker cells inside a frame whose corners land at `quad` (top left, top right, bottom right, bottom left), each with whether it is a light cell:
-/// a cell's corners in image coordinates go back to the frame (undo the offset, the tiling, the turn), are cut to the frame and bent with its corners
+/// The checker cells inside a frame whose corners land at `quad` (top left, top right, bottom right, bottom left), each with whether it is a light cell: a cell's corners in image coordinates go back to the frame (undo the offset, the tiling, the turn), are cut to the frame and bent with its corners
 pub(crate) fn warp_checker(quad: [Pos2; 4], placement: Placement) -> Vec<(Vec<Pos2>, bool)> {
     let [top_left, top_right, bottom_right, bottom_left] = quad;
     let at = |[u, v]: [f32; 2]| -> Pos2 {

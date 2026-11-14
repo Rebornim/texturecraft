@@ -11,21 +11,13 @@ use texturecraft_engine::core::{Channel, ChannelKind, Fill, NormalFormat, Projec
 use texturecraft_engine::geom::glam::{Vec2, Vec3};
 use texturecraft_engine::texel::srgb_to_linear;
 
+mod orb_sample;
+
+pub(crate) use orb_sample::OrbSample;
+
 /// The channels the orb reads; the others do not change how it looks
 pub(crate) const ORB_CHANNELS: [Channel; 7] =
     [Channel::BaseColor, Channel::Metallic, Channel::Roughness, Channel::Normal, Channel::Height, Channel::Emissive, Channel::Opacity];
-
-/// The orb's values at one point of its surface (linear)
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct OrbSample {
-    pub(crate) base: [f32; 3],
-    pub(crate) metallic: f32,
-    pub(crate) roughness: f32,
-    /// Tangent-space normal, OpenGL (+Y up), 0..1 per component
-    pub(crate) normal: [f32; 3],
-    pub(crate) emissive: [f32; 3],
-    pub(crate) opacity: f32,
-}
 
 /// A material as the orb shows it
 #[derive(Clone, Debug)]
@@ -164,8 +156,7 @@ fn image_scale(projection: &Projection) -> f32 {
     if scale.is_finite() { scale.abs().clamp(0.01, 64.0) } else { 1.0 }
 }
 
-/// Where a point of the unit orb lies for a fill's projection: its position and normal (both the unit direction `direction`), and UVs
-/// wrapping once around the equator (two across) and once from pole to pole
+/// Where a point of the unit orb lies for a fill's projection: its position and normal (both the unit direction `direction`), and UVs wrapping once around the equator (two across) and once from pole to pole
 pub(crate) fn orb_coords(direction: Vec3) -> Coords {
     let u = direction.z.atan2(direction.x) / std::f32::consts::TAU + 0.5;
     let v = direction.y.clamp(-1.0, 1.0).acos() / std::f32::consts::PI;

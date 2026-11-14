@@ -13,10 +13,13 @@ const OUTLINE_SIZE: f32 = 24.0;
 /// The coverage from which a pixel counts as ink for the hotspot
 const INK_ALPHA: u8 = 128;
 /// A `.cur` file's header (6 bytes) and its one picture's entry (16 bytes)
+#[cfg(any(windows, test))]
 const CUR_HEADER_BYTES: u32 = 22;
 /// The `.cur` file type in its header (an `.ico` file says 1)
+#[cfg(any(windows, test))]
 const CUR_TYPE: u16 = 2;
 /// A `BITMAPINFOHEADER`'s size
+#[cfg(any(windows, test))]
 const BITMAP_HEADER_BYTES: u32 = 40;
 /// The part of the pointer's cell the pipette's square takes (the system's arrow is about 20 pixels tall in its 32-pixel cell)
 const GLYPH_SHARE: f32 = 0.625;
@@ -54,7 +57,7 @@ impl CursorImage {
     }
 
     /// The picture as a Windows `.cur` file: 32-bit colour with alpha, its hotspot in the file's header
-    #[cfg_attr(not(windows), allow(dead_code, reason = "only Windows loads a pointer from a file"))]
+    #[cfg(any(windows, test))]
     pub fn cur_file(&self) -> Vec<u8> {
         let side = self.size;
         let mask_row = side.div_ceil(32) * 4;

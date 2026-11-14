@@ -7,7 +7,7 @@
 //! view zooms out until both fit, down to half the shape's size; a projector bigger than that runs off the square, marked on
 //! each side it passes
 
-use egui::{Color32, ColorImage, Painter, Pos2, Rect, Shape, Stroke, TextureHandle, TextureOptions, pos2, vec2};
+use egui::{Color32, ColorImage, Painter, Pos2, Rect, Shape, Stroke, TextureOptions, pos2, vec2};
 use texturecraft_engine::compose::frame_placement::{folded, upright_turn};
 use texturecraft_engine::compose::pattern::{Coords, decal_axes, image_samples};
 use texturecraft_engine::compose::projector_cover::projector_cover;
@@ -18,6 +18,16 @@ use rayon::prelude::*;
 
 use crate::preview_outline::ProjectorOutline;
 use crate::theme::Tokens;
+
+mod preview_shape;
+mod rendered_preview;
+mod screen;
+mod view;
+
+use preview_shape::PreviewShape;
+use rendered_preview::RenderedPreview;
+use screen::Screen;
+use view::View;
 
 /// Largest preview side in pixels; the square is never drawn bigger than this
 const MAX_SIDE_PX: usize = 256;
@@ -58,22 +68,6 @@ const CHECKER_DARK: f32 = 0.12;
 const CHECKER_LIGHT: f32 = 1.0;
 /// The shape where the projection does not reach, as a fraction of the way from `field` to `text`
 const UNCOVERED: f32 = 0.45;
-
-/// The preview square's last picture: what it shows (`key`), how many rays per pixel along each axis it was cast with, and the texture holding it
-#[derive(Clone)]
-struct RenderedPreview {
-    key: String,
-    supersample: usize,
-    texture: TextureHandle,
-}
-
-/// What the preview wraps the checker around
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PreviewShape {
-    Sphere,
-    Cylinder,
-    Cube,
-}
 
 /// Draw the preview of `projection` on a mesh within `bounds` into `rect`, rendered once per projection, size and theme, with a quarter of the rays while a drag is held (None for projections without one: UV, warp)
 pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Projection, bounds: (Vec3, Vec3), tokens: &Tokens) -> Option<()> {
@@ -174,36 +168,6 @@ fn at_rest(projection: &Projection) -> Projection {
     resting
 }
 
-impl PreviewShape {
-    /// Half the shape's size along X, Y and Z, in mesh radii
-    fn half_size(self) -> Vec3 {
-        match self {
-            PreviewShape::Sphere => Vec3::splat(SPHERE_RADIUS),
-            PreviewShape::Cylinder => Vec3::new(CYLINDER_RADIUS, CYLINDER_HALF_HEIGHT, CYLINDER_RADIUS),
-            PreviewShape::Cube => Vec3::splat(CUBE_HALF),
-        }
-    }
-}
-
-/// The preview camera's directions: towards the eye, the view direction, and the view's right and up
-#[derive(Clone, Copy, Debug)]
-struct View {
-    eye: Vec3,
-    forward: Vec3,
-    right: Vec3,
-    up: Vec3,
-}
-
-impl View {
-    fn new() -> View {
-        let (yaw, pitch) = (CAMERA_YAW.to_radians(), CAMERA_PITCH.to_radians());
-        let eye = Vec3::new(pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos());
-        let forward = -eye;
-        let right = forward.cross(Vec3::Y).normalize_or_zero();
-        View { eye, forward, right, up: right.cross(forward) }
-    }
-}
-
 /// Which way the preview camera looks
 pub(crate) fn view_direction() -> Vec3 {
     View::new().forward
@@ -215,26 +179,6 @@ fn view_half(outline: Option<&ProjectorOutline>) -> f32 {
     let reach =
         outline.into_iter().flat_map(ProjectorOutline::points).map(|point| point.dot(view.right).abs().max(point.dot(view.up).abs())).fold(0.0, f32::max);
     if reach.is_finite() { (reach * FIT_MARGIN).clamp(VIEW_HALF, MAX_VIEW_HALF) } else { MAX_VIEW_HALF }
-}
-
-/// The preview's view laid on the square `rect`, `half` mesh radii each way from its middle
-struct Screen {
-    view: View,
-    rect: Rect,
-    half: f32,
-}
-
-impl Screen {
-    fn at(&self, point: Vec3) -> Pos2 {
-        let per_radius = self.rect.width() * 0.5 / self.half;
-        self.rect.center() + vec2(point.dot(self.view.right), -point.dot(self.view.up)) * per_radius
-    }
-
-    /// Whether `shape` hides `point` from the camera
-    fn hidden(&self, shape: PreviewShape, point: Vec3) -> bool {
-        let origin = point + self.view.eye * CAMERA_DISTANCE;
-        intersect(shape, origin, self.view.forward).is_some_and(|hit| (hit.pos - point).dot(self.view.eye) > 1e-3)
-    }
 }
 
 /// The outline's line in the text colour and the field-coloured line under it that keeps it readable on the checker, as the 3D view's gizmo draws its white outline on a dark shadow (the square's field is light in the light themes); fainter where the shape hides it

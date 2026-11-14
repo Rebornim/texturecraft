@@ -13,56 +13,15 @@ use crate::move_on_model::MoveOnModel;
 use crate::theme::{AXIS_COLORS, Tokens};
 use crate::viewport::project;
 
-/// What a drag on the projector does
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum RoundGrab {
-    /// The centre square: slide it across the view
-    Slide,
-    /// Along the projector's X (0), Y (1) or Z (2) direction
-    Axis(usize),
-    /// Turn it round its X, Y or Z direction
-    Ring(usize),
-    /// A size dot: scale it along the directions marked
-    Size([bool; 3]),
-}
+mod round_drag;
+mod round_grab;
+mod shape;
+mod size_handle;
 
-/// A handle that resizes the projector
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct SizeHandle {
-    pub at: Pos2,
-    /// The projector directions it scales
-    pub axes: [bool; 3],
-    /// A double arrow's direction on screen; None for a dot
-    pub along: Option<egui::Vec2>,
-}
-
-impl SizeHandle {
-    /// How far screen point `p` is from the handle (a double arrow: from anywhere along it)
-    fn distance(&self, p: Pos2) -> f32 {
-        match self.along {
-            Some(along) => distance_to_segment(p, self.at - along * SIZE_ARROW, self.at + along * SIZE_ARROW),
-            None => self.at.distance(p),
-        }
-    }
-
-    /// The resize cursor along its arrow, or a diagonal one for a dot
-    fn cursor(&self) -> egui::CursorIcon {
-        match self.along {
-            Some(along) if along.y.abs() >= along.x.abs() => egui::CursorIcon::ResizeVertical,
-            Some(_) => egui::CursorIcon::ResizeHorizontal,
-            None => egui::CursorIcon::ResizeNeSw,
-        }
-    }
-}
-
-/// Which shape the projector shows
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Shape {
-    Box,
-    Sphere,
-    /// Round the axis 0, 1 or 2
-    Cylinder(usize),
-}
+use round_drag::RoundDrag;
+pub(crate) use round_grab::RoundGrab;
+use shape::Shape;
+pub(crate) use size_handle::SizeHandle;
 
 /// The projector of the fill Move on model moves, as the 3D view shows it
 #[derive(Clone, Debug)]
@@ -103,18 +62,10 @@ const FACE_CLEARANCE: f32 = 40.0;
 /// Points on a drawn circle
 pub(crate) const CIRCLE_POINTS: usize = 48;
 /// The projector's scale limits (as `layer.fill.projection` takes them)
-const MIN_STRETCH: f32 = 0.001;
+pub(crate) const MIN_STRETCH: f32 = 0.001;
 const MAX_STRETCH: f32 = 1000.0;
-
-/// A projector handle being dragged (kept in egui's memory between frames)
-#[derive(Clone, Debug)]
-struct RoundDrag {
-    grab: RoundGrab,
-    from: Pos2,
-    start: RoundGizmo,
-    /// The drag made its undo step: later updates merge into it
-    stepped: bool,
-}
+/// The least offset per unit of a projector's own size, so a zero-sized mesh moves nothing to infinity
+pub(crate) const MIN_OFFSET_PER_LOCAL: f32 = 1e-6;
 
 fn drag_id() -> egui::Id {
     egui::Id::unique("tc_round_drag")
@@ -144,7 +95,7 @@ impl RoundGizmo {
         let [x, y, z] = projector.rotation.map(f32::to_radians);
         let turn = Mat3::from_euler(EulerRot::ZYX, z, y, x);
         let stretch = Vec3::from(projector.scale).max(Vec3::splat(MIN_STRETCH));
-        let offset_per_local = if offset_per_local.abs() < 1e-6 { 1e-6 } else { offset_per_local };
+        let offset_per_local = if offset_per_local.abs() < MIN_OFFSET_PER_LOCAL { MIN_OFFSET_PER_LOCAL } else { offset_per_local };
         let local = -Vec3::from(offset) / offset_per_local;
         let mut gizmo = RoundGizmo {
             target,

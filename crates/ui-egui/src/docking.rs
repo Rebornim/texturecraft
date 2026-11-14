@@ -480,8 +480,7 @@ const VIEWPORT_MIN_SIZE: Vec2 = vec2(200.0, 150.0);
 /// Size a panel opens at when it floats
 const FLOATING_SIZE: Vec2 = vec2(300.0, 380.0);
 
-/// The body of every panel except the viewport, in the dock or on the rail
-/// Least size of `panel`, docked or floating; a dock column or split stops shrinking at its panels' largest
+/// The body of every panel except the viewport, in the dock or on the rail Least size of `panel`, docked or floating; a dock column or split stops shrinking at its panels' largest
 fn min_size(panel: Panel) -> Vec2 {
     match panel {
         Panel::Viewport => VIEWPORT_MIN_SIZE,

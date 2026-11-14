@@ -109,7 +109,7 @@ pub struct StrokePreview {
     pub erase: bool,
     /// Values painted per channel (layer targets).
     pub values: BTreeMap<Channel, [f32; 3]>,
-    /// Gray painted into a mask.
+    /// Gray painted into a mask
     pub mask_gray: MaskGray,
     /// Projection tool: base color (and alpha) come from a screen-pinned image.
     pub stencil: Option<Stencil>,
@@ -953,8 +953,7 @@ fn mirror_texel(
     sample(at(origin_x, u), at(origin_y, v), acc);
 }
 
-/// Transform `transform` at texel `(x, y)` into `acc`: bilinear between the four texels round where it reads in its UV tile (`res`
-/// texels from its `block`'s top left), each wrapped round the tile; where it does not repeat, a read past the tile counts as empty
+/// Transform `transform` at texel `(x, y)` into `acc`: bilinear between the four texels round where it reads in its UV tile (`res` texels from its `block`'s top left), each wrapped round the tile; where it does not repeat, a read past the tile counts as empty
 fn transform_texel(transform: &TileTransform, (x, y): (f32, f32), (block, res): (u32, u32), acc: &mut [f32; 5], sample: &dyn Fn(f32, f32, &mut [f32; 5])) {
     let (block, size) = (block.max(1) as f32, res.max(1) as f32);
     let (origin_x, origin_y) = ((x / block).floor() * block, (y / block).floor() * block);
@@ -1147,8 +1146,7 @@ fn field(inp: &Inputs, channels: &[Channel], below: &Fields, id: LayerId, job: J
     previous.map(|(_, field)| field)
 }
 
-/// The tile-aligned texel region `(x0, y0, w, h)` around `tiles` plus `margin` tiles, clipped to the set; with `wrap`, an axis
-/// the margin crosses an edge of spans the whole set (the filter reads the far side there)
+/// The tile-aligned texel region `(x0, y0, w, h)` around `tiles` plus `margin` tiles, clipped to the set; with `wrap`, an axis the margin crosses an edge of spans the whole set (the filter reads the far side there)
 fn region_around(inp: &Inputs, tiles: &[(u32, u32)], margin: u32, wrap: bool) -> Option<(u32, u32, u32, u32)> {
     let (first_x, first_y) = tiles.iter().fold((u32::MAX, u32::MAX), |(min_x, min_y), tile| (min_x.min(tile.0), min_y.min(tile.1)));
     let (last_x, last_y) = tiles.iter().fold((0, 0), |(max_x, max_y), tile| (max_x.max(tile.0), max_y.max(tile.1)));
@@ -2872,7 +2870,7 @@ impl<'a, 'b> Texel<'a, 'b> {
                 }
                 _ => (v, cov),
             },
-            // Environment lighting reads the texel's normal, occlusion and metal, and lights the base color only.
+            // Environment lighting reads the texel's normal, occlusion and metal, and lights the base color only
             EffectKind::Filter(Filter::EnvironmentLighting { horizontal, vertical, exposure, height_intensity, ambient_occlusion, specular_occlusion }) => {
                 match (Channel::ALL.get(c.ch), &e.environment) {
                     (Some(Channel::BaseColor), Some(environment)) => {
@@ -3403,10 +3401,7 @@ fn histogram_tiles(width: u32, height: u32) -> Vec<(u32, u32)> {
     all.into_iter().step_by(stride).collect()
 }
 
-/// Histogram (`bins` buckets over 0..1) of the values entering effect `effect`: its layer's mask
-/// below it, or (a content effect) the layer's `channel` below it where the layer has content,
-/// signed values mapped to 0..1, a color's components pooled, on their own and as luminance. Over the texels the mesh covers
-/// (in an even sample of tiles on large sets); None for an unknown effect.
+/// Histogram (`bins` buckets over 0..1) of the values entering effect `effect`: its layer's mask below it, or (a content effect) the layer's `channel` below it where the layer has content, signed values mapped to 0..1, a color's components pooled, on their own and as luminance. Over the texels the mesh covers (in an even sample of tiles on large sets); None for an unknown effect
 pub fn effect_histogram(inp: &Inputs, effect: LayerId, channel: Channel, bins: usize) -> Option<EffectHistogram> {
     let (owner, _) = inp.project.effect(effect)?;
     let bins = bins.max(1);
@@ -3524,6 +3519,7 @@ pub fn compare_histograms(inp: &Inputs, effect: LayerId, bins: usize) -> Option<
             let Some(mut mask) = layer_mask(&cut, owner).and_then(|m| mask_plan(&cut_inp, owner, m, tx, ty, Some(fields), cut.contents_around(owner))) else {
                 return counts;
             };
+
             let full = if reads_stack {
                 mask.layer = cut
                     .content_layer(owner)
@@ -3532,6 +3528,7 @@ pub fn compare_histograms(inp: &Inputs, effect: LayerId, bins: usize) -> Option<
             } else {
                 Vec::new()
             };
+
             for (x, y, o) in tile_texels(inp.gbuf, tx, ty) {
                 let mut tex = Texel::new(&cut_inp, x, y, o, 0.0);
                 if !full.is_empty() {

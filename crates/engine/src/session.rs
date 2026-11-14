@@ -352,7 +352,7 @@ pub struct Session {
     pub(crate) stroke: Option<ActiveStroke>,
     /// Layer clipboard: a document snapshot and the copied layer (or effect).
     pub clipboard: Option<(Document, LayerId)>,
-    /// Channel blending copied from an effect (see [`crate::effect_blending_cmds`]).
+    /// Channel blending copied from an effect (see [`crate::effect_blending_cmds`])
     pub blending_clipboard: Option<crate::effect_blending_cmds::CopiedBlending>,
     /// Decoded image resources (rebuilt from `doc.resources` by `Session::sync_images`).
     pub images: texturecraft_compose::ImageStore,

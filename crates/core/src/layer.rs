@@ -663,20 +663,19 @@ pub struct MaterialLink {
     pub inputs: Vec<String>,
     /// Size the maps were cooked at (pixels across).
     pub size: u32,
-    /// Size to cook at; `None` cooks at the texture set's resolution.
+    /// Size to cook at; `None` cooks at the texture set's resolution
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolution: Option<crate::CookResolution>,
-    /// The output a channel reads, where it is not the output named like the channel.
+    /// The output a channel reads, where it is not the output named like the channel
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub mapping: BTreeMap<Channel, String>,
-    /// The image resource of each output of the last cook, by output id. Empty in projects saved
-    /// before channels could be mapped: there each channel's source is its own output.
+    /// The image resource of each output of the last cook, by output id. Empty in projects saved before channels could be mapped: there each channel's source is its own output
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub outputs: BTreeMap<String, String>,
 }
 
 impl MaterialLink {
-    /// The output channel `c` reads.
+    /// The output channel `c` reads
     pub fn output_of(&self, c: Channel) -> &str {
         self.mapping.get(&c).map_or(c.id(), String::as_str)
     }
@@ -718,9 +717,7 @@ impl Fill {
         self.sources.get(&c).cloned().unwrap_or_else(|| Source::uniform_of(c))
     }
 
-    /// The image resource of each output of the linked material's last cook, by output id
-    /// (empty without a link). Links saved before channels could be mapped list their channels'
-    /// own outputs.
+    /// The image resource of each output of the linked material's last cook, by output id (empty without a link). Links saved before channels could be mapped list their channels' own outputs
     pub fn link_outputs(&self) -> BTreeMap<String, String> {
         let Some(link) = &self.link else { return BTreeMap::new() };
         if !link.outputs.is_empty() {
@@ -938,8 +935,7 @@ pub enum Filter {
         contrast: f32,
         luminosity: f32,
     },
-    /// Contrast, luminosity (both −1..1, 0 = unchanged) and saturation (0..1, 0.5 = unchanged) for the shadows, midtones and
-    /// highlights, each `[contrast, luminosity, saturation]`, weighted by the texel's lightness as [`Filter::ColorBalance`].
+    /// Contrast, luminosity (both −1..1, 0 = unchanged) and saturation (0..1, 0.5 = unchanged) for the shadows, midtones and highlights, each `[contrast, luminosity, saturation]`, weighted by the texel's lightness as [`Filter::ColorBalance`]
     ColorCorrect {
         shadows: [f32; 3],
         midtones: [f32; 3],
@@ -1024,8 +1020,7 @@ pub enum Filter {
     HistogramShift {
         offset: f32,
     },
-    /// Shift each texel's lookup along a noise vector field: `intensity` in texels at 2K,
-    /// `scale` noise features per UV unit (projects saved before the warp modes; new ones are [`Filter::SourceWarp`]).
+    /// Shift each texel's lookup along a noise vector field: `intensity` in texels at 2K, `scale` noise features per UV unit (projects saved before the warp modes; new ones are [`Filter::SourceWarp`])
     Warp {
         intensity: f32,
         scale: f32,
@@ -1062,7 +1057,7 @@ pub enum Filter {
     EdgeDetect {
         width: f32,
     },
-    /// Like [`Filter::Warp`], but every texel moves along one direction (`angle` in degrees; projects saved before the warp modes).
+    /// Like [`Filter::Warp`], but every texel moves along one direction (`angle` in degrees; projects saved before the warp modes)
     DirectionalWarp {
         intensity: f32,
         angle: f32,
@@ -1072,9 +1067,9 @@ pub enum Filter {
         #[serde(default = "unit_divider", skip_serializing_if = "is_unit_divider")]
         divider: u16,
     },
-    /// Colors to their luminance (scalars and masks unchanged): projects saved before Grayscale Conversion's settings.
+    /// Colors to their luminance (scalars and masks unchanged): projects saved before Grayscale Conversion's settings
     Grayscale,
-    /// The gray of every channel (or of its Custom Input) by its mode and weights, balanced, contrasted and maybe inverted.
+    /// The gray of every channel (or of its Custom Input) by its mode and weights, balanced, contrasted and maybe inverted
     GrayscaleConversion(GrayscaleConversion),
     /// Flip the green component of normal maps (OpenGL ↔ DirectX); other channels unchanged.
     NormalInvert,
@@ -1123,8 +1118,7 @@ pub enum Filter {
         #[serde(default, skip_serializing_if = "is_false")]
         alpha: bool,
     },
-    /// Adds a blur of the values (`radius` texels at 2K) times `amount`: light bleeds around
-    /// bright areas (projects saved before the halo glow below)
+    /// Adds a blur of the values (`radius` texels at 2K) times `amount`: light bleeds around bright areas (projects saved before the halo glow below)
     Glow {
         radius: f32,
         amount: f32,
@@ -1149,10 +1143,7 @@ pub enum Filter {
         opacity: f32,
         color: [f32; 3],
     },
-    /// Lighting painted into the base color: `ambient` (times the baked ambient occlusion by
-    /// `occlusion`) plus a directional light of strength `light` from `azimuth` around +Y
-    /// (degrees from +Z) and `elevation` above the horizon (degrees), on the mesh's normals.
-    /// `stylized` adds sky colors, more lights, cavity, edges and highlights (Baked Lighting Stylized); projects saved before have none and light as they did
+    /// Lighting painted into the base color: `ambient` (times the baked ambient occlusion by `occlusion`) plus a directional light of strength `light` from `azimuth` around +Y (degrees from +Z) and `elevation` above the horizon (degrees), on the mesh's normals. `stylized` adds sky colors, more lights, cavity, edges and highlights (Baked Lighting Stylized); projects saved before have none and light as they did
     BakedLighting {
         azimuth: f32,
         elevation: f32,
@@ -1162,9 +1153,7 @@ pub enum Filter {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stylized: Option<Box<StylizedLighting>>,
     },
-    /// The base color lit by the viewport environment (its diffuse light), turned `horizontal` and tilted `vertical` degrees,
-    /// brighter by 2^`exposure`, on the mesh's normals tilted by the baked height (`height_intensity`) and darkened by the baked
-    /// ambient occlusion (`ambient_occlusion` on the diffuse light, `specular_occlusion` on the reflections)
+    /// The base color lit by the viewport environment (its diffuse light), turned `horizontal` and tilted `vertical` degrees, brighter by 2^`exposure`, on the mesh's normals tilted by the baked height (`height_intensity`) and darkened by the baked ambient occlusion (`ambient_occlusion` on the diffuse light, `specular_occlusion` on the reflections)
     EnvironmentLighting {
         horizontal: f32,
         vertical: f32,
@@ -1285,14 +1274,12 @@ pub fn hsl_adjust(rgb: [f32; 3], hue: f32, saturation: f32, lightness: f32) -> [
     [hue_to_rgb(p, q, h + 1.0 / 3.0), hue_to_rgb(p, q, h), hue_to_rgb(p, q, h - 1.0 / 3.0)]
 }
 
-/// Smooth weights of the shadows, midtones and highlights at lightness `l` (0..1), summing to 1: shadows fade out and
-/// highlights in with lightness
+/// Smooth weights of the shadows, midtones and highlights at lightness `l` (0..1), summing to 1: shadows fade out and highlights in with lightness
 fn tone_weights(l: f32) -> (f32, f32, f32) {
     ((1.0 - l) * (1.0 - l), 2.0 * l * (1.0 - l), l * l)
 }
 
-/// [`hsl_adjust`] in OKLCh: the hue turns and the chroma scales (`saturation` −1 = gray, 1 = twice as vivid) at the color's
-/// own perceived lightness, which `lightness` then pushes towards white or black (linear 0..1 colors)
+/// [`hsl_adjust`] in OKLCh: the hue turns and the chroma scales (`saturation` −1 = gray, 1 = twice as vivid) at the color's own perceived lightness, which `lightness` then pushes towards white or black (linear 0..1 colors)
 pub fn perceptive_adjust(rgb: [f32; 3], hue: f32, saturation: f32, lightness: f32) -> [f32; 3] {
     let clean = |x: f32| if x.is_finite() { x } else { 0.0 };
     let [l, a, b] = crate::oklab::from_linear(rgb.map(|v| clean(v).clamp(0.0, 1.0)));
@@ -1337,8 +1324,7 @@ impl Filter {
     /// The most colors a gradient's Color Quantity uses
     pub const MAX_GRADIENT_COLORS: u8 = 10;
 
-    /// Histogram Shift's Position (0..1) for its `offset`: a shift back by 1 − position, so 1 shifts nothing (offsets above 0
-    /// saved before the Position read as themselves, the same shift but for white and black)
+    /// Histogram Shift's Position (0..1) for its `offset`: a shift back by 1 − position, so 1 shifts nothing (offsets above 0 saved before the Position read as themselves, the same shift but for white and black)
     pub fn shift_position(offset: f32) -> f32 {
         let offset = if offset.is_finite() { offset.clamp(-1.0, 1.0) } else { 0.0 };
         if offset <= 0.0 { offset + 1.0 } else { offset }
@@ -1710,9 +1696,7 @@ pub enum EffectKind {
     /// Content only: a material fill (one source per channel; channels without a source are
     /// left as they are).
     Material(Fill),
-    /// Records the stack at its place so masks and fills above can read it ([`Source::Anchor`]): in
-    /// a content stack the composited stack right after its layer (that layer and everything
-    /// below), in a mask the mask value there (every channel reads that gray).
+    /// Records the stack at its place so masks and fills above can read it ([`Source::Anchor`]): in a content stack the composited stack right after its layer (that layer and everything below), in a mask the mask value there (every channel reads that gray)
     Anchor,
 }
 

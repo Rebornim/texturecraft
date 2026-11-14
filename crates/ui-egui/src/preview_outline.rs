@@ -3,15 +3,17 @@
 use texturecraft_engine::compose::axis_frame::axis_frame;
 use texturecraft_engine::compose::pattern::decal_axes;
 use texturecraft_engine::core::Projection;
-use texturecraft_engine::geom::glam::{EulerRot, Mat3, Vec2, Vec3};
+use texturecraft_engine::geom::glam::{Vec2, Vec3};
 
 use crate::round_gizmo::{BOX_REACH, CIRCLE_POINTS, CYLINDER_HEIGHT, CYLINDER_REACH, SPHERE_REACH};
+
+mod place;
+
+use place::Place;
 
 /// How far in front of the object a planar's frame stands, and how far its direction line reaches back from the frame (preview units)
 const FRAME_GAP: f32 = 0.15;
 const DIRECTION_LENGTH: f32 = 0.35;
-/// The smallest stretch a projector is drawn with (as the gizmo draws it)
-const MIN_STRETCH: f32 = 0.001;
 
 /// The projector's outline in the preview's coordinates (the compositor's: the mesh's centre at the origin, its half diagonal 1)
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -92,32 +94,6 @@ fn planar(size: [f32; 2], (origin, across, up, out): (Vec3, Vec3, Vec3, Vec3), o
     let corners = [center - across - up, center + across - up, center + across + up, center - across + up, center - across - up];
     let tip = center - out * DIRECTION_LENGTH;
     ProjectorOutline { lines: vec![corners.to_vec(), vec![center, tip]], tip: Some(tip), center }
-}
-
-/// A round projector's turn, stretch and centre: a point in its own units lands at `turn × (stretch × point)` (the gizmo's placement)
-struct Place {
-    turn: Mat3,
-    stretch: Vec3,
-    /// Its centre in its own units
-    local: Vec3,
-}
-
-impl Place {
-    /// `offset` moves the centre by `-offset / per_local` of its own units
-    fn new(rotation: [f32; 3], scale: [f32; 3], offset: Vec3, per_local: f32) -> Place {
-        let [x, y, z] = rotation.map(f32::to_radians);
-        let per_local = if per_local.abs() < 1e-6 { 1e-6 } else { per_local };
-        Place { turn: Mat3::from_euler(EulerRot::ZYX, z, y, x), stretch: Vec3::from(scale).max(Vec3::splat(MIN_STRETCH)), local: -offset / per_local }
-    }
-
-    fn world(&self, local: Vec3) -> Vec3 {
-        self.turn * (self.stretch * local)
-    }
-
-    /// The preview camera's view direction in the projector's own units: the rim is the circle across it
-    fn facing(&self) -> Vec3 {
-        (self.turn.transpose() * crate::projection_preview::view_direction() / self.stretch).try_normalize().unwrap_or(Vec3::Z)
-    }
 }
 
 /// -1 or 1: bit `axis` of a box corner's index

@@ -102,7 +102,7 @@ fn norm(s: &str) -> String {
     s.to_ascii_lowercase().replace([' ', '_', '-', '/'], "")
 }
 
-/// The library filter `id` (case and separators ignored; labels work too). Directional Warp's former id and labels find Warp, whose mode it is now.
+/// The library filter `id` (case and separators ignored; labels work too). Directional Warp's former id and labels find Warp, whose mode it is now
 pub fn find(id: &str) -> Option<&'static FilterDef> {
     let n = if is_directional_warp(id) { norm("warp") } else { norm(id) };
     FILTERS.iter().find(|f| norm(f.id) == n || norm(f.label) == n)
@@ -176,6 +176,7 @@ fn restore_defaults(s: &mut Session, p: &Value) -> Result<Value> {
     let Some(defaults) = defaults.filter(|defaults| current != Some(&EffectKind::Filter(defaults.clone()))) else {
         return Ok(json!({"changed": false}));
     };
+
     s.edit("Restore defaults", |s| {
         if let Some(edited) = s.doc.project.effect_mut(effect) {
             edited.kind = EffectKind::Filter(defaults);
@@ -991,8 +992,7 @@ mod tests {
     fn every_filter_builds_and_finds_by_id_or_label() {
         for f in FILTERS {
             let kind = build(f.id, &Value::Null).unwrap_or_else(|e| panic!("{}: {e}", f.id));
-            // Material finishes are content only; other filters also run on masks, where some
-            // (normal invert) change nothing and are not offered.
+            // Material finishes are content only; other filters also run on masks, where some (normal invert) change nothing and are not offered
             assert_eq!(kind.content_only().is_none(), f.mask || matches!(kind, EffectKind::Filter(_)), "{}", f.id);
             assert_eq!(find(f.label).map(|d| d.id), Some(f.id));
         }
@@ -1004,6 +1004,7 @@ mod tests {
         let EffectKind::Filter(Filter::GradientMap { colors, .. }) = build("gradientMap", &json!({"colors": [[0, 0, 0], "#ffffff"]})).unwrap() else {
             panic!()
         };
+
         assert_eq!(colors.len(), 2);
     }
 

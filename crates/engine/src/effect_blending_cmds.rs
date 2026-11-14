@@ -150,10 +150,23 @@ fn blending_effect(s: &Session, p: &Value, cmd: &str, content_only: bool) -> Res
 fn to_every_channel(s: &mut Session, p: &Value, cmd: &str, (mode, opacity): (bool, bool)) -> Result<Value> {
     let id = blending_effect(s, p, cmd, true)?;
     let channel = channel_param(cmd, p, "channel")?.unwrap_or(Channel::BaseColor);
+    let (_, current) = s.doc.project.effect(id).ok_or_else(|| bad(cmd, format!("no effect {}", id.0)))?;
+    let mut changed = current.clone();
+    let source = changed.blend_of(Some(channel));
+    set_blending(&mut changed, None, mode.then_some(source.mode), opacity.then_some(source.opacity));
+    replace_blending(s, id, cmd, changed)
+}
+
+/// Effect `id` replaced by `changed`, in one undo step; no step when nothing changes
+fn replace_blending(s: &mut Session, id: LayerId, cmd: &str, changed: Effect) -> Result<Value> {
+    let (_, current) = s.doc.project.effect(id).ok_or_else(|| bad(cmd, format!("no effect {}", id.0)))?;
+    if *current == changed {
+        return Ok(Value::Null);
+    }
+
     s.edit(UNDO_LABEL, |s| {
         let effect = s.doc.project.effect_mut(id).ok_or_else(|| bad(cmd, format!("no effect {}", id.0)))?;
-        let source = effect.blend_of(Some(channel));
-        set_blending(effect, None, mode.then_some(source.mode), opacity.then_some(source.opacity));
+        *effect = changed;
         Ok(())
     })?;
     Ok(Value::Null)
@@ -184,12 +197,10 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     let (shared, channels) = s.blending_clipboard.clone().ok_or_else(|| bad(CMD, "no channel blending is copied"))?;
     let id = blending_effect(s, p, CMD, false)?;
     let mask = on_mask(&s.doc.project, id);
-    s.edit(UNDO_LABEL, |s| {
-        let effect = s.doc.project.effect_mut(id).ok_or_else(|| bad(CMD, format!("no effect {}", id.0)))?;
-        effect.blend = shared.mode;
-        effect.opacity = shared.opacity;
-        effect.channel_blends = if mask { BTreeMap::new() } else { channels };
-        Ok(())
-    })?;
-    Ok(Value::Null)
+    let (_, current) = s.doc.project.effect(id).ok_or_else(|| bad(CMD, format!("no effect {}", id.0)))?;
+    let mut changed = current.clone();
+    changed.blend = shared.mode;
+    changed.opacity = shared.opacity;
+    changed.channel_blends = if mask { BTreeMap::new() } else { channels };
+    replace_blending(s, id, CMD, changed)
 }

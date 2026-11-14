@@ -25,6 +25,7 @@ mod fur_lock;
 mod held_fields;
 mod image_identity;
 mod mask_gray;
+pub mod mip_level;
 mod organic;
 pub mod pattern;
 mod pattern_context;

@@ -43,23 +43,23 @@ pub fn specs() -> Vec<CommandSpec> {
 /// A mask fill reading an image resource or a library alpha, in one undo step with the alpha's resource
 fn add_bitmap(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "mask.add.bitmap";
-    let name = match (strp(p, "image"), strp(p, "alpha")) {
-        (Some(image), _) => {
+    let (name, library) = match (strp(p, "image"), strp(p, "alpha")) {
+        (Some(_), Some(_)) => return Err(bad(CMD, "give `image` or `alpha`, not both")),
+        (Some(image), None) => {
             if !s.images.contains_key(image) {
                 return Err(bad(CMD, format!("no image resource `{image}` (import it first)")));
             }
 
-            image.to_owned()
+            (image.to_owned(), None)
         }
         (None, Some(alpha)) => {
             let alpha = alphas::find(alpha).ok_or_else(|| bad(CMD, format!("unknown alpha `{alpha}`")))?;
-            crate::fill_alpha::resource_name(alpha)
+            (crate::fill_alpha::resource_name(alpha), Some(alpha))
         }
         (None, None) => return Err(bad(CMD, "`image` or `alpha` is required")),
     };
     let projection = crate::layer_cmds::projection_from(p, CMD, None, || crate::warp_cmds::fitted_frame(&s.mesh))?;
     let kind = EffectKind::Fill { source: Source::Image { name, normal_format: Default::default() }, projection, sampling: Sampling::default() };
-    let library = strp(p, "image").is_none().then(|| strp(p, "alpha").and_then(alphas::find)).flatten();
     let add_library = |s: &mut Session| library.map_or(Ok(()), |alpha| s.add_library_alpha(alpha).map(|_| ()));
     push_effect_with(s, &mask_target(p), kind, BlendMode::Normal, "Add bitmap mask", add_library)
 }

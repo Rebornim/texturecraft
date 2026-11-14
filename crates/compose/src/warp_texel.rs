@@ -2,7 +2,7 @@
 
 use texturecraft_core::{SourceWarp, WarpBlending, WarpMode, WarpSource, WarpSourceMode, lum};
 
-use crate::eval::{direction, texel_noise};
+use crate::eval::{MIN_ALPHA, direction, texel_noise};
 
 /// Bilinear sample at an absolute texel position into an accumulator (components, then weight), as [`crate::eval`]'s gather reads
 pub(crate) type Sample<'a> = &'a dyn Fn(f32, f32, &mut [f32; 5]);
@@ -42,6 +42,7 @@ pub(crate) fn warp_texel(warp: &SourceWarp, (x, y): (f32, f32), (res, comps): (u
                 if read[4] <= 1e-6 {
                     continue;
                 }
+
                 let read = read.map(|component| component / read[4]);
                 picked = Some(match picked {
                     Some(so_far) => std::array::from_fn(|k| if larger { so_far[k].max(read[k]) } else { so_far[k].min(read[k]) }),
@@ -53,6 +54,7 @@ pub(crate) fn warp_texel(warp: &SourceWarp, (x, y): (f32, f32), (res, comps): (u
                 acc[4] = 1.0;
             }
         }
+
         // One direction, or the average of several: the reads add up in `acc`
         _ => {
             for direction in &directions {
@@ -97,11 +99,12 @@ impl Source<'_> {
                 (self.sample)(x, y, &mut read);
                 match (self.comps, read) {
                     // Content stays premultiplied by its own coverage
-                    (4, [r, g, b, alpha, _]) if alpha > 1e-5 => Some(lum([r / alpha, g / alpha, b / alpha])),
+                    (4, [r, g, b, alpha, _]) if alpha > MIN_ALPHA => Some(lum([r / alpha, g / alpha, b / alpha])),
                     (1, [value, .., weight]) if weight > 1e-6 => Some(value / weight),
                     _ => None,
                 }
             }
+
             // Mid gray (its default) moves nothing
             WarpSourceMode::CustomNoise => (self.input)(x, y),
         }

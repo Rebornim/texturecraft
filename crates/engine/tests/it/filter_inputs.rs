@@ -21,6 +21,7 @@ fn inputs(s: &Session, effect: u64) -> Vec<(String, Source)> {
 #[test]
 fn a_distance_map_scales_the_bevel_smooth_distance() {
     let mut s = session();
+
     // A layer below records a roughness of 0.5 at an anchor point
     execute(&mut s, "layer.add.fill", &json!({"color": [0.5, 0.5, 0.5], "roughness": 0.5})).unwrap();
     let anchor = execute(&mut s, "effect.add.anchor", &Value::Null).unwrap()["effect"].as_u64().unwrap();

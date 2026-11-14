@@ -1,11 +1,12 @@
 //! The colour filters in Properties: HSL Perceptive's Mode switch and centred sliders, the tone cards of Color Balance and
 //! Color Correct, and Blur's Wrap toggle
 
+use crate::filter_support::{click_at, filter_of};
 use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::{Value, json};
-use texturecraft_engine::core::{EffectKind, Filter, LayerId};
+use texturecraft_engine::core::{Filter, LayerId};
 use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 
@@ -22,22 +23,6 @@ fn app_with(filter: &str) -> (Harness<'static, TextureCraftApp>, LayerId) {
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(4);
     (harness, effect)
-}
-
-/// A press and release of the primary button at `pos`, as the pointer does it
-fn click_at(harness: &mut Harness<'_, TextureCraftApp>, pos: egui::Pos2) {
-    let modifiers = egui::Modifiers::NONE;
-    harness.event(egui::Event::PointerMoved(pos));
-    harness.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers });
-    harness.run_steps(1);
-    harness.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers });
-}
-
-fn filter_of(harness: &Harness<'_, TextureCraftApp>, effect: LayerId) -> Filter {
-    match &harness.state().session.doc.project.effect(effect).unwrap().1.kind {
-        EffectKind::Filter(filter) => filter.clone(),
-        other => panic!("not a filter: {other:?}"),
-    }
 }
 
 #[test]

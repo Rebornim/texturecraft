@@ -18,7 +18,7 @@ const CARD_PADDING: f32 = 10.0;
 pub(super) const CARD_BLEED: f32 = 6.0;
 
 /// Corner radius of a card
-const CARD_RADIUS: u8 = 6;
+pub(super) const CARD_RADIUS: u8 = 6;
 
 /// From a card's top to its name's centre
 const CARD_NAME_CENTER: f32 = CARD_PADDING + 6.0;
@@ -50,6 +50,15 @@ const BAND_VALUE_INSET: f32 = 22.0;
 const BAND_PICTURE_SIZE: f32 = 16.0;
 const BAND_PICTURE_AIR: f32 = 8.0;
 
+/// A band's reset button click square
+const BAND_RESET_TARGET: f32 = 20.0;
+
+/// How far above and below a foldable card's name a click folds it
+const CARD_HIT_HALF_HEIGHT: f32 = 12.0;
+
+/// How far a title's text reaches below its centre
+const TITLE_HALF_LINE: f32 = 7.0;
+
 impl PropertySheet<'_> {
     /// A top-level group across the whole panel with a caret and a reset (`Some(changed)`) or a value; a click folds it
     pub(crate) fn band(&mut self, title: &str, default_open: bool, reset: Option<bool>, value: Option<&str>) -> BandResponse {
@@ -65,6 +74,7 @@ impl PropertySheet<'_> {
         if self.card.is_none() {
             self.space(GROUP_GAP);
         }
+
         // A band is top-level: it ends a held card too
         self.held = false;
         self.close_card();
@@ -76,7 +86,7 @@ impl PropertySheet<'_> {
         let response = self.ui.interact(band, id, Sense::click());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, title));
 
-        let reset_rect = Rect::from_center_size(pos2(self.right - BAND_RESET_INSET, rect.center().y), vec2(20.0, 20.0));
+        let reset_rect = Rect::from_center_size(pos2(self.right - BAND_RESET_INSET, rect.center().y), vec2(BAND_RESET_TARGET, BAND_RESET_TARGET));
         let mut reset_clicked = false;
         let mut reset_hovered = false;
         if let Some(changed) = reset {
@@ -134,6 +144,7 @@ impl PropertySheet<'_> {
         if self.held && self.card.is_some() {
             return self.inner_caption(title, foldable);
         }
+
         self.open_card();
         let id = self.next_id();
         let rect = self.take(CARD_NAME_CENTER + ROW_HEIGHT / 2.0);
@@ -141,7 +152,7 @@ impl PropertySheet<'_> {
         let mut open = true;
         if let Some(default_open) = foldable {
             open = self.ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
-            let hit = Rect::from_x_y_ranges(self.left..=self.right, (center_y - 12.0)..=(center_y + 12.0));
+            let hit = Rect::from_x_y_ranges(self.left..=self.right, (center_y - CARD_HIT_HALF_HEIGHT)..=(center_y + CARD_HIT_HALF_HEIGHT));
             let response = self.ui.interact(hit, id, Sense::click());
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, title));
             if response.clicked() {
@@ -155,7 +166,7 @@ impl PropertySheet<'_> {
         if foldable.is_some() {
             self.caret(pos2(self.right - EDGE_GLYPH_INSET, center_y), open, t.text_dim);
         }
-        self.drawn(center_y + 7.0);
+        self.drawn(center_y + TITLE_HALF_LINE);
         open
     }
 
@@ -187,7 +198,7 @@ impl PropertySheet<'_> {
         if foldable.is_some() {
             self.caret(pos2(self.right - EDGE_GLYPH_INSET, center_y), open, t.text_dim);
         }
-        self.drawn(center_y + 7.0);
+        self.drawn(center_y + TITLE_HALF_LINE);
         open
     }
 
@@ -215,6 +226,7 @@ impl PropertySheet<'_> {
         if self.held && self.card.is_some() {
             return;
         }
+
         if self.card.is_none() && self.air_at != Some(self.cursor_y()) && !self.empty {
             self.space(GROUP_GAP);
         }
@@ -244,7 +256,7 @@ impl PropertySheet<'_> {
             self.ui.painter().text(pos2(self.right - BAND_VALUE_INSET, center_y), Align2::RIGHT_CENTER, value, FontId::proportional(TEXT_SIZE), t.text_dim);
         }
         self.caret(pos2(self.right - EDGE_GLYPH_INSET, center_y), open, t.text_dim);
-        self.drawn(center_y + 7.0);
+        self.drawn(center_y + TITLE_HALF_LINE);
         open
     }
 
@@ -259,6 +271,7 @@ impl PropertySheet<'_> {
         if self.held {
             return;
         }
+
         let Some(card) = self.card.take() else { return };
 
         let bottom = self.drawn_bottom + CARD_PADDING;

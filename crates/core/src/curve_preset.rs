@@ -2,6 +2,14 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::layer::smoothstep;
+
+/// Stairs climbs in this many flat steps
+const STAIRS_STEPS: f32 = 4.0;
+
+/// Triangular rises and falls this many times
+const TRIANGULAR_TEETH: f32 = 2.0;
+
 /// A remap curve from 0..1 onto 0..1
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -90,16 +98,16 @@ impl CurvePreset {
         let y = match self {
             CurvePreset::Round => (1.0 - (1.0 - t) * (1.0 - t)).sqrt(),
             CurvePreset::Pinch => 1.0 - (1.0 - t * t).sqrt(),
-            CurvePreset::Stairs => ((t * 4.0).floor() / 3.0).min(1.0),
+            CurvePreset::Stairs => ((t * STAIRS_STEPS).floor() / (STAIRS_STEPS - 1.0)).min(1.0),
             CurvePreset::EaseOut => 1.0 - (1.0 - t) * (1.0 - t),
-            CurvePreset::Ease => t * t * (3.0 - 2.0 * t),
+            CurvePreset::Ease => smoothstep(0.0, 1.0, t),
             CurvePreset::EaseIn => t * t,
             CurvePreset::PeakOut => peak.sqrt(),
             CurvePreset::Peak => peak,
             CurvePreset::PeakIn => peak * peak,
             CurvePreset::Bump => (std::f32::consts::PI * t).sin(),
             CurvePreset::DoubleBump => (2.0 * std::f32::consts::PI * t).sin().abs(),
-            CurvePreset::Triangular => 1.0 - ((4.0 * t) % 2.0 - 1.0).abs(),
+            CurvePreset::Triangular => 1.0 - ((2.0 * TRIANGULAR_TEETH * t) % 2.0 - 1.0).abs(),
         };
         y.clamp(0.0, 1.0)
     }

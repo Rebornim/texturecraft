@@ -64,7 +64,7 @@ mod tests {
         let uv = UvTransform { tiling: [3.0, 1.5], ..UvTransform::default() };
         for projection in [
             Projection::Uv { scale: [3.0, 1.5], rotation: 0.0, offset: [0.0; 2] },
-            Projection::Triplanar { scale: 1.5, sharpness: 8.0, offset: [0.0; 3], uv, projector: Default::default() },
+            Projection::Triplanar { scale: 1.5, sharpness: Projection::TRIPLANAR_SHARPNESS, offset: [0.0; 3], uv, projector: Default::default() },
             Projection::Planar { scale: 0.5, axis: 2, offset: [0.0; 3], uv, projector: Default::default(), placed: None },
             Projection::Cylindrical { scale: 2.0, axis: 1, uv, offset: [0.0; 3], projector: Default::default(), angle: 360.0 },
         ] {

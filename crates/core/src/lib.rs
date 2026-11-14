@@ -102,8 +102,8 @@ pub use image_input::ImageInput;
 pub use layer::{
     ChannelBlend, CompareOp, CurvatureDetail, CurvatureMode, Decal, DecalFlip, DecalSymmetry, Effect, EffectKind, Fill, Filter, Filtering, Generator,
     GeneratorGlobal, GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Levels, LinkParam, LinkPreset, Mask, MaskBackground, MaterialLink, MicroDetail,
-    OutputResolution, POSTERIZE_LEVELS_MAX, PathShape, Procedural, ProceduralKind, Projection, ResolutionMode, Sampling, ScaleMode, Source, TileBlending,
-    TileGenerator, TileInputDistribution, TileShape, TileSizeMode, TileSymmetry, UvTransform, UvWrap, gradient, hsl_adjust, per_unit, posterize,
+    OutputResolution, POSTERIZE_LEVELS_MAX, PathShape, Procedural, ProceduralKind, Projection, ResolutionMode, SIZE_REFERENCE_RES, Sampling, ScaleMode, Source,
+    TileBlending, TileGenerator, TileInputDistribution, TileShape, TileSizeMode, TileSymmetry, UvTransform, UvWrap, gradient, hsl_adjust, per_unit, posterize,
 };
 pub use lighting_output::LightingOutput;
 pub use mask_outline::MaskOutline;

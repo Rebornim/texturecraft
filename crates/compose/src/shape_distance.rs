@@ -3,7 +3,7 @@
 use rayon::prelude::*;
 use texturecraft_core::{BevelBlur, BevelCorner, Filter, lum};
 
-use crate::eval::blur;
+use crate::eval::{MIN_ALPHA, blur};
 
 /// Samples a Directional Distance trail reads behind a texel at most (beyond, samples spread out)
 const TRAIL_SAMPLES: i32 = 64;
@@ -26,7 +26,7 @@ pub(crate) fn distance_filter(
 ) {
     let map = |texel: usize| grays.get(texel).copied().unwrap_or(1.0);
     let value = |pixel: &[f32]| match pixel {
-        [r, g, b, alpha] if *alpha > 1e-5 => lum([r / alpha, g / alpha, b / alpha]),
+        [r, g, b, alpha] if *alpha > MIN_ALPHA => lum([r / alpha, g / alpha, b / alpha]),
         [value] => *value,
         _ => 0.0,
     };
@@ -73,6 +73,7 @@ pub(crate) fn distance_filter(
             let inside = shapes(&|value| value >= texturecraft_core::DirectionalDistance::EDGE);
             let along = trail_distances(&inside, (width, height), crate::eval::direction(trail.angle), trail.reach(res));
             let trail = *trail;
+
             // A share of the full reach is a larger share of a texel's shorter one; no trail where the map is black, the shapes stay
             let shortened = move |texel: usize| {
                 along.get(texel).copied().flatten().and_then(|along| match map(texel) {
@@ -90,10 +91,11 @@ pub(crate) fn distance_filter(
         if *covered <= 0.0 {
             return;
         }
+
         // Content is premultiplied by its coverage, which stays
         let cov = if comps == 4 { pixel.get(3).copied().unwrap_or(0.0) } else { 1.0 };
         for slot in pixel.iter_mut().take(comps.min(3)) {
-            let before = if comps == 4 { if cov > 1e-5 { *slot / cov } else { 0.0 } } else { *slot };
+            let before = if comps == 4 { if cov > MIN_ALPHA { *slot / cov } else { 0.0 } } else { *slot };
             let after = result(texel, *inside, before);
             *slot = (before + (after - before) * opacity) * cov;
         }
@@ -172,6 +174,7 @@ impl Envelope {
 fn chessboard_distances(feature: &[bool], (width, height): (usize, usize)) -> Vec<f32> {
     let far = (width + height) as f32;
     let mut distances: Vec<f32> = feature.iter().map(|feature| if *feature { 0.0 } else { far }).collect();
+
     // One pass down from the texels above and left, one up from those below and right
     let step = |distances: &mut Vec<f32>, (x, y): (usize, usize), neighbours: [(isize, isize); 4]| {
         let nearest = neighbours

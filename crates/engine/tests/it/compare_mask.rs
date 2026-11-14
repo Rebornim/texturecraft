@@ -72,6 +72,7 @@ fn this_layer_is_compared_with_the_layers_below() {
 #[test]
 fn hardness_ramps_the_mask_past_the_edge() {
     let mut session = session();
+
     // 0.6 is 0.03 past 0.57: a third of the default hardness 0.9's 0.1 ramp
     let (_, top, compare) = two_layers(&mut session, 0.57, 0.6);
     assert!(close(mask(&mut session, top), 0.3), "{}", mask(&mut session, top));

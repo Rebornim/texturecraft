@@ -931,6 +931,7 @@ mod tests {
             (p.contents_around(outer), p.contents_around(top), p.contents_offset(a)),
             (ContentsOffset::NONE, ContentsOffset::NONE, ContentsOffset::NONE)
         );
+
         // A folder saved before folders had an offset has none, and one without an offset saves as before
         let old: LayerKind = serde_json::from_str(r#"{"Group":{"children":[],"collapsed":true}}"#).unwrap();
         assert_eq!(old, LayerKind::Group { children: vec![], collapsed: true, contents: ContentsOffset::NONE, randomized: Vec::new() });

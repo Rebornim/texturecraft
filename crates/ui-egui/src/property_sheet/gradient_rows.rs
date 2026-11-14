@@ -51,9 +51,9 @@ impl PropertySheet<'_> {
         let t = self.tokens;
         let mut mesh = Mesh::default();
         for slice in 0..=RAMP_SLICES {
-            let f = slice as f32 / RAMP_SLICES as f32;
-            let x = x0 + (x1 - x0) * f;
-            let color = shown_color(at(f));
+            let share = slice as f32 / RAMP_SLICES as f32;
+            let x = x0 + (x1 - x0) * share;
+            let color = shown_color(at(share));
             mesh.colored_vertex(pos2(x, ramp.top()), color);
             mesh.colored_vertex(pos2(x, ramp.bottom()), color);
             if slice > 0 {

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BevelBlur, BevelCorner};
+use crate::{BevelBlur, BevelCorner, SIZE_REFERENCE_RES};
 
 /// Shapes (values at or above [`Bevel::EDGE`]) sloped at their edge: inwards for a negative distance, outwards for a positive one
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -28,6 +28,9 @@ impl Bevel {
     /// Texels at 2K a unit of Smoothing blurs over
     pub const SMOOTHING_TEXELS: f32 = 4.0;
 
+    /// The largest Smoothing
+    pub const SMOOTHING_MAX: f32 = 5.0;
+
     /// Whether the slope lies inside the shapes
     pub fn inward(&self) -> bool {
         self.distance <= 0.0 || self.distance.is_nan()
@@ -41,8 +44,8 @@ impl Bevel {
 
     /// How many texels the slope is blurred over at `res` texels across a UV tile
     pub fn smoothing_texels(&self, res: u32) -> f32 {
-        let smoothing = if self.smoothing.is_finite() { self.smoothing.clamp(0.0, 5.0) } else { 0.0 };
-        smoothing * Self::SMOOTHING_TEXELS * res as f32 / 2048.0
+        let smoothing = if self.smoothing.is_finite() { self.smoothing.clamp(0.0, Self::SMOOTHING_MAX) } else { 0.0 };
+        smoothing * Self::SMOOTHING_TEXELS * res as f32 / SIZE_REFERENCE_RES
     }
 
     /// The slope (0..1) at a texel `edge` texels from the shapes' edge, inside them or not, rising from 0 at its foot to 1 at its top

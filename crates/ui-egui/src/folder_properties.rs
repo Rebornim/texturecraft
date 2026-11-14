@@ -24,6 +24,7 @@ pub(crate) fn folder_properties(app: &mut TextureCraftApp, ui: &mut Ui, folder: 
             sheet.empty_note(tr("No properties found"));
             return;
         }
+
         if sheet.section_reset(tr("Contents"), changed) {
             app.run("folder.contents.reset", json!({"layer": folder.0}));
         }

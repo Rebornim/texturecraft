@@ -47,6 +47,7 @@ fn a_source_that_is_gone_shows_a_missing_layer_that_takes_no_click() {
     let card = format!("Missing layer {}", set_name(&harness));
     let missing = harness.get_by_role_and_label(Role::Button, &card);
     assert!(missing.accesskit_node().is_disabled(), "a missing source can't be gone to");
+
     // A real press and release on the card
     let at = missing.rect().center();
     harness.drag_at(at);

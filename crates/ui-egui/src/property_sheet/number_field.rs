@@ -43,6 +43,9 @@ pub(crate) struct NumberField<'a> {
     pub(crate) suffix: &'a str,
 }
 
+/// The air between a field's axis tag and its typing box
+const TAG_TO_TYPING: f32 = 6.0;
+
 impl PropertySheet<'_> {
     /// A row of number fields (drag or type); returns the edited index and whether it continues a drag
     pub(crate) fn number_fields(&mut self, label: &str, fields: &mut [NumberField], link: Option<&mut bool>, keep_link_slot: bool) -> Option<(usize, bool)> {
@@ -111,7 +114,7 @@ impl PropertySheet<'_> {
         let decimals = field.decimals;
         if let Some(mut text) = self.ui.data(|data| data.get_temp::<String>(typing_id)) {
             let edit = egui::TextEdit::singleline(&mut text).id(typing_id).font(semibold(TEXT_SIZE)).align(egui::Align2::RIGHT_CENTER);
-            let response = self.typing_edit(rect.left() + 2.0 * TAG_LETTER_INSET + 6.0, rect.right() - VALUE_INSET, rect.center().y, edit);
+            let response = self.typing_edit(rect.left() + 2.0 * TAG_LETTER_INSET + TAG_TO_TYPING, rect.right() - VALUE_INSET, rect.center().y, edit);
             painter.rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, t.accent), StrokeKind::Inside);
             if !response.lost_focus() {
                 self.ui.data_mut(|data| data.insert_temp(typing_id, text));
@@ -122,10 +125,12 @@ impl PropertySheet<'_> {
             if self.ui.input(|input| input.key_pressed(egui::Key::Escape)) {
                 return None;
             }
+
             let typed: f32 = text.trim().trim_end_matches(field.suffix).trim().parse().ok()?;
             if !typed.is_finite() || typed == field.value {
                 return None;
             }
+
             field.value = typed;
             return Some(false);
         }
@@ -148,6 +153,7 @@ impl PropertySheet<'_> {
             self.start_typing(typing_id, shown_number(field.value, decimals));
             return None;
         }
+
         if response.dragged() {
             crate::pointer_lock::hold(self.ui.ctx());
         }
@@ -155,6 +161,7 @@ impl PropertySheet<'_> {
         if !response.dragged() || delta == 0.0 {
             return None;
         }
+
         field.value += delta * field.speed;
         Some(!response.drag_started())
     }
@@ -168,6 +175,7 @@ fn fitting_number(value: f32, decimals: usize, suffix: &str, room: f32, width: i
         if decimals == 0 || width(&shown) <= room {
             return shown;
         }
+
         decimals -= 1;
     }
 }

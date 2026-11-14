@@ -660,6 +660,7 @@ fn mask_fill_set(s: &mut Session, p: &Value, effect: LayerId) -> Result<Value> {
     if ["channel", "enabled", "solo", "normalFormat"].iter().any(|key| p.get(key).is_some()) {
         return Err(bad(FILL_SET, "a mask fill has one grayscale source: leave out `channel`, `enabled`, `solo` and `normalFormat`"));
     }
+
     let current = mask_source_mut(s, effect)?.clone();
     let (source, library_alpha) = gray_source(s, p, effect, current)?;
     s.edit("Set fill", |s| {
@@ -681,6 +682,7 @@ fn input_set(s: &mut Session, p: &Value, id: &str) -> Result<Value> {
     if ["channel", "enabled", "solo", "normalFormat"].iter().any(|key| p.get(key).is_some()) {
         return Err(bad(FILL_SET, "an image input is one grayscale source: leave out `channel`, `enabled`, `solo` and `normalFormat`"));
     }
+
     let (source, library_alpha) = if p.get("clear").and_then(Value::as_bool) == Some(true) {
         (None, None)
     } else {
@@ -692,6 +694,7 @@ fn input_set(s: &mut Session, p: &Value, id: &str) -> Result<Value> {
             s.add_library_alpha(alpha)?;
         }
         let found = s.doc.project.effect_mut(effect).ok_or_else(|| bad(FILL_SET, "the effect is gone"))?;
+
         // Its default gray is not stored, so a project that never set the input saves as before
         match source.filter(|source| *source != input.default_source()) {
             Some(source) => found.inputs.insert(input.id.to_string(), source),
@@ -720,6 +723,7 @@ fn gray_source(s: &Session, p: &Value, effect: LayerId, current: Source) -> Resu
         Ok((Source::image(crate::fill_alpha::resource_name(alpha)), Some(alpha)))
     } else if let Some(anchor) = u64p(p, "anchor") {
         let reader = s.doc.project.effect(effect).map(|(owner, _)| owner).ok_or_else(|| bad(FILL_SET, "the effect is not in a layer"))?;
+
         // A gray reads one channel of the anchor's stack: the one it read, else Height
         let kept = match current {
             Source::Anchor { channel, .. } => channel,
@@ -891,9 +895,7 @@ pub(crate) fn new_unframed_projection(id: &str) -> Option<Projection> {
     let projection = match id {
         "uv" => Projection::default(),
         "uvTile" => Projection::UvTile,
-        "triplanar" | "tri-planar" => {
-            Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: Default::default(), projector: Default::default() }
-        }
+        "triplanar" | "tri-planar" => Projection::triplanar(),
         "planar" => Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: Default::default(), projector: Projector::depth_culled(), placed: None },
         "spherical" => Projection::Spherical { scale: 1.0, uv: Default::default(), offset: [0.0; 3], projector: Default::default() },
         "cylindrical" => Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default(), offset: [0.0; 3], projector: Default::default(), angle: 360.0 },
@@ -918,12 +920,14 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
     let tiling = floats::<2>(p, "tiling", MIN_SCALE, MAX_PLACEMENT);
     let rotation = f32p(p, "rotation").map(|r| r.rem_euclid(360.0));
     let axis = u64p(p, "axis").map(|a| a.min(2) as u8);
+
     // The UV transformations of a 3D projection: tiling, rotation and an offset across the surface
     let place = |uv: &mut UvTransform| {
         uv.tiling = tiling.unwrap_or(uv.tiling);
         uv.rotation = rotation.unwrap_or(uv.rotation);
         uv.offset = floats(p, "uvOffset", -MAX_PLACEMENT, MAX_PLACEMENT).unwrap_or(uv.offset);
     };
+
     // The 3D projection settings: the projector's offset, turn and per-axis scale
     let offset3 = floats::<3>(p, "offset", -MAX_PLACEMENT, MAX_PLACEMENT);
     let crop = match strp(p, "shapeCrop") {

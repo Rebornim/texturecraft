@@ -1,10 +1,11 @@
 //! The light and shadow filters in Properties: Glow's Used on a Mask, Mode and signed Width, Drop Shadow's Angle and Distance, the Baked Lighting cards and rows
 
+use crate::filter_support::filter_of;
 use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::{Value, json};
-use texturecraft_engine::core::{EffectKind, Filter, LayerId, LightingOutput};
+use texturecraft_engine::core::{Filter, LayerId, LightingOutput};
 use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 
@@ -32,13 +33,6 @@ fn click_at(harness: &mut Harness<'_, TextureCraftApp>, pos: egui::Pos2) {
     harness.run_steps(1);
     harness.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers });
     harness.run_steps(3);
-}
-
-fn filter_of(harness: &Harness<'_, TextureCraftApp>, effect: LayerId) -> Filter {
-    match &harness.state().session.doc.project.effect(effect).unwrap().1.kind {
-        EffectKind::Filter(filter) => filter.clone(),
-        other => panic!("not a filter: {other:?}"),
-    }
 }
 
 /// Clicks on Used on a Mask, Precise and the left end of Width turn the glow into a precise inner glow laid as white on the mask
@@ -89,6 +83,7 @@ fn baked_lighting_stylized_cards_set_the_sun_a_light_and_the_output() {
     let (mut harness, effect) = app_with_lighting("bakedLighting");
     let sun = harness.get_by_role_and_label(Role::Slider, "Sun Intensity").rect();
     click_at(&mut harness, egui::pos2(sun.right() - 1.0, sun.center().y));
+
     // Light 1's card comes before Light 2's
     let light_1 = harness.query_all_by_role_and_label(Role::Slider, "Intensity").map(|node| node.rect()).min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
     click_at(&mut harness, egui::pos2(light_1.right() - 1.0, light_1.center().y));

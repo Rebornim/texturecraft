@@ -37,10 +37,12 @@ impl MaskOutline {
         if !self.position.covers(inside) || closeness <= 0.0 || !self.width.is_finite() || self.width <= 0.0 {
             return 0.0;
         }
+
         let blur = if self.blur.is_finite() { self.blur.clamp(0.0, 1.0) } else { 0.0 };
         if blur <= 0.0 {
             return 1.0;
         }
+
         let curve = if self.curve.is_finite() { self.curve.clamp(-1.0, 1.0) } else { 0.0 };
         (closeness / blur).min(1.0).powf(4f32.powf(-curve))
     }

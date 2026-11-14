@@ -10,8 +10,10 @@ pub fn placed_from_axis(proj: &Projection, (lo, hi): (Vec3, Vec3)) -> Option<Pro
     let Projection::Planar { scale, axis, offset, uv, projector, placed: None } = proj else { return None };
 
     let frame = axis_frame(*scale, *axis, Vec3::from(*offset), projector, (lo, hi))?;
+
     // The turn and per-axis scale are now in the frame; culling and crop stay
     let projector = Projector { rotation: [0.0; 3], scale: [1.0; 3], ..*projector };
+
     // An axis planar turns its image round the top left, a frame round its centre
     let uv = frame_uv_from_corner(uv);
     Some(Projection::Planar { scale: *scale, axis: *axis, offset: *offset, uv, projector, placed: Some(frame) })
@@ -34,6 +36,7 @@ pub fn axis_frame(scale: f32, axis: u8, offset: Vec3, projector: &Projector, (lo
         _ => (Vec3::X, Vec3::Y, Vec3::Z),
     };
     let side = |direction: Vec3| 2.0 * radius * direction.abs().dot(stretch) / scale;
+
     // A negative stretch or scale turns that side over
     let flip = |direction: Vec3| direction * side(direction).signum();
     let (across, up) = (flip(across), flip(up));

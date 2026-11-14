@@ -76,6 +76,7 @@ pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
     let orb = |painter: &Painter, rect: Rect| material_orb(painter, rect, &shown, &tokens, &format!("orb{place}"));
     let link = fill.link.as_deref().zip(base.get("layer").and_then(Value::as_u64)).map(|(link, layer)| (link.clone(), LayerId(layer)));
     let mode_id = sheet.ui.make_persistent_id(("material_mode", base.to_string()));
+
     // A fill opens on the side that made it: a material (linked or built-in) on Material, separate sources on Channels
     let made_whole = link.is_some() || fill.material.is_some();
     let mode = sheet.ui.data(|data| data.get_temp::<usize>(mode_id)).unwrap_or(if made_whole { MATERIAL_MODE } else { CHANNELS_MODE });
@@ -182,6 +183,7 @@ pub(crate) fn source_card(
         resource_picker::toggle(sheet.ui.ctx(), popup);
     }
     let current = source_choice(&source);
+
     // From Uniform the picker opens at the top, not at its Uniform tile at the end
     let reveal = current != SourceChoice::Uniform;
     let uniform = match source {
@@ -387,6 +389,7 @@ fn procedural_rows(
 
     let mut edited = pattern.clone();
     let mut edit = scale_and_contrast(sheet, &mut edited);
+
     // A grayscale's card (a mask fill's, a filter input's) shows its Balance and Seed with Scale and Contrast; a material channel's keeps them in Attributes
     let gray = matches!(slot_of, SourceSlot::Grayscale | SourceSlot::Input(_));
     if gray {
@@ -416,6 +419,7 @@ fn procedural_rows(
             }
         }
     }
+
     // The size the pattern is made at, as a cooked texture would be (the texture set's own by default)
     let texture_set = app.session.doc.project.texture_set(app.session.ts()).map_or(2048, |texture_set| texture_set.resolution);
     if let Some(picked) = resolution_row(sheet, band_size(pattern.resolution, texture_set), texture_set) {
@@ -464,6 +468,7 @@ fn material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, link:
             sheet.ui.data_mut(|data| data.insert_temp(pending, true));
         }
     }
+
     // A drag stores every step; the maps re-cook once the pointer lets go
     let waiting = sheet.ui.data(|data| data.get_temp::<bool>(pending)).unwrap_or(false);
     if waiting && !sheet.ui.input(|input| input.pointer.any_down()) {
@@ -521,6 +526,7 @@ fn mapping_band(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: 
     if !sheet.band(tr("Channels mapping"), true, None, None).open {
         return;
     }
+
     let outputs: Vec<String> = fill.link_outputs().into_keys().collect();
     let indices: Vec<usize> = (0..outputs.len()).collect();
     for channel in shown {
@@ -556,6 +562,7 @@ fn link_input(sheet: &mut PropertySheet<'_>, layer: LayerId, param: &LinkParam, 
             let decimals = if kind == "float" { 2 } else { 0 };
             sheet.slider(&param.label, &mut edited, low.min(number)..=high.max(number), decimals).map(|_| json!(edited))
         }
+
         // Colours and vectors keep their egui editors until the sheet draws them
         _ => sheet.embed(|ui| crate::dock::link_param_editor(ui, layer, param)),
     };

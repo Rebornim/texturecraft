@@ -4,7 +4,7 @@ use egui::{Align2, Color32, CornerRadius, FontId, Rect, Sense, Stroke, StrokeKin
 use egui_phosphor::regular as ic;
 
 use super::group::CARD_BLEED;
-use super::{IdColorRowResponse, PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE, TEXT_SIZE};
+use super::{GLYPH_SIZE, GLYPH_TARGET, IdColorRowResponse, PropertySheet, ROW_HEIGHT, ROW_RADIUS, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::drawn_icon::DrawnIcon;
 
 /// Height of the swatch
@@ -16,17 +16,15 @@ const SWATCH_TO_COLUMN: f32 = 12.0;
 /// Room the × keeps at the row's end
 const REMOVE_ROOM: f32 = 24.0;
 
-/// From the right edge to the ×'s centre, and the size of the row's glyphs
+/// From the right edge to the ×'s centre
 const REMOVE_INSET: f32 = 6.0;
-const GLYPH_SIZE: f32 = 13.0;
 /// Size of the pipette on a hovered swatch
 const PIPETTE_SIZE: f32 = 14.0;
 
 /// From a component's letter to its value
 const LETTER_TO_VALUE: f32 = 12.0;
 
-/// Corner radius of the hovered row's face and of the swatch
-const ROW_RADIUS: u8 = 6;
+/// Corner radius of the swatch
 const SWATCH_RADIUS: u8 = 3;
 
 /// Above this luminance the swatch's eyedropper is drawn dark
@@ -59,12 +57,13 @@ impl PropertySheet<'_> {
         let painter = self.ui.painter().clone();
         painter.rect_filled(swatch, CornerRadius::same(SWATCH_RADIUS), color);
         if enabled && (hovered || repicking) {
+            // Rec. 709 luminance
             let luminance = (0.2126 * f32::from(red) + 0.7152 * f32::from(green) + 0.0722 * f32::from(blue)) / 255.0;
             let glyph = if luminance > LIGHT_SWATCH { Color32::from_gray(20) } else { Color32::from_gray(235) };
             DrawnIcon::Pipette.paint(&painter, swatch.center(), PIPETTE_SIZE, glyph);
         }
 
-        let step = (self.right - REMOVE_ROOM - self.column()) / 3.0;
+        let step = (self.right - REMOVE_ROOM - self.column()) / rgb.len() as f32;
         for (index, (letter, value)) in ["R", "G", "B"].into_iter().zip(rgb).enumerate() {
             let x = self.column() + step * index as f32;
             painter.text(pos2(x, center_y), Align2::LEFT_CENTER, letter, FontId::proportional(SMALL_TEXT_SIZE), t.text_dim);
@@ -72,7 +71,7 @@ impl PropertySheet<'_> {
         }
 
         // The × answers only while the row is hovered, so it never takes a click meant for the row under a moving pointer
-        let remove = Rect::from_center_size(pos2(self.right - REMOVE_INSET, center_y), vec2(18.0, 18.0));
+        let remove = Rect::from_center_size(pos2(self.right - REMOVE_INSET, center_y), vec2(GLYPH_TARGET, GLYPH_TARGET));
         let remove_id = self.next_id();
         let remove_tip = crate::i18n::tr("Remove");
         let remove_response = self.ui.interact(remove, remove_id, if hovered { Sense::click() } else { Sense::hover() });

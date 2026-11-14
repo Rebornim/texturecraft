@@ -3,18 +3,12 @@
 use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use texturecraft_engine::core::{ColorMatch, EffectKind, Filter, HeightToNormal, LayerId, PbrValidate, SourceColorMode, TargetColorMode, ValidationMode};
+use texturecraft_engine::core::{ColorMatch, Filter, HeightToNormal, LayerId, PbrValidate, SourceColorMode, TargetColorMode, ValidationMode};
 use texturecraft_ui_egui::TextureCraftApp;
 
 use crate::filter_light::app_with_lighting;
 use crate::filter_shape::{app_with, click_at, pick};
-
-fn filter_of(harness: &Harness<'_, TextureCraftApp>, effect: LayerId) -> Filter {
-    match &harness.state().session.doc.project.effect(effect).unwrap().1.kind {
-        EffectKind::Filter(filter) => filter.clone(),
-        other => panic!("not a filter: {other:?}"),
-    }
-}
+use crate::filter_support::filter_of;
 
 /// Anisotropic Kuwahara: Extract Direction (its Custom Input slot right under it), then Radius … Anisotropy and the Anisotropy Angle dial, in the reference's order
 #[test]
@@ -71,6 +65,7 @@ fn height_to_normal_rows() {
     ]
     .map(|(role, label)| harness.get_by_role_and_label(role, label).rect().center().y);
     assert!(rows.windows(2).all(|pair| pair[0] < pair[1]), "the reference's order: {rows:?}");
+
     // A click on Surface Size's track sets whole centimetres
     let size = harness.get_by_role_and_label(Role::Slider, "Surface Size (cm)").rect();
     click_at(&mut harness, egui::pos2(size.left() + size.width() * 0.37, size.center().y));
@@ -102,6 +97,7 @@ fn color_match_of(harness: &Harness<'_, TextureCraftApp>, effect: LayerId) -> Co
 #[test]
 fn color_match_rows() {
     let (mut harness, effect) = app_with_lighting("colorMatch");
+
     // Target Color Mode's control: its switch's segment, or its list where the words don't fit
     let target_mode = |harness: &Harness<'_, TextureCraftApp>, shown: &str| {
         let mut found: Vec<egui::Rect> = harness

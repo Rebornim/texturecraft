@@ -80,6 +80,7 @@ pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Pro
     let key = format!("{side}{half}{shown:?}{:?}{:?}{:?}", tokens.field, tokens.text, tokens.accent);
     let held = ctx.input(|input| input.pointer.any_down());
     let id = egui::Id::unique("projection_preview");
+
     // The picture, the key and the rays per pixel it was rendered with; a drag's lighter picture is redone in full once the pointer is let go
     let cached = ctx.data(|data| data.get_temp::<RenderedPreview>(id));
     let up_to_date = cached.as_ref().is_some_and(|cached| cached.key == key && (held || cached.supersample == SUPERSAMPLE));
@@ -130,10 +131,12 @@ fn shown_projection(projection: &Projection, bounds: (Vec3, Vec3)) -> Option<Pro
         Projection::Planar { placed: Some(_), uv, .. } => {
             let landed = folded(projection)?;
             let Projection::Planar { placed: Some(frame), projector, .. } = &landed else { return None };
+
             // The sphere stands for the model: its radius is the model's largest half size
             let radius = ((bounds.1 - bounds.0) * 0.5).max_element().max(1e-4);
             let half = frame.size.map(|side| (SPHERE_RADIUS * side / (2.0 * radius)).max(1e-4));
             let turn = upright_turn(frame).unwrap_or(0.0);
+
             // Slid across its own plane away from the mesh's centre: off the sphere's middle by as much
             let (origin, across, up, _) = decal_axes(frame)?;
             let from_center = (origin - (bounds.0 + bounds.1) * 0.5) / radius * SPHERE_RADIUS;
@@ -233,6 +236,7 @@ pub(crate) fn passed_sides(points: impl Iterator<Item = Pos2>, rect: Rect) -> [b
 pub(crate) fn edge_markers(painter: &Painter, rect: Rect, sides: [bool; 4], tokens: &Tokens) {
     let inner = rect.shrink(EDGE_INSET);
     let center = rect.center();
+
     // Per side: its two ends, the chevron's point and the way into the square
     let edges = [
         ([inner.left_top(), inner.left_bottom()], pos2(inner.left(), center.y), vec2(1.0, 0.0)),
@@ -244,11 +248,13 @@ pub(crate) fn edge_markers(painter: &Painter, rect: Rect, sides: [bool; 4], toke
         if !passed {
             continue;
         }
+
         let along = vec2(inward.y, inward.x);
         let chevron = vec![point + (inward - along) * CHEVRON_ARM, point, point + (inward + along) * CHEVRON_ARM];
         for stroke in outline_strokes(false, tokens) {
             painter.extend(Shape::dashed_line(&ends, stroke, EDGE_DASH, EDGE_DASH));
         }
+
         // The chevron on a clear patch, so the dashes and the shape do not run through it
         let patch = Rect::from_points(&chevron).expand(1.5);
         painter.rect_filled(patch, 0, tokens.field);
@@ -277,6 +283,7 @@ fn render(projection: &Projection, side: usize, half: f32, supersample: usize, t
     let shades = [CHECKER_DARK, CHECKER_LIGHT, UNCOVERED].map(|t| background.lerp(text, t));
     let supersample = supersample.max(1);
     let rays = side * supersample;
+
     // Per ray: the lit colour and how much of the projection lands there (None = the background)
     let samples: Vec<Option<(Vec3, f32)>> = (0..rays * rays)
         .into_par_iter()
@@ -316,6 +323,7 @@ fn on_edge(samples: &[Option<(Vec3, f32)>], rays: usize, x: usize, y: usize, cov
     if cover <= 0.5 {
         return false;
     }
+
     let neighbours = [(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)];
     neighbours.into_iter().any(|(nx, ny)| nx < rays && ny < rays && samples.get(ny * rays + nx).copied().flatten().is_some_and(|(_, cover)| cover <= 0.5))
 }
@@ -343,6 +351,7 @@ fn intersect(shape: PreviewShape, origin: Vec3, dir: Vec3) -> Option<Coords> {
             if disc < 0.0 {
                 return None;
             }
+
             let pos = origin + dir * (-b - disc.sqrt());
             Some(hit(pos, pos.normalize_or_zero()))
         }
@@ -354,8 +363,10 @@ fn intersect(shape: PreviewShape, origin: Vec3, dir: Vec3) -> Option<Coords> {
                     if o.abs() > CUBE_HALF {
                         return None;
                     }
+
                     continue;
                 }
+
                 let (t0, t1) = ((-CUBE_HALF - o) / d, (CUBE_HALF - o) / d);
                 let (enter, exit) = (t0.min(t1), t0.max(t1));
                 if enter > near {
@@ -374,6 +385,7 @@ fn intersect(shape: PreviewShape, origin: Vec3, dir: Vec3) -> Option<Coords> {
                     best = Some((t, hit));
                 }
             };
+
             // The side: x² + z² = r² within the height
             let (a, b) = (dir.x * dir.x + dir.z * dir.z, origin.x * dir.x + origin.z * dir.z);
             let c = origin.x * origin.x + origin.z * origin.z - CYLINDER_RADIUS * CYLINDER_RADIUS;
@@ -385,6 +397,7 @@ fn intersect(shape: PreviewShape, origin: Vec3, dir: Vec3) -> Option<Coords> {
                     keep(t, hit(pos, Vec3::new(pos.x, 0.0, pos.z).normalize_or_zero()));
                 }
             }
+
             // The caps
             if dir.y.abs() > 1e-6 {
                 for sign in [1.0, -1.0] {
@@ -439,11 +452,7 @@ mod tests {
     #[test]
     fn the_shape_fills_the_middle_and_leaves_the_corners_to_the_background() {
         let tokens = tokens();
-        for projection in [
-            spherical(1.0),
-            cylindrical(Projector::default()),
-            Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: UvTransform::default(), projector: Projector::default() },
-        ] {
+        for projection in [spherical(1.0), cylindrical(Projector::default()), Projection::triplanar()] {
             let image = render(&projection, 32, VIEW_HALF, SUPERSAMPLE, &tokens);
             assert_eq!(image.pixels[0], tokens.field, "{projection:?}: the corner is background");
             assert_ne!(image.pixels[16 * 32 + 16], tokens.field, "{projection:?}: the middle shows the shape");
@@ -547,7 +556,7 @@ mod tests {
 
         let triplanar = Projection::Triplanar {
             scale: 1.0,
-            sharpness: 8.0,
+            sharpness: Projection::TRIPLANAR_SHARPNESS,
             offset: [0.0; 3],
             uv: UvTransform::default(),
             projector: Projector { scale: [10.0; 3], ..Projector::default() },
@@ -618,12 +627,13 @@ mod tests {
             ("cylindrical", |s| cylindrical(Projector { scale: [s; 3], ..Projector::default() })),
             ("triplanar", |s| Projection::Triplanar {
                 scale: 1.0,
-                sharpness: 8.0,
+                sharpness: Projection::TRIPLANAR_SHARPNESS,
                 offset: [0.0; 3],
                 uv: UvTransform::default(),
                 projector: Projector { scale: [s; 3], ..Projector::default() },
             }),
         ];
+
         // One square per picture: the preview keeps one rendered texture. The medium theme at every size, the others at two
         let themes = [(Brightness::MediumDark, "", &SIZES[..]), (Brightness::Dark, "-dark", &[1.0, 3.0][..]), (Brightness::Light, "-light", &[1.0, 3.0][..])];
         for ((brightness, theme, sizes), (name, make)) in themes.into_iter().flat_map(|theme| kinds.map(|kind| (theme, kind))) {
@@ -642,6 +652,7 @@ mod tests {
                 harness.render().unwrap().save(directory.join(format!("preview-fit-{name}-x{scale}{theme}.png"))).unwrap();
             }
         }
+
         // In the panel: a x3 sphere zoomed out to its floor, marked on every side
         let (mut harness, _) = crate::frame_gizmo::tests::fill_app_rendered(serde_json::json!({"projection": "spherical", "projectorScale": [3, 3, 3]}), true);
         harness.run_steps(4);
@@ -655,6 +666,7 @@ mod tests {
         let mut output = ctx.run_ui(input, |ui| {
             projection_preview(ui.painter(), Rect::from_min_size(pos2(0.0, 0.0), vec2(64.0, 64.0)), projection, BOUNDS, &tokens);
         });
+
         // No renderer takes the uploads here
         output.textures_delta.clear();
     }
@@ -683,11 +695,7 @@ mod tests {
     #[ignore]
     fn preview_render_timings() {
         let tokens = tokens();
-        let kinds = [
-            ("sphere", spherical(2.0)),
-            ("cylinder", cylindrical(Projector::default())),
-            ("cube", Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: UvTransform::default(), projector: Projector::default() }),
-        ];
+        let kinds = [("sphere", spherical(2.0)), ("cylinder", cylindrical(Projector::default())), ("cube", Projection::triplanar())];
         for (name, projection) in kinds {
             let start = std::time::Instant::now();
             const RUNS: u32 = 10;

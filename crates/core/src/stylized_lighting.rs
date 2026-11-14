@@ -100,6 +100,7 @@ impl StylizedLighting {
         } else {
             let metal = unit(channel(Channel::Metallic)[0]);
             let f0 = mix3([unit(self.dielectric_reflectance); 3], albedo, metal);
+
             // Without highlights the whole base color is lit, as Baked Lighting did
             let kept = if self.output.specular() { 1.0 - metal } else { 1.0 };
             (unit(channel(Channel::Roughness)[0]), f0, albedo.map(|x| x * kept))
@@ -121,6 +122,7 @@ impl StylizedLighting {
             if facing <= 0.0 || intensity <= 0.0 {
                 continue;
             }
+
             let half = normalize([nrm[0] + dir[0], nrm[1] + dir[1], nrm[2] + dir[2]]);
             let nh = dot(nrm, half).max(0.0);
             let d = ggx(nh, roughness) / 4.0 * facing * specular_cavity;

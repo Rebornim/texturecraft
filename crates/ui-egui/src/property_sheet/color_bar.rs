@@ -1,8 +1,7 @@
 //! A uniform colour's bar with its eyedropper, and the colour picker window it opens beside the panel
 
 use egui::{
-    Align2, Color32, CornerRadius, CursorIcon, FontId, Id, Order, Pos2, Rect, Response, Role, Sense, Shadow, Stroke, StrokeKind, UiBuilder, Vec2, WidgetInfo,
-    pos2, vec2,
+    Align2, CornerRadius, CursorIcon, FontId, Id, Order, Pos2, Rect, Response, Role, Sense, Shadow, Stroke, StrokeKind, UiBuilder, Vec2, WidgetInfo, pos2, vec2,
 };
 use egui_phosphor::regular as ic;
 
@@ -11,6 +10,7 @@ use super::{PAD, PropertySheet};
 use crate::color_picker::{ColorModel, ColorPick, ColorSpace, PickerState};
 use crate::fill_material_panel::shown_color;
 use crate::i18n::tr;
+use crate::theme::HARD_SHADOW;
 
 /// Height of a colour bar
 const COLOR_BAR_HEIGHT: f32 = 16.0;
@@ -47,7 +47,7 @@ const PICKER_HEIGHT_GUESS: f32 = 340.0;
 const PICKER_RADIUS: u8 = 7;
 
 /// The picker's shadow: offset down-right, no blur
-const PICKER_SHADOW: Shadow = Shadow { offset: [2, 4], blur: 0, spread: 0, color: Color32::from_rgb(12, 14, 18) };
+const PICKER_SHADOW: Shadow = Shadow { offset: [2, 4], blur: 0, spread: 0, color: HARD_SHADOW };
 
 /// Where the space and model last picked are kept, so the next picker opens with them
 const PREFERENCES_KEY: &str = "color_picker_preferences";
@@ -172,6 +172,7 @@ impl PropertySheet<'_> {
         let kept = ctx.data_mut(|data| data.get_persisted::<[f32; 2]>(size_id));
         let [width, field_height] = kept.unwrap_or([self.right - self.left + 2.0 * PAD, FIELD_HEIGHT]);
         let screen = ctx.content_rect();
+
         // A kept size may come from a bigger screen or a damaged settings file (max/min also turn NaN into a bound)
         let width = width.max(PICKER_MIN_WIDTH).min(screen.width().max(PICKER_MIN_WIDTH));
         let field_height = field_height.max(FIELD_MIN_HEIGHT).min(screen.height().max(FIELD_MIN_HEIGHT));
@@ -179,11 +180,13 @@ impl PropertySheet<'_> {
         let height = ctx.data(|data| data.get_temp::<f32>(height_id)).unwrap_or(PICKER_HEIGHT_GUESS + field_height - FIELD_HEIGHT);
         let panel = Rect::from_x_y_ranges(self.ui.clip_rect().left().min(self.left - PAD)..=self.right + PAD, screen.y_range());
         let corner = state.moved_to.unwrap_or_else(|| beside(panel, bar.rect.top(), vec2(width, height), screen));
+
         // The title bar stays on screen, so a drag can always bring the window back
         let corner = pos2(
             corner.x.clamp(screen.left(), (screen.right() - width).max(screen.left())),
             corner.y.clamp(screen.top(), (screen.bottom() - TITLE_HEIGHT).max(screen.top())),
         );
+
         // A press that picks from one of the picker's own lists must not close it
         let list_open = egui::Popup::is_any_open(&ctx);
         let tokens = self.tokens;
@@ -248,6 +251,7 @@ impl PropertySheet<'_> {
             let rows = face.height() - field_height;
             let most = vec2(screen.width().max(PICKER_MIN_WIDTH), (screen.height() - rows).max(FIELD_MIN_HEIGHT));
             let (moved, size) = resized(corner, vec2(width, field_height), sides, delta, most);
+
             // A resized window stays where it was put instead of following the panel
             state.moved_to = Some(moved);
             ctx.data_mut(|data| data.insert_persisted(size_id, [size.x, size.y]));
@@ -259,6 +263,7 @@ impl PropertySheet<'_> {
                 && !input.modifiers.alt
                 && input.pointer.interact_pos().is_some_and(|at| !face.contains(at) && !bar.rect.contains(at) && !eyedropper.contains(at))
         });
+
         // The app leaves Escape to an open picker (menus.rs); Escape in the hex field ends the typing first
         let escape = ctx.input(|input| input.key_pressed(egui::Key::Escape)) && ctx.memory(|memory| memory.focused().is_none_or(|focused| focused == bar.id));
         if closed || (!list_open && !waiting && (pressed_outside || escape)) {

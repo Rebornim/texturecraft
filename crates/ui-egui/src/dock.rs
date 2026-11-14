@@ -1427,6 +1427,7 @@ fn properties_place(app: &TextureCraftApp) -> Option<(LayerId, StackTarget)> {
     if app.session.tool.tool == Tool::PolygonFill {
         return None;
     }
+
     app.session.selected_layer().map(|layer| (layer, app.session.target))
 }
 
@@ -1444,6 +1445,7 @@ pub(crate) fn properties_fill_tabs(app: &TextureCraftApp) -> Option<[(&'static s
     if app.session.tool.tool == Tool::PolygonFill && app.session.tool_usable(Tool::PolygonFill) {
         return None;
     }
+
     let project = &app.session.doc.project;
     match app.session.target {
         StackTarget::Content => {
@@ -1563,6 +1565,7 @@ fn tool_properties(app: &mut TextureCraftApp, ui: &mut Ui) {
 
     let stroke_width = (brush.size / 0.25 * 60.0).clamp(2.0, 30.0);
     let alpha = (brush.flow * brush.opacity * 255.0) as u8;
+
     // A mask stroke shows the gray it lays down and no material
     let gray = match (targets_content(app), &app.session.tool.mask_image) {
         (false, None) => (app.session.tool.mask_value.clamp(0.0, 1.0) * 255.0).round() as u8,
@@ -1578,6 +1581,7 @@ fn tool_properties(app: &mut TextureCraftApp, ui: &mut Ui) {
 
     ui.horizontal(|ui| {
         let button_size = ui.spacing().interact_size.y;
+
         // Painting a mask, the material tab becomes the Grayscale tab
         let material = if targets_content(app) { (ic::SPHERE, tr("Material")) } else { (ic::SQUARE_HALF, tr("Grayscale")) };
         for (tab, icon, tip) in

@@ -43,6 +43,9 @@ const CHANNEL_PILL_GAP: f32 = 4.0;
 /// Air under the channel strip
 const CHANNEL_STRIP_AIR: f32 = 6.0;
 
+/// The least air around a channel pill's name before the names shrink a point
+const PILL_TEXT_AIR: f32 = 10.0;
+
 impl PropertySheet<'_> {
     /// Two to four short choices as a boxed switch, or a dropdown when one doesn't fit; returns the picked index
     pub(crate) fn switch(&mut self, label: &str, options: &[&str], selected: usize) -> Option<usize> {
@@ -74,6 +77,7 @@ impl PropertySheet<'_> {
             let name = |index: usize| options.get(index).copied().unwrap_or_default().to_owned();
             return self.dropdown(label, selected, &indices, name, None).0;
         }
+
         let (control, _) = self.row_with(RowLead::Label { text: label, stack: true });
         self.segments(control, options, selected, &[], None)
     }
@@ -178,6 +182,7 @@ impl PropertySheet<'_> {
         let center_y = rect.center().y;
         self.paint_info_at_end(center_y);
         let font = FontId::proportional(TEXT_SIZE);
+
         // A name too long for the label column pushes the picture right instead of running under it
         let picture_x = self.column().max(self.left + self.text_width(label, font.clone()) + super::LABEL_MIN_AIR);
         let square = Rect::from_min_size(pos2(picture_x, center_y - ROW_PICTURE_SIZE / 2.0), vec2(ROW_PICTURE_SIZE, ROW_PICTURE_SIZE));
@@ -244,8 +249,11 @@ impl PropertySheet<'_> {
         let rect = self.take(CHANNEL_PILL_HEIGHT);
         let count = names.len().max(1) as f32;
         let width = (self.right - self.left - (count - 1.0) * CHANNEL_PILL_GAP) / count;
-        let size =
-            if names.iter().all(|name| self.text_width(name, semibold(SMALL_TEXT_SIZE)) + 10.0 <= width) { SMALL_TEXT_SIZE } else { SMALL_TEXT_SIZE - 1.0 };
+        let size = if names.iter().all(|name| self.text_width(name, semibold(SMALL_TEXT_SIZE)) + PILL_TEXT_AIR <= width) {
+            SMALL_TEXT_SIZE
+        } else {
+            SMALL_TEXT_SIZE - 1.0
+        };
 
         let t = self.tokens;
         let mut clicked = None;

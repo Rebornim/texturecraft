@@ -173,6 +173,7 @@ fn framed(s: &Session, cmd: &str, id: LayerId, effect: Option<LayerId>) -> Resul
         },
     };
     let projection = placed_from_axis(projection, s.mesh.bounds()).unwrap_or_else(|| projection.clone());
+
     // The frame moves as it lands: a projector's own turn and scale go into it first
     let projection = folded(&projection).unwrap_or(projection);
     let frame =
@@ -186,6 +187,7 @@ fn placed_as_shown(s: &Session, cmd: &str, p: &Value, projection: &Projection) -
     if fields.iter().all(|key| p.get(*key).is_none()) {
         return Ok(None);
     }
+
     let read = |key: &str| match p.get(key) {
         None => Ok(None),
         Some(_) => vec3(p, key).map(Some).ok_or_else(|| bad(cmd, format!("`{key}` must be [x, y, z]"))),

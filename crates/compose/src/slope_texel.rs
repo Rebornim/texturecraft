@@ -17,11 +17,13 @@ pub(crate) fn slope_texel(
     let probe = SourceWarp::probe_texels(res);
     let downhill = [source.at(x - probe, y) - source.at(x + probe, y), source.at(x, y - probe) - source.at(x, y + probe)];
     let steepness = downhill[0].hypot(downhill[1]);
+
     // A flat spot keeps its value
     if steepness.is_nan() || steepness <= 1e-6 {
         sample(x, y, acc);
         return;
     }
+
     let [dx, dy] = downhill.map(|rise| rise / steepness);
     let reach = slope.move_texels(res);
     let reads = slope.samples((reach.ceil() as u32).clamp(1, LINE_SAMPLES.unsigned_abs()));
@@ -33,6 +35,7 @@ pub(crate) fn slope_texel(
         }
         return;
     }
+
     let larger = slope.blending == SlopeBlending::Max;
     let mut picked: Option<[f32; 5]> = None;
     for t in along {
@@ -41,6 +44,7 @@ pub(crate) fn slope_texel(
         if read[4] <= 1e-6 {
             continue;
         }
+
         let read = read.map(|component| component / read[4]);
         picked = Some(match picked {
             Some(so_far) => std::array::from_fn(|k| if larger { so_far[k].max(read[k]) } else { so_far[k].min(read[k]) }),

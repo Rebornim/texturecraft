@@ -209,7 +209,7 @@ impl Builder<'_> {
     fn fill(&mut self, name: &str, sources: Sources) -> Layer {
         let id = self.p.alloc_id();
         let enabled: Vec<Channel> = sources.iter().map(|(c, _)| *c).filter(|c| self.channels.contains(c)).collect();
-        let projection = Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: Default::default(), projector: Default::default() };
+        let projection = Projection::triplanar();
         Layer::new(id, name, LayerKind::Fill(Fill { sources: sources.into_iter().collect(), projection, ..Fill::default() }), &enabled)
     }
 
@@ -748,6 +748,7 @@ pub fn apply_at(s: &mut Session, id: &str, place: Place) -> Result<LayerId> {
         }
         let top = if layers.len() == 1 {
             let mut l = layers.into_iter().next().ok_or_else(|| EngineError::Other("empty material".into()))?;
+
             // A plain material's fill remembers it, so its Material side names it
             if let (false, LayerKind::Fill(fill)) = (m.smart, &mut l.kind) {
                 fill.material = Some(m.id.to_string());

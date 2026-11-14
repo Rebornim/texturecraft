@@ -10,6 +10,9 @@ pub(super) struct Screen {
     pub(super) half: f32,
 }
 
+/// A hit this close in front of the point is the point's own surface
+const OWN_SURFACE_DEPTH: f32 = 1e-3;
+
 impl Screen {
     pub(super) fn at(&self, point: Vec3) -> Pos2 {
         let per_radius = self.rect.width() * 0.5 / self.half;
@@ -19,6 +22,6 @@ impl Screen {
     /// Whether `shape` hides `point` from the camera
     pub(super) fn hidden(&self, shape: PreviewShape, point: Vec3) -> bool {
         let origin = point + self.view.eye * CAMERA_DISTANCE;
-        intersect(shape, origin, self.view.forward).is_some_and(|hit| (hit.pos - point).dot(self.view.eye) > 1e-3)
+        intersect(shape, origin, self.view.forward).is_some_and(|hit| (hit.pos - point).dot(self.view.eye) > OWN_SURFACE_DEPTH)
     }
 }

@@ -353,11 +353,14 @@ fn fill_set(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(input) = strp(p, "input") {
         return input_set(s, p, input);
     }
+
     let target = fill_target(s, p, "layer.fill.set")?;
     if let FillTarget::Mask(effect) = target {
         return mask_fill_set(s, p, effect);
     }
+
     let ch = channel_param("layer.fill.set", p, "channel")?.ok_or_else(|| bad("layer.fill.set", "`channel` is required"))?;
+
     // `solo`: this channel on, every other one off
     let solo = boolp(p, "solo") == Some(true);
     let enabled = if solo { Some(true) } else { boolp(p, "enabled") };
@@ -395,6 +398,7 @@ fn fill_set(s: &mut Session, p: &Value) -> Result<Value> {
     if normal_format.is_some() && source.as_ref().is_some_and(|src| !matches!(src, Source::Image { .. })) {
         return Err(bad("layer.fill.set", "`normalFormat` goes with `image` or alone"));
     }
+
     // A format-only edit leaves the channel on or off
     let touches_channel = source.is_some() || enabled.is_some();
     s.edit("Set fill", |s| {
@@ -402,6 +406,7 @@ fn fill_set(s: &mut Session, p: &Value) -> Result<Value> {
             s.add_library_alpha(alpha)?;
         }
         let f = fill_mut(s, target)?;
+
         // `normalFormat` alone: the convention of the channel's image
         if let (None, Some(nf)) = (&source, normal_format) {
             match f.sources.get_mut(&ch) {
@@ -409,6 +414,7 @@ fn fill_set(s: &mut Session, p: &Value) -> Result<Value> {
                 _ => return Err(bad("layer.fill.set", "`normalFormat` needs an image on the channel")),
             }
         }
+
         // A channel set on its own: the sources are no longer one whole material
         if source.is_some() {
             f.material = None;
@@ -451,6 +457,7 @@ fn mask_fill_set(s: &mut Session, p: &Value, effect: LayerId) -> Result<Value> {
     if ["channel", "enabled", "solo", "normalFormat"].iter().any(|key| p.get(key).is_some()) {
         return Err(bad(FILL_SET, "a mask fill has one grayscale source: leave out `channel`, `enabled`, `solo` and `normalFormat`"));
     }
+
     let current = mask_source_mut(s, effect)?.clone();
     let (source, library_alpha) = gray_source(s, p, effect, current)?;
     s.edit("Set fill", |s| {
@@ -472,6 +479,7 @@ fn input_set(s: &mut Session, p: &Value, id: &str) -> Result<Value> {
     if ["channel", "enabled", "solo", "normalFormat"].iter().any(|key| p.get(key).is_some()) {
         return Err(bad(FILL_SET, "an image input is one grayscale source: leave out `channel`, `enabled`, `solo` and `normalFormat`"));
     }
+
     let (source, library_alpha) = if p.get("clear").and_then(Value::as_bool) == Some(true) {
         (None, None)
     } else {
@@ -483,6 +491,7 @@ fn input_set(s: &mut Session, p: &Value, id: &str) -> Result<Value> {
             s.add_library_alpha(alpha)?;
         }
         let found = s.doc.project.effect_mut(effect).ok_or_else(|| bad(FILL_SET, "the effect is gone"))?;
+
         // Its default gray is not stored, so a project that never set the input saves as before
         match source.filter(|source| *source != input.default_source()) {
             Some(source) => found.inputs.insert(input.id.to_string(), source),
@@ -511,6 +520,7 @@ fn gray_source(s: &Session, p: &Value, effect: LayerId, current: Source) -> Resu
         Ok((Source::image(crate::fill_alpha::resource_name(alpha)), Some(alpha)))
     } else if let Some(anchor) = u64p(p, "anchor") {
         let reader = s.doc.project.effect(effect).map(|(owner, _)| owner).ok_or_else(|| bad(FILL_SET, "the effect is not in a layer"))?;
+
         // A gray reads one channel of the anchor's stack: the one it read, else Height
         let kept = match current {
             Source::Anchor { channel, .. } => channel,
@@ -547,6 +557,7 @@ fn procedural_source(p: &Value, kind: ProceduralKind, current: Option<Source>, n
     if let Some(invert) = boolp(p, "invert") {
         pattern.invert = invert;
     }
+
     // `{relative}` or `{fixed}` as `material.link.resolution`; the texture set's own size is stored as none
     if let Some(size) = p.get("resolution") {
         pattern.resolution = crate::link_cmds::picked_resolution(size)
@@ -568,9 +579,7 @@ pub(crate) fn new_unframed_projection(id: &str) -> Option<Projection> {
     let projection = match id {
         "uv" => Projection::default(),
         "uvTile" => Projection::UvTile,
-        "triplanar" | "tri-planar" => {
-            Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: Default::default(), projector: Default::default() }
-        }
+        "triplanar" | "tri-planar" => Projection::triplanar(),
         "planar" => Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: Default::default(), projector: Projector::depth_culled(), placed: None },
         "spherical" => Projection::Spherical { scale: 1.0, uv: Default::default(), offset: [0.0; 3], projector: Default::default() },
         "cylindrical" => Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default(), offset: [0.0; 3], projector: Default::default(), angle: 360.0 },
@@ -595,12 +604,14 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
     let tiling = floats::<2>(p, "tiling", MIN_SCALE, MAX_PLACEMENT);
     let rotation = f32p(p, "rotation").map(|r| r.rem_euclid(360.0));
     let axis = u64p(p, "axis").map(|a| a.min(2) as u8);
+
     // The UV transformations of a 3D projection: tiling, rotation and an offset across the surface
     let place = |uv: &mut UvTransform| {
         uv.tiling = tiling.unwrap_or(uv.tiling);
         uv.rotation = rotation.unwrap_or(uv.rotation);
         uv.offset = floats(p, "uvOffset", -MAX_PLACEMENT, MAX_PLACEMENT).unwrap_or(uv.offset);
     };
+
     // The 3D projection settings: the projector's offset, turn and per-axis scale
     let offset3 = floats::<3>(p, "offset", -MAX_PLACEMENT, MAX_PLACEMENT);
     let crop = match strp(p, "shapeCrop") {

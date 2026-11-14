@@ -114,6 +114,9 @@ fn channel_pills(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effec
 /// How soon a filter card whose picture is still rendering looks for it again
 const THUMBNAIL_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
+/// The hourglass size on a slot whose picture is still rendering
+const WAITING_GLYPH_SIZE: f32 = 12.0;
+
 /// The card naming the filter (or None): a click opens the filter picker under it, × empties it; returns whether its ⟲ (live while `changed`) was clicked
 fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect: LayerId, filter: &Filter, changed: bool) -> bool {
     let ctx = sheet.ui.ctx().clone();
@@ -124,6 +127,7 @@ fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect:
         Some(texture) => {
             painter.image(texture.id(), rect, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
         }
+
         // A picked filter whose picture is still rendering: a filled square, so it never reads as the empty card's outline
         None if !empty => {
             painter.rect_filled(rect.shrink(1.0), 3, tokens.button);
@@ -131,7 +135,7 @@ fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect:
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 egui_phosphor::regular::HOURGLASS_MEDIUM,
-                egui::FontId::proportional(12.0),
+                egui::FontId::proportional(WAITING_GLYPH_SIZE),
                 tokens.text_dim,
             );
             ctx.request_repaint_after(THUMBNAIL_POLL);
@@ -380,6 +384,7 @@ fn color_match(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64
     if !matcher.custom_variation {
         return;
     }
+
     if sheet.card(tr("Color Variation"), Some(true)) {
         let mut hue = matcher.hue;
         if let Some(merge) = sheet.angle(tr("Hue"), &mut hue, 0.0..=360.0) {
@@ -680,6 +685,7 @@ fn color_balance(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u
             sheet.close_card();
             continue;
         }
+
         let mut balance = *values;
         let mut edit = None;
         for (component, (value, (left, right))) in balance.iter_mut().zip(ends).enumerate() {
@@ -701,6 +707,7 @@ fn color_correct(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u
             sheet.close_card();
             continue;
         }
+
         let [mut contrast, mut luminosity, mut saturation] = *values;
         let edit = sheet
             .signed_slider(tr("Contrast"), &mut contrast, -1.0..=1.0, 2)
@@ -769,6 +776,7 @@ fn gradient(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, f
 
     if sheet.card(tr("Colors"), Some(true)) {
         let used = filter.ramp_colors();
+
         // An evenly spaced ramp (projects saved before) shows its places, and keeps them once one moves
         let last = used.len().saturating_sub(1).max(1) as f32;
         let mut places: Vec<f32> = (0..colors.len()).map(|index| positions.get(index).copied().unwrap_or(index as f32 / last)).collect();
@@ -865,6 +873,7 @@ fn gradient_source(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id:
     let swatch = |painter: &Painter, rect: Rect| {
         painter.rect_filled(rect, 3, crate::fill_material_panel::shown_color(color));
     };
+
     // The card's row opens the picker of the colour bar under it: its source is a uniform color only
     let card = sheet.slot(&swatch, tr("Gradient Source"), tr("Uniform"), None, false, false);
     let pick = sheet.color_bar(tr("Gradient Source"), color, app.picking_color, &app.session.doc.project.swatches);
@@ -915,7 +924,7 @@ fn drop_shadow(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64
 /// Baked Lighting Stylized: a card each for the Sun, the Sky, Light 1 and 2, Occlusion and cavity, the Material and Normal details (one saved before shows its plain settings)
 fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, filter: &Filter) {
     let Filter::BakedLighting { azimuth, elevation, light, ambient, occlusion, stylized } = filter else { return };
-    let s = stylized.as_deref().unwrap_or(&StylizedLighting::PLAIN);
+    let lighting = stylized.as_deref().unwrap_or(&StylizedLighting::PLAIN);
     let set = |app: &mut TextureCraftApp, params: Value| {
         let mut params = params;
         params["effect"] = json!(id);
@@ -936,7 +945,7 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
                 set(app, json!({key: value, "merge": merge}));
             }
         }
-        let pick = sheet.color_bar_led(tr("Sun Color"), s.sun_color, app.picking_color, &swatches);
+        let pick = sheet.color_bar_led(tr("Sun Color"), lighting.sun_color, app.picking_color, &swatches);
         if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
             set(app, json!({"sunColor": picked, "merge": pick.merge}));
         }
@@ -949,9 +958,9 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
             set(app, json!({"ambient": value, "merge": merge}));
         }
         for (key, label, color) in [
-            ("skyColor", tr("Sky Color"), s.sky_color),
-            ("horizonColor", tr("Horizon Color"), s.horizon_color),
-            ("groundColor", tr("Ground Color"), s.ground_color),
+            ("skyColor", tr("Sky Color"), lighting.sky_color),
+            ("horizonColor", tr("Horizon Color"), lighting.horizon_color),
+            ("groundColor", tr("Ground Color"), lighting.ground_color),
         ] {
             let pick = sheet.color_bar_led(label, color, app.picking_color, &swatches);
             if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
@@ -961,7 +970,7 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
     }
     sheet.close_card();
 
-    for (key, title, extra) in [("light1", tr("Light 1"), s.lights[0]), ("light2", tr("Light 2"), s.lights[1])] {
+    for (key, title, extra) in [("light1", tr("Light 1"), lighting.lights[0]), ("light2", tr("Light 2"), lighting.lights[1])] {
         if sheet.card(title, Some(true)) {
             extra_light(app, sheet, id, key, extra, &swatches);
         }
@@ -971,12 +980,12 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
     if sheet.card(tr("Occlusion and cavity"), Some(true)) {
         let rows = [
             ("occlusion", tr("Diffuse AO"), *occlusion, 1.0),
-            ("diffuseCavity", tr("Diffuse Cavity"), s.diffuse_cavity, 1.0),
-            ("specularAo", tr("Specular AO"), s.specular_ao, 1.0),
-            ("specularCavity", tr("Specular Cavity"), s.specular_cavity, 1.0),
-            ("cavitySmoothness", tr("Cavity Smoothness"), s.cavity_smoothness, MAX_CAVITY_SMOOTHNESS),
-            ("edgesIntensity", tr("Edges Intensity"), s.edges_intensity, 1.0),
-            ("edgesSmoothness", tr("Edges Smoothness"), s.edges_smoothness, 1.0),
+            ("diffuseCavity", tr("Diffuse Cavity"), lighting.diffuse_cavity, 1.0),
+            ("specularAo", tr("Specular AO"), lighting.specular_ao, 1.0),
+            ("specularCavity", tr("Specular Cavity"), lighting.specular_cavity, 1.0),
+            ("cavitySmoothness", tr("Cavity Smoothness"), lighting.cavity_smoothness, MAX_CAVITY_SMOOTHNESS),
+            ("edgesIntensity", tr("Edges Intensity"), lighting.edges_intensity, 1.0),
+            ("edgesSmoothness", tr("Edges Smoothness"), lighting.edges_smoothness, 1.0),
         ];
         for (key, label, value, max) in rows {
             let mut value = value;
@@ -989,14 +998,14 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
 
     if sheet.card(tr("Material"), Some(true)) {
         let input = |glossiness: bool| tr(if glossiness { "Specular / Glossiness" } else { "Metal / Roughness" }).to_owned();
-        if let (Some(glossiness), _) = sheet.dropdown(tr("Input"), s.specular_glossiness, &[false, true], input, None) {
+        if let (Some(glossiness), _) = sheet.dropdown(tr("Input"), lighting.specular_glossiness, &[false, true], input, None) {
             set(app, json!({"input": if glossiness { "specularGlossiness" } else { "metalRoughness" }}));
         }
         let output = |output: LightingOutput| tr(output.label()).to_owned();
-        if let (Some(picked), _) = sheet.dropdown(tr("Output"), s.output, &LightingOutput::ALL, output, None) {
+        if let (Some(picked), _) = sheet.dropdown(tr("Output"), lighting.output, &LightingOutput::ALL, output, None) {
             set(app, json!({"output": picked.id()}));
         }
-        let mut value = s.dielectric_reflectance;
+        let mut value = lighting.dielectric_reflectance;
         if let Some(merge) = sheet.slider(tr("Dielectric Reflectance"), &mut value, 0.0..=MAX_DIELECTRIC_REFLECTANCE, 2) {
             set(app, json!({"dielectricReflectance": value, "merge": merge}));
         }
@@ -1005,10 +1014,10 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
 
     if sheet.card(tr("Normal details"), Some(true)) {
         let details = |mesh_only: bool| tr(if mesh_only { "Mesh only" } else { "Mesh + Height + Normal" }).to_owned();
-        if let (Some(mesh_only), _) = sheet.dropdown(tr("Normal Details Type"), s.mesh_only, &[true, false], details, None) {
+        if let (Some(mesh_only), _) = sheet.dropdown(tr("Normal Details Type"), lighting.mesh_only, &[true, false], details, None) {
             set(app, json!({"normalDetails": if mesh_only { "mesh" } else { "meshHeightNormal" }}));
         }
-        let mut value = s.height_to_normal;
+        let mut value = lighting.height_to_normal;
         if let Some(merge) = sheet.slider(tr("Height to Normal Intensity"), &mut value, 0.0..=MAX_HEIGHT_TO_NORMAL, 2) {
             set(app, json!({"heightToNormal": value, "merge": merge}));
         }

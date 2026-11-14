@@ -28,6 +28,7 @@ fn app_with_fill(projection: &str) -> (Harness<'static, TextureCraftApp>, u64) {
     texturecraft_engine::execute(&mut session, "layer.fill.projection", &json!({"layer": layer, "projection": projection})).unwrap();
 
     let mut harness = Harness::builder().with_size(WINDOW_SIZE).build_eframe(|cc| TextureCraftApp::new(cc, session));
+
     // The labels below are English; a first run would speak the system's language
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(STARTUP_FRAMES);
@@ -67,6 +68,7 @@ fn each_projection_shows_its_own_rows() {
     assert!(!shows(&harness, "Reset frame"), "planar has no frame to reset");
 
     let (harness, _) = app_with_fill("warp");
+
     // A warp's 3D projection settings are its frame's: where its centre is, its turn and its size
     for label in ["Depth", "Reset frame", "Depth culling", "Offset X", "Rotation X", "Scale X"] {
         assert!(shows(&harness, label), "warp: {label}");
@@ -110,6 +112,7 @@ const TIP_VALUE_ROOM: f32 = 70.0;
 #[test]
 fn the_culling_rows_i_explains_the_row_on_hover_without_covering_its_values() {
     let (mut harness, layer) = app_with_fill("planar");
+
     // The i ends on the panel's right edge, where the values end
     let panel_right = harness.get_by_label(DEPTH_CULLING_TIP).rect().right();
     for (tip, row) in [(DEPTH_CULLING_TIP, "Depth culling"), (BACKFACE_CULLING_TIP, "Backface culling")] {
@@ -143,6 +146,7 @@ const WARP_DEPTH_TIP: &str = "How far the warp projection reaches into the mesh,
 #[test]
 fn shape_crop_sits_beside_its_label_and_a_warps_depth_explains_itself() {
     let (harness, _) = app_with_fill("warp");
+
     // Beside its label like Filtering, not under a stacked label at the panel's full width
     let crop = harness.get_by_label("Extends Outside Shape").rect();
     let filtering = harness.get_by_label("Bilinear | HQ").rect();

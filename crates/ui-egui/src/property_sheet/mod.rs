@@ -54,7 +54,9 @@ pub(crate) use number_field::NumberField;
 pub(crate) use preview_lower::PreviewLower;
 pub(crate) use preview_size::PreviewSize;
 pub(crate) use row_lead::RowLead;
-pub(crate) use section_tabs::{SectionScope, in_scope, section_tabs};
+pub(crate) use section_tabs::{
+    SectionScope, TAB_GAP, TAB_ICON_CENTER, TAB_ICON_SIZE, TAB_NAME_LEFT, TAB_PADDING, TAB_ROUNDING, TAB_TEXT_SIZE, TAB_TOP, in_scope, section_tabs,
+};
 pub(crate) use slot_response::SlotResponse;
 pub(crate) use stack_slider::StackSlider;
 
@@ -109,6 +111,21 @@ const ICON_SIZE: f32 = 12.0;
 /// Size of a picture row's picture, and the air after it
 const ROW_PICTURE_SIZE: f32 = 18.0;
 const ROW_PICTURE_AIR: f32 = 8.0;
+
+/// The click square of a glyph button inside a row
+const GLYPH_TARGET: f32 = 18.0;
+
+/// How far above and below a row's centre a slider track or a typed value takes the pointer
+const ROW_HIT_HALF_HEIGHT: f32 = 10.0;
+
+/// Size of a row's glyph button glyphs (eyedropper, remove, arrow)
+const GLYPH_SIZE: f32 = 13.0;
+
+/// Corner radius of a hovered row's face
+const ROW_RADIUS: u8 = 6;
+
+/// Air above and below a picture block, as a control has in its row
+const BLOCK_MARGIN: f32 = 2.0;
 
 /// The Properties panel being laid out this frame: where the controls column is, which card is open, and what this frame measured for the next one
 pub(crate) struct PropertySheet<'u> {

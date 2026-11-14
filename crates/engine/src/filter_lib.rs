@@ -6,8 +6,9 @@ use serde_json::{Value, json};
 use texturecraft_core::{
     AnisotropicKuwahara, Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, ColorMatch, ConversionMode, CurvePreset, DirectionalDistance,
     EffectKind, Fill, Filter, GradientInput, GrayscaleConversion, GrayscaleMode, HeightToNormal, HighpassSpace, Levels, MaskOutline, Mirror, MirrorCorner,
-    MirrorMode, OutlinePosition, PbrValidate, Procedural, ProceduralKind, Projection, SlopeBlending, Source, SourceColorMode, SourceSlopeBlur, SourceWarp,
-    StylizedLighting, TargetColorMode, ThresholdMode, TileTransform, ValidationMode, WarpBlending, WarpMode, WarpSourceMode,
+    MirrorMode, OutlinePosition, POSTERIZE_LEVELS_MAX, PbrValidate, Procedural, ProceduralKind, Projection, SlopeBlending, Source, SourceColorMode,
+    SourceSlopeBlur, SourceWarp, StylizedLighting, TargetColorMode, ThresholdMode, TileTransform, ValidationMode, WarpBlending, WarpMode, WarpSource,
+    WarpSourceMode,
 };
 
 use crate::commands::{CommandSpec, always, bad, boolp, color_of, color_param, f32p, has_layer, strp, u64p};
@@ -104,8 +105,8 @@ fn norm(s: &str) -> String {
 
 /// The library filter `id` (case and separators ignored; labels work too). Directional Warp's former id and labels find Warp, whose mode it is now
 pub fn find(id: &str) -> Option<&'static FilterDef> {
-    let n = if is_directional_warp(id) { norm("warp") } else { norm(id) };
-    FILTERS.iter().find(|f| norm(f.id) == n || norm(f.label) == n)
+    let wanted = if is_directional_warp(id) { norm("warp") } else { norm(id) };
+    FILTERS.iter().find(|f| norm(f.id) == wanted || norm(f.label) == wanted)
 }
 
 /// Whether `id` names Directional Warp, a filter of its own before the warp modes (`warpDirectional`, "Warp Directional", "Directional Warp")
@@ -195,16 +196,14 @@ const MID_GRAY: f32 = 0.214;
 /// A new glow's warm light, in linear RGB
 const GLOW_COLOR: [f32; 3] = [0.871, 0.578, 0.188];
 
-use texturecraft_core::POSTERIZE_LEVELS_MAX;
-
 pub use crate::stylized_lighting_params::{MAX_CAVITY_SMOOTHNESS, MAX_DIELECTRIC_REFLECTANCE, MAX_HEIGHT_TO_NORMAL, MAX_LIGHT_INTENSITY};
 
 /// A Seed slider's end; any seed can be typed
 const SEED_SLIDER_MAX: f32 = 999.0;
 
 /// The Tiling range of a warp's or slope blur's source
-pub const SOURCE_TILING_MIN: f32 = 0.01;
-pub const SOURCE_TILING_MAX: f32 = 16.0;
+pub const SOURCE_TILING_MIN: f32 = WarpSource::TILING_MIN;
+pub const SOURCE_TILING_MAX: f32 = WarpSource::TILING_MAX;
 
 /// The Source Tiling slider range of a noise-driven warp or blur
 const NOISE_TILING_MIN: f32 = 0.5;
@@ -230,13 +229,13 @@ const MOSAIC_SIZE_MAX: f32 = 2048.0;
 const HEIGHT_MULTIPLY_MAX: f32 = 10.0;
 
 /// Distance Bevel's largest Smoothing
-pub const DISTANCE_BEVEL_SMOOTHING_MAX: f32 = 5.0;
+pub const DISTANCE_BEVEL_SMOOTHING_MAX: f32 = Bevel::SMOOTHING_MAX;
 
 /// Bevel Smooth's and Directional Distance's largest Distance, as a share of the texture
 pub const SMOOTH_DISTANCE_MAX: f32 = 0.3;
 
 /// Bevel Smooth's largest Smoothing
-pub const BEVEL_SMOOTHING_MAX: f32 = 10.0;
+pub const BEVEL_SMOOTHING_MAX: f32 = BevelSmooth::SMOOTHING_MAX;
 
 /// Stylized lighting's Sun Intensity, Exposure (stops either way) and Height Intensity ends
 pub const SUN_INTENSITY_MAX: f32 = 10.0;
@@ -336,10 +335,7 @@ fn mat_finish(id: &str) -> Option<Fill> {
         _ => return None,
     };
     let pattern = Procedural { scale, ..Procedural::new(kind) };
-    let mut fill = Fill {
-        projection: Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: Default::default(), projector: Default::default() },
-        ..Fill::default()
-    };
+    let mut fill = Fill { projection: Projection::triplanar(), ..Fill::default() };
     fill.sources.insert(Channel::Roughness, Source::Procedural { pattern: pattern.clone(), low: [rough[0]; 3], high: [rough[1]; 3] });
     fill.sources.insert(Channel::Height, Source::Procedural { pattern, low: [-height; 3], high: [height; 3] });
     Some(fill)
@@ -607,6 +603,7 @@ fn choice<T: Copy>(p: &Value, key: &str, all: &[T], id: fn(T) -> &'static str, c
     if p.get(key).is_none() {
         return Ok(None);
     }
+
     let given = strp(p, key).unwrap_or_default();
     let found = all.iter().copied().find(|choice| id(*choice) == given);
     found.map(Some).ok_or_else(|| {
@@ -640,6 +637,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
         }
         Ok(())
     };
+
     // A blur's Intensity in the reference workflow's unit (radius in texels at 2K ÷ Filter::BLUR_INTENSITY)
     let blur_intensity = |radius: &mut f32| {
         if let Some(intensity) = f32p(p, "intensity") {
@@ -1010,6 +1008,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             if let Some(v) = f32p(p, "azimuth") {
                 *azimuth = v.rem_euclid(360.0);
             }
+
             // A light past the zenith comes from the far side: the angle wraps like the horizontal one
             if let Some(v) = f32p(p, "elevation") {
                 *elevation = v.rem_euclid(360.0);
@@ -1017,6 +1016,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             set(light, "light", 0.0, SUN_INTENSITY_MAX);
             set(ambient, "ambient", 0.0, 10.0);
             set(occlusion, "occlusion", 0.0, 1.0);
+
             // A Baked Lighting saved before the stylized settings takes them lit as it was
             if crate::stylized_lighting_params::sets_any(p) {
                 crate::stylized_lighting_params::apply(p, stylized.get_or_insert_with(|| Box::new(StylizedLighting::PLAIN)), cmd)?;
@@ -1052,6 +1052,7 @@ mod tests {
     fn every_filter_builds_and_finds_by_id_or_label() {
         for f in FILTERS {
             let kind = build(f.id, &Value::Null).unwrap_or_else(|e| panic!("{}: {e}", f.id));
+
             // Material finishes are content only; other filters also run on masks, where some (normal invert) change nothing and are not offered
             assert_eq!(kind.content_only().is_none(), f.mask || matches!(kind, EffectKind::Filter(_)), "{}", f.id);
             assert_eq!(find(f.label).map(|d| d.id), Some(f.id));

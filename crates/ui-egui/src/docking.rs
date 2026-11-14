@@ -572,6 +572,7 @@ impl DockContent<Panel> for Panels<'_> {
         if !header_closes(active, floating) {
             return;
         }
+
         let rect = ui.max_rect();
         let button = egui::Rect::from_center_size(
             egui::pos2(rect.right() - HEADER_CLOSE_RIGHT_MARGIN - HEADER_CLOSE_SIZE / 2.0, rect.center().y),

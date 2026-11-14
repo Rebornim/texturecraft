@@ -29,11 +29,13 @@ impl Worker {
                         return;
                     }
                 }
+
                 // Every quick picture before any full one, so a list fills in at once
                 let next = waiting.iter().position(|job| job.quick).unwrap_or(0);
                 if next >= waiting.len() {
                     continue;
                 }
+
                 let mut job = waiting.remove(next);
                 let image = match &pool {
                     Ok(pool) => pool.install(|| job.picture()),
@@ -43,6 +45,7 @@ impl Worker {
                 if result_tx.send(OrbResult::Picture { key: job.key, full, image }).is_err() {
                     return;
                 }
+
                 ctx.request_repaint();
                 if !full {
                     job.quick = false;

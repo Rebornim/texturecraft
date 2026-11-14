@@ -79,6 +79,7 @@ fn set_contents(s: &mut Session, p: &Value) -> Result<Value> {
     if scale.is_none() && rotation.is_none() {
         return Err(bad(CMD, "give `scale` and/or `rotation`"));
     }
+
     let current = s.doc.project.contents_offset(id);
     let offset = ContentsOffset::new(scale.unwrap_or(current.scale), rotation.unwrap_or(current.rotation));
     s.edit("Folder contents", |s| {
@@ -95,6 +96,7 @@ fn reset_contents(s: &mut Session, p: &Value) -> Result<Value> {
     if !contents_changed(&s.doc.project, id) {
         return Ok(Value::Null);
     }
+
     let mut inside = Vec::new();
     descendants(&s.doc.project, id, 0, &mut inside);
     s.edit("Reset folder contents", |s| {
@@ -103,6 +105,7 @@ fn reset_contents(s: &mut Session, p: &Value) -> Result<Value> {
         let randomized = randomized_mut(&mut s.doc.project, id).map(std::mem::take).unwrap_or_default();
         for record in randomized.iter().filter(|record| inside.contains(&record.layer)) {
             let Some(layer) = s.doc.project.layers.get_mut(&record.layer) else { continue };
+
             // Only a seed still at the value Randomize seeds gave it goes back: one changed since keeps the artist's pick
             if let Some(seed) = layer_seeds(layer).into_iter().nth(record.index as usize).filter(|seed| **seed == record.after) {
                 *seed = record.before;
@@ -122,6 +125,7 @@ fn randomize_seeds(s: &mut Session, p: &Value) -> Result<Value> {
     if seeds == 0 {
         return Ok(json!({ "seeds": 0 }));
     }
+
     // One mixing key per folder: a seed maps to the same new seed wherever it is, so patterns that lined up still do
     let key = mix(folder.0 as u32 ^ (folder.0 >> 32) as u32);
     s.edit("Randomize seeds", |s| {
@@ -169,6 +173,7 @@ fn descendants(project: &Project, id: LayerId, depth: usize, out: &mut Vec<Layer
     if depth > MAX_DEPTH {
         return;
     }
+
     for child in project.layers.get(&id).map(|l| l.children().to_vec()).unwrap_or_default() {
         out.push(child);
         descendants(project, child, depth + 1, out);

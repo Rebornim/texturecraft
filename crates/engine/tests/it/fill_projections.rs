@@ -218,6 +218,7 @@ fn warp_projection_bends_to_its_corners_reaches_its_depth_and_resets_its_frame()
 
     set(&mut s, layer, json!({"shapeCrop": "cropped", "warpCorners": Projection::FRAME_CORNERS}));
     let cropped = snapshot(&mut s);
+
     // Depth 0.1 of a frame 2 wide reaches 0.2 in front of and behind the frame through the sphere's middle
     let (beyond, within) = (facing_z(&s, 0.35, 1.1), facing_z(&s, -0.05, 0.05));
     assert!(!beyond.is_empty() && !within.is_empty());
@@ -291,6 +292,7 @@ fn fill_symmetry_mirrors_or_turns_copies_of_a_3d_projection() {
     execute(&mut s, "layer.visible", &json!({"layer": layer.0, "visible": false})).unwrap();
     let empty = snapshot(&mut s);
     execute(&mut s, "layer.visible", &json!({"layer": layer.0, "visible": true})).unwrap();
+
     // Depth culled from +Z, the planar projection reaches only the near side
     set(&mut s, layer, json!({"projection": "planar", "axis": 2}));
     let plain = snapshot(&mut s);
@@ -375,6 +377,7 @@ fn a_frame_takes_its_offset_rotation_and_scale_and_folds_its_projector_in_first(
     execute(&mut s, "layer.fill.set", &json!({"layer": layer.0, "channel": "baseColor", "image": ramp})).unwrap();
     set(&mut s, layer, json!({"projection": "planar", "axis": 2}));
     execute(&mut s, "layer.decal.set", &json!({"layer": layer.0})).unwrap();
+
     // Depth culling off: its depth map is drawn along the frame, so a folded turn re-draws it (a few silhouette texels differ)
     set(&mut s, layer, json!({"projectorRotation": [0, 0, 30], "projectorScale": 1.25, "depthCulling": false}));
     let turned = snapshot(&mut s);

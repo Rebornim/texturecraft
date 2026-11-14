@@ -52,10 +52,12 @@ impl ColorSelection {
         if !distance.is_finite() {
             return 0.0;
         }
+
         let past = distance - self.tolerance;
         if past <= 0.0 {
             return 1.0;
         }
+
         let width = 1.0 - self.hardness.clamp(0.0, 1.0);
         if width <= 0.0 { 0.0 } else { (1.0 - past / width).clamp(0.0, 1.0) }
     }

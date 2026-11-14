@@ -107,9 +107,11 @@ fn selected_blending_effect(s: &Session, content_only: bool) -> std::result::Res
     if !effect.kind.blends() {
         return Err(format!("{} has no blending", effect.kind.name().to_ascii_lowercase()));
     }
+
     if content_only && on_mask(&s.doc.project, id) {
         return Err("a mask effect blends one channel".into());
     }
+
     Ok(())
 }
 
@@ -125,6 +127,7 @@ fn can_paste(s: &Session) -> std::result::Result<(), String> {
     if s.blending_clipboard.is_none() {
         return Err("no channel blending is copied".into());
     }
+
     blending_effect_selected(s)
 }
 
@@ -135,9 +138,11 @@ fn blending_effect(s: &Session, p: &Value, cmd: &str, content_only: bool) -> Res
     if !effect.kind.blends() {
         return Err(bad(cmd, format!("{} has no blending", effect.kind.name().to_ascii_lowercase())));
     }
+
     if content_only && on_mask(&s.doc.project, id) {
         return Err(bad(cmd, "a mask effect blends one channel"));
     }
+
     Ok(id)
 }
 

@@ -7,7 +7,8 @@ use texturecraft_engine::geom::glam::{EulerRot, Mat3, Quat, Vec2, Vec3};
 
 use crate::TextureCraftApp;
 use crate::frame_gizmo::{
-    ARROW, HALO, HALO_EXTRA_WIDTH, SHAFT_WIDTH, TURN_RING, arrow_distance, center_distance, distance_to_segment, handle_dot, move_handles, nearest,
+    ARROW, HALO, HALO_EXTRA_WIDTH, SHAFT_WIDTH, TURN_RING, arrow_distance, center_distance, dashed_outline, distance_to_segment, handle_dot, move_handles,
+    nearest,
 };
 use crate::move_on_model::MoveOnModel;
 use crate::theme::{AXIS_COLORS, Tokens};
@@ -82,6 +83,7 @@ impl RoundGizmo {
         if app.ui.mode != crate::state::Mode::Painting {
             return None;
         }
+
         let target = MoveOnModel::selected(app)?;
         let (shape, offset, projector, offset_per_local) = match target.projection(app)? {
             Projection::Triplanar { scale, offset, projector, .. } => (Shape::Box, offset, projector, scale),
@@ -116,6 +118,7 @@ impl RoundGizmo {
         if !origin.is_finite() {
             return None;
         }
+
         gizmo.center = project(app, rect, origin)?;
         let world = |point: Vec3| mesh_center + turn * (stretch * point) * radius;
         let at = |point: Vec3| project(app, rect, world(point));
@@ -144,6 +147,7 @@ impl RoundGizmo {
             axes
         };
         let half = (hi - lo) * 0.5 / radius;
+
         // The view direction in the projector's units: what faces the camera there
         let facing = (turn.transpose() * forward / stretch).try_normalize().unwrap_or(Vec3::Z);
         match shape {
@@ -160,6 +164,7 @@ impl RoundGizmo {
                         }
                     }
                 }
+
                 // The corner up and right on screen scales it evenly; a double arrow on the face turned towards the camera stretches it along each direction
                 let corners = (0..8).filter_map(|index| at(corner(index)));
                 if let Some(top_right) = corners.max_by(|a, b| (a.x - a.y).total_cmp(&(b.x - b.y))) {
@@ -175,37 +180,40 @@ impl RoundGizmo {
                 }
             }
             Shape::Sphere => {
-                let r = half.max_element() * SPHERE_REACH;
+                let radius = half.max_element() * SPHERE_REACH;
                 let (u, v) = facing.any_orthonormal_pair();
-                let silhouette = circle(|t| at(local + (u * t.x + v * t.y) * r));
+                let silhouette = circle(|t| at(local + (u * t.x + v * t.y) * radius));
+
                 // A sphere only scales evenly: one dot, on its right side
                 if let Some(side) = silhouette.iter().copied().max_by(|a, b| a.x.total_cmp(&b.x)) {
                     gizmo.sizes.push(dot(side, [true; 3]));
                 }
                 gizmo.outline.push(silhouette);
-                gizmo.outline.push(circle(|t| at(local + Vec3::new(t.x, 0.0, t.y) * r)));
+                gizmo.outline.push(circle(|t| at(local + Vec3::new(t.x, 0.0, t.y) * radius)));
             }
             Shape::Cylinder(axis) => {
                 let along = Vec3::AXES[axis];
                 let (u, v) = (Vec3::AXES[(axis + 1) % 3], Vec3::AXES[(axis + 2) % 3]);
-                let r = (half * (Vec3::ONE - along)).max_element() * CYLINDER_REACH;
-                let h = half[axis] * CYLINDER_HEIGHT;
-                let cap = |height: f32| circle(|t| at(local + along * height + (u * t.x + v * t.y) * r));
-                let top = cap(h);
+                let radius = (half * (Vec3::ONE - along)).max_element() * CYLINDER_REACH;
+                let half_height = half[axis] * CYLINDER_HEIGHT;
+                let cap = |height: f32| circle(|t| at(local + along * height + (u * t.x + v * t.y) * radius));
+                let top = cap(half_height);
+
                 // Its height: a double arrow along the axis (seen end on, a dot)
-                let along_axis = match (at(local + along * h), at(local - along * h)) {
+                let along_axis = match (at(local + along * half_height), at(local - along * half_height)) {
                     (Some(top), Some(bottom)) => Some(top - bottom).filter(|span| span.length() > 1.0).map(egui::Vec2::normalized),
                     _ => None,
                 };
                 if let Some(rim) = top.iter().copied().min_by(|a, b| a.y.total_cmp(&b.y)) {
                     gizmo.sizes.push(SizeHandle { at: keep_in_view(rim), axes: only(axis), along: along_axis });
                 }
-                gizmo.outline.extend([top, cap(-h)]);
+                gizmo.outline.extend([top, cap(-half_height)]);
+
                 // The two side lines, where the round side turns away from the camera
                 if let Some(side) = along.cross(facing - along * facing.dot(along)).try_normalize() {
                     let mut sides = Vec::new();
                     for edge in [side, -side] {
-                        let line = [at(local + edge * r + along * h), at(local + edge * r - along * h)];
+                        let line = [at(local + edge * radius + along * half_height), at(local + edge * radius - along * half_height)];
                         if let [Some(a), Some(b)] = line {
                             gizmo.outline.push(vec![a, b]);
                             sides.push(a.lerp(b, 0.5));
@@ -273,6 +281,7 @@ impl RoundGizmo {
             }
             RoundGrab::Ring(axis) => {
                 let angle = (to - self.center).angle() - (from - self.center).angle();
+
                 // Seen from the side its direction points to, a turn runs the other way round on screen
                 let facing = self.directions()[axis].dot(app.session.camera.forward());
                 let angle = if facing < 0.0 { -angle } else { angle };
@@ -287,6 +296,7 @@ impl RoundGizmo {
                 (self.turn, stretch.clamp(Vec3::splat(MIN_STRETCH), Vec3::splat(MAX_STRETCH)), origin)
             }
         };
+
         // The centre stays where it was put: the offset follows the turn and scale
         let local = turn.transpose() * ((center - self.mesh_center) / self.radius) / stretch;
         let offset = -local * self.offset_per_local;
@@ -342,6 +352,7 @@ fn on_view_plane(app: &TextureCraftApp, rect: Rect, origin: Vec3, forward: Vec3,
     if facing.abs() < 1e-4 {
         return None;
     }
+
     let hit = ray.origin + ray.dir * ((origin - ray.origin).dot(forward) / facing);
     hit.is_finite().then_some(hit)
 }
@@ -384,6 +395,7 @@ pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Respons
     {
         params["merge"] = json!(drag.stepped);
         drag.stepped |= texturecraft_engine::execute(&mut app.session, "layer.fill.projection", &params).is_ok();
+
         // The panel drew before this edit: one more frame shows its fields and preview where the projector is now
         ctx.request_repaint();
     }
@@ -398,6 +410,7 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
     let tokens = Tokens::get(ui.ctx());
     let painter = ui.painter_at(rect);
     let active = ui.ctx().data(|data| data.get_temp::<RoundDrag>(drag_id())).map(|drag| drag.grab);
+
     // A held Move on model button owns the cursor
     let hovered = ui.ctx().pointer_hover_pos().filter(|hover| rect.contains(*hover) && app.moving_on_model.is_none()).and_then(|hover| gizmo.grab(hover));
     if let Some(grab) = active.or(hovered) {
@@ -407,9 +420,7 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
     let fill = |grab: RoundGrab| if lit(grab) { tokens.viewport_accent } else { Color32::WHITE };
     let axis_color = |axis: usize, grab: RoundGrab| if lit(grab) { tokens.viewport_accent } else { AXIS_COLORS[axis] };
     for line in &gizmo.outline {
-        for stroke in [Stroke::new(3.0, Color32::from_black_alpha(140)), Stroke::new(1.2, Color32::from_white_alpha(230))] {
-            painter.add(egui::Shape::dashed_line(line, stroke, 6.0, 4.0));
-        }
+        dashed_outline(&painter, line);
     }
     for (axis, ring) in gizmo.rings.iter().enumerate() {
         painter.add(egui::Shape::line(ring.clone(), Stroke::new(SHAFT_WIDTH + HALO_EXTRA_WIDTH, HALO)));
@@ -456,6 +467,7 @@ mod tests {
             let shown = gizmo(&harness);
             assert!(shown.arrows.iter().all(Option::is_some) && shown.rings.iter().all(|ring| ring.len() > 8), "{kind}: arrows and rings {shown:?}");
             assert!(!shown.outline.is_empty(), "{kind}: its shape is drawn");
+
             // A box's corner and a double arrow per face (the ball is seen from above and aside, no face head on); a sphere's one dot; a cylinder's top rim and side
             let size_handles = match kind {
                 "triplanar" => 4,

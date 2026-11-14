@@ -30,6 +30,7 @@ fn app_with_fill(settings: serde_json::Value) -> (Harness<'static, TextureCraftA
     let added = texturecraft_engine::execute(&mut session, "layer.add.fill", &settings).unwrap();
     let layer = LayerId(added["layer"].as_u64().unwrap());
     let mut harness = Harness::builder().with_size(WINDOW_SIZE).build_eframe(|cc| TextureCraftApp::new(cc, session));
+
     // The labels below are English; a first run would speak the system's language
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(STARTUP_FRAMES);
@@ -485,6 +486,7 @@ fn a_plain_fill_switches_to_one_whole_material_picks_it_from_its_card_and_clears
     mouse_click_on(&mut harness, Role::RadioButton, "Material");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Metallic").is_none(), "the Material side has no channel cards");
     mouse_click_on(&mut harness, Role::ComboBox, "None");
+
     // The card opens the material picker, not a list: its search keeps only the materials it names
     harness.event(egui::Event::Text("hammered".into()));
     harness.run_steps(SETTLE_FRAMES);

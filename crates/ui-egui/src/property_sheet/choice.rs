@@ -58,6 +58,15 @@ pub(super) fn truncated(painter: &Painter, text: &str, room: f32, color: Color32
     painter.layout_no_wrap("…".to_owned(), font, color)
 }
 
+/// The chosen option's accent bar, inset from the option's left, top and bottom
+const CHOSEN_BAR_LEFT: f32 = 2.0;
+const CHOSEN_BAR_RIGHT: f32 = 4.0;
+const CHOSEN_BAR_TOP: f32 = 5.0;
+const CHOSEN_BAR_BOTTOM: f32 = 7.0;
+
+/// The hovered option's eye glyph size
+const EYE_SIZE: f32 = 13.0;
+
 impl PropertySheet<'_> {
     /// A set-once choice whose list hangs from its button; returns the picked and the hovered option
     pub(crate) fn dropdown<T: Copy + PartialEq>(
@@ -185,7 +194,10 @@ impl PropertySheet<'_> {
                         painter.rect_filled(fill, CornerRadius::same(4), t.button);
                     }
                     if chosen {
-                        let bar = Rect::from_min_max(pos2(rect.left() + 2.0, rect.top() + 5.0), pos2(rect.left() + 4.0, rect.bottom() - 7.0));
+                        let bar = Rect::from_min_max(
+                            pos2(rect.left() + CHOSEN_BAR_LEFT, rect.top() + CHOSEN_BAR_TOP),
+                            pos2(rect.left() + CHOSEN_BAR_RIGHT, rect.bottom() - CHOSEN_BAR_BOTTOM),
+                        );
                         painter.rect_filled(bar, CornerRadius::same(1), t.accent);
                     }
 
@@ -202,7 +214,7 @@ impl PropertySheet<'_> {
                     let font = if chosen { semibold(TEXT_SIZE) } else { FontId::proportional(TEXT_SIZE) };
                     painter.text(pos2(text_x, center_y), Align2::LEFT_CENTER, name(option), font, t.text);
                     if response.hovered() && width >= EYE_MIN_LIST_WIDTH {
-                        painter.text(pos2(rect.right() - EYE_INSET, center_y), Align2::CENTER_CENTER, ic::EYE, FontId::proportional(13.0), t.accent);
+                        painter.text(pos2(rect.right() - EYE_INSET, center_y), Align2::CENTER_CENTER, ic::EYE, FontId::proportional(EYE_SIZE), t.accent);
                     }
                     if response.clicked() && !chosen {
                         picked = Some(option);

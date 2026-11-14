@@ -3,8 +3,11 @@
 /// How a drag holds the pointer on this platform
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Hold {
-    /// The pointer moves, and is put back where the press began after every frame (Windows, X11)
+    /// The pointer moves, and is put back where the press began after every frame; the put-back's own move arrives among the others (X11)
     PutBack,
+
+    /// Put back the same way, but the system folds its waiting moves into one, read from where it put the pointer (Windows)
+    PutBackFolded,
 
     /// The system keeps the pointer still and reports raw motion (macOS, Wayland, which cannot move a pointer)
     Locked,
@@ -20,10 +23,17 @@ impl Hold {
             Hold::Free
         } else if cfg!(target_os = "macos") {
             Hold::Locked
-        } else if cfg!(target_os = "windows") || std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        } else if cfg!(target_os = "windows") {
+            Hold::PutBackFolded
+        } else if std::env::var_os("WAYLAND_DISPLAY").is_none() {
             Hold::PutBack
         } else {
             Hold::Locked
         }
+    }
+
+    /// The pointer is held by putting it back after every frame
+    pub(crate) fn puts_back(self) -> bool {
+        matches!(self, Hold::PutBack | Hold::PutBackFolded)
     }
 }

@@ -10,12 +10,15 @@ pub(crate) struct SystemPointer {
     pub(crate) locked: bool,
     pub(crate) hidden: bool,
     pub(crate) put_backs: usize,
+
+    /// The system folds a put-back into the next move, as Windows does, instead of reporting it as a move of its own
+    pub(crate) folds: bool,
 }
 
 impl SystemPointer {
     /// The pointer resting at `at` over the window
     pub(crate) fn at<S>(harness: &mut Harness<'_, S>, at: Pos2) -> SystemPointer {
-        let mut pointer = SystemPointer { at, locked: false, hidden: false, put_backs: 0 };
+        let mut pointer = SystemPointer { at, locked: false, hidden: false, put_backs: 0, folds: false };
         harness.input_mut().events.push(Event::PointerMoved(at));
         pointer.frame(harness);
         pointer
@@ -61,7 +64,9 @@ impl SystemPointer {
                 ViewportCommand::CursorPosition(to) => {
                     self.at = to;
                     self.put_backs += 1;
-                    harness.input_mut().events.push(Event::PointerMoved(to));
+                    if !self.folds {
+                        harness.input_mut().events.push(Event::PointerMoved(to));
+                    }
                 }
                 ViewportCommand::CursorGrab(grab) => self.locked = grab == CursorGrab::Locked,
                 _ => {}

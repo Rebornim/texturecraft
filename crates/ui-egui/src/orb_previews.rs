@@ -3,13 +3,23 @@
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
-use egui::{Color32, ColorImage, Context, Id, TextureHandle, TextureOptions};
+use egui::{ColorImage, Context, Id, TextureHandle, TextureOptions};
 
-use crate::material_orb::render;
-use crate::orb_material::OrbMaterial;
+mod orb_job;
+#[cfg(not(target_arch = "wasm32"))]
+mod orb_result;
+mod picture;
+#[cfg(not(target_arch = "wasm32"))]
+mod worker;
+
+pub(crate) use orb_job::OrbJob;
+#[cfg(not(target_arch = "wasm32"))]
+use orb_result::OrbResult;
+use picture::Picture;
+#[cfg(not(target_arch = "wasm32"))]
+use worker::Worker;
 
 /// Pictures kept; the least recently drawn go first (a list of every plain material holds about fifty)
 const MAX_PICTURES: usize = 160;
@@ -17,56 +27,6 @@ const MAX_PICTURES: usize = 160;
 /// The quick first picture is this many times smaller than the full one, and pictures this small skip it
 const QUICK_DIVISOR: usize = 4;
 const QUICK_BELOW_PX: usize = 48;
-
-/// One orb to render
-#[derive(Clone, Debug)]
-pub(crate) struct OrbJob {
-    key: u64,
-    material: OrbMaterial,
-    side: usize,
-    backdrop: Color32,
-    /// Where it is drawn: a newer job for the same place replaces an older one still waiting
-    // The web renders each job at once, so nothing is replaced there
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    place: Id,
-    /// The quick picture is still to come
-    quick: bool,
-}
-
-impl OrbJob {
-    pub(crate) fn new(material: OrbMaterial, side: usize, backdrop: Color32) -> OrbJob {
-        let mut hasher = DefaultHasher::new();
-        (material.key(), side, backdrop.to_array()).hash(&mut hasher);
-        OrbJob { key: hasher.finish(), material, side, backdrop, place: Id::NULL, quick: side >= QUICK_BELOW_PX }
-    }
-
-    fn picture(&self) -> ColorImage {
-        let side = if self.quick { self.side / QUICK_DIVISOR } else { self.side };
-        render(&self.material, side, self.backdrop)
-    }
-}
-
-/// What the worker answers
-#[cfg(not(target_arch = "wasm32"))]
-enum OrbResult {
-    Picture {
-        key: u64,
-        full: bool,
-        image: ColorImage,
-    },
-    /// A newer job for its place replaced it before it was finished
-    Dropped {
-        key: u64,
-    },
-}
-
-/// A cached picture
-struct Picture {
-    texture: Option<TextureHandle>,
-    full: bool,
-    /// The pass it was last drawn in
-    drawn: u64,
-}
 
 /// Every orb picture of one egui context
 #[derive(Default)]
@@ -82,12 +42,13 @@ type Shared = Arc<Mutex<OrbPreviews>>;
 
 impl OrbPreviews {
     /// The picture to draw at `place` for `job`: its own once rendered, else the last one drawn there (None before the first)
-    pub(crate) fn texture(ctx: &Context, place: Id, mut job: OrbJob) -> Option<TextureHandle> {
+    pub(crate) fn texture(ctx: &Context, place: Id, job: OrbJob) -> Option<TextureHandle> {
         let shared = ctx.data_mut(|data| data.get_temp_mut_or_default::<Shared>(Id::unique("orb_previews")).clone());
         let mut previews = shared.lock().ok()?;
         previews.take_results(ctx);
         let pass = ctx.cumulative_pass_nr();
-        job.place = place;
+        #[cfg(not(target_arch = "wasm32"))]
+        let job = OrbJob { place, ..job };
         let key = job.key;
         if let Entry::Vacant(slot) = previews.pictures.entry(key) {
             slot.insert(Picture { texture: None, full: false, drawn: pass });
@@ -190,66 +151,6 @@ impl OrbPreviews {
     }
 }
 
-/// The thread that renders orbs
-#[cfg(not(target_arch = "wasm32"))]
-struct Worker {
-    jobs: std::sync::mpsc::Sender<OrbJob>,
-    results: std::sync::mpsc::Receiver<OrbResult>,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl Worker {
-    fn start(ctx: &Context) -> Option<Worker> {
-        let (jobs, job_rx) = std::sync::mpsc::channel::<OrbJob>();
-        let (result_tx, results) = std::sync::mpsc::channel();
-        let ctx = ctx.clone();
-        let spawned = std::thread::Builder::new().name("texturecraft-material-orbs".into()).spawn(move || {
-            // Its own pool keeps orbs from queuing ahead of painting and compositing
-            let threads = std::thread::available_parallelism().map_or(1, |n| n.get().saturating_sub(1).max(1));
-            let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).thread_name(|i| format!("texturecraft-orb-{i}")).build();
-            let mut waiting: Vec<OrbJob> = Vec::new();
-            loop {
-                if waiting.is_empty() {
-                    let Ok(job) = job_rx.recv() else { break };
-                    waiting.push(job);
-                }
-                waiting.extend(job_rx.try_iter());
-                for key in newest_per_place(&mut waiting) {
-                    if result_tx.send(OrbResult::Dropped { key }).is_err() {
-                        return;
-                    }
-                }
-                // Every quick picture before any full one, so a list fills in at once
-                let next = waiting.iter().position(|job| job.quick).unwrap_or(0);
-                if next >= waiting.len() {
-                    continue;
-                }
-                let mut job = waiting.remove(next);
-                let image = match &pool {
-                    Ok(pool) => pool.install(|| job.picture()),
-                    Err(_) => job.picture(),
-                };
-                let full = !job.quick;
-                if result_tx.send(OrbResult::Picture { key: job.key, full, image }).is_err() {
-                    return;
-                }
-                ctx.request_repaint();
-                if !full {
-                    job.quick = false;
-                    waiting.push(job);
-                }
-            }
-        });
-        match spawned {
-            Ok(_) => Some(Worker { jobs, results }),
-            Err(e) => {
-                log::warn!("could not start the material orb worker: {e}");
-                None
-            }
-        }
-    }
-}
-
 /// Keep only the newest job per place (others than [`Id::NULL`]); returns the keys of the jobs dropped
 #[cfg(not(target_arch = "wasm32"))]
 fn newest_per_place(waiting: &mut Vec<OrbJob>) -> Vec<u64> {
@@ -272,7 +173,10 @@ fn newest_per_place(waiting: &mut Vec<OrbJob>) -> Vec<u64> {
 mod tests {
     use std::time::{Duration, Instant};
 
+    use egui::Color32;
+
     use super::*;
+    use crate::orb_material::OrbMaterial;
 
     fn copper(roughness: f32) -> OrbMaterial {
         OrbMaterial::uniform([0.8, 0.35, 0.18], 1.0, roughness)

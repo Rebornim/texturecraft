@@ -67,8 +67,7 @@ fn click_at(harness: &mut Harness<'_, TextureCraftApp>, position: Pos2) {
     harness.run_steps(3);
 }
 
-/// Whether the last frame drew the eyedropper glyph with its tip at `pointer`
-/// Whether the pointer at `pointer` is the drawn eyedropper: the system pointer hidden and a picture painted under it
+/// Whether the last frame drew the eyedropper glyph with its tip at `pointer` Whether the pointer at `pointer` is the drawn eyedropper: the system pointer hidden and a picture painted under it
 fn eyedropper_at(harness: &Harness<'_, TextureCraftApp>, pointer: Pos2) -> bool {
     let output = harness.output();
     output.platform_output.cursor_icon == egui::CursorIcon::None

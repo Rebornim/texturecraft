@@ -19,9 +19,7 @@ pub(crate) fn enc(kind: ChannelKind, v: f32) -> u16 {
     if kind == ChannelKind::Signed { to_u16_signed(v) } else { to_u16(v) }
 }
 
-/// What one image receives: its channel kind, the painted value (unused when erasing or for
-/// coverage images), whether a stencil's color replaces it (base color) and the values a clone
-/// or smudge stroke carries for it, and the image whose gray a mask stroke paints in place of `value`
+/// What one image receives: its channel kind, the painted value (unused when erasing or for coverage images), whether a stencil's color replaces it (base color) and the values a clone or smudge stroke carries for it, and the image whose gray a mask stroke paints in place of `value`
 struct Blend<'a> {
     kind: ChannelKind,
     value: &'a [f32],

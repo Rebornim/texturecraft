@@ -19,6 +19,18 @@ use crate::theme::Tokens;
 use crate::thumbs::Thumbs;
 use crate::tile_picture::TilePicture;
 
+mod add_item;
+mod bitmap_choice;
+mod item_icon;
+mod menu_icon;
+mod pick;
+
+use add_item::AddItem;
+use bitmap_choice::BitmapChoice;
+use item_icon::ItemIcon;
+use menu_icon::MenuIcon;
+use pick::Pick;
+
 /// The row's height and its controls' height
 const BAR_HEIGHT: f32 = 40.0;
 const CONTROL_HEIGHT: f32 = 26.0;
@@ -67,31 +79,6 @@ const BLACK_SWATCH: u8 = 10;
 
 /// The filter Add filter adds: at its defaults it changes nothing, and its slot opens the picker to swap it
 pub(crate) const NEW_FILTER: &str = "none";
-
-/// What an Add menu item shows at its left
-#[derive(Clone, Copy)]
-enum ItemIcon {
-    Glyph(&'static str),
-    /// A gray swatch (Add mask's White and Black)
-    Swatch(u8),
-}
-
-/// One item of the Add effect or Add mask menu
-struct AddItem {
-    icon: ItemIcon,
-    /// The toolbar menu's name (the button says "Add effect" / "Add mask") and the layer context menu's
-    short: &'static str,
-    long: &'static str,
-    command: &'static str,
-    params: Value,
-    enabled: bool,
-}
-
-/// What a click in one of the row's menus asks for, done once the menu has closed
-enum Pick {
-    Run { command: &'static str, params: Value },
-    Bitmap,
-}
 
 /// The Layers panel's top row and what its menus open
 pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
@@ -167,14 +154,6 @@ fn channel_list(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, tokens: &Tok
             }
         }
     });
-}
-
-/// The icon of a menu button
-#[derive(Clone, Copy)]
-enum MenuIcon {
-    Glyph(&'static str),
-    /// Add mask's square, half of it filled corner to corner
-    Mask,
 }
 
 /// A button with its icon and a caret whose menu hangs from it (caption, then `items`); the item picked
@@ -320,8 +299,7 @@ fn run_on(app: &mut TextureCraftApp, ui: &Ui, layer: &Layer, command: &str, para
     }
 }
 
-/// The Add effect items for `layer`: on its content when the content is the selected target, else in its mask; an item that can't go
-/// there is greyed, not sent elsewhere (all of them without a layer)
+/// The Add effect items for `layer`: on its content when the content is the selected target, else in its mask; an item that can't go there is greyed, not sent elsewhere (all of them without a layer)
 fn effect_items(app: &TextureCraftApp, layer: Option<&Layer>) -> Vec<AddItem> {
     let content = layer.is_some_and(|layer| !layer.is_group() && app.session.selected_layer() == Some(layer.id) && crate::dock::targets_content(app));
     let target = if content { "content" } else { "mask" };
@@ -389,16 +367,7 @@ fn icon_of(icon: ItemIcon) -> &'static str {
     }
 }
 
-/// What the bitmap picker offers: Import..., an image resource, a library alpha
-#[derive(Clone, PartialEq)]
-enum BitmapChoice {
-    Import,
-    Image(String),
-    Alpha(&'static str),
-}
-
-/// The texture picker of Add bitmap mask, hanging under `anchor` at its width while open: a pick adds the mask to `layer`, Escape or a
-/// click elsewhere adds nothing
+/// The texture picker of Add bitmap mask, hanging under `anchor` at its width while open: a pick adds the mask to `layer`, Escape or a click elsewhere adds nothing
 pub(crate) fn bitmap_picker(app: &mut TextureCraftApp, anchor: &Response, popup: Id, layer: LayerId) {
     let ctx = anchor.ctx.clone();
     let images = app.session.images.clone();

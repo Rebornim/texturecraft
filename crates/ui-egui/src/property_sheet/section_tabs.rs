@@ -3,6 +3,12 @@ use egui::{Align2, Color32, CornerRadius, FontId, Id, Rect, Role, Sense, Ui, Wid
 use super::{PAD, SMALL_TEXT_SIZE};
 use crate::theme::{Tokens, semibold};
 
+mod section_scope;
+mod section_tops;
+
+pub(crate) use section_scope::SectionScope;
+pub(super) use section_tops::SectionTops;
+
 /// Height of the tab strip
 const STRIP_HEIGHT: f32 = 30.0;
 
@@ -28,15 +34,6 @@ const TAB_ICON_SIZE: f32 = 13.0;
 
 /// A section counts as in view once its caption is this close to the top of the scrolled area
 const IN_VIEW_SLACK: f32 = 30.0;
-
-/// Which strip the sections belong to: the docked panel and the right-click popup can show the same sections at once
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub(crate) enum SectionScope {
-    /// The docked Properties panel
-    Docked,
-    /// The right-click Properties popup over a view
-    Popup,
-}
 
 /// Where the scope of the sections being drawn is kept while a strip's contents run
 fn scope_id() -> Id {
@@ -64,25 +61,6 @@ pub(crate) fn in_scope<R>(ui: &mut Ui, scope: SectionScope, body: impl FnOnce(&m
 /// The strip the sections being drawn belong to: the docked panel's unless a caller said otherwise
 fn current_scope(ui: &Ui) -> SectionScope {
     ui.data(|data| data.get_temp::<SectionScope>(scope_id())).unwrap_or(SectionScope::Docked)
-}
-
-/// The sections' captions seen last frame, top to bottom, the area they scroll in and whether it is scrolled to its end
-#[derive(Clone, Default)]
-pub(super) struct SectionTops {
-    pub(super) tops: Vec<(String, f32)>,
-    pub(super) view_top: f32,
-    pub(super) view_bottom: f32,
-    pub(super) at_end: bool,
-}
-
-impl SectionTops {
-    /// The section in view: the last caption at the top, or at the scroll's end the last one shown (a short last section never reaches the top)
-    fn lit(&self) -> Option<&str> {
-        let scrolled = self.tops.first().is_some_and(|(_, top)| *top < self.view_top);
-        let shown = |top: f32| if self.at_end && scrolled { top < self.view_bottom } else { top <= self.view_top + IN_VIEW_SLACK };
-        let reached = self.tops.iter().rev().find(|(_, top)| shown(*top));
-        reached.or(self.tops.first()).map(|(title, _)| title.as_str())
-    }
 }
 
 /// Stores this frame's section captions for the tabs

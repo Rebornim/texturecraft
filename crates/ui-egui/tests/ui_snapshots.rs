@@ -658,6 +658,24 @@ fn fill_properties_snapshots() {
         save(&mut harness, &output_dir, &format!("fill-uv-{name}"));
     }
     harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    // A UV pad drag right, held mid-way: the ring stays in the middle, the filled dot and the checker go right; then a dot past the edge
+    execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": layer, "offset": [0.0, 0.0]})).unwrap();
+    harness.run_steps(2);
+    let pad = harness.get_by_label("Move on model").rect().center();
+    harness.event(egui::Event::PointerMoved(pad));
+    harness.event(egui::Event::PointerButton { pos: pad, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    harness.run_steps(2);
+    for step in 1..=20 {
+        harness.event(egui::Event::PointerMoved(pad + egui::vec2(6.0 * step as f32, 0.0)));
+        harness.run_steps(1);
+    }
+    save(&mut harness, &output_dir, "fill-uv-pad-dragged-right");
+    harness.event(egui::Event::PointerButton { pos: pad, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    harness.run_steps(2);
+    execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": layer, "offset": [-1.6, 0.6]})).unwrap();
+    save(&mut harness, &output_dir, "fill-uv-dot-past-edge");
+    execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": layer, "offset": [0.25, 0.0]})).unwrap();
+    harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
     for (shown, hover, name) in [
         ("UV projection", "Planar projection", "fill-uv-projection-open"),
         ("Bilinear | HQ", "Nearest", "fill-uv-filtering-open"),

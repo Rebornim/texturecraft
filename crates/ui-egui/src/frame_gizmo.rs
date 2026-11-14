@@ -1,4 +1,4 @@
-//! The frame of the selected planar or warp projection in the 3D view: the centre square slides it, the axis arrows move it along its across, up and out directions, a planar's corners scale it and its edge dots stretch one side, a warp's corners pull freely
+//! The frame of the selected planar or warp projection in the 3D view: the centre square slides it, the axis arrows move it along its across, up and out directions, the ring turns it round its normal, a planar's corners scale it, the edge dots stretch one side, a warp's corners pull freely
 
 use egui::{Color32, PointerButton, Pos2, Rect, Stroke, Ui, vec2};
 use serde_json::{Value, json};
@@ -25,6 +25,8 @@ pub(crate) enum FrameGrab {
     Side(usize),
     /// A warp's corner (top left, top right, bottom right, bottom left): pull it
     Corner(usize),
+    /// The ring: turn it round its normal
+    Turn,
 }
 
 impl FrameGrab {
@@ -32,7 +34,7 @@ impl FrameGrab {
         match self {
             FrameGrab::Slide if dragging => egui::CursorIcon::Grabbing,
             FrameGrab::Slide => egui::CursorIcon::Grab,
-            FrameGrab::Axis(_) | FrameGrab::Corner(_) => egui::CursorIcon::Move,
+            FrameGrab::Axis(_) | FrameGrab::Corner(_) | FrameGrab::Turn => egui::CursorIcon::Move,
             FrameGrab::Scale => egui::CursorIcon::ResizeNwSe,
             FrameGrab::Side(side) if side % 2 == 0 => egui::CursorIcon::ResizeVertical,
             FrameGrab::Side(_) => egui::CursorIcon::ResizeHorizontal,
@@ -73,6 +75,8 @@ pub(crate) struct FrameGizmo {
     pub center: Pos2,
     /// On screen, the tips of the across, up and out arrows (None when one points at the camera)
     pub arrows: [Option<Pos2>; 3],
+    /// On screen, the turn ring round the centre in the frame's plane (None when it is edge on)
+    pub ring: Option<[Pos2; TURN_RING_POINTS]>,
     /// In the world: the frame's centre, and its across, up and out directions
     origin: Vec3,
     axes: [Vec3; 3],
@@ -94,6 +98,10 @@ const SIDE_DOT: f32 = 5.5;
 const WARP_DOT: f32 = 8.0;
 /// How near a handle or arrow a press grabs it (points)
 pub(crate) const GRAB: f32 = 11.0;
+/// Screen radius of the turn rings (frames and round projectors alike): past the arrow heads, so a ring is grabbed apart from the arrows
+pub(crate) const TURN_RING: f32 = 84.0;
+/// Points on a frame's turn ring, the first repeated at the end to close it
+pub(crate) const TURN_RING_POINTS: usize = 49;
 /// The smallest share of its size a dragged side keeps
 const MIN_STRETCH: f32 = 0.02;
 
@@ -149,7 +157,16 @@ impl FrameGizmo {
         let axes = [across, up, out];
         let steps = axes.map(|axis| Some((project(app, rect, origin + axis * reach)? - center) / reach.max(f32::MIN_POSITIVE)));
         let arrows = steps.map(|step| step.filter(|step| step.length() * reach > 1.0).map(|step| center + step.normalized() * ARROW));
-        Some(FrameGizmo { layer, effect, decal, warp, corners, sides, center, arrows, origin, axes, steps })
+        let ring = steps[0].zip(steps[1]).filter(|(a, b)| a.length() > f32::EPSILON && solve(*a, *b, egui::Vec2::X).is_some()).and_then(|(step, _)| {
+            let radius = TURN_RING / step.length();
+            let last = (TURN_RING_POINTS - 1) as f32;
+            let points = (0..TURN_RING_POINTS).map(|index| {
+                let (sin, cos) = (index as f32 / last * std::f32::consts::TAU).sin_cos();
+                project(app, rect, origin + (across * cos + up * sin) * radius)
+            });
+            points.collect::<Option<Vec<_>>>()?.try_into().ok()
+        });
+        Some(FrameGizmo { layer, effect, decal, warp, corners, sides, center, arrows, ring, origin, axes, steps })
     }
 
     /// The handle under screen point `p`: the nearest one within reach, so a small frame's corners stay grabbable beside its arrows
@@ -161,10 +178,11 @@ impl FrameGizmo {
             // A mask effect's warp corners have no command to pull them
             Some(_) if self.effect.is_none() => handles.extend(near(self.corners, FrameGrab::Corner)),
             Some(_) => {}
-            None => {
-                handles.extend(near(self.corners, |_| FrameGrab::Scale));
-                handles.extend(near(self.sides, FrameGrab::Side));
-            }
+            None => handles.extend(near(self.corners, |_| FrameGrab::Scale)),
+        }
+        handles.extend(near(self.sides, FrameGrab::Side));
+        if let Some(ring) = &self.ring {
+            handles.push((FrameGrab::Turn, ring.windows(2).map(|pair| distance_to_segment(p, pair[0], pair[1])).fold(f32::INFINITY, f32::min)));
         }
         nearest(handles)
     }
@@ -221,6 +239,13 @@ impl FrameGizmo {
                 size[1 - side % 2] *= stretch;
                 json!({"size": size})
             }
+            FrameGrab::Turn => {
+                // The sweep round the centre on the frame's own plane (across turning towards up is a positive turn), so a tilted or off-centre frame follows the pointer too
+                let angle = |p: Pos2| self.on_plane(app, rect, p).map(|[across, up]| (up * self.decal.size[1]).atan2(across * self.decal.size[0]).to_degrees());
+                let swept = angle(to)? - angle(from)?;
+                let swept = (swept + HALF_TURN).rem_euclid(2.0 * HALF_TURN) - HALF_TURN;
+                json!({"rotation": self.decal.rotation + swept})
+            }
             FrameGrab::Corner(corner) => {
                 let mut corners = self.warp?;
                 *corners.get_mut(corner)? = self.on_plane(app, rect, to)?;
@@ -234,6 +259,9 @@ impl FrameGizmo {
         Some(("layer.decal.set", params))
     }
 }
+
+/// Half a turn in degrees: a ring drag's sweep is kept within one either way
+const HALF_TURN: f32 = 180.0;
 
 /// `delta` as a mix of screen steps `a` and `b` (None when they are parallel on screen)
 fn solve(a: egui::Vec2, b: egui::Vec2, delta: egui::Vec2) -> Option<[f32; 2]> {
@@ -337,6 +365,11 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
     for stroke in [shadow, Stroke::new(1.2, Color32::from_white_alpha(230))] {
         painter.add(egui::Shape::dashed_line(&outline, stroke, 6.0, 4.0));
     }
+    if let Some(ring) = &gizmo.ring {
+        let color = if lit(FrameGrab::Turn) { tokens.viewport_accent } else { AXIS_COLORS[2] };
+        painter.add(egui::Shape::line(ring.to_vec(), Stroke::new(SHAFT_WIDTH + HALO_EXTRA_WIDTH, HALO)));
+        painter.add(egui::Shape::line(ring.to_vec(), Stroke::new(SHAFT_WIDTH, color)));
+    }
     match gizmo.warp {
         Some(_) => {
             for (index, corner) in gizmo.corners.into_iter().enumerate() {
@@ -347,10 +380,10 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
             for corner in gizmo.corners {
                 handle_dot(&painter, corner, CORNER_DOT, dot_fill(FrameGrab::Scale));
             }
-            for (index, side) in gizmo.sides.into_iter().enumerate() {
-                handle_dot(&painter, side, SIDE_DOT, dot_fill(FrameGrab::Side(index)));
-            }
         }
+    }
+    for (index, side) in gizmo.sides.into_iter().enumerate() {
+        handle_dot(&painter, side, SIDE_DOT, dot_fill(FrameGrab::Side(index)));
     }
 
     let arrow_color = |axis: usize| if lit(FrameGrab::Axis(axis)) { tokens.viewport_accent } else { AXIS_COLORS[axis] };
@@ -523,6 +556,41 @@ pub(crate) mod tests {
         assert!(gizmo(&harness).corners[1].distance(to) < 1.5, "the corner sits under the pointer");
     }
 
+    /// The panel's Rotation turns a frame and its Scale sizes it, so the gizmo does both: the ring turns a planar or warp frame round its normal, following the pointer round the centre; a warp's edge dots size its frame as a planar's do
+    #[test]
+    fn the_ring_turns_a_frame_and_a_warps_edge_dots_size_it() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        for kind in ["warp", "planar"] {
+            let (mut harness, _) = fill_app(kind);
+            let start = gizmo(&harness);
+            let ring = start.ring.expect("{kind}: a frame facing the camera shows its ring");
+            let on_ring = *ring
+                .iter()
+                .filter(|at| start.grab(**at) == Some(FrameGrab::Turn))
+                .max_by(|a, b| a.y.total_cmp(&b.y))
+                .expect("a ring point clear of the other handles");
+            let steps = harness.state().session.history_labels().len();
+            let quarter = start.center + (on_ring - start.center).rot90();
+            drag(&mut harness, on_ring, quarter, Modifiers::NONE);
+            let turned = gizmo(&harness);
+            let sweep = |from: egui::Vec2, to: egui::Vec2| (to.angle() - from.angle()).to_degrees();
+            let pointer = sweep(on_ring - start.center, quarter - start.center);
+            let corner = sweep(start.corners[1] - start.center, turned.corners[1] - turned.center);
+            let off = (corner - pointer + 180.0).rem_euclid(360.0) - 180.0;
+            assert!(off.abs() < 6.0, "{kind}: the frame turns a quarter with the pointer: corner {corner}°, pointer {pointer}°");
+            assert!(turned.center.distance(start.center) < 1.0, "{kind}: round its centre");
+            assert_eq!(harness.state().session.history_labels().len(), steps + 1, "{kind}: one undo step");
+        }
+
+        let (mut harness, layer) = fill_app("warp");
+        let warp = gizmo(&harness);
+        assert_eq!(warp.grab(warp.sides[1]), Some(FrameGrab::Side(1)));
+        drag(&mut harness, warp.sides[1], warp.center + (warp.sides[1] - warp.center) * 0.5, Modifiers::NONE);
+        let Projection::Warp { frame, corners, .. } = projection(&harness, layer) else { panic!("still a warp") };
+        assert!(frame.size[0] < warp.decal.size[0] * 0.75 && (frame.size[1] - warp.decal.size[1]).abs() < 1e-4, "the right edge dot narrows it: {frame:?}");
+        assert_eq!(corners, Projection::FRAME_CORNERS, "its corners stay where they are on the frame");
+    }
+
     #[test]
     fn round_projections_have_no_frame() {
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -604,7 +672,7 @@ pub(crate) mod tests {
         checker(&mut harness, layer);
         harness.run_steps(4);
         let round = crate::round_gizmo::RoundGizmo::of(harness.state(), harness.state().viewport_rect).unwrap();
-        let (dot, _) = round.dots[0];
+        let dot = round.sizes[0].at;
         let to = round.center + (dot - round.center) * 0.6;
         harness.event(egui::Event::PointerMoved(dot));
         harness.event(egui::Event::PointerButton { pos: dot, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
@@ -616,13 +684,13 @@ pub(crate) mod tests {
         harness.run_steps(3);
         harness.render().unwrap().save(directory.join("sync-sphere-mid-drag.png")).unwrap();
 
-        // The round projections with their fill selected: the shape round it, a ring hovered (a sphere: its bottom dot)
+        // The round projections with their fill selected: the shape round it, a ring hovered (a sphere: its one dot; a cylinder: its height arrow)
         for kind in ["triplanar", "spherical", "cylindrical"] {
             let (mut harness, layer) = fill_app_rendered(json!({"projection": kind}), true);
             checker(&mut harness, layer);
             harness.run_steps(4);
             let round = crate::round_gizmo::RoundGizmo::of(harness.state(), harness.state().viewport_rect).unwrap();
-            let hover = if kind == "spherical" { round.dots[2].0 } else { round.rings[2][crate::round_gizmo::CIRCLE_POINTS / 8] };
+            let hover = if kind == "triplanar" { round.rings[2][crate::round_gizmo::CIRCLE_POINTS / 8] } else { round.sizes[0].at };
             harness.hover_at(hover);
             harness.run_steps(4);
             harness.render().unwrap().save(directory.join(format!("move-{kind}.png"))).unwrap();

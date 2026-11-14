@@ -1,6 +1,7 @@
 //! The checker a warp preview bends into its frame: laid on the frame as the fill's Tiling, Rotation and Offset lay the image, so turning or tiling the image shows
 
 use egui::Pos2;
+use texturecraft_engine::compose::pattern::FRAME_UV_CENTER;
 
 use crate::fill_placement::Placement;
 
@@ -23,14 +24,16 @@ pub(crate) fn warp_checker(quad: [Pos2; 4], placement: Placement) -> Vec<(Vec<Po
     let offset = placement.offset.map(|offset| if offset.is_finite() { offset.rem_euclid(1.0) } else { 0.0 });
     let rotation = if placement.rotation.is_finite() { placement.rotation.rem_euclid(360.0) } else { 0.0 };
     let (sin, cos) = rotation.to_radians().sin_cos();
-    // The frame (0..1 across and down) → image coordinates in cells: turn, tile, offset, as the compositor places a warp's image
+    let [middle_u, middle_v] = FRAME_UV_CENTER.to_array();
+    // The frame (0..1 across and down) → image coordinates in cells: turn round the frame's centre, tile, offset, as the compositor places a warp's image
     let to_cells = |[u, v]: [f32; 2]| -> [f32; 2] {
-        let (x, y) = (u * cos - v * sin, u * sin + v * cos);
+        let (u, v) = (u - middle_u, v - middle_v);
+        let (x, y) = (u * cos - v * sin + middle_u, u * sin + v * cos + middle_v);
         [(x * tiling[0] + offset[0]) * CELLS_PER_TILE, (y * tiling[1] + offset[1]) * CELLS_PER_TILE]
     };
     let to_frame = |[x, y]: [f32; 2]| -> [f32; 2] {
-        let (x, y) = ((x / CELLS_PER_TILE - offset[0]) / tiling[0], (y / CELLS_PER_TILE - offset[1]) / tiling[1]);
-        [x * cos + y * sin, -x * sin + y * cos]
+        let (x, y) = ((x / CELLS_PER_TILE - offset[0]) / tiling[0] - middle_u, (y / CELLS_PER_TILE - offset[1]) / tiling[1] - middle_v);
+        [x * cos + y * sin + middle_u, -x * sin + y * cos + middle_v]
     };
     let corners = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]].map(to_cells);
     let low = |axis: usize| corners.iter().map(|c| c[axis]).fold(f32::INFINITY, f32::min).floor() as i32;
@@ -116,6 +119,26 @@ mod tests {
         assert_eq!(rounded(&warp_checker(QUAD, Placement { rotation: 360.0, ..STILL })), still, "a full turn looks unturned");
         assert_ne!(rounded(&warp_checker(QUAD, Placement { tiling: [2.0, 2.0], ..STILL })), still, "tiling shows");
         assert_ne!(rounded(&warp_checker(QUAD, Placement { offset: [0.1, 0.0], ..STILL })), still, "offset shows");
+    }
+
+    /// The checker turns round the frame's centre, as the compositor turns a warp's image: a half turn maps the checker onto itself, mirrored through the centre
+    #[test]
+    fn rotation_turns_the_checker_round_the_frame_centre() {
+        // A tiling whose cells do not divide the frame evenly: a turn round the top left would cut it elsewhere
+        let off_center = Placement { tiling: [0.7, 0.7], offset: [0.1, 0.05], ..STILL };
+        let still = rounded(&warp_checker(QUAD, off_center));
+        let half_turn = Placement { rotation: 180.0, ..off_center };
+        let turned: Vec<_> = rounded(&warp_checker(QUAD, half_turn))
+            .into_iter()
+            .map(|(outline, light)| (outline.into_iter().map(|[x, y]| [100 - x, 100 - y]).collect::<Vec<_>>(), light))
+            .collect();
+        let corners = |cells: &[(Vec<[i32; 2]>, bool)]| {
+            let mut points: Vec<[i32; 2]> = cells.iter().flat_map(|(outline, _)| outline.iter().copied()).collect();
+            points.sort_unstable();
+            points.dedup();
+            points
+        };
+        assert_eq!(corners(&turned), corners(&still), "half turned round the centre: the same cut lines, mirrored through it");
     }
 
     #[test]

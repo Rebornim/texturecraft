@@ -30,15 +30,15 @@ struct HookState {
 static HOOK: Mutex<Option<HookState>> = Mutex::new(None);
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
-/// Waits on this thread for a left click outside the app until it lands or `shared` stops the pick
-pub(super) fn run(shared: &Arc<PickShared>, outcomes: Sender<PickOutcome>, ctx: egui::Context) {
+/// Waits on this thread for a left click outside the app until it lands or `shared` stops the pick (`dpi` sizes the pointer)
+pub(super) fn run(shared: &Arc<PickShared>, outcomes: Sender<PickOutcome>, ctx: egui::Context, dpi: u32) {
     let unavailable = outcomes.clone();
     let generation = GENERATION.fetch_add(1, Ordering::Relaxed);
     if let Ok(mut hook) = HOOK.lock() {
         *hook = Some(HookState { generation, shared: Arc::clone(shared), outcomes, ctx: ctx.clone(), pressed: false, done: false });
     }
     // Before the hook: while it is in place this thread must keep reading messages, or every mouse move on the desktop stalls
-    let _pointer = super::windows_pointer::SystemPointer::show();
+    let _pointer = super::windows_pointer::SystemPointer::show(dpi);
     let Ok(module) = HINSTANCE::GetModuleHandle(None) else { return finish(&unavailable, &ctx) };
     let Ok(mut hook) = HHOOK::SetWindowsHookEx(co::WH::MOUSE_LL, mouse_hook, Some(&module), None) else {
         return finish(&unavailable, &ctx);

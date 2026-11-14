@@ -4,7 +4,9 @@ use std::ops::RangeInclusive;
 
 use egui::{Color32, Mesh, Painter, Rect, Sense, Vec2, pos2, vec2};
 
-use super::slider::{KNOB_RADIUS, Track};
+use super::ramp_edit::RampEdit;
+use super::slider::KNOB_RADIUS;
+use super::track::Track;
 use super::{CONTROL_HEIGHT, GLYPH_TARGET, PropertySheet, ROW_HEIGHT};
 use crate::drawn_icon::DrawnIcon;
 
@@ -33,15 +35,6 @@ const RAMP_HEIGHT: f32 = 4.0;
 /// Size of the invert glyph
 const INVERT_GLYPH_SIZE: f32 = 14.0;
 
-/// What a uniform channel's ramp row did this frame
-pub(crate) struct RampEdit {
-    /// `Some(merge)` when the value changed, `merge` true for a drag's later steps
-    pub(crate) changed: Option<bool>,
-
-    /// The invert glyph was clicked
-    pub(crate) invert: bool,
-}
-
 /// The gaps between the widgets of a card's own body
 const CARD_ITEM_SPACING: Vec2 = vec2(8.0, 4.0);
 
@@ -55,7 +48,7 @@ impl PropertySheet<'_> {
             pos2(square.right() + ORB_TO_SWITCH, square.center().y - CONTROL_HEIGHT / 2.0),
             pos2(self.right, square.center().y + CONTROL_HEIGHT / 2.0),
         );
-        let picked = if options.is_empty() { None } else { self.segments(switch, options, selected, &[], None) };
+        let picked = if options.is_empty() { None } else { self.segments(switch, options, selected, super::switch_control::untinted, None) };
         self.drawn(square.bottom());
         self.space(ORB_AIR);
         picked
@@ -71,15 +64,15 @@ impl PropertySheet<'_> {
         let ramp = Rect::from_min_max(pos2(track.start, center_y - RAMP_HEIGHT / 2.0), pos2(track.end, center_y + RAMP_HEIGHT / 2.0));
         self.ui.painter().add(gray_ramp(ramp));
         let dragged = self.track(id, label, &track, value, &range);
-        let typed = self.value_field_at(id, self.right - RAMP_VALUE_INSET, RAMP_VALUE_WIDTH, center_y, *value, &range, 2, "");
+        let typed = self.value_field_at(id, label, self.right - RAMP_VALUE_INSET, RAMP_VALUE_WIDTH, center_y, *value, &range, 2, "");
 
         let glyph = Rect::from_center_size(pos2(self.right - INVERT_INSET, center_y), vec2(GLYPH_TARGET, GLYPH_TARGET));
         let invert_id = self.next_id();
         let tip = crate::i18n::tr("Invert");
         let response = self.tip(self.ui.interact(glyph, invert_id, Sense::click()), tip);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
-        let t = self.tokens;
-        let color = if response.hovered() { t.text } else { t.text_dim };
+        let tokens = self.tokens;
+        let color = if response.hovered() { tokens.text } else { tokens.text_dim };
         DrawnIcon::Invert.paint(self.ui.painter(), glyph.center(), INVERT_GLYPH_SIZE, color);
         self.drawn(center_y + KNOB_RADIUS);
         RampEdit { changed: Self::apply_typed(value, typed, dragged), invert: response.clicked() }

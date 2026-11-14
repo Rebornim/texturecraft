@@ -19,15 +19,15 @@ impl PropertySheet<'_> {
         let response = self.ui.interact(picture, id, Sense::click_and_drag());
         response.widget_info(|| WidgetInfo::labeled(Role::Button, true, name));
 
-        let t = self.tokens;
+        let tokens = self.tokens;
         let lit = held || response.hovered();
         let painter = self.ui.painter();
         let badge = Rect::from_min_size(picture.right_bottom() - vec2(BADGE_INSET + BADGE_SIZE, BADGE_INSET + BADGE_SIZE), vec2(BADGE_SIZE, BADGE_SIZE));
-        let (fill, edge) = if lit { (t.accent_dim, t.accent) } else { (t.button, t.button_border) };
+        let (fill, edge) = if lit { (tokens.accent_dim, tokens.accent) } else { (tokens.button, tokens.button_border) };
         painter.rect(badge, CornerRadius::same(BADGE_ROUNDING), fill, Stroke::new(1.0, edge), StrokeKind::Inside);
-        painter.text(badge.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(BADGE_GLYPH_SIZE), t.text);
+        painter.text(badge.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(BADGE_GLYPH_SIZE), tokens.text);
         if lit {
-            painter.rect_stroke(picture, 0, Stroke::new(1.0, t.accent), StrokeKind::Inside);
+            painter.rect_stroke(picture, 0, Stroke::new(1.0, tokens.accent), StrokeKind::Inside);
         }
         response
     }

@@ -66,7 +66,7 @@ impl PropertySheet<'_> {
     }
 
     /// [`Self::band`] whose value is led by a picture (Resolution: the size against the texture set's)
-    pub(crate) fn band_pictured(&mut self, title: &str, default_open: bool, value: &str, picture: &dyn Fn(&egui::Painter, Rect)) -> BandResponse {
+    pub(crate) fn band_pictured(&mut self, title: &str, default_open: bool, value: &str, picture: BandPicture<'_>) -> BandResponse {
         self.band_drawn(title, default_open, None, Some(value), Some(picture))
     }
 
@@ -79,7 +79,10 @@ impl PropertySheet<'_> {
         self.held = false;
         self.close_card();
 
-        let id = self.next_id();
+        self.scope = self.id;
+        let id = self.named_id("band", title);
+        self.band_scope = id;
+        self.scope = id;
         let rect = self.take(BAND_HEIGHT);
         let band = Rect::from_x_y_ranges(self.ui.max_rect().x_range(), rect.y_range());
         let mut open = self.ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
@@ -108,30 +111,31 @@ impl PropertySheet<'_> {
             self.ui.data_mut(|data| data.insert_temp(id, open));
         }
 
-        let t = self.tokens;
+        let tokens = self.tokens;
         let painter = self.ui.painter();
         painter.rect_filled(band, CornerRadius::ZERO, self.band_fill());
-        painter.line_segment([band.left_top(), band.right_top()], Stroke::new(1.0, t.separator));
-        painter.line_segment([band.left_bottom(), band.right_bottom()], Stroke::new(1.0, t.separator));
+        painter.line_segment([band.left_top(), band.right_top()], Stroke::new(1.0, tokens.separator));
+        painter.line_segment([band.left_bottom(), band.right_bottom()], Stroke::new(1.0, tokens.separator));
         let center_y = rect.center().y;
-        painter.text(pos2(self.left, center_y), Align2::LEFT_CENTER, title, semibold(TEXT_SIZE), t.text);
+        painter.text(pos2(self.left, center_y), Align2::LEFT_CENTER, title, semibold(TEXT_SIZE), tokens.text);
         if let Some(changed) = reset {
             // The round section reset, as on a section caption: faint where it does nothing
             let color = match (changed, reset_hovered) {
-                (false, _) => t.text_dim.gamma_multiply(RESET_AT_DEFAULT_OPACITY),
-                (true, true) => t.text_strong,
-                (true, false) => t.text_dim,
+                (false, _) => tokens.text_dim.gamma_multiply(RESET_AT_DEFAULT_OPACITY),
+                (true, true) => tokens.text_strong,
+                (true, false) => tokens.text_dim,
             };
             painter.text(reset_rect.center(), Align2::CENTER_CENTER, ic::CLOCK_COUNTER_CLOCKWISE, FontId::proportional(RESET_ICON_SIZE), color);
         }
         if let Some(value) = value {
-            let shown = painter.text(pos2(self.right - BAND_VALUE_INSET, center_y), Align2::RIGHT_CENTER, value, FontId::proportional(TEXT_SIZE), t.text_dim);
+            let shown =
+                painter.text(pos2(self.right - BAND_VALUE_INSET, center_y), Align2::RIGHT_CENTER, value, FontId::proportional(TEXT_SIZE), tokens.text_dim);
             if let Some(draw) = picture {
                 let left = shown.left() - BAND_PICTURE_AIR - BAND_PICTURE_SIZE;
                 draw(painter, Rect::from_min_size(pos2(left, center_y - BAND_PICTURE_SIZE / 2.0), vec2(BAND_PICTURE_SIZE, BAND_PICTURE_SIZE)));
             }
         }
-        self.caret(pos2(self.right - EDGE_GLYPH_INSET, center_y), open, t.text_dim);
+        self.caret(pos2(self.right - EDGE_GLYPH_INSET, center_y), open, tokens.text_dim);
 
         self.drawn(band.bottom());
         self.space(GROUP_GAP);
@@ -146,7 +150,8 @@ impl PropertySheet<'_> {
         }
 
         self.open_card();
-        let id = self.next_id();
+        let id = self.named_id("card", title);
+        self.scope = id;
         let rect = self.take(CARD_NAME_CENTER + ROW_HEIGHT / 2.0);
         let center_y = rect.top() + CARD_NAME_CENTER;
         let mut open = true;
@@ -161,10 +166,10 @@ impl PropertySheet<'_> {
             }
         }
 
-        let t = self.tokens;
-        self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, title, semibold(TEXT_SIZE), t.text);
+        let tokens = self.tokens;
+        self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, title, semibold(TEXT_SIZE), tokens.text);
         if foldable.is_some() {
-            self.caret(pos2(self.right - EDGE_GLYPH_INSET, center_y), open, t.text_dim);
+            self.caret(pos2(self.right - EDGE_GLYPH_INSET, center_y), open, tokens.text_dim);
         }
         self.drawn(center_y + TITLE_HALF_LINE);
         open
@@ -173,7 +178,7 @@ impl PropertySheet<'_> {
     /// A sub-group inside the held card: its bold name on a hairline (no card in a card), a caret when it folds
     fn inner_caption(&mut self, title: &str, foldable: Option<bool>) -> bool {
         self.space(INNER_CAPTION_AIR);
-        let id = self.next_id();
+        let id = self.named_id("caption", title);
         let rect = self.take(INNER_CAPTION_ROW);
         let center_y = rect.top() + INNER_CAPTION_CENTER;
         let mut open = true;
@@ -188,15 +193,15 @@ impl PropertySheet<'_> {
             }
         }
 
-        let t = self.tokens;
+        let tokens = self.tokens;
         let painter = self.ui.painter();
-        let name = painter.text(pos2(self.left, center_y), Align2::LEFT_CENTER, title, semibold(TEXT_SIZE), t.text);
+        let name = painter.text(pos2(self.left, center_y), Align2::LEFT_CENTER, title, semibold(TEXT_SIZE), tokens.text);
         let rule_end = self.right - INNER_RULE_END;
         if name.right() + INNER_RULE_AIR < rule_end {
-            painter.line_segment([pos2(name.right() + INNER_RULE_AIR, center_y), pos2(rule_end, center_y)], Stroke::new(1.0, t.separator));
+            painter.line_segment([pos2(name.right() + INNER_RULE_AIR, center_y), pos2(rule_end, center_y)], Stroke::new(1.0, tokens.separator));
         }
         if foldable.is_some() {
-            self.caret(pos2(self.right - EDGE_GLYPH_INSET, center_y), open, t.text_dim);
+            self.caret(pos2(self.right - EDGE_GLYPH_INSET, center_y), open, tokens.text_dim);
         }
         self.drawn(center_y + TITLE_HALF_LINE);
         open
@@ -238,7 +243,7 @@ impl PropertySheet<'_> {
 
     /// A folded group inside a card: its bold name, the value it holds (dim) and a caret. Returns whether it is open
     pub(crate) fn fold(&mut self, title: &str, value: Option<&str>, default_open: bool) -> bool {
-        let id = self.next_id();
+        let id = self.named_id("fold", title);
         let rect = self.take(ROW_HEIGHT);
         let mut open = self.ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
         let hit = Rect::from_x_y_ranges(self.left..=self.right, rect.y_range());
@@ -249,13 +254,19 @@ impl PropertySheet<'_> {
             self.ui.data_mut(|data| data.insert_temp(id, open));
         }
 
-        let t = self.tokens;
+        let tokens = self.tokens;
         let center_y = rect.center().y;
-        self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, title, semibold(TEXT_SIZE), t.text);
+        self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, title, semibold(TEXT_SIZE), tokens.text);
         if let Some(value) = value {
-            self.ui.painter().text(pos2(self.right - BAND_VALUE_INSET, center_y), Align2::RIGHT_CENTER, value, FontId::proportional(TEXT_SIZE), t.text_dim);
+            self.ui.painter().text(
+                pos2(self.right - BAND_VALUE_INSET, center_y),
+                Align2::RIGHT_CENTER,
+                value,
+                FontId::proportional(TEXT_SIZE),
+                tokens.text_dim,
+            );
         }
-        self.caret(pos2(self.right - EDGE_GLYPH_INSET, center_y), open, t.text_dim);
+        self.caret(pos2(self.right - EDGE_GLYPH_INSET, center_y), open, tokens.text_dim);
         self.drawn(center_y + TITLE_HALF_LINE);
         open
     }
@@ -273,6 +284,8 @@ impl PropertySheet<'_> {
         }
 
         let Some(card) = self.card.take() else { return };
+
+        self.scope = self.band_scope;
 
         let bottom = self.drawn_bottom + CARD_PADDING;
         let face = Rect::from_min_max(pos2(self.left - CARD_BLEED, card.top), pos2(self.right + CARD_BLEED, bottom));

@@ -19,15 +19,16 @@ mod hold_pad;
 mod id_color_row;
 mod id_color_row_response;
 mod info_icon;
+mod marker_drag;
 mod material_rows;
 mod name_field;
-
 mod number_field;
 mod open_card;
 mod preview_block;
 mod preview_edit;
 mod preview_lower;
 mod preview_size;
+mod ramp_edit;
 mod reference_row;
 mod row;
 mod row_lead;
@@ -40,6 +41,7 @@ mod source_card;
 mod stack_slider;
 mod switch_control;
 mod tooltip;
+mod track;
 mod value_text;
 
 #[cfg(test)]
@@ -96,6 +98,9 @@ const LOOSE_LABEL_AIR: f32 = 2.0;
 /// The narrowest value column at a slider's right end
 const VALUE_MIN_WIDTH: f32 = 26.0;
 
+/// Air between a slider track's end and the value column, room for the knob and a gap
+const TRACK_TO_VALUE: f32 = 14.0;
+
 /// The panel counts as scrolled to its end when its last row is at most this far below the visible area
 const SCROLL_END_SLACK: f32 = 2.0;
 
@@ -124,6 +129,9 @@ const GLYPH_SIZE: f32 = 13.0;
 /// Corner radius of a hovered row's face
 const ROW_RADIUS: u8 = 6;
 
+/// Corner radius of dropdowns, fields and buttons
+const CONTROL_RADIUS: u8 = 4;
+
 /// Air above and below a picture block, as a control has in its row
 const BLOCK_MARGIN: f32 = 2.0;
 
@@ -132,6 +140,9 @@ pub(crate) struct PropertySheet<'u> {
     pub(crate) ui: &'u mut Ui,
     tokens: Tokens,
     id: Id,
+    scope: Id,
+    band_scope: Id,
+    named: Vec<Id>,
     left: f32,
     right: f32,
     used: SheetMeasure,
@@ -141,7 +152,7 @@ pub(crate) struct PropertySheet<'u> {
     drawn_bottom: f32,
     empty: bool,
     sections: Vec<(String, f32)>,
-    info: Option<String>,
+    info: Option<&'u str>,
     held: bool,
 }
 
@@ -155,6 +166,9 @@ impl<'u> PropertySheet<'u> {
         let mut sheet = PropertySheet {
             tokens: Tokens::get(ui.ctx()),
             id,
+            scope: id,
+            band_scope: id,
+            named: Vec::new(),
             left: rect.left() + PAD,
             right: rect.right() - PAD,
             used,
@@ -194,7 +208,7 @@ impl<'u> PropertySheet<'u> {
 
     /// Where the knob of a slider's track ends: left of this panel's widest value
     fn track_end(&self) -> f32 {
-        self.right - self.used.value_width.max(VALUE_MIN_WIDTH) - 14.0
+        self.right - self.used.value_width.max(VALUE_MIN_WIDTH) - TRACK_TO_VALUE
     }
 
     /// Records a value's width for the panel's value column
@@ -235,8 +249,8 @@ impl<'u> PropertySheet<'u> {
 
     /// The colour of a top-level band: between the window frame and a card
     fn band_fill(&self) -> Color32 {
-        let t = &self.tokens;
+        let tokens = &self.tokens;
         let mid = |a: u8, b: u8| ((u16::from(a) + u16::from(b)) / 2) as u8;
-        Color32::from_rgb(mid(t.chrome.r(), t.row.r()), mid(t.chrome.g(), t.row.g()), mid(t.chrome.b(), t.row.b()))
+        Color32::from_rgb(mid(tokens.chrome.r(), tokens.row.r()), mid(tokens.chrome.g(), tokens.row.g()), mid(tokens.chrome.b(), tokens.row.b()))
     }
 }

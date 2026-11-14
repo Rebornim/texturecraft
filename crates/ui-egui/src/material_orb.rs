@@ -32,12 +32,16 @@ const HEIGHT_DEPTH: f32 = 0.05;
 /// Exposure before tone mapping
 const EXPOSURE: f32 = 0.55;
 
+/// The least facing a normal turned past the outline keeps, so the reflection and the BRDF fit never see a grazing zero
+const MIN_NORMAL_DOT_VIEW: f32 = 1e-4;
+
 /// Draws `material`'s orb into `rect` on the panel's darkest backdrop; each `place` keeps its last picture while a new one renders
-pub(crate) fn material_orb(painter: &Painter, rect: Rect, material: &OrbMaterial, tokens: &Tokens, place: &str) {
+pub(crate) fn material_orb(painter: &Painter, rect: Rect, material: &OrbMaterial, tokens: &Tokens, place: impl std::hash::Hash + std::fmt::Debug) {
     let ctx = painter.ctx();
     let side = ((rect.width() * ctx.pixels_per_point()).round() as usize).clamp(1, MAX_SIDE_PX);
-    let job = OrbJob::new(material.clone(), side, tokens.chrome);
-    if let Some(texture) = OrbPreviews::texture(ctx, egui::Id::unique(("material_orb", place)), job) {
+    let key = OrbJob::key_of(material, side, tokens.chrome);
+    let job = || OrbJob::new(material.clone(), side, tokens.chrome);
+    if let Some(texture) = OrbPreviews::texture(ctx, egui::Id::unique(("material_orb", place)), key, job) {
         painter.image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
     }
 }
@@ -46,7 +50,7 @@ pub(crate) fn material_orb(painter: &Painter, rect: Rect, material: &OrbMaterial
 pub(crate) fn render(material: &OrbMaterial, side: usize, backdrop: Color32) -> ColorImage {
     let side = side.clamp(1, MAX_SIDE_PX);
     let env = OrbEnvironment::get();
-    let back = [backdrop.r(), backdrop.g(), backdrop.b()].map(|c| f32::from(c) / 255.0);
+    let back = [backdrop.r(), backdrop.g(), backdrop.b()].map(|component| f32::from(component) / 255.0);
 
     // One pixel in orb radii: the step for the height slope and the reach of the anti-aliased outline
     let pixel = 2.0 / (side as f32 * SPHERE_RADIUS);
@@ -73,10 +77,10 @@ pub(crate) fn render(material: &OrbMaterial, side: usize, backdrop: Color32) -> 
                 }
                 None => {
                     let (linear, opacity) = shade(material, env, normal, pixel, uniform);
-                    (linear.map(|c| linear_to_srgb(aces(c * EXPOSURE))), coverage * opacity)
+                    (linear.map(|component| linear_to_srgb(aces(component * EXPOSURE))), coverage * opacity)
                 }
             };
-            let [r, g, b] = [0, 1, 2].map(|k| ((back[k] + (shown[k] - back[k]) * alpha) * 255.0).round().clamp(0.0, 255.0) as u8);
+            let [r, g, b] = [0, 1, 2].map(|channel| ((back[channel] + (shown[channel] - back[channel]) * alpha) * 255.0).round().clamp(0.0, 255.0) as u8);
             *out = Color32::from_rgb(r, g, b);
         }
     });
@@ -93,7 +97,7 @@ fn shade(material: &OrbMaterial, env: &OrbEnvironment, direction: Vec3, pixel: f
     // Tangent frame on the material: east along the UVs, then north
     let east = Vec3::new(-direction.z, 0.0, direction.x).try_normalize().unwrap_or(Vec3::X);
     let north = direction.cross(east).try_normalize().unwrap_or(Vec3::Y);
-    let mapped = Vec3::from(sample.normal.map(|c| c * 2.0 - 1.0));
+    let mapped = Vec3::from(sample.normal.map(|component| component * 2.0 - 1.0));
     let mut surface = (east * mapped.x + north * mapped.y + direction * mapped.z).try_normalize().unwrap_or(direction);
     if material.has_relief() {
         let height = material.height(&coords, footprint);
@@ -104,7 +108,7 @@ fn shade(material: &OrbMaterial, env: &OrbEnvironment, direction: Vec3, pixel: f
     let normal = surface;
     let roughness = sample.roughness.clamp(MIN_ROUGHNESS, 1.0);
     let metallic = sample.metallic.clamp(0.0, 1.0);
-    let normal_dot_view = normal.z.max(1e-4);
+    let normal_dot_view = normal.z.max(MIN_NORMAL_DOT_VIEW);
 
     // Mirror the direction towards the viewer (+Z) about the normal
     let reflected = (2.0 * normal_dot_view * normal - Vec3::Z).normalize_or_zero();
@@ -112,11 +116,11 @@ fn shade(material: &OrbMaterial, env: &OrbEnvironment, direction: Vec3, pixel: f
     let diffuse_light = env.diffuse(normal);
     let (scale, bias) = environment_brdf(roughness, normal_dot_view);
     let mut out = [0.0; 3];
-    for (k, value) in out.iter_mut().enumerate() {
-        let base = sample.base[k].clamp(0.0, 1.0);
+    for (channel, value) in out.iter_mut().enumerate() {
+        let base = sample.base[channel].clamp(0.0, 1.0);
         let f0 = DIELECTRIC_F0 + (base - DIELECTRIC_F0) * metallic;
         let specular = f0 * scale + bias;
-        *value = diffuse_light[k] * base * (1.0 - metallic) * (1.0 - specular) + specular_light[k] * specular + sample.emissive[k].max(0.0);
+        *value = diffuse_light[channel] * base * (1.0 - metallic) * (1.0 - specular) + specular_light[channel] * specular + sample.emissive[channel].max(0.0);
     }
     (out, sample.opacity.clamp(0.0, 1.0))
 }
@@ -137,9 +141,9 @@ fn channel_view(channel: Channel, value: [f32; 3]) -> [f32; 3] {
 
 /// The split-sum environment BRDF as scale and bias on F0, from Karis' analytic fit for mobile (no lookup table)
 fn environment_brdf(roughness: f32, normal_dot_view: f32) -> (f32, f32) {
-    let r = [1.0 - roughness, roughness * -0.0275 + 0.0425, roughness * -0.572 + 1.04, roughness * 0.022 - 0.04];
-    let a004 = (r[0] * r[0]).min((-9.28 * normal_dot_view).exp2()) * r[0] + r[1];
-    (a004 * -1.04 + r[2], a004 * 1.04 + r[3])
+    let [gloss, gloss_offset, scale_base, bias_base] = [1.0 - roughness, roughness * -0.0275 + 0.0425, roughness * -0.572 + 1.04, roughness * 0.022 - 0.04];
+    let shared = (gloss * gloss).min((-9.28 * normal_dot_view).exp2()) * gloss + gloss_offset;
+    (shared * -1.04 + scale_base, shared * 1.04 + bias_base)
 }
 
 #[cfg(test)]

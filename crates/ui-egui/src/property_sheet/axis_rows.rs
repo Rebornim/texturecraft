@@ -5,7 +5,8 @@ use std::ops::RangeInclusive;
 use egui::{Align2, Color32, FontId, Painter, Rect, Response, Role, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
 
 use super::row::SECTION_CAPTION_CENTER;
-use super::slider::{KNOB_RADIUS, Track};
+use super::slider::KNOB_RADIUS;
+use super::track::Track;
 use super::{BLOCK_MARGIN, PropertySheet, SMALL_TEXT_SIZE, StackSlider, TEXT_SIZE};
 use crate::theme::semibold;
 
@@ -49,17 +50,17 @@ impl PropertySheet<'_> {
 
     /// A dim section caption whose switch can't be used: `reason` stands in its place at the right edge, cut with "…" to fit (then its tooltip reads it whole)
     pub(crate) fn section_unavailable(&mut self, title: &str, reason: &str) {
-        let t = self.tokens;
-        self.section_in(title, false, t.text_dim);
+        let tokens = self.tokens;
+        self.section_in(title, false, tokens.text_dim);
         let top = self.sections.last().map_or(self.cursor_y(), |(_, top)| *top);
         let center_y = top + SECTION_CAPTION_CENTER;
         let painter = self.ui.painter().clone();
-        let caption = painter.layout_no_wrap(title.to_uppercase(), semibold(SMALL_TEXT_SIZE), t.text_dim).size().x;
+        let caption = painter.layout_no_wrap(title.to_uppercase(), semibold(SMALL_TEXT_SIZE), tokens.text_dim).size().x;
         let room = self.right - self.left - caption - UNAVAILABLE_AIR;
-        let galley = crate::widgets::elided(&painter, reason, SMALL_TEXT_SIZE, t.text_dim, room);
+        let galley = crate::widgets::elided(&painter, reason, SMALL_TEXT_SIZE, tokens.text_dim, room);
         let cut = galley.text() != reason;
         let rect = Rect::from_min_size(pos2(self.right - galley.size().x, center_y - galley.size().y / 2.0), galley.size());
-        painter.galley(rect.min, galley, t.text_dim);
+        painter.galley(rect.min, galley, tokens.text_dim);
         let id = self.next_id();
         let response = self.ui.interact(rect, id, Sense::hover());
         response.widget_info(|| WidgetInfo::labeled(Role::Label, false, reason));
@@ -87,8 +88,9 @@ impl PropertySheet<'_> {
             self.ui.painter().text(pos2(control.left(), center_y), Align2::LEFT_CENTER, *letter, semibold(TEXT_SIZE), *color);
             let id = self.next_id();
             let track = Track { start: control.left() + LETTER_TO_TRACK + KNOB_RADIUS, end: self.track_end(), center_y, zero: Some(0.0), ramp: false };
-            let dragged = self.track(id, &format!("{label} {letter}"), &track, value, &range);
-            let typed = self.value_field(id, center_y, *value, &range, decimals, "");
+            let name = format_args!("{label} {letter}");
+            let dragged = self.track(id, name, &track, value, &range);
+            let typed = self.value_field(id, name, center_y, *value, &range, decimals, "");
             if let Some(merge) = Self::apply_typed(value, typed, dragged) {
                 edit = Some((index, merge));
             }
@@ -119,7 +121,7 @@ impl PropertySheet<'_> {
             let id = self.next_id();
             let track = Track { start: x0 + KNOB_RADIUS, end: self.track_end(), center_y, zero: None, ramp: false };
             let dragged = self.track(id, slider.label, &track, slider.value, &slider.range);
-            let typed = self.value_field(id, center_y, *slider.value, &slider.range, slider.decimals, slider.suffix);
+            let typed = self.value_field(id, slider.label, center_y, *slider.value, &slider.range, slider.decimals, slider.suffix);
             if let Some(merge) = Self::apply_typed(slider.value, typed, dragged) {
                 edit = Some((index, merge));
             }

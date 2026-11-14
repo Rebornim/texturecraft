@@ -261,6 +261,23 @@ fn tool_controls(app: &mut TextureCraftApp, ui: &mut egui::Ui, tokens: &Tokens) 
     const DEFAULT_LAZY_DISTANCE_PX: f32 = 20.0;
     const TOOL_ICON_SIZE: f32 = 15.0;
 
+    // Slider widths: the longer-named Size and Stroke opacity get more room, Lazy mouse's Distance less
+    const WIDE_SLIDER_WIDTH: f32 = 110.0;
+    const SLIDER_WIDTH: f32 = 100.0;
+    const NARROW_SLIDER_WIDTH: f32 = 90.0;
+
+    /// The sliders show fractions as percentages
+    const PERCENT: f32 = 100.0;
+
+    /// Size's track, in percent of the largest brush
+    const SIZE_PERCENT_RANGE: std::ops::RangeInclusive<f32> = 0.05..=100.0;
+
+    /// Spacing's track, in percent of the brush's diameter
+    const SPACING_PERCENT_RANGE: std::ops::RangeInclusive<f32> = 1.0..=200.0;
+
+    /// Lazy mouse Distance's track, in pixels
+    const LAZY_DISTANCE_RANGE_PX: std::ops::RangeInclusive<f32> = 1.0..=200.0;
+
     let button_size = ui.spacing().interact_size.y;
     let tool = app.session.tool.tool;
     if tool == Tool::ColorPicker {
@@ -274,24 +291,24 @@ fn tool_controls(app: &mut TextureCraftApp, ui: &mut egui::Ui, tokens: &Tokens) 
     let brush = &mut app.session.tool.brush;
     match tool {
         Tool::Paint | Tool::Eraser | Tool::Projection | Tool::Smudge | Tool::Clone | Tool::Path => {
-            let mut size = brush.size / MAX_BRUSH_SIZE * 100.0;
-            if bar_slider(ui, tr("Size"), &mut size, 0.05..=100.0, 110.0).changed() {
-                brush.size = (size / 100.0 * MAX_BRUSH_SIZE).clamp(MIN_BRUSH_SIZE, MAX_BRUSH_SIZE);
+            let mut size = brush.size / MAX_BRUSH_SIZE * PERCENT;
+            if bar_slider(ui, tr("Size"), &mut size, SIZE_PERCENT_RANGE, WIDE_SLIDER_WIDTH).changed() {
+                brush.size = (size / PERCENT * MAX_BRUSH_SIZE).clamp(MIN_BRUSH_SIZE, MAX_BRUSH_SIZE);
             }
 
-            let mut flow = brush.flow * 100.0;
-            if bar_slider(ui, tr("Flow"), &mut flow, 0.0..=100.0, 100.0).changed() {
-                brush.flow = flow / 100.0;
+            let mut flow = brush.flow * PERCENT;
+            if bar_slider(ui, tr("Flow"), &mut flow, 0.0..=PERCENT, SLIDER_WIDTH).changed() {
+                brush.flow = flow / PERCENT;
             }
 
-            let mut opacity = brush.opacity * 100.0;
-            if bar_slider(ui, tr("Stroke opacity"), &mut opacity, 0.0..=100.0, 110.0).changed() {
-                brush.opacity = opacity / 100.0;
+            let mut opacity = brush.opacity * PERCENT;
+            if bar_slider(ui, tr("Stroke opacity"), &mut opacity, 0.0..=PERCENT, WIDE_SLIDER_WIDTH).changed() {
+                brush.opacity = opacity / PERCENT;
             }
 
-            let mut spacing = brush.spacing * 100.0;
-            if bar_slider(ui, tr("Spacing"), &mut spacing, 1.0..=200.0, 100.0).changed() {
-                brush.spacing = spacing / 100.0;
+            let mut spacing = brush.spacing * PERCENT;
+            if bar_slider(ui, tr("Spacing"), &mut spacing, SPACING_PERCENT_RANGE, SLIDER_WIDTH).changed() {
+                brush.spacing = spacing / PERCENT;
             }
 
             ui.separator();
@@ -301,7 +318,7 @@ fn tool_controls(app: &mut TextureCraftApp, ui: &mut egui::Ui, tokens: &Tokens) 
             }
             if lazy_on {
                 let mut distance = brush.lazy;
-                if bar_slider(ui, tr("Distance"), &mut distance, 1.0..=200.0, 90.0).changed() {
+                if bar_slider(ui, tr("Distance"), &mut distance, LAZY_DISTANCE_RANGE_PX, NARROW_SLIDER_WIDTH).changed() {
                     brush.lazy = distance;
                 }
             }
@@ -316,9 +333,9 @@ fn tool_controls(app: &mut TextureCraftApp, ui: &mut egui::Ui, tokens: &Tokens) 
 
             if tool == Tool::Smudge {
                 ui.separator();
-                let mut strength = app.session.tool.smudge_strength * 100.0;
-                if bar_slider(ui, tr("Strength"), &mut strength, 0.0..=100.0, 100.0).changed() {
-                    app.session.tool.smudge_strength = (strength / 100.0).clamp(0.0, 1.0);
+                let mut strength = app.session.tool.smudge_strength * PERCENT;
+                if bar_slider(ui, tr("Strength"), &mut strength, 0.0..=PERCENT, SLIDER_WIDTH).changed() {
+                    app.session.tool.smudge_strength = (strength / PERCENT).clamp(0.0, 1.0);
                 }
             }
 
@@ -514,7 +531,7 @@ const RAIL_ICON_SIZE: f32 = 26.0;
 const RAIL_ICON_GAP: f32 = 4.0;
 
 /// Padding inside the rail's card around its icons, as the tool shelf's
-const RAIL_CARD_PADDING: egui::Margin = egui::Margin::symmetric(3, 6);
+const RAIL_CARD_PADDING: egui::Margin = SHELF_PADDING;
 
 /// The icon rail: the rail panels that are not in the dock (Export first), each opening its popup
 pub fn rail(app: &mut TextureCraftApp, ui: &mut egui::Ui) {

@@ -8,18 +8,10 @@ use texturecraft_engine::core::{Channel, CookResolution, LayerId, LayerKind, Lin
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::screen_pick::{PickOutcome, ScreenPick};
 
+use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+
 /// Tall enough that Properties shows the whole fill and an open source list without scrolling
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1600.0);
-
-/// Small texture and bake sizes keep the sample session fast; the panel doesn't depend on them
-const TEXTURE_RESOLUTION: u32 = 256;
-const BAKE_RESOLUTION: u32 = 64;
-
-/// Frames for the first layout and fonts to settle
-const STARTUP_FRAMES: usize = 4;
-
-/// Frames for a click or selection change to reach the panel
-const SETTLE_FRAMES: usize = 3;
 
 /// Frames for a scroll to bring a control into view
 const SCROLL_FRAMES: usize = 25;
@@ -59,6 +51,25 @@ fn click_below(harness: &mut Harness<'_, TextureCraftApp>, role: Role, label: &s
     harness.get_by_role_and_label(role, label).scroll_to_me();
     harness.run_steps(SCROLL_FRAMES);
     click(harness, role, label);
+}
+
+/// Clicks the eyedropper at the end of the Base color bar's row in the panel (the open picker has its own)
+fn click_bar_eyedropper(harness: &mut Harness<'_, TextureCraftApp>) {
+    let bar = harness.get_by_role_and_label(Role::Button, "Base color").rect();
+    let eyedropper = harness
+        .get_all_by_role_and_label(Role::Button, "Pick color")
+        .find(|node| bar.y_range().contains(node.rect().center().y) && node.rect().left() >= bar.right())
+        .unwrap();
+    eyedropper.click();
+}
+
+/// Clicks the open picker's own eyedropper, beside its hex field
+fn click_picker_eyedropper(harness: &mut Harness<'_, TextureCraftApp>) {
+    let hex = harness.get_by_role_and_label(Role::TextInput, "Hex color").rect();
+    let title = harness.get_by_role_and_label(Role::TitleBar, "Base color").rect();
+    let in_picker_row = |at: egui::Pos2| hex.y_range().contains(at.y) && at.x >= hex.right() && at.x <= title.right() + CLOSE_ROOM;
+    let eyedropper = harness.get_all_by_role_and_label(Role::Button, "Pick color").find(|node| in_picker_row(node.rect().center())).unwrap();
+    eyedropper.click();
 }
 
 /// Clicks the `role` named `label` that sits in the row of the slot named `slot` (bands above have their own ⟲)
@@ -184,6 +195,105 @@ fn a_linked_material_shows_its_inputs_and_the_switch_shows_its_channels() {
     assert!(harness.query_by_role_and_label(Role::Slider, "Wear").is_none());
 }
 
+/// A drag on a linked material's number input is one undo step, however many frames it spans
+#[test]
+fn dragging_a_linked_material_input_adds_one_undo_step() {
+    let (mut harness, layer) = app_with_fill(json!({}));
+    let wear = LinkParam {
+        id: "wear".into(),
+        label: "Wear".into(),
+        group: String::new(),
+        value: json!({"t": "float", "v": 0.25}),
+        default: json!({"t": "float", "v": 0.25}),
+        min: 0.0,
+        max: 1.0,
+        options: Vec::new(),
+    };
+    let link = MaterialLink {
+        name: "Painted steel".into(),
+        package: String::new(),
+        graph: "main".into(),
+        params: vec![wear],
+        presets: Vec::new(),
+        inputs: Vec::new(),
+        size: 256,
+        resolution: None,
+        mapping: Default::default(),
+        outputs: Default::default(),
+    };
+    if let Some(LayerKind::Fill(fill)) = harness.state_mut().session.doc.project.layers.get_mut(&layer).map(|layer| &mut layer.kind) {
+        fill.link = Some(Box::new(link));
+    }
+    harness.run_steps(SETTLE_FRAMES);
+    let steps = harness.state().session.history_labels().len();
+
+    let track = harness.get_by_role_and_label(Role::Slider, "Wear").rect();
+    mouse_drag(&mut harness, track.center(), egui::vec2(track.width() / 4.0, 0.0));
+
+    let LayerKind::Fill(fill) = &harness.state().session.doc.project.layer(layer).unwrap().kind else { panic!("a fill") };
+    assert_ne!(fill.link.as_deref().unwrap().params[0].value, json!({"t": "float", "v": 0.25}), "the drag changes the input");
+    assert_eq!(harness.state().session.history_labels().len(), steps + 1, "every frame of the drag merges into one step");
+}
+
+/// A drag in a linked material's colour picker is one undo step, however many frames it spans
+#[test]
+fn dragging_in_a_linked_colour_picker_adds_one_undo_step() {
+    let (mut harness, layer) = app_with_fill(json!({}));
+    let gray = json!({"t": "color", "v": [0.5, 0.5, 0.5, 1.0]});
+    let tint = LinkParam {
+        id: "tint".into(),
+        label: "Tint".into(),
+        group: String::new(),
+        value: gray.clone(),
+        default: gray.clone(),
+        min: 0.0,
+        max: 1.0,
+        options: Vec::new(),
+    };
+    let link = MaterialLink {
+        name: "Painted steel".into(),
+        package: String::new(),
+        graph: "main".into(),
+        params: vec![tint],
+        presets: Vec::new(),
+        inputs: Vec::new(),
+        size: 256,
+        resolution: None,
+        mapping: Default::default(),
+        outputs: Default::default(),
+    };
+    if let Some(LayerKind::Fill(fill)) = harness.state_mut().session.doc.project.layers.get_mut(&layer).map(|layer| &mut layer.kind) {
+        fill.link = Some(Box::new(link));
+    }
+    harness.run_steps(SETTLE_FRAMES);
+    let steps = harness.state().session.history_labels().len();
+
+    // The swatch sits right of its label; its picker's saturation and value square lies under the R, G, B row
+    let label = harness.get_by_label("Tint").rect();
+    let swatch = egui::pos2(label.right() + SWATCH_REACH, label.center().y);
+    harness.drag_at(swatch);
+    harness.drop_at(swatch);
+    harness.run_steps(SETTLE_FRAMES);
+    let copy = harness.get_by_role_and_label(Role::Button, "Copy RGB values").rect();
+    let red = harness
+        .get_all_by_role(Role::SpinButton)
+        .map(|node| node.rect())
+        .filter(|field| field.center().y < copy.bottom())
+        .min_by(|a, b| a.left().total_cmp(&b.left()))
+        .unwrap();
+    mouse_drag(&mut harness, egui::pos2(red.left() + SQUARE_REACH, copy.bottom() + SQUARE_REACH), egui::vec2(SQUARE_REACH / 2.0, SQUARE_REACH / 2.0));
+
+    let LayerKind::Fill(fill) = &harness.state().session.doc.project.layer(layer).unwrap().kind else { panic!("a fill") };
+    assert_ne!(fill.link.as_deref().unwrap().params[0].value, gray, "the drag changes the colour");
+    assert_eq!(harness.state().session.history_labels().len(), steps + 1, "every frame of the drag merges into one step");
+}
+
+/// From a label's right edge into the colour swatch beside it
+const SWATCH_REACH: f32 = 30.0;
+
+/// From the picker's top-left content corner into its saturation and value square, and half of it for the drag
+const SQUARE_REACH: f32 = 80.0;
+
 #[test]
 fn a_linked_material_maps_its_channels_and_picks_its_resolution() {
     let (mut harness, layer) = app_with_fill(json!({}));
@@ -257,7 +367,7 @@ fn the_colour_bar_opens_the_picker_which_types_restores_and_waits_for_an_eyedrop
     let restored = base_color(&harness, layer);
     assert!(restored.iter().zip(before).all(|(a, b)| (a - b).abs() < 1e-4), "a click on the previous colour restores it: {restored:?} {before:?}");
 
-    harness.get_all_by_role_and_label(Role::Button, "Pick color").next().unwrap().click();
+    click_picker_eyedropper(&mut harness);
     harness.run_steps(SETTLE_FRAMES);
     assert!(harness.state().picking_color.is_some(), "the eyedropper waits for a click on the model");
 }
@@ -308,7 +418,7 @@ fn the_picker_is_a_window_beside_the_panel_that_its_title_drags_and_its_close_or
 fn escape_ends_an_eyedropper_pick_before_the_picker_and_an_alt_orbit_keeps_the_picker_open() {
     let (mut harness, _) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
     click(&mut harness, Role::Button, "Base color");
-    harness.get_all_by_role_and_label(Role::Button, "Pick color").next().unwrap().click();
+    click_bar_eyedropper(&mut harness);
     harness.run_steps(SETTLE_FRAMES);
     assert!(harness.state().picking_color.is_some(), "the eyedropper waits for a click on the model");
 
@@ -407,6 +517,10 @@ fn picker_face(harness: &Harness<'_, TextureCraftApp>) -> egui::Rect {
 /// The title bar stops at the × (color_bar.rs: from the right edge to the close target's left edge)
 const CLOSE_ROOM: f32 = 22.0;
 
+/// The narrowest the picker resizes to and the shortest its colour field gets (color_bar.rs PICKER_MIN_WIDTH, color_picker_rows.rs FIELD_MIN_HEIGHT)
+const PICKER_MIN_WIDTH: f32 = 240.0;
+const FIELD_MIN_HEIGHT: f32 = 100.0;
+
 #[test]
 fn the_picker_is_titled_by_its_channel_resizes_from_its_edges_keeps_its_size_and_previews_nothing_on_hover() {
     let (mut harness, _) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
@@ -440,7 +554,7 @@ fn the_picker_is_titled_by_its_channel_resizes_from_its_edges_keeps_its_size_and
     mouse_drag(&mut harness, wider.right_bottom() - egui::vec2(2.0, 2.0), egui::vec2(-1000.0, -1000.0));
     let least = picker_face(&harness);
     let least_field = harness.get_by_role_and_label(Role::Slider, "Saturation and value").rect();
-    assert!(least.width() >= 200.0 && least_field.height() >= 90.0, "it stops at a usable size: {least:?} {least_field:?}");
+    assert!(least.width() >= PICKER_MIN_WIDTH - 1.0 && least_field.height() >= FIELD_MIN_HEIGHT - 1.0, "it stops at a usable size: {least:?} {least_field:?}");
 
     harness.key_press(egui::Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
@@ -509,7 +623,7 @@ fn a_plain_fill_switches_to_one_whole_material_picks_it_from_its_card_and_clears
 
 /// Arms the base colour bar's eyedropper and gives its pick the click outside the app that ended as `outcome`
 fn pick_outside(harness: &mut Harness<'_, TextureCraftApp>, outcome: PickOutcome) {
-    harness.get_all_by_role_and_label(Role::Button, "Pick color").next().unwrap().click();
+    click_bar_eyedropper(harness);
     harness.run_steps(SETTLE_FRAMES);
     let bar = harness.state().picking_color.expect("the eyedropper waits for a click");
     harness.state_mut().screen_pick = Some(ScreenPick::ended(bar, outcome));
@@ -548,7 +662,7 @@ fn an_armed_eyedropper_is_the_pointer_over_the_whole_window_and_the_app_losing_t
     let (mut harness, layer) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
     let before = base_color(&harness, layer);
     click(&mut harness, Role::Button, "Base color");
-    harness.get_all_by_role_and_label(Role::Button, "Pick color").next().unwrap().click();
+    click_bar_eyedropper(&mut harness);
     harness.run_steps(SETTLE_FRAMES);
     let bar = harness.state().picking_color.expect("the eyedropper waits for a click");
 

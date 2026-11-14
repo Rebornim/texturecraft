@@ -48,11 +48,20 @@ impl SourceSlot {
 
     /// A procedural's two ends when it is picked: a gray fill spans the whole range, a channel a softer part of it
     pub(crate) fn procedural_ends(self) -> ([f32; 3], [f32; 3]) {
+        /// Base color stays off pure black and white, which read as unlit or blown out
+        const BASE_COLOR_ENDS: ([f32; 3], [f32; 3]) = ([0.15; 3], [0.85; 3]);
+
+        /// Height stays a shallow relief around flat, as a full −1..1 swing reads as deep cuts
+        const HEIGHT_ENDS: ([f32; 3], [f32; 3]) = ([-0.05; 3], [0.05; 3]);
+
+        /// The other channels keep off their extremes, so the pattern changes the surface without flattening it to one end
+        const CHANNEL_ENDS: ([f32; 3], [f32; 3]) = ([0.2; 3], [0.8; 3]);
+
         match self {
             SourceSlot::Grayscale | SourceSlot::Input(_) => ([0.0; 3], [1.0; 3]),
-            SourceSlot::Channel(Channel::BaseColor) => ([0.15; 3], [0.85; 3]),
-            SourceSlot::Channel(Channel::Height) => ([-0.05; 3], [0.05; 3]),
-            SourceSlot::Channel(_) => ([0.2; 3], [0.8; 3]),
+            SourceSlot::Channel(Channel::BaseColor) => BASE_COLOR_ENDS,
+            SourceSlot::Channel(Channel::Height) => HEIGHT_ENDS,
+            SourceSlot::Channel(_) => CHANNEL_ENDS,
         }
     }
 

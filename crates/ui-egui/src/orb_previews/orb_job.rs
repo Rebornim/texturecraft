@@ -24,10 +24,8 @@ pub(crate) struct OrbJob {
 
 impl OrbJob {
     pub(crate) fn new(material: OrbMaterial, side: usize, backdrop: Color32) -> OrbJob {
-        let mut hasher = DefaultHasher::new();
-        (material.key(), side, backdrop.to_array()).hash(&mut hasher);
         OrbJob {
-            key: hasher.finish(),
+            key: OrbJob::key_of(&material, side, backdrop),
             material,
             side,
             backdrop,
@@ -35,6 +33,13 @@ impl OrbJob {
             place: Id::NULL,
             quick: side >= QUICK_BELOW_PX,
         }
+    }
+
+    /// The cache key of `material`'s orb `side` pixels square on `backdrop`, without building the job
+    pub(crate) fn key_of(material: &OrbMaterial, side: usize, backdrop: Color32) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        (material.key(), side, backdrop.to_array()).hash(&mut hasher);
+        hasher.finish()
     }
 
     pub(super) fn picture(&self) -> ColorImage {

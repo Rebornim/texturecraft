@@ -21,6 +21,12 @@ const SLOT_LOW_IN_THE_CARD: &str = "Height";
 const FIRST_TILE: &str = "Clouds";
 /// A window with room for the picker under every slot
 const TALL_WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 3200.0);
+/// From a slot's top-left corner to a point clearly left of its open picker, over the viewport
+const OUTSIDE_THE_PICKER: egui::Vec2 = egui::vec2(-400.0, 0.0);
+/// A window too short for the picker under Roughness's slot, so the snapshot shows it opened above
+const SNAPSHOT_WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1000.0);
+/// Frames for the hovered tile's fill to show before the snapshot
+const HOVER_FRAMES: usize = 8;
 
 /// The app with a new fill layer selected on its Material tab, the layer's id; `prepare` runs on the session first
 fn app_with_fill(prepare: impl FnOnce(&mut texturecraft_engine::Session, LayerId)) -> (Harness<'static, TextureCraftApp>, LayerId) {
@@ -68,7 +74,7 @@ fn a_procedural_tile_sets_the_channel_and_closes_the_picker() {
     assert!(harness.query_by_role_and_label(Role::Tab, "Resources").is_some(), "the picker has its Resources tab");
     assert!(harness.query_by_role_and_label(Role::Tab, "Anchor points").is_some(), "and its Anchor points tab");
 
-    click_tile(&mut harness, "Clouds");
+    click_tile(&mut harness, FIRST_TILE);
     let Source::Procedural { pattern, .. } = source(&harness, layer, Channel::Roughness) else { panic!("a procedural") };
     assert_eq!(pattern.kind, ProceduralKind::Clouds);
     assert!(!egui::Popup::is_any_open(&harness.ctx), "a pick closes the picker");
@@ -182,12 +188,12 @@ fn escape_or_a_click_outside_closes_it_and_the_wheel_still_zooms_the_view() {
     click_slot(&mut harness, "Roughness");
     assert!(egui::Popup::is_any_open(&harness.ctx));
     let slot = harness.get_by_role_and_label(Role::ComboBox, "Roughness").rect();
-    click_at(&mut harness, egui::pos2(slot.min.x - 400.0, slot.min.y));
+    click_at(&mut harness, slot.min + OUTSIDE_THE_PICKER);
     assert!(!egui::Popup::is_any_open(&harness.ctx), "a click outside closes the picker");
 
     // Opened again from Uniform after a scroll down, it starts at the top
     click_slot(&mut harness, "Roughness");
-    let clouds = |harness: &Harness<'_, TextureCraftApp>| harness.get_by_role_and_label(Role::ListBoxOption, "Clouds").rect();
+    let clouds = |harness: &Harness<'_, TextureCraftApp>| harness.get_by_role_and_label(Role::ListBoxOption, FIRST_TILE).rect();
     let first_tile = clouds(&harness);
     harness.hover_at(first_tile.center());
     harness.event(egui::Event::MouseWheel {
@@ -236,15 +242,14 @@ fn near_the_windows_bottom_the_picker_opens_above_its_slot_at_full_size() {
 fn picker_above_its_slot_snapshot() {
     let mut session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();
     texturecraft_engine::execute(&mut session, "layer.add.fill", &json!({})).unwrap();
-    let mut harness =
-        Harness::builder().with_size(egui::vec2(1600.0, 1000.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    let mut harness = Harness::builder().with_size(SNAPSHOT_WINDOW_SIZE).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(STARTUP_FRAMES);
     harness.get_by_role_and_label(Role::Tab, "Material").click();
     harness.run_steps(SETTLE_FRAMES);
     click_slot(&mut harness, "Roughness");
     harness.hover_at(harness.get_by_role_and_label(Role::ListBoxOption, FIRST_TILE).rect().center());
-    harness.run_steps(8);
+    harness.run_steps(HOVER_FRAMES);
     let image = harness.render().unwrap();
     if let Some(directory) = std::env::var_os("TC_UI_SNAPSHOTS") {
         image.save(std::path::Path::new(&directory).join("picker-above-slot.png")).unwrap();

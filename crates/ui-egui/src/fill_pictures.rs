@@ -2,13 +2,14 @@
 
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
 use texturecraft_engine::core::{Filtering, ShapeCrop, UvWrap};
+use texturecraft_engine::paint::FULL_TURN_DEGREES;
 
-use crate::fill_placement::Placement;
+use crate::placement::Placement;
 use crate::projection_kind::ProjectionKind;
 use crate::projection_preview::{edge_markers, passed_sides};
 use crate::warp_checker::warp_checker;
 
-use crate::theme::Tokens;
+use crate::theme::{Tokens, lerp_color};
 
 /// The projection glyph's height, as a share of its picture's
 const PROJECTION_GLYPH_SHARE: f32 = 0.85;
@@ -184,25 +185,38 @@ const ANGLE_RADIUS_SHARE: f32 = 0.45;
 /// The warp preview's outline width
 const WARP_EDGE_WIDTH: f32 = 1.5;
 
+/// Corner radius of the crop picture's shape, and of a fill that reaches a picture's edges
+const CROP_SHAPE_CORNER_RADIUS: u8 = 3;
+const PICTURE_CORNER_RADIUS: u8 = 2;
+
+/// Where the depth picture's surface sits, as a share of its height from the top
+const DEPTH_SURFACE_SHARE: f32 = 0.25;
+
+/// Points what lies under the surface reaches past its share, so it still reads at small sizes
+const DEPTH_UNDER_EXTRA: f32 = 2.0;
+
+/// How far the backface picture's face stays inside the picture's sides
+const BACKFACE_SIDE_INSET: f32 = 2.0;
+
 /// Shape crop: the projection inside its shape only, or past it too
 pub(crate) fn crop_picture(painter: &Painter, rect: Rect, crop: ShapeCrop, tokens: &Tokens) {
     let inner = rect.shrink(PICTURE_INSET);
     match crop {
         ShapeCrop::Cropped => {
-            painter.rect_filled(inner, 3, accent_shade(tokens));
+            painter.rect_filled(inner, CROP_SHAPE_CORNER_RADIUS, accent_shade(tokens));
         }
         ShapeCrop::ExtendsOutside => {
-            painter.rect_filled(rect, 2, accent_shade(tokens));
+            painter.rect_filled(rect, PICTURE_CORNER_RADIUS, accent_shade(tokens));
         }
     }
-    painter.rect_stroke(inner, 3, Stroke::new(1.0, tokens.text), egui::StrokeKind::Inside);
+    painter.rect_stroke(inner, CROP_SHAPE_CORNER_RADIUS, Stroke::new(1.0, tokens.text), egui::StrokeKind::Inside);
 }
 
 /// Depth culling, seen from the side: the surface the projection lands on and what lies under it
 pub(crate) fn depth_picture(painter: &Painter, rect: Rect, tokens: &Tokens) {
-    let top = rect.top() + rect.height() * 0.25;
-    let under = Rect::from_min_max(pos2(rect.left(), top), pos2(rect.right(), top + rect.height() * DEPTH_UNDER_SHARE + 2.0));
-    painter.rect_filled(under, 2, accent_shade(tokens));
+    let top = rect.top() + rect.height() * DEPTH_SURFACE_SHARE;
+    let under = Rect::from_min_max(pos2(rect.left(), top), pos2(rect.right(), top + rect.height() * DEPTH_UNDER_SHARE + DEPTH_UNDER_EXTRA));
+    painter.rect_filled(under, PICTURE_CORNER_RADIUS, accent_shade(tokens));
     painter.line_segment([pos2(rect.left(), top), pos2(rect.right(), top)], Stroke::new(1.0, tokens.text));
     painter.text(
         pos2(rect.center().x, rect.top() + PICTURE_INSET),
@@ -216,9 +230,9 @@ pub(crate) fn depth_picture(painter: &Painter, rect: Rect, tokens: &Tokens) {
 /// Backface culling: a face turned away, darker while culled
 pub(crate) fn backface_picture(painter: &Painter, rect: Rect, on: bool, tokens: &Tokens) {
     let (left, apex, right) = (
-        pos2(rect.left() + 2.0, rect.bottom() - PICTURE_INSET),
+        pos2(rect.left() + BACKFACE_SIDE_INSET, rect.bottom() - PICTURE_INSET),
         pos2(rect.center().x, rect.top() + PICTURE_INSET),
-        pos2(rect.right() - 2.0, rect.bottom() - PICTURE_INSET),
+        pos2(rect.right() - BACKFACE_SIDE_INSET, rect.bottom() - PICTURE_INSET),
     );
     painter.add(Shape::convex_polygon(vec![left, apex, right], if on { accent_shade(tokens) } else { tokens.accent }, Stroke::NONE));
     painter.line_segment([apex, right], Stroke::new(1.0, tokens.text));
@@ -227,18 +241,21 @@ pub(crate) fn backface_picture(painter: &Painter, rect: Rect, on: bool, tokens: 
 /// Points around the Angle picture's arc per full turn
 const ARC_POINTS: usize = 48;
 
+/// The angle and ring pictures start at the top: a quarter turn back from +x (egui's y points down), in turns
+const TOP_START_TURNS: f32 = 0.25;
+
 /// A cylindrical projection's Angle seen from above: the slice of a turn one repeat spans
 pub(crate) fn angle_picture(painter: &Painter, rect: Rect, degrees: f32, tokens: &Tokens) {
     let center = rect.center();
     let radius = rect.width() * ANGLE_RADIUS_SHARE;
-    let sweep = degrees.clamp(0.0, 360.0) / 360.0;
+    let sweep = degrees.clamp(0.0, FULL_TURN_DEGREES) / FULL_TURN_DEGREES;
     if sweep >= 1.0 {
         painter.circle_filled(center, radius, tokens.accent);
     } else {
         let steps = ((ARC_POINTS as f32 * sweep).ceil() as usize).max(1);
         let mut points = vec![center];
         for step in 0..=steps {
-            let turn = (step as f32 / steps as f32 * sweep - 0.25) * std::f32::consts::TAU;
+            let turn = (step as f32 / steps as f32 * sweep - TOP_START_TURNS) * std::f32::consts::TAU;
             points.push(pos2(center.x + radius * turn.cos(), center.y + radius * turn.sin()));
         }
 
@@ -288,13 +305,13 @@ pub(crate) fn ring_picture(painter: &Painter, rect: Rect, count: u32, span: f32,
     painter.rect_filled(rect, 0, tokens.field);
     let center = rect.center();
     let radius = rect.width() * RING_RADIUS;
-    let full = span >= 360.0;
+    let full = span >= FULL_TURN_DEGREES;
     let step = if full { span / count.max(1) as f32 } else { span / count.saturating_sub(1).max(1) as f32 };
     let at = |degrees: f32| {
-        let turn = (degrees - 90.0).to_radians();
+        let turn = (degrees - TOP_START_TURNS * FULL_TURN_DEGREES).to_radians();
         center + vec2(turn.cos(), turn.sin()) * radius
     };
-    let ring_end = if full { 360.0 } else { span };
+    let ring_end = if full { FULL_TURN_DEGREES } else { span };
     let ring: Vec<Pos2> = (0..=RING_SEGMENTS).map(|k| at(ring_end * k as f32 / RING_SEGMENTS as f32)).collect();
     painter.add(Shape::line(ring, Stroke::new(1.0, tokens.separator)));
     painter.circle_filled(center, RING_AXIS_DOT, axis_color);
@@ -309,11 +326,6 @@ const RING_RADIUS: f32 = 0.34;
 const RING_AXIS_DOT: f32 = 2.0;
 const RING_COPY_DOT: f32 = 3.5;
 const RING_SEGMENTS: usize = 64;
-
-fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
-    let mix = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round().clamp(0.0, 255.0) as u8;
-    Color32::from_rgb(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()))
-}
 
 #[cfg(test)]
 mod tests {

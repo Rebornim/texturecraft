@@ -6,7 +6,7 @@ use super::preview_edit::PreviewEdit;
 use super::preview_lower::PreviewLower;
 use super::preview_size::PreviewSize;
 use super::row::CAPTION_LINE;
-use super::slider::Track;
+use super::track::Track;
 use super::{BLOCK_MARGIN, ICON_SIZE, PropertySheet, SMALL_TEXT_SIZE};
 
 /// One slider line beside the preview square
@@ -68,8 +68,8 @@ impl PropertySheet<'_> {
             let center_y = y + PART_LINE / 2.0;
             let start = if linked { x0 } else { self.direction_glyph(x0, center_y, part) };
             let mut value = size.values[part];
-            let label = if part == 0 { size.label.to_owned() } else { format!("{} 2", size.label) };
-            if let Some(merge) = self.side_slider(&label, start, track_end, value_right, center_y, &mut value, (&size.range, &size.typed), size.decimals, false)
+            let label = format_args!("{}{}", size.label, part_suffix(part));
+            if let Some(merge) = self.side_slider(label, start, track_end, value_right, center_y, &mut value, (&size.range, &size.typed), size.decimals, false)
             {
                 size.values[part] = value;
                 if linked {
@@ -88,14 +88,14 @@ impl PropertySheet<'_> {
 
         match lower {
             PreviewLower::Offset { values, range, typed } => {
-                self.side_caption(x0, y, crate::i18n::tr("Offset"));
+                let offset = crate::i18n::tr("Offset");
+                self.side_caption(x0, y, offset);
                 y += CAPTION_LINE;
                 for part in 0..2 {
                     let center_y = y + PART_LINE / 2.0;
                     let start = self.direction_glyph(x0, center_y, part);
-                    let offset = crate::i18n::tr("Offset");
-                    let label = if part == 0 { offset.to_owned() } else { format!("{offset} 2") };
-                    if let Some(merge) = self.side_slider(&label, start, track_end, value_right, center_y, &mut values[part], (&range, &typed), 2, true) {
+                    let label = format_args!("{offset}{}", part_suffix(part));
+                    if let Some(merge) = self.side_slider(label, start, track_end, value_right, center_y, &mut values[part], (&range, &typed), 2, true) {
                         edit.lower = Some(merge);
                     }
                     y += PART_LINE;
@@ -130,7 +130,7 @@ impl PropertySheet<'_> {
     #[allow(clippy::too_many_arguments)]
     fn side_slider(
         &mut self,
-        label: &str,
+        label: impl std::fmt::Display,
         start: f32,
         end: f32,
         value_right: f32,
@@ -141,8 +141,13 @@ impl PropertySheet<'_> {
         signed: bool,
     ) -> Option<bool> {
         let id = self.next_id();
-        let dragged = self.track(id, label, &Track { start, end, center_y, zero: signed.then_some(0.0), ramp: false }, value, range);
-        let typed = self.value_field_at(id, value_right, SIDE_VALUE_WIDTH - SIDE_VALUE_AIR, center_y, *value, typed_range, decimals, "");
+        let dragged = self.track(id, &label, &Track { start, end, center_y, zero: signed.then_some(0.0), ramp: false }, value, range);
+        let typed = self.value_field_at(id, &label, value_right, SIDE_VALUE_WIDTH - SIDE_VALUE_AIR, center_y, *value, typed_range, decimals, "");
         Self::apply_typed(value, typed, dragged)
     }
+}
+
+/// What a part's name adds to its caption: nothing for the first, " 2" for the second
+fn part_suffix(part: usize) -> &'static str {
+    if part == 0 { "" } else { " 2" }
 }

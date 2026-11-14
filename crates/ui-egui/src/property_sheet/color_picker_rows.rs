@@ -7,7 +7,7 @@ use egui_phosphor::regular as ic;
 use texturecraft_engine::core::MAX_SWATCHES;
 
 use super::slider::KNOB_RADIUS;
-use super::{CONTROL_HEIGHT, GLYPH_SIZE, GLYPH_TARGET, PAD, PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE, TEXT_SIZE};
+use super::{CONTROL_HEIGHT, CONTROL_RADIUS, GLYPH_SIZE, GLYPH_TARGET, PAD, PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::color_picker::{ColorModel, ColorPick, ColorSpace, PickerState, SwatchEdit, hex, parse_hex};
 use crate::drawn_icon::DrawnIcon;
 use crate::fill_material_panel::shown_color as screen_color;
@@ -34,6 +34,9 @@ const FIELD_KNOB_RADIUS: f32 = 6.0;
 /// How far the hue marker reaches past the strip's sides, and half its height
 const HUE_MARKER_OVERHANG: f32 = 2.0;
 const HUE_MARKER_HALF_HEIGHT: f32 = 3.0;
+
+/// Corner radius of the hue marker's outline: under its 3 px half height, so it stays a rounded bar
+const HUE_MARKER_RADIUS: u8 = 2;
 
 /// Width of the before and of the after swatch
 const SWATCH_WIDTH: f32 = 30.0;
@@ -82,6 +85,9 @@ const SWATCHES_CAPTION_AIR: f32 = 2.0;
 /// Side of a swatch chip (a control's height), and the air between chips and between their rows
 const SWATCH_CHIP: f32 = 24.0;
 const SWATCH_CHIP_GAP: f32 = 6.0;
+
+/// Size of the ⋯ menu glyph: a point larger than a row's glyphs, as its dots are small
+const MENU_GLYPH_SIZE: f32 = GLYPH_SIZE + 1.0;
 
 /// Corner radius of a swatch chip, and the size of the + chip's glyph
 const SWATCH_CHIP_RADIUS: u8 = 4;
@@ -178,7 +184,7 @@ impl PropertySheet<'_> {
             pos2(strip.left() - HUE_MARKER_OVERHANG, marker_y - HUE_MARKER_HALF_HEIGHT),
             pos2(strip.right() + HUE_MARKER_OVERHANG, marker_y + HUE_MARKER_HALF_HEIGHT),
         );
-        painter.rect_stroke(marker, CornerRadius::same(2), Stroke::new(OUTLINE_STROKE, Color32::WHITE), StrokeKind::Middle);
+        painter.rect_stroke(marker, CornerRadius::same(HUE_MARKER_RADIUS), Stroke::new(OUTLINE_STROKE, Color32::WHITE), StrokeKind::Middle);
         self.drawn(field.bottom());
         edited
     }
@@ -186,7 +192,7 @@ impl PropertySheet<'_> {
     /// Before | after (a click on before restores it), the hex field and the eyedropper; Some(false) when restored or typed, and whether the eyedropper was clicked
     fn before_after_row(&mut self, state: &mut PickerState, eyedropping: bool) -> (Option<bool>, bool) {
         let center_y = self.take(ROW_HEIGHT).center().y;
-        let t = self.tokens;
+        let tokens = self.tokens;
         let mut edited = None;
 
         let before = Rect::from_min_size(pos2(self.left, center_y - CONTROL_HEIGHT / 2.0), vec2(SWATCH_WIDTH, CONTROL_HEIGHT));
@@ -213,7 +219,7 @@ impl PropertySheet<'_> {
         }
 
         let glyph = Rect::from_center_size(pos2(self.right - EYEDROPPER_INSET, center_y), vec2(GLYPH_TARGET, GLYPH_TARGET));
-        let eyedropper = self.eyedropper_at(glyph, eyedropping, t.text_dim);
+        let eyedropper = self.eyedropper_at(glyph, eyedropping, tokens.text_dim);
         self.drawn(before.bottom());
         (edited, eyedropper)
     }
@@ -224,11 +230,11 @@ impl PropertySheet<'_> {
         let label = tr("Pick color");
         let response = self.tip(self.ui.interact(glyph, id, Sense::click()), label);
         response.widget_info(|| WidgetInfo::selected(Role::Button, true, eyedropping, label));
-        let t = self.tokens;
+        let tokens = self.tokens;
         let color = if eyedropping {
-            t.accent
+            tokens.accent
         } else if response.hovered() {
-            t.text
+            tokens.text
         } else {
             idle
         };
@@ -239,10 +245,10 @@ impl PropertySheet<'_> {
     /// The hex code of `shown` in a field; the values typed, once Enter or a click elsewhere ends the edit
     fn hex_field(&mut self, field: Rect, shown: [f32; 3]) -> Option<[f32; 3]> {
         let id = self.next_id();
-        let t = self.tokens;
+        let tokens = self.tokens;
         let painter = self.ui.painter();
-        painter.rect(field, CornerRadius::same(4), t.field, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
-        painter.text(pos2(field.left() + HASH_INSET, field.center().y), Align2::LEFT_CENTER, "#", FontId::proportional(TEXT_SIZE), t.text_dim);
+        painter.rect(field, CornerRadius::same(CONTROL_RADIUS), tokens.field, Stroke::new(1.0, tokens.field_border), StrokeKind::Inside);
+        painter.text(pos2(field.left() + HASH_INSET, field.center().y), Align2::LEFT_CENTER, "#", FontId::proportional(TEXT_SIZE), tokens.text_dim);
         let digits = Rect::from_min_max(pos2(field.left() + DIGITS_INSET, field.top()), field.right_bottom());
         let text_id = id.with("typed");
         let editing = self.ui.data(|data| data.get_temp::<String>(text_id));
@@ -250,7 +256,7 @@ impl PropertySheet<'_> {
         let Some(mut text) = editing else {
             let response = self.ui.interact(digits, id, Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
             response.widget_info(|| WidgetInfo::labeled(Role::TextInput, true, tr("Hex color")));
-            self.ui.painter().text(pos2(digits.left(), digits.center().y), Align2::LEFT_CENTER, hex(shown), semibold(TEXT_SIZE), t.text);
+            self.ui.painter().text(pos2(digits.left(), digits.center().y), Align2::LEFT_CENTER, hex(shown), semibold(TEXT_SIZE), tokens.text);
             if response.clicked() {
                 self.ui.data_mut(|data| data.insert_temp(text_id, hex(shown)));
                 self.ui.memory_mut(|memory| memory.request_focus(text_id));
@@ -295,9 +301,9 @@ impl PropertySheet<'_> {
         let more = tr("More");
         let response = self.ui.interact(glyph, menu_id, Sense::click());
         response.widget_info(|| WidgetInfo::labeled(Role::Button, true, more));
-        let t = self.tokens;
-        let color = if response.hovered() { t.text } else { t.text_dim };
-        self.ui.painter().text(glyph.center(), Align2::CENTER_CENTER, ic::DOTS_THREE, FontId::proportional(GLYPH_SIZE + 1.0), color);
+        let tokens = self.tokens;
+        let color = if response.hovered() { tokens.text } else { tokens.text_dim };
+        self.ui.painter().text(glyph.center(), Align2::CENTER_CENTER, ic::DOTS_THREE, FontId::proportional(MENU_GLYPH_SIZE), color);
         let shown = state.shown();
         egui::Popup::menu(&response).show(|ui| {
             if ui.button(tr("Copy RGB values")).clicked() {
@@ -320,8 +326,8 @@ impl PropertySheet<'_> {
         for (index, letter) in state.model.letters().into_iter().enumerate() {
             let row = self.take(SLIDER_ROW);
             let center_y = row.center().y;
-            let t = self.tokens;
-            self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, letter, semibold(TEXT_SIZE), t.text_dim);
+            let tokens = self.tokens;
+            self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, letter, semibold(TEXT_SIZE), tokens.text_dim);
             let track = Rect::from_min_max(
                 pos2(self.left + TRACK_LEFT, center_y - TRACK_HEIGHT / 2.0),
                 pos2(self.right - TRACK_RIGHT_INSET, center_y + TRACK_HEIGHT / 2.0),
@@ -340,12 +346,12 @@ impl PropertySheet<'_> {
                 part = ((at.x - track.left()) / track.width()).clamp(0.0, 1.0);
                 changed = Some(continues(&response));
             }
-            if let Some(typed) = self.value_field_at(id, self.right, VALUE_WIDTH, center_y, part, &(0.0..=1.0), 2, "") {
+            if let Some(typed) = self.value_field_at(id, letter, self.right, VALUE_WIDTH, center_y, part, &(0.0..=1.0), 2, "") {
                 part = typed;
                 changed = Some(false);
             }
             let knob = pos2(track.left() + track.width() * part, center_y);
-            self.ui.painter().circle(knob, KNOB_RADIUS, t.panel, Stroke::new(OUTLINE_STROKE, Color32::WHITE));
+            self.ui.painter().circle(knob, KNOB_RADIUS, tokens.panel, Stroke::new(OUTLINE_STROKE, Color32::WHITE));
             if let Some(merge) = changed {
                 set_part(state, index, part);
                 edited = edited.or(Some(merge));
@@ -358,24 +364,24 @@ impl PropertySheet<'_> {
     /// The working (linear) values of the colour, small and dim
     fn working_line(&mut self, state: &PickerState) {
         let center_y = self.take(WORKING_LINE).center().y;
-        let t = self.tokens;
+        let tokens = self.tokens;
         let font = FontId::proportional(SMALL_TEXT_SIZE);
         let painter = self.ui.painter();
-        let label = painter.text(pos2(self.left, center_y), Align2::LEFT_CENTER, tr("Working color space"), font.clone(), t.text_dim);
+        let label = painter.text(pos2(self.left, center_y), Align2::LEFT_CENTER, tr("Working color space"), font.clone(), tokens.text_dim);
         let [r, g, b] = state.linear;
-        painter.text(pos2(self.right, center_y), Align2::RIGHT_CENTER, format!("{r:.2}  {g:.2}  {b:.2}"), font, t.text_dim);
+        painter.text(pos2(self.right, center_y), Align2::RIGHT_CENTER, format!("{r:.2}  {g:.2}  {b:.2}"), font, tokens.text_dim);
         self.drawn(label.bottom());
     }
 
     /// A line across the window, the Swatches caption, then the project's `swatches` as chips (wrapping) and the + chip that keeps the picker's colour; the swatch clicked, and an add or a removal (a swatch's right-click menu)
     fn swatch_rows(&mut self, state: &PickerState, swatches: &[[f32; 3]]) -> (Option<[f32; 3]>, Option<SwatchEdit>) {
-        let t = self.tokens;
+        let tokens = self.tokens;
         self.space(SWATCHES_RULE_AIR);
         let rule_y = self.cursor_y();
-        self.ui.painter().hline((self.left - PAD)..=(self.right + PAD), rule_y, Stroke::new(1.0, t.separator));
+        self.ui.painter().hline((self.left - PAD)..=(self.right + PAD), rule_y, Stroke::new(1.0, tokens.separator));
         self.space(SWATCHES_RULE_AIR);
         let caption = self.take(SWATCHES_CAPTION);
-        self.ui.painter().text(pos2(self.left, caption.center().y), Align2::LEFT_CENTER, tr("Swatches"), semibold(SMALL_TEXT_SIZE), t.text);
+        self.ui.painter().text(pos2(self.left, caption.center().y), Align2::LEFT_CENTER, tr("Swatches"), semibold(SMALL_TEXT_SIZE), tokens.text);
         self.space(SWATCHES_CAPTION_AIR);
 
         let count = swatches.len().min(MAX_SWATCHES);
@@ -395,9 +401,8 @@ impl PropertySheet<'_> {
             let chip = chip_at(index);
             let chip_id = self.next_id();
             let response = self.ui.interact(chip, chip_id, Sense::click());
-            let code = format!("#{}", hex(state.space.shown(color)));
-            response.widget_info(|| WidgetInfo::labeled(Role::Button, true, &code));
-            let border = if response.hovered() { t.accent } else { Color32::TRANSPARENT };
+            response.widget_info(|| WidgetInfo::labeled(Role::Button, true, format!("#{}", hex(state.space.shown(color)))));
+            let border = if response.hovered() { tokens.accent } else { Color32::TRANSPARENT };
             self.ui.painter().rect(chip, CornerRadius::same(SWATCH_CHIP_RADIUS), screen_color(color), Stroke::new(1.0, border), StrokeKind::Inside);
             if response.clicked() {
                 applied = Some(color);
@@ -416,7 +421,7 @@ impl PropertySheet<'_> {
         let add_id = self.next_id();
         let response = self.tip(self.ui.interact(add, add_id, if room { Sense::click() } else { Sense::hover() }), label);
         response.widget_info(|| WidgetInfo::labeled(Role::Button, room, label));
-        let (border, glyph) = if response.hovered() && room { (t.accent, t.text) } else { (t.field_border, t.text_dim) };
+        let (border, glyph) = if response.hovered() && room { (tokens.accent, tokens.text) } else { (tokens.field_border, tokens.text_dim) };
         let painter = self.ui.painter();
         painter.rect_stroke(add, CornerRadius::same(SWATCH_CHIP_RADIUS), Stroke::new(1.0, border), StrokeKind::Inside);
         painter.text(add.center(), Align2::CENTER_CENTER, ic::PLUS, FontId::proportional(PLUS_GLYPH_SIZE), glyph);

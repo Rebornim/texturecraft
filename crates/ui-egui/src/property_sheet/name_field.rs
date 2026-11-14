@@ -2,11 +2,10 @@
 
 use egui::{CornerRadius, Stroke, StrokeKind};
 
-use super::{PropertySheet, TEXT_SIZE};
+use super::{CONTROL_RADIUS, PropertySheet, TEXT_SIZE};
 use crate::theme::semibold;
 
-/// Corner radius of the field, and the air before its text
-const FIELD_RADIUS: u8 = 4;
+/// Air before the field's text
 const TEXT_INSET: i8 = 8;
 
 impl PropertySheet<'_> {
@@ -17,13 +16,13 @@ impl PropertySheet<'_> {
         let typing = self.ui.memory(|memory| memory.has_focus(typing_id));
         let mut text = self.ui.data(|data| data.get_temp::<String>(typing_id)).filter(|_| typing).unwrap_or_else(|| name.to_owned());
 
-        let t = self.tokens;
-        let outline = Stroke::new(1.0, if typing { t.accent } else { t.field_border });
-        self.ui.painter().rect(control, CornerRadius::same(FIELD_RADIUS), t.field, outline, StrokeKind::Inside);
+        let tokens = self.tokens;
+        let outline = Stroke::new(1.0, if typing { tokens.accent } else { tokens.field_border });
+        self.ui.painter().rect(control, CornerRadius::same(CONTROL_RADIUS), tokens.field, outline, StrokeKind::Inside);
         let edit = egui::TextEdit::singleline(&mut text)
             .id(typing_id)
             .font(semibold(TEXT_SIZE))
-            .text_color(t.text)
+            .text_color(tokens.text)
             .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(TEXT_INSET, 0)))
             .align(egui::Align2::LEFT_CENTER);
         let response = self.ui.put(control.shrink(1.0), edit);

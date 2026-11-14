@@ -29,16 +29,16 @@ impl PropertySheet<'_> {
         let response = self.ui.interact(face, id, Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, format!("{name} {kind}")));
 
-        let t = self.tokens;
+        let tokens = self.tokens;
         let painter = self.ui.painter().clone();
         if response.hovered() {
-            painter.rect_filled(face, CornerRadius::same(ROW_RADIUS), t.button);
-            painter.text(pos2(self.right - ARROW_INSET, center_y), Align2::CENTER_CENTER, ic::CARET_RIGHT, FontId::proportional(ARROW_SIZE), t.text);
+            painter.rect_filled(face, CornerRadius::same(ROW_RADIUS), tokens.button);
+            painter.text(pos2(self.right - ARROW_INSET, center_y), Align2::CENTER_CENTER, ic::CARET_RIGHT, FontId::proportional(ARROW_SIZE), tokens.text);
         }
-        painter.text(pos2(self.left + GLYPH_CENTER, center_y), Align2::CENTER_CENTER, glyph, FontId::proportional(GLYPH_SIZE), t.text_dim);
+        painter.text(pos2(self.left + GLYPH_CENTER, center_y), Align2::CENTER_CENTER, glyph, FontId::proportional(GLYPH_SIZE), tokens.text_dim);
         let name_left = self.left + GLYPH_CENTER + GLYPH_TO_NAME;
-        let name_rect = painter.text(pos2(name_left, center_y), Align2::LEFT_CENTER, name, FontId::proportional(TEXT_SIZE), t.text);
-        painter.text(pos2(name_rect.right() + NAME_TO_KIND, center_y), Align2::LEFT_CENTER, kind, FontId::proportional(TEXT_SIZE), t.text_dim);
+        let name_rect = painter.text(pos2(name_left, center_y), Align2::LEFT_CENTER, name, FontId::proportional(TEXT_SIZE), tokens.text);
+        painter.text(pos2(name_rect.right() + NAME_TO_KIND, center_y), Align2::LEFT_CENTER, kind, FontId::proportional(TEXT_SIZE), tokens.text_dim);
         self.drawn(rect.bottom());
         response.clicked()
     }

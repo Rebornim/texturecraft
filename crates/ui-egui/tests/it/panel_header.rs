@@ -6,17 +6,9 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::docking::Panel;
 
+use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 960.0);
-
-// Small texture and bake sizes keep the sample session fast; the header doesn't depend on them
-const TEXTURE_RESOLUTION: u32 = 256;
-const BAKE_RESOLUTION: u32 = 64;
-
-/// Frames for the first layout and fonts to settle
-const STARTUP_FRAMES: usize = 4;
-
-/// Frames for a click to reach the dock and the panel to go
-const SETTLE_FRAMES: usize = 3;
 
 fn app() -> Harness<'static, TextureCraftApp> {
     let session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();

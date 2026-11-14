@@ -4751,6 +4751,7 @@ dependencies = [
  "craft-update",
  "eframe",
  "egui",
+ "egui_kittest",
  "image",
  "log",
  "rfd",

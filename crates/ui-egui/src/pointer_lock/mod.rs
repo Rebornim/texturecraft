@@ -71,7 +71,7 @@ pub(crate) fn rewrite(ctx: &Context, raw: &mut RawInput) {
             Event::PointerMoved(to) => {
                 let put_back = lock.putting_back && to.distance(lock.anchor) <= PUT_BACK_REACH;
                 lock.putting_back &= !put_back;
-                if lock.hold == Hold::PutBack && !put_back {
+                if lock.hold.puts_back() && !put_back {
                     lock.at += to - lock.seen;
                     raw.events.push(Event::PointerMoved(lock.at));
                 }
@@ -129,9 +129,15 @@ pub(crate) fn settle(ctx: &Context) {
 
     let mut lock = lock;
     ctx.set_cursor_icon(CursorIcon::None);
-    if lock.hold == Hold::PutBack && lock.seen.distance(lock.anchor) > PUT_BACK_REACH {
+    if lock.hold.puts_back() && lock.seen.distance(lock.anchor) > PUT_BACK_REACH {
         ctx.send_viewport_cmd(ViewportCommand::CursorPosition(lock.anchor));
-        lock.putting_back = true;
+
+        // A folding system reads every later move from where it put the pointer, its own move folded in
+        if lock.hold == Hold::PutBackFolded {
+            lock.seen = lock.anchor;
+        } else {
+            lock.putting_back = true;
+        }
     }
     ctx.data_mut(|data| data.insert_temp(lock_id(), lock));
 }

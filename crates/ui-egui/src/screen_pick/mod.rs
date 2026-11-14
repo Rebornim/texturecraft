@@ -10,10 +10,15 @@ mod pick_outcome;
 mod pick_shared;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod portal;
+mod swatch_color;
+mod swatch_picture;
+mod swatch_side;
 #[cfg(windows)]
 mod windows_hook;
 #[cfg(windows)]
 mod windows_pointer;
+#[cfg(windows)]
+mod windows_swatch;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod x11_grab;
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -27,6 +32,9 @@ pub use keeper_args::KEEPER_ARG;
 pub use painted_cursor::paint as paint_cursor;
 pub use pick_outcome::PickOutcome;
 pub(crate) use pick_shared::PickShared;
+pub(crate) use swatch_color::SwatchColor;
+pub use swatch_picture::{swatch_reach, swatch_unit};
+pub use swatch_side::SwatchSide;
 #[cfg(windows)]
 pub use windows_pointer::keep_pointer;
 

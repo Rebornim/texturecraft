@@ -110,11 +110,13 @@ const TIP_VALUE_ROOM: f32 = 70.0;
 #[test]
 fn the_culling_rows_i_explains_the_row_on_hover_without_covering_its_values() {
     let (mut harness, layer) = app_with_fill("planar");
-    let panel_right = harness.get_by_label("Move on model").rect().right();
+    // The i ends on the panel's right edge, where the values end
+    let panel_right = harness.get_by_label(DEPTH_CULLING_TIP).rect().right();
     for (tip, row) in [(DEPTH_CULLING_TIP, "Depth culling"), (BACKFACE_CULLING_TIP, "Backface culling")] {
         let info = harness.get_by_label(tip).rect();
         let switch = harness.get_by_label(row).rect();
-        assert!(info.right() <= switch.left() && (info.center().y - switch.center().y).abs() < 1.0, "{row}: the i sits left of its row");
+        assert!(info.left() >= switch.right() && (info.center().y - switch.center().y).abs() < 1.0, "{row}: the i sits at its row's end");
+        assert_eq!(info.right(), panel_right, "{row}: on the panel's right edge");
         assert_eq!(harness.query_all_by_label(tip).count(), 1, "{row}: no tooltip before the hover");
 
         harness.hover_at(info.center());

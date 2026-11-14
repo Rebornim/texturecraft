@@ -485,10 +485,15 @@ fn a_plain_fill_switches_to_one_whole_material_picks_it_from_its_card_and_clears
     mouse_click_on(&mut harness, Role::RadioButton, "Material");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Metallic").is_none(), "the Material side has no channel cards");
     mouse_click_on(&mut harness, Role::ComboBox, "None");
+    // The card opens the material picker, not a list: its search keeps only the materials it names
+    harness.event(egui::Event::Text("hammered".into()));
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Steel").is_none(), "searching hides what it doesn't name");
+    assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Steel Painted Worn").is_none(), "smart materials are folders of layers: not offered");
     mouse_click_on(&mut harness, Role::ListBoxOption, "Copper Hammered");
-    assert_eq!(whole_material(&harness, layer).as_deref(), Some("copper_hammered"), "the card's list sets the whole material");
+    assert_eq!(whole_material(&harness, layer).as_deref(), Some("copper_hammered"), "the picker sets the whole material");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Copper Hammered").is_some(), "the card names it");
-    assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Steel").is_none(), "the list closed on the pick");
+    assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Steel").is_none(), "the picker closed on the pick");
 
     mouse_click_on(&mut harness, Role::RadioButton, "Channels");
     assert!(matches!(source(&harness, layer, Channel::BaseColor), Source::Procedural { .. }), "the material set every channel");

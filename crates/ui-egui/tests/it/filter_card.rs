@@ -1,8 +1,8 @@
-//! The Filter effect card in Properties: channel pills, Intensity's Divider chip, Restore defaults on Parameters and × emptying the filter
+//! The Filter effect card in Properties: channel pills, Intensity's Divider chip, the card holding the parameters with its ⟲ beside × and Attributes as its last row
 
 use egui::accesskit::Role;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::{Value, json};
 use texturecraft_engine::core::{Channel, EffectKind, Filter, LayerId, SourceWarp};
 use texturecraft_engine::{StackTarget, execute};
@@ -50,6 +50,11 @@ fn a_pill_switches_its_channel_and_the_chip_picks_the_divider() {
 fn restore_defaults_and_clear_on_the_card() {
     let (mut harness, effect) = app_with("blur");
     let defaults = filter_of(&harness, effect);
+    let restore = harness.get_by_role_and_label(Role::Button, "Restore defaults");
+    assert!(restore.accesskit_node().is_disabled(), "inert at the defaults");
+    let clear = harness.get_by_role_and_label(Role::Button, "Clear").rect();
+    assert!((restore.rect().center().y - clear.center().y).abs() < 0.5 && restore.rect().right() < clear.left(), "⟲ beside × on the card");
+
     harness.state_mut().run("effect.set", json!({"effect": effect.0, "radius": 40.0}));
     harness.run_steps(3);
     harness.get_by_role_and_label(Role::Button, "Restore defaults").click();
@@ -59,38 +64,31 @@ fn restore_defaults_and_clear_on_the_card() {
     harness.get_by_role_and_label(Role::Button, "Clear").click();
     harness.run_steps(3);
     assert_eq!(filter_of(&harness, effect), Filter::Empty);
-    assert!(harness.query_by_label("Parameters").is_none(), "an empty filter has no parameters");
+    assert!(harness.query_by_label("Attributes").is_none(), "an empty filter has no settings");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Filter").is_some(), "the card reads Filter over None");
 }
 
-/// The rect of the band button named `title`
-fn band_rect(harness: &Harness<'_, TextureCraftApp>, title: &str) -> egui::Rect {
-    harness.get_by_role_and_label(Role::Button, title).rect()
-}
-
+/// The filter's card holds its rows: no Parameters band, every row and the Attributes row inside the card's edges, Attributes last
 #[test]
-fn the_filter_bands_span_the_panel_like_the_fills() {
-    let (mut harness, effect) = app_with("blur");
-    let attributes = band_rect(&harness, "Attributes");
-
-    // The fill under the filter lays its bands out on the same sheet edges
-    harness.state_mut().session.target = StackTarget::Content;
-    harness.run_steps(3);
-    let filtering = band_rect(&harness, "Filtering and edges");
-    // The fill's rows overflow and take a scroll bar, so only the left edges must be equal
-    assert_eq!(attributes.left(), filtering.left(), "a filter's bands start at the panel edge like a fill's");
-    assert!(attributes.right() >= filtering.right(), "and reach its right edge: {attributes:?} {filtering:?}");
-
-    harness.state_mut().session.target = StackTarget::Effect(effect);
-    harness.run_steps(3);
-    assert_eq!(band_rect(&harness, "Attributes").left(), filtering.left());
+fn the_filter_card_holds_its_parameters() {
+    let (harness, _) = app_with("slopeBlur");
+    assert!(harness.query_by_label("Parameters").is_none(), "no Parameters band");
+    let card = harness.get_by_role_and_label(Role::ComboBox, "Blur Slope").rect();
+    let attributes = harness.get_by_role_and_label(Role::Button, "Attributes").rect();
+    let sub_group = harness.get_by_role_and_label(Role::Button, "Source Parameters").rect();
+    // A row inside the card keeps the card's bleed on both sides; a band would span the panel
+    assert_eq!(attributes.left(), card.left() + 6.0, "{attributes:?} {card:?}");
+    assert_eq!(sub_group.left(), attributes.left(), "a sub-group is a caption in the card, not a card of its own");
+    for slider in harness.query_all_by_role(Role::Slider) {
+        assert!(slider.rect().bottom() <= attributes.top(), "Attributes is the card's last row: {:?}", slider.rect());
+    }
 }
 
-/// Air between the bottom of slider `last` and the top of the Attributes band under it, with library filter `filter` shown
+/// Air between the bottom of slider `last` and the top of the Attributes row under it, with library filter `filter` shown
 fn air_under(filter: &str, last: &str) -> f32 {
     let (harness, _) = app_with(filter);
     let slider = harness.get_by_role_and_label(Role::Slider, last).rect();
-    band_rect(&harness, "Attributes").top() - slider.bottom()
+    harness.get_by_role_and_label(Role::Button, "Attributes").rect().top() - slider.bottom()
 }
 
 #[test]

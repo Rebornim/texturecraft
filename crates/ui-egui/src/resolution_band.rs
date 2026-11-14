@@ -1,4 +1,4 @@
-//! The Resolution band of a cooked source: Relative (follows the texture set) | Fixed, then its Size, each size pictured against the texture set's
+//! The Resolution of a cooked source, Relative (follows the texture set) or Fixed, each size pictured against the texture set's: a material's band, a procedural slot's row
 
 use egui::{CornerRadius, Painter, Rect, Stroke, StrokeKind, vec2};
 use texturecraft_engine::core::{CookResolution, MAX_RESOLUTION};
@@ -44,11 +44,33 @@ pub(crate) fn resolution_band(sheet: &mut PropertySheet<'_>, current: CookResolu
         let draw = |painter: &Painter, rect: Rect, factor: i8| ratio_picture(painter, rect, factor, true, &tokens);
         sheet.dropdown(tr("Size"), factor, &factors, name, Some(&draw)).0.map(CookResolution::Relative)
     } else {
-        let sizes: Vec<u32> = std::iter::successors(Some(SMALLEST_FIXED), |size| size.checked_mul(2)).take_while(|size| *size <= MAX_RESOLUTION).collect();
+        let sizes: Vec<u32> = fixed_sizes().collect();
         let draw = |painter: &Painter, rect: Rect, size: u32| ratio_picture(painter, rect, factor_of(size, texture_set), false, &tokens);
         sheet.dropdown(tr("Size"), size, &sizes, |size| format!("{size} × {size}"), Some(&draw)).0.map(CookResolution::Fixed)
     };
     switched.or(picked)
+}
+
+/// The Resolution row of a procedural slot's card: one list with the texture set's factors under Relative and fixed sizes under Fixed; returns the resolution picked
+pub(crate) fn resolution_row(sheet: &mut PropertySheet<'_>, current: CookResolution, texture_set: u32) -> Option<CookResolution> {
+    let tokens = Tokens::get(sheet.ui.ctx());
+    let relative: Vec<CookResolution> = CookResolution::FACTORS.filter(|factor| fits(texture_set, *factor)).map(CookResolution::Relative).collect();
+    let fixed: Vec<CookResolution> = fixed_sizes().map(CookResolution::Fixed).collect();
+    let name = |resolution: CookResolution| match resolution {
+        CookResolution::Relative(factor) => format!("{}  ·  {}", factor_name(factor), resolution.size(texture_set)),
+        CookResolution::Fixed(size) => format!("{size} × {size}"),
+    };
+    let draw = |painter: &Painter, rect: Rect, resolution: CookResolution| {
+        let related = matches!(resolution, CookResolution::Relative(_));
+        ratio_picture(painter, rect, factor_of(resolution.size(texture_set), texture_set), related, &tokens);
+    };
+    let groups = [(tr("Relative"), relative.as_slice()), (tr("Fixed"), fixed.as_slice())];
+    sheet.grouped_dropdown(tr("Resolution"), current, &groups, name, &draw)
+}
+
+/// The sizes a fixed resolution offers, smallest first
+fn fixed_sizes() -> impl Iterator<Item = u32> {
+    std::iter::successors(Some(SMALLEST_FIXED), |size| size.checked_mul(2)).take_while(|size| *size <= MAX_RESOLUTION)
 }
 
 /// Whether the texture set's size times 2^`factor` can be cooked

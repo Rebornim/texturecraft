@@ -22,16 +22,16 @@ impl FillCopies {
         let pivot = center + position * radius;
         let axis = usize::from(symmetry.axis.min(2));
         let count = symmetry.copies();
-        let d = p - pivot;
+        let from_pivot = p - pivot;
         let first = match symmetry.kind {
             // The original keeps the half on the axis's positive side
-            SymmetryKind::Mirror => u32::from(d[axis] < 0.0),
+            SymmetryKind::Mirror => u32::from(from_pivot[axis] < 0.0),
             SymmetryKind::Radial => {
-                let turned = d[(axis + 2) % 3].atan2(d[(axis + 1) % 3]).to_degrees().rem_euclid(360.0);
+                let turned = from_pivot[(axis + 2) % 3].atan2(from_pivot[(axis + 1) % 3]).to_degrees().rem_euclid(360.0);
                 let step = symmetry.step().max(f32::EPSILON);
                 let gap = |k: u32| {
-                    let off = (turned - k as f32 * step).rem_euclid(360.0);
-                    off.min(360.0 - off)
+                    let past_copy = (turned - k as f32 * step).rem_euclid(360.0);
+                    past_copy.min(360.0 - past_copy)
                 };
                 (0..count).min_by(|a, b| gap(*a).total_cmp(&gap(*b))).unwrap_or(0)
             }

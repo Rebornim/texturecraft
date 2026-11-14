@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::project::MAX_DEPTH;
-use texturecraft_core::{ContentsOffset, EffectKind, Filter, Layer, LayerId, LayerKind, Project, RandomizedSeed, Source};
+use texturecraft_core::{ContentsOffset, EffectKind, Fill, Filter, Layer, LayerId, LayerKind, Project, RandomizedSeed, Source};
 
 use crate::commands::{CommandSpec, bad, f32p, has_layer, layer_param};
 use crate::{Result, Session, cmd};
@@ -82,12 +82,17 @@ fn set_contents(s: &mut Session, p: &Value) -> Result<Value> {
 
     let current = s.doc.project.contents_offset(id);
     let offset = ContentsOffset::new(scale.unwrap_or(current.scale), rotation.unwrap_or(current.rotation));
+    let unchanged = json!({ "scale": offset.scale, "rotation": offset.rotation });
+    if offset == current {
+        return Ok(unchanged);
+    }
+
     s.edit("Folder contents", |s| {
         let contents = contents_mut(&mut s.doc.project, id).ok_or_else(|| bad(CMD, format!("layer {} is not a folder", id.0)))?;
         *contents = offset;
         Ok(())
     })?;
-    Ok(json!({ "scale": offset.scale, "rotation": offset.rotation }))
+    Ok(unchanged)
 }
 
 fn reset_contents(s: &mut Session, p: &Value) -> Result<Value> {
@@ -121,7 +126,7 @@ fn randomize_seeds(s: &mut Session, p: &Value) -> Result<Value> {
     let folder = folder_param(s, CMD, p)?;
     let mut inside = Vec::new();
     descendants(&s.doc.project, folder, 0, &mut inside);
-    let seeds: usize = inside.iter().filter_map(|id| s.doc.project.layers.get(id)).map(|layer| layer_seeds(&mut layer.clone()).len()).sum();
+    let seeds: usize = inside.iter().filter_map(|id| s.doc.project.layers.get(id)).map(seed_count).sum();
     if seeds == 0 {
         return Ok(json!({ "seeds": 0 }));
     }
@@ -164,7 +169,7 @@ pub fn has_contents(project: &Project, id: LayerId) -> bool {
                 .iter()
                 .chain(layer.mask.iter().flat_map(|m| m.effects.iter()))
                 .any(|e| matches!(e.kind, EffectKind::Fill { .. } | EffectKind::Material(_)));
-        fills || !layer_seeds(&mut layer.clone()).is_empty()
+        fills || seed_count(layer) > 0
     })
 }
 
@@ -200,6 +205,28 @@ fn layer_seeds(layer: &mut Layer) -> Vec<&mut u32> {
         }
     }
     seeds
+}
+
+/// How many seeds [`layer_seeds`] gives for `layer`, read without borrowing it mutably (the panel asks every frame)
+fn seed_count(layer: &Layer) -> usize {
+    let fill_seeds = |fill: &Fill| fill.sources.values().filter(|source| matches!(source, Source::Procedural { .. })).count();
+    let own = match &layer.kind {
+        LayerKind::Fill(fill) => fill_seeds(fill),
+        _ => 0,
+    };
+    let effects = layer.content_effects.iter().chain(layer.mask.iter().flat_map(|mask| mask.effects.iter()));
+    let effect_seeds: usize = effects
+        .map(|effect| match &effect.kind {
+            EffectKind::Fill { source, .. } => usize::from(matches!(source, Source::Procedural { .. })),
+            EffectKind::Material(fill) => fill_seeds(fill),
+            EffectKind::Generator(_)
+            | EffectKind::Filter(
+                Filter::Warp { .. } | Filter::SlopeBlur { .. } | Filter::DirectionalWarp { .. } | Filter::SourceWarp(_) | Filter::SourceSlopeBlur(_),
+            ) => 1,
+            _ => 0,
+        })
+        .sum();
+    own + effect_seeds
 }
 
 fn source_seed(source: &mut Source) -> Option<&mut u32> {

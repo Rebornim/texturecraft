@@ -258,7 +258,7 @@ fn resolution(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "material.link.resolution";
     let id = layer_param(s, CMD, p)?;
     let size = picked_resolution(p).ok_or_else(|| bad(CMD, "give `relative` (-3..3) or `fixed` (a power of two from 128 to 8192)"))?;
-    link_of(s, CMD, id)?;
+    let link = link_of(s, CMD, id)?;
     let store = |s: &mut Session| {
         s.edit(EDIT, |s| {
             if let LayerKind::Fill(Fill { link: Some(link), .. }) = &mut s.doc.project.layer_mut(id)?.kind {
@@ -268,7 +268,11 @@ fn resolution(s: &mut Session, p: &Value) -> Result<Value> {
         })
     };
     if !boolp(p, "cook").unwrap_or(true) {
-        store(s)?;
+        // Only the stored size changes, so the size it already has adds no undo step
+        if link.resolution != size {
+            store(s)?;
+        }
+
         return Ok(json!({"layer": id.0, "cooked": false}));
     }
 
@@ -655,7 +659,7 @@ fn put_maps(s: &mut Session, stem: &str, maps: &[CookedMap], fill: &mut Fill) ->
     for channel in channels {
         let Some(name) = outputs.get(link.output_of(channel)) else { continue };
 
-        // Preserve a normal convention the user chose for this layer
+        // A normal map the user marked DirectX stays marked through re-cooks
         let normal_format = match fill.sources.get(&channel) {
             Some(Source::Image { normal_format, .. }) => *normal_format,
             _ => Default::default(),

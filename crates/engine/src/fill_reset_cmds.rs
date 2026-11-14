@@ -49,6 +49,11 @@ pub fn at_defaults(projection: &Projection, sampling: Sampling) -> bool {
 
 fn reset_projection(s: &mut Session, p: &Value) -> Result<Value> {
     let target = fill_target(s, p, "layer.fill.resetProjection")?;
+    let (projection, sampling) = placement_mut(s, target)?;
+    if at_defaults(projection, *sampling) {
+        return Ok(Value::Null);
+    }
+
     s.edit("Reset fill settings", |s| {
         let (projection, sampling) = placement_mut(s, target)?;
         *projection = reset_projection_of(projection);

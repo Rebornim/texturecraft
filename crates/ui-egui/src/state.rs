@@ -263,6 +263,12 @@ fn default_export_dir() -> String {
 fn default_split_ratio() -> f32 {
     0.5
 }
+
+/// The Layers panel's channel list starts on Material, so the Material tab's orb shows the whole material
+fn default_layer_material_view() -> bool {
+    true
+}
+
 /// The bake layout's version: saved bake docks from an older one load as `Dock::for_baking`
 const BAKE_LAYOUT_VERSION: u32 = 1;
 
@@ -296,6 +302,9 @@ pub struct UiState {
     pub uv_pan: [f32; 2],
     /// Channel whose blending the layer rows show.
     pub layer_channel: Channel,
+    /// The Layers panel's channel list is on Material: the Material tab's orb shows the whole material, else `layer_channel` alone
+    #[serde(default = "default_layer_material_view")]
+    pub layer_material_view: bool,
     pub shelf_filter: String,
     /// The asset shelf's open tab.
     #[serde(default)]
@@ -388,6 +397,7 @@ impl Default for UiState {
             uv_zoom: 1.0,
             uv_pan: [0.0, 0.0],
             layer_channel: Channel::BaseColor,
+            layer_material_view: true,
             shelf_filter: String::new(),
             shelf_tab: 0,
             props_tab: PropsTab::Brush,

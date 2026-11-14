@@ -1,8 +1,10 @@
 //! The material orbs of the Properties panel: a sphere showing the whole material (every channel, height and normal relief
-//! included) lit by a photographed studio, rendered at its on-screen size in physical pixels, off the UI thread, cached by look
+//! included) lit by a photographed studio, or one channel unlit as the viewport's channel view shows it, rendered at its
+//! on-screen size in physical pixels, off the UI thread, cached by look
 
 use egui::{Color32, ColorImage, Painter, Rect, pos2};
 use rayon::prelude::*;
+use texturecraft_engine::core::Channel;
 use texturecraft_engine::geom::glam::Vec3;
 use texturecraft_engine::texel::linear_to_srgb;
 
@@ -62,12 +64,17 @@ pub(crate) fn render(material: &OrbMaterial, side: usize, backdrop: Color32) -> 
             // Pixels on the outline shade the sphere's rim
             let (u, v) = if distance > 1.0 { (u / distance, v / distance) } else { (u, v) };
             let normal = Vec3::new(u, v, (1.0 - u * u - v * v).max(0.0).sqrt());
-            let (linear, opacity) = shade(material, env, normal, pixel, uniform);
-            let alpha = coverage * opacity;
-            let [r, g, b] = [0, 1, 2].map(|k| {
-                let shown = linear_to_srgb(aces(linear[k] * EXPOSURE));
-                ((back[k] + (shown - back[k]) * alpha) * 255.0).round().clamp(0.0, 255.0) as u8
-            });
+            let (shown, alpha) = match material.alone() {
+                Some(channel) => {
+                    let footprint = pixel * std::f32::consts::FRAC_1_PI;
+                    (channel_view(channel, material.value(channel, &orb_coords(normal), footprint)), coverage)
+                }
+                None => {
+                    let (linear, opacity) = shade(material, env, normal, pixel, uniform);
+                    (linear.map(|c| linear_to_srgb(aces(c * EXPOSURE))), coverage * opacity)
+                }
+            };
+            let [r, g, b] = [0, 1, 2].map(|k| ((back[k] + (shown[k] - back[k]) * alpha) * 255.0).round().clamp(0.0, 255.0) as u8);
             *out = Color32::from_rgb(r, g, b);
         }
     });
@@ -108,6 +115,20 @@ fn shade(material: &OrbMaterial, env: &OrbEnvironment, direction: Vec3, pixel: f
         *value = diffuse_light[k] * base * (1.0 - metallic) * (1.0 - specular) + specular_light[k] * specular + sample.emissive[k].max(0.0);
     }
     (out, sample.opacity.clamp(0.0, 1.0))
+}
+
+/// `channel`'s `value` on screen (0..1) as the viewport's channel view shows it: colours sRGB-encoded, height around mid gray
+fn channel_view(channel: Channel, value: [f32; 3]) -> [f32; 3] {
+    let value = value.map(|c| if c.is_finite() { c } else { 0.0 });
+    let shown = match channel {
+        Channel::BaseColor | Channel::Emissive | Channel::Specular | Channel::SheenColor => value.map(|c| linear_to_srgb(c.clamp(0.0, 1.0))),
+        // The viewport encodes these as it does colours (they share its colour output)
+        Channel::Metallic | Channel::Roughness | Channel::Glossiness => [linear_to_srgb(value[0].clamp(0.0, 1.0)); 3],
+        Channel::Normal | Channel::CoatNormal => value,
+        Channel::Height => [value[0] * 0.5 + 0.5; 3],
+        _ => [value[0]; 3],
+    };
+    shown.map(|c| c.clamp(0.0, 1.0))
 }
 
 /// The split-sum environment BRDF as scale and bias on F0, from Karis' analytic fit for mobile (no lookup table)
@@ -277,6 +298,29 @@ mod tests {
                 }
                 eprintln!("{name} {side}px: {:.2} ms", started.elapsed().as_secs_f64() * 1000.0 / f64::from(runs));
             }
+        }
+    }
+
+    #[test]
+    fn a_channel_alone_shows_unlit_as_the_viewports_channel_view_draws_it() {
+        let mut fill = fill_with(Channel::BaseColor, Source::Uniform([0.8, 0.35, 0.18]));
+        fill.sources.insert(Channel::Roughness, Source::Uniform([0.3; 3]));
+        fill.sources.insert(Channel::Height, Source::Uniform([0.5; 3]));
+        let on = [Channel::BaseColor, Channel::Roughness, Channel::Height];
+        let byte = |value: f32| (value * 255.0).round() as u8;
+        let encoded = |value: f32| byte(linear_to_srgb(value));
+
+        for (channel, expected) in [
+            (Channel::BaseColor, Color32::from_rgb(encoded(0.8), encoded(0.35), encoded(0.18))),
+            (Channel::Roughness, Color32::from_gray(encoded(0.3))),
+            (Channel::Height, Color32::from_gray(byte(0.75))),
+            (Channel::Metallic, Color32::from_gray(0)),
+        ] {
+            let image = render(&OrbMaterial::of_channel(&fill, channel, &on, &Default::default()), 64, BACKDROP);
+
+            assert_eq!(at(&image, 32, 32), expected, "{channel:?} at the centre");
+            assert_eq!(at(&image, 12, 32), expected, "{channel:?} unlit: the same off the centre");
+            assert_eq!(image.pixels[0], BACKDROP, "{channel:?} sits on the backdrop");
         }
     }
 

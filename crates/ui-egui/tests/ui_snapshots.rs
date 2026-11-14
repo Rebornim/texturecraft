@@ -924,6 +924,24 @@ fn fill_material_snapshots() {
     harness.run_steps(4);
     harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
     save(&mut harness, &output_dir, "material-channels");
+    // The orb follows the Layers panel's channel list: its list open, then one channel alone each
+    harness.get_all_by_role_and_label(egui::Role::ComboBox, "Material").min_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).unwrap().click();
+    harness.run_steps(2);
+    save(&mut harness, &output_dir, "material-ball-list");
+    harness.key_press(egui::Key::Escape);
+    for channel in [texturecraft_engine::core::Channel::BaseColor, texturecraft_engine::core::Channel::Normal, texturecraft_engine::core::Channel::Height] {
+        harness.state_mut().ui.layer_material_view = false;
+        harness.state_mut().ui.layer_channel = channel;
+        save(&mut harness, &output_dir, &format!("material-ball-{}", channel.id()));
+    }
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("material-ball-height-{name}"));
+        }
+        harness.state_mut().ui.prefs.brightness = Brightness::default();
+    }
+    harness.state_mut().ui.layer_material_view = true;
     // The Base color slot (the lowest "Base color" list: the Layers panel has one too) with its list open
     lowest_list(&harness, "Base color").click();
     harness.run_steps(2);

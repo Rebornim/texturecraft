@@ -35,6 +35,8 @@ pub(crate) struct OrbMaterial {
     sampling: Sampling,
     /// The images the sources read, shared with the session
     images: BTreeMap<String, Arc<ImageRes>>,
+    /// The one channel shown on its own, unlit, as the viewport's channel view draws it; `None` = the whole material, lit
+    alone: Option<Channel>,
 }
 
 impl OrbMaterial {
@@ -46,13 +48,26 @@ impl OrbMaterial {
             (Channel::Metallic, Source::Uniform([metallic; 3])),
             (Channel::Roughness, Source::Uniform([roughness; 3])),
         ]);
-        OrbMaterial { sources, projection: Projection::default(), sampling: Sampling::default(), images: BTreeMap::new() }
+        OrbMaterial { sources, projection: Projection::default(), sampling: Sampling::default(), images: BTreeMap::new(), alone: None }
     }
 
     /// `fill` with the channels in `on`; channels that are off show their defaults, images come from `images`
     pub(crate) fn of_fill(fill: &Fill, on: &[Channel], images: &std::collections::HashMap<String, Arc<ImageRes>>) -> OrbMaterial {
-        let sources: BTreeMap<Channel, Source> =
-            ORB_CHANNELS.into_iter().filter(|channel| on.contains(channel)).map(|channel| (channel, fill.source(channel))).collect();
+        OrbMaterial::with_channels(fill, ORB_CHANNELS.into_iter().filter(|channel| on.contains(channel)), images, None)
+    }
+
+    /// `fill`'s `channel` alone (its default when the fill does not write it, `on` being the channels it writes)
+    pub(crate) fn of_channel(fill: &Fill, channel: Channel, on: &[Channel], images: &std::collections::HashMap<String, Arc<ImageRes>>) -> OrbMaterial {
+        OrbMaterial::with_channels(fill, on.contains(&channel).then_some(channel), images, Some(channel))
+    }
+
+    fn with_channels(
+        fill: &Fill,
+        channels: impl IntoIterator<Item = Channel>,
+        images: &std::collections::HashMap<String, Arc<ImageRes>>,
+        alone: Option<Channel>,
+    ) -> OrbMaterial {
+        let sources: BTreeMap<Channel, Source> = channels.into_iter().map(|channel| (channel, fill.source(channel))).collect();
         let images = sources
             .values()
             .filter_map(|source| match source {
@@ -60,13 +75,18 @@ impl OrbMaterial {
                 _ => None,
             })
             .collect();
-        OrbMaterial { sources, projection: fill.projection.clone(), sampling: fill.sampling, images }
+        OrbMaterial { sources, projection: fill.projection.clone(), sampling: fill.sampling, images, alone }
+    }
+
+    /// The channel the orb shows on its own, if any
+    pub(crate) fn alone(&self) -> Option<Channel> {
+        self.alone
     }
 
     /// A key that changes whenever the orb would look different
     pub(crate) fn key(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
-        format!("{:?}{:?}{:?}", self.sources, self.projection, self.sampling).hash(&mut hasher);
+        format!("{:?}{:?}{:?}{:?}", self.sources, self.projection, self.sampling, self.alone).hash(&mut hasher);
         for (name, image) in &self.images {
             // The same name re-imported is a new image
             (name, Arc::as_ptr(image) as usize, image.width, image.height).hash(&mut hasher);
@@ -96,7 +116,8 @@ impl OrbMaterial {
         self.sources.get(&Channel::Height).is_some_and(|source| !matches!(source, Source::Uniform(_)))
     }
 
-    fn value(&self, channel: Channel, coords: &Coords, footprint: f32) -> [f32; 3] {
+    /// `channel`'s value at `coords` (linear; normals 0..1 per component, height -1..1)
+    pub(crate) fn value(&self, channel: Channel, coords: &Coords, footprint: f32) -> [f32; 3] {
         let Some(source) = self.sources.get(&channel) else { return channel.default_value() };
         match source {
             Source::Uniform(value) => *value,

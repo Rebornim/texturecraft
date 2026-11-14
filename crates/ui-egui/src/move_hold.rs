@@ -12,6 +12,4 @@ pub(crate) struct MoveHold {
     pub stepped: bool,
     /// The pass that last applied it: a sheet drawn twice in one frame moves the projection once
     pub pass: u64,
-    /// When the wheel last scaled the projection and whether it grew it; the cursor shows it for a moment
-    pub wheeled: Option<(f64, bool)>,
 }

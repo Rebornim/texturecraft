@@ -59,7 +59,7 @@ const PROJECTION_DEPTH_TRACK: RangeInclusive<f32> = 0.0..=1.0;
 const WARP_SPAN_FALLBACK: f32 = 1.7;
 
 /// Change per pixel dragged on a 3D offset field
-const OFFSET_FIELD_SPEED: f32 = 0.01;
+pub(crate) const OFFSET_FIELD_SPEED: f32 = 0.01;
 
 /// Change per pixel dragged on a 3D rotation field, in degrees
 const ROTATION_FIELD_SPEED: f32 = 0.5;

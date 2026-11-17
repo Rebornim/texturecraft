@@ -376,3 +376,28 @@ fn output_hardness_and_background_shape_the_mask_in_one_undo_step_each() {
         assert!(inspected.contains(key), "{key} in {inspected}");
     }
 }
+
+#[test]
+fn the_id_mask_view_shows_the_chosen_image_where_the_mask_reads_it() {
+    let mut session = session();
+    let (_, effect) = masked_layer(&mut session, false);
+    assert!(session.id_mask_view_rgba(effect, 16).is_none(), "the ID mesh map is no image");
+
+    let image = session.import_resource_bytes("parts.png", id_map_png()).unwrap();
+    execute(&mut session, "effect.set", &json!({"effect": effect.0, "idMap": image})).unwrap();
+    assert_eq!(session.id_mask_image(effect).map(|(texture_set, _)| texture_set), Some(0));
+    let rgba = session.id_mask_view_rgba(effect, 16).unwrap();
+    assert_eq!(rgba.len(), 16 * 16 * 4);
+    let pixel = |x: usize, y: usize| -> [u8; 3] {
+        let start = (y * 16 + x) * 4;
+        [rgba[start], rgba[start + 1], rgba[start + 2]]
+    };
+    assert_eq!(pixel(1, 1), TOP_LEFT_ID);
+    assert_eq!(pixel(14, 1), TOP_RIGHT_ID);
+    assert_eq!(pixel(8, 14), BOTTOM_ID);
+
+    // Each view pixel shows the color a pick at the same UV adds
+    let picked = execute(&mut session, "effect.colorSelection.pick", &json!({"effect": effect.0, "uv": [14.5 / 16.0, 1.5 / 16.0]})).unwrap();
+    let picked: Vec<f32> = serde_json::from_value(picked["color"].clone()).unwrap();
+    assert_close([picked[0], picked[1], picked[2]], stored(pixel(14, 1)));
+}

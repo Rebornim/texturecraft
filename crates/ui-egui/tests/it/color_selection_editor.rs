@@ -427,3 +427,24 @@ fn invert_tooltip_snapshot() {
         image.save(std::path::Path::new(&directory).join("invert-tooltip.png")).unwrap();
     }
 }
+
+#[test]
+fn a_hand_picked_id_mask_picks_without_a_bake() {
+    let (mut session, effect) = color_selection_session(false);
+    session.doc.baked.clear();
+    let texture = session.import_resource_bytes("parts.png", id_map_png()).unwrap();
+    execute(&mut session, "effect.set", &json!({"effect": effect.0, "idMap": texture})).unwrap();
+    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.run_steps(4);
+
+    harness.get_by_label(&pick_color_label()).click();
+    harness.run_steps(3);
+    assert!(harness.state().picking_id_color.is_some_and(|pick| pick.effect == effect), "Pick color starts picking with no bake");
+
+    let center = harness.state().viewport_rect.center();
+    click_at(&mut harness, center);
+
+    let picked = colors(&harness, effect);
+    assert_eq!(picked.len(), 4, "the click adds a row");
+    assert_eq!(picked[3], ID_PART.map(|channel| channel as f32 / 255.0), "read from the chosen image");
+}

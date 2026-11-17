@@ -28,6 +28,7 @@ pub mod filter_about;
 pub mod filter_lib;
 pub mod folder_cmds;
 mod frame_target;
+pub mod id_mask_view;
 pub mod inspect;
 pub mod instance_cmds;
 pub mod layer_cmds;

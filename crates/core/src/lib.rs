@@ -26,7 +26,7 @@ pub use channel::{Channel, ChannelFormat, ChannelKind};
 pub use layer::{
     ChannelBlend, CompareOp, CurvatureDetail, CurvatureMode, Decal, Effect, EffectKind, Fill, Filter, Generator, GeneratorGlobal, GeneratorKind, HeightMask,
     Layer, LayerId, LayerKind, Levels, LinkParam, LinkPreset, Mask, MaskBackground, MaterialLink, OutputResolution, PathShape, Procedural, ProceduralKind,
-    Projection, ResolutionMode, Source, gradient, hsl_adjust, per_unit,
+    Projection, ResolutionMode, Source, WearParameters, gradient, hsl_adjust, per_unit,
 };
 pub use project::{
     AoMixing, BlockScales, Camera, DepthOfField, DisplaySettings, FORMAT_VERSION, MAX_RESOLUTION, MIN_RESOLUTION, NormalFormat, NormalMixing, Project,

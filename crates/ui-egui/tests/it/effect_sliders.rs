@@ -4,10 +4,10 @@ use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{Queryable, by};
 use serde_json::json;
-use texturecraft_engine::core::{EffectKind, LayerId};
+use texturecraft_engine::core::{EffectKind, LayerId, WearParameters};
 use texturecraft_ui_egui::TextureCraftApp;
 
-/// The sample session with its first generator effect selected, and that effect's id.
+/// The sample session with its first generator other than a wear one selected, and that effect's id
 fn selected_generator() -> (Harness<'static, TextureCraftApp>, LayerId) {
     let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
     let (layer, effect) = session
@@ -17,7 +17,12 @@ fn selected_generator() -> (Harness<'static, TextureCraftApp>, LayerId) {
         .values()
         .find_map(|layer| {
             let mask_effects = layer.mask.iter().flat_map(|mask| mask.effects.iter());
-            layer.content_effects.iter().chain(mask_effects).find(|effect| matches!(effect.kind, EffectKind::Generator(_))).map(|effect| (layer.id, effect.id))
+            layer
+                .content_effects
+                .iter()
+                .chain(mask_effects)
+                .find(|effect| matches!(&effect.kind, EffectKind::Generator(generator) if WearParameters::defaults(generator.kind).is_none()))
+                .map(|effect| (layer.id, effect.id))
         })
         .unwrap();
     texturecraft_engine::execute(&mut session, "layer.select", &json!({"layer": layer.0, "target": effect.0})).unwrap();

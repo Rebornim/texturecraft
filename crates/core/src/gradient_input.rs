@@ -7,6 +7,9 @@ use crate::grayscale_mode::GrayscaleMode;
 /// Full contrast stays a finite step instead of a division by zero
 const MIN_STEEPNESS: f32 = 1e-3;
 
+/// The balance that leaves the gray as it is
+const NEUTRAL_BALANCE: f32 = 0.5;
+
 /// The gray, blurred, balanced, contrasted and maybe inverted value a gradient looks up
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -25,13 +28,13 @@ pub struct GradientInput {
 impl Default for GradientInput {
     /// What gradients read in projects saved before the Input Transformation: luma, untouched
     fn default() -> Self {
-        GradientInput { mode: GrayscaleMode::Luma, blur: 0.0, balance: 0.5, contrast: 0.0, invert: false }
+        GradientInput { mode: GrayscaleMode::Luma, blur: 0.0, balance: NEUTRAL_BALANCE, contrast: 0.0, invert: false }
     }
 }
 
 impl GradientInput {
     /// The library's starting transformation: the average of the components, untouched
-    pub const LIBRARY: GradientInput = GradientInput { mode: GrayscaleMode::Average, blur: 0.0, balance: 0.5, contrast: 0.0, invert: false };
+    pub const LIBRARY: GradientInput = GradientInput { mode: GrayscaleMode::Average, blur: 0.0, balance: NEUTRAL_BALANCE, contrast: 0.0, invert: false };
 
     /// Whether it reads gradients as projects saved before it did (skipped when saving)
     pub fn is_unchanged(&self) -> bool {
@@ -40,6 +43,11 @@ impl GradientInput {
 
     /// The ramp position of gray `x`
     pub fn shape(&self, x: f32) -> f32 {
+        // Left as it is, the gray reaches the ramp bit for bit as projects saved before read it (the ramp clamps it)
+        if self.balance == NEUTRAL_BALANCE && self.contrast == 0.0 && !self.invert {
+            return x;
+        }
+
         shape(x, self.balance, self.contrast, self.invert)
     }
 }

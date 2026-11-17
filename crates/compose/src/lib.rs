@@ -21,6 +21,7 @@ pub mod eval;
 mod fabric;
 pub mod fill_copies;
 pub mod fill_copy;
+mod fill_place;
 pub mod frame_placement;
 mod fur_lock;
 mod held_fields;

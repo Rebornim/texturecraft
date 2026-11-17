@@ -69,6 +69,7 @@ mod picker_group;
 mod picker_tab;
 mod placement;
 mod pointer_lock;
+mod popup_drag;
 mod preview_dots;
 mod preview_image;
 mod preview_outline;
@@ -829,6 +830,9 @@ impl eframe::App for TextureCraftApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let t0 = now_ms();
+
+        // Before any popup draws, so one a drag closes is gone from this frame
+        popup_drag::close_on_drag_outside(&ctx);
         if !self.ui.hide_ui {
             titlebar::show(self, ui);
             banner(self, ui);

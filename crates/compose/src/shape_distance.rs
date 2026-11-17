@@ -3,6 +3,7 @@
 use rayon::prelude::*;
 use texturecraft_core::{BevelBlur, BevelCorner, Filter, lum};
 
+use crate::distance_envelope::DistanceEnvelope;
 use crate::eval::{MIN_ALPHA, blur};
 
 /// Samples a Directional Distance trail reads behind a texel at most (beyond, samples spread out)
@@ -122,52 +123,10 @@ fn straight_distances(feature: &[bool], (width, height): (usize, usize)) -> Vec<
     // Squared distances, separable: along the rows, then along the columns of those
     let far = ((width + height) as f32).powi(2);
     let mut rows: Vec<f32> = feature.iter().map(|feature| if *feature { 0.0 } else { far }).collect();
-    rows.par_chunks_mut(width.max(1)).for_each_init(Envelope::default, |envelope, row| envelope.lower(row));
+    rows.par_chunks_mut(width.max(1)).for_each_init(DistanceEnvelope::default, |envelope, row| envelope.lower(row));
     let mut columns: Vec<f32> = (0..width * height).map(|at| rows.get((at % height.max(1)) * width + at / height.max(1)).copied().unwrap_or(far)).collect();
-    columns.par_chunks_mut(height.max(1)).for_each_init(Envelope::default, |envelope, column| envelope.lower(column));
+    columns.par_chunks_mut(height.max(1)).for_each_init(DistanceEnvelope::default, |envelope, column| envelope.lower(column));
     (0..width * height).map(|at| columns.get((at % width.max(1)) * height + at / width.max(1)).copied().unwrap_or(far).sqrt()).collect()
-}
-
-/// The lower envelope of the parabolas over a line of squared distances, which gives each place's squared distance to the nearest feature along it and the line before
-#[derive(Default)]
-struct Envelope {
-    /// The parabolas still lowest somewhere: their vertex and where their stretch begins
-    parabolas: Vec<(usize, f32)>,
-    /// The line as it was
-    heights: Vec<f32>,
-}
-
-impl Envelope {
-    /// Replace `line` with each place's squared distance to the nearest feature
-    fn lower(&mut self, line: &mut [f32]) {
-        self.heights.clear();
-        self.heights.extend_from_slice(line);
-        self.parabolas.clear();
-        let heights = &self.heights;
-        let lifted = |at: usize| heights.get(at).copied().unwrap_or(f32::MAX) + (at * at) as f32;
-        for at in 0..heights.len() {
-            let mut start = f32::NEG_INFINITY;
-            while let Some(&(vertex, from)) = self.parabolas.last() {
-                let crossing = (lifted(at) - lifted(vertex)) / (2.0 * (at - vertex) as f32);
-                if crossing <= from {
-                    self.parabolas.pop();
-                } else {
-                    start = crossing;
-                    break;
-                }
-            }
-            self.parabolas.push((at, start));
-        }
-        let mut current = 0;
-        for (at, out) in line.iter_mut().enumerate() {
-            while self.parabolas.get(current + 1).is_some_and(|(_, from)| *from < at as f32) {
-                current += 1;
-            }
-            if let Some(&(vertex, _)) = self.parabolas.get(current) {
-                *out = (at as f32 - vertex as f32).powi(2) + heights.get(vertex).copied().unwrap_or(f32::MAX);
-            }
-        }
-    }
 }
 
 /// Every texel's distance (texels, the larger of across and down) to the nearest texel where `feature` holds; farther than the region when none does

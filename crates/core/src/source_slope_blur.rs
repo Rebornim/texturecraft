@@ -23,7 +23,7 @@ pub struct SourceSlopeBlur {
 impl SourceSlopeBlur {
     /// The Blur Slope filter as the library adds it
     pub const LIBRARY: SourceSlopeBlur =
-        SourceSlopeBlur { seed: 1, intensity: 0.3, divider: 10, blending: SlopeBlending::Blur, quality: 1.0, source: WarpSource::LIBRARY };
+        SourceSlopeBlur { seed: 0, intensity: 0.3, divider: 10, blending: SlopeBlending::Blur, quality: 1.0, source: WarpSource::LIBRARY };
 
     /// How many texels downhill a texel reads at most at `res` texels across a UV tile
     pub fn move_texels(&self, res: u32) -> f32 {

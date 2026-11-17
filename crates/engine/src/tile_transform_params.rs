@@ -23,16 +23,16 @@ pub(crate) fn apply(p: &Value, transform: &mut TileTransform, cmd: &str) -> Resu
     }
     let (low, high) = TileTransform::SCALING;
     if let Some(scaling) = pair(p, "scaling", cmd)? {
-        edited.scaling = scaling.map(|s| s.clamp(low, high));
+        edited.scaling = scaling.map(|scale| scale.clamp(low, high));
     }
     if let Some(offset) = pair(p, "offset", cmd)? {
-        edited.offset = offset.map(|o| o.clamp(-TileTransform::MAX_OFFSET, TileTransform::MAX_OFFSET));
+        edited.offset = offset.map(|along| along.clamp(-TileTransform::MAX_OFFSET, TileTransform::MAX_OFFSET));
     }
     if p.get("tileSafeRotation").is_some() {
         edited.tile_safe = boolp(p, "tileSafeRotation").ok_or_else(|| bad(cmd, "`tileSafeRotation` must be true or false"))?;
     }
     if p.get("rotation").is_some() {
-        let degrees = f32p(p, "rotation").filter(|d| d.is_finite()).ok_or_else(|| bad(cmd, "`rotation` must be a number of degrees"))?;
+        let degrees = f32p(p, "rotation").ok_or_else(|| bad(cmd, "`rotation` must be a number of degrees"))?;
         edited.rotation = degrees.rem_euclid(360.0);
     }
     *transform = edited;
@@ -42,10 +42,10 @@ pub(crate) fn apply(p: &Value, transform: &mut TileTransform, cmd: &str) -> Resu
 /// `[x, y]` (or one number for both) under `key`, if given; anything else is refused
 fn pair(p: &Value, key: &str, cmd: &str) -> Result<Option<[f32; 2]>> {
     let Some(value) = p.get(key) else { return Ok(None) };
-    let number = |v: &Value| v.as_f64().map(|n| n as f32).filter(|n| n.is_finite());
+    let number = |item: &Value| item.as_f64().map(|value| value as f32).filter(|value| value.is_finite());
     let parsed = match value {
         Value::Array(items) if items.len() == 2 => items.first().and_then(number).zip(items.get(1).and_then(number)).map(|(x, y)| [x, y]),
-        other => number(other).map(|n| [n, n]),
+        other => number(other).map(|both| [both, both]),
     };
     parsed.map(Some).ok_or_else(|| bad(cmd, format!("`{key}` must be [x, y] or one number")))
 }

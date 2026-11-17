@@ -8,6 +8,12 @@ mod repeat_mode;
 pub use flip_mode::FlipMode;
 pub use repeat_mode::RepeatMode;
 
+/// A turn this close to a whole number of quarter turns (in quarter turns) keeps the tile's edges meeting as it is
+const SQUARE_TURN_TOLERANCE: f32 = 1e-4;
+
+/// A shift this small (a share of the tile) moves no texel
+const IDENTITY_SHIFT_TOLERANCE: f32 = 1e-6;
+
 /// A Transform filter: each UV tile's content scaled, turned and moved about the tile's centre, then flipped
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,12 +51,13 @@ impl TileTransform {
     pub fn affine(&self) -> ([[f32; 2]; 2], [f32; 2]) {
         let finite = |value: f32, fallback: f32| if value.is_finite() { value } else { fallback };
         let (low, high) = Self::SCALING;
-        let scaling = self.scaling.map(|s| finite(s, 1.0).clamp(low, high));
+        let scaling = self.scaling.map(|scale| finite(scale, 1.0).clamp(low, high));
         let (sin, cos) = finite(self.rotation, 0.0).to_radians().sin_cos();
 
         // Turn, then scale (a fill's Tiling convention): one step across moves (cos, sin) scaled
         let mut columns = [[cos * scaling[0], sin * scaling[1]], [-sin * scaling[0], cos * scaling[1]]];
-        let square = (finite(self.rotation, 0.0) / 90.0).fract().abs() < 1e-4;
+        let quarter_turns = finite(self.rotation, 0.0) / 90.0;
+        let square = (quarter_turns - quarter_turns.round()).abs() < SQUARE_TURN_TOLERANCE;
         if self.tile_safe && !square {
             // Whole steps of the source per tile edge keep the edges meeting; a step can never vanish
             for column in &mut columns {
@@ -69,7 +76,7 @@ impl TileTransform {
         if flip_y {
             columns[1] = columns[1].map(|v| -v);
         }
-        let offset = self.offset.map(|o| finite(o, 0.0).clamp(-Self::MAX_OFFSET, Self::MAX_OFFSET));
+        let offset = self.offset.map(|along| finite(along, 0.0).clamp(-Self::MAX_OFFSET, Self::MAX_OFFSET));
 
         // About the tile's centre: the centre reads the centre moved by the offset
         let shift = [0, 1].map(|axis| 0.5 + offset[axis] - 0.5 * (columns[0][axis] + columns[1][axis]));
@@ -89,7 +96,7 @@ impl TileTransform {
     /// Whether it changes nothing
     pub fn is_identity(&self) -> bool {
         let (columns, shift) = self.affine();
-        columns == [[1.0, 0.0], [0.0, 1.0]] && shift.iter().all(|s| s.abs() < 1e-6)
+        columns == [[1.0, 0.0], [0.0, 1.0]] && shift.iter().all(|along| along.abs() < IDENTITY_SHIFT_TOLERANCE)
     }
 }
 
@@ -143,6 +150,10 @@ mod tests {
         // A square turn keeps its scaling
         let square = TileTransform { scaling: [1.5, 1.5], rotation: 90.0, ..TileTransform::LIBRARY };
         assert!((square.affine().0[1][0] + 1.5).abs() < 1e-5);
+
+        // A turn just short of a whole one is square too (a tiny negative turn is stored that way)
+        let nearly_whole = TileTransform { scaling: [1.5, 1.5], rotation: 359.99995, ..TileTransform::LIBRARY };
+        assert!((nearly_whole.affine().0[0][0] - 1.5).abs() < 1e-5, "{:?}", nearly_whole.affine().0);
     }
 
     #[test]

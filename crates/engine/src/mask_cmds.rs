@@ -67,7 +67,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add filter",
             ["Layers", "Effects"],
             None,
-            "{layer?, target?: mask|content, name?, filter?: id from filter.list or \"none\" for an empty filter that changes nothing (invert, threshold, blur, sharpen, hsl, levels, contrastLuminosity, colorBalance, gradientMap, gradientCurve, gradientDynamic, posterize, clamp, histogramScan|Range|Shift, warp, blurDirectional, slopeBlur, matFinishGrind|Raw|Sanded|Hammered), level?, radius?, amount?, hue?: turns -1..1, saturation?, lightness?, contrast?, luminosity?, shadows?|midtones?|highlights?: [r,g,b] -1..1, colors?: [[r,g,b] linear or \"#rrggbb\" sRGB, ...], positions?: [0..1, ...], quantity?: 2..10, grayscaleMode?: desaturation|luma|average|max|min, blur?, balance?, invert?, linear?, debug?, preset?: round|pinch|stairs|easeOut|ease|easeIn|peakOut|peak|peakIn|bump|doubleBump|triangular, orientation?: horizontal|vertical, color?, levels?, min?, max?, position?, range?, offset?, intensity?, scale?, seed?, angle?} — material finishes go on the content",
+            "{layer?, target?: mask|content, name?, filter?: any id or label from filter.list (warpDirectional adds Warp in its Directional mode) or \"none\" for an empty filter that changes nothing, level?, radius?, amount?, hue?: turns -1..1, saturation?, lightness?, contrast?, luminosity?, shadows?|midtones?|highlights?: [r,g,b] -1..1, colors?: [[r,g,b] linear or \"#rrggbb\" sRGB, ...], positions?: [0..1, ...], quantity?: 2..10, grayscaleMode?: desaturation|luma|average|max|min, blur?, balance?, invert?, linear?, debug?, preset?: round|pinch|stairs|easeOut|ease|easeIn|peakOut|peak|peakIn|bump|doubleBump|triangular, orientation?: horizontal|vertical, color?, levels?, min?, max?, position?, range?, offset?, intensity?, scale?, seed?, angle?} — material finishes go on the content",
             has_layer,
             add_filter
         ),
@@ -759,7 +759,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         _ => None,
     };
 
-    // Naming the filter the effect already is edits its parameters like a plain effect.set
+    // Naming the filter the effect already is edits its parameters like a plain effect.set (Directional Warp's former id also sets its mode)
     let swapped = match strp(params, "filter") {
         Some(EMPTY_FILTER) => Some(emptied_filter(session, effect)?),
         Some(filter) if crate::filter_lib::find(filter).is_some_and(|def| current_filter_id(session, effect) == Some(def.id)) => None,
@@ -825,7 +825,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
 
             // The swapped filter was built with the parameters already
             EffectKind::Filter(_) if swaps_filter => {}
-            EffectKind::Filter(filter) => crate::filter_lib::apply(params, filter, CMD)?,
+            EffectKind::Filter(filter) => crate::filter_lib::apply_named(strp(params, "filter"), params, filter, CMD)?,
             EffectKind::Fill { source, projection, .. } => {
                 // `uniform` picks the source, so it outranks settings that would edit the current pattern
                 let uniform = f32p(params, "uniform").filter(|_| strp(params, "procedural").is_none());
@@ -939,10 +939,9 @@ fn swapped_filter(s: &Session, effect: LayerId, id: &str, p: &Value) -> Result<(
     }
 
     let def = crate::filter_lib::find(id).ok_or_else(|| bad(CMD, format!("unknown filter `{id}` (see filter.list)")))?;
-    let mut kind = crate::filter_lib::build(def.id, &Value::Null)?;
-    let EffectKind::Filter(filter) = &mut kind else {
+    if !def.is_filter_effect() {
         return Err(bad(CMD, format!("{} is its own effect type: add it with effect.add.filter", def.label)));
-    };
+    }
 
     let mask = s.doc.project.layer(owner)?.mask.as_ref();
     let on_mask = mask.is_some_and(|mask| mask.effects.iter().any(|masked| masked.id == effect));
@@ -950,7 +949,8 @@ fn swapped_filter(s: &Session, effect: LayerId, id: &str, p: &Value) -> Result<(
         return Err(bad(CMD, format!("{} goes on layer content, not on masks", def.label)));
     }
 
-    crate::filter_lib::apply(p, filter, CMD)?;
+    // Built as effect.add.filter builds it, from the id given, so a former id such as `warpDirectional` sets the same mode it adds with
+    let kind = crate::filter_lib::build_for(CMD, id, p)?;
     Ok((kind, def.label))
 }
 

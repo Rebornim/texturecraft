@@ -9,13 +9,14 @@ use texturecraft_engine::core::{
     ThresholdMode, ValidationMode, WarpBlending, WarpMode, WarpSourceMode,
 };
 use texturecraft_engine::filter_lib::{
-    BEVEL_SMOOTHING_MAX, BLUR_INTENSITY_SLIDER_MAX, DISTANCE_BEVEL_SMOOTHING_MAX, MAX_CAVITY_SMOOTHNESS, MAX_DIELECTRIC_REFLECTANCE, MAX_HEIGHT_TO_NORMAL,
-    MAX_LIGHT_INTENSITY, SMOOTH_DISTANCE_MAX, SOURCE_TILING_MAX, SOURCE_TILING_MIN, SUN_INTENSITY_MAX, build, find, scalar_params,
+    BEVEL_SMOOTHING_MAX, BLUR_INTENSITY_SLIDER_MAX, DISTANCE_BEVEL_SMOOTHING_MAX, FilterDef, GRADIENT_QUANTITY_MIN, MAX_CAVITY_SMOOTHNESS,
+    MAX_DIELECTRIC_REFLECTANCE, MAX_HEIGHT_TO_NORMAL, MAX_LIGHT_INTENSITY, SKY_INTENSITY_SLIDER_MAX, SMOOTH_DISTANCE_MAX, SOURCE_TILING_MAX, SOURCE_TILING_MIN,
+    SUN_INTENSITY_MAX, build, find, scalar_params,
 };
 
 use crate::TextureCraftApp;
 use crate::fill_material_panel::pill_name;
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use crate::property_sheet::PropertySheet;
 use crate::theme::{AXIS_COLORS, OPPOSITE_COLORS, Tokens};
 
@@ -28,15 +29,16 @@ const WIDEST_DIVIDER: &str = "÷1000";
 /// The properties of filter effect `effect` (`filter`), with its channel pills when it sits on the layer content
 pub(crate) fn filter_properties(app: &mut TextureCraftApp, ui: &mut Ui, effect: LayerId, filter: &Filter) {
     let on_mask = crate::filter_slot::is_on_mask(app, effect.0);
-    let off: Vec<Channel> = app.session.doc.project.effect(effect).map(|(_, found)| found.off_channels.iter().copied().collect()).unwrap_or_default();
     PropertySheet::show(ui, ("filter_sheet", effect.0), |sheet| {
         sheet.section(tr("Filter"), false);
         if !on_mask {
+            let off: Vec<Channel> = app.session.doc.project.effect(effect).map(|(_, found)| found.off_channels.iter().copied().collect()).unwrap_or_default();
             channel_pills(app, sheet, effect, &off);
         }
-        let defaults = defaults_of(filter);
+        let def = find(filter.label());
+        let defaults = def.and_then(defaults_of);
         let changed = defaults.as_ref().is_some_and(|defaults| defaults != filter);
-        if filter_card(app, sheet, effect, filter, changed) {
+        if filter_card(app, sheet, effect, filter, def, changed) {
             app.run("effect.filter.restoreDefaults", json!({"effect": effect.0}));
         }
         if *filter == Filter::Empty {
@@ -48,7 +50,7 @@ pub(crate) fn filter_properties(app: &mut TextureCraftApp, ui: &mut Ui, effect: 
         sheet.hold_card();
         parameters(app, sheet, effect.0, filter);
         if sheet.closing_fold(tr("Attributes")) {
-            attributes(app, sheet, filter);
+            attributes(app, sheet, def);
         }
         sheet.release_card();
 
@@ -62,9 +64,9 @@ pub(crate) fn filter_properties(app: &mut TextureCraftApp, ui: &mut Ui, effect: 
     });
 }
 
-/// The filter's read-only Attributes: what it does, who made it, the words it is found by and the size it works at
-fn attributes(app: &TextureCraftApp, sheet: &mut PropertySheet<'_>, filter: &Filter) {
-    let about = find(filter.label()).and_then(|def| def.about());
+/// The filter's read-only Attributes (library entry `def`): what it does, who made it, the words it is found by and the size it works at
+fn attributes(app: &TextureCraftApp, sheet: &mut PropertySheet<'_>, def: Option<&FilterDef>) {
+    let about = def.and_then(|def| def.about());
     if let Some(about) = about {
         sheet.attribute_text(tr("Description"), tr(about.description));
     }
@@ -85,9 +87,8 @@ fn input_slot(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect: 
     crate::fill_material_panel::source_card(app, sheet, source, &json!({"effect": effect.0}), crate::source_slot::SourceSlot::Input(input), reader, in_card);
 }
 
-/// The library defaults of `filter` (None for an empty filter)
-fn defaults_of(filter: &Filter) -> Option<Filter> {
-    let def = find(filter.label())?;
+/// The library defaults of filter `def`
+fn defaults_of(def: &FilterDef) -> Option<Filter> {
     match build(def.id, &Value::Null) {
         Ok(EffectKind::Filter(defaults)) => Some(defaults),
         _ => None,
@@ -116,11 +117,11 @@ const THUMBNAIL_POLL: std::time::Duration = std::time::Duration::from_millis(100
 /// The hourglass size on a slot whose picture is still rendering
 const WAITING_GLYPH_SIZE: f32 = 12.0;
 
-/// The card naming the filter (or None): a click opens the filter picker under it, × empties it; returns whether its ⟲ (live while `changed`) was clicked
-fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect: LayerId, filter: &Filter, changed: bool) -> bool {
+/// The card naming the filter (or None; `def` its library entry): a click opens the filter picker under it, × empties it; returns whether its ⟲ (live while `changed`) was clicked
+fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect: LayerId, filter: &Filter, def: Option<&FilterDef>, changed: bool) -> bool {
     let ctx = sheet.ui.ctx().clone();
     let empty = *filter == Filter::Empty;
-    let thumbnail = find(filter.label()).and_then(|def| app.thumbs.filter(&ctx, def.id));
+    let thumbnail = def.and_then(|def| app.thumbs.filter(&ctx, def.id));
     let tokens = Tokens::get(&ctx);
     let picture = |painter: &Painter, rect: Rect| match &thumbnail {
         Some(texture) => {
@@ -148,7 +149,7 @@ fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect:
     if slot.clear {
         app.run("effect.set", json!({"effect": effect.0, "filter": "none"}));
     }
-    crate::filter_slot::picker(app, &slot.pick, effect.0, filter);
+    crate::filter_slot::picker(app, &slot.pick, effect.0, def.map(|def| def.id));
     slot.reset
 }
 
@@ -207,14 +208,10 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
     }
     let divided = divided_key(filter);
     for (key, label, mut value, min, max) in params.into_iter().filter(|(key, ..)| *key != "seed") {
-        let edit = if Some(key) == divided.map(|(key, _)| key) {
-            intensity_row(app, sheet, id, &mut value, min..=max, divided.map_or(1, |(_, divider)| divider))
-        } else if matches!(key, "angle" | "azimuth" | "horizontalRotation" | "verticalRotation") {
-            sheet.angle(tr(label), &mut value, min..=max)
-        } else if min < 0.0 {
-            sheet.signed_slider(tr(label), &mut value, min..=max, decimals(key, min, max))
-        } else {
-            sheet.slider(tr(label), &mut value, min..=max, decimals(key, min, max))
+        let edit = match divided {
+            Some((divided_param, divider)) if divided_param == key => intensity_row(app, sheet, id, &mut value, min..=max, divider),
+            _ if matches!(key, "angle" | "azimuth" | "horizontalRotation" | "verticalRotation") => sheet.angle(tr(label), &mut value, min..=max),
+            _ => range_slider(sheet, tr(label), &mut value, min..=max, decimals(key, min, max)),
         };
         if let Some(merge) = edit {
             set(app, key, json!(value), merge);
@@ -295,7 +292,7 @@ fn anisotropic_kuwahara(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>
     let rows = [
         ("radius", tr("Radius"), kuwahara.radius, 0.0..=AnisotropicKuwahara::MAX_RADIUS),
         ("smoothness", tr("Smoothness"), kuwahara.smoothness, 0.0..=1.0),
-        ("sharpness", tr("Sharpness"), kuwahara.sharpness, 0.25..=1.0),
+        ("sharpness", tr("Sharpness"), kuwahara.sharpness, AnisotropicKuwahara::LIBRARY.sharpness..=1.0),
         ("tensorSmoothness", tr("Tensor Smoothness"), kuwahara.tensor_smoothness, 0.0..=1.0),
         ("anisotropy", tr("Anisotropy"), kuwahara.anisotropy, 0.0..=1.0),
     ];
@@ -335,7 +332,7 @@ fn height_to_normal(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id
     }
     let rows = if filter.world_units {
         vec![
-            ("surfaceSize", tr("Surface Size (cm)"), filter.surface_size, 1.0..=HeightToNormal::MAX_SURFACE_SIZE, 0),
+            ("surfaceSize", tr("Surface Size (cm)"), filter.surface_size, HeightToNormal::MIN_SURFACE_SIZE..=HeightToNormal::MAX_SURFACE_SIZE, 0),
             ("heightDepth", tr("Height Depth (cm)"), filter.height_depth, 0.0..=HeightToNormal::MAX_HEIGHT_DEPTH, 0),
         ]
     } else {
@@ -352,9 +349,8 @@ fn height_to_normal(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id
 
 /// Color Match: each Color Mode with its color or image slot right under it, Custom Color Variation and, while it is on, the Color Variation card (Hue with its dial, Chroma, Luma)
 fn color_match(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, matcher: &ColorMatch) {
-    let swatches = app.session.doc.project.swatches.clone();
     let color = |app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, key: &str, label: &str, linear: [f32; 3]| {
-        let pick = sheet.color_bar_led(label, linear, app.picking_color, &swatches);
+        let pick = sheet.color_bar_led(label, linear, app.picking_color, &app.session.doc.project.swatches);
         if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
             app.run("effect.set", json!({"effect": id, key: picked, "merge": pick.merge}));
         }
@@ -487,12 +483,15 @@ fn choice_switch<T: Copy + PartialEq>(
 fn slider_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, rows: &[(&str, &str, f32, std::ops::RangeInclusive<f32>)]) {
     for (key, label, value, range) in rows {
         let mut value = *value;
-        let edit =
-            if *range.start() < 0.0 { sheet.signed_slider(label, &mut value, range.clone(), 2) } else { sheet.slider(label, &mut value, range.clone(), 2) };
-        if let Some(merge) = edit {
+        if let Some(merge) = range_slider(sheet, label, &mut value, range.clone(), 2) {
             app.run("effect.set", json!({"effect": id, *key: value, "merge": merge}));
         }
     }
+}
+
+/// A slider over `range`, filling from its middle when the range is signed
+fn range_slider(sheet: &mut PropertySheet<'_>, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, decimals: usize) -> Option<bool> {
+    if *range.start() < 0.0 { sheet.signed_slider(label, value, range, decimals) } else { sheet.slider(label, value, range, decimals) }
 }
 
 /// The Bevel Wrap switch of a bevel
@@ -618,12 +617,15 @@ fn slope_blur(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
         if source.mode == WarpSourceMode::CustomNoise {
             input_slot(app, sheet, LayerId(id), ImageInput::CUSTOM_NOISE, true);
         }
+        let mut shown_blur = source.blur * SLOPE_SOURCE_BLUR_DISPLAY_MAX;
+        if let Some(merge) = sheet.slider(tr("Blur"), &mut shown_blur, 0.0..=SLOPE_SOURCE_BLUR_DISPLAY_MAX, 2) {
+            set(app, "sourceBlur", json!(shown_blur / SLOPE_SOURCE_BLUR_DISPLAY_MAX), merge);
+        }
         slider_rows(
             app,
             sheet,
             id,
             &[
-                ("sourceBlur", tr("Blur"), source.blur, 0.0..=1.0),
                 ("sourceBalance", tr("Position"), source.balance, 0.0..=1.0),
                 ("sourceContrast", tr("Contrast"), source.contrast, 0.0..=1.0),
                 ("sourceTiling", tr("Source Tiling"), source.tiling, SOURCE_TILING_MIN..=SOURCE_TILING_MAX),
@@ -632,6 +634,9 @@ fn slope_blur(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
     }
     sheet.close_card();
 }
+
+/// The reference shows this blur on 0..20; stored on Warp's shared 0..1 source scale
+const SLOPE_SOURCE_BLUR_DISPLAY_MAX: f32 = 20.0;
 
 /// A light bar on the field after the slope pass: smeared (Blur), eaten away (Min) or grown (Max)
 fn slope_blending_picture(painter: &Painter, rect: Rect, blending: SlopeBlending, tokens: &Tokens) {
@@ -786,18 +791,20 @@ fn gradient(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, f
             set(app, json!({"positions": places, "merge": drag.merge}));
         }
         let mut quantity = used.len() as f32;
-        if let Some(merge) = sheet.slider(tr("Color Quantity"), &mut quantity, 2.0..=f32::from(Filter::MAX_GRADIENT_COLORS), 0) {
-            let quantity = quantity.round();
-            if quantity as usize != used.len() {
-                set(app, json!({"quantity": quantity, "merge": merge}));
-            }
+        let slid = sheet.slider(tr("Color Quantity"), &mut quantity, f32::from(GRADIENT_QUANTITY_MIN)..=f32::from(Filter::MAX_GRADIENT_COLORS), 0).is_some();
+        let quantity = quantity.round();
+
+        // A press's first whole-number change starts its undo step: changes that round to the count it has apply nothing
+        let press = sheet.ui.make_persistent_id(("color_quantity_press", id));
+        if let Some(merge) = crate::widgets::press_edit(sheet.ui, press, slid && quantity as usize != used.len()) {
+            set(app, json!({"quantity": quantity, "merge": merge}));
         }
         let mut in_linear = *linear;
         if sheet.toggle(tr("Blend Color in Linear"), &mut in_linear) {
             set(app, json!({"linear": in_linear}));
         }
         for (index, color) in used.iter().enumerate() {
-            let label = format!("{} {}", tr("Color"), index + 1);
+            let label = trf("Color {number}", &[("number", &(index + 1))]);
             let mut place = places.get(index).copied().unwrap_or(0.0);
             let (pick, moved) = sheet.color_stop(&label, *color, &mut place, app.picking_color, &app.session.doc.project.swatches);
             if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
@@ -895,8 +902,7 @@ fn glow(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, filte
         app.run("effect.set", json!({"effect": id, "mode": if mode == 1 { "precise" } else { "soft" }}));
     }
     for (key, label, mut value, min, max) in scalar_params(filter) {
-        let edit = if min < 0.0 { sheet.signed_slider(tr(label), &mut value, min..=max, 2) } else { sheet.slider(tr(label), &mut value, min..=max, 2) };
-        if let Some(merge) = edit {
+        if let Some(merge) = range_slider(sheet, tr(label), &mut value, min..=max, 2) {
             app.run("effect.set", json!({"effect": id, key: value, "merge": merge}));
         }
     }
@@ -906,13 +912,7 @@ fn glow(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, filte
 /// Drop Shadow: Angle with its dial, Distance (either way), Size, Spread, Opacity and its Color
 fn drop_shadow(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, filter: &Filter, color: [f32; 3]) {
     for (key, label, mut value, min, max) in scalar_params(filter) {
-        let edit = if key == "angle" {
-            sheet.angle(tr(label), &mut value, min..=max)
-        } else if min < 0.0 {
-            sheet.signed_slider(tr(label), &mut value, min..=max, 2)
-        } else {
-            sheet.slider(tr(label), &mut value, min..=max, 2)
-        };
+        let edit = if key == "angle" { sheet.angle(tr(label), &mut value, min..=max) } else { range_slider(sheet, tr(label), &mut value, min..=max, 2) };
         if let Some(merge) = edit {
             app.run("effect.set", json!({"effect": id, key: value, "merge": merge}));
         }
@@ -929,7 +929,6 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
         params["effect"] = json!(id);
         app.run("effect.set", params);
     };
-    let swatches = app.session.doc.project.swatches.clone();
 
     if sheet.card(tr("Sun"), Some(true)) {
         let mut value = *light;
@@ -937,14 +936,14 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
             set(app, json!({"light": value, "merge": merge}));
         }
         for (key, label, value, range) in
-            [("azimuth", tr("Horizontal Angle"), *azimuth, 0.0..=360.0), ("elevation", tr("Vertical Angle"), elevation.rem_euclid(360.0), 0.0..=360.0)]
+            [("azimuth", tr("Sun Horizontal Angle"), *azimuth, 0.0..=360.0), ("elevation", tr("Sun Vertical Angle"), elevation.rem_euclid(360.0), 0.0..=360.0)]
         {
             let mut value = value;
             if let Some(merge) = sheet.angle(label, &mut value, range) {
                 set(app, json!({key: value, "merge": merge}));
             }
         }
-        let pick = sheet.color_bar_led(tr("Sun Color"), lighting.sun_color, app.picking_color, &swatches);
+        let pick = sheet.color_bar_led(tr("Sun Color"), lighting.sun_color, app.picking_color, &app.session.doc.project.swatches);
         if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
             set(app, json!({"sunColor": picked, "merge": pick.merge}));
         }
@@ -953,7 +952,7 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
 
     if sheet.card(tr("Sky"), Some(true)) {
         let mut value = *ambient;
-        if let Some(merge) = sheet.slider(tr("Sky Intensity"), &mut value, 0.0..=2.0, 2) {
+        if let Some(merge) = sheet.slider(tr("Sky Intensity"), &mut value, 0.0..=SKY_INTENSITY_SLIDER_MAX, 2) {
             set(app, json!({"ambient": value, "merge": merge}));
         }
         for (key, label, color) in [
@@ -961,7 +960,7 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
             ("horizonColor", tr("Horizon Color"), lighting.horizon_color),
             ("groundColor", tr("Ground Color"), lighting.ground_color),
         ] {
-            let pick = sheet.color_bar_led(label, color, app.picking_color, &swatches);
+            let pick = sheet.color_bar_led(label, color, app.picking_color, &app.session.doc.project.swatches);
             if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
                 set(app, json!({key: picked, "merge": pick.merge}));
             }
@@ -971,7 +970,7 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
 
     for (key, title, extra) in [("light1", tr("Light 1"), lighting.lights[0]), ("light2", tr("Light 2"), lighting.lights[1])] {
         if sheet.card(title, Some(true)) {
-            extra_light(app, sheet, id, key, extra, &swatches);
+            extra_light(app, sheet, id, key, extra);
         }
         sheet.close_card();
     }
@@ -1025,7 +1024,7 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
 }
 
 /// Light 1 or 2's rows (`key` names it to `effect.set`): Horizontal and Vertical Angle with their dials, Intensity and Color
-fn extra_light(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, key: &str, light: DirectionalLight, swatches: &[[f32; 3]]) {
+fn extra_light(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, key: &str, light: DirectionalLight) {
     let mut edits: Vec<(Value, bool)> = Vec::new();
     for (part, label, value, range) in
         [("azimuth", tr("Horizontal Angle"), light.azimuth, 0.0..=360.0), ("elevation", tr("Vertical Angle"), light.elevation.rem_euclid(360.0), 0.0..=360.0)]
@@ -1039,7 +1038,7 @@ fn extra_light(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64
     if let Some(merge) = sheet.slider(tr("Intensity"), &mut intensity, 0.0..=MAX_LIGHT_INTENSITY, 2) {
         edits.push((json!({"intensity": intensity}), merge));
     }
-    let pick = sheet.color_bar_led(tr("Color"), light.color, app.picking_color, swatches);
+    let pick = sheet.color_bar_led(tr("Color"), light.color, app.picking_color, &app.session.doc.project.swatches);
     if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
         edits.push((json!({"color": picked}), pick.merge));
     }
@@ -1101,9 +1100,8 @@ fn decimals(key: &str, min: f32, max: f32) -> usize {
 
 /// Replace Color's two colors: each bar opens the colour picker, its eyedropper picks from the screen
 fn replace_colors(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, from: [f32; 3], to: [f32; 3]) {
-    let swatches = app.session.doc.project.swatches.clone();
     for (key, label, linear) in [("from", tr("Color to replace"), from), ("to", tr("Replacement color"), to)] {
-        let pick = sheet.color_bar_led(label, linear, app.picking_color, &swatches);
+        let pick = sheet.color_bar_led(label, linear, app.picking_color, &app.session.doc.project.swatches);
         if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
             app.run("effect.set", json!({"effect": id, key: picked, "merge": pick.merge}));
         }

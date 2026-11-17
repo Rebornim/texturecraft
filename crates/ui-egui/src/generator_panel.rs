@@ -116,6 +116,7 @@ fn attributes(ui: &mut Ui, kind: GeneratorKind) {
         GeneratorKind::DrippingRust => {
             (tr("Rust in occluded areas, running down in drips."), [tr("mask"), tr("generator"), tr("grayscale"), tr("ambient occlusion")])
         }
+        GeneratorKind::UvRandomColor => (tr("A random value per UV island."), [tr("mask"), tr("generator"), tr("grayscale"), tr("uv")]),
     };
 
     // Wrapped rows: a long line must not widen the panel past its edge

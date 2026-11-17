@@ -9,6 +9,7 @@ use crate::dripping_rust::rust_field;
 use crate::eval::Inputs;
 use crate::micro_details::{LayoutMap, MicroCurvature, micro_occlusion};
 use crate::uv_border_distance::border_gradient;
+use crate::uv_islands::random_color_field;
 
 /// What a generator reads beyond its texel: built once per map and settings, shared by every tile
 #[derive(Clone, Default)]
@@ -19,10 +20,8 @@ pub(crate) struct GeneratorMaps {
     pub micro_curvature: Option<Arc<MicroCurvature>>,
     /// What its micro details multiply its occlusion by
     pub micro_occlusion: Option<Arc<LayoutMap>>,
-    /// The UV Border Distance gradient at every working texel
-    pub border_gradient: Option<Arc<Vec<f32>>>,
-    /// The Dripping Rust field at every working texel
-    pub rust_field: Option<Arc<Vec<f32>>>,
+    /// The whole-map field of UV Border Distance, Dripping Rust or UV Random Color at every working texel
+    pub field: Option<Arc<Vec<f32>>>,
     /// The controls of a kind with only its own controls, brought into range
     pub controls: Option<Arc<KindControls>>,
 }
@@ -39,14 +38,12 @@ impl GeneratorMaps {
             None => inp.baked.maps.get(&BakedMap::Curvature).and_then(|curvature| CurvatureSizes::of_map(inp, curvature, needed)),
         };
         let controls = generator.kind_controls();
-        let border_gradient = match &controls {
+        let field = match &controls {
             Some(KindControls::BorderDistance(border)) => Some(border_gradient(inp, border)),
-            _ => None,
-        };
-        let rust_field = match &controls {
             Some(KindControls::DrippingRust(rust)) => Some(rust_field(inp, rust, generator.seed)),
+            Some(KindControls::UvRandomColor(random)) => Some(random_color_field(inp, random, generator.seed)),
             _ => None,
         };
-        GeneratorMaps { sizes, micro_curvature, micro_occlusion, border_gradient, rust_field, controls: controls.map(Arc::new) }
+        GeneratorMaps { sizes, micro_curvature, micro_occlusion, field, controls: controls.map(Arc::new) }
     }
 }

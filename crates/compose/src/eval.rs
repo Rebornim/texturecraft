@@ -1079,7 +1079,8 @@ fn prepare_mask_curvature_sizes<'a>(inp: &Inputs, masks: impl Iterator<Item = &'
     for effect in masks.flat_map(|mask| &mask.effects).filter(|effect| effect.visible) {
         if let EffectKind::Generator(generator) = &effect.kind {
             // Micro details blur a curvature map of their own; a border gradient is built once, not by every tile at the same time
-            let whole_map = matches!(generator.kind_controls(), Some(KindControls::BorderDistance(_) | KindControls::DrippingRust(_)));
+            let whole_map =
+                matches!(generator.kind_controls(), Some(KindControls::BorderDistance(_) | KindControls::DrippingRust(_) | KindControls::UvRandomColor(_)));
             if generator.micro_in_use().is_some() || whole_map {
                 GeneratorMaps::of(inp, generator, &curvature_sizes_in_use(generator));
                 continue;
@@ -1503,17 +1504,10 @@ impl<'a, 'b> Texel<'a, 'b> {
                 let position = self.uniform_position_input(generator);
                 return three_d_distance::linear_gradient_value(gradient, position);
             }
-            Some(KindControls::BorderDistance(border)) => {
-                let texel = (self.y * self.inp.gbuf.width + self.x) as usize;
-                let gradient = maps.border_gradient.as_ref().and_then(|gradient| gradient.get(texel)).copied().unwrap_or(0.0);
-                return uv_border_distance::border_value(border, gradient);
-            }
+            Some(KindControls::BorderDistance(border)) => return uv_border_distance::border_value(border, self.field_value(maps)),
             Some(KindControls::Grayscale(grayscale)) => return self.grayscale_conversion(grayscale),
-            Some(KindControls::DrippingRust(rust)) => {
-                let texel = (self.y * self.inp.gbuf.width + self.x) as usize;
-                let field = maps.rust_field.as_ref().and_then(|field| field.get(texel)).copied().unwrap_or(0.0);
-                return dripping_rust::rust_value(rust, field);
-            }
+            Some(KindControls::DrippingRust(rust)) => return dripping_rust::rust_value(rust, self.field_value(maps)),
+            Some(KindControls::UvRandomColor(_)) => return self.field_value(maps),
             None => {}
         }
 
@@ -1541,7 +1535,8 @@ impl<'a, 'b> Texel<'a, 'b> {
                 | GeneratorKind::ThreeDLinearGradient
                 | GeneratorKind::UvBorderDistance
                 | GeneratorKind::GrayscaleConversion
-                | GeneratorKind::DrippingRust,
+                | GeneratorKind::DrippingRust
+                | GeneratorKind::UvRandomColor,
                 _,
             ) => 0.0,
         };
@@ -1593,7 +1588,8 @@ impl<'a, 'b> Texel<'a, 'b> {
             | GeneratorKind::ThreeDLinearGradient
             | GeneratorKind::UvBorderDistance
             | GeneratorKind::GrayscaleConversion
-            | GeneratorKind::DrippingRust => 0.0,
+            | GeneratorKind::DrippingRust
+            | GeneratorKind::UvRandomColor => 0.0,
         }
     }
 
@@ -1603,6 +1599,12 @@ impl<'a, 'b> Texel<'a, 'b> {
             Some(source) => self.source(source, &Projection::default(), ChannelKind::NormalMap),
             None => self.bounds_position().to_array(),
         }
+    }
+
+    /// A generator's whole-map field at this texel (0 without one)
+    fn field_value(&self, maps: &GeneratorMaps) -> f32 {
+        let texel = (self.y * self.inp.gbuf.width + self.x) as usize;
+        maps.field.as_ref().and_then(|field| field.get(texel)).copied().unwrap_or(0.0)
     }
 
     /// The Grayscale Conversion generator at this texel: its image tiled and turned about the UV square's centre, made gray, balanced and contrasted

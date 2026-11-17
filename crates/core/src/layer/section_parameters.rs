@@ -44,7 +44,8 @@ impl SectionParameters {
             | GeneratorKind::ThreeDLinearGradient
             | GeneratorKind::UvBorderDistance
             | GeneratorKind::GrayscaleConversion
-            | GeneratorKind::DrippingRust => None,
+            | GeneratorKind::DrippingRust
+            | GeneratorKind::UvRandomColor => None,
         }
     }
 

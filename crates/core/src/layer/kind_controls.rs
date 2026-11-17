@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use super::{BorderDistanceParameters, DistanceParameters, DrippingRustParameters, GeneratorKind, GrayscaleConversionParameters, LinearGradientParameters};
+use super::{
+    BorderDistanceParameters, DistanceParameters, DrippingRustParameters, GeneratorKind, GrayscaleConversionParameters, LinearGradientParameters,
+    UvRandomColorParameters,
+};
 
 /// The controls of a kind that has only the reference's own controls, no earlier model: one variant per kind
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -11,6 +14,7 @@ pub enum KindControls {
     BorderDistance(BorderDistanceParameters),
     Grayscale(GrayscaleConversionParameters),
     DrippingRust(DrippingRustParameters),
+    UvRandomColor(UvRandomColorParameters),
 }
 
 impl KindControls {
@@ -22,6 +26,7 @@ impl KindControls {
             GeneratorKind::UvBorderDistance => Some(KindControls::BorderDistance(BorderDistanceParameters::default())),
             GeneratorKind::GrayscaleConversion => Some(KindControls::Grayscale(GrayscaleConversionParameters::default())),
             GeneratorKind::DrippingRust => Some(KindControls::DrippingRust(DrippingRustParameters::default())),
+            GeneratorKind::UvRandomColor => Some(KindControls::UvRandomColor(UvRandomColorParameters::default())),
             GeneratorKind::EdgeWear
             | GeneratorKind::Dirt
             | GeneratorKind::ThinAreas
@@ -42,6 +47,7 @@ impl KindControls {
             KindControls::BorderDistance(border) => KindControls::BorderDistance(border.clamped()),
             KindControls::Grayscale(grayscale) => KindControls::Grayscale(grayscale.clamped()),
             KindControls::DrippingRust(rust) => KindControls::DrippingRust(rust.clamped()),
+            KindControls::UvRandomColor(random) => KindControls::UvRandomColor(random.clamped()),
         }
     }
 
@@ -53,6 +59,7 @@ impl KindControls {
             KindControls::BorderDistance(_) => GeneratorKind::UvBorderDistance,
             KindControls::Grayscale(_) => GeneratorKind::GrayscaleConversion,
             KindControls::DrippingRust(_) => GeneratorKind::DrippingRust,
+            KindControls::UvRandomColor(_) => GeneratorKind::UvRandomColor,
         }
     }
 }

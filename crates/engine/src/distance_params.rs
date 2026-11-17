@@ -1,10 +1,10 @@
 //! The controls of the kinds with only the reference's own controls (3D Distance, 3D Linear Gradient, UV Border Distance, Grayscale Conversion) that `effect.add.generator` and `effect.set` take
 
 use serde_json::Value;
-use texturecraft_core::{DrippingRustParameters, Generator, GeneratorKind, GrayscaleConversion, KindControls};
+use texturecraft_core::{DrippingRustParameters, Generator, GeneratorKind, GrayscaleConversion, KindControls, UvRandomColorParameters};
 
 use crate::Result;
-use crate::commands::{bad, boolp, color_param, f32p, u64p};
+use crate::commands::{bad, boolp, color_of, color_param, f32p, u64p};
 
 /// The 3D Distance controls: the point's X, Y and Z across the mesh's bounds, then the radius, offset and contrast
 pub const DISTANCE_KEYS: [&str; 6] = ["distanceX", "distanceY", "distanceZ", "distanceRadius", "distanceOffset", "distanceContrast"];
@@ -22,6 +22,9 @@ pub const GRAYSCALE_KEYS: [&str; 6] = ["grayscaleType", "grayscaleBalance", "gra
 pub const DRIPPING_RUST_KEYS: [&str; 7] =
     ["rustSpreading", "rustContrast", "spreadingSmoothness", "dripsIntensity", "dripsSmoothness", "dripsSamples", "dripsAxis"];
 
+/// The UV Random Color controls (it also takes the seed)
+pub const UV_RANDOM_COLOR_KEYS: [&str; 2] = ["colorSourceMode", "gradientColors"];
+
 /// The controls of the earlier model and the global adjustments, which these kinds don't have
 const OTHER_MODEL_KEYS: [&str; 9] = ["level", "softness", "noise", "noiseScale", "offset", "direction", "blur", "balance", "contrast"];
 
@@ -34,6 +37,7 @@ pub fn distance_from(command: &str, params: &Value, generator: &mut Generator) -
         (&BORDER_DISTANCE_KEYS[..], GeneratorKind::UvBorderDistance),
         (&GRAYSCALE_KEYS[..], GeneratorKind::GrayscaleConversion),
         (&DRIPPING_RUST_KEYS[..], GeneratorKind::DrippingRust),
+        (&UV_RANDOM_COLOR_KEYS[..], GeneratorKind::UvRandomColor),
     ] {
         if let Some(key) = first_given(params, keys).filter(|_| kind != owner) {
             return Err(bad(command, format!("{} has no `{key}`: only {} has it", kind.label(), owner.label())));
@@ -53,6 +57,9 @@ pub fn distance_from(command: &str, params: &Value, generator: &mut Generator) -
     }
     if kind == GeneratorKind::DrippingRust {
         return dripping_rust_from(command, params, generator);
+    }
+    if kind == GeneratorKind::UvRandomColor {
+        return uv_random_color_from(command, params, generator);
     }
     if kind == GeneratorKind::UvBorderDistance {
         let mut border = generator.border_distance_controls().unwrap_or_default();
@@ -154,6 +161,25 @@ fn dripping_rust_from(command: &str, params: &Value, generator: &mut Generator) 
         };
     }
     generator.controls = Some(Box::new(KindControls::DrippingRust(rust.clamped())));
+    Ok(())
+}
+
+/// The UV Random Color controls in `params` (the generator is one)
+fn uv_random_color_from(command: &str, params: &Value, generator: &mut Generator) -> Result<()> {
+    let Some(KindControls::UvRandomColor(mut random)) = generator.kind_controls() else { return Ok(()) };
+    if let Some(value) = params.get("colorSourceMode") {
+        random.custom_gradient = match value.as_str().map(str::to_ascii_lowercase).as_deref() {
+            Some("random") => false,
+            Some("customgradient" | "custom gradient" | "gradient") => true,
+            _ => return Err(bad(command, "`colorSourceMode` must be random or customGradient")),
+        };
+    }
+    if let Some(value) = params.get("gradientColors") {
+        let invalid = || bad(command, "`gradientColors` takes 1 to 16 colors, each [r, g, b] or \"#rrggbb\"");
+        let items = value.as_array().filter(|items| (1..=UvRandomColorParameters::MAX_GRADIENT_COLORS).contains(&items.len())).ok_or_else(invalid)?;
+        random.gradient = items.iter().map(|item| color_of(item).ok_or_else(invalid)).collect::<Result<_>>()?;
+    }
+    generator.controls = Some(Box::new(KindControls::UvRandomColor(random.clamped())));
     Ok(())
 }
 

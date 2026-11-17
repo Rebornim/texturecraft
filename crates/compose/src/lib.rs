@@ -26,6 +26,7 @@ mod texture_layer;
 mod three_d_distance;
 pub mod thumb;
 mod uv_border_distance;
+mod uv_islands;
 mod wear;
 mod wear_inputs;
 mod wear_scan;

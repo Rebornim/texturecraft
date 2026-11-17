@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use texturecraft_engine::core::{
     BorderDistanceParameters, DistanceParameters, DrippingRustParameters, EffectKind, Generator, GeneratorKind, GrayscaleConversion, KindControls, LayerId,
-    LinearGradientParameters, Source,
+    LinearGradientParameters, Source, UvRandomColorParameters,
 };
 use texturecraft_engine::{Session, execute};
 
@@ -136,4 +136,16 @@ fn dripping_rust_takes_its_controls_its_seed_and_its_axis() {
     assert!(execute(&mut session, "effect.set", &json!({"effect": effect, "level": 0.2})).is_err());
     let curvature = add(&mut session, json!({"generator": "curvature"}));
     assert!(execute(&mut session, "effect.set", &json!({"effect": curvature, "rustSpreading": 0.2})).is_err());
+}
+
+#[test]
+fn uv_random_color_takes_its_mode_and_gradient() {
+    let mut session = session();
+    let params = json!({"generator": "UV Random Color", "colorSourceMode": "customGradient", "gradientColors": [[2.0, 0.5, 0.0], "#000000"]});
+    let effect = add(&mut session, params);
+
+    let expected = UvRandomColorParameters { custom_gradient: true, gradient: vec![[1.0, 0.5, 0.0], [0.0; 3]] };
+    assert_eq!(generator(&session, effect).kind_controls(), Some(KindControls::UvRandomColor(expected)), "colors stay within 0..1");
+    assert!(execute(&mut session, "effect.set", &json!({"effect": effect, "gradientColors": []})).is_err());
+    assert!(execute(&mut session, "effect.set", &json!({"effect": effect, "colorSourceMode": "fancy"})).is_err());
 }

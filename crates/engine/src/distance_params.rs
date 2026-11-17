@@ -1,7 +1,7 @@
 //! The controls of the kinds with only the reference's own controls (3D Distance, 3D Linear Gradient, UV Border Distance, Grayscale Conversion) that `effect.add.generator` and `effect.set` take
 
 use serde_json::Value;
-use texturecraft_core::{DrippingRustParameters, Generator, GeneratorKind, GrayscaleConversion, KindControls, UvRandomColorParameters};
+use texturecraft_core::{DrippingRustParameters, Generator, GeneratorKind, GrayscaleConversion, KindControls, UvCheckerParameters, UvRandomColorParameters};
 
 use crate::Result;
 use crate::commands::{bad, boolp, color_of, color_param, f32p, u64p};
@@ -25,6 +25,9 @@ pub const DRIPPING_RUST_KEYS: [&str; 7] =
 /// The UV Random Color controls (it also takes the seed)
 pub const UV_RANDOM_COLOR_KEYS: [&str; 2] = ["colorSourceMode", "gradientColors"];
 
+/// The UV Checker controls (it also takes the seed)
+pub const UV_CHECKER_KEYS: [&str; 6] = ["checkerColorMode", "checkerColor", "checkerGridTile", "checkerGridOpacity", "uvBordersColor", "uvBordersWidth"];
+
 /// The controls of the earlier model and the global adjustments, which these kinds don't have
 const OTHER_MODEL_KEYS: [&str; 9] = ["level", "softness", "noise", "noiseScale", "offset", "direction", "blur", "balance", "contrast"];
 
@@ -38,6 +41,7 @@ pub fn distance_from(command: &str, params: &Value, generator: &mut Generator) -
         (&GRAYSCALE_KEYS[..], GeneratorKind::GrayscaleConversion),
         (&DRIPPING_RUST_KEYS[..], GeneratorKind::DrippingRust),
         (&UV_RANDOM_COLOR_KEYS[..], GeneratorKind::UvRandomColor),
+        (&UV_CHECKER_KEYS[..], GeneratorKind::UvChecker),
     ] {
         if let Some(key) = first_given(params, keys).filter(|_| kind != owner) {
             return Err(bad(command, format!("{} has no `{key}`: only {} has it", kind.label(), owner.label())));
@@ -60,6 +64,9 @@ pub fn distance_from(command: &str, params: &Value, generator: &mut Generator) -
     }
     if kind == GeneratorKind::UvRandomColor {
         return uv_random_color_from(command, params, generator);
+    }
+    if kind == GeneratorKind::UvChecker {
+        return uv_checker_from(command, params, generator);
     }
     if kind == GeneratorKind::UvBorderDistance {
         let mut border = generator.border_distance_controls().unwrap_or_default();
@@ -180,6 +187,34 @@ fn uv_random_color_from(command: &str, params: &Value, generator: &mut Generator
         random.gradient = items.iter().map(|item| color_of(item).ok_or_else(invalid)).collect::<Result<_>>()?;
     }
     generator.controls = Some(Box::new(KindControls::UvRandomColor(random.clamped())));
+    Ok(())
+}
+
+/// The UV Checker controls in `params` (the generator is one)
+fn uv_checker_from(command: &str, params: &Value, generator: &mut Generator) -> Result<()> {
+    let Some(KindControls::UvChecker(mut checker)) = generator.kind_controls() else { return Ok(()) };
+    if let Some(value) = params.get("checkerColorMode") {
+        checker.random_colors = match value.as_str().map(str::to_ascii_lowercase).as_deref() {
+            Some("uniform") => false,
+            Some("random") => true,
+            _ => return Err(bad(command, "`checkerColorMode` must be uniform or random")),
+        };
+    }
+    if let Some(color) = color_param(command, params, "checkerColor")? {
+        checker.checker_color = color;
+    }
+    if let Some(color) = color_param(command, params, "uvBordersColor")? {
+        checker.border_color = color;
+    }
+    if let Some(tile) = u64p(params, "checkerGridTile") {
+        checker.grid_tile = tile.min(u64::from(*UvCheckerParameters::GRID_TILE_RANGE.end())) as u32;
+    }
+    for (key, value) in [("checkerGridOpacity", &mut checker.grid_opacity), ("uvBordersWidth", &mut checker.border_width)] {
+        if let Some(given) = f32p(params, key) {
+            *value = given;
+        }
+    }
+    generator.controls = Some(Box::new(KindControls::UvChecker(checker.clamped())));
     Ok(())
 }
 

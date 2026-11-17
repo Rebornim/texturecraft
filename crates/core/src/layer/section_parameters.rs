@@ -45,7 +45,8 @@ impl SectionParameters {
             | GeneratorKind::UvBorderDistance
             | GeneratorKind::GrayscaleConversion
             | GeneratorKind::DrippingRust
-            | GeneratorKind::UvRandomColor => None,
+            | GeneratorKind::UvRandomColor
+            | GeneratorKind::UvChecker => None,
         }
     }
 

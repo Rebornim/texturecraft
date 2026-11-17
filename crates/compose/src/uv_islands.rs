@@ -1,13 +1,16 @@
-//! The UV island generators: a value per UV island at every working texel, built once per layout and settings
+//! The UV island generators (UV Random Color, UV Checker) at every working texel, built once per layout and settings
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use rayon::prelude::*;
-use texturecraft_core::{UvRandomColorParameters, gradient};
-use texturecraft_geom::TrianglePartition;
+use texturecraft_core::{UvCheckerParameters, UvRandomColorParameters, gradient};
+use texturecraft_geom::{NO_TRI, TrianglePartition};
+use texturecraft_texel::linear_to_srgb;
 use texturecraft_texel::noise::cell_hash;
 
-use crate::eval::Inputs;
+use crate::eval::{Inputs, texel_coords};
+use crate::uv_border_distance::border_distances;
 use crate::working_field::FieldCache;
 
 static CACHE: FieldCache = FieldCache::new();
@@ -24,7 +27,7 @@ pub(crate) fn random_color_field(inp: &Inputs, random: &UvRandomColorParameters,
 }
 
 /// The value `value_of` gives each UV island, by triangle
-fn island_values(inp: &Inputs, value_of: impl Fn(u32) -> f32) -> std::collections::HashMap<u32, f32> {
+fn island_values(inp: &Inputs, value_of: impl Fn(u32) -> f32) -> HashMap<u32, f32> {
     let material = inp.project.texture_set(inp.ts).map_or(0, |set| set.material);
     let islands = TrianglePartition::uv_islands(inp.mesh, material);
     islands
@@ -45,4 +48,118 @@ fn random_gray(random: &UvRandomColorParameters, seed: u32, island: u32) -> f32 
         std::array::from_fn(|channel| cell_hash(island, channel as i32 + 1, 0, seed))
     };
     color.iter().sum::<f32>() / 3.0
+}
+
+/// Checker squares across one grid tile, and grid lines across one square (fitted)
+const SQUARES_PER_GRID_TILE: f32 = 4.0;
+const MINOR_LINES_PER_SQUARE: f32 = 4.0;
+
+/// The dark squares are the light color times this, on its sRGB-encoded values (fitted)
+const DARK_SQUARE_SHADE: f32 = 0.7128;
+
+/// What a full-opacity minor and major grid line multiply the color by (fitted)
+const MINOR_LINE_SHADE: f32 = 0.8465;
+const MAJOR_LINE_SHADE: f32 = 0.4230;
+
+/// Texels of a 2K UV tile a grid line lies within of its square's edge, and the border's width per unit of UV Borders Width (fitted: 0.2 is 3 texels)
+const LINE_HALF_WIDTH_2K: f32 = 1.0;
+const BORDER_TEXELS_PER_WIDTH_2K: f32 = 15.0;
+
+/// The UV tile resolution the sizes above are measured at
+const REFERENCE_TILE_TEXELS: f32 = 2048.0;
+
+/// The saturation and value random island colors are picked within (measured)
+const RANDOM_SATURATION: std::ops::RangeInclusive<f32> = 0.06..=0.57;
+const RANDOM_VALUE: std::ops::RangeInclusive<f32> = 0.42..=0.80;
+
+/// UV Checker at every working texel of `inp`: the gray of its color, the mean of the sRGB-encoded channels as the reference reads it (0 outside the islands)
+pub(crate) fn checker_field(inp: &Inputs, checker: &UvCheckerParameters, seed: u32) -> Arc<Vec<f32>> {
+    let mut settings = vec![seed, u32::from(checker.random_colors), checker.grid_tile, checker.grid_opacity.to_bits(), checker.border_width.to_bits()];
+    settings.extend(checker.checker_color.iter().chain(&checker.border_color).map(|value| value.to_bits()));
+    CACHE.get_or_build(inp, &[], settings, |block| {
+        let gbuf = inp.gbuf;
+        let (width, height) = (gbuf.width, gbuf.height);
+        let island_colors = if checker.random_colors { island_colors(inp, seed) } else { HashMap::new() };
+        let distances = border_distances(gbuf, (width, height), block);
+        let light = checker.checker_color.map(linear_to_srgb);
+        let border = checker.border_color.map(linear_to_srgb);
+
+        (0..width * height)
+            .into_par_iter()
+            .map(|texel| {
+                let Some(triangle) = gbuf.tri.get(texel as usize).copied().filter(|triangle| *triangle != NO_TRI) else { return 0.0 };
+                let (x, y) = (texel % width, texel / width);
+                let texels_2k = REFERENCE_TILE_TEXELS / (block.0 as f32 * inp.block_scales.at(x, y));
+                // Measured from the texel's 2K sub-texel nearest the border, so a coarser texel still shows the border it holds
+                let to_border = distances.get(texel as usize).copied().unwrap_or(0.0) * texels_2k - (texels_2k - 1.0).max(0.0);
+                let color = if checker.border_width > 0.0 && to_border <= checker.border_width * BORDER_TEXELS_PER_WIDTH_2K {
+                    border
+                } else {
+                    let uv = texel_coords(inp, x, y).uv;
+                    let light = island_colors.get(&triangle).copied().unwrap_or(light);
+                    let at = (uv.x.rem_euclid(1.0) * REFERENCE_TILE_TEXELS, uv.y.rem_euclid(1.0) * REFERENCE_TILE_TEXELS);
+                    checker_color(checker, light, at, texels_2k)
+                };
+                color.iter().sum::<f32>() / 3.0
+            })
+            .collect()
+    })
+}
+
+/// The checker's sRGB-encoded color at (`x`, `y`) in texels of a 2K UV tile (row 0 at the top) for a texel `texels_2k` of them wide, with `light` its light squares
+fn checker_color(checker: &UvCheckerParameters, light: [f32; 3], (x, y): (f32, f32), texels_2k: f32) -> [f32; 3] {
+    let square = REFERENCE_TILE_TEXELS / (SQUARES_PER_GRID_TILE * checker.grid_tile.max(1) as f32);
+    let is_light = ((x / square).floor() + (y / square).floor()).rem_euclid(2.0) >= 1.0;
+    let base = if is_light { light } else { light.map(|channel| channel * DARK_SQUARE_SHADE) };
+
+    // Line layers in the reference's order, each laid over the last at the grid's opacity
+    let minor = square / MINOR_LINES_PER_SQUARE;
+    // A texel is on a line when its footprint overlaps the line's band, so lines stay visible on coarser texels
+    let reach = LINE_HALF_WIDTH_2K + (texels_2k - 1.0).max(0.0) * 0.5;
+    let on_line = |position: f32, period: f32| (position - (position / period).round() * period).abs() < reach;
+    let layers = [
+        (on_line(y, minor) && !on_line(y, square), MINOR_LINE_SHADE),
+        (on_line(x, minor) && !on_line(x, square), MINOR_LINE_SHADE),
+        (on_line(y, square), MAJOR_LINE_SHADE),
+        (on_line(x, square), MAJOR_LINE_SHADE),
+    ];
+    let opacity = checker.grid_opacity.clamp(0.0, 1.0);
+    let shade = layers.iter().filter(|(on, _)| *on).fold(1.0, |shade, (_, line)| shade + (line - shade) * opacity);
+    base.map(|channel| channel * shade)
+}
+
+/// A random light sRGB-encoded color per UV island, by triangle
+fn island_colors(inp: &Inputs, seed: u32) -> HashMap<u32, [f32; 3]> {
+    let material = inp.project.texture_set(inp.ts).map_or(0, |set| set.material);
+    let islands = TrianglePartition::uv_islands(inp.mesh, material);
+    islands
+        .groups
+        .iter()
+        .enumerate()
+        .flat_map(|(island, triangles)| {
+            let island = island as i32;
+            let within = |range: &std::ops::RangeInclusive<f32>, random: f32| range.start() + (range.end() - range.start()) * random;
+            let color = hsv_to_rgb(
+                cell_hash(island, 0, 1, seed),
+                within(&RANDOM_SATURATION, cell_hash(island, 1, 1, seed)),
+                within(&RANDOM_VALUE, cell_hash(island, 2, 1, seed)),
+            );
+            triangles.iter().map(move |triangle| (*triangle, color))
+        })
+        .collect()
+}
+
+/// A color from its hue (in turns), saturation and value
+fn hsv_to_rgb(hue: f32, saturation: f32, value: f32) -> [f32; 3] {
+    let sector = hue.rem_euclid(1.0) * 6.0;
+    let fraction = sector - sector.floor();
+    let (low, falling, rising) = (value * (1.0 - saturation), value * (1.0 - saturation * fraction), value * (1.0 - saturation * (1.0 - fraction)));
+    match sector.floor() as u32 {
+        0 => [value, rising, low],
+        1 => [falling, value, low],
+        2 => [low, value, rising],
+        3 => [low, falling, value],
+        4 => [rising, low, value],
+        _ => [value, low, falling],
+    }
 }

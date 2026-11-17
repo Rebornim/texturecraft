@@ -28,7 +28,7 @@ pub use layer::{
     Effect, EffectKind, Fill, Filter, Generator, GeneratorGlobal, GeneratorKind, GrayscaleConversion, GrayscaleConversionParameters, HeightMask, KindControls,
     Layer, LayerId, LayerKind, Levels, LightParameters, LinearGradientParameters, LinkParam, LinkPreset, Mask, MaskBackground, MaterialLink,
     MicroCurvatureType, MicroDetails, OutputResolution, PathShape, Procedural, ProceduralKind, Projection, ResolutionMode, SectionParameters, Source,
-    TextureBlend, TextureLayer, UvRandomColorParameters, WearParameters, gradient, hsl_adjust, per_unit,
+    TextureBlend, TextureLayer, UvCheckerParameters, UvRandomColorParameters, WearParameters, gradient, hsl_adjust, per_unit,
 };
 pub use project::{
     AoMixing, BlockScales, Camera, DepthOfField, DisplaySettings, FORMAT_VERSION, MAX_RESOLUTION, MIN_RESOLUTION, NormalFormat, NormalMixing, Project,

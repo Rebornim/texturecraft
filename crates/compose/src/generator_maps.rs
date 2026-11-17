@@ -9,7 +9,7 @@ use crate::dripping_rust::rust_field;
 use crate::eval::Inputs;
 use crate::micro_details::{LayoutMap, MicroCurvature, micro_occlusion};
 use crate::uv_border_distance::border_gradient;
-use crate::uv_islands::random_color_field;
+use crate::uv_islands::{checker_field, random_color_field};
 
 /// What a generator reads beyond its texel: built once per map and settings, shared by every tile
 #[derive(Clone, Default)]
@@ -20,7 +20,7 @@ pub(crate) struct GeneratorMaps {
     pub micro_curvature: Option<Arc<MicroCurvature>>,
     /// What its micro details multiply its occlusion by
     pub micro_occlusion: Option<Arc<LayoutMap>>,
-    /// The whole-map field of UV Border Distance, Dripping Rust or UV Random Color at every working texel
+    /// The whole-map field of UV Border Distance, Dripping Rust, UV Random Color or UV Checker at every working texel
     pub field: Option<Arc<Vec<f32>>>,
     /// The controls of a kind with only its own controls, brought into range
     pub controls: Option<Arc<KindControls>>,
@@ -42,6 +42,7 @@ impl GeneratorMaps {
             Some(KindControls::BorderDistance(border)) => Some(border_gradient(inp, border)),
             Some(KindControls::DrippingRust(rust)) => Some(rust_field(inp, rust, generator.seed)),
             Some(KindControls::UvRandomColor(random)) => Some(random_color_field(inp, random, generator.seed)),
+            Some(KindControls::UvChecker(checker)) => Some(checker_field(inp, checker, generator.seed)),
             _ => None,
         };
         GeneratorMaps { sizes, micro_curvature, micro_occlusion, field, controls: controls.map(Arc::new) }

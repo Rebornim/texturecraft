@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use texturecraft_engine::core::{
     BorderDistanceParameters, DistanceParameters, DrippingRustParameters, EffectKind, Generator, GeneratorKind, GrayscaleConversion, KindControls, LayerId,
-    LinearGradientParameters, Source, UvRandomColorParameters,
+    LinearGradientParameters, Source, UvCheckerParameters, UvRandomColorParameters,
 };
 use texturecraft_engine::{Session, execute};
 
@@ -148,4 +148,17 @@ fn uv_random_color_takes_its_mode_and_gradient() {
     assert_eq!(generator(&session, effect).kind_controls(), Some(KindControls::UvRandomColor(expected)), "colors stay within 0..1");
     assert!(execute(&mut session, "effect.set", &json!({"effect": effect, "gradientColors": []})).is_err());
     assert!(execute(&mut session, "effect.set", &json!({"effect": effect, "colorSourceMode": "fancy"})).is_err());
+}
+
+#[test]
+fn uv_checker_takes_its_controls() {
+    let mut session = session();
+    let params =
+        json!({"generator": "UV Checker", "checkerColorMode": "random", "checkerGridTile": 40, "checkerGridOpacity": 0.25, "uvBordersColor": [0.0, 1.0, 0.0]});
+    let effect = add(&mut session, params);
+
+    let expected =
+        UvCheckerParameters { random_colors: true, grid_tile: 24, grid_opacity: 0.25, border_color: [0.0, 1.0, 0.0], ..UvCheckerParameters::default() };
+    assert_eq!(generator(&session, effect).kind_controls(), Some(KindControls::UvChecker(expected)), "the grid tile stops at 24");
+    assert!(execute(&mut session, "effect.set", &json!({"effect": effect, "checkerColorMode": "plaid"})).is_err());
 }

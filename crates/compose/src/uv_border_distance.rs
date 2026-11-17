@@ -67,7 +67,7 @@ fn build(inp: &Inputs, border: &BorderDistanceParameters, block: (u32, u32)) -> 
 }
 
 /// Each texel's Euclidean distance in texels to the nearest uncovered texel of its UV tile block, the space past the block's edges counting as uncovered
-fn border_distances(gbuf: &texturecraft_geom::UvGBuffer, (width, height): (u32, u32), block: (u32, u32)) -> Vec<f32> {
+pub(crate) fn border_distances(gbuf: &texturecraft_geom::UvGBuffer, (width, height): (u32, u32), block: (u32, u32)) -> Vec<f32> {
     let mut squared = vec![0.0f32; (width * height) as usize];
     for top in (0..height).step_by(block.1 as usize) {
         for left in (0..width).step_by(block.0 as usize) {

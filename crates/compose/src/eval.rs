@@ -1079,8 +1079,10 @@ fn prepare_mask_curvature_sizes<'a>(inp: &Inputs, masks: impl Iterator<Item = &'
     for effect in masks.flat_map(|mask| &mask.effects).filter(|effect| effect.visible) {
         if let EffectKind::Generator(generator) = &effect.kind {
             // Micro details blur a curvature map of their own; a border gradient is built once, not by every tile at the same time
-            let whole_map =
-                matches!(generator.kind_controls(), Some(KindControls::BorderDistance(_) | KindControls::DrippingRust(_) | KindControls::UvRandomColor(_)));
+            let whole_map = matches!(
+                generator.kind_controls(),
+                Some(KindControls::BorderDistance(_) | KindControls::DrippingRust(_) | KindControls::UvRandomColor(_) | KindControls::UvChecker(_))
+            );
             if generator.micro_in_use().is_some() || whole_map {
                 GeneratorMaps::of(inp, generator, &curvature_sizes_in_use(generator));
                 continue;
@@ -1507,7 +1509,7 @@ impl<'a, 'b> Texel<'a, 'b> {
             Some(KindControls::BorderDistance(border)) => return uv_border_distance::border_value(border, self.field_value(maps)),
             Some(KindControls::Grayscale(grayscale)) => return self.grayscale_conversion(grayscale),
             Some(KindControls::DrippingRust(rust)) => return dripping_rust::rust_value(rust, self.field_value(maps)),
-            Some(KindControls::UvRandomColor(_)) => return self.field_value(maps),
+            Some(KindControls::UvRandomColor(_) | KindControls::UvChecker(_)) => return self.field_value(maps),
             None => {}
         }
 
@@ -1536,7 +1538,8 @@ impl<'a, 'b> Texel<'a, 'b> {
                 | GeneratorKind::UvBorderDistance
                 | GeneratorKind::GrayscaleConversion
                 | GeneratorKind::DrippingRust
-                | GeneratorKind::UvRandomColor,
+                | GeneratorKind::UvRandomColor
+                | GeneratorKind::UvChecker,
                 _,
             ) => 0.0,
         };
@@ -1589,7 +1592,8 @@ impl<'a, 'b> Texel<'a, 'b> {
             | GeneratorKind::UvBorderDistance
             | GeneratorKind::GrayscaleConversion
             | GeneratorKind::DrippingRust
-            | GeneratorKind::UvRandomColor => 0.0,
+            | GeneratorKind::UvRandomColor
+            | GeneratorKind::UvChecker => 0.0,
         }
     }
 

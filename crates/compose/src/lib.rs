@@ -20,6 +20,7 @@ pub mod environment_sky;
 pub mod eval;
 pub mod fill_copies;
 pub mod fill_copy;
+mod fill_place;
 pub mod frame_placement;
 mod held_fields;
 mod image_identity;

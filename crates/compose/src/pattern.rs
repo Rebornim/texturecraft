@@ -273,9 +273,9 @@ pub fn procedural(pattern: &Procedural, projection: &Projection, coords: &Coords
     evaluate(pattern, projection, coords, None)
 }
 
-/// Evaluate a procedural through a projection on a texture set `set` texels across a tile: a pattern with a resolution is read between the samples of that grid, as a texture cooked at that size
-pub fn procedural_sized(pattern: &Procedural, projection: &Projection, coords: &Coords, set: u32) -> f32 {
-    evaluate(pattern, projection, coords, pattern.resolution.map(|resolution| resolution.size(set.max(1))))
+/// Evaluate a procedural through a projection on a texture set `set()` texels across a tile: a pattern with a resolution is read between the samples of that grid, as a texture cooked at that size (`set` is asked only then)
+pub fn procedural_sized(pattern: &Procedural, projection: &Projection, coords: &Coords, set: impl FnOnce() -> u32) -> f32 {
+    evaluate(pattern, projection, coords, pattern.resolution.map(|resolution| resolution.size(set().max(1))))
 }
 
 /// The 2D pattern at `q`, bilinear between the centres of a `grid` × `grid` sampling of each `scale` × `scale` cell of pattern space (one projection tile)

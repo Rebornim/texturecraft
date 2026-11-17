@@ -661,7 +661,7 @@ impl Source {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct Fill {
     pub sources: BTreeMap<Channel, Source>,
-    #[serde(deserialize_with = "crate::saved_projection::load")]
+    #[serde(serialize_with = "crate::saved_projection::save", deserialize_with = "crate::saved_projection::load")]
     pub projection: Projection,
     #[serde(default = "Sampling::saved_before")]
     pub sampling: Sampling,
@@ -1772,7 +1772,7 @@ pub enum EffectKind {
     /// A uniform or procedural grayscale fill.
     Fill {
         source: Source,
-        #[serde(deserialize_with = "crate::saved_projection::load")]
+        #[serde(serialize_with = "crate::saved_projection::save", deserialize_with = "crate::saved_projection::load")]
         projection: Projection,
         #[serde(default = "Sampling::saved_before")]
         sampling: Sampling,
@@ -2163,6 +2163,20 @@ mod tests {
         assert!(close(hsl_adjust([0.4; 3], 0.3, 1.0, 0.5), [0.7; 3]));
         assert!(close(hsl_adjust([0.4; 3], 0.0, 0.0, -0.5), [0.2; 3]));
         assert!(hsl_adjust([f32::NAN, 2.0, -1.0], f32::NAN, 5.0, -5.0).iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn an_untransformed_gradient_maps_bit_for_bit_as_projects_saved_before_did() {
+        let colors = vec![[1.0, 0.2, 0.0], [0.1, 0.4, 0.9], [0.0, 0.0, 1.0]];
+        let gm = Filter::even_gradient(colors.clone());
+        for step in 0..=1000 {
+            let x = step as f32 / 1000.0;
+            let color = [x, 0.5 * x, 1.0 - x];
+            assert_eq!(gm.point(ChannelKind::Color, color), gradient(&colors, lum(color)), "color {color:?}");
+            let height = 2.0 * x - 1.0;
+            let saved_before = per_unit(ChannelKind::Signed, [height; 3], |t| gradient(&colors, t).map_or(t, lum));
+            assert_eq!(gm.point(ChannelKind::Signed, [height; 3]), Some(saved_before), "height {height}");
+        }
     }
 
     #[test]

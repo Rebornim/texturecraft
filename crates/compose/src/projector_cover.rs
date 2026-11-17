@@ -9,19 +9,27 @@ use crate::warp::warp_uv;
 /// Nearer a cylinder's axis than this a texel has no outward direction, so it counts as facing out
 const MIN_AXIS_DISTANCE: f32 = 1e-6;
 
-/// How much of the texel at `c` the projection reaches through its shape crop and backface culling
-pub fn projector_cover(proj: &Projection, c: &Coords) -> f32 {
+/// The shape crop and backface culling [`projector_cover`] applies, None where it lets every texel through
+fn cropping_projector(proj: &Projection) -> Option<&Projector> {
     let projector = match proj {
         Projection::Triplanar { projector, .. }
         | Projection::Planar { projector, .. }
         | Projection::Spherical { projector, .. }
         | Projection::Cylindrical { projector, .. } => projector,
         // Framed on the surface: see [`framed_cover`]
-        Projection::Warp { .. } | Projection::Uv { .. } | Projection::UvTile => return 1.0,
+        Projection::Warp { .. } | Projection::Uv { .. } | Projection::UvTile => return None,
     };
-    if projector.crop == ShapeCrop::ExtendsOutside && !projector.backface.on {
-        return 1.0;
-    }
+    Some(projector).filter(|projector| projector.crop != ShapeCrop::ExtendsOutside || projector.backface.on)
+}
+
+/// Whether [`projector_cover`] is 1 on every texel, so it needs no texel's place
+pub fn projector_covers_all(proj: &Projection) -> bool {
+    cropping_projector(proj).is_none()
+}
+
+/// How much of the texel at `c` the projection reaches through its shape crop and backface culling
+pub fn projector_cover(proj: &Projection, c: &Coords) -> f32 {
+    let Some(projector) = cropping_projector(proj) else { return 1.0 };
 
     let local = projector_local(projector, c);
     let (inside, facing) = match proj {

@@ -190,7 +190,26 @@ fn saved_decals_load_as_planar_projections_placed_on_the_surface() {
     assert_eq!(placed, frame);
     assert_eq!(projector.crop, ShapeCrop::Cropped);
     assert_eq!(projector.backface, Backface { on: true, angle: 90.0, hardness: 0.5 });
-    assert_eq!(serde_json::to_value(&fill.projection).unwrap()["Planar"]["placed"], json!(frame), "it saves as a planar projection");
+}
+
+/// A planar projection with a decal's look saves as a decal, so versions from before planar decals still read a decal; changed in any way it saves as a planar projection
+#[test]
+fn placed_planars_with_a_decals_look_save_as_decals() {
+    use texturecraft_engine::core::{Decal, Fill};
+    let frame =
+        Decal { center: [0.0, 0.0, 1.0], normal: [0.0, 0.0, 1.0], up: [0.0, 1.0, 0.0], size: [0.5, 0.4], rotation: 10.0, offset: [0.1, 0.0], depth: 0.3 };
+    let fill = Fill { projection: Projection::decal(frame), ..Fill::default() };
+
+    let saved = serde_json::to_value(&fill).unwrap();
+    assert_eq!(saved["projection"], json!({ "Decal": frame }));
+    assert_eq!(serde_json::from_value::<Fill>(saved).unwrap(), fill, "and reads back the same");
+
+    let mut turned = fill;
+    let Projection::Planar { uv, .. } = &mut turned.projection else { panic!("{:?}", turned.projection) };
+    uv.rotation = 30.0;
+    let saved = serde_json::to_value(&turned).unwrap();
+    assert_eq!(saved["projection"]["Planar"]["placed"], json!(frame));
+    assert_eq!(serde_json::from_value::<Fill>(saved).unwrap(), turned);
 }
 
 /// A warp projects from a frame around the mesh: pulling a corner bends the image, Projection Depth bounds it when cropped, and Reset frame unpulls the corners

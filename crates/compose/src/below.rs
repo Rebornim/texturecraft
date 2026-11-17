@@ -157,7 +157,7 @@ impl StackKey {
                     match &effect.kind {
                         EffectKind::Fill { source, .. } => record_image_reference(source),
                         EffectKind::Material(fill) => fill.sources.values().for_each(&mut record_image_reference),
-                        EffectKind::Generator(generator) => generator.inputs.values().for_each(&mut record_image_reference),
+                        EffectKind::Generator(generator) => generator.sources().for_each(&mut record_image_reference),
                         _ => {}
                     }
                 }

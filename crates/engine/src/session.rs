@@ -595,7 +595,7 @@ impl Session {
                             || layer.mask.iter().flat_map(|mask| &mask.effects).chain(&layer.content_effects).any(|effect| match &effect.kind {
                                 EffectKind::Fill { source, .. } => uses_source(source),
                                 EffectKind::Material(fill) => uses_fill(fill),
-                                EffectKind::Generator(generator) => generator.inputs.values().any(uses_source),
+                                EffectKind::Generator(generator) => generator.sources().any(uses_source),
                                 _ => false,
                             })
                     })

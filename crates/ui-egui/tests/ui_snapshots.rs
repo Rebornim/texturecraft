@@ -2809,3 +2809,38 @@ fn properties_min_width_snapshot() {
     execute(&mut harness.state_mut().session, "effect.add.filter", &json!({"target": "content", "filter": "colorMatch"})).unwrap();
     save(&mut harness, &output_dir, "properties-min-width-filter");
 }
+
+/// The docked Properties list of a fill whose sections all fit, scrolled to its end: MATERIAL at the top, blank space under it
+#[test]
+#[ignore]
+fn sheet_scroll_end_snapshots() {
+    use egui::{Event, Modifiers};
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1]})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.fill.projection", &json!({"layer": layer, "projection": "uv"})).unwrap();
+    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 2000.0)).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.set_render_cursor(false);
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "sheet-end-top-medium");
+
+    let strip = harness.get_by_role_and_label(egui::accesskit::Role::Tab, "Fill").rect();
+    harness.hover_at(strip.center_bottom() + egui::vec2(0.0, 100.0));
+    for _ in 0..40 {
+        harness.event(Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -120.0),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
+            modifiers: Modifiers::NONE,
+        });
+        harness.step();
+    }
+    harness.run_steps(30);
+    save(&mut harness, &output_dir, "sheet-end-scrolled-medium");
+}

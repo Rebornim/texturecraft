@@ -62,6 +62,7 @@ mod orb_material;
 pub mod orb_previews;
 mod orb_shape;
 pub mod parity;
+mod past_end;
 mod path_hit;
 mod path_surface_cache;
 pub mod pbr_import;

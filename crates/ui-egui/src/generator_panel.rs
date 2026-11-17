@@ -108,6 +108,9 @@ fn attributes(ui: &mut Ui, kind: GeneratorKind) {
         GeneratorKind::Direction => (tr("Surfaces facing a light."), [tr("mask"), tr("generator"), tr("grayscale"), tr("normal")]),
         GeneratorKind::WorldSpaceNormals => (tr("Surfaces facing along the world's axes."), [tr("mask"), tr("generator"), tr("grayscale"), tr("normal")]),
         GeneratorKind::ThreeDDistance => (tr("A gradient around a point on the mesh."), [tr("mask"), tr("generator"), tr("grayscale"), tr("position")]),
+        GeneratorKind::ThreeDLinearGradient => {
+            (tr("A gradient between two points on the mesh."), [tr("mask"), tr("generator"), tr("grayscale"), tr("position")])
+        }
     };
 
     // Wrapped rows: a long line must not widen the panel past its edge

@@ -1,7 +1,7 @@
-//! The 3D Distance generator through `effect.add.generator` and `effect.set`: its controls, the controls it lacks, and a gradient around its point
+//! The 3D Distance and 3D Linear Gradient generators through `effect.add.generator` and `effect.set`: its controls, the controls it lacks, and a gradient around its point
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{DistanceParameters, EffectKind, Generator, GeneratorKind, LayerId};
+use texturecraft_engine::core::{DistanceParameters, EffectKind, Generator, GeneratorKind, LayerId, LinearGradientParameters};
 use texturecraft_engine::{Session, execute};
 
 fn session() -> Session {
@@ -58,4 +58,29 @@ fn swapping_onto_three_d_distance_drops_the_earlier_offset() {
     let swapped = generator(&session, effect);
     assert_eq!(swapped.offset, 0.0);
     assert_eq!(swapped.distance_controls(), Some(DistanceParameters::default()));
+}
+
+#[test]
+fn three_d_linear_gradient_takes_its_points_balance_and_contrast() {
+    let mut session = session();
+    let params =
+        json!({"generator": "3D Linear Gradient", "gradientStart": [0.0, 0.5, 0.5], "gradientEnd": [1.0, 0.5, 2.0], "gradientBalance": 0.25, "invert": true});
+    let effect = add(&mut session, params);
+
+    let made = generator(&session, effect);
+    assert_eq!(made.kind, GeneratorKind::ThreeDLinearGradient);
+    let expected = LinearGradientParameters { start: [0.0, 0.5, 0.5], end: [1.0, 0.5, 1.0], balance: 0.25, contrast: 0.0 };
+    assert_eq!(made.linear_gradient_controls(), Some(expected), "points stay within the bounds");
+    assert!(made.invert && !made.on_earlier_model());
+}
+
+#[test]
+fn each_3d_kind_refuses_the_others_controls() {
+    let mut session = session();
+    let gradient = add(&mut session, json!({"generator": "3dLinearGradient"}));
+    let distance = add(&mut session, json!({"generator": "3dDistance"}));
+
+    assert!(execute(&mut session, "effect.set", &json!({"effect": gradient, "distanceRadius": 0.5})).is_err());
+    assert!(execute(&mut session, "effect.set", &json!({"effect": distance, "gradientBalance": 0.5})).is_err());
+    assert!(execute(&mut session, "effect.set", &json!({"effect": gradient, "level": 0.5})).is_err());
 }

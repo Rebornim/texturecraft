@@ -59,7 +59,8 @@ impl WearParameters {
             | GeneratorKind::Position
             | GeneratorKind::Direction
             | GeneratorKind::WorldSpaceNormals
-            | GeneratorKind::ThreeDDistance => None,
+            | GeneratorKind::ThreeDDistance
+            | GeneratorKind::ThreeDLinearGradient => None,
         }
     }
 

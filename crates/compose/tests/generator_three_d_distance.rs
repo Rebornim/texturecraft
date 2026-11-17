@@ -1,11 +1,11 @@
-//! The 3D Distance generator on a sphere: white at its point, falling off over its radius, slid by its offset
+//! The 3D Distance and 3D Linear Gradient generators on a sphere: white at a point falling off over a radius, and a gradient between two points
 
 use std::sync::Arc;
 
 use texturecraft_compose::{BakedMaps, Inputs, PixelStore, mask_at};
 use texturecraft_core::{
-    BakedMap, Channel, DistanceParameters, Effect, EffectKind, Fill, Generator, GeneratorKind, Layer, LayerId, LayerKind, Mask, MaskBackground, Project,
-    Source, TextureSet,
+    BakedMap, Channel, DistanceParameters, Effect, EffectKind, Fill, Generator, GeneratorKind, Layer, LayerId, LayerKind, LinearGradientParameters, Mask,
+    MaskBackground, Project, Source, TextureSet,
 };
 use texturecraft_geom::{Mesh, UvGBuffer, primitives};
 
@@ -40,7 +40,11 @@ fn covered(fixture: &Fixture) -> Vec<((u32, u32), f32)> {
 
 /// The mask of a 3D Distance generator with `distance` alone over black at `texels`
 fn mask(fixture: &mut Fixture, distance: DistanceParameters, texels: &[(u32, u32)]) -> Vec<f32> {
-    let generator = Generator { distance: Some(Box::new(distance)), ..Generator::new(GeneratorKind::ThreeDDistance) };
+    generator_mask(fixture, Generator { distance: Some(Box::new(distance)), ..Generator::new(GeneratorKind::ThreeDDistance) }, texels)
+}
+
+/// The mask of `generator` alone over black at `texels`
+fn generator_mask(fixture: &mut Fixture, generator: Generator, texels: &[(u32, u32)]) -> Vec<f32> {
     let mut mask = Mask::new(MaskBackground::Black);
     mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Generator(generator)));
     fixture.project.layer_mut(fixture.layer).unwrap().mask = Some(mask);
@@ -93,4 +97,21 @@ fn a_larger_radius_reaches_further() {
     let small = total(mask(&mut fixture, DistanceParameters { radius: 0.3, ..DistanceParameters::default() }, &at));
     let large = total(mask(&mut fixture, DistanceParameters { radius: 1.2, ..DistanceParameters::default() }, &at));
     assert!(large > small);
+}
+
+#[test]
+fn the_linear_gradient_runs_from_its_start_to_its_end() {
+    let mut fixture = fixture();
+    let texels = covered(&fixture);
+    let at: Vec<(u32, u32)> = texels.iter().map(|(texel, _)| *texel).collect();
+    let gradient =
+        |gradient: LinearGradientParameters| Generator { linear_gradient: Some(Box::new(gradient)), ..Generator::new(GeneratorKind::ThreeDLinearGradient) };
+
+    let upwards = generator_mask(&mut fixture, gradient(LinearGradientParameters::default()), &at);
+    let downwards =
+        generator_mask(&mut fixture, gradient(LinearGradientParameters { start: [0.5, 1.0, 0.5], end: [0.5, 0.0, 0.5], ..Default::default() }), &at);
+    for (((_, height), up), down) in texels.iter().zip(&upwards).zip(&downwards) {
+        assert!((up - (height * 0.5 + 0.5)).abs() < 0.02, "bottom to top across the sphere's height: {up} at {height}");
+        assert!((up + down - 1.0).abs() < 1e-4, "swapping the points reverses it");
+    }
 }

@@ -14,6 +14,7 @@ mod distance_parameters;
 mod generator_global;
 mod grayscale_conversion;
 mod light_parameters;
+mod linear_gradient_parameters;
 mod micro_curvature_type;
 mod micro_details;
 mod output_resolution;
@@ -31,6 +32,7 @@ pub use distance_parameters::DistanceParameters;
 pub use generator_global::GeneratorGlobal;
 pub use grayscale_conversion::GrayscaleConversion;
 pub use light_parameters::LightParameters;
+pub use linear_gradient_parameters::LinearGradientParameters;
 pub use micro_curvature_type::MicroCurvatureType;
 pub use micro_details::MicroDetails;
 pub use output_resolution::OutputResolution;
@@ -537,10 +539,12 @@ pub enum GeneratorKind {
     WorldSpaceNormals,
     /// White around a point across the mesh's bounds, fading with the distance from it
     ThreeDDistance,
+    /// A gradient from a start point to an end point across the mesh's bounds
+    ThreeDLinearGradient,
 }
 
 impl GeneratorKind {
-    pub const ALL: [GeneratorKind; 10] = [
+    pub const ALL: [GeneratorKind; 11] = [
         GeneratorKind::EdgeWear,
         GeneratorKind::Dirt,
         GeneratorKind::ThinAreas,
@@ -551,6 +555,7 @@ impl GeneratorKind {
         GeneratorKind::FiberGlassEdgeWear,
         GeneratorKind::WorldSpaceNormals,
         GeneratorKind::ThreeDDistance,
+        GeneratorKind::ThreeDLinearGradient,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -564,6 +569,7 @@ impl GeneratorKind {
             GeneratorKind::FiberGlassEdgeWear => "Fiber Glass Edge Wear",
             GeneratorKind::WorldSpaceNormals => "World Space Normals",
             GeneratorKind::ThreeDDistance => "3D Distance",
+            GeneratorKind::ThreeDLinearGradient => "3D Linear Gradient",
         }
     }
 
@@ -580,12 +586,13 @@ impl GeneratorKind {
             GeneratorKind::FiberGlassEdgeWear => "FiberGlassEdgeWear",
             GeneratorKind::WorldSpaceNormals => "WorldSpaceNormals",
             GeneratorKind::ThreeDDistance => "ThreeDDistance",
+            GeneratorKind::ThreeDLinearGradient => "ThreeDLinearGradient",
         }
     }
 
-    /// Whether the generator picker offers this kind (Thin areas only loads from saved projects and smart masks; 3D Distance waits for its panel)
+    /// Whether the generator picker offers this kind (Thin areas only loads from saved projects and smart masks; the 3D kinds wait for their panels)
     pub fn in_picker(self) -> bool {
-        !matches!(self, GeneratorKind::ThinAreas | GeneratorKind::ThreeDDistance)
+        !matches!(self, GeneratorKind::ThinAreas | GeneratorKind::ThreeDDistance | GeneratorKind::ThreeDLinearGradient)
     }
 
     /// Whether the kind's result depends on its seed
@@ -600,7 +607,7 @@ impl GeneratorKind {
             GeneratorKind::Curvature => &[BakedMap::Curvature],
             GeneratorKind::AmbientOcclusion => &[BakedMap::AmbientOcclusion],
             GeneratorKind::ThinAreas => &[BakedMap::Thickness],
-            GeneratorKind::Position | GeneratorKind::ThreeDDistance => &[BakedMap::Position],
+            GeneratorKind::Position | GeneratorKind::ThreeDDistance | GeneratorKind::ThreeDLinearGradient => &[BakedMap::Position],
             GeneratorKind::WorldSpaceNormals => &[BakedMap::WorldNormal],
             GeneratorKind::Direction => &[BakedMap::WorldNormal, BakedMap::Position],
         }
@@ -608,7 +615,7 @@ impl GeneratorKind {
 
     /// Whether the kind was added with the reference's controls only, so it never computes with level, softness and noise
     pub fn has_no_earlier_model(self) -> bool {
-        matches!(self, GeneratorKind::FiberGlassEdgeWear | GeneratorKind::ThreeDDistance)
+        matches!(self, GeneratorKind::FiberGlassEdgeWear | GeneratorKind::ThreeDDistance | GeneratorKind::ThreeDLinearGradient)
     }
 
     pub fn parse(s: &str) -> Option<GeneratorKind> {
@@ -676,6 +683,9 @@ pub struct Generator {
     /// The 3D Distance generator's controls (None on every other kind); boxed, so a generator effect stays small
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distance: Option<Box<DistanceParameters>>,
+    /// The 3D Linear Gradient generator's controls (None on every other kind); boxed, so a generator effect stays small
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linear_gradient: Option<Box<LinearGradientParameters>>,
 }
 
 impl Generator {
@@ -699,6 +709,11 @@ impl Generator {
     /// The 3D Distance controls the generator computes with: its own, else the defaults on a 3D Distance generator
     pub fn distance_controls(&self) -> Option<DistanceParameters> {
         self.distance.as_deref().copied().or_else(|| (self.kind == GeneratorKind::ThreeDDistance).then(DistanceParameters::default))
+    }
+
+    /// The 3D Linear Gradient controls the generator computes with: its own, else the defaults on a 3D Linear Gradient generator
+    pub fn linear_gradient_controls(&self) -> Option<LinearGradientParameters> {
+        self.linear_gradient.as_deref().copied().or_else(|| (self.kind == GeneratorKind::ThreeDLinearGradient).then(LinearGradientParameters::default))
     }
 
     /// The mode and detail sizes the generator reads its curvature with: its own, the defaults on Curvature's section controls, else None
@@ -769,6 +784,7 @@ impl Generator {
             grunge: None,
             micro: None,
             distance: (kind == GeneratorKind::ThreeDDistance).then(Box::default),
+            linear_gradient: (kind == GeneratorKind::ThreeDLinearGradient).then(Box::default),
         }
     }
 

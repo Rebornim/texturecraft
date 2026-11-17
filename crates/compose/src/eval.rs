@@ -1477,6 +1477,10 @@ impl<'a, 'b> Texel<'a, 'b> {
             let position = self.uniform_position_input(generator);
             return three_d_distance::distance_value(&distance, position);
         }
+        if let Some(gradient) = generator.linear_gradient_controls() {
+            let position = self.uniform_position_input(generator);
+            return three_d_distance::linear_gradient_value(&gradient, position);
+        }
 
         let coords = self.coords();
         let signal = match (generator.kind, &generator.detail) {
@@ -1497,7 +1501,7 @@ impl<'a, 'b> Texel<'a, 'b> {
             (GeneratorKind::Direction, _) => coords.nrm.dot(Vec3::from(generator.direction).try_normalize().unwrap_or(Vec3::Y)) * 0.5 + 0.5,
             // World Space Normals and 3D Distance always compute with their own controls: these arms only keep the match whole
             (GeneratorKind::WorldSpaceNormals, _) => coords.nrm.y * 0.5 + 0.5,
-            (GeneratorKind::ThreeDDistance, _) => 0.0,
+            (GeneratorKind::ThreeDDistance | GeneratorKind::ThreeDLinearGradient, _) => 0.0,
         };
         let signal = if generator.noise_amount > 0.0 {
             let noise = world_noise(coords.pos, generator.noise_scale, generator.seed);
@@ -1543,7 +1547,8 @@ impl<'a, 'b> Texel<'a, 'b> {
             | GeneratorKind::ThinAreas
             | GeneratorKind::Direction
             | GeneratorKind::FiberGlassEdgeWear
-            | GeneratorKind::ThreeDDistance => 0.0,
+            | GeneratorKind::ThreeDDistance
+            | GeneratorKind::ThreeDLinearGradient => 0.0,
         }
     }
 

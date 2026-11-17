@@ -25,9 +25,9 @@ pub use blend::{BlendMode, blend1, blend3, lum, mix3};
 pub use channel::{Channel, ChannelFormat, ChannelKind};
 pub use layer::{
     AxisBlend, AxisLayer, ChannelBlend, CompareOp, CurvatureDetail, CurvatureMode, Decal, DistanceParameters, Effect, EffectKind, Fill, Filter, Generator,
-    GeneratorGlobal, GeneratorKind, GrayscaleConversion, HeightMask, Layer, LayerId, LayerKind, Levels, LightParameters, LinkParam, LinkPreset, Mask,
-    MaskBackground, MaterialLink, MicroCurvatureType, MicroDetails, OutputResolution, PathShape, Procedural, ProceduralKind, Projection, ResolutionMode,
-    SectionParameters, Source, TextureBlend, TextureLayer, WearParameters, gradient, hsl_adjust, per_unit,
+    GeneratorGlobal, GeneratorKind, GrayscaleConversion, HeightMask, Layer, LayerId, LayerKind, Levels, LightParameters, LinearGradientParameters, LinkParam,
+    LinkPreset, Mask, MaskBackground, MaterialLink, MicroCurvatureType, MicroDetails, OutputResolution, PathShape, Procedural, ProceduralKind, Projection,
+    ResolutionMode, SectionParameters, Source, TextureBlend, TextureLayer, WearParameters, gradient, hsl_adjust, per_unit,
 };
 pub use project::{
     AoMixing, BlockScales, Camera, DepthOfField, DisplaySettings, FORMAT_VERSION, MAX_RESOLUTION, MIN_RESOLUTION, NormalFormat, NormalMixing, Project,

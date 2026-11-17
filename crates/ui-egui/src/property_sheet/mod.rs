@@ -57,7 +57,8 @@ pub(crate) use preview_lower::PreviewLower;
 pub(crate) use preview_size::PreviewSize;
 pub(crate) use row_lead::RowLead;
 pub(crate) use section_tabs::{
-    SectionScope, TAB_GAP, TAB_ICON_CENTER, TAB_ICON_SIZE, TAB_NAME_LEFT, TAB_PADDING, TAB_ROUNDING, TAB_TEXT_SIZE, TAB_TOP, in_scope, section_tabs,
+    SectionScope, TAB_GAP, TAB_ICON_CENTER, TAB_ICON_SIZE, TAB_NAME_LEFT, TAB_PADDING, TAB_ROUNDING, TAB_TEXT_SIZE, TAB_TOP, forget_sections, in_scope,
+    room_past_end, section_tabs,
 };
 pub(crate) use slot_response::SlotResponse;
 pub(crate) use stack_slider::StackSlider;
@@ -100,9 +101,6 @@ const VALUE_MIN_WIDTH: f32 = 26.0;
 
 /// Air between a slider track's end and the value column, room for the knob and a gap
 const TRACK_TO_VALUE: f32 = 14.0;
-
-/// The panel counts as scrolled to its end when its last row is at most this far below the visible area
-const SCROLL_END_SLACK: f32 = 2.0;
 
 /// Size of regular labels and SemiBold values
 const TEXT_SIZE: f32 = 12.0;
@@ -185,12 +183,8 @@ impl<'u> PropertySheet<'u> {
         let result = body(&mut sheet);
         sheet.close_card();
         if !sheet.sections.is_empty() {
-            let view = sheet.ui.clip_rect();
-            let at_end = sheet.ui.min_rect().bottom() <= view.bottom() + SCROLL_END_SLACK;
-            section_tabs::remember(
-                sheet.ui,
-                section_tabs::SectionTops { tops: std::mem::take(&mut sheet.sections), view_top: view.top(), view_bottom: view.bottom(), at_end },
-            );
+            let view_top = sheet.ui.clip_rect().top();
+            section_tabs::remember(sheet.ui, section_tabs::SectionTops { tops: std::mem::take(&mut sheet.sections), view_top });
         }
 
         let seen = sheet.seen;

@@ -83,7 +83,9 @@ pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
                 crate::property_sheet::section_tabs(ui, scope, ui.style().visuals.menu_corner_radius.nw, &tabs);
             }
             crate::property_sheet::in_scope(ui, scope, |ui| {
-                crate::dock::properties_scrolled(app, ui, egui::ScrollArea::vertical().id_salt("properties_popup_scroll"));
+                // A popup that fits its rows keeps its size; one that scrolls goes on until its last section's top
+                let area = egui::ScrollArea::vertical().id_salt("properties_popup_scroll");
+                crate::dock::properties_scrolled(app, ui, area, crate::past_end::PastEnd::WhenScrolling);
             });
         });
     });

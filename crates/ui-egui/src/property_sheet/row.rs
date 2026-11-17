@@ -30,7 +30,7 @@ const GLYPH_BOX: f32 = 20.0;
 const SECTION_AIR: f32 = 6.0;
 
 /// The hairline above a later section caption, to the caption's top
-const SECTION_RULE_TO_CAPTION: f32 = 12.0;
+pub(super) const SECTION_RULE_TO_CAPTION: f32 = 12.0;
 
 /// Air above the panel's first section caption
 const FIRST_SECTION_AIR: f32 = 12.0;

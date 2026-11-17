@@ -662,6 +662,18 @@ impl Generator {
         self.section.or_else(|| SectionParameters::defaults(self.kind).filter(|_| self.kind == GeneratorKind::WorldSpaceNormals))
     }
 
+    /// The mode and detail sizes the generator reads its curvature with: its own, the defaults on Curvature's section controls, else None
+    pub fn detail_in_use(&self) -> Option<CurvatureDetail> {
+        let on_section = self.kind == GeneratorKind::Curvature && self.section_controls().is_some();
+        self.detail.clone().or_else(|| on_section.then(CurvatureDetail::default))
+    }
+
+    /// The mesh maps the generator reads: none for Position and Light on the earlier model, which read the mesh itself
+    pub fn inputs_in_use(&self) -> &'static [BakedMap] {
+        let reads_geometry = self.on_earlier_model() && matches!(self.kind, GeneratorKind::Position | GeneratorKind::Direction);
+        if reads_geometry { &[] } else { self.kind.inputs() }
+    }
+
     /// Whether the generator is on the level, softness and noise it had before the reference app's controls
     pub fn on_earlier_model(&self) -> bool {
         self.wear.is_none() && self.light.is_none() && self.section_controls().is_none() && self.kind != GeneratorKind::FiberGlassEdgeWear

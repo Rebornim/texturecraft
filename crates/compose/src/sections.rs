@@ -232,8 +232,8 @@ mod tests {
         assert_eq!(blur_sigma(GeneratorKind::Position, &section), 0.0);
         assert_eq!(blur_sigma(GeneratorKind::WorldSpaceNormals, &section), 72.0);
         assert_eq!(blur_radius_at(GeneratorKind::AmbientOcclusion, &SectionParameters { blur: 0.0, ..section }, 2048), 0);
-        let radius = blur_radius_at(GeneratorKind::AmbientOcclusion, &SectionParameters { blur: 1.0, ..section }, 2048) as f32;
-        assert!((radius * (radius + 1.0)).sqrt() - 4.5 < 0.6, "three boxes of radius {radius} spread like sigma 4.5");
+        // Three boxes of radius 4 spread a texel with variance 4 × 5, the closest to sigma 4.5 squared
+        assert_eq!(blur_radius_at(GeneratorKind::AmbientOcclusion, &SectionParameters { blur: 1.0, ..section }, 2048), 4);
     }
 
     #[test]

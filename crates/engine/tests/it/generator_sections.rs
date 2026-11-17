@@ -89,6 +89,10 @@ fn keys_a_kind_lacks_or_both_models_at_once_are_refused() {
     assert!(execute(&mut session, "effect.set", &json!({"effect": position, "topBottomBlend": "overlay"})).is_err());
     assert_eq!(generator(&session, position).section, SectionParameters::defaults(GeneratorKind::Position), "a refused edit changes nothing");
 
+    let direction = json!([1.0, 0.0, 0.0]);
+    assert!(execute(&mut session, "effect.set", &json!({"effect": curvature, "direction": direction})).is_err(), "Curvature points no way");
+    assert!(execute(&mut session, "effect.set", &json!({"effect": occlusion, "direction": direction})).is_err(), "nor does Ambient Occlusion");
+
     assert!(!section_key_applies(GeneratorKind::Position, "sectionBlur"));
     assert!(section_key_applies(GeneratorKind::WorldSpaceNormals, "rightLeftBlend"));
 }
@@ -116,4 +120,18 @@ fn light_takes_its_controls_and_refuses_the_global_ones() {
     let moved = generator(&session, earlier);
     assert_eq!(moved.light.map(|light| light.vertical), Some(60.0));
     assert_eq!(moved.global, Generator::new(GeneratorKind::Direction).global, "the light controls have no global adjustments");
+}
+
+/// Position and Light read the mesh itself on the earlier model, so they take no Position input there
+#[test]
+fn an_input_the_generator_does_not_read_is_refused() {
+    let mut session = session();
+    let earlier = add(&mut session, json!({"generator": "position", "level": 0.4}));
+    let plug = |effect: u64| json!({"effect": effect, "input": "position", "inputValue": 0.5});
+    assert!(execute(&mut session, "effect.set", &plug(earlier)).is_err());
+    assert!(generator(&session, earlier).inputs.is_empty());
+
+    let on_section = add(&mut session, json!({"generator": "position"}));
+    execute(&mut session, "effect.set", &plug(on_section)).unwrap();
+    assert_eq!(generator(&session, on_section).inputs.len(), 1);
 }

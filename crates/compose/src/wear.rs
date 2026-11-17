@@ -1,14 +1,16 @@
 //! The wear generators' value at a texel (Metal Edge Wear, Fiber Glass Edge Wear, Dirt), fitted to the reference app's observed results
 
-use texturecraft_core::{CurvatureDetail, GeneratorKind, Procedural, ProceduralKind, Projection, WearParameters};
+use texturecraft_core::{GeneratorKind, Procedural, ProceduralKind, Projection, WearParameters};
+
+use crate::curvature_sizes::LEVEL_RADII;
 
 use crate::pattern::{Coords, procedural};
 
 use crate::wear_inputs::WearInputs;
 use crate::wear_scan::{DIRT_SCAN, EDGE_WEAR_SCAN, FIBER_GLASS_SCAN};
 
-/// The radius of each blurred curvature level, in texels at 2K (the detail sizes after the map itself)
-const LEVEL_RADII: [f32; CurvatureDetail::BLURRED_SIZES] = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0];
+/// The Gaussian sigma each blurred curvature level spreads like: three box blurs of radius r spread √(r(r+1)), radii from [`LEVEL_RADII`]
+const LEVEL_SIGMAS: [f32; LEVEL_RADII.len()] = [1.414, 2.449, 4.472, 8.485, 16.492, 32.496, 64.498, 128.499];
 
 /// Gaussian sigma per unit of edges smoothness, in texels at 2K
 const EDGE_WEAR_SMOOTHNESS_SIGMA: f32 = 4.6;
@@ -81,8 +83,7 @@ pub(crate) fn grunge(kind: GeneratorKind, wear: &WearParameters, seed: u32, coor
 
 /// The two blurred curvature levels around `sigma` and the weight of the wider one; level None is the map itself
 pub(crate) fn levels_around(sigma: f32) -> (Option<usize>, usize, f32) {
-    // Three box blurs of radius r spread like a Gaussian of sigma √(r(r+1))
-    let sigmas = LEVEL_RADII.map(|radius| (radius * (radius + 1.0)).sqrt());
+    let sigmas = LEVEL_SIGMAS;
     let wider = sigmas.iter().position(|level| *level >= sigma).unwrap_or(sigmas.len() - 1);
     let (narrower, narrower_sigma) = match wider.checked_sub(1) {
         Some(level) => (Some(level), sigmas[level]),
@@ -94,8 +95,13 @@ pub(crate) fn levels_around(sigma: f32) -> (Option<usize>, usize, f32) {
 }
 
 /// Which blurred curvature levels a wear generator reads
-pub(crate) fn levels_in_use(kind: GeneratorKind, wear: &WearParameters) -> [bool; CurvatureDetail::BLURRED_SIZES] {
-    let (narrower, wider, _) = levels_around(blur_sigma(kind, wear));
+pub(crate) fn levels_in_use(kind: GeneratorKind, wear: &WearParameters) -> [bool; LEVEL_RADII.len()] {
+    let sigma = blur_sigma(kind, wear);
+    if sigma <= 0.0 {
+        return [false; LEVEL_RADII.len()];
+    }
+
+    let (narrower, wider, _) = levels_around(sigma);
     std::array::from_fn(|level| level == wider || Some(level) == narrower)
 }
 
@@ -113,9 +119,19 @@ fn smoothed_edges(inputs: &WearInputs) -> f32 {
     (1.0 - SMOOTHED_SHARE) * inputs.curvature + SMOOTHED_SHARE * inputs.blurred_curvature
 }
 
+/// The masking at which the fitted cut-off is pinned, the controls' default
+const DEFAULT_MASKING: f32 = 0.5;
+
 /// 1 where the area is open enough to wear, 0 where occluded: the cut-off sits at `offset + gain × masking`, softened over `width`
 fn open_area(occlusion: f32, masking: f32, (offset, gain, width): (f32, f32, f32)) -> f32 {
-    ((occlusion - (offset + gain * masking)) / width + 0.5).clamp(0.0, 1.0)
+    // A cut-off below this leaves every occlusion fully open, so the low end eases from it to the default's cut-off instead of masking nothing
+    let fully_open = -width * 0.5;
+    let cut_off = if masking < DEFAULT_MASKING && offset < fully_open {
+        fully_open + (offset + gain * DEFAULT_MASKING - fully_open) * masking / DEFAULT_MASKING
+    } else {
+        offset + gain * masking
+    };
+    ((occlusion - cut_off) / width + 0.5).clamp(0.0, 1.0)
 }
 
 // The signals' coefficients are fitted to the reference app's sweeps on a hard-surface bake
@@ -178,6 +194,15 @@ mod tests {
     }
 
     #[test]
+    fn every_ao_masking_above_0_masks_more_occluded_edges() {
+        let wear = |ao_masking| WearParameters { ao_masking, ..defaults(GeneratorKind::EdgeWear) };
+        let occluded_edge = inputs(0.1, 0.0);
+        let values: Vec<f32> = [0.0, 0.05, 0.1, 0.3].iter().map(|masking| wear_value(GeneratorKind::EdgeWear, &wear(*masking), &occluded_edge)).collect();
+        assert!(values.windows(2).all(|pair| pair[1] < pair[0]), "{values:?}");
+        assert_eq!(wear_value(GeneratorKind::EdgeWear, &wear(1.0), &occluded_edge), 0.0, "full masking clears occluded areas");
+    }
+
+    #[test]
     fn a_higher_level_spreads_the_wear_and_a_full_level_is_a_hard_step() {
         let low = WearParameters { level: 0.25, ..defaults(GeneratorKind::EdgeWear) };
         let high = WearParameters { level: 0.9, ..low };
@@ -235,5 +260,13 @@ mod tests {
         assert_eq!((narrower, wider), (Some(2), 3));
         assert!((0.0..=0.1).contains(&weight), "4.6 sits just past radius 4's sigma: {weight}");
         assert_eq!(levels_around(500.0).1, LEVEL_RADII.len() - 1, "wider than every level reads the widest");
+        for (radius, sigma) in LEVEL_RADII.iter().zip(LEVEL_SIGMAS) {
+            assert!(((radius * (radius + 1.0)).sqrt() - sigma).abs() < 0.001, "{radius}: {sigma}");
+        }
+        let widest = super::blur_sigma(
+            GeneratorKind::EdgeWear,
+            &WearParameters { edges_smoothness: *WearParameters::EDGES_SMOOTHNESS_RANGE.end(), ..WearParameters::defaults(GeneratorKind::EdgeWear).unwrap() },
+        );
+        assert!(widest < LEVEL_SIGMAS[LEVEL_RADII.len() - 1], "the whole smoothness range lands between built levels: {widest}");
     }
 }

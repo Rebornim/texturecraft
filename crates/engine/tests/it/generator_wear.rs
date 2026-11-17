@@ -67,3 +67,27 @@ fn mixing_the_models_or_wear_controls_on_other_kinds_is_refused() {
     assert!(execute(&mut session, "effect.add.generator", &json!({"generator": "fiberGlassEdgeWear", "level": 0.5})).is_err());
     assert_eq!(generator(&session, edge_wear).wear, WearParameters::defaults(GeneratorKind::EdgeWear), "a refused edit changes nothing");
 }
+
+#[test]
+fn controls_a_kind_does_not_use_are_refused_rather_than_ignored() {
+    let mut session = session();
+    let edge_wear = add(&mut session, json!({"generator": "edgeWear"}));
+    let dirt = add(&mut session, json!({"generator": "dirt"}));
+    let fiber_glass = add(&mut session, json!({"generator": "fiberGlassEdgeWear"}));
+
+    assert!(execute(&mut session, "effect.set", &json!({"effect": edge_wear, "edgesMasking": 0.2})).is_err(), "edge wear has no edges masking");
+    assert!(execute(&mut session, "effect.set", &json!({"effect": dirt, "edgesSmoothness": 2.0})).is_err(), "dirt has no edges smoothness");
+    assert!(execute(&mut session, "effect.set", &json!({"effect": fiber_glass, "grungeScale": 8.0})).is_err(), "fiber glass has no grunge scale");
+    assert!(execute(&mut session, "effect.set", &json!({"effect": edge_wear, "blur": 0.5})).is_err(), "the wear controls have no global blur");
+}
+
+#[test]
+fn mode_and_sizes_keep_edge_wear_on_the_earlier_model_where_they_apply() {
+    let mut session = session();
+    let effect = add(&mut session, json!({"generator": "edgeWear", "mode": "both"}));
+    let added = generator(&session, effect);
+    assert_eq!(added.wear, None, "detail sizes belong to the earlier model");
+    assert!(added.detail.is_some());
+    execute(&mut session, "effect.set", &json!({"effect": effect, "blur": 0.5})).unwrap();
+    assert_eq!(generator(&session, effect).global.blur, 0.5, "the earlier model keeps its global blur");
+}

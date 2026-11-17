@@ -34,6 +34,7 @@ pub mod materialx_cmds;
 pub mod meshmap_cmds;
 mod meshmap_file_name;
 pub mod meshmap_import_cmds;
+pub mod micro_params;
 mod orb_camera;
 pub mod orb_preview;
 pub mod painting;

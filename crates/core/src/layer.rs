@@ -13,6 +13,8 @@ mod curvature_mode;
 mod generator_global;
 mod grayscale_conversion;
 mod light_parameters;
+mod micro_curvature_type;
+mod micro_details;
 mod output_resolution;
 mod resolution_mode;
 mod section_parameters;
@@ -27,6 +29,8 @@ pub use curvature_mode::CurvatureMode;
 pub use generator_global::GeneratorGlobal;
 pub use grayscale_conversion::GrayscaleConversion;
 pub use light_parameters::LightParameters;
+pub use micro_curvature_type::MicroCurvatureType;
+pub use micro_details::MicroDetails;
 pub use output_resolution::OutputResolution;
 pub use resolution_mode::ResolutionMode;
 pub use section_parameters::SectionParameters;
@@ -654,6 +658,9 @@ pub struct Generator {
     /// The image a wear generator reads as its grunge once Use Custom Grunge is on (None: an empty slot)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grunge: Option<Source>,
+    /// The micro details of Curvature, Ambient Occlusion and the wear kinds (None: never touched, their defaults: off); boxed, so a generator effect stays small
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub micro: Option<Box<MicroDetails>>,
 }
 
 impl Generator {
@@ -691,9 +698,16 @@ impl Generator {
         self.texture.as_deref().filter(|texture| texture.in_use() && self.section_controls().is_some())
     }
 
-    /// Everything the generator reads instead of its mesh maps: its inputs, then its texture and its custom grunge
+    /// Everything the generator reads instead of its mesh maps: its inputs, then its texture, its custom grunge and its micro details
     pub fn sources(&self) -> impl Iterator<Item = &Source> {
-        self.inputs.values().chain(self.texture.as_ref().and_then(|texture| texture.source.as_ref())).chain(self.grunge.as_ref())
+        let micro = self.micro.iter().flat_map(|micro| micro.sources());
+        self.inputs.values().chain(self.texture.as_ref().and_then(|texture| texture.source.as_ref())).chain(self.grunge.as_ref()).chain(micro)
+    }
+
+    /// The micro details the generator computes with: only on the reference's controls (its wear or section controls), switched on with an image to read
+    pub fn micro_in_use(&self) -> Option<&MicroDetails> {
+        let on_controls = self.wear.is_some() || self.kind == GeneratorKind::FiberGlassEdgeWear || self.section_controls().is_some();
+        self.micro.as_deref().filter(|micro| on_controls && micro.in_use(self.kind))
     }
 
     /// Whether the generator is on the level, softness and noise it had before the reference app's controls
@@ -733,6 +747,7 @@ impl Generator {
             light: LightParameters::defaults(kind),
             texture: None,
             grunge: None,
+            micro: None,
         }
     }
 

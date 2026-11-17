@@ -34,7 +34,11 @@ const CACHE_MAPS: usize = 16;
 impl CurvatureSizes {
     /// The sizes of the texture set `inp` composites, holding at least those `needed` marks (one flag per blurred size); None without a baked curvature map or a needed size.
     pub fn of(inp: &Inputs, needed: &[bool]) -> Option<Arc<CurvatureSizes>> {
-        let curvature = inp.baked.maps.get(&BakedMap::Curvature)?;
+        CurvatureSizes::of_map(inp, inp.baked.maps.get(&BakedMap::Curvature)?, needed)
+    }
+
+    /// The sizes of `curvature`, a map in the baked curvature map's layout (the baked map or one derived from it)
+    pub fn of_map(inp: &Inputs, curvature: &Arc<Vec<f32>>, needed: &[bool]) -> Option<Arc<CurvatureSizes>> {
         let (width, height) = (inp.baked.resolution, inp.baked.height(BakedMap::Curvature));
         if !needed.contains(&true) || width == 0 || height == 0 {
             return None;

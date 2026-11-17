@@ -20,6 +20,7 @@ use texturecraft_texel::{DilationMap, TILE, TILE_AREA, TileImage, from_u16, nois
 
 use crate::below::{Band, BelowCache, Level, StackKey};
 use crate::curvature_sizes::{CurvatureSizes, LEVEL_RADII};
+use crate::generator_maps::GeneratorMaps;
 use crate::held_fields::HeldFields;
 use crate::pattern::{Coords, decal_uv, image_samples, procedural, world_noise};
 use crate::sections;
@@ -217,8 +218,8 @@ struct EffectPlan<'a> {
     opacity: f32,
     data: Option<Cow<'a, [u16]>>,
     preview: bool,
-    /// The curvature detail sizes a generator with detail reads.
-    curvature_sizes: Option<Arc<CurvatureSizes>>,
+    /// The detail sizes and micro details a generator reads
+    maps: GeneratorMaps,
 }
 
 struct MaskPlan<'a> {
@@ -682,12 +683,12 @@ fn filter_region(
             let preview_tile = inputs.preview.and_then(|preview| preview.alpha.tile(tile_x, tile_y));
             let mut mask = None;
             let mut nodes = Vec::new();
-            let mut generator_sizes = None;
+            let mut generator_maps = GeneratorMaps::default();
             match job {
                 Job::Mask(layer_mask) => {
                     let Some(mut mask_stack) = mask_plan(inputs, id, layer_mask, tile_x, tile_y, None) else { return Vec::new() };
 
-                    generator_sizes = mask_stack.effects.get(index).and_then(|effect| effect.curvature_sizes.clone());
+                    generator_maps = mask_stack.effects.get(index).map(|effect| effect.maps.clone()).unwrap_or_default();
                     mask_stack.effects.truncate(index);
                     mask_stack.start = start;
                     mask = Some(mask_stack);
@@ -709,7 +710,7 @@ fn filter_region(
 
                     let value = match (&mask, nodes.first()) {
                         (Some(mask_stack), _) => {
-                            let ramp = generator.map_or(0.0, |(generator, _)| texel.generator_ramp(generator, generator_sizes.as_deref()));
+                            let ramp = generator.map_or(0.0, |(generator, _)| texel.generator_ramp(generator, &generator_maps));
                             let texture = generator.and_then(|(generator, _)| texel.generator_texture(generator)).unwrap_or(0.0);
                             [texel.mask(mask_stack), ramp, texture, 0.0]
                         }
@@ -1051,6 +1052,11 @@ fn prepare_mask_curvature_sizes<'a>(inp: &Inputs, masks: impl Iterator<Item = &'
     let mut needed = [false; LEVEL_RADII.len()];
     for effect in masks.flat_map(|mask| &mask.effects).filter(|effect| effect.visible) {
         if let EffectKind::Generator(generator) = &effect.kind {
+            // Micro details blur a curvature map of their own
+            if generator.micro_in_use().is_some() {
+                GeneratorMaps::of(inp, generator, &curvature_sizes_in_use(generator));
+                continue;
+            }
             for (slot, in_use) in needed.iter_mut().zip(curvature_sizes_in_use(generator)) {
                 *slot |= in_use;
             }
@@ -1085,9 +1091,9 @@ fn effect_plans<'a>(inp: &Inputs<'a>, effects: &'a [Effect], tile_x: u32, tile_y
                 Some(channel) => (inp.pixels.layer(effect.id, channel), PaintTarget::Layer(effect.id)),
                 None => (inp.pixels.masks.get(&effect.id), PaintTarget::Mask(effect.id)),
             };
-            let curvature_sizes = match &effect.kind {
-                EffectKind::Generator(generator) => CurvatureSizes::of(inp, &curvature_sizes_in_use(generator)),
-                _ => None,
+            let maps = match &effect.kind {
+                EffectKind::Generator(generator) => GeneratorMaps::of(inp, generator, &curvature_sizes_in_use(generator)),
+                _ => GeneratorMaps::default(),
             };
             EffectPlan {
                 kind: &effect.kind,
@@ -1095,7 +1101,7 @@ fn effect_plans<'a>(inp: &Inputs<'a>, effects: &'a [Effect], tile_x: u32, tile_y
                 opacity: effect.opacity,
                 data: if effect.kind.painted() { tile_of(inp, image, tile_x, tile_y, channel) } else { None },
                 preview: previews(inp, target),
-                curvature_sizes,
+                maps,
             }
         })
         .collect()
@@ -1453,9 +1459,9 @@ impl<'a, 'b> Texel<'a, 'b> {
     }
 
     /// The generator's ramp at this texel, before its global blur, balance, contrast and invert (on the section controls, before those too).
-    fn generator_ramp(&mut self, generator: &Generator, curvature_sizes: Option<&CurvatureSizes>) -> f32 {
+    fn generator_ramp(&mut self, generator: &Generator, maps: &GeneratorMaps) -> f32 {
         if let Some(wear) = wear_parameters(generator) {
-            return self.wear_ramp(generator, &wear, curvature_sizes);
+            return self.wear_ramp(generator, &wear, maps);
         }
         if let Some(light) = &generator.light {
             let normal =
@@ -1464,14 +1470,14 @@ impl<'a, 'b> Texel<'a, 'b> {
             return sections::light_value(light, normal, position, generator.invert);
         }
         if let Some(section) = generator.section_controls() {
-            return self.section_signal(generator, &section, curvature_sizes);
+            return self.section_signal(generator, &section, maps);
         }
 
         let coords = self.coords();
         let signal = match (generator.kind, &generator.detail) {
             (GeneratorKind::Curvature | GeneratorKind::EdgeWear, Some(detail)) => {
                 // Detail sizes are blurred copies of the mesh map, so a replaced curvature input reads at its own size only
-                let sizes = if generator.inputs.contains_key(&BakedMap::Curvature) { None } else { curvature_sizes };
+                let sizes = if generator.inputs.contains_key(&BakedMap::Curvature) { None } else { maps.sizes.as_deref() };
                 let curvature = self.generator_input(generator, BakedMap::Curvature);
                 self.curvature_detail(detail, sizes, curvature)
             }
@@ -1508,15 +1514,15 @@ impl<'a, 'b> Texel<'a, 'b> {
     }
 
     /// The signal a generator on its section controls adjusts at this texel: the axes of its map, its curvature or its occlusion
-    fn section_signal(&mut self, generator: &Generator, section: &SectionParameters, curvature_sizes: Option<&CurvatureSizes>) -> f32 {
+    fn section_signal(&mut self, generator: &Generator, section: &SectionParameters, maps: &GeneratorMaps) -> f32 {
         match generator.kind {
             GeneratorKind::Curvature => {
                 let detail = generator.detail_in_use().unwrap_or_default();
-                let sizes = if generator.inputs.contains_key(&BakedMap::Curvature) { None } else { curvature_sizes };
-                let curvature = self.generator_input(generator, BakedMap::Curvature);
+                let sizes = if generator.inputs.contains_key(&BakedMap::Curvature) { None } else { maps.sizes.as_deref() };
+                let curvature = self.curvature_input(generator, maps);
                 self.curvature_detail(&detail, sizes, curvature)
             }
-            GeneratorKind::AmbientOcclusion => self.generator_input(generator, BakedMap::AmbientOcclusion).unwrap_or(1.0),
+            GeneratorKind::AmbientOcclusion => self.occlusion_input(generator, maps).unwrap_or(1.0),
             GeneratorKind::Position => {
                 let position = self.position_input(generator);
                 sections::axes_signal(position, &section.axes)
@@ -1545,14 +1551,14 @@ impl<'a, 'b> Texel<'a, 'b> {
     }
 
     /// A wear generator's value at this texel from its curvature, occlusion and grunge, before its global adjustments and invert
-    fn wear_ramp(&mut self, generator: &Generator, wear: &WearParameters, curvature_sizes: Option<&CurvatureSizes>) -> f32 {
-        let curvature = self.generator_input(generator, BakedMap::Curvature).map_or(0.0, |curvature| curvature - 0.5);
+    fn wear_ramp(&mut self, generator: &Generator, wear: &WearParameters, maps: &GeneratorMaps) -> f32 {
+        let curvature = self.curvature_input(generator, maps).map_or(0.0, |curvature| curvature - 0.5);
 
         // Blurred levels are copies of the mesh map, so a replaced curvature input is read at its own size only
-        let sizes = if generator.inputs.contains_key(&BakedMap::Curvature) { None } else { curvature_sizes };
+        let sizes = if generator.inputs.contains_key(&BakedMap::Curvature) { None } else { maps.sizes.as_deref() };
         let blurred_curvature = self.blurred_curvature(wear::blur_sigma(generator.kind, wear), sizes, curvature);
 
-        let occlusion = self.generator_input(generator, BakedMap::AmbientOcclusion).unwrap_or(1.0);
+        let occlusion = self.occlusion_input(generator, maps).unwrap_or(1.0);
         let grunge = if wear.custom_grunge {
             // An image not loaded yet reads mid gray, which leaves the wear as without grunge
             let gray = self.slot_color(generator, generator.grunge.as_ref(), &wear::custom_grunge_placement(wear)).map_or(0.5, lum);
@@ -1586,8 +1592,8 @@ impl<'a, 'b> Texel<'a, 'b> {
     }
 
     /// The generator's value at this texel: its ramp finished by balance, contrast, invert and offset (its blur and resolution need neighbours: see [`generator_region`]).
-    fn generator(&mut self, generator: &Generator, curvature_sizes: Option<&CurvatureSizes>) -> f32 {
-        let ramp = self.generator_ramp(generator, curvature_sizes);
+    fn generator(&mut self, generator: &Generator, maps: &GeneratorMaps) -> f32 {
+        let ramp = self.generator_ramp(generator, maps);
         let adjusted = generator.section_controls().map_or(ramp, |section| sections::adjusted(generator.kind, &section, ramp));
         let textured = match (generator.texture_in_use(), self.generator_texture(generator)) {
             (Some(texture), Some(gray)) => texture_layer::blended_over(texture, adjusted, gray),
@@ -1628,6 +1634,22 @@ impl<'a, 'b> Texel<'a, 'b> {
             // A value or an anchor reads the same wherever it is projected
             other => Some(self.source(other, &Projection::default(), ChannelKind::NormalMap)),
         }
+    }
+
+    /// The generator's curvature input at this texel with what its micro details add
+    fn curvature_input(&mut self, generator: &Generator, maps: &GeneratorMaps) -> Option<f32> {
+        let curvature = self.generator_input(generator, BakedMap::Curvature)?;
+        let working_size = (self.res, self.inp.gbuf.height);
+        let micro = maps.micro_curvature.as_ref().and_then(|micro| micro.term.at((self.x, self.y), working_size, &self.inp.block_scales));
+        Some(curvature + micro.unwrap_or(0.0))
+    }
+
+    /// The generator's occlusion input at this texel, darkened by its micro details
+    fn occlusion_input(&mut self, generator: &Generator, maps: &GeneratorMaps) -> Option<f32> {
+        let occlusion = self.generator_input(generator, BakedMap::AmbientOcclusion)?;
+        let working_size = (self.res, self.inp.gbuf.height);
+        let micro = maps.micro_occlusion.as_ref().and_then(|micro| micro.at((self.x, self.y), working_size, &self.inp.block_scales));
+        Some(occlusion * micro.unwrap_or(1.0))
     }
 
     /// Generator input `map` at this texel: what replaces the mesh map in the generator's inputs, else the mesh map (None when not baked).
@@ -1715,7 +1737,7 @@ impl<'a, 'b> Texel<'a, 'b> {
                     value += (blend1(effect.blend, value, fill) - value) * opacity * self.cover(std::iter::once(source), projection);
                 }
                 EffectKind::Generator(generator) => {
-                    let generated = self.generator(generator, effect.curvature_sizes.as_deref());
+                    let generated = self.generator(generator, &effect.maps);
                     value += (blend1(effect.blend, value, generated) - value) * opacity;
                 }
                 EffectKind::Levels(levels) => value += (levels.apply(value) - value) * opacity,

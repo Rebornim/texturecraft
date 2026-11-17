@@ -85,6 +85,9 @@ fn generator_json(generator: &Generator) -> Value {
     if let Some(grunge) = &generator.grunge {
         out["grunge"] = source_json(grunge);
     }
+    if let Some(micro) = &generator.micro {
+        out["micro"] = json!(micro);
+    }
     if let Some(detail) = &generator.detail {
         out["mode"] = json!(format!("{:?}", detail.mode));
         out["sizes"] = json!(detail.weights);

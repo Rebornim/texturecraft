@@ -1,7 +1,7 @@
-//! The 3D Distance and 3D Linear Gradient generators through `effect.add.generator` and `effect.set`: its controls, the controls it lacks, and a gradient around its point
+//! The 3D Distance, 3D Linear Gradient and UV Border Distance generators through `effect.add.generator` and `effect.set`: its controls, the controls it lacks, and a gradient around its point
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{DistanceParameters, EffectKind, Generator, GeneratorKind, LayerId, LinearGradientParameters};
+use texturecraft_engine::core::{BorderDistanceParameters, DistanceParameters, EffectKind, Generator, GeneratorKind, LayerId, LinearGradientParameters};
 use texturecraft_engine::{Session, execute};
 
 fn session() -> Session {
@@ -83,4 +83,17 @@ fn each_3d_kind_refuses_the_others_controls() {
     assert!(execute(&mut session, "effect.set", &json!({"effect": gradient, "distanceRadius": 0.5})).is_err());
     assert!(execute(&mut session, "effect.set", &json!({"effect": distance, "gradientBalance": 0.5})).is_err());
     assert!(execute(&mut session, "effect.set", &json!({"effect": gradient, "level": 0.5})).is_err());
+}
+
+#[test]
+fn uv_border_distance_takes_its_controls_and_refuses_the_others() {
+    let mut session = session();
+    let effect = add(&mut session, json!({"generator": "UV Border Distance", "borderDistance": 0.3, "borderSmoothness": 2.0, "borderContrast": 0.4}));
+
+    let expected = BorderDistanceParameters { distance: 0.3, smoothness: 1.0, contrast: 0.4, ..BorderDistanceParameters::default() };
+    assert_eq!(generator(&session, effect).border_distance_controls(), Some(expected));
+    assert!(execute(&mut session, "effect.set", &json!({"effect": effect, "distanceRadius": 0.5})).is_err());
+    assert!(execute(&mut session, "effect.set", &json!({"effect": effect, "softness": 0.5})).is_err());
+    let curvature = add(&mut session, json!({"generator": "curvature"}));
+    assert!(execute(&mut session, "effect.set", &json!({"effect": curvature, "borderDistance": 0.5})).is_err());
 }

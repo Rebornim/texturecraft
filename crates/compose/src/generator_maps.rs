@@ -7,6 +7,7 @@ use texturecraft_core::{BakedMap, Generator, MicroDetails};
 use crate::curvature_sizes::CurvatureSizes;
 use crate::eval::Inputs;
 use crate::micro_details::{LayoutMap, MicroCurvature, micro_occlusion};
+use crate::uv_border_distance::border_gradient;
 
 /// What a generator reads beyond its texel: built once per map and settings, shared by every tile
 #[derive(Clone, Default)]
@@ -17,6 +18,8 @@ pub(crate) struct GeneratorMaps {
     pub micro_curvature: Option<Arc<MicroCurvature>>,
     /// What its micro details multiply its occlusion by
     pub micro_occlusion: Option<Arc<LayoutMap>>,
+    /// The UV Border Distance gradient at every working texel
+    pub border_gradient: Option<Arc<Vec<f32>>>,
 }
 
 impl GeneratorMaps {
@@ -29,6 +32,7 @@ impl GeneratorMaps {
             Some(micro) => CurvatureSizes::of_map(inp, &micro.curvature, needed),
             None => inp.baked.maps.get(&BakedMap::Curvature).and_then(|curvature| CurvatureSizes::of_map(inp, curvature, needed)),
         };
-        GeneratorMaps { sizes, micro_curvature, micro_occlusion }
+        let border_gradient = generator.border_distance_controls().map(|border| border_gradient(inp, &border));
+        GeneratorMaps { sizes, micro_curvature, micro_occlusion, border_gradient }
     }
 }

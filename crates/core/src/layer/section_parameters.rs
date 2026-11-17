@@ -41,7 +41,8 @@ impl SectionParameters {
             | GeneratorKind::Direction
             | GeneratorKind::FiberGlassEdgeWear
             | GeneratorKind::ThreeDDistance
-            | GeneratorKind::ThreeDLinearGradient => None,
+            | GeneratorKind::ThreeDLinearGradient
+            | GeneratorKind::UvBorderDistance => None,
         }
     }
 

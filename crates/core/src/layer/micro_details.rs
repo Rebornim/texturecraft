@@ -57,7 +57,8 @@ impl MicroDetails {
             | GeneratorKind::Direction
             | GeneratorKind::WorldSpaceNormals
             | GeneratorKind::ThreeDDistance
-            | GeneratorKind::ThreeDLinearGradient => None,
+            | GeneratorKind::ThreeDLinearGradient
+            | GeneratorKind::UvBorderDistance => None,
         }
     }
 

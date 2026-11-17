@@ -1,4 +1,4 @@
-//! The 3D Distance and 3D Linear Gradient controls `effect.add.generator` and `effect.set` take
+//! The controls of 3D Distance, 3D Linear Gradient and UV Border Distance that `effect.add.generator` and `effect.set` take
 
 use serde_json::Value;
 use texturecraft_core::{Generator, GeneratorKind};
@@ -12,18 +12,25 @@ pub const DISTANCE_KEYS: [&str; 6] = ["distanceX", "distanceY", "distanceZ", "di
 /// The 3D Linear Gradient controls: its start and end points ([x, y, z] across the mesh's bounds), balance and contrast
 pub const LINEAR_GRADIENT_KEYS: [&str; 4] = ["gradientStart", "gradientEnd", "gradientBalance", "gradientContrast"];
 
-/// The controls of the earlier model and the global adjustments, which the 3D kinds don't have
+/// The UV Border Distance controls
+pub const BORDER_DISTANCE_KEYS: [&str; 4] = ["borderDistance", "borderSmoothness", "borderBalance", "borderContrast"];
+
+/// The controls of the earlier model and the global adjustments, which these kinds don't have
 const OTHER_MODEL_KEYS: [&str; 9] = ["level", "softness", "noise", "noiseScale", "offset", "direction", "blur", "balance", "contrast"];
 
-/// The 3D Distance and 3D Linear Gradient controls in `params`, each refused on other kinds; both kinds refuse the earlier model's and the global controls
+/// The 3D Distance, 3D Linear Gradient and UV Border Distance controls in `params`, each refused on other kinds; these kinds refuse the earlier model's and the global controls
 pub fn distance_from(command: &str, params: &Value, generator: &mut Generator) -> Result<()> {
     let kind = generator.kind;
-    for (keys, owner) in [(&DISTANCE_KEYS[..], GeneratorKind::ThreeDDistance), (&LINEAR_GRADIENT_KEYS[..], GeneratorKind::ThreeDLinearGradient)] {
+    for (keys, owner) in [
+        (&DISTANCE_KEYS[..], GeneratorKind::ThreeDDistance),
+        (&LINEAR_GRADIENT_KEYS[..], GeneratorKind::ThreeDLinearGradient),
+        (&BORDER_DISTANCE_KEYS[..], GeneratorKind::UvBorderDistance),
+    ] {
         if let Some(key) = first_given(params, keys).filter(|_| kind != owner) {
             return Err(bad(command, format!("{} has no `{key}`: only {} has it", kind.label(), owner.label())));
         }
     }
-    if !matches!(kind, GeneratorKind::ThreeDDistance | GeneratorKind::ThreeDLinearGradient) {
+    if !matches!(kind, GeneratorKind::ThreeDDistance | GeneratorKind::ThreeDLinearGradient | GeneratorKind::UvBorderDistance) {
         return Ok(());
     }
     if let Some(key) = first_given(params, &OTHER_MODEL_KEYS) {
@@ -31,6 +38,21 @@ pub fn distance_from(command: &str, params: &Value, generator: &mut Generator) -
     }
     if kind == GeneratorKind::ThreeDLinearGradient {
         return linear_gradient_from(command, params, generator);
+    }
+    if kind == GeneratorKind::UvBorderDistance {
+        let mut border = generator.border_distance_controls().unwrap_or_default();
+        for (key, value) in [
+            ("borderDistance", &mut border.distance),
+            ("borderSmoothness", &mut border.smoothness),
+            ("borderBalance", &mut border.balance),
+            ("borderContrast", &mut border.contrast),
+        ] {
+            if let Some(given) = f32p(params, key) {
+                *value = given;
+            }
+        }
+        generator.border_distance = Some(Box::new(border.clamped()));
+        return Ok(());
     }
 
     let mut distance = generator.distance_controls().unwrap_or_default();

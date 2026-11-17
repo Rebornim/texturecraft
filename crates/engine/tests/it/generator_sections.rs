@@ -135,3 +135,22 @@ fn an_input_the_generator_does_not_read_is_refused() {
     execute(&mut session, "effect.set", &plug(on_section)).unwrap();
     assert_eq!(generator(&session, on_section).inputs.len(), 1);
 }
+
+#[test]
+fn the_offset_belongs_to_the_earlier_model() {
+    let mut session = session();
+    for (kind, control) in [("position", json!({"sectionBalance": 0.3})), ("direction", json!({"highlightLevel": 0.5}))] {
+        let effect = add(&mut session, json!({"generator": kind, "offset": 0.4}));
+        assert_eq!(generator(&session, effect).offset, 0.4, "{kind}: the offset keeps it on the earlier model");
+
+        let mut edit = control.clone();
+        edit["effect"] = json!(effect);
+        execute(&mut session, "effect.set", &edit).unwrap();
+        assert_eq!(generator(&session, effect).offset, 0.0, "{kind}: moving onto the reference controls drops the unseen offset");
+
+        let mut both = control;
+        both["effect"] = json!(effect);
+        both["offset"] = json!(0.2);
+        assert!(execute(&mut session, "effect.set", &both).is_err(), "{kind}: offset and the reference controls at once are refused");
+    }
+}

@@ -37,6 +37,7 @@ const QUALITIES: [(u32, &str); 6] = [
 
 /// The Baking Visualization panel in the top-left corner of bake mode's 3D view `view`
 pub(crate) fn bake_visualization_panel(app: &mut TextureCraftApp, ui: &Ui, view: Rect) {
+    let matching_error_applies = super::matching_error_applies(&app.session);
     let toggles = &mut app.ui.bake_visualization;
     let tokens = Tokens::get(ui.ctx());
     egui::Area::new(ui.scope_id().with("bake_visualization_panel")).fixed_pos(view.left_top() + vec2(PANEL_MARGIN, PANEL_MARGIN)).constrain_to(view).show(
@@ -52,14 +53,14 @@ pub(crate) fn bake_visualization_panel(app: &mut TextureCraftApp, ui: &Ui, view:
                     collapsing_state.toggle(ui);
                 }
 
-                collapsing_state.show_body_unindented(ui, |ui| sections(ui, toggles));
+                collapsing_state.show_body_unindented(ui, |ui| sections(ui, toggles, matching_error_applies));
             });
         },
     );
 }
 
-/// The panel's sections below its header
-fn sections(ui: &mut Ui, toggles: &mut BakeVisualizationToggles) {
+/// The panel's sections below its header; the Matching Error row greys unless `matching_error_applies`
+fn sections(ui: &mut Ui, toggles: &mut BakeVisualizationToggles, matching_error_applies: bool) {
     ui.horizontal(|ui| {
         ui.checkbox(&mut toggles.selected_set_only, tr("Show for Selected Texture Set Only"));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -72,7 +73,7 @@ fn sections(ui: &mut Ui, toggles: &mut BakeVisualizationToggles) {
     let meshes_editable = !toggles.hide_baking_meshes;
     if collapsible(ui, "high_poly", tr("High Definition Mesh (HP)"), SectionOpening::Open, true, meshes_editable, |ui| {
         overlay_row(ui, "bake_high_poly_color", tr("Mesh"), &mut toggles.high_poly_mesh);
-        overlay_row(ui, "bake_matching_error_color", tr("Matching Error"), &mut toggles.matching_error);
+        ui.add_enabled_ui(matching_error_applies, |ui| overlay_row(ui, "bake_matching_error_color", tr("Matching Error"), &mut toggles.matching_error));
     }) {
         toggles.reset_high_poly();
     }

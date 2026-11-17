@@ -522,6 +522,10 @@ fn cage_and_skew_controls_require_a_high_poly_and_grey_out_with_a_reason() {
         assert!(harness.query_by_label(distance_based_only).is_none(), "the automatic cage has no {distance_based_only}");
     }
     assert!(harness.query(by().label_contains("Paint Cage")).is_none(), "the automatic cage is not painted");
+    assert!(
+        harness.get_by_role_and_label(Role::CheckBox, "Matching Error").accesskit_node().is_disabled(),
+        "greyed with the automatic cage, as in the reference"
+    );
     harness.get_by_label("Skew Correction needs a distance-based cage: the automatic cage is fitted to the high poly as it is.");
 
     click(&mut harness, "Cage Type");

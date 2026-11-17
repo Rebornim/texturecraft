@@ -24,13 +24,19 @@ mod set_picker_purpose;
 use egui::{Ui, vec2};
 use egui_phosphor::regular as icon;
 use serde_json::{Value, json};
+use texturecraft_engine::Session;
 use texturecraft_engine::bake::settings_patch;
-use texturecraft_engine::core::{BakeSettings, BakeSyncGroup, BakedMap};
+use texturecraft_engine::core::{BakeSettings, BakeSyncGroup, BakedMap, CageType};
 
 use crate::TextureCraftApp;
 use crate::i18n::{tr, trf};
 use crate::state::Mode;
 use crate::widgets::{icon_button, primary_button};
+
+/// Whether the high poly shows its matching error for `session`'s selected texture set: the automatic cage has no distances to fall short, as in the reference
+pub(crate) fn matching_error_applies(session: &Session) -> bool {
+    session.doc.project.texture_sets.get(session.ts()).is_none_or(|set| set.bake.cage.kind != CageType::Automatic)
+}
 
 pub fn texture_sets(app: &mut TextureCraftApp, ui: &mut Ui) {
     egui::ScrollArea::vertical().id_salt("bake_texture_sets").auto_shrink([false; 2]).show(ui, |ui| {

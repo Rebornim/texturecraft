@@ -861,7 +861,9 @@ fn bake_visualization(app: &TextureCraftApp) -> Option<texturecraft_render::Bake
         return None;
     }
 
-    Some(app.ui.bake_visualization.visualization(app.session.ts()))
+    let mut visualization = app.ui.bake_visualization.visualization(app.session.ts());
+    visualization.matching_error.shown &= crate::bake_mode::matching_error_applies(&app.session);
+    Some(visualization)
 }
 
 /// What a drag on the selected decal's frame does.
@@ -2294,6 +2296,20 @@ mod tests {
         app.cancel_bake();
 
         assert_eq!(bake_visualization(app), Some(before));
+    }
+
+    #[test]
+    fn the_automatic_cage_shows_no_matching_error() {
+        let session = texturecraft_engine::sample_session(256, 64).unwrap();
+        let mut harness = egui_kittest::Harness::builder().build_eframe(|context| TextureCraftApp::new(context, session));
+        let app = harness.state_mut();
+        app.ui.mode = crate::state::Mode::Baking;
+        assert!(bake_visualization(app).unwrap().matching_error.shown);
+
+        app.session.doc.project.texture_sets[0].bake.cage.kind = texturecraft_engine::core::CageType::Automatic;
+
+        assert!(!bake_visualization(app).unwrap().matching_error.shown);
+        assert!(app.ui.bake_visualization.matching_error.shown, "the switch keeps its state for the other cage types");
     }
 
     const VIEW: Rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 100.0));

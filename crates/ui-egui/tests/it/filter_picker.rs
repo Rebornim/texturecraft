@@ -8,6 +8,8 @@ use texturecraft_engine::core::{EffectKind, Filter, LayerId};
 use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 
+use crate::filter_support::click_at;
+
 /// The app with an Invert filter on a fill layer's content, selected so Properties shows its slot
 fn app_with_invert() -> (Harness<'static, TextureCraftApp>, LayerId) {
     let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
@@ -29,8 +31,8 @@ fn kind(harness: &Harness<'_, TextureCraftApp>, effect: LayerId) -> EffectKind {
 
 /// Clicks the Invert slot, which opens its picker
 fn open_picker(harness: &mut Harness<'_, TextureCraftApp>) {
-    harness.get_by_role_and_label(Role::ComboBox, "Invert").click();
-    harness.run_steps(3);
+    let at = harness.get_by_role_and_label(Role::ComboBox, "Invert").rect().center();
+    click_at(harness, at);
     assert!(egui::Popup::is_any_open(&harness.ctx), "clicking the slot opens the picker");
 }
 
@@ -44,8 +46,8 @@ fn picking_from_the_slot_swaps_the_filter() {
     harness.run_steps(3);
     assert_eq!(harness.query_all_by_label("Blur").count(), 0, "the search hides filters that don't match");
 
-    harness.get_by_label("Sharpen").click();
-    harness.run_steps(3);
+    let at = harness.get_by_label("Sharpen").rect().center();
+    click_at(&mut harness, at);
 
     assert!(matches!(kind(&harness, effect), EffectKind::Filter(Filter::Sharpen { .. })), "{:?}", kind(&harness, effect));
     assert!(!egui::Popup::is_any_open(&harness.ctx), "a pick closes the picker");
@@ -68,11 +70,11 @@ fn escape_closes_the_picker_without_changes() {
 
 /// Opens the wand's Add effect menu and clicks Filter
 fn add_filter_from_the_wand(harness: &mut Harness<'_, TextureCraftApp>) {
-    harness.get_by_role_and_label(Role::Button, "Add effect").click();
-    harness.run_steps(3);
+    let at = harness.get_by_role_and_label(Role::Button, "Add effect").rect().center();
+    click_at(harness, at);
 
-    harness.get_by_role_and_label(Role::Button, "Filter").click();
-    harness.run_steps(3);
+    let at = harness.get_by_role_and_label(Role::Button, "Filter").rect().center();
+    click_at(harness, at);
 }
 
 #[test]
@@ -88,8 +90,8 @@ fn add_filter_adds_a_filter_selects_it_and_opens_its_picker() {
     // The search field has the focus, and a search brings Sharpen into view
     harness.event(egui::Event::Text("sharp".into()));
     harness.run_steps(3);
-    harness.get_by_label("Sharpen").click();
-    harness.run_steps(3);
+    let at = harness.get_by_label("Sharpen").rect().center();
+    click_at(&mut harness, at);
     assert!(matches!(kind(&harness, added), EffectKind::Filter(Filter::Sharpen { .. })), "{:?}", kind(&harness, added));
 }
 
@@ -114,6 +116,7 @@ fn escape_after_add_filter_keeps_the_empty_filter() {
 fn add_filter_on_a_mask_adds_it_to_the_mask() {
     let (mut harness, _) = app_with_invert();
     let layer = harness.state().session.selected_layer().unwrap();
+
     // A new mask becomes the selected target, so the wand adds to it
     harness.state_mut().run("mask.add.white", json!({"layer": layer.0}));
     harness.run_steps(3);
@@ -194,7 +197,7 @@ fn filter_picker_snapshots_and_frame_timings() {
     harness.event(egui::Event::Text("sharp".into()));
     harness.run_steps(3);
     harness.render().unwrap().save(output.join("filter-picker-search.png")).unwrap();
-    harness.get_by_label("Sharpen").click();
-    harness.run_steps(3);
+    let at = harness.get_by_label("Sharpen").rect().center();
+    click_at(&mut harness, at);
     harness.render().unwrap().save(output.join("filter-picker-selected.png")).unwrap();
 }

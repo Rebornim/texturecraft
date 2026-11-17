@@ -13,6 +13,7 @@ pub mod below;
 mod curvature_size_level;
 pub mod curvature_sizes;
 pub mod display;
+mod distance_envelope;
 mod effect_histogram;
 pub mod environment_sh;
 pub mod environment_sky;
@@ -35,6 +36,7 @@ pub mod store;
 pub mod thumb;
 pub mod tile_length;
 pub mod warp;
+mod warp_source_sample;
 mod warp_texel;
 
 pub use below::{BelowCache, StackKey};

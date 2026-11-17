@@ -26,7 +26,7 @@ pub struct SourceWarp {
 impl SourceWarp {
     /// The Warp filter as the library adds it
     pub const LIBRARY: SourceWarp = SourceWarp {
-        seed: 1,
+        seed: 0,
         mode: WarpMode::Warp,
         intensity: 0.1,
         divider: 10,
@@ -57,22 +57,21 @@ impl SourceWarp {
     }
 
     /// The directions (degrees) texels move along: none in Warp mode (the slope decides), the Angle, or Directions spread from it
-    pub fn angles(&self) -> Vec<f32> {
+    pub fn angles(&self) -> impl Iterator<Item = f32> + Clone + use<> {
         let angle = if self.angle.is_finite() { self.angle } else { 0.0 };
-        match self.mode {
-            WarpMode::Warp => Vec::new(),
-            WarpMode::Directional => vec![angle],
-            WarpMode::MultiDirectional => {
-                let count = if Self::DIRECTIONS.contains(&self.directions) { self.directions } else { 1 };
-                (0..count).map(|k| angle + 360.0 * f32::from(k) / f32::from(count)).collect()
-            }
-        }
+        let count = match self.mode {
+            WarpMode::Warp => 0,
+            WarpMode::Directional => 1,
+            WarpMode::MultiDirectional if Self::DIRECTIONS.contains(&self.directions) => self.directions,
+            WarpMode::MultiDirectional => 1,
+        };
+        (0..count).map(move |index| angle + 360.0 * f32::from(index) / f32::from(count))
     }
 
     /// How many texels around a texel the warp reads at `res` texels across a UV tile: its moves (chained ones add up) and where it reads its source
     pub fn reach(&self, res: u32) -> f32 {
         let chained = self.mode == WarpMode::MultiDirectional && self.blending == WarpBlending::Chain;
-        let moves = self.move_texels(res) * if chained { self.angles().len().max(1) as f32 } else { 1.0 };
+        let moves = self.move_texels(res) * if chained { self.angles().count().max(1) as f32 } else { 1.0 };
         if self.source.mode != WarpSourceMode::PreviousInput {
             return moves;
         }
@@ -105,11 +104,11 @@ mod tests {
     fn moves_follow_intensity_mode_and_directions() {
         let warp = SourceWarp::LIBRARY;
         assert!((warp.move_texels(2048) - 20.48).abs() < 1e-3, "0.1 ÷ 10 of the tile");
-        assert_eq!(warp.angles(), Vec::<f32>::new());
+        assert_eq!(warp.angles().count(), 0);
         let directional = SourceWarp { mode: WarpMode::Directional, angle: 30.0, ..warp };
-        assert_eq!(directional.angles(), vec![30.0]);
+        assert_eq!(directional.angles().collect::<Vec<_>>(), vec![30.0]);
         let multi = SourceWarp { mode: WarpMode::MultiDirectional, angle: 10.0, ..warp };
-        assert_eq!(multi.angles(), vec![10.0, 100.0, 190.0, 280.0]);
+        assert_eq!(multi.angles().collect::<Vec<_>>(), vec![10.0, 100.0, 190.0, 280.0]);
         let chained = SourceWarp { blending: WarpBlending::Chain, ..multi };
         assert!((chained.reach(2048) - 4.0 * 20.48).abs() < 1e-3, "four moves one after the other");
         let input = SourceWarp { source: WarpSource { mode: WarpSourceMode::PreviousInput, ..WarpSource::LIBRARY }, ..warp };
@@ -125,7 +124,7 @@ mod tests {
         let steep = warp.slope_move([1.0, 1.0], 2048);
         assert!((steep[0].hypot(steep[1]) - warp.move_texels(2048)).abs() < 1e-3, "a cliff moves the whole way, no further: {steep:?}");
         let hostile = SourceWarp { intensity: f32::NAN, angle: f32::INFINITY, directions: 9, divider: 0, mode: WarpMode::MultiDirectional, ..warp };
-        assert_eq!((hostile.move_texels(2048), hostile.angles()), (0.0, vec![0.0]));
+        assert_eq!((hostile.move_texels(2048), hostile.angles().collect::<Vec<_>>()), (0.0, vec![0.0]));
         assert_eq!(hostile.slope_move([f32::NAN, 1.0], 2048)[0], 0.0);
         assert_eq!(SourceWarp { intensity: 9.0, divider: 1, ..warp }.move_texels(1024), 1024.0);
     }

@@ -1,50 +1,22 @@
-//! The light and shadow filters in Properties: Glow's Used on a Mask, Mode and signed Width, Drop Shadow's Angle and Distance, the Baked Lighting cards and rows
+//! The light and shadow filters in Properties: Glow's Used on a Mask, Mode and signed Width, Drop Shadow's Angle and Distance, the Baked Lighting cards and rows (the Sun's angle names)
 
-use crate::filter_support::filter_of;
+use crate::filter_support::{TALL_WINDOW_HEIGHT, WINDOW_HEIGHT, along, app_with, click_at, drag, filter_of, topmost, undo, undo_depth};
 use egui::accesskit::Role;
-use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use serde_json::{Value, json};
-use texturecraft_engine::core::{Filter, LayerId, LightingOutput};
-use texturecraft_engine::{StackTarget, execute};
-use texturecraft_ui_egui::TextureCraftApp;
-
-/// The app with library filter `filter` in a fill layer's mask, selected so Properties shows it
-fn app_with(filter: &str) -> (Harness<'static, TextureCraftApp>, LayerId) {
-    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
-    let layer = execute(&mut session, "layer.add.fill", &Value::Null).unwrap();
-    execute(&mut session, "mask.add.white", &json!({"layer": layer["layer"]})).unwrap();
-    let effect = execute(&mut session, "effect.add.filter", &json!({"target": "mask", "filter": filter})).unwrap();
-    let effect = LayerId(effect["effect"].as_u64().unwrap());
-    execute(&mut session, "layer.select", &json!({"layer": layer["layer"]})).unwrap();
-    session.target = StackTarget::Effect(effect);
-
-    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).build_eframe(|cc| TextureCraftApp::new(cc, session));
-    harness.state_mut().ui.prefs.language = "en".into();
-    harness.run_steps(4);
-    (harness, effect)
-}
-
-/// A press and release of the primary button at `pos`, as the pointer does it
-fn click_at(harness: &mut Harness<'_, TextureCraftApp>, pos: egui::Pos2) {
-    let modifiers = egui::Modifiers::NONE;
-    harness.event(egui::Event::PointerMoved(pos));
-    harness.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers });
-    harness.run_steps(1);
-    harness.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers });
-    harness.run_steps(3);
-}
+use texturecraft_engine::core::{Filter, LightingOutput};
 
 /// Clicks on Used on a Mask, Precise and the left end of Width turn the glow into a precise inner glow laid as white on the mask
 #[test]
 fn glow_rows_set_used_on_a_mask_precise_and_an_inner_width() {
-    let (mut harness, effect) = app_with("glow");
+    let (mut harness, effect) = app_with("glow", "mask", WINDOW_HEIGHT);
+
     let toggle = harness.get_by_role_and_label(Role::CheckBox, "Used on a Mask").rect();
     click_at(&mut harness, toggle.center());
     let precise = harness.get_by_role_and_label(Role::RadioButton, "Precise").rect();
     click_at(&mut harness, precise.center());
     let width = harness.get_by_role_and_label(Role::Slider, "Width").rect();
-    click_at(&mut harness, egui::pos2(width.left() + 1.0, width.center().y));
+    click_at(&mut harness, along(width, 0.0));
+
     let Filter::HaloGlow { on_mask, precise, width, .. } = filter_of(&harness, effect) else { panic!("{:?}", filter_of(&harness, effect)) };
     assert!(on_mask && precise, "{on_mask} {precise}");
     assert!(width < -0.9, "inner glow: {width}");
@@ -53,40 +25,58 @@ fn glow_rows_set_used_on_a_mask_precise_and_an_inner_width() {
 /// Drop Shadow's Distance reaches both ways and its Angle row carries a dial
 #[test]
 fn drop_shadow_distance_goes_both_ways() {
-    let (mut harness, effect) = app_with("dropShadow");
+    let (mut harness, effect) = app_with("dropShadow", "mask", WINDOW_HEIGHT);
     let distance = harness.get_by_role_and_label(Role::Slider, "Distance").rect();
-    click_at(&mut harness, egui::pos2(distance.left() + 1.0, distance.center().y));
+
+    click_at(&mut harness, along(distance, 0.0));
+
     let Filter::DropShadow { distance, angle, .. } = filter_of(&harness, effect) else { panic!() };
     assert!(distance < -0.45, "towards the light: {distance}");
     assert_eq!(angle, 90.0);
     assert!(harness.query_all_by_label("Angle").next().is_some());
 }
 
-/// The app with lighting filter `filter` on a fill layer's content, selected so Properties shows it
-pub(crate) fn app_with_lighting(filter: &str) -> (Harness<'static, TextureCraftApp>, LayerId) {
-    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
-    let layer = execute(&mut session, "layer.add.fill", &Value::Null).unwrap();
-    let effect = execute(&mut session, "effect.add.filter", &json!({"target": "content", "filter": filter})).unwrap();
-    let effect = LayerId(effect["effect"].as_u64().unwrap());
-    execute(&mut session, "layer.select", &json!({"layer": layer["layer"]})).unwrap();
-    session.target = StackTarget::Effect(effect);
+/// Drop Shadow's Angle dial row: a drag turns it in one undo step, undo turns it back
+#[test]
+fn drop_shadow_angle_drag_is_one_undo_step() {
+    let (mut harness, effect) = app_with("dropShadow", "mask", WINDOW_HEIGHT);
+    let depth = undo_depth(&harness);
+    let angle = harness.get_by_role_and_label(Role::Slider, "Angle").rect();
 
-    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 2400.0)).build_eframe(|cc| TextureCraftApp::new(cc, session));
-    harness.state_mut().ui.prefs.language = "en".into();
-    harness.run_steps(4);
-    (harness, effect)
+    drag(&mut harness, along(angle, 0.5), along(angle, 0.0));
+
+    let Filter::DropShadow { angle, .. } = filter_of(&harness, effect) else { panic!("{:?}", filter_of(&harness, effect)) };
+    assert!(angle < 0.5, "turned to 0: {angle}");
+    assert_eq!(undo_depth(&harness), depth + 1, "one undo step for the drag");
+
+    undo(&mut harness);
+    assert!(matches!(filter_of(&harness, effect), Filter::DropShadow { angle, .. } if angle == 90.0), "{:?}", filter_of(&harness, effect));
+}
+
+/// The Sun card's angles read Sun Horizontal Angle and Sun Vertical Angle; Light 1 and 2 keep Horizontal Angle and Vertical Angle
+#[test]
+fn baked_lighting_stylized_sun_angles_take_the_sun_names() {
+    let (harness, _) = app_with("bakedLighting", "content", TALL_WINDOW_HEIGHT);
+
+    for label in ["Sun Horizontal Angle", "Sun Vertical Angle"] {
+        assert_eq!(harness.query_all_by_role_and_label(Role::Slider, label).count(), 1, "{label}");
+    }
+    for label in ["Horizontal Angle", "Vertical Angle"] {
+        assert_eq!(harness.query_all_by_role_and_label(Role::Slider, label).count(), 2, "{label}: Light 1 and 2");
+    }
 }
 
 /// Baked Lighting Stylized's cards edit their own settings: Sun Intensity's right end, Light 1's Intensity and Output's Specular only
 #[test]
 fn baked_lighting_stylized_cards_set_the_sun_a_light_and_the_output() {
-    let (mut harness, effect) = app_with_lighting("bakedLighting");
+    let (mut harness, effect) = app_with("bakedLighting", "content", TALL_WINDOW_HEIGHT);
+
     let sun = harness.get_by_role_and_label(Role::Slider, "Sun Intensity").rect();
-    click_at(&mut harness, egui::pos2(sun.right() - 1.0, sun.center().y));
+    click_at(&mut harness, along(sun, 1.0));
 
     // Light 1's card comes before Light 2's
-    let light_1 = harness.query_all_by_role_and_label(Role::Slider, "Intensity").map(|node| node.rect()).min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
-    click_at(&mut harness, egui::pos2(light_1.right() - 1.0, light_1.center().y));
+    let light_1 = topmost(&harness, Role::Slider, "Intensity");
+    click_at(&mut harness, along(light_1, 1.0));
     let output = harness.get_by_role_and_label(Role::ComboBox, "Diffuse + Specular").rect();
     click_at(&mut harness, output.center());
     let specular = harness.get_by_label("Specular only").rect();
@@ -102,13 +92,15 @@ fn baked_lighting_stylized_cards_set_the_sun_a_light_and_the_output() {
 /// Baked Lighting Environment's rows: Horizontal Rotation with its dial, a signed Exposure, and the stacked Specular Occlusion Intensity under its label
 #[test]
 fn baked_lighting_environment_rows_set_rotation_exposure_and_occlusion() {
-    let (mut harness, effect) = app_with_lighting("bakedLightingEnvironment");
+    let (mut harness, effect) = app_with("bakedLightingEnvironment", "content", TALL_WINDOW_HEIGHT);
+
     let rotation = harness.get_by_role_and_label(Role::Slider, "Horizontal Rotation").rect();
-    click_at(&mut harness, egui::pos2(rotation.center().x, rotation.center().y));
+    click_at(&mut harness, rotation.center());
     let exposure = harness.get_by_role_and_label(Role::Slider, "Exposure").rect();
-    click_at(&mut harness, egui::pos2(exposure.left() + 1.0, exposure.center().y));
+    click_at(&mut harness, along(exposure, 0.0));
     let specular = harness.get_by_role_and_label(Role::Slider, "Specular Occlusion Intensity").rect();
-    click_at(&mut harness, egui::pos2(specular.right() - 1.0, specular.center().y));
+    click_at(&mut harness, along(specular, 1.0));
+
     let Filter::EnvironmentLighting { horizontal, exposure, specular_occlusion, ambient_occlusion, .. } = filter_of(&harness, effect) else {
         panic!("{:?}", filter_of(&harness, effect))
     };

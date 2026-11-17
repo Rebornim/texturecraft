@@ -80,14 +80,14 @@ impl StylizedLighting {
         }
     }
 
-    /// The ambient light reaching a surface facing `nrm` from the sky, horizon and ground
-    pub fn ambient(&self, nrm: [f32; 3]) -> [f32; 3] {
-        let up = nrm[1].clamp(-1.0, 1.0);
+    /// The ambient light reaching a surface facing `normal` from the sky, horizon and ground
+    pub fn ambient(&self, normal: [f32; 3]) -> [f32; 3] {
+        let up = normal[1].clamp(-1.0, 1.0);
         if up >= 0.0 { mix3(self.horizon_color, self.sky_color, up) } else { mix3(self.horizon_color, self.ground_color, -up) }
     }
 
-    /// The lit base color of linear `albedo` facing `nrm` (world space, unit) with baked ambient occlusion `ao` and curvature `curvature` (0.5 flat), its material read from `channels` (straight values by [`Channel::index`]); the viewer looks straight at the surface
-    pub fn shade(&self, light: SunAndSky, albedo: [f32; 3], nrm: [f32; 3], [ao, curvature]: [f32; 2], channels: &[[f32; 3]]) -> [f32; 3] {
+    /// The lit base color of linear `albedo` facing `normal` (world space, unit) with baked ambient occlusion `ao` and curvature `curvature` (0.5 flat), its material read from `channels` (straight values by [`Channel::index`]); the viewer looks straight at the surface
+    pub fn shade(&self, light: SunAndSky, albedo: [f32; 3], normal: [f32; 3], [ao, curvature]: [f32; 2], channels: &[[f32; 3]]) -> [f32; 3] {
         let channel = |channel: Channel| channels.get(channel.index()).copied().unwrap_or_else(|| channel.default_value());
         let unit = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 };
         let ao = if ao.is_finite() { ao.clamp(0.0, 1.0) } else { 1.0 };
@@ -108,27 +108,27 @@ impl StylizedLighting {
         let roughness = roughness.max(MIN_ROUGHNESS);
 
         let lights = std::iter::once((light.sun.direction(), light.sun.intensity, self.sun_color))
-            .chain(self.lights.iter().map(|l| (l.direction(), l.intensity, l.color)));
-        let sky = self.ambient(nrm);
+            .chain(self.lights.iter().map(|extra| (extra.direction(), extra.intensity, extra.color)));
+        let sky = self.ambient(normal);
         let diffuse_ao = 1.0 + (ao - 1.0) * unit(light.diffuse_ao);
         let specular_ao = 1.0 + (ao - 1.0) * unit(self.specular_ao);
         let diffuse_cavity = 1.0 - cavity * unit(self.diffuse_cavity);
         let specular_cavity = 1.0 - cavity * unit(self.specular_cavity);
 
-        let mut diffuse = sky.map(|s| s * light.sky_intensity * diffuse_ao * diffuse_cavity);
+        let mut diffuse = sky.map(|sky_light| sky_light * light.sky_intensity * diffuse_ao * diffuse_cavity);
         let mut specular = [0.0f32; 3];
-        for (dir, intensity, color) in lights {
-            let facing = dot(nrm, dir);
+        for (direction, intensity, color) in lights {
+            let facing = dot(normal, direction);
             if facing <= 0.0 || intensity <= 0.0 {
                 continue;
             }
 
-            let half = normalize([nrm[0] + dir[0], nrm[1] + dir[1], nrm[2] + dir[2]]);
-            let nh = dot(nrm, half).max(0.0);
-            let d = ggx(nh, roughness) / 4.0 * facing * specular_cavity;
+            let half = normalize([normal[0] + direction[0], normal[1] + direction[1], normal[2] + direction[2]]);
+            let normal_dot_half = dot(normal, half).max(0.0);
+            let highlight = ggx(normal_dot_half, roughness) / 4.0 * facing * specular_cavity;
             for k in 0..3 {
                 diffuse[k] += color[k] * intensity * facing;
-                specular[k] += color[k] * intensity * d * schlick(f0[k], nh);
+                specular[k] += color[k] * intensity * highlight * schlick(f0[k], normal_dot_half);
             }
         }
         for k in 0..3 {
@@ -139,8 +139,8 @@ impl StylizedLighting {
         for k in 0..3 {
             let lit = if self.output.diffuse() { diffuse_albedo[k] * diffuse[k] } else { 0.0 };
             let shine = if self.output.specular() { specular[k] } else { 0.0 };
-            let v = unit(lit + shine);
-            out[k] = unit(v + (1.0 - v) * edge * unit(self.edges_intensity));
+            let shaded = unit(lit + shine);
+            out[k] = unit(shaded + (1.0 - shaded) * edge * unit(self.edges_intensity));
         }
         out
     }
@@ -152,11 +152,11 @@ fn fade_in(amount: f32, smoothness: f32) -> f32 {
     if smoothness <= MIN_SMOOTHNESS { if amount > 0.0 { 1.0 } else { 0.0 } } else { (amount / smoothness).min(1.0) }
 }
 
-/// The GGX distribution of microfacets facing `nh` at `roughness`
-fn ggx(nh: f32, roughness: f32) -> f32 {
-    let a2 = (roughness * roughness).powi(2);
-    let d = nh * nh * (a2 - 1.0) + 1.0;
-    a2 / (PI * d * d)
+/// The GGX distribution of microfacets facing `normal_dot_half` (the cosine between the normal and the half vector) at `roughness`
+fn ggx(normal_dot_half: f32, roughness: f32) -> f32 {
+    let alpha_squared = (roughness * roughness).powi(2);
+    let denominator = normal_dot_half * normal_dot_half * (alpha_squared - 1.0) + 1.0;
+    alpha_squared / (PI * denominator * denominator)
 }
 
 /// Schlick's Fresnel of reflectance `f0` at cosine `cos`
@@ -168,9 +168,12 @@ fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
+/// `v` at unit length; a vector too short to have a direction points up
 fn normalize(v: [f32; 3]) -> [f32; 3] {
-    let len = dot(v, v).sqrt();
-    if len > 1e-6 { v.map(|x| x / len) } else { [0.0, 1.0, 0.0] }
+    const MIN_LENGTH: f32 = 1e-6;
+
+    let length = dot(v, v).sqrt();
+    if length > MIN_LENGTH { v.map(|x| x / length) } else { [0.0, 1.0, 0.0] }
 }
 
 #[cfg(test)]

@@ -1285,7 +1285,8 @@ fn is_unit_divider(divider: &u16) -> bool {
     *divider == 1
 }
 
-/// The most steps a posterize keeps
+/// The fewest and most steps a posterize keeps
+pub const POSTERIZE_LEVELS_MIN: f32 = 2.0;
 pub const POSTERIZE_LEVELS_MAX: f32 = 64.0;
 
 /// Filter sizes are given in texels at 2K, as in the reference workflow
@@ -1293,7 +1294,7 @@ pub const SIZE_REFERENCE_RES: f32 = 2048.0;
 
 /// `x` (0..1) rounded to `levels` steps (2..64) from black to white
 pub fn posterize(x: f32, levels: f32) -> f32 {
-    let steps = (levels.clamp(2.0, POSTERIZE_LEVELS_MAX).round() - 1.0).max(1.0);
+    let steps = (levels.clamp(POSTERIZE_LEVELS_MIN, POSTERIZE_LEVELS_MAX).round() - 1.0).max(1.0);
     let x = if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 };
     (x * steps).round() / steps
 }
@@ -1447,6 +1448,13 @@ impl Filter {
     /// Texels at 2K a halo glow's Width or a drop shadow's Size of 1 reaches
     pub const HALO_REACH: f32 = 128.0;
 
+    /// A drop shadow is cast at most this share of a UV tile away, either way
+    pub const SHADOW_DISTANCE_MAX: f32 = 0.5;
+
+    /// The noise features per UV unit a noise-driven warp or slope blur reads, at least and at most
+    pub const NOISE_SCALE_MIN: f32 = 0.01;
+    pub const NOISE_SCALE_MAX: f32 = 1000.0;
+
     /// The colors a gradient's ramp uses: the first Color Quantity of them (all of them where it has none)
     pub fn ramp_colors(&self) -> &[[f32; 3]] {
         match self {
@@ -1499,6 +1507,12 @@ impl Filter {
     /// The filter applied to one value of a channel of `kind` (masks are scalars). None for
     /// neighbourhood filters and where it changes nothing (an empty gradient).
     pub fn point(&self, kind: ChannelKind, v: [f32; 3]) -> Option<[f32; 3]> {
+        // Histogram Scan's narrowest soft cut, so near full contrast stays a finite slope
+        const SCAN_MIN_WIDTH: f32 = 1e-3;
+
+        // Replace Color's least softness, so a hard edge divides by no zero
+        const REPLACE_MIN_SOFTNESS: f32 = 1e-6;
+
         let unit = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 };
         Some(match self {
             Filter::Invert => per_unit(kind, v, |x| 1.0 - x),
@@ -1509,13 +1523,13 @@ impl Filter {
                 _ => per_unit(kind, v, |x| hsl_adjust([x; 3], 0.0, 0.0, *lightness)[0]),
             },
             Filter::ContrastLuminosity { contrast, luminosity } => {
-                let k = 1.0 + contrast.clamp(-1.0, 1.0);
-                per_unit(kind, v, |x| unit((x - 0.5) * k + 0.5 + luminosity))
+                let slope = 1.0 + contrast.clamp(-1.0, 1.0);
+                per_unit(kind, v, |x| unit((x - 0.5) * slope + 0.5 + luminosity))
             }
             Filter::ColorCorrect { shadows, midtones, highlights } => {
                 // [contrast, luminosity, saturation] at the texel's lightness, weighted as color balance
-                let at = |l: f32| -> [f32; 3] {
-                    let (in_shadows, in_midtones, in_highlights) = tone_weights(unit(l));
+                let at = |lightness: f32| -> [f32; 3] {
+                    let (in_shadows, in_midtones, in_highlights) = tone_weights(unit(lightness));
                     std::array::from_fn(|k| shadows[k] * in_shadows + midtones[k] * in_midtones + highlights[k] * in_highlights)
                 };
                 let correct = |x: f32, [contrast, luminosity, _]: [f32; 3]| (x - 0.5) * (1.0 + contrast.clamp(-1.0, 1.0)) + 0.5 + luminosity.clamp(-1.0, 1.0);
@@ -1531,31 +1545,25 @@ impl Filter {
                 }
             }
             Filter::ColorBalance { shadows, midtones, highlights } => {
-                let shift = |k: usize, l: f32| {
-                    let (in_shadows, in_midtones, in_highlights) = tone_weights(unit(l));
-                    shadows.get(k).copied().unwrap_or(0.0) * in_shadows
-                        + midtones.get(k).copied().unwrap_or(0.0) * in_midtones
-                        + highlights.get(k).copied().unwrap_or(0.0) * in_highlights
+                let shift = |component: usize, lightness: f32| {
+                    let (in_shadows, in_midtones, in_highlights) = tone_weights(unit(lightness));
+                    shadows.get(component).copied().unwrap_or(0.0) * in_shadows
+                        + midtones.get(component).copied().unwrap_or(0.0) * in_midtones
+                        + highlights.get(component).copied().unwrap_or(0.0) * in_highlights
                 };
                 match kind {
                     ChannelKind::Color => {
-                        let l = lum(v);
-                        std::array::from_fn(|k| unit(v[k] + shift(k, l)))
+                        let lightness = lum(v);
+                        std::array::from_fn(|k| unit(v[k] + shift(k, lightness)))
                     }
                     _ => per_unit(kind, v, |x| unit(x + (shift(0, x) + shift(1, x) + shift(2, x)) / 3.0)),
                 }
             }
-            Filter::GradientMap { input, .. } => {
-                let gray = match kind {
-                    ChannelKind::Color => input.mode.gray(v),
-                    _ => v[0],
-                };
-                let mapped = self.ramp_at(input.shape(gray))?;
-                match kind {
-                    ChannelKind::Color => mapped,
-                    _ => per_unit(kind, v, |_| lum(mapped)),
-                }
-            }
+            Filter::GradientMap { input, .. } => match kind {
+                ChannelKind::Color => self.ramp_at(input.shape(input.mode.gray(v)))?,
+                // A height reads the ramp at its 0..1 place, as projects saved before did
+                _ => per_unit(kind, v, |x| self.ramp_at(input.shape(x)).map_or(x, lum)),
+            },
             Filter::GradientCurve { preset, invert, balance, contrast } => per_unit(kind, v, |x| preset.at(shape(x, *balance, *contrast, *invert))),
             Filter::GradientDynamic { color, .. } => match kind {
                 ChannelKind::Color => color.map(unit),
@@ -1572,22 +1580,23 @@ impl Filter {
             }
             Filter::InvertOff => v,
             Filter::Clamp { min, max } => {
-                let (lo, hi) = (min.min(*max), min.max(*max));
-                per_unit(kind, v, |x| x.max(lo).min(hi))
+                let (low, high) = (min.min(*max), min.max(*max));
+                per_unit(kind, v, |x| x.max(low).min(high))
             }
-            // Full contrast is a threshold: the position itself goes to white.
+
+            // Full contrast is a threshold: the position itself goes to white
             Filter::HistogramScan { position, contrast, invert_position } => {
                 let position = if *invert_position { 1.0 - position } else { *position };
                 if *contrast >= 1.0 {
                     per_unit(kind, v, |x| if x >= position { 1.0 } else { 0.0 })
                 } else {
-                    let width = (1.0 - contrast.clamp(0.0, 1.0)).max(1e-3);
+                    let width = (1.0 - contrast.clamp(0.0, 1.0)).max(SCAN_MIN_WIDTH);
                     per_unit(kind, v, |x| unit((x - position) / width + 0.5))
                 }
             }
             Filter::HistogramRange { range, position } => per_unit(kind, v, |x| unit(position + (x - position) * range)),
             Filter::HistogramShift { offset } => per_unit(kind, v, |x| {
-                // Wrapped by hand: `rem_euclid` would also send white (1 + 0) to black.
+                // Wrapped by hand: `rem_euclid` would also send white (1 + 0) to black
                 let y = unit(x) + offset.clamp(-1.0, 1.0);
                 unit(if y > 1.0 {
                     y - 1.0
@@ -1601,25 +1610,26 @@ impl Filter {
                 ChannelKind::Color => [lum(v); 3],
                 _ => v,
             },
-            // Read opaque here: the compositor passes the content's coverage (and a Custom Input) through `GrayscaleConversion::gray`
-            Filter::GrayscaleConversion(conversion) => [conversion.gray(v, 1.0); 3],
+            // Read opaque here: the compositor passes the content's coverage (and a Custom Input) through `GrayscaleConversion::channel_value`
+            Filter::GrayscaleConversion(conversion) => conversion.channel_value(kind, v, None, 1.0),
             Filter::NormalInvert => match kind {
                 ChannelKind::NormalMap => [v[0], 1.0 - v[1], v[2]],
                 _ => v,
             },
             Filter::ReplaceColor { from, to, tolerance, softness } => match kind {
                 ChannelKind::Color => {
-                    let d = ((v[0] - from[0]).powi(2) + (v[1] - from[1]).powi(2) + (v[2] - from[2]).powi(2)).sqrt() / 3f32.sqrt();
-                    let (t, s) = (tolerance.clamp(0.0, 1.0), softness.clamp(0.0, 1.0));
-                    let w = if d <= t {
+                    // How far the color is from `from`, 1 across the whole cube
+                    let distance = ((v[0] - from[0]).powi(2) + (v[1] - from[1]).powi(2) + (v[2] - from[2]).powi(2)).sqrt() / 3f32.sqrt();
+                    let (tolerance, softness) = (tolerance.clamp(0.0, 1.0), softness.clamp(0.0, 1.0));
+                    let weight = if distance <= tolerance {
                         1.0
-                    } else if d >= t + s {
+                    } else if distance >= tolerance + softness {
                         0.0
                     } else {
-                        let x = 1.0 - (d - t) / s.max(1e-6);
-                        x * x * (3.0 - 2.0 * x)
+                        let closeness = 1.0 - (distance - tolerance) / softness.max(REPLACE_MIN_SOFTNESS);
+                        closeness * closeness * (3.0 - 2.0 * closeness)
                     };
-                    std::array::from_fn(|k| unit(v[k] + (to[k] - from[k]) * w))
+                    std::array::from_fn(|k| unit(v[k] + (to[k] - from[k]) * weight))
                 }
                 _ => v,
             },
@@ -1721,16 +1731,18 @@ impl Filter {
         }
     }
 
-    /// Baked lighting's factor on the base color of a surface facing `nrm` (world space) with
+    /// Baked lighting's factor on the base color of a surface facing `normal` (world space) with
     /// ambient occlusion `ao` (None for other filters).
-    pub fn baked_light(&self, nrm: [f32; 3], ao: f32) -> Option<f32> {
+    pub fn baked_light(&self, normal: [f32; 3], ao: f32) -> Option<f32> {
         let Filter::BakedLighting { azimuth, elevation, light, ambient, occlusion, .. } = self else { return None };
-        let (sa, ca) = azimuth.to_radians().sin_cos();
-        let (se, ce) = elevation.to_radians().sin_cos();
-        let facing = (nrm[0] * ce * sa + nrm[1] * se + nrm[2] * ce * ca).max(0.0);
+        let (sin_azimuth, cos_azimuth) = azimuth.to_radians().sin_cos();
+        let (sin_elevation, cos_elevation) = elevation.to_radians().sin_cos();
+
+        // Multiplied in this order so saved projects light exactly as before
+        let facing = (normal[0] * cos_elevation * sin_azimuth + normal[1] * sin_elevation + normal[2] * cos_elevation * cos_azimuth).max(0.0);
         let ao = if ao.is_finite() { ao.clamp(0.0, 1.0) } else { 1.0 };
-        let k = ambient * (1.0 + (ao - 1.0) * occlusion.clamp(0.0, 1.0)) + light * facing;
-        Some(if k.is_finite() { k.max(0.0) } else { 1.0 })
+        let factor = ambient * (1.0 + (ao - 1.0) * occlusion.clamp(0.0, 1.0)) + light * facing;
+        Some(if factor.is_finite() { factor.max(0.0) } else { 1.0 })
     }
 
     /// The channels a new content effect of the filter starts with on (None: all of them)
@@ -2164,6 +2176,8 @@ mod tests {
         assert!(close(gm.point(c, [0.0; 3]).unwrap(), [1.0, 0.0, 0.0]));
         assert!(close(gm.point(c, [1.0; 3]).unwrap(), [0.0, 0.0, 1.0]));
         assert_eq!(Filter::even_gradient(vec![]).point(c, [0.3; 3]), None, "an empty gradient changes nothing");
+        let gray_ramp = Filter::even_gradient(vec![[0.0; 3], [1.0; 3]]);
+        assert!(close(gray_ramp.point(ChannelKind::Signed, [-0.6; 3]).unwrap(), [-0.6; 3]), "a height reads the ramp at its 0..1 place");
         assert!(close(Filter::Posterize { levels: 2.0, alpha: false }.point(c, [0.2, 0.6, 0.9]).unwrap(), [0.0, 1.0, 1.0]));
         assert!(close(Filter::Clamp { min: 0.8, max: 0.3 }.point(c, [0.1, 0.5, 0.9]).unwrap(), [0.3, 0.5, 0.8]), "swapped bounds never panic");
         let scan = |position, contrast| Filter::HistogramScan { position, contrast, invert_position: false }.point(c, [0.2, 0.5, 0.9]).unwrap();

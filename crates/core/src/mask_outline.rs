@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::OutlinePosition;
+use crate::bevel_smooth::CURVE_SHAPE_BASE;
 
 /// A band along the edge where values cross a threshold, outside, inside or on both sides of the shapes
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -27,7 +28,7 @@ impl MaskOutline {
 
     /// Whether `value` is inside the shapes
     pub fn inside(&self, value: f32) -> bool {
-        let threshold = if self.threshold.is_finite() { self.threshold.clamp(0.0, 1.0) } else { 1.0 };
+        let threshold = if self.threshold.is_finite() { self.threshold.clamp(0.0, 1.0) } else { Self::LIBRARY.threshold };
         value >= threshold - f32::EPSILON
     }
 
@@ -44,7 +45,7 @@ impl MaskOutline {
         }
 
         let curve = if self.curve.is_finite() { self.curve.clamp(-1.0, 1.0) } else { 0.0 };
-        (closeness / blur).min(1.0).powf(4f32.powf(-curve))
+        (closeness / blur).min(1.0).powf(CURVE_SHAPE_BASE.powf(-curve))
     }
 
     /// The result at a texel of value `value`: the band on black, or over the value

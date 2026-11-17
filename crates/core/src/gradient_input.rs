@@ -57,16 +57,30 @@ pub fn shape(x: f32, balance: f32, contrast: f32, invert: bool) -> f32 {
 pub fn ramp(colors: &[[f32; 3]], positions: &[f32], linear: bool, t: f32) -> Option<[f32; 3]> {
     let last = colors.len().checked_sub(1)?;
     let even = |index: usize| if last == 0 { 0.0 } else { index as f32 / last as f32 };
-    let mut stops: Vec<(f32, [f32; 3])> = colors
+    let stops = colors
         .iter()
         .enumerate()
-        .map(|(index, color)| (positions.get(index).copied().filter(|p| p.is_finite()).unwrap_or_else(|| even(index)).clamp(0.0, 1.0), *color))
-        .collect();
-    stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+        .map(|(index, color)| (positions.get(index).copied().filter(|p| p.is_finite()).unwrap_or_else(|| even(index)).clamp(0.0, 1.0), *color));
     let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.0 };
-    let after = stops.partition_point(|(position, _)| *position <= t);
-    let (Some(&(p0, c0)), Some(&(p1, c1))) = (stops.get(after.saturating_sub(1)), stops.get(after.min(last))) else {
-        return None;
+
+    // A stop's place and color
+    type Stop = (f32, [f32; 3]);
+
+    // The stops each side of `t` without sorting them, per texel: the last placed at or before it and the first placed after it
+    let (mut before, mut after): (Option<Stop>, Option<Stop>) = (None, None);
+    for (position, color) in stops {
+        if position <= t {
+            if before.is_none_or(|(so_far, _)| position.total_cmp(&so_far).is_ge()) {
+                before = Some((position, color));
+            }
+        } else if after.is_none_or(|(so_far, _)| position.total_cmp(&so_far).is_lt()) {
+            after = Some((position, color));
+        }
+    }
+    let ((p0, c0), (p1, c1)) = match (before, after) {
+        (Some(before), Some(after)) => (before, after),
+        (Some(only), None) | (None, Some(only)) => (only, only),
+        (None, None) => return None,
     };
 
     let share = if p1 > p0 { ((t - p0) / (p1 - p0)).clamp(0.0, 1.0) } else { 0.0 };
@@ -87,4 +101,25 @@ pub(crate) fn linear_to_srgb(v: f32) -> f32 {
 pub(crate) fn srgb_to_linear(v: f32) -> f32 {
     let v = v.clamp(0.0, 1.0);
     if v <= 0.040_45 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_ramp_reads_its_stops_in_place_order_whatever_their_list_order() {
+        let (black, gray, white) = ([0.0; 3], [0.5; 3], [1.0; 3]);
+        let colors = [white, black, gray];
+        let positions = [1.0, 0.0, 0.5];
+
+        let quarter = ramp(&colors, &positions, true, 0.25);
+        let ends = (ramp(&colors, &positions, true, 0.0), ramp(&colors, &positions, true, 1.0));
+        let past_one_stop = ramp(&[gray, white], &[0.5, 0.5], true, 0.25);
+
+        assert_eq!(quarter, Some([0.25; 3]));
+        assert_eq!(ends, (Some(black), Some(white)));
+        assert_eq!(past_one_stop, Some(gray), "before the first stop, its color");
+        assert_eq!(ramp(&[], &[], true, 0.5), None);
+    }
 }

@@ -103,6 +103,20 @@ fn height_adjust_flips_scales_and_raises() {
     assert_eq!(filter_of(&s, effect), Filter::HeightAdjust { invert: true, offset: -0.2, multiply: 10.0 }, "Multiply caps at 10");
 }
 
+/// Height Adjust's Offset reaches -10..10 as the reference's does
+#[test]
+fn height_adjust_offset_reaches_ten_either_way() {
+    let mut s = fill(0.25);
+    let effect = add_filter(&mut s, json!({"filter": "heightAdjust"}));
+
+    execute(&mut s, "effect.set", &json!({"effect": effect.0, "offset": 5.0})).unwrap();
+    let kept = filter_of(&s, effect);
+    execute(&mut s, "effect.set", &json!({"effect": effect.0, "offset": -50.0})).unwrap();
+
+    assert_eq!(kept, Filter::HeightAdjust { invert: false, offset: 5.0, multiply: 1.0 }, "an offset of 5 is kept");
+    assert_eq!(filter_of(&s, effect), Filter::HeightAdjust { invert: false, offset: -10.0, multiply: 1.0 }, "Offset stops at -10");
+}
+
 /// Histogram Scan's Invert Position reads the position from the other end; old saves have none
 #[test]
 fn histogram_scan_inverts_its_position() {
@@ -245,4 +259,27 @@ fn grayscale_conversion_takes_its_settings_and_keeps_saved_grayscales() {
     let inspect = execute(&mut s, "project.inspect", &json!({})).unwrap().to_string();
     assert!(inspect.contains("Grayscale Conversion"));
     assert_eq!(serde_json::to_value(Filter::Grayscale).unwrap(), json!("Grayscale"), "saved as before");
+}
+
+/// Grayscale Conversion turns only colors gray: a signed height keeps its sign and a normal map is left alone
+#[test]
+fn grayscale_conversion_keeps_heights_signed_and_normals_as_they_are() {
+    let mut s = session();
+    let fill = execute(&mut s, "layer.add.fill", &json!({"color": [0.8, 0.2, 0.1]})).unwrap()["layer"].as_u64().unwrap();
+    execute(&mut s, "layer.fill.set", &json!({"layer": fill, "channel": "height", "value": -0.6})).unwrap();
+    execute(&mut s, "layer.fill.set", &json!({"layer": fill, "channel": "normal", "value": [0.7, 0.5, 0.95]})).unwrap();
+    s.update();
+    let height_before = s.caches[0].composite.value(Channel::Height, TEXEL.0, TEXEL.1)[0];
+    let normal_before = s.caches[0].composite.value(Channel::Normal, TEXEL.0, TEXEL.1);
+
+    add_filter(&mut s, json!({"filter": "grayscale"}));
+    s.update();
+    let height = s.caches[0].composite.value(Channel::Height, TEXEL.0, TEXEL.1)[0];
+    let normal = s.caches[0].composite.value(Channel::Normal, TEXEL.0, TEXEL.1);
+
+    assert!(height_before < -0.5, "the fill's height is negative: {height_before}");
+    assert!((height - height_before).abs() < 0.02, "a signed height keeps its sign: {height} from {height_before}");
+    assert!(normal.iter().zip(normal_before).all(|(after, before)| close(*after, before)), "the normal is untouched: {normal:?}");
+    let gray = base_color(&mut s);
+    assert!(close(gray[0], gray[2]), "the color turns gray: {gray:?}");
 }

@@ -9,7 +9,7 @@ use texturecraft_formats::{ExportOptions, UsdTextureInput};
 use crate::commands::bad;
 use crate::{EngineError, Result, Session};
 
-/// One export: a step per texture set, then the USD asset and the shader parameters when asked for
+/// One export: a step per texture set (with its MaterialX material when asked for), then the USD asset and the shader parameters when asked for
 pub struct TextureExport {
     dir: PathBuf,
     jobs: VecDeque<(Vec<usize>, ExportOptions)>,
@@ -30,6 +30,7 @@ impl TextureExport {
     pub fn start(s: &Session, p: &Value, dir: &str, cmd: &str) -> Result<TextureExport> {
         let jobs = crate::export_settings_cmds::export_jobs(s, p, cmd)?;
         let shader_parameters = crate::export_settings_cmds::writes_shader_parameters(s, p, cmd)?;
+        let materialx = crate::export_settings_cmds::writes_materialx(s, p, cmd)?;
         let mut warnings = Vec::new();
         let usd_inputs = if crate::export_settings_cmds::writes_usd(s, p, cmd)? { Some(s.usd_asset_inputs(&jobs, &mut warnings)?) } else { None };
         std::fs::create_dir_all(dir).map_err(|e| bad(cmd, format!("cannot create {dir}: {e}")))?;
@@ -39,7 +40,7 @@ impl TextureExport {
             steps: jobs.len(),
             exported_sets: jobs.iter().flat_map(|(sets, _)| sets.iter().copied()).collect(),
             jobs: jobs.into(),
-            materialx: p.get("materialX").and_then(Value::as_bool).unwrap_or(false),
+            materialx,
             usd_inputs,
             shader_parameters,
             materialx_stems: HashSet::new(),
@@ -70,7 +71,11 @@ impl TextureExport {
         let mut warnings: Vec<String> = files.iter().flat_map(|f| f.warnings.iter().cloned()).collect();
         let mut written = texturecraft_formats::write_files(&files, &self.dir).map_err(|e| EngineError::Other(e.to_string()))?;
         if self.materialx {
-            written.extend(crate::file_cmds::write_materialx(s, &sets, &options, &self.dir, &mut self.materialx_stems, &mut warnings)?);
+            for document in s.job_materialx_documents(&sets, &options, &mut self.materialx_stems, &mut warnings)? {
+                let path = self.dir.join(&document.file);
+                texturecraft_formats::write_atomic(&path, document.text.as_bytes()).map_err(|e| EngineError::Other(e.to_string()))?;
+                written.push(path);
+            }
         }
 
         self.add_warnings(warnings);

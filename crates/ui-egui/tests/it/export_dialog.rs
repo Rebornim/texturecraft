@@ -359,6 +359,20 @@ fn global_settings_ticks_the_usd_asset() {
     assert!(draft(&mut harness).settings.usd);
 }
 
+#[test]
+fn global_settings_ticks_the_materialx_material_and_lists_its_files() {
+    let mut harness = harness(2, LAPTOP);
+    draft(&mut harness).settings.parameters.preset = "OpenPBR (separate maps)".into();
+    harness.get_by_label("Export MaterialX material").click();
+    harness.run_steps(2);
+    assert!(draft(&mut harness).settings.materialx);
+    harness.get_by_label("List of exports").click();
+    harness.run_steps(3);
+    let is_material = |text: Option<String>| text.is_some_and(|text| text.ends_with(".mtlx"));
+    let materials = harness.get_all_by_role(Role::Label).filter(|node| is_material(node.accesskit_node().label()) || is_material(node.value())).count();
+    assert_eq!(materials, 2, "one material per texture set");
+}
+
 fn dialog_rect(harness: &Harness<'static, TextureCraftApp>) -> egui::Rect {
     harness.get_all_by_role(Role::Window).find(|node| node.accesskit_node().label().as_deref() == Some("Export textures")).unwrap().rect()
 }
@@ -529,7 +543,7 @@ fn the_window_sizes_by_its_corner_and_keeps_that_size_on_every_tab() {
 fn the_settings_tab_opens_at_most_a_quarter_empty() {
     let harness = harness(2, egui::vec2(1600.0, 960.0));
     let top = harness.get_by_label("General export parameters").rect().top();
-    let last = harness.get_by_label("Export shader parameters").rect().bottom();
+    let last = harness.get_by_label("Export MaterialX material").rect().bottom();
     let bottom = harness.get_all_by_label("Reset all").find(|node| node.accesskit_node().role() == Role::Button).unwrap().rect().top();
     let empty = (bottom - last) / (bottom - top);
     assert!(empty <= MOST_EMPTY_SETTINGS, "{:.0}% of the Settings tab is empty", empty * 100.0);

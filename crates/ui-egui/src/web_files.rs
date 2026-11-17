@@ -317,11 +317,24 @@ mod web {
         let with_usd = texturecraft_engine::export_settings_cmds::writes_usd(&app.session, &none, "file.exportTextures").map_err(|e| e.to_string())?;
         let mut warnings = Vec::new();
         let usd_inputs = if with_usd { app.session.usd_asset_inputs(&jobs, &mut warnings).map_err(|e| e.to_string())? } else { Vec::new() };
+        let with_materialx =
+            texturecraft_engine::export_settings_cmds::writes_materialx(&app.session, &none, "file.exportTextures").map_err(|e| e.to_string())?;
+        let mut materials = Vec::new();
+        if with_materialx {
+            materials = app.session.materialx_documents(&jobs, &mut warnings).map_err(|e| e.to_string())?;
+        }
         app.session.log.extend(warnings);
         let mut files = Vec::new();
         for (sets, options) in jobs {
             files.extend(app.session.export_files(&sets, &options).map_err(|e| e.to_string())?);
         }
+        files.extend(materials.into_iter().map(|document| ExportedFile {
+            name: document.file,
+            bytes: document.text.into_bytes(),
+            width: 0,
+            height: 0,
+            warnings: Vec::new(),
+        }));
         if with_usd {
             let layer = texturecraft_engine::formats::usd_asset(&app.session.mesh, &app.session.doc.project.name, &usd_inputs).map_err(|e| e.to_string())?;
             let name = format!("{}.usda", sanitize_file_stem(&app.session.doc.project.name));

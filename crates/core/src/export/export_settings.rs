@@ -19,4 +19,7 @@ pub struct ExportSettings {
     /// Also write the shader's parameters and the texture sets using it, as JSON
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub shader_parameters: bool,
+    /// Also write a MaterialX OpenPBR material per texture set reading its exported textures
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub materialx: bool,
 }

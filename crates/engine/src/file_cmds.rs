@@ -3,8 +3,8 @@
 
 use serde_json::{Value, json};
 #[cfg(not(target_arch = "wasm32"))]
-use texturecraft_core::{NormalFormat, PROJECT_EXT};
-use texturecraft_core::{Project, TextureSet};
+use texturecraft_core::PROJECT_EXT;
+use texturecraft_core::{NormalFormat, Project, TextureSet};
 use texturecraft_formats::{ExportInput, ExportOptions, ExportedFile, FileFormat, MapPreview, Padding, ProjectFile};
 use texturecraft_geom::{Mesh, primitives};
 
@@ -630,62 +630,80 @@ fn export_textures(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "files": written.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(), "warnings": warnings }))
 }
 
-/// One `<mesh>_<set>.mtlx` per texture set beside the textures `opts` wrote; sets without a known map or with a name in `stems` (the export's taken names) are skipped with a warning
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn write_materialx(
-    s: &Session,
-    sets: &[usize],
-    opts: &ExportOptions,
-    dir: &std::path::Path,
-    stems: &mut std::collections::HashSet<String>,
-    warnings: &mut Vec<String>,
-) -> Result<Vec<std::path::PathBuf>> {
-    use texturecraft_formats::materialx::{self, Texture};
-    let mesh_name = stem_of(s.doc.project.mesh.trim_start_matches("builtin:"));
-    if opts.color_space == Some(texturecraft_texel::ColorSpace::Aces2065) {
-        warnings.push("MaterialX: version 1.39 has no ACES2065-1 colour space; the colour maps are tagged lin_ap0_scene, its name in later versions, which older readers may not know".into());
+/// One texture set's OpenPBR material: its `.mtlx` file (written beside the textures) and the document's text
+pub struct MaterialxDocument {
+    pub ts: usize,
+    pub file: String,
+    pub text: String,
+}
+
+impl Session {
+    /// The `.mtlx` documents of every job, as one export writes them (later sets never take an earlier set's name)
+    pub fn materialx_documents(&self, jobs: &[(Vec<usize>, ExportOptions)], warnings: &mut Vec<String>) -> Result<Vec<MaterialxDocument>> {
+        let mut stems = std::collections::HashSet::new();
+        let mut documents = Vec::new();
+        for (sets, opts) in jobs {
+            documents.extend(self.job_materialx_documents(sets, opts, &mut stems, warnings)?);
+        }
+
+        Ok(documents)
     }
-    let mut out = Vec::new();
-    let mut normal_map_written = false;
-    for &ts in sets {
-        let set = s.doc.project.texture_set(ts).map_err(|e| EngineError::Other(e.to_string()))?;
-        let mut textures: Vec<Texture> = Vec::new();
-        for f in texturecraft_formats::list_outputs(&s.doc.project, ts, &mesh_name, opts).map_err(fe)? {
-            if f.format == texturecraft_formats::export::FileFormat::Psd {
-                warnings.push(format!("MaterialX can't read PSD files, so texture set \"{}\"'s .mtlx leaves out its PSD", set.name));
+
+    /// One `<mesh>_<set>.mtlx` per texture set reading the textures `opts` writes; sets without an OpenPBR map or with a name in `stems` (the export's taken names) are left out with a warning
+    pub(crate) fn job_materialx_documents(
+        &self,
+        sets: &[usize],
+        opts: &ExportOptions,
+        stems: &mut std::collections::HashSet<String>,
+        warnings: &mut Vec<String>,
+    ) -> Result<Vec<MaterialxDocument>> {
+        use texturecraft_formats::materialx::{self, Texture};
+        let mesh_name = stem_of(self.doc.project.mesh.trim_start_matches("builtin:"));
+        if opts.color_space == Some(texturecraft_texel::ColorSpace::Aces2065) {
+            warnings.push("MaterialX: version 1.39 has no ACES2065-1 colour space; the colour maps are tagged lin_ap0_scene, its name in later versions, which older readers may not know".into());
+        }
+        let mut documents = Vec::new();
+        let mut normal_map_written = false;
+        for &ts in sets {
+            let set = self.doc.project.texture_set(ts).map_err(|e| EngineError::Other(e.to_string()))?;
+            let mut textures: Vec<Texture> = Vec::new();
+            for f in texturecraft_formats::list_outputs(&self.doc.project, ts, &mesh_name, opts).map_err(fe)? {
+                if f.format == FileFormat::Psd {
+                    warnings.push(format!("MaterialX can't read PSD files, so texture set \"{}\"'s .mtlx leaves out its PSD", set.name));
+                    continue;
+                }
+                let Some(input) = opts.preset.maps.get(f.map).and_then(|m| materialx::input_of_template(&m.file)) else { continue };
+                // The first tile stands for all of them: its number is written as <UDIM>
+                let file = f.udim_name.clone().unwrap_or_else(|| f.name.clone());
+                let colorspace = materialx::colorspace_name(opts.space_for(f.format));
+                if !textures.iter().any(|t| t.input == input) {
+                    textures.push(Texture { input: input.to_owned(), file, colorspace });
+                }
+            }
+            normal_map_written |= textures.iter().any(|t| t.input == "geometry_normal");
+            if textures.is_empty() {
+                warnings.push(format!("MaterialX: texture set \"{}\" has no OpenPBR maps; use the \"OpenPBR (separate maps)\" preset", set.name));
                 continue;
             }
-            let Some(input) = opts.preset.maps.get(f.map).and_then(|m| materialx::input_of_template(&m.file)) else { continue };
-            // The first tile stands for all of them: its number is written as <UDIM>
-            let file = f.udim_name.clone().unwrap_or_else(|| f.name.clone());
-            let colorspace = materialx::colorspace_name(opts.space_for(f.format));
-            if !textures.iter().any(|t| t.input == input) {
-                textures.push(Texture { input: input.to_owned(), file, colorspace });
+            let stem = texturecraft_formats::export::sanitize_file_stem(&format!("{mesh_name}_{}", set.name));
+            // Case-insensitive: Windows and macOS file systems are
+            if !stems.insert(stem.to_ascii_lowercase()) {
+                warnings.push(format!(
+                    "MaterialX: texture set \"{}\" exports as \"{stem}\" like an earlier set, so its .mtlx was not written; rename one of them",
+                    set.name
+                ));
+                continue;
             }
+            let text = materialx::write(&format!("{mesh_name}_{}", set.name), &textures, None);
+            documents.push(MaterialxDocument { ts, file: format!("{stem}.mtlx"), text });
         }
-        normal_map_written |= textures.iter().any(|t| t.input == "geometry_normal");
-        if textures.is_empty() {
-            warnings.push(format!("MaterialX: texture set \"{}\" has no OpenPBR maps; use the \"OpenPBR (separate maps)\" preset", set.name));
-            continue;
+        // The normalmap node only exists in a material that has a normal map
+        if normal_map_written && opts.normal_format == Some(NormalFormat::DirectX) {
+            warnings.push("MaterialX: the normalmap node reads OpenGL (+Y) normals; this export wrote DirectX normals, so flip the green channel".into());
         }
-        let stem = texturecraft_formats::export::sanitize_file_stem(&format!("{mesh_name}_{}", set.name));
-        // Case-insensitive: Windows and macOS file systems are
-        if !stems.insert(stem.to_ascii_lowercase()) {
-            warnings.push(format!(
-                "MaterialX: texture set \"{}\" exports as \"{stem}\" like an earlier set, so its .mtlx was not written; rename one of them",
-                set.name
-            ));
-            continue;
-        }
-        let path = dir.join(format!("{stem}.mtlx"));
-        texturecraft_formats::write_atomic(&path, materialx::write(&format!("{mesh_name}_{}", set.name), &textures, None).as_bytes()).map_err(fe)?;
-        out.push(path);
+
+        Ok(documents)
     }
-    // The normalmap node only exists in a material that has a normal map
-    if normal_map_written && opts.normal_format == Some(NormalFormat::DirectX) {
-        warnings.push("MaterialX: the normalmap node reads OpenGL (+Y) normals; this export wrote DirectX normals, so flip the green channel".into());
-    }
-    Ok(out)
 }
 
 #[cfg(not(target_arch = "wasm32"))]

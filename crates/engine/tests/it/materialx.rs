@@ -183,3 +183,19 @@ fn a_psd_is_left_out_of_the_material_and_said_so() {
     assert!(!all.iter().any(|f| f.ends_with(".mtlx")), "no material reads a PSD: {all:?}");
     assert!(r["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("MaterialX can't read PSD")), "{r}");
 }
+
+#[test]
+fn the_saved_settings_write_the_material_unless_the_call_says_no() {
+    let mut s = Session::new_project("t", primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+    let settings = json!({"parameters": {"preset": OPENPBR}, "materialx": true});
+    execute(&mut s, "export.settings.set", &json!({"settings": settings})).unwrap();
+    let saved = execute(&mut s, "export.settings.get", &json!({})).unwrap();
+    assert_eq!(saved["settings"]["materialx"], true, "{saved}");
+
+    let dir = temp("saved_on");
+    let r = execute(&mut s, "file.exportTextures", &json!({"dir": dir.display().to_string()})).unwrap();
+    assert_eq!(files(&r).iter().filter(|f| f.ends_with(".mtlx")).count(), s.set_count(), "{r}");
+    let dir = temp("saved_off");
+    let r = execute(&mut s, "file.exportTextures", &json!({"dir": dir.display().to_string(), "materialX": false})).unwrap();
+    assert!(!files(&r).iter().any(|f| f.ends_with(".mtlx")), "{r}");
+}

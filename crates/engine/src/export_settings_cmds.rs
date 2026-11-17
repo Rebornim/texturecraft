@@ -20,7 +20,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Get the export settings",
             [],
             None,
-            "{} → {saved: bool, settings: {dir, parameters: {preset, file_type: {format (empty: the template's own), bit_depth, dithering}, size (0: each texture set's own), padding, dilation}, normal_format, color_space, usd?: bool, shader_parameters?: bool}, sets: [{name, export: {skip?, overrides?, maps?}}]}",
+            "{} → {saved: bool, settings: {dir, parameters: {preset, file_type: {format (empty: the template's own), bit_depth, dithering}, size (0: each texture set's own), padding, dilation}, normal_format, color_space, usd?: bool, shader_parameters?: bool, materialx?: bool}, sets: [{name, export: {skip?, overrides?, maps?}}]}",
             always,
             get
         ),
@@ -90,6 +90,11 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
 /// Whether an export call also writes the shader parameters: `p`'s `shaderParameters`, else the settings' (none with explicit options)
 pub fn writes_shader_parameters(s: &Session, p: &Value, cmd: &str) -> Result<bool> {
     writes_extra(s, p, cmd, "shaderParameters", |settings| settings.shader_parameters)
+}
+
+/// Whether an export call also writes a MaterialX material per texture set: `p`'s `materialX`, else the settings' (none with explicit options)
+pub fn writes_materialx(s: &Session, p: &Value, cmd: &str) -> Result<bool> {
+    writes_extra(s, p, cmd, "materialX", |settings| settings.materialx)
 }
 
 /// Whether an export call also writes a USD asset: `p`'s `usd`, else the settings' (none with explicit options)

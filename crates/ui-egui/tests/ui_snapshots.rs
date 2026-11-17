@@ -634,4 +634,15 @@ fn export_dialog_snapshots() {
     harness.state_mut().ui.export.preset = "PBR Metallic Roughness (folders or PSD groups)".into();
     harness.run_steps(60);
     save(&mut harness, &output_dir, "export-templates-psd");
+
+    // MaterialX: its tick on Settings and a material per texture set in List of exports
+    let settings = &mut harness.state_mut().ui.export.settings.as_mut().unwrap().settings;
+    settings.parameters.preset = "OpenPBR (separate maps)".into();
+    settings.parameters.file_type = Default::default();
+    settings.materialx = true;
+    for (tab, name) in [(ExportTab::Settings, "export-materialx-settings"), (ExportTab::ListOfExports, "export-materialx-list")] {
+        harness.state_mut().ui.export.tab = tab;
+        harness.run_steps(60);
+        save(&mut harness, &output_dir, name);
+    }
 }

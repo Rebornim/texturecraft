@@ -47,6 +47,8 @@ const LIST_SIZE_WIDTH: f32 = 200.0;
 const LIST_FORMAT_WIDTH: f32 = 60.0;
 const LIST_BITS_WIDTH: f32 = 70.0;
 const LIST_INDENT: f32 = 40.0;
+/// The format column of a MaterialX material in List of exports
+const MATERIALX_EXTENSION: &str = "mtlx";
 /// The List of exports console's width, and its show / hide button's
 const CONSOLE_WIDTH: f32 = 330.0;
 const CONSOLE_TOGGLE_WIDTH: f32 = 36.0;
@@ -418,6 +420,7 @@ fn list_of_exports(app: &mut TextureCraftApp, ui: &mut Ui) {
     let names: Vec<String> = app.session.doc.project.texture_sets.iter().map(|set| set.name.clone()).collect();
     let params = plan_params(app);
     let plan = texturecraft_engine::execute(&mut app.session, "export.plan", &params);
+    let materials = materialx_files(app, &params);
     let console_open = !app.ui.export.console_closed;
     let tree_width = ui.available_width() - if console_open { CONSOLE_WIDTH } else { 0.0 } - CONSOLE_TOGGLE_WIDTH;
 
@@ -459,6 +462,12 @@ fn list_of_exports(app: &mut TextureCraftApp, ui: &mut Ui) {
                             cell(ui, LIST_BITS_WIDTH, RichText::new(trf("{n} bits", &[("n", &file["bitDepth"].as_u64().unwrap_or(0))])).color(tk.text_dim));
                             ui.end_row();
                         }
+                        for (_, file) in materials.iter().filter(|(material_set, _)| *material_set == ts) {
+                            cell(ui, name_width, RichText::new(file));
+                            cell(ui, LIST_SIZE_WIDTH, RichText::new(""));
+                            cell(ui, LIST_FORMAT_WIDTH, RichText::new(MATERIALX_EXTENSION).color(tk.text_dim));
+                            ui.end_row();
+                        }
                     });
                 });
             }
@@ -481,6 +490,23 @@ fn list_of_exports(app: &mut TextureCraftApp, ui: &mut Ui) {
             });
         });
     }
+}
+
+/// The texture set and file name of each MaterialX material the export writes (none when it writes none)
+fn materialx_files(app: &TextureCraftApp, params: &serde_json::Value) -> Vec<(usize, String)> {
+    const CMD: &str = "export.plan";
+    let session = &app.session;
+    if !texturecraft_engine::export_settings_cmds::writes_materialx(session, params, CMD).unwrap_or(false) {
+        return Vec::new();
+    }
+    let Ok(jobs) = texturecraft_engine::export_settings_cmds::export_jobs(session, params, CMD) else { return Vec::new() };
+
+    // The warnings reach the console when the export runs
+    let mut warnings = Vec::new();
+    session
+        .materialx_documents(&jobs, &mut warnings)
+        .map(|documents| documents.into_iter().map(|document| (document.ts, document.file)).collect())
+        .unwrap_or_default()
 }
 
 /// export.plan parameters for the draft (the project's saved settings when the window is closed)
@@ -621,6 +647,7 @@ fn global_settings(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[String], 
     ui.add_space(SETTINGS_CHECKBOX_GAP);
     ui.checkbox(&mut settings.usd, tr("Export USD asset"));
     ui.checkbox(&mut settings.shader_parameters, tr("Export shader parameters"));
+    ui.checkbox(&mut settings.materialx, tr("Export MaterialX material"));
 
     #[cfg(not(target_arch = "wasm32"))]
     if pick_dir {

@@ -97,6 +97,21 @@ fn gradient_places_quantity_and_input_transformation() {
     assert_eq!(input.mode, GrayscaleMode::Max);
 }
 
+/// A new gradient given its colors alone ramps evenly through every one of them
+#[test]
+fn a_gradient_given_colors_alone_ramps_evenly_through_all_of_them() {
+    let mut s = session();
+
+    let two = filtered(&mut s, [0.5; 3], json!({"filter": "gradientMap", "colors": [[0, 0, 0], [1, 1, 1]]}));
+    let mid = center(&mut s, Channel::BaseColor).0[0];
+    assert!(near(mid, 0.5), "black to white reads mid gray halfway: {mid}");
+
+    execute(&mut s, "effect.remove", &json!({"effect": two.0})).unwrap();
+    let five = json!({"filter": "gradientMap", "target": "content", "colors": [[0, 0, 0], [0.25, 0.25, 0.25], [0.5, 0.5, 0.5], [0.75, 0.75, 0.75], [1, 1, 1]]});
+    let five = LayerId(execute(&mut s, "effect.add.filter", &five).unwrap()["effect"].as_u64().unwrap());
+    assert_eq!(filter_of(&s, five).ramp_colors().len(), 5, "every color is used");
+}
+
 /// Display Gradient (Debug) shows the ramp left to right across the texture
 #[test]
 fn display_gradient_shows_the_ramp_across_the_texture() {

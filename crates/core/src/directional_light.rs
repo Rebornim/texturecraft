@@ -25,7 +25,7 @@ impl DirectionalLight {
 
 /// The unit direction toward a light at `azimuth` around +Y (degrees from +Z) and `elevation` above the horizon (degrees)
 pub fn toward(azimuth: f32, elevation: f32) -> [f32; 3] {
-    let (sa, ca) = azimuth.to_radians().sin_cos();
-    let (se, ce) = elevation.to_radians().sin_cos();
-    [ce * sa, se, ce * ca]
+    let (sin_azimuth, cos_azimuth) = azimuth.to_radians().sin_cos();
+    let (sin_elevation, cos_elevation) = elevation.to_radians().sin_cos();
+    [cos_elevation * sin_azimuth, sin_elevation, cos_elevation * cos_azimuth]
 }

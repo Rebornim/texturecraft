@@ -25,6 +25,9 @@ pub struct BevelSmooth {
     pub wrap: bool,
 }
 
+/// A Curve Shape of 1 raises a ramp to the power ¼ and −1 to the power 4, 0 leaves it straight (Bevel Smooth's and Mask Outline's)
+pub(crate) const CURVE_SHAPE_BASE: f32 = 4.0;
+
 impl BevelSmooth {
     /// The Bevel Smooth filter as the library adds it
     pub const LIBRARY: BevelSmooth = BevelSmooth {
@@ -46,7 +49,7 @@ impl BevelSmooth {
 
     /// Whether `value` is inside the shapes
     pub fn inside(&self, value: f32) -> bool {
-        let threshold = if self.threshold.is_finite() { self.threshold.clamp(0.0, 1.0) } else { 0.5 };
+        let threshold = if self.threshold.is_finite() { self.threshold.clamp(0.0, 1.0) } else { Self::LIBRARY.threshold };
         value >= threshold - f32::EPSILON
     }
 
@@ -67,7 +70,7 @@ impl BevelSmooth {
         let along = if reach > 0.0 && edge.is_finite() { (edge / reach).clamp(0.0, 1.0) } else { 1.0 };
         let offset = if self.curve_offset.is_finite() { self.curve_offset.clamp(-1.0, 1.0) } else { 0.0 };
         let shape = if self.curve_shape.is_finite() { self.curve_shape.clamp(-1.0, 1.0) } else { 0.0 };
-        let curved = (along + offset).clamp(0.0, 1.0).powf(4f32.powf(-shape));
+        let curved = (along + offset).clamp(0.0, 1.0).powf(CURVE_SHAPE_BASE.powf(-shape));
         match (self.direction, inside) {
             (BevelDirection::Out, true) => 1.0,
             (BevelDirection::Out, false) => 1.0 - curved,

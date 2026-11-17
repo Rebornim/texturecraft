@@ -6,9 +6,9 @@ use serde_json::{Value, json};
 use texturecraft_core::{
     AnisotropicKuwahara, Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, ColorMatch, ConversionMode, CurvePreset, DirectionalDistance,
     EffectKind, Fill, Filter, GradientInput, GrayscaleConversion, GrayscaleMode, HeightToNormal, HighpassSpace, Levels, MaskOutline, Mirror, MirrorCorner,
-    MirrorMode, OutlinePosition, POSTERIZE_LEVELS_MAX, PbrValidate, Procedural, ProceduralKind, Projection, SlopeBlending, Source, SourceColorMode,
-    SourceSlopeBlur, SourceWarp, StylizedLighting, TargetColorMode, ThresholdMode, TileTransform, ValidationMode, WarpBlending, WarpMode, WarpSource,
-    WarpSourceMode,
+    MirrorMode, OutlinePosition, POSTERIZE_LEVELS_MAX, POSTERIZE_LEVELS_MIN, PbrValidate, Procedural, ProceduralKind, Projection, SlopeBlending, Source,
+    SourceColorMode, SourceSlopeBlur, SourceWarp, StylizedLighting, TargetColorMode, ThresholdMode, TileTransform, ValidationMode, WarpBlending, WarpMode,
+    WarpSource, WarpSourceMode,
 };
 
 use crate::commands::{CommandSpec, always, bad, boolp, color_of, color_param, f32p, has_layer, strp, u64p};
@@ -106,7 +106,7 @@ fn norm(s: &str) -> String {
 /// The library filter `id` (case and separators ignored; labels work too). Directional Warp's former id and labels find Warp, whose mode it is now
 pub fn find(id: &str) -> Option<&'static FilterDef> {
     let wanted = if is_directional_warp(id) { norm("warp") } else { norm(id) };
-    FILTERS.iter().find(|f| norm(f.id) == wanted || norm(f.label) == wanted)
+    FILTERS.iter().find(|def| norm(def.id) == wanted || norm(def.label) == wanted)
 }
 
 /// Whether `id` names Directional Warp, a filter of its own before the warp modes (`warpDirectional`, "Warp Directional", "Directional Warp")
@@ -219,14 +219,23 @@ const TEXELS_SLIDER_MAX: f32 = 128.0;
 /// Slider ends where a larger value can still be typed
 const SHARPEN_SLIDER_MAX: f32 = 4.0;
 const GLOW_AMOUNT_SLIDER_MAX: f32 = 5.0;
+pub const SKY_INTENSITY_SLIDER_MAX: f32 = 2.0;
 const EDGE_WIDTH_SLIDER_MAX: f32 = 64.0;
 const MOSAIC_PIXELS_SLIDER_MAX: f32 = 128.0;
+
+/// The largest values that can be typed past those slider ends
+const SHARPEN_AMOUNT_MAX: f32 = 10.0;
+const GLOW_AMOUNT_MAX: f32 = 10.0;
+const SKY_INTENSITY_MAX: f32 = 10.0;
 
 /// The largest mosaic cell, in pixels
 const MOSAIC_SIZE_MAX: f32 = 2048.0;
 
 /// Height Adjust's largest Multiply
 const HEIGHT_MULTIPLY_MAX: f32 = 10.0;
+
+/// Height Adjust's Offset reaches this far either way, as the reference's does
+const HEIGHT_OFFSET_MAX: f32 = 10.0;
 
 /// Distance Bevel's largest Smoothing
 pub const DISTANCE_BEVEL_SMOOTHING_MAX: f32 = Bevel::SMOOTHING_MAX;
@@ -236,6 +245,12 @@ pub const SMOOTH_DISTANCE_MAX: f32 = 0.3;
 
 /// Bevel Smooth's largest Smoothing
 pub const BEVEL_SMOOTHING_MAX: f32 = BevelSmooth::SMOOTHING_MAX;
+
+/// The most colors `colors` takes at once
+const GRADIENT_COLORS_GIVEN_MAX: usize = 16;
+
+/// The fewest colors a gradient's Color Quantity uses
+pub const GRADIENT_QUANTITY_MIN: u8 = 2;
 
 /// Stylized lighting's Sun Intensity, Exposure (stops either way) and Height Intensity ends
 pub const SUN_INTENSITY_MAX: f32 = 10.0;
@@ -252,12 +267,15 @@ fn library_gradient() -> Filter {
     Filter::GradientMap { colors, positions, quantity: Some(quantity), input: GradientInput::LIBRARY, linear: true, debug: false }
 }
 
-/// The effect for library filter `id` with its defaults, then the parameters in `p`.
+/// The effect for library filter `id` with its defaults, then the parameters in `p`
 pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
-    let cmd = "effect.add.filter";
-    let d = find(id).ok_or_else(|| bad(cmd, format!("unknown filter `{id}` (see filter.list)")))?;
-    let mut f = match d.id {
-        "warp" if is_directional_warp(id) => Filter::SourceWarp(SourceWarp { mode: WarpMode::Directional, ..SourceWarp::LIBRARY }),
+    build_for("effect.add.filter", id, p)
+}
+
+/// The effect for library filter `id` with its defaults, then the parameters in `p`; errors name `cmd` (`effect.set` swaps a filter with it)
+pub(crate) fn build_for(cmd: &str, id: &str, p: &Value) -> Result<EffectKind> {
+    let def = find(id).ok_or_else(|| bad(cmd, format!("unknown filter `{id}` (see filter.list)")))?;
+    let mut filter = match def.id {
         "invert" => Filter::Invert,
         "threshold" => Filter::Threshold { level: 0.01, mode: ThresholdMode::Greater },
         "blur" => Filter::Blur { radius: 0.3 * Filter::BLUR_INTENSITY, wrap: false },
@@ -315,14 +333,24 @@ pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
             specular_occlusion: 0.0,
         },
         "levels" => {
-            let mut l = Levels::default();
-            crate::mask_cmds::levels_from(cmd, p, &mut l)?;
-            return Ok(EffectKind::Levels(l));
+            let mut levels = Levels::default();
+            crate::mask_cmds::levels_from(cmd, p, &mut levels)?;
+            return Ok(EffectKind::Levels(levels));
         }
         finish => return mat_finish(finish).map(EffectKind::Material).ok_or_else(|| bad(cmd, format!("unknown filter `{id}`"))),
     };
-    apply(p, &mut f, cmd)?;
-    Ok(EffectKind::Filter(f))
+
+    // A new gradient given its colors without places ramps evenly through them, or through the `quantity` given (`effect.set` keeps the places the color picker sends)
+    if let Filter::GradientMap { positions, quantity, .. } = &mut filter
+        && p.get("colors").is_some()
+        && p.get("positions").is_none()
+    {
+        positions.clear();
+        *quantity = None;
+    }
+
+    apply_named(Some(id), p, &mut filter, cmd)?;
+    Ok(EffectKind::Filter(filter))
 }
 
 /// A material finish: procedural roughness and height (tri-planar, so it is seamless).
@@ -343,8 +371,8 @@ fn mat_finish(id: &str) -> Option<Fill> {
 }
 
 /// Scalar parameters of a filter for editors: (param key, label, value, min, max); colors (color balance, gradient map) and the HSL hue have their own editors
-pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f32)> {
-    match f {
+pub fn scalar_params(filter: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f32)> {
+    match filter {
         Filter::Blur { radius, .. } => vec![("intensity", "Blur Intensity", *radius / Filter::BLUR_INTENSITY, 0.0, BLUR_INTENSITY_SLIDER_MAX)],
         Filter::Sharpen { amount } => vec![("amount", "Sharpen Intensity", *amount, 0.0, SHARPEN_SLIDER_MAX)],
         Filter::Threshold { level, .. } => vec![("level", "Threshold", *level, 0.0, 1.0)],
@@ -354,11 +382,11 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         Filter::ContrastLuminosity { contrast, luminosity } => {
             vec![("contrast", "Contrast", *contrast, -1.0, 1.0), ("luminosity", "Luminosity", *luminosity, -1.0, 1.0)]
         }
-        Filter::Posterize { levels, .. } => vec![("levels", "Colors Amount", *levels, 2.0, POSTERIZE_LEVELS_MAX)],
+        Filter::Posterize { levels, .. } => vec![("levels", "Colors Amount", *levels, POSTERIZE_LEVELS_MIN, POSTERIZE_LEVELS_MAX)],
         Filter::Clamp { min, max } => vec![("min", "Min", *min, 0.0, 1.0), ("max", "Max", *max, 0.0, 1.0)],
         Filter::Smoothstep { min, max } => vec![("min", "Minimum", *min, 0.0, 1.0), ("max", "Maximum", *max, 0.0, 1.0)],
         Filter::HeightAdjust { offset, multiply, .. } => {
-            vec![("offset", "Offset", *offset, -1.0, 1.0), ("multiply", "Multiply", *multiply, 0.0, HEIGHT_MULTIPLY_MAX)]
+            vec![("offset", "Offset", *offset, -HEIGHT_OFFSET_MAX, HEIGHT_OFFSET_MAX), ("multiply", "Multiply", *multiply, 0.0, HEIGHT_MULTIPLY_MAX)]
         }
         Filter::HistogramScan { position, contrast, .. } => vec![("position", "Position", *position, 0.0, 1.0), ("contrast", "Contrast", *contrast, 0.0, 1.0)],
         Filter::HistogramRange { range, position } => vec![("range", "Range", *range, 0.0, 1.0), ("position", "Position", *position, 0.0, 1.0)],
@@ -385,17 +413,17 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         Filter::AnisotropicKuwahara(kuwahara) => vec![
             ("radius", "Radius", kuwahara.radius, 0.0, AnisotropicKuwahara::MAX_RADIUS),
             ("smoothness", "Smoothness", kuwahara.smoothness, 0.0, 1.0),
-            ("sharpness", "Sharpness", kuwahara.sharpness, 0.25, 1.0),
+            ("sharpness", "Sharpness", kuwahara.sharpness, AnisotropicKuwahara::LIBRARY.sharpness, 1.0),
             ("tensorSmoothness", "Tensor Smoothness", kuwahara.tensor_smoothness, 0.0, 1.0),
             ("anisotropy", "Anisotropy", kuwahara.anisotropy, 0.0, 1.0),
             ("angle", "Anisotropy Angle", kuwahara.angle, 0.0, 360.0),
         ],
         Filter::Grayscale => conversion_params(&GrayscaleConversion::of_luminance()),
-        Filter::HeightToNormal(filter) if filter.world_units => vec![
-            ("surfaceSize", "Surface Size (cm)", filter.surface_size, 1.0, HeightToNormal::MAX_SURFACE_SIZE),
-            ("heightDepth", "Height Depth (cm)", filter.height_depth, 0.0, HeightToNormal::MAX_HEIGHT_DEPTH),
+        Filter::HeightToNormal(converter) if converter.world_units => vec![
+            ("surfaceSize", "Surface Size (cm)", converter.surface_size, HeightToNormal::MIN_SURFACE_SIZE, HeightToNormal::MAX_SURFACE_SIZE),
+            ("heightDepth", "Height Depth (cm)", converter.height_depth, 0.0, HeightToNormal::MAX_HEIGHT_DEPTH),
         ],
-        Filter::HeightToNormal(filter) => vec![("normalIntensity", "Normal Intensity", filter.intensity, 0.0, HeightToNormal::MAX_INTENSITY)],
+        Filter::HeightToNormal(converter) => vec![("normalIntensity", "Normal Intensity", converter.intensity, 0.0, HeightToNormal::MAX_INTENSITY)],
         Filter::ColorMatch(matcher) => {
             vec![("hue", "Hue", matcher.hue, 0.0, 360.0), ("chroma", "Chroma", matcher.chroma, 0.0, 1.0), ("luma", "Luma", matcher.luma, 0.0, 1.0)]
         }
@@ -405,7 +433,7 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
                 ("intensity", "Intensity", *intensity, 0.0, TEXELS_SLIDER_MAX),
                 ("angle", "Angle", *angle, 0.0, 360.0),
                 ("scale", "Source Tiling", *scale, NOISE_TILING_MIN, NOISE_TILING_MAX),
-                ("seed", "Seed", *seed as f32, 0.0, 999.0),
+                ("seed", "Seed", *seed as f32, 0.0, SEED_SLIDER_MAX),
             ]
         }
         Filter::Bevel { width, .. } => vec![("width", "Distance", *width, 0.0, TEXELS_SLIDER_MAX)],
@@ -469,7 +497,7 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
         }
         Filter::DropShadow { angle, distance, size, spread, opacity, .. } => vec![
             ("angle", "Angle", *angle, 0.0, 360.0),
-            ("distance", "Distance", *distance, -0.5, 0.5),
+            ("distance", "Distance", *distance, -Filter::SHADOW_DISTANCE_MAX, Filter::SHADOW_DISTANCE_MAX),
             ("size", "Size", *size, 0.0, 1.0),
             ("spread", "Spread", *spread, 0.0, 1.0),
             ("opacity", "Opacity", *opacity, 0.0, 1.0),
@@ -478,7 +506,7 @@ pub fn scalar_params(f: &Filter) -> Vec<(&'static str, &'static str, f32, f32, f
             ("light", "Sun Intensity", *light, 0.0, SUN_INTENSITY_MAX),
             ("azimuth", "Horizontal Angle", *azimuth, 0.0, 360.0),
             ("elevation", "Vertical Angle", *elevation, 0.0, 360.0),
-            ("ambient", "Sky Intensity", *ambient, 0.0, 2.0),
+            ("ambient", "Sky Intensity", *ambient, 0.0, SKY_INTENSITY_SLIDER_MAX),
             ("occlusion", "Diffuse AO", *occlusion, 0.0, 1.0),
         ],
         Filter::EnvironmentLighting { horizontal, vertical, exposure, height_intensity, ambient_occlusion, specular_occlusion } => vec![
@@ -542,12 +570,13 @@ fn apply_conversion(p: &Value, conversion: &mut GrayscaleConversion, cmd: &str) 
         conversion.invert = boolp(p, "invert").ok_or_else(|| bad(cmd, "`invert` must be true or false"))?;
     }
     conversion.mode = choice(p, "mode", &ConversionMode::ALL, ConversionMode::id, cmd)?.unwrap_or(conversion.mode);
+
     let [red, green, blue, alpha] = &mut conversion.weights;
     for (key, slot) in
         [("balance", &mut conversion.balance), ("contrast", &mut conversion.contrast), ("red", red), ("green", green), ("blue", blue), ("alpha", alpha)]
     {
-        if let Some(v) = f32p(p, key) {
-            *slot = v.clamp(0.0, 1.0);
+        if let Some(value) = f32p(p, key) {
+            *slot = value.clamp(0.0, 1.0);
         }
     }
     Ok(())
@@ -575,21 +604,23 @@ fn set_quantity(colors: &mut Vec<[f32; 3]>, positions: &mut Vec<f32>, quantity: 
 fn apply_mirror(p: &Value, mirror: &mut Mirror, cmd: &str) -> Result<()> {
     if p.get("mode").is_some() {
         let id = strp(p, "mode").unwrap_or_default();
-        mirror.mode = MirrorMode::ALL.into_iter().find(|m| m.id() == id).ok_or_else(|| bad(cmd, "`mode` must be axisX, axisY or corner"))?;
+        mirror.mode = MirrorMode::ALL.into_iter().find(|mode| mode.id() == id).ok_or_else(|| bad(cmd, "`mode` must be axisX, axisY or corner"))?;
     }
     if p.get("cornerType").is_some() {
         let id = strp(p, "cornerType").unwrap_or_default();
         mirror.corner = MirrorCorner::ALL
             .into_iter()
-            .find(|c| c.id() == id)
+            .find(|corner| corner.id() == id)
             .ok_or_else(|| bad(cmd, "`cornerType` must be topLeft, topRight, bottomLeft or bottomRight"))?;
     }
+
     let [offset_x, offset_y] = &mut mirror.offset;
     for (key, slot) in [("axisXOffset", offset_x), ("axisYOffset", offset_y)] {
-        if let Some(v) = f32p(p, key) {
-            *slot = v.clamp(0.0, 1.0);
+        if let Some(offset) = f32p(p, key) {
+            *slot = offset.clamp(0.0, 1.0);
         }
     }
+
     let [invert_x, invert_y] = &mut mirror.invert;
     for (key, slot) in [("displayDebug", &mut mirror.debug), ("invertAxisX", invert_x), ("invertAxisY", invert_y)] {
         if p.get(key).is_some() {
@@ -613,16 +644,29 @@ fn choice<T: Copy>(p: &Value, key: &str, all: &[T], id: fn(T) -> &'static str, c
     })
 }
 
-/// Set the parameters of `f` given in `p` (clamped to their ranges); `effect.set` uses it too
-pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
-    let set = |slot: &mut f32, key: &str, lo: f32, hi: f32| {
-        if let Some(v) = f32p(p, key) {
-            *slot = v.clamp(lo, hi);
+/// [`apply`] for the filter id `named`, if one is given: Directional Warp's former id turns a Warp to Directional mode unless `warpMode` is given
+pub(crate) fn apply_named(named: Option<&str>, p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
+    apply(p, filter, cmd)?;
+
+    if let Filter::SourceWarp(warp) = filter
+        && named.is_some_and(is_directional_warp)
+        && p.get("warpMode").is_none()
+    {
+        warp.mode = WarpMode::Directional;
+    }
+    Ok(())
+}
+
+/// Set the parameters of `filter` given in `p` (clamped to their ranges); `effect.set` uses it too
+pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
+    let set = |slot: &mut f32, key: &str, low: f32, high: f32| {
+        if let Some(value) = f32p(p, key) {
+            *slot = value.clamp(low, high);
         }
     };
     let seed = |slot: &mut u32| {
-        if let Some(v) = u64p(p, "seed") {
-            *slot = u32::try_from(v).unwrap_or(u32::MAX);
+        if let Some(value) = u64p(p, "seed") {
+            *slot = u32::try_from(value).unwrap_or(u32::MAX);
         }
     };
     let divider = |slot: &mut u16| -> Result<()> {
@@ -653,21 +697,22 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
     };
     let shade = |slot: &mut [f32; 3]| -> Result<()> {
         if p.get("color").is_some() {
-            let v = color_param(cmd, p, "color")?.ok_or_else(|| bad(cmd, "`color` must be a color ([r, g, b] linear or \"#rrggbb\")"))?;
-            *slot = v.map(|x| x.clamp(0.0, 1.0));
+            let rgb = color_param(cmd, p, "color")?.ok_or_else(|| bad(cmd, "`color` must be a color ([r, g, b] linear or \"#rrggbb\")"))?;
+            *slot = rgb.map(|x| x.clamp(0.0, 1.0));
         }
         Ok(())
     };
     let angle = |slot: &mut f32| {
-        if let Some(v) = f32p(p, "angle") {
-            *slot = v.rem_euclid(360.0);
+        if let Some(degrees) = f32p(p, "angle") {
+            *slot = degrees.rem_euclid(360.0);
         }
     };
-    match f {
+
+    match filter {
         Filter::Invert | Filter::InvertOff => {
             if p.get("invert").is_some() {
                 let on = boolp(p, "invert").ok_or_else(|| bad(cmd, "`invert` must be true or false"))?;
-                *f = if on { Filter::Invert } else { Filter::InvertOff };
+                *filter = if on { Filter::Invert } else { Filter::InvertOff };
             }
         }
         Filter::NormalInvert | Filter::Empty => {}
@@ -676,7 +721,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             if CONVERSION_KEYS.iter().any(|key| p.get(key).is_some()) {
                 let mut conversion = GrayscaleConversion::of_luminance();
                 apply_conversion(p, &mut conversion, cmd)?;
-                *f = Filter::GrayscaleConversion(conversion);
+                *filter = Filter::GrayscaleConversion(conversion);
             }
         }
         Filter::GrayscaleConversion(conversion) => apply_conversion(p, conversion, cmd)?,
@@ -690,7 +735,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             }
             set(&mut kuwahara.radius, "radius", 0.0, AnisotropicKuwahara::MAX_RADIUS);
             set(&mut kuwahara.smoothness, "smoothness", 0.0, 1.0);
-            set(&mut kuwahara.sharpness, "sharpness", 0.25, 1.0);
+            set(&mut kuwahara.sharpness, "sharpness", AnisotropicKuwahara::LIBRARY.sharpness, 1.0);
             set(&mut kuwahara.tensor_smoothness, "tensorSmoothness", 0.0, 1.0);
             set(&mut kuwahara.anisotropy, "anisotropy", 0.0, 1.0);
             angle(&mut kuwahara.angle);
@@ -707,20 +752,20 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
                 }
             }
         }
-        Filter::HeightToNormal(filter) => {
-            switch(&mut filter.overwrite, "overwriteExistingNormal")?;
-            switch(&mut filter.world_units, "useWorldUnits")?;
-            set(&mut filter.surface_size, "surfaceSize", 1.0, HeightToNormal::MAX_SURFACE_SIZE);
-            set(&mut filter.height_depth, "heightDepth", 0.0, HeightToNormal::MAX_HEIGHT_DEPTH);
-            set(&mut filter.intensity, "normalIntensity", 0.0, HeightToNormal::MAX_INTENSITY);
+        Filter::HeightToNormal(converter) => {
+            switch(&mut converter.overwrite, "overwriteExistingNormal")?;
+            switch(&mut converter.world_units, "useWorldUnits")?;
+            set(&mut converter.surface_size, "surfaceSize", HeightToNormal::MIN_SURFACE_SIZE, HeightToNormal::MAX_SURFACE_SIZE);
+            set(&mut converter.height_depth, "heightDepth", 0.0, HeightToNormal::MAX_HEIGHT_DEPTH);
+            set(&mut converter.intensity, "normalIntensity", 0.0, HeightToNormal::MAX_INTENSITY);
         }
         Filter::ColorMatch(matcher) => {
             matcher.source_mode = choice(p, "sourceColorMode", &SourceColorMode::ALL, SourceColorMode::id, cmd)?.unwrap_or(matcher.source_mode);
             matcher.target_mode = choice(p, "targetColorMode", &TargetColorMode::ALL, TargetColorMode::id, cmd)?.unwrap_or(matcher.target_mode);
             for (key, slot) in [("sourceColor", &mut matcher.source_color), ("targetColor", &mut matcher.target_color)] {
                 if p.get(key).is_some() {
-                    let v = color_param(cmd, p, key)?.ok_or_else(|| bad(cmd, format!("`{key}` must be a color ([r, g, b] linear or \"#rrggbb\")")))?;
-                    *slot = v.map(|x| x.clamp(0.0, 1.0));
+                    let rgb = color_param(cmd, p, key)?.ok_or_else(|| bad(cmd, format!("`{key}` must be a color ([r, g, b] linear or \"#rrggbb\")")))?;
+                    *slot = rgb.map(|x| x.clamp(0.0, 1.0));
                 }
             }
             switch(&mut matcher.custom_variation, "customColorVariation")?;
@@ -734,7 +779,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
                 let id = strp(p, "mode").unwrap_or_default();
                 *mode = ThresholdMode::ALL
                     .into_iter()
-                    .find(|m| m.id() == id)
+                    .find(|threshold_mode| threshold_mode.id() == id)
                     .ok_or_else(|| bad(cmd, "`mode` must be greater, greaterOrEqual, lower or lowerOrEqual"))?;
             }
         }
@@ -808,12 +853,12 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             set(&mut outline.blur, "blur", 0.0, 1.0);
             set(&mut outline.curve, "curveShape", -1.0, 1.0);
         }
-        Filter::Blur { radius, wrap: w } => {
+        Filter::Blur { radius, wrap: wraps } => {
             set(radius, "radius", 0.0, TEXELS_MAX);
             blur_intensity(radius);
-            wrap(w)?;
+            wrap(wraps)?;
         }
-        Filter::Sharpen { amount } => set(amount, "amount", 0.0, 10.0),
+        Filter::Sharpen { amount } => set(amount, "amount", 0.0, SHARPEN_AMOUNT_MAX),
         Filter::Hsl { hue, saturation, lightness, perceptive } => {
             if let Some(mode) = p.get("mode") {
                 *perceptive = match mode.as_str() {
@@ -833,44 +878,50 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
         Filter::ColorCorrect { shadows, midtones, highlights } => {
             for (key, slot) in [("shadows", shadows), ("midtones", midtones), ("highlights", highlights)] {
                 if p.get(key).is_some() {
-                    let v = p.get(key).and_then(color_of).ok_or_else(|| bad(cmd, format!("`{key}` must be [contrast, luminosity, saturation]")))?;
-                    *slot = [v[0].clamp(-1.0, 1.0), v[1].clamp(-1.0, 1.0), v[2].clamp(0.0, 1.0)];
+                    let [contrast, luminosity, saturation] =
+                        p.get(key).and_then(color_of).ok_or_else(|| bad(cmd, format!("`{key}` must be [contrast, luminosity, saturation]")))?;
+                    *slot = [contrast.clamp(-1.0, 1.0), luminosity.clamp(-1.0, 1.0), saturation.clamp(0.0, 1.0)];
                 }
             }
         }
         Filter::ColorBalance { shadows, midtones, highlights } => {
             for (key, slot) in [("shadows", shadows), ("midtones", midtones), ("highlights", highlights)] {
-                if let Some(val) = p.get(key).filter(|v| !v.is_null()) {
-                    let v = color_of(val).ok_or_else(|| bad(cmd, format!("`{key}` must be [r, g, b] offsets in -1..1")))?;
-                    *slot = v.map(|x| x.clamp(-1.0, 1.0));
+                if let Some(given) = p.get(key).filter(|given| !given.is_null()) {
+                    let offsets = color_of(given).ok_or_else(|| bad(cmd, format!("`{key}` must be [r, g, b] offsets in -1..1")))?;
+                    *slot = offsets.map(|x| x.clamp(-1.0, 1.0));
                 }
             }
         }
         Filter::GradientMap { colors, positions, quantity, input, linear, debug } => {
             if let Some(list) = p.get("colors") {
-                let parsed: Option<Vec<[f32; 3]>> = list.as_array().and_then(|a| a.iter().map(|c| color_of(c).map(|v| v.map(|x| x.clamp(0.0, 1.0)))).collect());
+                let parsed: Option<Vec<[f32; 3]>> =
+                    list.as_array().and_then(|given| given.iter().map(|color| color_of(color).map(|rgb| rgb.map(|x| x.clamp(0.0, 1.0)))).collect());
                 match parsed {
-                    Some(c) if (1..=16).contains(&c.len()) => *colors = c,
-                    _ => return Err(bad(cmd, "`colors` must be 1 to 16 colors ([r, g, b] linear or \"#rrggbb\" sRGB)")),
+                    Some(parsed) if (1..=GRADIENT_COLORS_GIVEN_MAX).contains(&parsed.len()) => *colors = parsed,
+                    _ => return Err(bad(cmd, format!("`colors` must be 1 to {GRADIENT_COLORS_GIVEN_MAX} colors ([r, g, b] linear or \"#rrggbb\" sRGB)"))),
                 }
             }
             if let Some(list) = p.get("positions") {
-                let parsed: Option<Vec<f32>> = list.as_array().and_then(|a| a.iter().map(|v| v.as_f64().map(|v| (v as f32).clamp(0.0, 1.0))).collect());
+                let parsed: Option<Vec<f32>> =
+                    list.as_array().and_then(|given| given.iter().map(|place| place.as_f64().map(|place| (place as f32).clamp(0.0, 1.0))).collect());
                 match parsed {
                     Some(parsed) if parsed.len() <= colors.len() => *positions = parsed,
                     _ => return Err(bad(cmd, "`positions` must be numbers in 0..1, at most one per color")),
                 }
             }
             if p.get("quantity").is_some() {
-                let wanted = u64p(p, "quantity").and_then(|q| u8::try_from(q).ok()).filter(|q| (2..=Filter::MAX_GRADIENT_COLORS).contains(q));
-                let wanted = wanted.ok_or_else(|| bad(cmd, "`quantity` must be a whole number from 2 to 10"))?;
+                let wanted = u64p(p, "quantity")
+                    .and_then(|count| u8::try_from(count).ok())
+                    .filter(|count| (GRADIENT_QUANTITY_MIN..=Filter::MAX_GRADIENT_COLORS).contains(count));
+                let wanted = wanted
+                    .ok_or_else(|| bad(cmd, format!("`quantity` must be a whole number from {GRADIENT_QUANTITY_MIN} to {}", Filter::MAX_GRADIENT_COLORS)))?;
                 set_quantity(colors, positions, quantity, wanted);
             }
             if let Some(mode) = p.get("grayscaleMode") {
                 let id = mode.as_str().unwrap_or_default();
                 input.mode = GrayscaleMode::ALL
                     .into_iter()
-                    .find(|m| m.id() == id)
+                    .find(|gray_mode| gray_mode.id() == id)
                     .ok_or_else(|| bad(cmd, "`grayscaleMode` must be desaturation, luma, average, max or min"))?;
             }
             set(&mut input.blur, "blur", 0.0, BLUR_INTENSITY_SLIDER_MAX);
@@ -885,7 +936,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
         Filter::GradientCurve { preset, invert, balance, contrast } => {
             if p.get("preset").is_some() {
                 let id = strp(p, "preset").unwrap_or_default();
-                *preset = CurvePreset::ALL.into_iter().find(|c| c.id() == id).ok_or_else(|| bad(cmd, format!("unknown `preset` `{id}`")))?;
+                *preset = CurvePreset::ALL.into_iter().find(|curve| curve.id() == id).ok_or_else(|| bad(cmd, format!("unknown `preset` `{id}`")))?;
             }
             if p.get("invert").is_some() {
                 *invert = boolp(p, "invert").ok_or_else(|| bad(cmd, "`invert` must be true or false"))?;
@@ -905,7 +956,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             shade(color)?;
         }
         Filter::Posterize { levels, alpha } => {
-            set(levels, "levels", 2.0, POSTERIZE_LEVELS_MAX);
+            set(levels, "levels", POSTERIZE_LEVELS_MIN, POSTERIZE_LEVELS_MAX);
             switch(alpha, "applyToAlpha")?;
         }
         Filter::Clamp { min, max } | Filter::Smoothstep { min, max } => {
@@ -914,7 +965,7 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
         }
         Filter::HeightAdjust { invert, offset, multiply } => {
             switch(invert, "invert")?;
-            set(offset, "offset", -1.0, 1.0);
+            set(offset, "offset", -HEIGHT_OFFSET_MAX, HEIGHT_OFFSET_MAX);
             set(multiply, "multiply", 0.0, HEIGHT_MULTIPLY_MAX);
         }
         Filter::HistogramScan { position, contrast, invert_position } => {
@@ -932,22 +983,22 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
                 *offset = Filter::shift_offset(position);
             }
         }
-        Filter::Warp { intensity, scale, seed: s, divider: d } => {
-            set(intensity, "intensity", 0.0, 256.0);
-            set(scale, "scale", 0.01, 1000.0);
-            seed(s);
-            divider(d)?;
+        Filter::Warp { intensity, scale, seed: noise_seed, divider: intensity_divider } => {
+            set(intensity, "intensity", 0.0, TEXELS_MAX);
+            set(scale, "scale", Filter::NOISE_SCALE_MIN, Filter::NOISE_SCALE_MAX);
+            seed(noise_seed);
+            divider(intensity_divider)?;
         }
-        Filter::DirectionalBlur { radius, angle: a } => {
-            set(radius, "radius", 0.0, 256.0);
+        Filter::DirectionalBlur { radius, angle: direction } => {
+            set(radius, "radius", 0.0, TEXELS_MAX);
             blur_intensity(radius);
-            angle(a);
+            angle(direction);
         }
-        Filter::SlopeBlur { radius, scale, seed: s, divider: d } => {
-            set(radius, "radius", 0.0, 256.0);
-            set(scale, "scale", 0.01, 1000.0);
-            seed(s);
-            divider(d)?;
+        Filter::SlopeBlur { radius, scale, seed: noise_seed, divider: intensity_divider } => {
+            set(radius, "radius", 0.0, TEXELS_MAX);
+            set(scale, "scale", Filter::NOISE_SCALE_MIN, Filter::NOISE_SCALE_MAX);
+            seed(noise_seed);
+            divider(intensity_divider)?;
         }
         Filter::HighPass { radius, space, alpha } => {
             set(radius, "radius", 0.0, TEXELS_MAX);
@@ -956,9 +1007,9 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             switch(alpha, "applyToAlpha")?;
         }
         Filter::EdgeDetect { width } => set(width, "width", 0.0, TEXELS_MAX),
-        Filter::Bevel { width, wrap: w } => {
+        Filter::Bevel { width, wrap: wraps } => {
             set(width, "width", 0.0, TEXELS_MAX);
-            wrap(w)?;
+            wrap(wraps)?;
         }
         Filter::Mosaic { size, alpha } => {
             set(size, "size", 1.0, MOSAIC_SIZE_MAX);
@@ -969,8 +1020,8 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
         }
         Filter::Fxaa { alpha } => switch(alpha, "affectAlphaChannel")?,
         Filter::Glow { radius, amount } => {
-            set(radius, "radius", 0.0, 256.0);
-            set(amount, "amount", 0.0, 10.0);
+            set(radius, "radius", 0.0, TEXELS_MAX);
+            set(amount, "amount", 0.0, GLOW_AMOUNT_MAX);
         }
         Filter::HaloGlow { on_mask, precise, width, spread, opacity, color } => {
             if p.get("usedOnMask").is_some() {
@@ -988,9 +1039,9 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             set(opacity, "opacity", 0.0, 1.0);
             shade(color)?;
         }
-        Filter::DropShadow { angle: a, distance, size, spread, opacity, color } => {
-            angle(a);
-            set(distance, "distance", -0.5, 0.5);
+        Filter::DropShadow { angle: direction, distance, size, spread, opacity, color } => {
+            angle(direction);
+            set(distance, "distance", -Filter::SHADOW_DISTANCE_MAX, Filter::SHADOW_DISTANCE_MAX);
             set(size, "size", 0.0, 1.0);
             set(spread, "spread", 0.0, 1.0);
             set(opacity, "opacity", 0.0, 1.0);
@@ -998,24 +1049,24 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
         }
         Filter::ReplaceColor { from, to, tolerance, softness } => {
             for (key, slot) in [("from", from), ("to", to)] {
-                if let Some(v) = color_param(cmd, p, key)? {
-                    *slot = v.map(|x| x.clamp(0.0, 1.0));
+                if let Some(rgb) = color_param(cmd, p, key)? {
+                    *slot = rgb.map(|x| x.clamp(0.0, 1.0));
                 }
             }
             set(tolerance, "tolerance", 0.0, 1.0);
             set(softness, "softness", 0.0, 1.0);
         }
         Filter::BakedLighting { azimuth, elevation, light, ambient, occlusion, stylized } => {
-            if let Some(v) = f32p(p, "azimuth") {
-                *azimuth = v.rem_euclid(360.0);
+            if let Some(degrees) = f32p(p, "azimuth") {
+                *azimuth = degrees.rem_euclid(360.0);
             }
 
             // A light past the zenith comes from the far side: the angle wraps like the horizontal one
-            if let Some(v) = f32p(p, "elevation") {
-                *elevation = v.rem_euclid(360.0);
+            if let Some(degrees) = f32p(p, "elevation") {
+                *elevation = degrees.rem_euclid(360.0);
             }
             set(light, "light", 0.0, SUN_INTENSITY_MAX);
-            set(ambient, "ambient", 0.0, 10.0);
+            set(ambient, "ambient", 0.0, SKY_INTENSITY_MAX);
             set(occlusion, "occlusion", 0.0, 1.0);
 
             // A Baked Lighting saved before the stylized settings takes them lit as it was
@@ -1025,8 +1076,8 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
         }
         Filter::EnvironmentLighting { horizontal, vertical, exposure, height_intensity, ambient_occlusion, specular_occlusion } => {
             for (key, slot) in [("horizontalRotation", horizontal), ("verticalRotation", vertical)] {
-                if let Some(v) = f32p(p, key) {
-                    *slot = v.rem_euclid(360.0);
+                if let Some(degrees) = f32p(p, key) {
+                    *slot = degrees.rem_euclid(360.0);
                 }
             }
             set(exposure, "exposure", -EXPOSURE_MAX_EV, EXPOSURE_MAX_EV);
@@ -1034,12 +1085,12 @@ pub(crate) fn apply(p: &Value, f: &mut Filter, cmd: &str) -> Result<()> {
             set(ambient_occlusion, "ambientOcclusion", 0.0, 1.0);
             set(specular_occlusion, "specularOcclusion", 0.0, 1.0);
         }
-        Filter::DirectionalWarp { intensity, angle: a, scale, seed: s, divider: d } => {
-            set(intensity, "intensity", 0.0, 256.0);
-            angle(a);
-            set(scale, "scale", 0.01, 1000.0);
-            seed(s);
-            divider(d)?;
+        Filter::DirectionalWarp { intensity, angle: direction, scale, seed: noise_seed, divider: intensity_divider } => {
+            set(intensity, "intensity", 0.0, TEXELS_MAX);
+            angle(direction);
+            set(scale, "scale", Filter::NOISE_SCALE_MIN, Filter::NOISE_SCALE_MAX);
+            seed(noise_seed);
+            divider(intensity_divider)?;
         }
     }
     Ok(())
@@ -1051,23 +1102,39 @@ mod tests {
 
     #[test]
     fn every_filter_builds_and_finds_by_id_or_label() {
-        for f in FILTERS {
-            let kind = build(f.id, &Value::Null).unwrap_or_else(|e| panic!("{}: {e}", f.id));
+        for def in FILTERS {
+            let kind = build(def.id, &Value::Null).unwrap_or_else(|err| panic!("{}: {err}", def.id));
 
             // Material finishes are content only; other filters also run on masks, where some (normal invert) change nothing and are not offered
-            assert_eq!(kind.content_only().is_none(), f.mask || matches!(kind, EffectKind::Filter(_)), "{}", f.id);
-            assert_eq!(find(f.label).map(|d| d.id), Some(f.id));
+            assert_eq!(kind.content_only().is_none(), def.mask || matches!(kind, EffectKind::Filter(_)), "{}", def.id);
+            assert_eq!(find(def.label).map(|found| found.id), Some(def.id));
         }
-        assert!(build("nope", &Value::Null).is_err());
+
         let EffectKind::Filter(Filter::Posterize { levels, .. }) = build("posterize", &json!({"levels": 1000})).unwrap() else { panic!() };
-        assert_eq!(levels, 64.0);
+        assert_eq!(levels, POSTERIZE_LEVELS_MAX);
+
+        assert!(build("nope", &Value::Null).is_err());
         assert!(build("gradientMap", &json!({"colors": []})).is_err());
         assert!(build("colorBalance", &json!({"shadows": "x"})).is_err());
+
         let EffectKind::Filter(Filter::GradientMap { colors, .. }) = build("gradientMap", &json!({"colors": [[0, 0, 0], "#ffffff"]})).unwrap() else {
             panic!()
         };
 
         assert_eq!(colors.len(), 2);
+    }
+
+    #[test]
+    fn a_new_gradient_given_colors_and_a_quantity_spaces_them_evenly() {
+        let five = [[0.0; 3], [0.25; 3], [0.5; 3], [0.75; 3], [1.0; 3]];
+        for (given, quantity, expected) in [(&five[..2], 2, vec![0.0, 1.0]), (&five[..], 5, vec![0.0, 0.25, 0.5, 0.75, 1.0])] {
+            let params = json!({"colors": given, "quantity": quantity});
+
+            let EffectKind::Filter(Filter::GradientMap { positions, quantity: used, .. }) = build("gradientMap", &params).unwrap() else { panic!() };
+
+            assert_eq!(positions, expected, "{params}");
+            assert_eq!(used, Some(quantity));
+        }
     }
 
     #[test]

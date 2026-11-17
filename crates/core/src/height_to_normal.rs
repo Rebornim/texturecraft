@@ -22,6 +22,9 @@ impl HeightToNormal {
     /// A new Height To Normal
     pub const LIBRARY: HeightToNormal = HeightToNormal { overwrite: true, world_units: true, surface_size: 300.0, height_depth: 16.0, intensity: 10.0 };
 
+    /// The smallest Surface Size: whole cm, so the reference's 0.1 rounds up to 1
+    pub const MIN_SURFACE_SIZE: f32 = 1.0;
+
     /// The largest Surface Size (cm)
     pub const MAX_SURFACE_SIZE: f32 = 1000.0;
 
@@ -38,7 +41,7 @@ impl HeightToNormal {
     pub fn strength(&self, res: u32) -> f32 {
         let finite = |value: f32, max: f32| if value.is_finite() { value.clamp(0.0, max) } else { 0.0 };
         let per_tile = if self.world_units {
-            finite(self.height_depth, Self::MAX_HEIGHT_DEPTH) / finite(self.surface_size, Self::MAX_SURFACE_SIZE).max(1.0)
+            finite(self.height_depth, Self::MAX_HEIGHT_DEPTH) / finite(self.surface_size, Self::MAX_SURFACE_SIZE).max(Self::MIN_SURFACE_SIZE)
         } else {
             finite(self.intensity, Self::MAX_INTENSITY) * Self::INTENSITY_UNIT
         };
@@ -47,8 +50,8 @@ impl HeightToNormal {
 
     /// The unit tangent-space normal (OpenGL, +Y up the image) of a height changing by `gx` per texel to the right and `gy` per texel down
     pub fn normal(&self, [gx, gy]: [f32; 2], res: u32) -> [f32; 3] {
-        let s = self.strength(res);
-        let (x, y) = (-gx * s, gy * s);
+        let strength = self.strength(res);
+        let (x, y) = (-gx * strength, gy * strength);
         let length = (x * x + y * y + 1.0).sqrt();
         if length.is_finite() { [x / length, y / length, 1.0 / length] } else { [0.0, 0.0, 1.0] }
     }

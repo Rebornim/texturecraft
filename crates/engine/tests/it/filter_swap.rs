@@ -1,7 +1,7 @@
 //! Swapping a filter effect's type in place through `effect.set {filter}`
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{BlendMode, Effect, EffectKind, Filter, LayerId};
+use texturecraft_engine::core::{BlendMode, Effect, EffectKind, Filter, LayerId, WarpMode};
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, StackTarget, execute};
 
@@ -54,6 +54,51 @@ fn swapping_a_filter_keeps_a_name_the_user_chose() {
     execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "threshold"})).unwrap();
 
     assert_eq!(effect(&s, id).name, "Flip");
+}
+
+#[test]
+fn swapping_to_the_former_directional_warp_id_sets_directional_mode() {
+    let mut s = session();
+    let id = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "content"}));
+
+    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "warpDirectional"})).unwrap();
+
+    let swapped = effect(&s, id).kind;
+    assert!(matches!(swapped, EffectKind::Filter(Filter::SourceWarp(warp)) if warp.mode == WarpMode::Directional), "{swapped:?}");
+}
+
+#[test]
+fn naming_the_former_directional_warp_id_on_a_warp_sets_directional_mode() {
+    let mut s = session();
+    let id = add(&mut s, "effect.add.filter", json!({"filter": "warp", "target": "content", "seed": 7}));
+
+    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "warpDirectional"})).unwrap();
+
+    let edited = effect(&s, id).kind;
+    assert!(matches!(edited, EffectKind::Filter(Filter::SourceWarp(warp)) if warp.mode == WarpMode::Directional && warp.seed == 7), "{edited:?}");
+}
+
+#[test]
+fn a_warp_mode_given_with_the_former_directional_warp_id_wins() {
+    let mut s = session();
+    let id = add(&mut s, "effect.add.filter", json!({"filter": "warp", "target": "content"}));
+
+    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "warpDirectional", "warpMode": "warp"})).unwrap();
+
+    let edited = effect(&s, id).kind;
+    assert!(matches!(edited, EffectKind::Filter(Filter::SourceWarp(warp)) if warp.mode == WarpMode::Warp), "{edited:?}");
+}
+
+#[test]
+fn swapping_to_a_gradient_given_colors_ramps_evenly_through_them() {
+    let mut s = session();
+    let id = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "content"}));
+
+    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "gradientMap", "colors": [[0, 0, 0], [1, 1, 1]]})).unwrap();
+
+    let EffectKind::Filter(gradient) = effect(&s, id).kind else { panic!("still a filter") };
+    let halfway = gradient.ramp_at(0.5).unwrap();
+    assert!((halfway[0] - 0.5).abs() < 1e-3, "black to white is mid gray halfway: {halfway:?}");
 }
 
 #[test]

@@ -2,9 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ConversionMode;
 use crate::blend::lum;
 use crate::gradient_input::shape;
+use crate::layer::per_unit;
+use crate::{ChannelKind, ConversionMode};
 
 /// A Grayscale Conversion filter: the gray of the current channel (or of its Custom Input), balanced, contrasted and maybe inverted
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -41,6 +42,17 @@ impl GrayscaleConversion {
     pub fn gray(&self, rgb: [f32; 3], alpha: f32) -> f32 {
         shape(self.mode.gray(rgb, alpha, self.weights), self.balance, self.contrast, self.invert)
     }
+
+    /// `v` of a `kind` channel (coverage `alpha`) or `custom_input` turned gray: colors gray, scalar and signed in their range, normals as they are
+    pub fn channel_value(&self, kind: ChannelKind, v: [f32; 3], custom_input: Option<[f32; 3]>, alpha: f32) -> [f32; 3] {
+        match (kind, custom_input) {
+            (ChannelKind::NormalMap, _) => v,
+            (ChannelKind::Color, None) => [self.gray(v, alpha); 3],
+            (ChannelKind::Color, Some(input)) => [self.gray(input, alpha); 3],
+            (_, None) => per_unit(kind, v, |x| self.gray([x; 3], alpha)),
+            (_, Some(input)) => per_unit(kind, v, |_| self.gray(input, alpha)),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -63,5 +75,16 @@ mod tests {
         assert!((inverted.gray([0.2, 0.7, 0.1], 1.0) - 0.3).abs() < 1e-6);
         let contrasted = GrayscaleConversion { contrast: 1.0, mode: ConversionMode::Average, ..GrayscaleConversion::LIBRARY };
         assert_eq!(contrasted.gray([0.6; 3], 1.0), 1.0);
+    }
+
+    #[test]
+    fn only_colors_turn_gray() {
+        let conversion = GrayscaleConversion::LIBRARY;
+
+        let height = conversion.channel_value(ChannelKind::Signed, [-0.6; 3], None, 1.0);
+        let normal = conversion.channel_value(ChannelKind::NormalMap, [0.2, 0.7, 0.9], None, 1.0);
+
+        assert!(height.iter().all(|x| (x + 0.6).abs() < 0.02), "a signed height keeps its sign: {height:?}");
+        assert_eq!(normal, [0.2, 0.7, 0.9]);
     }
 }

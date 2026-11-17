@@ -41,17 +41,26 @@ pub(crate) fn warp_checker(quad: [Pos2; 4], placement: Placement) -> Vec<(Vec<Po
     let low = |axis: usize| corners.iter().map(|c| c[axis]).fold(f32::INFINITY, f32::min).floor() as i32;
     let high = |axis: usize| corners.iter().map(|c| c[axis]).fold(f32::NEG_INFINITY, f32::max).ceil() as i32;
     let mut cells = Vec::new();
+
+    // One outline and one cutting buffer for every cell: only the drawn outlines are kept
+    let mut outline = Vec::with_capacity(CLIPPED_CORNERS_MAX);
+    let mut scratch = Vec::with_capacity(CLIPPED_CORNERS_MAX);
     for x in low(0)..high(0) {
         for y in low(1)..high(1) {
             let (x0, y0) = (x as f32, y as f32);
-            let outline = clip_to_frame([[x0, y0], [x0 + 1.0, y0], [x0 + 1.0, y0 + 1.0], [x0, y0 + 1.0]].map(to_frame).to_vec());
+            outline.clear();
+            outline.extend([[x0, y0], [x0 + 1.0, y0], [x0 + 1.0, y0 + 1.0], [x0, y0 + 1.0]].map(to_frame));
+            clip_to_frame(&mut outline, &mut scratch);
             if area(&outline) > MIN_CELL_AREA {
-                cells.push((outline.into_iter().map(at).collect(), (x + y).rem_euclid(2) == 0));
+                cells.push((outline.iter().copied().map(at).collect(), (x + y).rem_euclid(2) == 0));
             }
         }
     }
     cells
 }
+
+/// Most corners a cell keeps once cut: its four, plus one for each side of the frame that cuts it
+const CLIPPED_CORNERS_MAX: usize = 8;
 
 /// Least share of the frame a cut cell must cover to be drawn (slivers left by rounding at the frame's sides are not)
 const MIN_CELL_AREA: f32 = 1e-6;
@@ -62,28 +71,27 @@ fn area(outline: &[[f32; 2]]) -> f32 {
     twice.abs() * 0.5
 }
 
-/// The part of convex polygon `polygon` (frame coordinates) inside the frame's 0..1 square (Sutherland–Hodgman, one side at a time)
-fn clip_to_frame(mut polygon: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
+/// Cuts convex polygon `polygon` (frame coordinates) to the frame's 0..1 square in place (Sutherland–Hodgman, one side at a time), `scratch` holding each side's cut
+fn clip_to_frame(polygon: &mut Vec<[f32; 2]>, scratch: &mut Vec<[f32; 2]>) {
     // Each side of the square: the axis it bounds, and whether points must stay below (1) or above (0) it
     for (axis, bound, below) in [(0, 0.0, false), (0, 1.0, true), (1, 0.0, false), (1, 1.0, true)] {
         let inside = |p: &[f32; 2]| if below { p[axis] <= bound } else { p[axis] >= bound };
-        let mut kept = Vec::with_capacity(polygon.len() + 1);
+        scratch.clear();
         for (point, next) in polygon.iter().zip(polygon.iter().cycle().skip(1)) {
             let next = *next;
             if inside(point) {
-                kept.push(*point);
+                scratch.push(*point);
             }
             if inside(point) != inside(&next) {
                 let t = (bound - point[axis]) / (next[axis] - point[axis]);
-                kept.push([point[0] + (next[0] - point[0]) * t, point[1] + (next[1] - point[1]) * t]);
+                scratch.push([point[0] + (next[0] - point[0]) * t, point[1] + (next[1] - point[1]) * t]);
             }
         }
-        polygon = kept;
+        std::mem::swap(polygon, scratch);
         if polygon.is_empty() {
             break;
         }
     }
-    polygon
 }
 
 #[cfg(test)]
@@ -145,6 +153,9 @@ mod tests {
 
     #[test]
     fn hostile_placements_draw_a_bounded_checker() {
+        // The most cells a turned frame spans along an axis: its diagonal at the finest tiling, rounded out at both ends
+        let cells_per_axis = (MAX_TILES * CELLS_PER_TILE * std::f32::consts::SQRT_2).ceil() + 1.0;
+        let most_cells = (cells_per_axis * cells_per_axis) as usize;
         for placement in [
             Placement { tiling: [f32::NAN, 1e9], ..STILL },
             Placement { rotation: f32::INFINITY, ..STILL },
@@ -152,7 +163,7 @@ mod tests {
             Placement { tiling: [0.0, -5.0], ..STILL },
         ] {
             let cells = warp_checker(QUAD, placement);
-            assert!(cells.len() <= 40 * 40, "{placement:?}: {} cells", cells.len());
+            assert!(cells.len() <= most_cells, "{placement:?}: {} cells", cells.len());
         }
     }
 }

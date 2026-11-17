@@ -11,13 +11,16 @@ const fn about(description: &'static str, tags: &'static [&'static str]) -> Filt
     FilterAbout { description, tags }
 }
 
-/// One entry per library filter id, in shelf order
+/// One entry per library filter id, found by its id
 const ABOUT: &[(&str, FilterAbout)] = &[
     ("hsl", about("Shifts the hue and changes the saturation and lightness of the colors.", &["color", "hue", "saturation", "lightness"])),
     ("levels", about("Remaps the values between new black and white points, with a midtone gamma.", &["levels", "contrast", "remap"])),
     ("contrastLuminosity", about("Raises or lowers the contrast and the overall brightness.", &["contrast", "brightness"])),
     ("colorBalance", about("Tints the shadows, midtones and highlights each towards a color.", &["color", "tint", "balance"])),
-    ("colorCorrect", about("Corrects the saturation, gamma and gain of the shadows, midtones and highlights.", &["color", "correction", "gamma"])),
+    (
+        "colorCorrect",
+        about("Corrects the contrast, luminosity and saturation of the shadows, midtones and highlights.", &["color", "correction", "saturation"]),
+    ),
     ("gradientMap", about("Replaces each value by the color at its place on a gradient.", &["gradient", "color", "remap"])),
     ("gradientCurve", about("Bends the values through a curve preset.", &["gradient", "curve", "remap"])),
     ("gradientDynamic", about("Reads the colors along a gradient source at each value's position.", &["gradient", "color", "dynamic"])),

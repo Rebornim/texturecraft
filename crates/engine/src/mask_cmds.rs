@@ -94,7 +94,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), generator?: kind (a generator effect only: changes kind in place), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), generator?: kind (a generator effect only: swaps its kind in place, starting from that kind's defaults), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -544,9 +544,16 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         None => None,
     };
     let swaps_filter = swapped.is_some();
+    let swapped_generator = match strp(params, "generator") {
+        Some(kind) => swapped_generator_kind(session, effect, kind)?,
+        None => None,
+    };
 
     session.edit("Edit effect", |session| {
         let edited = session.doc.project.effect_mut(effect).ok_or_else(|| bad(CMD, format!("no effect {}", effect.0)))?;
+        if let Some(generator) = swapped_generator {
+            edited.kind = EffectKind::Generator(generator);
+        }
         if let Some((kind, label)) = swapped {
             if let EffectKind::Filter(old) = &edited.kind
                 && edited.name == old.label()
@@ -621,6 +628,37 @@ fn current_filter_id(s: &Session, effect: LayerId) -> Option<&'static str> {
     match &s.doc.project.effect(effect)?.1.kind {
         EffectKind::Filter(filter) => crate::filter_lib::find(filter.label()).map(|def| def.id),
         _ => None,
+    }
+}
+
+/// A generator of kind `name` at its defaults to replace generator effect `effect`, or None when it is that kind already
+fn swapped_generator_kind(s: &Session, effect: LayerId, name: &str) -> Result<Option<Generator>> {
+    const CMD: &str = "effect.set";
+    let kind = GeneratorKind::parse(name).ok_or_else(|| bad(CMD, format!("unknown generator `{name}`")))?;
+    match &s.doc.project.effect(effect).ok_or_else(|| bad(CMD, format!("no effect {}", effect.0)))?.1.kind {
+        EffectKind::Generator(current) if current.kind == kind => Ok(None),
+        EffectKind::Generator(current) => Ok(Some(swapped_kind(current, kind))),
+        other => Err(bad(CMD, format!("`generator` changes generator effects only, not {}", other.name().to_ascii_lowercase()))),
+    }
+}
+
+/// `current` as a `kind` generator: the settings every kind shares and the inputs `kind` reads stay, its own controls start from `kind`'s defaults
+fn swapped_kind(current: &Generator, kind: GeneratorKind) -> Generator {
+    let mut inputs = current.inputs.clone();
+    inputs.retain(|map, _| kind.inputs().contains(map));
+    Generator {
+        level: current.level,
+        softness: current.softness,
+        noise_amount: current.noise_amount,
+        noise_scale: current.noise_scale,
+        seed: current.seed,
+        offset: current.offset,
+        direction: current.direction,
+        invert: current.invert,
+        global: current.global,
+        resolution: current.resolution,
+        inputs,
+        ..Generator::new(kind)
     }
 }
 

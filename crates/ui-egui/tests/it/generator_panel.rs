@@ -77,12 +77,12 @@ fn restore_defaults_puts_the_generator_back_to_its_kind_defaults() {
 }
 
 #[test]
-fn changing_kind_in_the_panel_preserves_the_effect() {
+fn picking_a_kind_in_the_panel_is_one_undo_step() {
     let (mut harness, effect) = harness(false);
     let history = harness.state().session.history_labels().len();
-    harness.get_all_by_role(Role::ComboBox).find(|node| node.value().as_deref() == Some("Curvature")).unwrap().click();
-    harness.run_steps(2);
-    harness.get_by_label("Dirt").click();
+    harness.get_by_role_and_label(Role::ComboBox, "Curvature").click();
+    harness.run_steps(3);
+    harness.get_by_role_and_label(Role::Button, "Dirt").click();
     harness.run_steps(3);
 
     assert_eq!(generator(&harness, effect).kind, GeneratorKind::Dirt);

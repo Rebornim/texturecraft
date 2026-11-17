@@ -10,6 +10,7 @@ use texturecraft_engine::orb_preview::MAX_PREVIEW_SIZE_PX;
 
 use crate::TextureCraftApp;
 use crate::decal_drop::DecalDrop;
+use crate::grid_tile::GridTile;
 use crate::i18n::{tr, trf};
 use crate::shelf_entry::ShelfEntry;
 use crate::shelf_preview::ShelfPreview;
@@ -481,7 +482,7 @@ fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry
         },
         entry.label(),
         asset.as_ref(),
-        view,
+        view.grid(),
     );
 
     if selected || entry.in_use(app) {
@@ -516,19 +517,19 @@ fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry
     }
 }
 
-/// Asset tile with optional dragging and a larger hover preview, at the medium size
-pub(crate) fn tile(
+/// Asset tile with optional dragging and a larger hover preview at `grid`'s measurements: the name under the thumbnail, or beside it in a list row when `grid` is None
+pub(crate) fn tile_in_grid(
     ui: &mut Ui,
     thumbs: &mut Thumbs,
-    texture: Option<&egui::TextureHandle>,
-    preview: impl FnOnce() -> ShelfPreview,
+    (texture, preview): (Option<&egui::TextureHandle>, impl FnOnce() -> ShelfPreview),
     label: &str,
     drag: Option<&Asset>,
+    grid: Option<GridTile>,
 ) -> egui::Response {
-    tile_in_view(ui, thumbs, texture, |_| Some(preview()), label, drag, ShelfView::Medium)
+    tile_in_view(ui, thumbs, texture, |_| Some(preview()), label, drag, grid)
 }
 
-/// [`tile`] at `view`'s size: a grid tile with the name under the thumbnail, or a list row with it beside; `preview` runs on hover
+/// [`tile_in_grid`] whose `preview` runs on hover and may have none
 fn tile_in_view(
     ui: &mut Ui,
     thumbs: &mut Thumbs,
@@ -536,11 +537,12 @@ fn tile_in_view(
     preview: impl FnOnce(&mut Thumbs) -> Option<ShelfPreview>,
     label: &str,
     drag: Option<&Asset>,
-    view: ShelfView,
+    grid: Option<GridTile>,
 ) -> egui::Response {
     let tokens = Tokens::get(ui.ctx());
     let sense = if drag.is_some() { Sense::click_and_drag() } else { Sense::click() };
-    let (rect, response) = ui.allocate_exact_size(view.tile_size(ui.available_width()), sense);
+    let size = grid.map_or_else(|| ShelfView::List.tile_size(ui.available_width()), GridTile::size);
+    let (rect, response) = ui.allocate_exact_size(size, sense);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     if let Some(asset) = drag
         && response.drag_started()
@@ -553,9 +555,9 @@ fn tile_in_view(
         painter.rect_filled(rect, TILE_ROUNDING, tokens.row_hover);
     }
 
-    let image_rect = view.thumbnail_rect(rect);
+    let image_rect = grid.map_or_else(|| ShelfView::List.thumbnail_rect(rect), |grid| grid.thumbnail_rect(rect));
     thumbnail(painter, texture, image_rect, &tokens);
-    if view.name_beside() {
+    if grid.is_none() {
         let left = image_rect.right() + crate::shelf_view::LIST_NAME_GAP;
         let galley = painter.layout_job(one_line(label, rect.right() - left - LABEL_MARGIN, tokens.text));
         painter.galley(egui::pos2(left, rect.center().y - galley.size().y * 0.5), galley, tokens.text);
@@ -590,7 +592,7 @@ fn big_preview(ui: &Ui, thumbs: &mut Thumbs, preview: impl FnOnce() -> ShelfPrev
     let requested_size_px = (BIG_PREVIEW_SIZE * ctx.pixels_per_point()).round() as usize;
 
     // High display scales must respect the orb camera's allocation limit
-    let on_the_orb = matches!(&preview, ShelfPreview::SmartMask(_) | ShelfPreview::SmartMaterial(_));
+    let on_the_orb = matches!(&preview, ShelfPreview::SmartMask(_) | ShelfPreview::Generator(_) | ShelfPreview::SmartMaterial(_));
     let size_px = if on_the_orb { requested_size_px.clamp(1, MAX_PREVIEW_SIZE_PX) } else { requested_size_px };
 
     // Scrolling moves tiles beneath a stationary pointer

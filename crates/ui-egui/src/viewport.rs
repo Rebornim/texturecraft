@@ -916,7 +916,14 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     // The selected fill's frame (planar, warp) or round projector (tri-planar, spherical, cylindrical): only a press on one of its handles moves it
     let gizmo_free = !alt && !holding && !s_held && !v_held && !focus_pick && !popup && !picking && touch.is_none() && !DecalDrop::blocks_input(ui.ctx());
     let frame_drag = gizmo_free && (crate::frame_gizmo::input(app, ui, &response, rect) || crate::round_gizmo::input(app, ui, &response, rect));
-    let decal_drag = frame_drag || holding;
+
+    // Alt (or another mode) taking the pointer mid-drag ends the drag: let go of Alt, it must not resume from where it began before the camera moved
+    if !gizmo_free {
+        crate::frame_gizmo::let_go(ui.ctx());
+        crate::round_gizmo::let_go(ui.ctx());
+    }
+
+    let projection_drag = frame_drag || holding;
     let plane_pick = !popup
         && !s_held
         && !v_held
@@ -924,7 +931,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !picking
         && touch.is_none()
         && !DecalDrop::blocks_input(ui.ctx())
-        && !decal_drag
+        && !projection_drag
         && crate::symmetry::plane_pick_input(app, ui, &response, rect);
     let symmetry_drag = !alt
         && !plane_pick
@@ -936,7 +943,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !picking
         && touch.is_none()
         && !DecalDrop::blocks_input(ui.ctx())
-        && !decal_drag
+        && !projection_drag
         && crate::symmetry::manipulator_input(app, ui, &response, rect);
 
     // A handle owns a new click, but a stroke already under way must still finish over it
@@ -958,7 +965,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !focus_pick
         && !picking
         && touch.is_none()
-        && !decal_drag
+        && !projection_drag
         && !plane_pick
         && !symmetry_drag
         && !symmetry_handle
@@ -1147,6 +1154,17 @@ fn stencil_overlay(app: &mut TextureCraftApp, ui: &Ui, rect: Rect) {
 pub(crate) fn project(app: &TextureCraftApp, rect: Rect, point: Vec3) -> Option<Pos2> {
     let ndc = app.session.camera.project(point, rect.width() / rect.height().max(1.0))?;
     Some(pos2(rect.left() + (ndc.x * 0.5 + 0.5) * rect.width(), rect.top() + (0.5 - ndc.y * 0.5) * rect.height()))
+}
+
+/// The camera ray through screen point `p` of the 3D view `rect`
+pub(crate) fn view_ray(app: &TextureCraftApp, rect: Rect, p: Pos2) -> texturecraft_engine::geom::Ray {
+    let ndc = Vec2::new((p.x - rect.left()) / rect.width() * 2.0 - 1.0, 1.0 - (p.y - rect.top()) / rect.height() * 2.0);
+    app.session.camera.ray(ndc, rect.width() / rect.height().max(1.0))
+}
+
+/// Whether the window lost the focus (Alt+Tab): egui keeps a held button down with no release to come, so a drag ends here as on a release
+pub(crate) fn focus_lost(ctx: &egui::Context) -> bool {
+    ctx.input(|input| input.viewport().focused == Some(false) || input.events.iter().any(|event| matches!(event, egui::Event::WindowFocused(false))))
 }
 
 /// Control point and curve grab radius (points)
@@ -2108,6 +2126,7 @@ fn view_2d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !v_held
         && !picking_id_color
         && !app.picking_symmetry_plane
+        && app.picking_color.is_none()
         && !DecalDrop::blocks_input(ui.ctx());
     let mut fill_box = None;
     if painting && path_tool {
@@ -2595,6 +2614,40 @@ mod tests {
         assert_eq!(aux_view(harness.state()), Some(crate::gpu::AuxView::IdMask(effect)), "the pick's own ID mask");
         crate::id_color_pick::IdColorPick::end(harness.state_mut());
         assert_eq!(aux_view(harness.state()), None, "the earlier view");
+    }
+
+    /// A click in the 2D view while a colour bar's eyedropper waits paints nothing: the pick keeps waiting, as over the 3D view
+    #[test]
+    fn a_waiting_eyedropper_keeps_a_2d_view_click_from_painting() {
+        let session = texturecraft_engine::sample_session(256, 64).unwrap();
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1600.0, 960.0)).build_eframe(|context| TextureCraftApp::new(context, session));
+        harness.state_mut().ui.layout = ViewLayout::Only2D;
+        harness.state_mut().session.tool.tool = Tool::PolygonFill;
+        harness.run_steps(4);
+
+        // The 2D view fills the window's middle: there the sample's UV islands are (the shelf drop tests click the same point)
+        let on_the_uvs = pos2(700.0, 420.0);
+        let steps = harness.state().session.history_labels().len();
+        let bar = egui::Id::unique("a colour bar");
+        harness.state_mut().picking_color = Some(bar);
+
+        click(&mut harness, on_the_uvs);
+        assert_eq!(harness.state().session.history_labels().len(), steps, "the click painted nothing");
+        assert_eq!(harness.state().picking_color, Some(bar), "the eyedropper still waits");
+
+        harness.state_mut().picking_color = None;
+        click(&mut harness, on_the_uvs);
+        assert_eq!(harness.state().session.undo_label(), Some("Polygon fill"), "without a pick the same click paints");
+    }
+
+    /// Press and release the primary button at `at`
+    fn click(harness: &mut egui_kittest::Harness<'_, TextureCraftApp>, at: Pos2) {
+        harness.hover_at(at);
+        harness.run_steps(1);
+        harness.event(egui::Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        harness.run_steps(1);
+        harness.event(egui::Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        harness.run_steps(2);
     }
 
     #[test]

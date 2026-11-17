@@ -1,33 +1,44 @@
 //! Eyedropper picks outside the app: while a colour bar's eyedropper waits, a left click anywhere on the desktop (another app, a
 //! reference picture on another monitor) reads the one screen pixel under it at that moment. Nothing records the screen, and
 //! clicks on the app's own windows keep picking from the model. Where the system allows neither, the pick stays on the model;
-//! While a pick waits the pointer is the eyedropper, drawn over the app's window and, where the system allows, over every app
+//! while a pick waits the pointer is the eyedropper, drawn over the app's window and, where the system allows, over every app
 
 mod cursor_image;
+mod cursor_texture;
+#[cfg(windows)]
+mod eyedropper_pointer;
+#[cfg(windows)]
+mod hook_state;
 mod keeper_args;
+#[cfg(windows)]
+mod live_swatch;
 mod painted_cursor;
 mod pick_outcome;
 mod pick_shared;
 #[cfg(all(unix, not(target_os = "macos")))]
+mod pixel_layout;
+#[cfg(all(unix, not(target_os = "macos")))]
 mod portal;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod premultiplied_argb;
+#[cfg(any(windows, test))]
+mod release_wait;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod shown_disc;
 mod swatch_color;
 mod swatch_picture;
 mod swatch_side;
 #[cfg(windows)]
 mod windows_hook;
-#[cfg(windows)]
-mod windows_pointer;
-#[cfg(windows)]
-mod windows_swatch;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod x11_grab;
-#[cfg(all(unix, not(target_os = "macos")))]
-mod x11_pixel;
 
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 
 pub use cursor_image::CursorImage;
+#[cfg(windows)]
+pub use eyedropper_pointer::keep_pointer;
 pub use keeper_args::KEEPER_ARG;
 pub use painted_cursor::paint as paint_cursor;
 pub use pick_outcome::PickOutcome;
@@ -35,8 +46,6 @@ pub(crate) use pick_shared::PickShared;
 pub(crate) use swatch_color::SwatchColor;
 pub use swatch_picture::{swatch_reach, swatch_unit};
 pub use swatch_side::SwatchSide;
-#[cfg(windows)]
-pub use windows_pointer::keep_pointer;
 
 use crate::TextureCraftApp;
 use crate::color_picker::ColorPick;
@@ -54,6 +63,7 @@ impl ScreenPick {
     fn start(bar: egui::Id, ctx: &egui::Context) -> Self {
         let (sender, outcomes) = mpsc::channel();
         let shared = Arc::new(PickShared::default());
+
         let waiting = Arc::clone(&shared);
         let dpi = window_dpi(ctx);
         let ctx = ctx.clone();
@@ -61,6 +71,7 @@ impl ScreenPick {
         if let Err(error) = spawned {
             log::warn!("the eyedropper picks on the model only: {error}");
         }
+
         ScreenPick { bar, outcomes, shared, ends_on_focus_loss: ends_on_focus_loss() }
     }
 
@@ -104,8 +115,11 @@ pub(crate) fn sync(app: &mut TextureCraftApp, ctx: &egui::Context) {
     };
 
     if app.screen_pick.as_ref().is_none_or(|pick| pick.bar != bar) {
+        // The last pick stops before the next starts, so its pointer goes back first
+        drop(app.screen_pick.take());
         app.screen_pick = app.screen_picking.then(|| ScreenPick::start(bar, ctx));
     }
+
     let Some(pick) = app.screen_pick.as_ref() else { return };
 
     pick.share_windows(ctx);

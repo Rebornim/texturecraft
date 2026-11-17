@@ -203,6 +203,7 @@ fn main() {
     if std::env::args_os().nth(1).is_some_and(|arg| arg == texturecraft_ui_egui::screen_pick::KEEPER_ARG) {
         std::process::exit(texturecraft_ui_egui::screen_pick::keep_pointer());
     }
+
     let args = match parse_args() {
         Ok(Some(a)) => a,
         Ok(None) => return,

@@ -14,7 +14,9 @@ use x11rb::protocol::xproto::{ConnectionExt, CreateGCAux, Cursor, EventMask, Gra
 use x11rb::rust_connection::RustConnection;
 
 use super::pick_shared::over_windows;
-use super::x11_pixel::{PixelLayout, premultiplied_argb};
+use super::pixel_layout::PixelLayout;
+use super::premultiplied_argb::premultiplied_argb;
+use super::shown_disc::ShownDisc;
 use super::{CursorImage, PickOutcome, PickShared, SwatchSide, swatch_reach, swatch_unit};
 
 /// How often the pointer's place is checked against the app's windows
@@ -27,12 +29,8 @@ const DEFAULT_POINTER_PX: u32 = 24;
 const MAX_POINTER_PX: u32 = 64;
 /// The colour depth of a pointer picture with alpha
 const ARGB_DEPTH: u8 = 32;
-
-/// The disc the grab's pointer shows now and that pointer
-struct ShownDisc {
-    look: ([u8; 3], SwatchSide),
-    pointer: Cursor,
-}
+/// The RENDER extension version that brought coloured pointers (`CreateCursor`), as major and minor
+const RENDER_CURSOR_VERSION: (u32, u32) = (0, 5);
 
 /// Waits for a left click off the app's windows until it lands or `shared` stops the pick; `None` when there is no X server
 pub(super) fn run(shared: &Arc<PickShared>, outcomes: &Sender<PickOutcome>, ctx: &egui::Context) -> Option<()> {
@@ -43,10 +41,12 @@ pub(super) fn run(shared: &Arc<PickShared>, outcomes: &Sender<PickOutcome>, ctx:
     let argb = argb_format(&connection);
     let cell = pointer_px();
     let pointer_shape = argb.and_then(|argb| make_pointer(&connection, root, argb, &CursorImage::eyedropper(cell))).unwrap_or(x11rb::NONE);
+
     let mut disc: Option<ShownDisc> = None;
     let mut grabbed = false;
     let mut pressed = false;
     while pressed || !shared.stopped() {
+        // Held off the app's windows and while the taken press is down; a failed query returns, and the closed connection ends the grab
         let pointer = connection.query_pointer(root).ok()?.reply().ok()?;
         let windows = shared.windows();
         let outside = !windows.is_empty() && !over_windows(&windows, pointer.root_x.into(), pointer.root_y.into());
@@ -55,6 +55,8 @@ pub(super) fn run(shared: &Arc<PickShared>, outcomes: &Sender<PickOutcome>, ctx:
         } else if !outside && grabbed && !pressed {
             grabbed = !ungrab(&connection);
         }
+
+        // The grab's pointer shows the pixel under its tip
         if grabbed
             && let Some(argb) = argb
             && let Some(color) = root_pixel(&connection, root, layout, pointer.root_x, pointer.root_y)
@@ -80,8 +82,10 @@ pub(super) fn run(shared: &Arc<PickShared>, outcomes: &Sender<PickOutcome>, ctx:
                 _ => {}
             }
         }
+
         std::thread::sleep(POLL);
     }
+
     if grabbed {
         ungrab(&connection);
     }
@@ -131,7 +135,7 @@ fn ungrab(connection: &RustConnection) -> bool {
 
 /// The server's 32-bit picture format with alpha that coloured pointers are made from, where it has one
 fn argb_format(connection: &RustConnection) -> Option<Pictformat> {
-    connection.render_query_version(0, 5).ok()?.reply().ok()?;
+    connection.render_query_version(RENDER_CURSOR_VERSION.0, RENDER_CURSOR_VERSION.1).ok()?.reply().ok()?;
     let formats = connection.render_query_pict_formats().ok()?.reply().ok()?;
     let argb = formats.formats.iter().find(|format| {
         let direct = format.direct;

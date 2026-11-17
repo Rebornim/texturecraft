@@ -1,6 +1,9 @@
 //! The pointer keeper's command line on Windows: whose pick it serves (the app's process id), the event that ends the pick and
 //! the dots per inch of the app's window, which size the eyedropper pointer as the system sizes its own pointers there
 
+#[cfg(any(windows, test))]
+use super::cursor_image::SIZES;
+
 /// The argument that starts this program as the pointer keeper
 pub const KEEPER_ARG: &str = "--eyedropper-pointer";
 
@@ -16,6 +19,9 @@ const MAX_DPI: u32 = BASE_DPI * 5;
 /// The shown event's name after the stop event's
 #[cfg(any(windows, test))]
 const SHOWN_SUFFIX: &str = "-shown";
+/// The longest stop event name taken (the app's are about 50 characters): with its suffix it stays under the system's 260
+#[cfg(any(windows, test))]
+const MAX_EVENT_NAME_LEN: usize = 200;
 
 /// What a pointer keeper is started with
 #[cfg(any(windows, test))]
@@ -40,8 +46,11 @@ impl KeeperArgs {
     pub fn parse(args: &[String]) -> Option<Self> {
         let [parent, stop, dpi] = args else { return None };
         let stop = stop.clone();
-        let usable_name = !stop.is_empty() && stop.len() <= 200 && stop.chars().all(|c| c.is_ascii_alphanumeric() || "\\-_".contains(c));
+        let usable_name = !stop.is_empty()
+            && stop.len() <= MAX_EVENT_NAME_LEN
+            && stop.chars().all(|character| character.is_ascii_alphanumeric() || "\\-_".contains(character));
         let dpi = dpi.parse::<u32>().ok().filter(|dpi| *dpi > 0)?.min(MAX_DPI);
+
         Some(KeeperArgs { parent: parent.parse().ok()?, stop: usable_name.then_some(stop)?, dpi })
     }
 
@@ -53,7 +62,7 @@ impl KeeperArgs {
     /// The pointer cell in pixels: the system's own pointer size at this density (`system`, where it says), else 32 scaled
     pub fn pointer_px(&self, system: Option<i32>) -> u32 {
         let scaled = BASE_POINTER_PX * self.dpi / BASE_DPI;
-        system.and_then(|px| u32::try_from(px).ok()).filter(|px| (8..=256).contains(px)).unwrap_or(scaled)
+        system.and_then(|px| u32::try_from(px).ok()).filter(|px| SIZES.contains(px)).unwrap_or(scaled)
     }
 }
 

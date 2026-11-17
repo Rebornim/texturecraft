@@ -5,13 +5,10 @@
 pub(crate) enum Hold {
     /// The pointer moves, and is put back where the press began after every frame; the put-back's own move arrives among the others (X11)
     PutBack,
-
     /// Put back the same way, but the system folds its waiting moves into one, read from where it put the pointer (Windows)
     PutBackFolded,
-
     /// The system keeps the pointer still and reports raw motion (macOS, Wayland, which cannot move a pointer)
     Locked,
-
     /// The pointer cannot be held (the browser): drags read it as it moves
     Free,
 }

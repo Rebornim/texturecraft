@@ -48,7 +48,7 @@ fn texture_controls_start_from_the_reference_defaults_and_clamp() {
         grayscale: GrayscaleConversion::Red,
         ..TextureLayer::default()
     };
-    assert_eq!(generator(&session, effect).texture, Some(expected));
+    assert_eq!(generator(&session, effect).texture, Some(Box::new(expected)));
     assert_eq!(TextureLayer::default().opacity, 0.0, "the reference starts the texture at opacity 0");
 
     assert!(execute(&mut session, "effect.set", &json!({"effect": effect, "textureBlend": "dissolve"})).is_err());

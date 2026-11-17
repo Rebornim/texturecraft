@@ -94,7 +94,7 @@ fn mask(fixture: &mut Fixture, generator: Generator, texels: &[(u32, u32)]) -> V
 
 /// Ambient Occlusion on its section controls with `texture` reading image `image`
 fn occlusion_with(image: &str, texture: TextureLayer) -> Generator {
-    Generator { texture: Some(TextureLayer { source: Some(Source::image(image)), ..texture }), ..Generator::new(GeneratorKind::AmbientOcclusion) }
+    Generator { texture: Some(Box::new(TextureLayer { source: Some(Source::image(image)), ..texture })), ..Generator::new(GeneratorKind::AmbientOcclusion) }
 }
 
 /// A texture turned on at full opacity, replacing the signal
@@ -122,7 +122,7 @@ fn a_texture_turned_off_or_at_opacity_zero_leaves_the_signal() {
 fn an_empty_texture_slot_blends_black() {
     let mut fixture = fixture([0.6; 3]);
     let texels: Vec<_> = surface(&fixture).iter().map(|point| point.texel).collect();
-    let empty = Generator { texture: Some(TextureLayer { opacity: 0.5, ..replacing() }), ..Generator::new(GeneratorKind::AmbientOcclusion) };
+    let empty = Generator { texture: Some(Box::new(TextureLayer { opacity: 0.5, ..replacing() })), ..Generator::new(GeneratorKind::AmbientOcclusion) };
     assert_all(&mask(&mut fixture, empty, &texels), OCCLUSION * 0.5, "half way to black");
 }
 

@@ -825,8 +825,8 @@ fn filter_region(
     Some(Field { x0: region_x, y0: region_y, w: width, h: height, comps: field_components, data: result })
 }
 
-/// What a generator's texture reads with nothing in its slot
-const EMPTY_TEXTURE_SLOT: Source = Source::Uniform([0.0; 3]);
+/// What a generator's texture or custom grunge reads with nothing in its slot
+const EMPTY_IMAGE_SLOT: Source = Source::Uniform([0.0; 3]);
 
 /// Values per texel of a generator stage's region: the stack below, the generator's ramp and its texture's gray
 const GENERATOR_STAGE_COMPONENTS: usize = 3;
@@ -1553,7 +1553,13 @@ impl<'a, 'b> Texel<'a, 'b> {
         let blurred_curvature = self.blurred_curvature(wear::blur_sigma(generator.kind, wear), sizes, curvature);
 
         let occlusion = self.generator_input(generator, BakedMap::AmbientOcclusion).unwrap_or(1.0);
-        let grunge = wear::grunge(generator.kind, wear, generator.seed, &self.coords());
+        let grunge = if wear.custom_grunge {
+            // An image not loaded yet reads mid gray, which leaves the wear as without grunge
+            let gray = self.slot_color(generator, generator.grunge.as_ref(), &wear::custom_grunge_placement(wear)).map_or(0.5, lum);
+            wear::custom_grunge(generator.kind, gray)
+        } else {
+            wear::grunge(generator.kind, wear, generator.seed, &self.coords())
+        };
         wear::wear_value(generator.kind, wear, &WearInputs { curvature, blurred_curvature, occlusion, grunge })
     }
 
@@ -1593,28 +1599,35 @@ impl<'a, 'b> Texel<'a, 'b> {
     /// The gray of the generator's texture at this texel (None when it blends no texture)
     fn generator_texture(&mut self, generator: &Generator) -> Option<f32> {
         let texture = generator.texture_in_use()?;
-        let rgb = match texture.source.as_ref().unwrap_or(&EMPTY_TEXTURE_SLOT) {
+        let rgb = self.slot_color(generator, texture.source.as_ref(), &texture_layer::texture_placement(texture))?;
+        Some(texture_layer::texture_gray(texture, rgb))
+    }
+
+    /// The color of a generator's image slot holding `source` (None: empty, read as black) at this texel, read where `placement` puts it (None when its image isn't loaded)
+    fn slot_color(&mut self, generator: &Generator, source: Option<&Source>, placement: &texture_layer::SlotPlacement) -> Option<[f32; 3]> {
+        match source.unwrap_or(&EMPTY_IMAGE_SLOT) {
             Source::Image { name, .. } => {
                 let image = self.inp.images.get(name)?.clone();
                 let read = |coordinates: Vec2| {
                     let [red, green, blue, _] = image.sample(coordinates.x, coordinates.y);
                     Vec3::new(red, green, blue)
                 };
-                if texture.triplanar {
-                    let normal = self
-                        .generator_input_color(generator, BakedMap::WorldNormal)
-                        .map_or_else(|| self.coords().nrm, |encoded| Vec3::from(encoded) * 2.0 - 1.0);
-                    let weights = texture_layer::triplanar_weights(texture, normal);
-                    let coordinates = texture_layer::triplanar_coordinates(texture, self.bounds_position());
-                    weights.iter().zip(coordinates).fold(Vec3::ZERO, |sum, (weight, at)| sum + read(at) * *weight).to_array()
-                } else {
-                    read(texture_layer::uv_coordinates(texture, self.coords().uv)).to_array()
-                }
+                let color = match placement.triplanar_contrast {
+                    Some(contrast) => {
+                        let normal = self
+                            .generator_input_color(generator, BakedMap::WorldNormal)
+                            .map_or_else(|| self.coords().nrm, |encoded| Vec3::from(encoded) * 2.0 - 1.0);
+                        let weights = texture_layer::triplanar_weights(contrast, normal);
+                        let coordinates = texture_layer::triplanar_coordinates(placement, self.bounds_position());
+                        weights.iter().zip(coordinates).fold(Vec3::ZERO, |sum, (weight, at)| sum + read(at) * *weight)
+                    }
+                    None => read(texture_layer::uv_coordinates(placement, self.coords().uv)),
+                };
+                Some(color.to_array())
             }
             // A value or an anchor reads the same wherever it is projected
-            other => self.source(other, &Projection::default(), ChannelKind::NormalMap),
-        };
-        Some(texture_layer::texture_gray(texture, rgb))
+            other => Some(self.source(other, &Projection::default(), ChannelKind::NormalMap)),
+        }
     }
 
     /// Generator input `map` at this texel: what replaces the mesh map in the generator's inputs, else the mesh map (None when not baked).

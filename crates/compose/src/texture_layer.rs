@@ -1,4 +1,4 @@
-//! A generator's texture (Use Texture): where it is read, how it turns gray and how it blends over the signal
+//! A generator's texture (Use Texture): where it is read, how it turns gray and how it blends over the signal; its custom grunge is read the same way
 
 use texturecraft_core::{TextureBlend, TextureLayer};
 use texturecraft_geom::glam::{Vec2, Vec3};
@@ -9,20 +9,33 @@ const TRIPLANAR_SHARPNESS_POWER: f32 = 1.58;
 /// Smallest normal component still dividing the weights, so a zero normal weighs the axes evenly
 const MIN_NORMAL_COMPONENT: f32 = 1e-6;
 
-/// Where the texture is read in UV: scaled about the centre of the UV square
-pub(crate) fn uv_coordinates(texture: &TextureLayer, uv: Vec2) -> Vec2 {
-    (uv - Vec2::splat(0.5)) * texture.scale + Vec2::splat(0.5)
+/// Where a generator's image slot is read: `scale` times across the UV square (or the mesh's bounds, triplanar), plus `offset`
+pub(crate) struct SlotPlacement {
+    pub scale: f32,
+    pub offset: f32,
+    /// How sharply the three projections meet, or None to read in UV
+    pub triplanar_contrast: Option<f32>,
 }
 
-/// Where the texture is read on each of the three projections (facing X, Y and Z) for `position` across the mesh's bounds (0..1), scaled about their centre
-pub(crate) fn triplanar_coordinates(texture: &TextureLayer, position: Vec3) -> [Vec2; 3] {
-    let scaled = |u: f32, v: f32| (Vec2::new(u, v) - Vec2::splat(0.5)) * texture.scale + Vec2::splat(0.5);
-    [scaled(-position.z, position.y), scaled(position.x, position.z), scaled(position.x, position.y)]
+/// The texture is scaled about the centre of the UV square (or of the mesh's bounds)
+pub(crate) fn texture_placement(texture: &TextureLayer) -> SlotPlacement {
+    SlotPlacement { scale: texture.scale, offset: 0.5 * (1.0 - texture.scale), triplanar_contrast: texture.triplanar.then_some(texture.triplanar_contrast) }
 }
 
-/// How much each projection (facing X, Y and Z) counts for a surface facing `normal`, summing to 1
-pub(crate) fn triplanar_weights(texture: &TextureLayer, normal: Vec3) -> [f32; 3] {
-    let contrast = texture.triplanar_contrast.clamp(*TextureLayer::TRIPLANAR_CONTRAST_RANGE.start(), *TextureLayer::TRIPLANAR_CONTRAST_RANGE.end());
+/// Where a slot is read in UV
+pub(crate) fn uv_coordinates(placement: &SlotPlacement, uv: Vec2) -> Vec2 {
+    uv * placement.scale + Vec2::splat(placement.offset)
+}
+
+/// Where a slot is read on each of the three projections (facing X, Y and Z) for `position` across the mesh's bounds (0..1)
+pub(crate) fn triplanar_coordinates(placement: &SlotPlacement, position: Vec3) -> [Vec2; 3] {
+    let placed = |u: f32, v: f32| Vec2::new(u, v) * placement.scale + Vec2::splat(placement.offset);
+    [placed(-position.z, position.y), placed(position.x, position.z), placed(position.x, position.y)]
+}
+
+/// How much each projection (facing X, Y and Z) counts for a surface facing `normal` at triplanar `contrast`, summing to 1
+pub(crate) fn triplanar_weights(contrast: f32, normal: Vec3) -> [f32; 3] {
+    let contrast = contrast.clamp(*TextureLayer::TRIPLANAR_CONTRAST_RANGE.start(), *TextureLayer::TRIPLANAR_CONTRAST_RANGE.end());
     let sharpness = (1.0 - contrast).max(f32::EPSILON).powf(-TRIPLANAR_SHARPNESS_POWER);
     let facing = normal.abs();
     let largest = facing.max_element().max(MIN_NORMAL_COMPONENT);
@@ -132,19 +145,18 @@ mod tests {
 
     #[test]
     fn triplanar_weights_follow_the_normal_and_sharpen_with_contrast() {
-        let along_y = triplanar_weights(&texture(), Vec3::Y);
+        let along_y = triplanar_weights(texture().triplanar_contrast, Vec3::Y);
         assert!((along_y[1] - 1.0).abs() < 1e-6);
         let diagonal = Vec3::new(1.0, 0.5, 0.0).normalize();
-        let soft = triplanar_weights(&TextureLayer { triplanar_contrast: 0.001, ..texture() }, diagonal);
-        let hard = triplanar_weights(&TextureLayer { triplanar_contrast: 0.9, ..texture() }, diagonal);
+        let (soft, hard) = (triplanar_weights(0.001, diagonal), triplanar_weights(0.9, diagonal));
         assert!(hard[0] > soft[0] && hard[1] < soft[1]);
         assert!((soft.iter().sum::<f32>() - 1.0).abs() < 1e-5);
     }
 
     #[test]
     fn scale_is_about_the_centre() {
-        let texture = TextureLayer { scale: 2.0, ..texture() };
-        assert_eq!(uv_coordinates(&texture, Vec2::splat(0.5)), Vec2::splat(0.5));
-        assert_eq!(uv_coordinates(&texture, Vec2::new(0.75, 0.25)), Vec2::new(1.0, 0.0));
+        let placement = texture_placement(&TextureLayer { scale: 2.0, ..texture() });
+        assert_eq!(uv_coordinates(&placement, Vec2::splat(0.5)), Vec2::splat(0.5));
+        assert_eq!(uv_coordinates(&placement, Vec2::new(0.75, 0.25)), Vec2::new(1.0, 0.0));
     }
 }

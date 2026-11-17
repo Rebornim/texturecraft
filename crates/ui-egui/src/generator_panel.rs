@@ -62,7 +62,7 @@ pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer
             // Saved before the section or light controls, a generator shows them at their defaults: editing one moves it onto them
             if let Some(defaults) = SectionParameters::defaults(generator.kind) {
                 section_parameters(app, ui, id, generator, generator.section_controls().unwrap_or(defaults));
-                texture_parameters(app, ui, id, generator.texture.clone().unwrap_or_default());
+                texture_parameters(app, ui, id, generator.texture.as_deref().cloned().unwrap_or_default());
             }
             if let Some(defaults) = LightParameters::defaults(generator.kind) {
                 light_parameters(app, ui, id, None, defaults);

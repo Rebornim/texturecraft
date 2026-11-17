@@ -648,9 +648,12 @@ pub struct Generator {
     /// The Light generator's controls (None: the level, softness and noise above, as saved before they existed)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub light: Option<LightParameters>,
-    /// The texture blended over the signal on the section controls (None: Use Texture never touched, as saved before it existed)
+    /// The texture blended over the signal on the section controls (None: Use Texture never touched, as saved before it existed); boxed, so a generator effect stays small
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub texture: Option<TextureLayer>,
+    pub texture: Option<Box<TextureLayer>>,
+    /// The image a wear generator reads as its grunge once Use Custom Grunge is on (None: an empty slot)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grunge: Option<Source>,
 }
 
 impl Generator {
@@ -685,12 +688,12 @@ impl Generator {
 
     /// The texture the generator blends over its signal: only on the section controls, turned on with some opacity
     pub fn texture_in_use(&self) -> Option<&TextureLayer> {
-        self.texture.as_ref().filter(|texture| texture.in_use() && self.section_controls().is_some())
+        self.texture.as_deref().filter(|texture| texture.in_use() && self.section_controls().is_some())
     }
 
-    /// Everything the generator reads instead of its mesh maps: its inputs, then its texture
+    /// Everything the generator reads instead of its mesh maps: its inputs, then its texture and its custom grunge
     pub fn sources(&self) -> impl Iterator<Item = &Source> {
-        self.inputs.values().chain(self.texture.as_ref().and_then(|texture| texture.source.as_ref()))
+        self.inputs.values().chain(self.texture.as_ref().and_then(|texture| texture.source.as_ref())).chain(self.grunge.as_ref())
     }
 
     /// Whether the generator is on the level, softness and noise it had before the reference app's controls
@@ -729,6 +732,7 @@ impl Generator {
             section: SectionParameters::defaults(kind),
             light: LightParameters::defaults(kind),
             texture: None,
+            grunge: None,
         }
     }
 

@@ -26,6 +26,9 @@ pub struct WearParameters {
     pub curvature_weight: f32,
     /// How much convex edges are kept clean (0..1; Dirt)
     pub edges_masking: f32,
+    /// The grunge read from the generator's custom grunge image instead of the kind's own pattern
+    #[serde(default)]
+    pub custom_grunge: bool,
 }
 
 impl WearParameters {
@@ -45,6 +48,7 @@ impl WearParameters {
             ao_masking: 0.5,
             curvature_weight: 1.0,
             edges_masking: 0.5,
+            custom_grunge: false,
         };
         match kind {
             GeneratorKind::EdgeWear | GeneratorKind::Dirt => Some(shared),
@@ -76,6 +80,7 @@ impl WearParameters {
             ao_masking: unit(self.ao_masking, defaults.ao_masking),
             curvature_weight: unit(self.curvature_weight, defaults.curvature_weight),
             edges_masking: unit(self.edges_masking, defaults.edges_masking),
+            custom_grunge: self.custom_grunge,
         }
     }
 }

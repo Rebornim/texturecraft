@@ -5,6 +5,7 @@ use texturecraft_core::{GeneratorKind, Procedural, ProceduralKind, Projection, W
 use crate::curvature_sizes::LEVEL_RADII;
 
 use crate::pattern::{Coords, procedural};
+use crate::texture_layer::SlotPlacement;
 
 use crate::wear_inputs::WearInputs;
 use crate::wear_scan::{DIRT_SCAN, EDGE_WEAR_SCAN, FIBER_GLASS_SCAN};
@@ -29,11 +30,13 @@ struct GrungePattern {
     breakup: Option<(ProceduralKind, f32)>,
     mean: f32,
     spread: f32,
+    /// How strongly a custom grunge's gray away from mid gray counts, in units of the normalised grunge (Dirt reads a brighter custom grunge as cleaner)
+    custom_gain: f32,
 }
 
 /// Fine scratches on metal edges, a woven fibre on fibreglass, blotchy grime for dirt
 const EDGE_WEAR_GRUNGE: GrungePattern =
-    GrungePattern { kind: ProceduralKind::Scratches, repeats_per_scale: 4.0, rotation: 0.0, breakup: None, mean: 0.037, spread: 0.149 };
+    GrungePattern { kind: ProceduralKind::Scratches, repeats_per_scale: 4.0, rotation: 0.0, breakup: None, mean: 0.037, spread: 0.149, custom_gain: 6.22 };
 const FIBER_GLASS_GRUNGE: GrungePattern = GrungePattern {
     kind: ProceduralKind::Weave,
     repeats_per_scale: 16.0,
@@ -41,14 +44,21 @@ const FIBER_GLASS_GRUNGE: GrungePattern = GrungePattern {
     breakup: Some((ProceduralKind::Grunge, 4.0)),
     mean: 0.539,
     spread: 0.198,
+    custom_gain: 1.9,
 };
 const DIRT_GRUNGE: GrungePattern =
-    GrungePattern { kind: ProceduralKind::Grunge, repeats_per_scale: 4.0, rotation: 0.0, breakup: None, mean: 0.682, spread: 0.242 };
+    GrungePattern { kind: ProceduralKind::Grunge, repeats_per_scale: 4.0, rotation: 0.0, breakup: None, mean: 0.682, spread: 0.242, custom_gain: -5.56 };
 /// How much a breakup pattern varies the grunge's strength (0 none, 1 down to nothing)
 const BREAKUP_DEPTH: f32 = 0.6;
 
 /// The triplanar seams' sharpness at triplanar contrast 0 and 1
 const TRIPLANAR_SHARPNESS: std::ops::RangeInclusive<f32> = 1.0..=16.0;
+
+/// The gray at which a custom grunge neither adds nor removes wear
+const CUSTOM_GRUNGE_MID_GRAY: f32 = 0.5;
+
+/// Where the reference app reads a custom grunge at the UV square's origin: half way across the image (triplanar: at its origin)
+const CUSTOM_GRUNGE_UV_OFFSET: f32 = 0.5;
 
 /// The Gaussian sigma (texels at 2K) the kind's blurred curvature is read at
 pub(crate) fn blur_sigma(kind: GeneratorKind, wear: &WearParameters) -> f32 {
@@ -59,17 +69,24 @@ pub(crate) fn blur_sigma(kind: GeneratorKind, wear: &WearParameters) -> f32 {
     }
 }
 
-/// The wear's grunge at `coords`, normalised to mean 0 and spread 1
-pub(crate) fn grunge(kind: GeneratorKind, wear: &WearParameters, seed: u32, coords: &Coords) -> f32 {
-    let grunge = match kind {
+fn grunge_pattern(kind: GeneratorKind) -> &'static GrungePattern {
+    match kind {
         GeneratorKind::Dirt => &DIRT_GRUNGE,
         GeneratorKind::FiberGlassEdgeWear => &FIBER_GLASS_GRUNGE,
         _ => &EDGE_WEAR_GRUNGE,
-    };
+    }
+}
+
+fn triplanar_sharpness(wear: &WearParameters) -> f32 {
+    TRIPLANAR_SHARPNESS.start() + (TRIPLANAR_SHARPNESS.end() - TRIPLANAR_SHARPNESS.start()) * wear.triplanar_contrast
+}
+
+/// The wear's own grunge at `coords`, normalised to mean 0 and spread 1
+pub(crate) fn grunge(kind: GeneratorKind, wear: &WearParameters, seed: u32, coords: &Coords) -> f32 {
+    let grunge = grunge_pattern(kind);
     let pattern = Procedural { scale: grunge.repeats_per_scale * wear.grunge_scale, seed, ..Procedural::new(grunge.kind) };
     let projection = if wear.triplanar {
-        let sharpness = TRIPLANAR_SHARPNESS.start() + (TRIPLANAR_SHARPNESS.end() - TRIPLANAR_SHARPNESS.start()) * wear.triplanar_contrast;
-        Projection::Triplanar { scale: 1.0, sharpness, offset: [0.0; 3] }
+        Projection::Triplanar { scale: 1.0, sharpness: triplanar_sharpness(wear), offset: [0.0; 3] }
     } else {
         Projection::Uv { scale: [1.0, 1.0], rotation: grunge.rotation, offset: [0.0, 0.0] }
     };
@@ -79,6 +96,20 @@ pub(crate) fn grunge(kind: GeneratorKind, wear: &WearParameters, seed: u32, coor
         value *= 1.0 - BREAKUP_DEPTH + BREAKUP_DEPTH * procedural(&breakup, &projection, coords);
     }
     (value - grunge.mean) / grunge.spread
+}
+
+/// Where a custom grunge image is read: repeated grunge-scale times across the UV square (or the mesh's bounds, triplanar)
+pub(crate) fn custom_grunge_placement(wear: &WearParameters) -> SlotPlacement {
+    if wear.triplanar {
+        SlotPlacement { scale: wear.grunge_scale, offset: 0.0, triplanar_contrast: Some(wear.triplanar_contrast) }
+    } else {
+        SlotPlacement { scale: wear.grunge_scale, offset: CUSTOM_GRUNGE_UV_OFFSET, triplanar_contrast: None }
+    }
+}
+
+/// A custom grunge's `gray` as the normalised grunge the fitted signals read; the reference app's seed leaves it where it is
+pub(crate) fn custom_grunge(kind: GeneratorKind, gray: f32) -> f32 {
+    grunge_pattern(kind).custom_gain * (gray - CUSTOM_GRUNGE_MID_GRAY)
 }
 
 /// The two blurred curvature levels around `sigma` and the weight of the wider one; level None is the map itself

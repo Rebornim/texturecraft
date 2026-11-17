@@ -843,7 +843,8 @@ fn replacing_a_generator_texture_image_invalidates_the_cached_stack() {
     let hot_layer = heavy_stack(&mut fixture);
     let texture = TextureLayer { enabled: true, source: Some(Source::image("grunge")), opacity: 1.0, blend: TextureBlend::Normal, ..TextureLayer::default() };
     let mut mask = Mask::new(MaskBackground::Black);
-    mask.effects.push(effect(&mut fixture, EffectKind::Generator(Generator { texture: Some(texture), ..Generator::new(GeneratorKind::AmbientOcclusion) })));
+    mask.effects
+        .push(effect(&mut fixture, EffectKind::Generator(Generator { texture: Some(Box::new(texture)), ..Generator::new(GeneratorKind::AmbientOcclusion) })));
     let textured = add(&mut fixture, 0, fill(&[(Channel::Roughness, procedural(ProceduralKind::Clouds, 0.0, 1.0))]), Some(mask));
     let stack = &mut fixture.project.texture_sets[0].stack;
     stack.retain(|id| *id != textured);

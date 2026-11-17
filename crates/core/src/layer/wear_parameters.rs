@@ -49,7 +49,12 @@ impl WearParameters {
         match kind {
             GeneratorKind::EdgeWear | GeneratorKind::Dirt => Some(shared),
             GeneratorKind::FiberGlassEdgeWear => Some(WearParameters { curvature_weight: 0.25, ..shared }),
-            GeneratorKind::ThinAreas | GeneratorKind::Curvature | GeneratorKind::AmbientOcclusion | GeneratorKind::Position | GeneratorKind::Direction => None,
+            GeneratorKind::ThinAreas
+            | GeneratorKind::Curvature
+            | GeneratorKind::AmbientOcclusion
+            | GeneratorKind::Position
+            | GeneratorKind::Direction
+            | GeneratorKind::WorldSpaceNormals => None,
         }
     }
 

@@ -12,6 +12,7 @@ mod export_colour_space;
 mod filter_swap;
 mod filters;
 mod generator_inputs;
+mod generator_sections;
 mod generator_swap;
 mod generator_wear;
 mod high_poly_missed;

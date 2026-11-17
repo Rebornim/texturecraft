@@ -16,6 +16,7 @@ pub mod eval;
 mod held_fields;
 mod image_identity;
 pub mod pattern;
+mod sections;
 pub mod store;
 pub mod thumb;
 mod wear;

@@ -4,6 +4,7 @@
 mod alpha_parameters;
 mod anchor_point;
 mod bake_job_mesh;
+mod bake_map_rows;
 mod bake_mode;
 mod bake_presets;
 mod bake_sync;

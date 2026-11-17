@@ -44,6 +44,20 @@ pub fn set_focus_picking(ctx: &egui::Context, on: bool) {
     ctx.data_mut(|d| d.insert_temp(focus_pick_id(), on));
 }
 
+/// What the views' aux texture shows: the quick mask being edited, a mesh map, the image a pending ID pick reads instead of the ID mesh map, or a mask
+fn aux_view(app: &TextureCraftApp) -> Option<crate::gpu::AuxView> {
+    match app.session.view {
+        _ if quick_mask_shown(app) => Some(crate::gpu::AuxView::QuickMask),
+        ViewMode::MeshMap(BakedMap::Id) if app.picking_id_color.is_some() => app.picking_id_color.map(|pick| crate::gpu::AuxView::IdMask(pick.effect)),
+        ViewMode::MeshMap(map) => Some(crate::gpu::AuxView::MeshMap(map)),
+        ViewMode::Mask(id) => Some(crate::gpu::AuxView::Mask(id)),
+        _ if app.ui.mode == crate::state::Mode::Baking && app.ui.bake_visualization.bent_normal_shown() => {
+            Some(crate::gpu::AuxView::MeshMap(BakedMap::BentNormal))
+        }
+        _ => None,
+    }
+}
+
 /// The viewport dock tab: the paint bar, then the 3D and 2D views in the chosen layout with the mode's overlays
 pub fn central(app: &mut TextureCraftApp, ui: &mut Ui) {
     let mode = app.ui.mode;
@@ -97,13 +111,7 @@ pub fn central(app: &mut TextureCraftApp, ui: &mut Ui) {
     finish_unavailable_tool_gestures(app, pending_2d_endpoint);
     crate::id_color_pick::IdColorPick::end_when_stale(app);
     let tokens = Tokens::get(ui.ctx());
-    let aux_view = match app.session.view {
-        _ if quick_mask_shown(app) => Some(crate::gpu::AuxView::QuickMask),
-        ViewMode::MeshMap(map) => Some(crate::gpu::AuxView::MeshMap(map)),
-        ViewMode::Mask(id) => Some(crate::gpu::AuxView::Mask(id)),
-        _ if mode == crate::state::Mode::Baking && app.ui.bake_visualization.bent_normal_shown() => Some(crate::gpu::AuxView::MeshMap(BakedMap::BentNormal)),
-        _ => None,
-    };
+    let aux_view = aux_view(app);
     let mut sync = PendingSync(Some(aux_view));
     let full = ui.available_rect_before_wrap();
     path_keys(app, ui);
@@ -2392,6 +2400,23 @@ mod tests {
         assert_eq!(mask_view_layer(app), None, "the quick mask is on screen, not the layer mask");
         app.session.quick_mask.editing = false;
         assert_eq!(mask_view_layer(app), Some(LayerId(7)), "the label returns with the mask view");
+    }
+
+    #[test]
+    fn picking_shows_the_id_mask_its_color_selection_reads() {
+        use texturecraft_engine::{StackTarget, execute};
+
+        let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+        execute(&mut session, "layer.add.fill", &json!(null)).unwrap();
+        let effect = texturecraft_engine::core::LayerId(execute(&mut session, "mask.add.colorSelection", &json!(null)).unwrap()["effect"].as_u64().unwrap());
+        session.target = StackTarget::Effect(effect);
+        let mut harness = egui_kittest::Harness::builder().build_eframe(|context| TextureCraftApp::new(context, session));
+        harness.run_steps(2);
+
+        crate::id_color_pick::IdColorPick::start(harness.state_mut(), effect, None);
+        assert_eq!(aux_view(harness.state()), Some(crate::gpu::AuxView::IdMask(effect)), "the pick's own ID mask");
+        crate::id_color_pick::IdColorPick::end(harness.state_mut());
+        assert_eq!(aux_view(harness.state()), None, "the earlier view");
     }
 
     #[test]

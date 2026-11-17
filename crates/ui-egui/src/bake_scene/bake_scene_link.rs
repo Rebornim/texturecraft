@@ -52,7 +52,7 @@ impl BakeSceneLink {
         let Some(visualization) = visualization else { return };
 
         if visualization.high_poly.shown {
-            let high = session.bake_meshes.merged_high().map(|high| high.mesh.clone());
+            let high = session.doc.bake_meshes.merged_high().map(|high| high.mesh.clone());
             let handle = SharedHandle::of(high.as_ref());
             if handle != self.high {
                 self.high = handle;

@@ -25,6 +25,7 @@ pub mod fonts;
 mod generator_panel;
 pub mod gpu;
 mod grid_tile;
+mod high_poly_job;
 pub mod i18n;
 pub mod id_color_pick;
 pub mod keymap;
@@ -86,6 +87,7 @@ use texturecraft_engine::bake::Progress;
 
 pub use bake_job::BakeJob;
 pub use control::ControlRequest;
+pub use high_poly_job::HighPolyJob;
 pub use running_bake::RunningBake;
 pub use state::UiState;
 
@@ -139,6 +141,8 @@ pub struct TextureCraftApp {
     pub(crate) gpu_memory: (Vec<String>, Option<String>),
     pub bake: Option<BakeJob>,
     pub resize: Option<ResizeJob>,
+    /// High poly files being loaded for the bake
+    pub high_poly_job: Option<HighPolyJob>,
     pub link_cooks: Vec<LinkCook>,
     pub thumbs: thumbs::Thumbs,
     /// The Layers panel's thumbnails and folded groups.
@@ -231,6 +235,7 @@ impl TextureCraftApp {
             gpu_memory: (Vec::new(), None),
             bake: None,
             resize: None,
+            high_poly_job: None,
             link_cooks: Vec::new(),
             thumbs: thumbs::Thumbs::default(),
             layer_panel: layer_panel::LayerPanel::default(),
@@ -710,6 +715,8 @@ impl eframe::App for TextureCraftApp {
         }
         self.poll_bake(ctx);
         self.poll_resize(ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.poll_high_poly_job(ctx);
         self.poll_link_cooks(ctx);
         self.thumbs.sync_images(&self.session.images, self.session.revision);
         // The library shelf rescans when the window comes back (MaterialCraft may have sent a material)

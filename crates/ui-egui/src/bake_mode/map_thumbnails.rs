@@ -49,7 +49,7 @@ mod tests {
 
     #[test]
     fn a_thumbnail_is_kept_until_its_map_is_baked_again() {
-        let mut session = texturecraft_engine::sample_session(64, 32).unwrap();
+        let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
         let context = egui::Context::default();
         let mut thumbnails = MapThumbnails::default();
         let map = *session.doc.baked[&0].maps.keys().next().expect("the sample has a baked map");

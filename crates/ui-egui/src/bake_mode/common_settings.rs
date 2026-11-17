@@ -1,7 +1,7 @@
 use super::controls::{choice, hint, indented, integer, number, section, subsection, text_input};
 use super::settings_section::SettingsSection;
 use crate::TextureCraftApp;
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use crate::theme::Tokens;
 use crate::widgets::icon_button;
 use egui::Ui;
@@ -23,7 +23,7 @@ const MAX_DILATION_WIDTH: u32 = 128;
 /// The Common Settings, Cage and Skew Correction sections, cage and skew greyed with the reason when they can't apply
 pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSettings) -> Option<Value> {
     let mut reset = Map::new();
-    let has_high = !app.session.bake_meshes.high.is_empty();
+    let has_high = !app.session.doc.bake_meshes.high.is_empty();
     let jump = super::section_jump::take(ui.ctx());
     ui.push_id("common", |ui| {
         super::section_jump::anchor(ui, SettingsSection::Common, jump);
@@ -207,7 +207,7 @@ fn output_size(ui: &mut Ui, settings: &mut CommonBakeSettings) {
 /// The high poly meshes as a list box, with + to add some and − to remove the selected one
 fn high_poly_scene(app: &mut TextureCraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
-    let names: Vec<String> = app.session.bake_meshes.high.iter().map(|mesh| mesh.name.clone()).collect();
+    let names: Vec<String> = app.session.doc.bake_meshes.high.iter().map(|mesh| mesh.name.clone()).collect();
     let selected_id = ui.make_persistent_id("high_poly_selected");
     let mut selected = ui.data(|data| data.get_temp::<usize>(selected_id)).filter(|index| *index < names.len());
 
@@ -225,6 +225,9 @@ fn high_poly_scene(app: &mut TextureCraftApp, ui: &mut Ui) {
                     if ui.selectable_label(selected == Some(index), name).on_hover_text(name).clicked() {
                         selected = Some(index);
                     }
+                }
+                for name in app.high_poly_job.iter().flat_map(|job| job.file_names()) {
+                    ui.add_enabled(false, egui::Button::selectable(false, trf("Loading {name}...", &[("name", &name)])));
                 }
             });
         });
@@ -253,7 +256,7 @@ fn high_poly_scene(app: &mut TextureCraftApp, ui: &mut Ui) {
 /// The cage file row; while the cage can't `apply` only removing a loaded one stays available, so a saved cage can still be dropped
 fn cage_file(app: &mut TextureCraftApp, ui: &mut Ui, apply: bool) {
     ui.add_enabled(apply, egui::Label::new(tr("Cage Scene")));
-    let cage = app.session.bake_meshes.cage.as_ref().map(|mesh| mesh.name.clone());
+    let cage = app.session.doc.bake_meshes.cage.as_ref().map(|mesh| mesh.name.clone());
     ui.horizontal(|ui| {
         let button_size = ui.spacing().interact_size.y;
         let label_width = (ui.available_width() - 2.0 * (button_size + ui.spacing().item_spacing.x)).max(0.0);

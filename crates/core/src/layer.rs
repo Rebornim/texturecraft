@@ -14,6 +14,8 @@ mod curvature_mode;
 mod distance_parameters;
 mod generator_global;
 mod grayscale_conversion;
+mod grayscale_conversion_parameters;
+mod kind_controls;
 mod light_parameters;
 mod linear_gradient_parameters;
 mod micro_curvature_type;
@@ -33,6 +35,8 @@ pub use curvature_mode::CurvatureMode;
 pub use distance_parameters::DistanceParameters;
 pub use generator_global::GeneratorGlobal;
 pub use grayscale_conversion::GrayscaleConversion;
+pub use grayscale_conversion_parameters::GrayscaleConversionParameters;
+pub use kind_controls::KindControls;
 pub use light_parameters::LightParameters;
 pub use linear_gradient_parameters::LinearGradientParameters;
 pub use micro_curvature_type::MicroCurvatureType;
@@ -545,10 +549,12 @@ pub enum GeneratorKind {
     ThreeDLinearGradient,
     /// White at the UV islands' borders, fading towards their insides
     UvBorderDistance,
+    /// An image turned gray, tiled and rotated across the UV square
+    GrayscaleConversion,
 }
 
 impl GeneratorKind {
-    pub const ALL: [GeneratorKind; 12] = [
+    pub const ALL: [GeneratorKind; 13] = [
         GeneratorKind::EdgeWear,
         GeneratorKind::Dirt,
         GeneratorKind::ThinAreas,
@@ -561,6 +567,7 @@ impl GeneratorKind {
         GeneratorKind::ThreeDDistance,
         GeneratorKind::ThreeDLinearGradient,
         GeneratorKind::UvBorderDistance,
+        GeneratorKind::GrayscaleConversion,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -576,6 +583,7 @@ impl GeneratorKind {
             GeneratorKind::ThreeDDistance => "3D Distance",
             GeneratorKind::ThreeDLinearGradient => "3D Linear Gradient",
             GeneratorKind::UvBorderDistance => "UV Border Distance",
+            GeneratorKind::GrayscaleConversion => "Grayscale Conversion",
         }
     }
 
@@ -594,12 +602,20 @@ impl GeneratorKind {
             GeneratorKind::ThreeDDistance => "ThreeDDistance",
             GeneratorKind::ThreeDLinearGradient => "ThreeDLinearGradient",
             GeneratorKind::UvBorderDistance => "UvBorderDistance",
+            GeneratorKind::GrayscaleConversion => "GrayscaleConversion",
         }
     }
 
     /// Whether the generator picker offers this kind (Thin areas only loads from saved projects and smart masks; the newest kinds wait for their panels)
     pub fn in_picker(self) -> bool {
-        !matches!(self, GeneratorKind::ThinAreas | GeneratorKind::ThreeDDistance | GeneratorKind::ThreeDLinearGradient | GeneratorKind::UvBorderDistance)
+        !matches!(
+            self,
+            GeneratorKind::ThinAreas
+                | GeneratorKind::ThreeDDistance
+                | GeneratorKind::ThreeDLinearGradient
+                | GeneratorKind::UvBorderDistance
+                | GeneratorKind::GrayscaleConversion
+        )
     }
 
     /// Whether the kind's result depends on its seed
@@ -617,7 +633,7 @@ impl GeneratorKind {
             GeneratorKind::Position | GeneratorKind::ThreeDDistance | GeneratorKind::ThreeDLinearGradient => &[BakedMap::Position],
             GeneratorKind::WorldSpaceNormals => &[BakedMap::WorldNormal],
             GeneratorKind::Direction => &[BakedMap::WorldNormal, BakedMap::Position],
-            GeneratorKind::UvBorderDistance => &[],
+            GeneratorKind::UvBorderDistance | GeneratorKind::GrayscaleConversion => &[],
         }
     }
 
@@ -625,7 +641,11 @@ impl GeneratorKind {
     pub fn has_no_earlier_model(self) -> bool {
         matches!(
             self,
-            GeneratorKind::FiberGlassEdgeWear | GeneratorKind::ThreeDDistance | GeneratorKind::ThreeDLinearGradient | GeneratorKind::UvBorderDistance
+            GeneratorKind::FiberGlassEdgeWear
+                | GeneratorKind::ThreeDDistance
+                | GeneratorKind::ThreeDLinearGradient
+                | GeneratorKind::UvBorderDistance
+                | GeneratorKind::GrayscaleConversion
         )
     }
 
@@ -691,15 +711,9 @@ pub struct Generator {
     /// The micro details of Curvature, Ambient Occlusion and the wear kinds (None: never touched, their defaults: off); boxed, so a generator effect stays small
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub micro: Option<Box<MicroDetails>>,
-    /// The 3D Distance generator's controls (None on every other kind); boxed, so a generator effect stays small
+    /// The controls of 3D Distance, 3D Linear Gradient, UV Border Distance or Grayscale Conversion (None on the other kinds); boxed, so a generator effect stays small
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub distance: Option<Box<DistanceParameters>>,
-    /// The 3D Linear Gradient generator's controls (None on every other kind); boxed, so a generator effect stays small
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub linear_gradient: Option<Box<LinearGradientParameters>>,
-    /// The UV Border Distance generator's controls (None on every other kind); boxed, so a generator effect stays small
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub border_distance: Option<Box<BorderDistanceParameters>>,
+    pub controls: Option<Box<KindControls>>,
 }
 
 impl Generator {
@@ -722,17 +736,47 @@ impl Generator {
 
     /// The 3D Distance controls the generator computes with: its own, else the defaults on a 3D Distance generator
     pub fn distance_controls(&self) -> Option<DistanceParameters> {
-        self.distance.as_deref().copied().or_else(|| (self.kind == GeneratorKind::ThreeDDistance).then(DistanceParameters::default))
+        match self.kind_controls() {
+            Some(KindControls::Distance(distance)) => Some(distance),
+            _ => None,
+        }
     }
 
     /// The 3D Linear Gradient controls the generator computes with: its own, else the defaults on a 3D Linear Gradient generator
     pub fn linear_gradient_controls(&self) -> Option<LinearGradientParameters> {
-        self.linear_gradient.as_deref().copied().or_else(|| (self.kind == GeneratorKind::ThreeDLinearGradient).then(LinearGradientParameters::default))
+        match self.kind_controls() {
+            Some(KindControls::LinearGradient(gradient)) => Some(gradient),
+            _ => None,
+        }
     }
 
     /// The UV Border Distance controls the generator computes with: its own, else the defaults on a UV Border Distance generator
     pub fn border_distance_controls(&self) -> Option<BorderDistanceParameters> {
-        self.border_distance.as_deref().copied().or_else(|| (self.kind == GeneratorKind::UvBorderDistance).then(BorderDistanceParameters::default))
+        match self.kind_controls() {
+            Some(KindControls::BorderDistance(border)) => Some(border),
+            _ => None,
+        }
+    }
+
+    /// The Grayscale Conversion controls the generator computes with: its own, else the defaults on a Grayscale Conversion generator
+    pub fn grayscale_controls(&self) -> Option<GrayscaleConversionParameters> {
+        match self.kind_controls() {
+            Some(KindControls::Grayscale(grayscale)) => Some(grayscale),
+            _ => None,
+        }
+    }
+
+    /// The controls of a kind with only its own controls: its saved ones when they are that kind's, else its defaults
+    pub fn kind_controls(&self) -> Option<KindControls> {
+        self.controls.as_deref().filter(|controls| controls.kind() == self.kind).cloned().or_else(|| KindControls::defaults(self.kind))
+    }
+
+    /// The Grayscale Conversion controls as saved, without a copy
+    fn grayscale_controls_ref(&self) -> Option<&GrayscaleConversionParameters> {
+        match self.controls.as_deref() {
+            Some(KindControls::Grayscale(grayscale)) if self.kind == GeneratorKind::GrayscaleConversion => Some(grayscale),
+            _ => None,
+        }
     }
 
     /// The mode and detail sizes the generator reads its curvature with: its own, the defaults on Curvature's section controls, else None
@@ -752,9 +796,9 @@ impl Generator {
         self.texture.as_deref().filter(|texture| texture.in_use() && self.section_controls().is_some())
     }
 
-    /// Everything the generator reads instead of its mesh maps: its inputs, then its texture, its custom grunge and its micro details
+    /// Everything the generator reads instead of its mesh maps: its inputs, then its texture, its custom grunge, its micro details and its Grayscale Conversion image
     pub fn sources(&self) -> impl Iterator<Item = &Source> {
-        let micro = self.micro.iter().flat_map(|micro| micro.sources());
+        let micro = self.micro.iter().flat_map(|micro| micro.sources()).chain(self.grayscale_controls_ref().and_then(|grayscale| grayscale.source.as_ref()));
         self.inputs.values().chain(self.texture.as_ref().and_then(|texture| texture.source.as_ref())).chain(self.grunge.as_ref()).chain(micro)
     }
 
@@ -802,9 +846,7 @@ impl Generator {
             texture: None,
             grunge: None,
             micro: None,
-            distance: (kind == GeneratorKind::ThreeDDistance).then(Box::default),
-            linear_gradient: (kind == GeneratorKind::ThreeDLinearGradient).then(Box::default),
-            border_distance: (kind == GeneratorKind::UvBorderDistance).then(Box::default),
+            controls: KindControls::defaults(kind).map(Box::new),
         }
     }
 

@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use texturecraft_compose::{BakedMaps, Inputs, PixelStore, mask_at};
 use texturecraft_core::{
-    BakedMap, Channel, DistanceParameters, Effect, EffectKind, Fill, Generator, GeneratorKind, Layer, LayerId, LayerKind, LinearGradientParameters, Mask,
-    MaskBackground, Project, Source, TextureSet,
+    BakedMap, Channel, DistanceParameters, Effect, EffectKind, Fill, Generator, GeneratorKind, KindControls, Layer, LayerId, LayerKind,
+    LinearGradientParameters, Mask, MaskBackground, Project, Source, TextureSet,
 };
 use texturecraft_geom::{Mesh, UvGBuffer, primitives};
 
@@ -40,7 +40,7 @@ fn covered(fixture: &Fixture) -> Vec<((u32, u32), f32)> {
 
 /// The mask of a 3D Distance generator with `distance` alone over black at `texels`
 fn mask(fixture: &mut Fixture, distance: DistanceParameters, texels: &[(u32, u32)]) -> Vec<f32> {
-    generator_mask(fixture, Generator { distance: Some(Box::new(distance)), ..Generator::new(GeneratorKind::ThreeDDistance) }, texels)
+    generator_mask(fixture, Generator { controls: Some(Box::new(KindControls::Distance(distance))), ..Generator::new(GeneratorKind::ThreeDDistance) }, texels)
 }
 
 /// The mask of `generator` alone over black at `texels`
@@ -104,8 +104,10 @@ fn the_linear_gradient_runs_from_its_start_to_its_end() {
     let mut fixture = fixture();
     let texels = covered(&fixture);
     let at: Vec<(u32, u32)> = texels.iter().map(|(texel, _)| *texel).collect();
-    let gradient =
-        |gradient: LinearGradientParameters| Generator { linear_gradient: Some(Box::new(gradient)), ..Generator::new(GeneratorKind::ThreeDLinearGradient) };
+    let gradient = |gradient: LinearGradientParameters| Generator {
+        controls: Some(Box::new(KindControls::LinearGradient(gradient))),
+        ..Generator::new(GeneratorKind::ThreeDLinearGradient)
+    };
 
     let upwards = generator_mask(&mut fixture, gradient(LinearGradientParameters::default()), &at);
     let downwards =

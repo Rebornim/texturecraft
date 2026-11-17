@@ -3,8 +3,8 @@
 use serde_json::{Value, json};
 use texturecraft_core::{
     AxisBlend, BakedMap, BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind,
-    GrayscaleConversion, LayerId, Levels, LightParameters, Mask, MaskBackground, OutputResolution, Procedural, ProceduralKind, Project, ResolutionMode,
-    SectionParameters, Source, TextureBlend, WearParameters,
+    GrayscaleConversion, KindControls, LayerId, Levels, LightParameters, Mask, MaskBackground, OutputResolution, Procedural, ProceduralKind, Project,
+    ResolutionMode, SectionParameters, Source, TextureBlend, WearParameters,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
@@ -52,7 +52,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add generator",
             ["Layers", "Effects"],
             None,
-            "{layer?, name?, generator?: edgeWear|dirt|fiberGlassEdgeWear|thinAreas|curvature|ambientOcclusion|position|worldSpaceNormals|direction|3dDistance|3dLinearGradient|uvBorderDistance, wearLevel?, wearContrast?, grungeAmount?, grungeScale?: 1..16, triplanar?, triplanarContrast?, edgesSmoothness?: 0..16, aoMasking?, curvatureWeight?, edgesMasking?, useCustomGrunge? (the image: effect.set input: grunge) (wear controls: edgeWear, fiberGlassEdgeWear and dirt), sectionInvert?, sectionBlur?: 0..16 (ambientOcclusion, worldSpaceNormals), sectionBalance? (not curvature), sectionContrast?, sectionBrightness?: -1..1 (not ambientOcclusion), rightLeft|topBottom|frontBack + Invert?|Blend?: normal|add|subtract|multiply|addSub|max|Weight? (position, worldSpaceNormals), useTexture?, textureOpacity?, textureInvert?, textureGrayscale?: desaturation|luma|average|max|min|red|green|blue, textureBlend?: normal|add|subtract|multiply|addSub|max|min|overlay|screen|softLight, textureScale?: 0.01..10, textureContrast?: -1..1, textureBrightness?: -1..1, textureTriplanar?, textureTriplanarContrast? (the texture itself: effect.set input: texture) (section controls: curvature, ambientOcclusion, position, worldSpaceNormals), useMicroDetails? (curvature, ambientOcclusion), microHeight?, microNormal? (the images: effect.set input: microHeight|microNormal, an image or a value), microCurvatureType?: standard|sobel|smooth, microCurvatureIntensity?: 0..5 on curvature, 0..1 on the wear kinds, microHeightIntensity?: 0..10 (curvature and the wear kinds), microAoRadius?, microAoDepth? (ambientOcclusion and the wear kinds) (micro details), distanceX?, distanceY?, distanceZ? (the point across the mesh's bounds), distanceRadius?: 0..1.5, distanceOffset? (0 all black, 1 all white), distanceContrast? (3dDistance, which also takes invert), gradientStart?, gradientEnd?: [x, y, z] across the mesh's bounds, gradientBalance?, gradientContrast? (3dLinearGradient, which also takes invert), borderDistance? (1 = half a UV tile), borderSmoothness?, borderBalance?, borderContrast? (uvBorderDistance, which also takes invert), lightHorizontal?: 0..360, lightVertical?: 0..360, highlightGlossiness?, highlightLevel?, lightAttenuation? (light controls: direction), level?, softness?, noise?, noiseScale?, offset?: -1..1 added to the result, direction? (instead keep edgeWear, dirt, curvature, ambientOcclusion, position and direction on the earlier model), invert?, blur?: 0..1, balance?: 0..1 (0.5 unchanged), contrast?: 0..1, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3 (1/8..x8), mode?: edges|cavities|both|raw, sizes?: [7 weights 0..1, finest first] (curvature and edgeWear)}",
+            "{layer?, name?, generator?: edgeWear|dirt|fiberGlassEdgeWear|thinAreas|curvature|ambientOcclusion|position|worldSpaceNormals|direction|3dDistance|3dLinearGradient|uvBorderDistance|grayscaleConversion, wearLevel?, wearContrast?, grungeAmount?, grungeScale?: 1..16, triplanar?, triplanarContrast?, edgesSmoothness?: 0..16, aoMasking?, curvatureWeight?, edgesMasking?, useCustomGrunge? (the image: effect.set input: grunge) (wear controls: edgeWear, fiberGlassEdgeWear and dirt), sectionInvert?, sectionBlur?: 0..16 (ambientOcclusion, worldSpaceNormals), sectionBalance? (not curvature), sectionContrast?, sectionBrightness?: -1..1 (not ambientOcclusion), rightLeft|topBottom|frontBack + Invert?|Blend?: normal|add|subtract|multiply|addSub|max|Weight? (position, worldSpaceNormals), useTexture?, textureOpacity?, textureInvert?, textureGrayscale?: desaturation|luma|average|max|min|red|green|blue, textureBlend?: normal|add|subtract|multiply|addSub|max|min|overlay|screen|softLight, textureScale?: 0.01..10, textureContrast?: -1..1, textureBrightness?: -1..1, textureTriplanar?, textureTriplanarContrast? (the texture itself: effect.set input: texture) (section controls: curvature, ambientOcclusion, position, worldSpaceNormals), useMicroDetails? (curvature, ambientOcclusion), microHeight?, microNormal? (the images: effect.set input: microHeight|microNormal, an image or a value), microCurvatureType?: standard|sobel|smooth, microCurvatureIntensity?: 0..5 on curvature, 0..1 on the wear kinds, microHeightIntensity?: 0..10 (curvature and the wear kinds), microAoRadius?, microAoDepth? (ambientOcclusion and the wear kinds) (micro details), distanceX?, distanceY?, distanceZ? (the point across the mesh's bounds), distanceRadius?: 0..1.5, distanceOffset? (0 all black, 1 all white), distanceContrast? (3dDistance, which also takes invert), gradientStart?, gradientEnd?: [x, y, z] across the mesh's bounds, gradientBalance?, gradientContrast? (3dLinearGradient, which also takes invert), borderDistance? (1 = half a UV tile), borderSmoothness?, borderBalance?, borderContrast? (uvBorderDistance, which also takes invert), grayscaleType?: desaturation|luma|average|max|min|red|green|blue, grayscaleBalance?, grayscaleContrast?, grayscaleTile?: 1..16, grayscaleRotation?: 0..360, grayscaleSafeRotation? (grayscaleConversion, which also takes invert; its image: effect.set input: image), lightHorizontal?: 0..360, lightVertical?: 0..360, highlightGlossiness?, highlightLevel?, lightAttenuation? (light controls: direction), level?, softness?, noise?, noiseScale?, offset?: -1..1 added to the result, direction? (instead keep edgeWear, dirt, curvature, ambientOcclusion, position and direction on the earlier model), invert?, blur?: 0..1, balance?: 0..1 (0.5 unchanged), contrast?: 0..1, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3 (1/8..x8), mode?: edges|cavities|both|raw, sizes?: [7 weights 0..1, finest first] (curvature and edgeWear)}",
             has_layer,
             add_generator
         ),
@@ -97,7 +97,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), generator?: kind (a generator effect only: swaps its kind in place, keeping the shared settings and the inputs it reads; its own controls start from that kind's defaults), wear, section and light controls (see effect.add.generator), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id, texture, grunge, microHeight or microNormal + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), generator?: kind (a generator effect only: swaps its kind in place, keeping the shared settings and the inputs it reads; its own controls start from that kind's defaults), wear, section and light controls (see effect.add.generator), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id, texture, grunge, microHeight, microNormal or image + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, value?, anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b], ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -437,6 +437,9 @@ const TEXTURE_KEYS: [&str; 10] = [
     "textureTriplanarContrast",
 ];
 
+/// The input name of Grayscale Conversion's image, beside the mesh map ids
+const GRAYSCALE_IMAGE_INPUT: &str = "image";
+
 /// The input name of a generator's texture, beside the mesh map ids
 const TEXTURE_INPUT: &str = "texture";
 
@@ -714,18 +717,20 @@ enum GeneratorInput {
     Grunge,
     MicroHeight,
     MicroNormal,
+    Image,
 }
 
 /// The generator input named by `input` and what replaces it (None: its mesh map again, or an empty texture or grunge slot), for a generator on layer `owner`
 fn generator_input_param(session: &Session, owner: LayerId, params: &Value) -> Result<Option<(GeneratorInput, Option<Source>)>> {
     const CMD: &str = "effect.set";
     let Some(name) = params.get("input") else { return Ok(None) };
-    let name = name.as_str().ok_or_else(|| bad(CMD, "`input` must be a mesh map id, `texture`, `grunge`, `microHeight` or `microNormal`"))?;
+    let name = name.as_str().ok_or_else(|| bad(CMD, "`input` must be a mesh map id, `texture`, `grunge`, `microHeight`, `microNormal` or `image`"))?;
     let input = match name {
         TEXTURE_INPUT => GeneratorInput::Texture,
         GRUNGE_INPUT => GeneratorInput::Grunge,
         MICRO_HEIGHT_INPUT => GeneratorInput::MicroHeight,
         MICRO_NORMAL_INPUT => GeneratorInput::MicroNormal,
+        GRAYSCALE_IMAGE_INPUT => GeneratorInput::Image,
         _ => GeneratorInput::Map(BakedMap::parse(name).ok_or_else(|| bad(CMD, format!("unknown input `{name}`")))?),
     };
 
@@ -932,6 +937,14 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
                         if let Some(micro) = generator.micro.as_mut() {
                             micro.height_source = source;
                         }
+                    }
+                    Some((GeneratorInput::Image, source)) => {
+                        if generator.kind != GeneratorKind::GrayscaleConversion {
+                            return Err(bad(CMD, "only Grayscale Conversion reads an `image` input"));
+                        }
+                        let mut grayscale = generator.grayscale_controls().unwrap_or_default();
+                        grayscale.source = source;
+                        generator.controls = Some(Box::new(KindControls::Grayscale(grayscale)));
                     }
                     Some((GeneratorInput::MicroNormal, source)) => {
                         if let Some(micro) = generator.micro.as_mut() {

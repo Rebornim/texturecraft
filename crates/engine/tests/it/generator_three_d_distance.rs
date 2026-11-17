@@ -1,7 +1,9 @@
 //! The 3D Distance, 3D Linear Gradient and UV Border Distance generators through `effect.add.generator` and `effect.set`: its controls, the controls it lacks, and a gradient around its point
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{BorderDistanceParameters, DistanceParameters, EffectKind, Generator, GeneratorKind, LayerId, LinearGradientParameters};
+use texturecraft_engine::core::{
+    BorderDistanceParameters, DistanceParameters, EffectKind, Generator, GeneratorKind, GrayscaleConversion, LayerId, LinearGradientParameters, Source,
+};
 use texturecraft_engine::{Session, execute};
 
 fn session() -> Session {
@@ -46,7 +48,7 @@ fn three_d_distance_refuses_the_earlier_and_global_controls_and_others_refuse_it
 
     let curvature = add(&mut session, json!({"generator": "curvature"}));
     assert!(execute(&mut session, "effect.set", &json!({"effect": curvature, "distanceRadius": 0.5})).is_err());
-    assert_eq!(generator(&session, curvature).distance, None);
+    assert_eq!(generator(&session, curvature).controls, None);
 }
 
 #[test]
@@ -96,4 +98,25 @@ fn uv_border_distance_takes_its_controls_and_refuses_the_others() {
     assert!(execute(&mut session, "effect.set", &json!({"effect": effect, "softness": 0.5})).is_err());
     let curvature = add(&mut session, json!({"generator": "curvature"}));
     assert!(execute(&mut session, "effect.set", &json!({"effect": curvature, "borderDistance": 0.5})).is_err());
+}
+
+#[test]
+fn grayscale_conversion_takes_its_controls_and_its_image() {
+    let mut session = session();
+    let image = image::RgbaImage::from_pixel(4, 4, image::Rgba([200, 50, 50, 255]));
+    let mut bytes = Vec::new();
+    image.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).unwrap();
+    let name = session.import_resource_bytes("color.png", bytes).unwrap();
+    let effect = add(&mut session, json!({"generator": "Grayscale Conversion", "grayscaleType": "red", "grayscaleTile": 3.4, "grayscaleSafeRotation": false}));
+
+    execute(&mut session, "effect.set", &json!({"effect": effect, "input": "image", "inputImage": name})).unwrap();
+    let grayscale = generator(&session, effect).grayscale_controls().unwrap();
+    assert_eq!((grayscale.grayscale, grayscale.tile, grayscale.safe_rotation), (GrayscaleConversion::Red, 3.0, false), "the tile is a whole count");
+    assert_eq!(grayscale.source, Some(Source::image(name.clone())));
+    execute(&mut session, "file.removeUnused", &Value::Null).unwrap();
+    assert!(session.doc.resources.contains_key(&name), "the image is still read");
+
+    let curvature = add(&mut session, json!({"generator": "curvature"}));
+    assert!(execute(&mut session, "effect.set", &json!({"effect": curvature, "input": "image", "inputImage": name})).is_err());
+    assert!(execute(&mut session, "effect.set", &json!({"effect": curvature, "grayscaleTile": 2})).is_err());
 }

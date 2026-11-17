@@ -61,7 +61,8 @@ impl WearParameters {
             | GeneratorKind::WorldSpaceNormals
             | GeneratorKind::ThreeDDistance
             | GeneratorKind::ThreeDLinearGradient
-            | GeneratorKind::UvBorderDistance => None,
+            | GeneratorKind::UvBorderDistance
+            | GeneratorKind::GrayscaleConversion => None,
         }
     }
 

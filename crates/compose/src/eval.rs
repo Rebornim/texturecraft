@@ -11,8 +11,8 @@ use std::sync::Arc;
 use rayon::prelude::*;
 use texturecraft_core::{
     BakedMap, BlendMode, BlockScales, Channel, ChannelKind, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter, Generator,
-    GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, NormalFormat, Project, Projection, SectionParameters, Source, TextureSet,
-    TileGrid, WearParameters, blend1, blend3, lum, mix3, per_unit,
+    GeneratorGlobal, GeneratorKind, GrayscaleConversionParameters, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, NormalFormat, Project,
+    Projection, SectionParameters, Source, TextureSet, TileGrid, WearParameters, blend1, blend3, lum, mix3, per_unit,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, UvGBuffer};
@@ -831,6 +831,9 @@ fn filter_region(
 /// What a generator's texture or custom grunge reads with nothing in its slot
 const EMPTY_IMAGE_SLOT: Source = Source::Uniform([0.0; 3]);
 
+/// The step Safe Rotation turns a Grayscale Conversion image by, so it keeps tiling seamlessly
+const QUARTER_TURN_DEGREES: f32 = 90.0;
+
 /// Values per texel of a generator stage's region: the stack below, the generator's ramp and its texture's gray
 const GENERATOR_STAGE_COMPONENTS: usize = 3;
 
@@ -1478,6 +1481,9 @@ impl<'a, 'b> Texel<'a, 'b> {
             let position = self.uniform_position_input(generator);
             return three_d_distance::distance_value(&distance, position);
         }
+        if let Some(grayscale) = generator.grayscale_controls() {
+            return self.grayscale_conversion(&grayscale);
+        }
         if let Some(border) = generator.border_distance_controls() {
             let texel = (self.y * self.inp.gbuf.width + self.x) as usize;
             let gradient = maps.border_gradient.as_ref().and_then(|gradient| gradient.get(texel)).copied().unwrap_or(0.0);
@@ -1507,7 +1513,9 @@ impl<'a, 'b> Texel<'a, 'b> {
             (GeneratorKind::Direction, _) => coords.nrm.dot(Vec3::from(generator.direction).try_normalize().unwrap_or(Vec3::Y)) * 0.5 + 0.5,
             // World Space Normals and 3D Distance always compute with their own controls: these arms only keep the match whole
             (GeneratorKind::WorldSpaceNormals, _) => coords.nrm.y * 0.5 + 0.5,
-            (GeneratorKind::ThreeDDistance | GeneratorKind::ThreeDLinearGradient | GeneratorKind::UvBorderDistance, _) => 0.0,
+            (GeneratorKind::ThreeDDistance | GeneratorKind::ThreeDLinearGradient | GeneratorKind::UvBorderDistance | GeneratorKind::GrayscaleConversion, _) => {
+                0.0
+            }
         };
         let signal = if generator.noise_amount > 0.0 {
             let noise = world_noise(coords.pos, generator.noise_scale, generator.seed);
@@ -1555,7 +1563,8 @@ impl<'a, 'b> Texel<'a, 'b> {
             | GeneratorKind::FiberGlassEdgeWear
             | GeneratorKind::ThreeDDistance
             | GeneratorKind::ThreeDLinearGradient
-            | GeneratorKind::UvBorderDistance => 0.0,
+            | GeneratorKind::UvBorderDistance
+            | GeneratorKind::GrayscaleConversion => 0.0,
         }
     }
 
@@ -1565,6 +1574,23 @@ impl<'a, 'b> Texel<'a, 'b> {
             Some(source) => self.source(source, &Projection::default(), ChannelKind::NormalMap),
             None => self.bounds_position().to_array(),
         }
+    }
+
+    /// The Grayscale Conversion generator at this texel: its image tiled and turned about the UV square's centre, made gray, balanced and contrasted
+    fn grayscale_conversion(&mut self, grayscale: &GrayscaleConversionParameters) -> f32 {
+        let degrees = if grayscale.safe_rotation { (grayscale.rotation / QUARTER_TURN_DEGREES).round() * QUARTER_TURN_DEGREES } else { grayscale.rotation };
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        let centred = self.coords().uv - Vec2::splat(0.5);
+        let at = Vec2::new(centred.x * cos - centred.y * sin, centred.x * sin + centred.y * cos) * grayscale.tile + Vec2::splat(0.5);
+        let rgb = match grayscale.source.as_ref().unwrap_or(&EMPTY_IMAGE_SLOT) {
+            Source::Image { name, .. } => self.inp.images.get(name).map_or([0.0; 3], |image| {
+                let [red, green, blue, _] = image.sample(at.x, at.y);
+                [red, green, blue]
+            }),
+            other => self.source(other, &Projection::default(), ChannelKind::NormalMap),
+        };
+        let gray = grayscale.grayscale.gray(rgb).clamp(0.0, 1.0);
+        GeneratorGlobal { balance: grayscale.balance, contrast: grayscale.contrast, ..GeneratorGlobal::default() }.apply(gray)
     }
 
     /// The image in `generator`'s Position input, else this texel's position across the mesh's bounds scaled evenly: the longest side spans 0..1, the others centred on 0.5

@@ -2,8 +2,8 @@
 
 use texturecraft_compose::{BakedMaps, Inputs, PixelStore, mask_at};
 use texturecraft_core::{
-    BorderDistanceParameters, Channel, Effect, EffectKind, Fill, Generator, GeneratorKind, Layer, LayerId, LayerKind, Mask, MaskBackground, Project, Source,
-    TextureSet,
+    BorderDistanceParameters, Channel, Effect, EffectKind, Fill, Generator, GeneratorKind, KindControls, Layer, LayerId, LayerKind, Mask, MaskBackground,
+    Project, Source, TextureSet,
 };
 use texturecraft_geom::{Mesh, UvGBuffer, primitives};
 
@@ -30,7 +30,7 @@ fn fixture() -> Fixture {
 
 /// The middle row's values, left edge to centre
 fn row(fixture: &mut Fixture, border: BorderDistanceParameters) -> Vec<f32> {
-    let generator = Generator { border_distance: Some(Box::new(border)), ..Generator::new(GeneratorKind::UvBorderDistance) };
+    let generator = Generator { controls: Some(Box::new(KindControls::BorderDistance(border))), ..Generator::new(GeneratorKind::UvBorderDistance) };
     let mut mask = Mask::new(MaskBackground::Black);
     mask.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Generator(generator)));
     fixture.project.layer_mut(fixture.layer).unwrap().mask = Some(mask);

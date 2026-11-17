@@ -112,6 +112,7 @@ fn attributes(ui: &mut Ui, kind: GeneratorKind) {
             (tr("A gradient between two points on the mesh."), [tr("mask"), tr("generator"), tr("grayscale"), tr("position")])
         }
         GeneratorKind::UvBorderDistance => (tr("A gradient in from the UV islands' borders."), [tr("mask"), tr("generator"), tr("grayscale"), tr("uv")]),
+        GeneratorKind::GrayscaleConversion => (tr("An image turned gray."), [tr("mask"), tr("generator"), tr("grayscale"), tr("image")]),
     };
 
     // Wrapped rows: a long line must not widen the panel past its edge

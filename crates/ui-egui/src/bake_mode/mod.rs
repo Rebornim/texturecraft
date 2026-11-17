@@ -15,7 +15,9 @@ pub(crate) use bake_visualization_panel::bake_visualization_panel;
 pub use bake_visualization_toggles::BakeVisualizationToggles;
 mod controls;
 mod map_settings;
+mod map_thumbnails;
 mod mesh_map_bakers;
+pub use map_thumbnails::MapThumbnails;
 mod set_picker;
 mod set_picker_purpose;
 

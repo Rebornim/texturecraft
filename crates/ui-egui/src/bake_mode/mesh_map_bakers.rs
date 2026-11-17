@@ -1,4 +1,4 @@
-use egui::{Align, Layout, RichText, Sense, Stroke, Ui, UiBuilder, vec2};
+use egui::{Align, Layout, Rect, RichText, Sense, Stroke, Ui, UiBuilder, vec2};
 use egui_phosphor::regular as icon;
 use serde_json::json;
 use texturecraft_engine::ViewMode;
@@ -48,12 +48,24 @@ pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSe
     ui.separator();
 
     let selected = super::selected_map(app.ui.selected_baked_map, settings);
+    let check_drag_id = ui.scope_id().with("check_drag");
+    let mut check_drag: Option<bool> = ui.data(|data| data.get_temp(check_drag_id));
     for map in BakedMap::ALL {
-        if ui.push_id(map, |ui| row(app, ui, map, settings, map == selected)).inner {
+        if ui.push_id(map, |ui| row(app, ui, map, settings, map == selected, &mut check_drag)).inner {
             app.ui.selected_baked_map = Some(map);
             app.ui.dock.focus(Panel::MeshMapSettings);
         }
     }
+
+    // Kept through the frame of the release, so the click that ends a drag does not toggle its last checkbox back
+    let is_held = ui.input(|input| input.pointer.primary_down());
+    ui.data_mut(|data| {
+        if let Some(value) = check_drag.filter(|_| is_held) {
+            data.insert_temp(check_drag_id, value);
+        } else {
+            data.remove_temp::<bool>(check_drag_id);
+        }
+    });
 }
 
 /// Enable every map, or disable them all when every map is already enabled
@@ -99,8 +111,8 @@ fn copy_items(app: &mut TextureCraftApp, ui: &mut Ui, what: &'static str, map: O
     }
 }
 
-/// One baker row; returns whether the row (not its checkbox or icons) was clicked
-fn row(app: &mut TextureCraftApp, ui: &mut Ui, map: BakedMap, settings: &mut BakeSettings, is_selected: bool) -> bool {
+/// One baker row (`check_drag`: the state a pressed checkbox gives those the pointer then crosses); returns whether the row itself was clicked
+fn row(app: &mut TextureCraftApp, ui: &mut Ui, map: BakedMap, settings: &mut BakeSettings, is_selected: bool, check_drag: &mut Option<bool>) -> bool {
     let several_sets = app.session.doc.project.texture_sets.len() > 1;
     let tokens = Tokens::get(ui.ctx());
     let name = tr(baked_map_label(map));
@@ -120,8 +132,13 @@ fn row(app: &mut TextureCraftApp, ui: &mut Ui, map: BakedMap, settings: &mut Bak
     let content_rect = rect.shrink2(vec2(ROW_INSET, 0.0));
     let mut content = ui.new_child(UiBuilder::new().max_rect(content_rect).layout(Layout::left_to_right(Align::Center)));
     let mut is_enabled = settings.maps.is_enabled(map);
-    let checkbox = content.checkbox(&mut is_enabled, "");
-    thumbnail(&mut content);
+    let checkbox = content.checkbox(&mut is_enabled, "").on_hover_text(tr("Include in Bake"));
+    let is_dragged_over = drag_check(&content, &checkbox, rect, settings.maps.is_enabled(map), check_drag);
+    if let Some(value) = check_drag.filter(|_| is_dragged_over) {
+        settings.maps.set_enabled(map, value);
+    }
+    let texture = app.bake_map_thumbnails.texture(content.ctx(), &app.session, app.session.ts(), map);
+    thumbnail(&mut content, texture.as_ref());
     let show_icons = is_selected || content.rect_contains_pointer(rect);
     content.with_layout(Layout::right_to_left(Align::Center), |ui| {
         let shares = settings.sync.shares(BakeSyncGroup::Map(map));
@@ -146,8 +163,8 @@ fn row(app: &mut TextureCraftApp, ui: &mut Ui, map: BakedMap, settings: &mut Bak
         }
         let text = if is_selected { RichText::new(name).strong() } else { RichText::new(name) };
         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-            let label = ui.add(egui::Label::new(text).selectable(false).truncate());
-            if checkbox.clone().labelled_by(label.id).changed() {
+            let label = ui.add(egui::Label::new(text).selectable(false).truncate()).on_hover_text(name);
+            if checkbox.clone().labelled_by(label.id).changed() && check_drag.is_none() {
                 settings.maps.set_enabled(map, is_enabled);
             }
         });
@@ -168,11 +185,26 @@ fn row(app: &mut TextureCraftApp, ui: &mut Ui, map: BakedMap, settings: &mut Bak
     response.clicked()
 }
 
-/// The map's thumbnail; before it is baked, an empty square crossed by a diagonal
-fn thumbnail(ui: &mut Ui) {
+/// Start a checkbox drag at a press on `checkbox`; returns whether a drag is in this row's checkbox column now (the whole row height counts)
+fn drag_check(ui: &Ui, checkbox: &egui::Response, row: Rect, is_enabled: bool, check_drag: &mut Option<bool>) -> bool {
+    if check_drag.is_none() && checkbox.is_pointer_button_down_on() {
+        *check_drag = Some(!is_enabled);
+    }
+    check_drag.is_some() && ui.rect_contains_pointer(Rect::from_x_y_ranges(checkbox.rect.x_range(), row.y_range()))
+}
+
+/// The baked map's thumbnail; before it is baked, an empty square crossed by a diagonal
+fn thumbnail(ui: &mut Ui, texture: Option<&egui::TextureHandle>) {
     let tokens = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE), Sense::hover());
     let stroke = Stroke::new(1.0, tokens.text_dim);
+    match texture {
+        Some(texture) => {
+            egui::Image::new(texture).paint_at(ui, rect);
+        }
+        None => {
+            ui.painter().line_segment([rect.left_top(), rect.right_bottom()], stroke);
+        }
+    }
     ui.painter().rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Inside);
-    ui.painter().line_segment([rect.left_top(), rect.right_bottom()], stroke);
 }

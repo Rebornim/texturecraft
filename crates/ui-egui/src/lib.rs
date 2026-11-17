@@ -143,6 +143,8 @@ pub struct TextureCraftApp {
     pub thumbs: thumbs::Thumbs,
     /// The Layers panel's thumbnails and folded groups.
     pub layer_panel: layer_panel::LayerPanel,
+    /// The Mesh Map Bakers rows' thumbnails
+    pub(crate) bake_map_thumbnails: bake_mode::MapThumbnails,
     /// Last frame's viewport rect (logical points), for scripted input.
     pub viewport_rect: egui::Rect,
     pub fps: f32,
@@ -232,6 +234,7 @@ impl TextureCraftApp {
             link_cooks: Vec::new(),
             thumbs: thumbs::Thumbs::default(),
             layer_panel: layer_panel::LayerPanel::default(),
+            bake_map_thumbnails: bake_mode::MapThumbnails::default(),
             viewport_rect: egui::Rect::NOTHING,
             fps: 0.0,
             ui_ms: 0.0,

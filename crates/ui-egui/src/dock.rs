@@ -15,6 +15,7 @@ use texturecraft_engine::{CloneFrom, StackTarget, Tool};
 use crate::TextureCraftApp;
 use crate::i18n::{n_, tr, trf};
 use crate::layer_panel::{effect_preview_size, effect_row_height, layer_preview_size, layer_row_height};
+use crate::past_end::PastEnd;
 use crate::property_sheet::{PropertySheet, SectionScope};
 use crate::shelf::{Asset, ShelfDrag};
 use crate::state::PropsTab;
@@ -1734,7 +1735,7 @@ pub(crate) fn properties(app: &mut TextureCraftApp, ui: &mut Ui) {
         crate::property_sheet::section_tabs(ui, scope, 0, &tabs);
     }
     let area = egui::ScrollArea::vertical().id_salt(("props", properties_place(app))).auto_shrink([false, false]);
-    crate::property_sheet::in_scope(ui, scope, |ui| properties_scrolled(app, ui, area));
+    crate::property_sheet::in_scope(ui, scope, |ui| properties_scrolled(app, ui, area, PastEnd::Always));
 }
 
 /// What the docked Properties list keeps its own scroll place for: the selected layer and the part of it edited, none for the tool
@@ -1748,11 +1749,18 @@ fn properties_place(app: &TextureCraftApp) -> Option<(LayerId, StackTarget)> {
 }
 
 /// The sections in `area`, leaving the solid bar's room even without it, so the bar coming in refits no row (flipped it every frame)
-pub(crate) fn properties_scrolled(app: &mut TextureCraftApp, ui: &mut Ui, area: egui::ScrollArea) {
+pub(crate) fn properties_scrolled(app: &mut TextureCraftApp, ui: &mut Ui, area: egui::ScrollArea, past_end: PastEnd) {
     let sheet_width = (ui.available_width() - ui.spacing().scroll.allocated_width()).max(0.0);
     area.show(ui, |ui| {
         ui.set_max_width(sheet_width);
-        properties_contents(app, ui)
+        crate::property_sheet::forget_sections(ui);
+        properties_contents(app, ui);
+
+        // Blank space under the rows lets the last section's top reach the top of the list, as the reference panel scrolls
+        let scrolls = ui.min_rect().height() > ui.clip_rect().height();
+        if past_end == PastEnd::Always || scrolls {
+            ui.add_space(crate::property_sheet::room_past_end(ui));
+        }
     });
 }
 

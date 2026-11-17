@@ -1,5 +1,6 @@
 use egui::{Align2, Color32, CornerRadius, FontId, Id, Rect, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 
+use super::row::SECTION_RULE_TO_CAPTION;
 use super::{PAD, SMALL_TEXT_SIZE};
 use crate::theme::{Tokens, semibold};
 
@@ -74,6 +75,23 @@ fn current_scope(ui: &Ui) -> SectionScope {
 pub(super) fn remember(ui: &Ui, tops: SectionTops) {
     let scope = current_scope(ui);
     ui.data_mut(|data| data.insert_temp(sections_id(scope), tops));
+}
+
+/// Drops the captions the sheets stored last frame, so a list drawn without sections leaves none behind; call before drawing the list
+pub(crate) fn forget_sections(ui: &Ui) {
+    let scope = current_scope(ui);
+    ui.data_mut(|data| data.remove::<SectionTops>(sections_id(scope)));
+}
+
+/// Room to leave under the sheets just drawn in `ui`'s scroll area so the last section's top can reach the top of the view
+pub(crate) fn room_past_end(ui: &Ui) -> f32 {
+    let scope = current_scope(ui);
+    let last_top = ui.data(|data| data.get_temp::<SectionTops>(sections_id(scope))).and_then(|tops| tops.last_top());
+    let Some(last_top) = last_top else { return 0.0 };
+
+    // Where a jump to the section scrolls to: its hairline at the top
+    let reach = last_top - SECTION_RULE_TO_CAPTION;
+    (reach + ui.clip_rect().height() - ui.min_rect().bottom()).max(0.0)
 }
 
 /// Whether a tab asked to show `title`: the caller scrolls to it once

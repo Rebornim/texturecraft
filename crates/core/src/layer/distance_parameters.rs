@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DistanceParameters {
-    /// The point, 0..1 across the mesh's bounds on each axis (Position X, Y and Z)
+    /// The point (Position X, Y and Z) in the mesh's bounds scaled evenly, as the reference's position map is: the longest side spans 0..1, the others are centred on 0.5
     pub point: [f32; 3],
     /// How far the gradient reaches, in units of the bounds' longest side ([`DistanceParameters::RADIUS_RANGE`])
     pub radius: f32,

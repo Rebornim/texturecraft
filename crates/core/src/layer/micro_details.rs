@@ -83,7 +83,7 @@ impl MicroDetails {
         if kind == GeneratorKind::Curvature { 0.0..=5.0 } else { 0.0..=1.0 }
     }
 
-    /// Whether the micro details change a generator of `kind`: switched on with an image to read
+    /// Whether the micro details change a generator of `kind`: switched on with a slot to read (an empty slot reads a flat black height, which some curvature types still lift)
     pub fn in_use(&self, kind: GeneratorKind) -> bool {
         (self.enabled || !MicroDetails::has_switch(kind)) && (self.height || self.normal)
     }

@@ -16,15 +16,18 @@ const SMOOTHNESS_SIGMA_2K: f32 = 45.0;
 /// The UV tile resolution [`SMOOTHNESS_SIGMA_2K`] is measured at
 const REFERENCE_TILE_TEXELS: f32 = 2048.0;
 
-/// Cached gradients; one per layout and setting a stack shows at a time
+/// Most gradients cached, and the bytes they may hold (the newest is kept whatever its size)
 const CACHE_ENTRIES: usize = 8;
+const CACHE_BYTES: usize = 256 << 20;
 
-/// Texels between the samples a layout's fingerprint reads
-const FINGERPRINT_STRIDE: usize = 997;
+/// Texels between the samples a layout's fingerprint reads: dense enough to tell UV edits apart, sparse enough to read once per tile
+const FINGERPRINT_STRIDE: usize = 31;
 
 /// What a gradient was built from: the working layout (size, coverage fingerprint, UV tile block, tile scales) and the settings' bits
 #[derive(Clone, PartialEq)]
 struct Key {
+    /// The g-buffer's triangle data by address, beside its fingerprint
+    layout: usize,
     size: (u32, u32),
     fingerprint: u64,
     block: (u32, u32),
@@ -42,7 +45,14 @@ pub(crate) fn border_gradient(inp: &Inputs, border: &BorderDistanceParameters) -
     let block = grid.map_or(size, |grid| (size.0 / grid.cols.max(1), size.1 / grid.rows.max(1)));
     let block = (block.0.clamp(1, size.0.max(1)), block.1.clamp(1, size.1.max(1)));
     let fingerprint = gbuf.tri.iter().step_by(FINGERPRINT_STRIDE).fold(gbuf.tri.len() as u64, |hash, tri| hash.rotate_left(5) ^ u64::from(*tri));
-    let key = Key { size, fingerprint, block, scales: inp.block_scales.clone(), settings: [border.distance.to_bits(), border.smoothness.to_bits()] };
+    let key = Key {
+        layout: gbuf.tri.as_ptr() as usize,
+        size,
+        fingerprint,
+        block,
+        scales: inp.block_scales.clone(),
+        settings: [border.distance.to_bits(), border.smoothness.to_bits()],
+    };
 
     let cached = {
         let cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -57,7 +67,17 @@ pub(crate) fn border_gradient(inp: &Inputs, border: &BorderDistanceParameters) -
     let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     cache.retain(|(cached, _)| *cached != key);
     cache.push((key, gradient.clone()));
-    let excess = cache.len().saturating_sub(CACHE_ENTRIES);
+    let mut bytes = 0usize;
+    let keep = cache
+        .iter()
+        .rev()
+        .take_while(|(_, built)| {
+            bytes = bytes.saturating_add(built.len().saturating_mul(size_of::<f32>()));
+            bytes <= CACHE_BYTES
+        })
+        .count()
+        .clamp(1, CACHE_ENTRIES);
+    let excess = cache.len().saturating_sub(keep);
     cache.drain(..excess);
     gradient
 }
@@ -89,10 +109,12 @@ fn build(inp: &Inputs, border: &BorderDistanceParameters, block: (u32, u32)) -> 
         .collect();
 
     // Smoothness blurs the gradient with the empty space around the islands, so their borders soften towards black
-    let sigma = border.smoothness * SMOOTHNESS_SIGMA_2K * block.0 as f32 / REFERENCE_TILE_TEXELS;
-    let radius = (((1.0 + 4.0 * sigma * sigma).sqrt() - 1.0) * 0.5).round() as usize;
-    if radius > 0 {
-        blur_blocks(&mut gradient, (width, height), block, radius);
+    if border.smoothness > 0.0 {
+        let radius_at = |tile_texels: f32| {
+            let sigma = border.smoothness * SMOOTHNESS_SIGMA_2K * tile_texels / REFERENCE_TILE_TEXELS;
+            (((1.0 + 4.0 * sigma * sigma).sqrt() - 1.0) * 0.5).round() as usize
+        };
+        blur_blocks(&mut gradient, (width, height), block, |left, top| radius_at(block.0 as f32 * inp.block_scales.at(left, top)));
         for (value, texel) in gradient.iter_mut().zip(0..) {
             if !gbuf.covered(texel) {
                 *value = 0.0;
@@ -177,8 +199,8 @@ fn squared_distance_line(line: &mut [f32]) {
     }
 }
 
-/// `data` blurred one UV tile block at a time, reading black past each block's edges
-fn blur_blocks(data: &mut [f32], (width, height): (u32, u32), block: (u32, u32), radius: usize) {
+/// `data` blurred one UV tile block at a time by the radius `radius_at` gives for the block's corner, reading black past each block's edges
+fn blur_blocks(data: &mut [f32], (width, height): (u32, u32), block: (u32, u32), radius_at: impl Fn(u32, u32) -> usize) {
     for top in (0..height).step_by(block.1 as usize) {
         for left in (0..width).step_by(block.0 as usize) {
             let (columns, rows) = (block.0.min(width - left) as usize, block.1.min(height - top) as usize);
@@ -187,6 +209,10 @@ fn blur_blocks(data: &mut [f32], (width, height): (u32, u32), block: (u32, u32),
                 .flat_map(|row| (0..columns).map(move |column| (column, row)))
                 .map(|(column, row)| data.get(index(column, row)).copied().unwrap_or(0.0))
                 .collect();
+            let radius = radius_at(left, top);
+            if radius == 0 {
+                continue;
+            }
             blur(&mut values, columns, rows, radius);
             for (offset, value) in values.into_iter().enumerate() {
                 if let Some(target) = data.get_mut(index(offset % columns, offset / columns)) {

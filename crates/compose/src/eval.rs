@@ -11,8 +11,8 @@ use std::sync::Arc;
 use rayon::prelude::*;
 use texturecraft_core::{
     BakedMap, BlendMode, BlockScales, Channel, ChannelKind, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter, Generator,
-    GeneratorGlobal, GeneratorKind, GrayscaleConversionParameters, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, NormalFormat, Project,
-    Projection, SectionParameters, Source, TextureSet, TileGrid, WearParameters, blend1, blend3, lum, mix3, per_unit,
+    GeneratorGlobal, GeneratorKind, GrayscaleConversionParameters, HeightMask, KindControls, Layer, LayerId, LayerKind, Mask, MaskBackground, NormalFormat,
+    Project, Projection, SectionParameters, Source, TextureSet, TileGrid, WearParameters, blend1, blend3, lum, mix3, per_unit,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, UvGBuffer};
@@ -1057,8 +1057,8 @@ fn prepare_mask_curvature_sizes<'a>(inp: &Inputs, masks: impl Iterator<Item = &'
     let mut needed = [false; LEVEL_RADII.len()];
     for effect in masks.flat_map(|mask| &mask.effects).filter(|effect| effect.visible) {
         if let EffectKind::Generator(generator) = &effect.kind {
-            // Micro details blur a curvature map of their own
-            if generator.micro_in_use().is_some() {
+            // Micro details blur a curvature map of their own; a border gradient is built once, not by every tile at the same time
+            if generator.micro_in_use().is_some() || generator.border_distance_controls().is_some() {
                 GeneratorMaps::of(inp, generator, &curvature_sizes_in_use(generator));
                 continue;
             }
@@ -1477,21 +1477,31 @@ impl<'a, 'b> Texel<'a, 'b> {
         if let Some(section) = generator.section_controls() {
             return self.section_signal(generator, &section, maps);
         }
-        if let Some(distance) = generator.distance_controls() {
-            let position = self.uniform_position_input(generator);
-            return three_d_distance::distance_value(&distance, position);
-        }
-        if let Some(grayscale) = generator.grayscale_controls() {
-            return self.grayscale_conversion(&grayscale);
-        }
-        if let Some(border) = generator.border_distance_controls() {
-            let texel = (self.y * self.inp.gbuf.width + self.x) as usize;
-            let gradient = maps.border_gradient.as_ref().and_then(|gradient| gradient.get(texel)).copied().unwrap_or(0.0);
-            return uv_border_distance::border_value(&border, gradient);
-        }
-        if let Some(gradient) = generator.linear_gradient_controls() {
-            let position = self.uniform_position_input(generator);
-            return three_d_distance::linear_gradient_value(&gradient, position);
+        // The kinds with only their own controls: resolved once per plan, not per texel
+        let resolved;
+        let controls = match maps.controls.as_deref() {
+            Some(controls) => Some(controls),
+            None => {
+                resolved = generator.kind_controls();
+                resolved.as_ref()
+            }
+        };
+        match controls {
+            Some(KindControls::Distance(distance)) => {
+                let position = self.uniform_position_input(generator);
+                return three_d_distance::distance_value(distance, position);
+            }
+            Some(KindControls::LinearGradient(gradient)) => {
+                let position = self.uniform_position_input(generator);
+                return three_d_distance::linear_gradient_value(gradient, position);
+            }
+            Some(KindControls::BorderDistance(border)) => {
+                let texel = (self.y * self.inp.gbuf.width + self.x) as usize;
+                let gradient = maps.border_gradient.as_ref().and_then(|gradient| gradient.get(texel)).copied().unwrap_or(0.0);
+                return uv_border_distance::border_value(border, gradient);
+            }
+            Some(KindControls::Grayscale(grayscale)) => return self.grayscale_conversion(grayscale),
+            None => {}
         }
 
         let coords = self.coords();

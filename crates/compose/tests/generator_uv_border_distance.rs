@@ -78,3 +78,13 @@ fn smoothness_darkens_the_edge_with_the_space_around_the_island() {
 
     assert!(smooth[0] < sharp[0] - 0.2, "{} vs {}", smooth[0], sharp[0]);
 }
+
+#[test]
+fn saved_values_out_of_range_render_as_their_nearest_valid_ones() {
+    let mut fixture = fixture();
+    let hostile =
+        row(&mut fixture, BorderDistanceParameters { distance: f32::NAN, smoothness: f32::INFINITY, contrast: 7.0, ..BorderDistanceParameters::default() });
+    let valid = row(&mut fixture, BorderDistanceParameters { contrast: 1.0, ..BorderDistanceParameters::default() });
+
+    assert_eq!(hostile, valid, "non-finite values read their defaults, others their nearest valid value");
+}

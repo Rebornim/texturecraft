@@ -32,6 +32,16 @@ impl KindControls {
         }
     }
 
+    /// Every value brought into its range, non-finite ones to the defaults (saved files are not trusted)
+    pub fn clamped(self) -> KindControls {
+        match self {
+            KindControls::Distance(distance) => KindControls::Distance(distance.clamped()),
+            KindControls::LinearGradient(gradient) => KindControls::LinearGradient(gradient.clamped()),
+            KindControls::BorderDistance(border) => KindControls::BorderDistance(border.clamped()),
+            KindControls::Grayscale(grayscale) => KindControls::Grayscale(grayscale.clamped()),
+        }
+    }
+
     /// The kind these controls belong to
     pub fn kind(&self) -> GeneratorKind {
         match self {

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LinearGradientParameters {
-    /// Where the gradient is black, 0..1 across the mesh's bounds on each axis
+    /// Where the gradient is black, in the mesh's bounds scaled evenly like 3D Distance's point (the longest side spans 0..1, the others are centred on 0.5)
     pub start: [f32; 3],
     /// Where the gradient is white
     pub end: [f32; 3],
@@ -29,7 +29,7 @@ impl LinearGradientParameters {
 }
 
 impl Default for LinearGradientParameters {
-    /// The reference app's defaults: bottom to top through the bounds' centre
+    /// The reference app's defaults: from y 0 to y 1 through the bounds' centre, which spans the mesh when its longest side is vertical
     fn default() -> LinearGradientParameters {
         LinearGradientParameters { start: [0.5, 0.0, 0.5], end: [0.5, 1.0, 0.5], balance: 0.5, contrast: 0.0 }
     }

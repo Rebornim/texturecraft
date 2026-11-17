@@ -211,3 +211,13 @@ fn a_micro_height_bump_moves_the_wear_kinds_around_it() {
         assert!(changed > 0, "{kind:?}");
     }
 }
+
+#[test]
+fn saved_micro_values_out_of_range_render_as_their_nearest_valid_ones() {
+    let mut fixture = fixture();
+    let hostile =
+        mask(&mut fixture, with_micro(GeneratorKind::AmbientOcclusion, Some("bump"), None, |micro| (micro.ao_radius, micro.ao_depth) = (1e30, f32::NAN)));
+    let valid = mask(&mut fixture, with_micro(GeneratorKind::AmbientOcclusion, Some("bump"), None, |micro| micro.ao_radius = 1.0));
+
+    assert_eq!(hostile, valid);
+}

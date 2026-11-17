@@ -40,8 +40,26 @@ const OCCLUSION_DEPTH_POWER: f32 = 1.0654;
 /// How dark a fully occluding horizon makes the occlusion (fitted)
 const OCCLUSION_STRENGTH: f32 = 0.3232;
 
-/// Cached micro maps; each entry is small next to the curvature sizes it feeds
+/// Most micro maps cached, and the bytes they may hold (the newest is kept whatever its size), like the curvature sizes they feed
 const CACHE_ENTRIES: usize = 8;
+const CACHE_BYTES: usize = 256 << 20;
+
+/// What a cached map holds, to keep the cache within [`CACHE_BYTES`]
+trait CachedBytes {
+    fn bytes(&self) -> usize;
+}
+
+impl CachedBytes for LayoutMap {
+    fn bytes(&self) -> usize {
+        self.data.len().saturating_mul(size_of::<f32>())
+    }
+}
+
+impl CachedBytes for MicroCurvature {
+    fn bytes(&self) -> usize {
+        self.term.bytes().saturating_add(self.curvature.len().saturating_mul(size_of::<f32>()))
+    }
+}
 
 /// A map in a mesh map's layout: `size` texels, each UV tile one block
 pub struct LayoutMap {
@@ -172,7 +190,7 @@ struct Cache<T> {
     entries: Mutex<Vec<(Key, Arc<T>)>>,
 }
 
-impl<T> Cache<T> {
+impl<T: CachedBytes> Cache<T> {
     const fn new() -> Cache<T> {
         Cache { entries: Mutex::new(Vec::new()) }
     }
@@ -197,7 +215,17 @@ impl<T> Cache<T> {
         let mut entries = self.entries.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         entries.retain(|(cached, _)| *cached != key);
         entries.push((key, built.clone()));
-        let excess = entries.len().saturating_sub(CACHE_ENTRIES);
+        let mut bytes = 0usize;
+        let keep = entries
+            .iter()
+            .rev()
+            .take_while(|(_, built)| {
+                bytes = bytes.saturating_add(built.bytes());
+                bytes <= CACHE_BYTES
+            })
+            .count()
+            .clamp(1, CACHE_ENTRIES);
+        let excess = entries.len().saturating_sub(keep);
         entries.drain(..excess);
         built
     }

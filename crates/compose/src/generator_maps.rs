@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use texturecraft_core::{BakedMap, Generator, MicroDetails};
+use texturecraft_core::{BakedMap, Generator, KindControls, MicroDetails};
 
 use crate::curvature_sizes::CurvatureSizes;
 use crate::eval::Inputs;
@@ -20,19 +20,26 @@ pub(crate) struct GeneratorMaps {
     pub micro_occlusion: Option<Arc<LayoutMap>>,
     /// The UV Border Distance gradient at every working texel
     pub border_gradient: Option<Arc<Vec<f32>>>,
+    /// The controls of a kind with only its own controls, brought into range
+    pub controls: Option<Arc<KindControls>>,
 }
 
 impl GeneratorMaps {
     /// The maps `generator` reads, with the detail sizes `needed` marks (one flag per blurred size)
     pub fn of(inp: &Inputs, generator: &Generator, needed: &[bool]) -> GeneratorMaps {
-        let micro = generator.micro_in_use();
-        let micro_curvature = micro.filter(|_| MicroDetails::has_curvature(generator.kind)).and_then(|micro| MicroCurvature::of(inp, generator.kind, micro));
-        let micro_occlusion = micro.filter(|_| MicroDetails::has_occlusion(generator.kind)).and_then(|micro| micro_occlusion(inp, micro));
+        let micro = generator.micro_in_use().map(|micro| micro.clone().clamped(generator.kind));
+        let micro_curvature =
+            micro.as_ref().filter(|_| MicroDetails::has_curvature(generator.kind)).and_then(|micro| MicroCurvature::of(inp, generator.kind, micro));
+        let micro_occlusion = micro.as_ref().filter(|_| MicroDetails::has_occlusion(generator.kind)).and_then(|micro| micro_occlusion(inp, micro));
         let sizes = match &micro_curvature {
             Some(micro) => CurvatureSizes::of_map(inp, &micro.curvature, needed),
             None => inp.baked.maps.get(&BakedMap::Curvature).and_then(|curvature| CurvatureSizes::of_map(inp, curvature, needed)),
         };
-        let border_gradient = generator.border_distance_controls().map(|border| border_gradient(inp, &border));
-        GeneratorMaps { sizes, micro_curvature, micro_occlusion, border_gradient }
+        let controls = generator.kind_controls();
+        let border_gradient = match &controls {
+            Some(KindControls::BorderDistance(border)) => Some(border_gradient(inp, border)),
+            _ => None,
+        };
+        GeneratorMaps { sizes, micro_curvature, micro_occlusion, border_gradient, controls: controls.map(Arc::new) }
     }
 }

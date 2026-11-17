@@ -17,19 +17,14 @@ const PUT_BACK_REACH: f32 = 1.0;
 #[derive(Clone, Copy, Debug)]
 struct PointerLock {
     hold: Hold,
-
     /// Where the press began: the pointer is kept there and comes back there
     anchor: Pos2,
-
     /// Where the system's pointer is
     seen: Pos2,
-
     /// Where egui sees the pointer: the anchor plus every move since, as far as it goes
     at: Pos2,
-
     /// A put-back is on its way: the pointer move that brings it back is no motion
     putting_back: bool,
-
     /// The drag let go: the next frame shows egui the pointer back at the anchor and forgets the lock
     let_go: bool,
 }

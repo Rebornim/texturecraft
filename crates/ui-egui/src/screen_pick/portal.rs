@@ -29,6 +29,7 @@ pub(super) fn run(shared: &Arc<PickShared>, outcomes: &Sender<PickOutcome>, ctx:
 
         std::thread::sleep(POLL);
     }
+
     let outcome = pick_color().unwrap_or(PickOutcome::Unavailable);
     let _ = outcomes.send(outcome);
     ctx.request_repaint();

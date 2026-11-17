@@ -4,6 +4,8 @@
 //! pixel under the tip is the one picked. The pointer is a system pointer's cell (32 pixels at 100 %) with the pipette drawn
 //! in its bottom-left part, about as tall as the system's arrow in its cell, so it reads at the size every other pointer has
 
+use super::swatch_picture::{disc_pixel, over, pipette_pixel};
+use super::{SwatchSide, swatch_reach, swatch_unit};
 use crate::drawn_icon::pipette;
 
 /// The outline's width in pixels at the smallest pointer; larger pointers scale it
@@ -21,10 +23,18 @@ const CUR_TYPE: u16 = 2;
 /// A `BITMAPINFOHEADER`'s size
 #[cfg(any(windows, test))]
 const BITMAP_HEADER_BYTES: u32 = 40;
+/// The `.cur` picture's colour depth: 8-bit blue, green, red and alpha
+#[cfg(any(windows, test))]
+const CUR_BITS_PER_PIXEL: u16 = 32;
+/// A bitmap's mask rows are padded to whole 32-bit words
+#[cfg(any(windows, test))]
+const MASK_WORD_BITS: u32 = 32;
 /// The part of the pointer's cell the pipette's square takes (the system's arrow is about 20 pixels tall in its 32-pixel cell)
 const GLYPH_SHARE: f32 = 0.625;
 /// The smallest and largest pointer drawn, in pixels
-const SIZES: std::ops::RangeInclusive<u32> = 8..=256;
+pub(super) const SIZES: std::ops::RangeInclusive<u32> = 8..=256;
+/// The largest picture with a colour disc made, in pixels (the largest pointer the systems take)
+pub(super) const MAX_PICTURE_PX: u32 = 256;
 
 /// A square pointer picture in straight-alpha RGBA rows, top row first, with the pixel that is the pointer's position
 #[derive(Clone, Debug, PartialEq)]
@@ -56,6 +66,40 @@ impl CursorImage {
         CursorImage { size, rgba, hotspot }
     }
 
+    /// The eyedropper in a `cell`-pixel pointer with a disc of `color` (8-bit sRGB) on `side` of its tip; its hotspot is the tip
+    pub fn eyedropper_with_swatch(cell: u32, color: [u8; 3], side: SwatchSide) -> Self {
+        let pipette = CursorImage::eyedropper(cell);
+        let unit = swatch_unit(cell);
+        let reach = swatch_reach(unit);
+        let [tip_x, tip_y] = pipette.hotspot.map(|edge| edge as f32 + 0.5);
+        let [offset_x, offset_y] = side.offset();
+        let center = [tip_x + offset_x * unit, tip_y + offset_y * unit];
+
+        // The picture spans the pipette's cell and the disc, as a square
+        let left = (center[0] - reach).floor().min(0.0);
+        let top = (center[1] - reach).floor().min(0.0);
+        let right = (center[0] + reach).ceil().max(pipette.size as f32);
+        let bottom = (center[1] + reach).ceil().max(pipette.size as f32);
+        let side_px = (right - left).max(bottom - top) as u32;
+        if side_px > MAX_PICTURE_PX && cell > 1 {
+            let smaller = (cell as f32 * MAX_PICTURE_PX as f32 / side_px as f32).floor() as u32;
+            return CursorImage::eyedropper_with_swatch(smaller.min(cell - 1), color, side);
+        }
+
+        let mut rgba = Vec::with_capacity((side_px * side_px * 4) as usize);
+        for y in 0..side_px {
+            for x in 0..side_px {
+                let [cell_x, cell_y] = [x as f32 + left, y as f32 + top];
+                let under = pipette_pixel(&pipette, cell_x, cell_y);
+                let distance = ((cell_x + 0.5 - center[0]).powi(2) + (cell_y + 0.5 - center[1]).powi(2)).sqrt();
+                rgba.extend_from_slice(&over(disc_pixel(distance, unit, color), under));
+            }
+        }
+
+        let hotspot = [pipette.hotspot[0] + (-left) as u32, pipette.hotspot[1] + (-top) as u32];
+        CursorImage { size: side_px, rgba, hotspot }
+    }
+
     /// A pointer size kept to the range drawn
     pub fn clamped_size(size: u32) -> u32 {
         size.clamp(*SIZES.start(), *SIZES.end())
@@ -65,7 +109,7 @@ impl CursorImage {
     #[cfg(any(windows, test))]
     pub fn cur_file(&self) -> Vec<u8> {
         let side = self.size;
-        let mask_row = side.div_ceil(32) * 4;
+        let mask_row = side.div_ceil(MASK_WORD_BITS) * (MASK_WORD_BITS / 8);
         let pixel_bytes = side * side * 4;
         let image_bytes = BITMAP_HEADER_BYTES + pixel_bytes + mask_row * side;
         let mut file = Vec::with_capacity((CUR_HEADER_BYTES + image_bytes) as usize);
@@ -88,7 +132,7 @@ impl CursorImage {
             file.extend_from_slice(&word.to_le_bytes());
         }
         file.extend_from_slice(&1_u16.to_le_bytes());
-        file.extend_from_slice(&32_u16.to_le_bytes());
+        file.extend_from_slice(&CUR_BITS_PER_PIXEL.to_le_bytes());
         for word in [0, pixel_bytes + mask_row * side, 0, 0, 0, 0] {
             file.extend_from_slice(&word.to_le_bytes());
         }

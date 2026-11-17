@@ -6,11 +6,11 @@ use texturecraft_engine::compose::axis_frame::placed_from_axis;
 use texturecraft_engine::compose::frame_placement::folded;
 use texturecraft_engine::compose::pattern::{decal_axes, decal_corners};
 use texturecraft_engine::core::{Decal, EffectKind, Fill, LayerId, LayerKind, Projection};
-use texturecraft_engine::geom::glam::{Vec2, Vec3};
+use texturecraft_engine::geom::glam::Vec3;
 
 use crate::TextureCraftApp;
 use crate::theme::{AXIS_COLORS, Tokens};
-use crate::viewport::project;
+use crate::viewport::{focus_lost, project, view_ray};
 
 mod frame_drag;
 mod frame_grab;
@@ -102,6 +102,7 @@ impl FrameGizmo {
             }
             StackTarget::Mask => return None,
         };
+
         let placed = placed_from_axis(projection, app.session.mesh.bounds());
 
         // Where the projection lands: a projector's own turn and scale moved into the frame, as the panel's 3D projection settings show it
@@ -112,6 +113,8 @@ impl FrameGizmo {
             _ => None,
         };
         let (origin, across, up, out) = decal_axes(&decal)?;
+
+        // The corners on screen: a warp's pulled ones, or the frame's own
         let at = |[x, y]: [f32; 2]| project(app, rect, origin + across * x * decal.size[0] + up * y * decal.size[1]);
         let corners = match warp {
             Some([a, b, c, d]) => [at(a)?, at(b)?, at(c)?, at(d)?],
@@ -120,21 +123,30 @@ impl FrameGizmo {
                 [a?, b?, c?, d?]
             }
         };
+
         let sides = [0, 1, 2, 3].map(|side| corners[side].lerp(corners[(side + 1) % 4], 0.5));
         let center = project(app, rect, origin)?;
+
+        // Screen movement per world unit along each direction, and an arrow along each one not pointing at the camera
         let reach = decal.size[0].max(decal.size[1]);
         let axes = [across, up, out];
         let steps = axes.map(|axis| Some((project(app, rect, origin + axis * reach)? - center) / reach.max(f32::MIN_POSITIVE)));
-        let arrows = steps.map(|step| step.filter(|step| step.length() * reach > 1.0).map(|step| center + step.normalized() * ARROW));
-        let ring = steps[0].zip(steps[1]).filter(|(a, b)| a.length() > f32::EPSILON && solve(*a, *b, egui::Vec2::X).is_some()).and_then(|(step, _)| {
-            let radius = TURN_RING / step.length();
-            let last = (TURN_RING_POINTS - 1) as f32;
-            let points = (0..TURN_RING_POINTS).map(|index| {
-                let (sin, cos) = (index as f32 / last * std::f32::consts::TAU).sin_cos();
-                project(app, rect, origin + (across * cos + up * sin) * radius)
+        let arrows = steps.map(|step| step.filter(|step| step.length() * reach > MIN_SCREEN_SPAN).map(|step| center + step.normalized() * ARROW));
+
+        // The turn ring, unless the frame is seen too near edge on to grab it
+        let ring = steps[0]
+            .zip(steps[1])
+            .filter(|(a, b)| a.length() > f32::EPSILON && solve(*a, *b, egui::Vec2::X).is_some() && ring_open(app, rect, center, out))
+            .and_then(|(step, _)| {
+                let radius = TURN_RING / step.length();
+                let last = (TURN_RING_POINTS - 1) as f32;
+                let points = (0..TURN_RING_POINTS).map(|index| {
+                    let (sin, cos) = (index as f32 / last * std::f32::consts::TAU).sin_cos();
+                    project(app, rect, origin + (across * cos + up * sin) * radius)
+                });
+                points.collect::<Option<Vec<_>>>()?.try_into().ok()
             });
-            points.collect::<Option<Vec<_>>>()?.try_into().ok()
-        });
+
         Some(FrameGizmo { layer, effect, decal, warp, corners, sides, center, arrows, ring, origin, axes, steps })
     }
 
@@ -164,11 +176,10 @@ impl FrameGizmo {
 
     /// Where screen point `p` meets the frame's plane, across and up in frame sizes from its centre
     fn on_plane(&self, app: &TextureCraftApp, rect: Rect, p: Pos2) -> Option<[f32; 2]> {
-        let ndc = Vec2::new((p.x - rect.left()) / rect.width() * 2.0 - 1.0, 1.0 - (p.y - rect.top()) / rect.height() * 2.0);
-        let ray = app.session.camera.ray(ndc, rect.width() / rect.height().max(1.0));
+        let ray = view_ray(app, rect, p);
         let [across, up, out] = self.axes;
         let facing = ray.dir.dot(out);
-        if facing.abs() < 1e-4 {
+        if facing.abs() < EDGE_ON_FACING {
             return None;
         }
 
@@ -233,10 +244,27 @@ impl FrameGizmo {
 /// Half a turn in degrees: a ring drag's sweep is kept within one either way
 const HALF_TURN: f32 = 180.0;
 
+/// The smallest determinant of two screen steps (points² per world unit²) that still tells them apart: below it they run parallel on screen
+const PARALLEL_DETERMINANT: f32 = 1e-6;
+
+/// The smallest cosine between a view ray and a plane's normal for the ray to meet the plane: nearer edge on, the hit runs off far away
+pub(crate) const EDGE_ON_FACING: f32 = 1e-4;
+
+/// The smallest length a direction spans on screen to point somewhere (points): shorter, it points at the camera
+pub(crate) const MIN_SCREEN_SPAN: f32 = 1.0;
+
+/// The smallest cosine between the view ray and a turn ring's axis for the ring to show: flatter, its half height on screen is under its drawn line's width, it reads as a line and a drag along it turns half a turn at once across the centre
+const MIN_RING_FACING: f32 = (SHAFT_WIDTH + HALO_EXTRA_WIDTH) / TURN_RING;
+
+/// Whether a turn ring round `axis`, centred on screen at `center`, is seen open enough to show and grab
+pub(crate) fn ring_open(app: &TextureCraftApp, rect: Rect, center: Pos2, axis: Vec3) -> bool {
+    view_ray(app, rect, center).dir.dot(axis).abs() >= MIN_RING_FACING
+}
+
 /// `delta` as a mix of screen steps `a` and `b` (None when they are parallel on screen)
 fn solve(a: egui::Vec2, b: egui::Vec2, delta: egui::Vec2) -> Option<[f32; 2]> {
     let det = a.x * b.y - a.y * b.x;
-    if det.abs() < 1e-6 {
+    if det.abs() < PARALLEL_DETERMINANT {
         return None;
     }
 
@@ -273,7 +301,11 @@ pub(crate) fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
 /// Whether the pointer is over one of the selected frame's handles (the brush cursor hides there)
 pub(crate) fn hovered(app: &TextureCraftApp, ui: &Ui, rect: Rect) -> bool {
     let dragging = ui.ctx().data(|data| data.get_temp::<FrameDrag>(drag_id())).is_some();
-    dragging || ui.ctx().pointer_hover_pos().is_some_and(|hover| FrameGizmo::shown(app, rect).is_some_and(|gizmo| gizmo.grab(hover).is_some()))
+    dragging
+        || ui
+            .ctx()
+            .pointer_hover_pos()
+            .is_some_and(|hover| rect.contains(hover) && FrameGizmo::shown(app, rect).is_some_and(|gizmo| gizmo.grab(hover).is_some()))
 }
 
 /// Whether screen point `at` is on one of the selected frame's handles
@@ -294,9 +326,10 @@ pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Respons
         drag = Some(FrameDrag { layer: gizmo.layer, effect: gizmo.effect, grab, from, start: *gizmo, stepped: false });
     }
 
-    let dragging = response.dragged_by(PointerButton::Primary) || response.drag_started_by(PointerButton::Primary);
+    // A window that lost the focus gets no release: the drag ends there
+    let dragging = (response.dragged_by(PointerButton::Primary) || response.drag_started_by(PointerButton::Primary)) && !focus_lost(ctx);
     let Some(mut drag) = drag.filter(|_| dragging) else {
-        ctx.data_mut(|data| data.remove::<FrameDrag>(drag_id()));
+        let_go(ctx);
         if let (Some(gizmo), Some(hover)) = (&gizmo, response.hover_pos())
             && let Some(grab) = gizmo.grab(hover)
         {
@@ -319,6 +352,11 @@ pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Respons
     }
     ctx.data_mut(|data| data.insert_temp(drag_id(), drag));
     true
+}
+
+/// Ends a frame drag under way where it is: its undo step stays one step
+pub(crate) fn let_go(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<FrameDrag>(drag_id()));
 }
 
 /// The selected frame over the 3D view: dashed outline, corner and edge dots, and the centre square with its axis arrows
@@ -413,21 +451,32 @@ pub(crate) mod tests {
 
     use super::*;
 
-    /// The ball with a selected fill layer projecting `projection` (with `fields` of layer.fill.projection)
+    /// The test window: big enough that the docked panels leave the 3D view room for the ball with every gizmo handle round it
+    const TEST_WINDOW: egui::Vec2 = vec2(1600.0, 960.0);
+
+    /// The ball in a new project, its first frames run; with `render` the views render through wgpu
+    pub(crate) fn ball_app(render: bool) -> egui_kittest::Harness<'static, TextureCraftApp> {
+        let session = Session::new_project("Gizmo", texturecraft_engine::geom::primitives::sphere(1.0, 48, 24), "builtin:sphere", None, 128).unwrap();
+        let builder = egui_kittest::Harness::builder().with_size(TEST_WINDOW);
+        let builder = if render { builder.wgpu() } else { builder };
+        let mut harness = builder.build_eframe(|context| TextureCraftApp::new(context, session));
+        harness.run_steps(4);
+        harness
+    }
+
+    /// The ball with a selected fill layer projecting `projection`
     pub(crate) fn fill_app(projection: &str) -> (egui_kittest::Harness<'static, TextureCraftApp>, LayerId) {
         fill_app_with(json!({"projection": projection}))
     }
 
+    /// The ball with a selected fill layer set up by `fields` of layer.fill.projection
     pub(crate) fn fill_app_with(fields: serde_json::Value) -> (egui_kittest::Harness<'static, TextureCraftApp>, LayerId) {
         fill_app_rendered(fields, false)
     }
 
+    /// As [`fill_app_with`]; with `render` the views render through wgpu
     pub(crate) fn fill_app_rendered(mut fields: serde_json::Value, render: bool) -> (egui_kittest::Harness<'static, TextureCraftApp>, LayerId) {
-        let session = Session::new_project("Frame", texturecraft_engine::geom::primitives::sphere(1.0, 48, 24), "builtin:sphere", None, 128).unwrap();
-        let builder = egui_kittest::Harness::builder().with_size(vec2(1600.0, 960.0));
-        let builder = if render { builder.wgpu() } else { builder };
-        let mut harness = builder.build_eframe(|context| TextureCraftApp::new(context, session));
-        harness.run_steps(4);
+        let mut harness = ball_app(render);
         let layer = harness.state_mut().run("layer.add.fill", json!({})).unwrap()["layer"].as_u64().unwrap();
         fields["layer"] = json!(layer);
         harness.state_mut().run("layer.fill.projection", fields).unwrap();
@@ -444,6 +493,13 @@ pub(crate) mod tests {
 
     /// A primary-button drag from `from` to `to` over a few frames, with `modifiers` held
     pub(crate) fn drag(harness: &mut egui_kittest::Harness<'_, TextureCraftApp>, from: Pos2, to: Pos2, modifiers: Modifiers) {
+        press_and_move(harness, from, to, modifiers);
+        harness.event_modifiers(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers }, modifiers);
+        harness.run_steps(2);
+    }
+
+    /// The press and moves of [`drag`], the button still down at `to`
+    pub(crate) fn press_and_move(harness: &mut egui_kittest::Harness<'_, TextureCraftApp>, from: Pos2, to: Pos2, modifiers: Modifiers) {
         harness.event_modifiers(egui::Event::PointerMoved(from), modifiers);
         harness.event_modifiers(egui::Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers }, modifiers);
         harness.run_steps(2);
@@ -451,8 +507,11 @@ pub(crate) mod tests {
             harness.event_modifiers(egui::Event::PointerMoved(from.lerp(to, step as f32 / 4.0)), modifiers);
             harness.run_steps(1);
         }
-        harness.event_modifiers(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers }, modifiers);
-        harness.run_steps(2);
+    }
+
+    /// Whether a frame drag is under way
+    fn frame_dragging(harness: &egui_kittest::Harness<'_, TextureCraftApp>) -> bool {
+        harness.ctx.data(|data| data.get_temp::<FrameDrag>(drag_id())).is_some()
     }
 
     /// A drag as a mouse sends it, one small move per frame; after each frame `check` looks at the app and (with `preview`) the 3D preview square must have re-rendered
@@ -555,7 +614,7 @@ pub(crate) mod tests {
         for kind in ["warp", "planar"] {
             let (mut harness, _) = fill_app(kind);
             let start = gizmo(&harness);
-            let ring = start.ring.expect("{kind}: a frame facing the camera shows its ring");
+            let ring = start.ring.unwrap_or_else(|| panic!("{kind}: a frame facing the camera shows its ring"));
             let on_ring = *ring
                 .iter()
                 .filter(|at| start.grab(**at) == Some(FrameGrab::Turn))
@@ -581,6 +640,60 @@ pub(crate) mod tests {
         let Projection::Warp { frame, corners, .. } = projection(&harness, layer) else { panic!("still a warp") };
         assert!(frame.size[0] < warp.decal.size[0] * 0.75 && (frame.size[1] - warp.decal.size[1]).abs() < 1e-4, "the right edge dot narrows it: {frame:?}");
         assert_eq!(corners, Projection::FRAME_CORNERS, "its corners stay where they are on the frame");
+    }
+
+    /// Losing the focus mid-drag (Alt+Tab) ends a frame drag as a release does: one undo step, and moves after it (egui still has the button down) leave the frame alone
+    #[test]
+    fn losing_the_window_focus_ends_a_frame_drag() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app("planar");
+        let steps = harness.state().session.history_labels().len();
+        let center = gizmo(&harness).center;
+        let to = center + vec2(40.0, 0.0);
+        press_and_move(&mut harness, center, to, Modifiers::NONE);
+        assert!(frame_dragging(&harness), "the centre square is held");
+
+        harness.event(egui::Event::WindowFocused(false));
+        harness.run_steps(1);
+        let left = projection(&harness, layer);
+        assert!(!frame_dragging(&harness), "the focus loss ends the drag");
+        assert_eq!(harness.state().session.history_labels().len(), steps + 1, "as one undo step");
+
+        for step in 1..=3 {
+            harness.event(egui::Event::PointerMoved(to + vec2(20.0, 10.0) * step as f32));
+            harness.run_steps(1);
+        }
+        assert_eq!(projection(&harness, layer), left, "moves after it leave the frame where it was");
+        harness.event(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        harness.run_steps(2);
+        assert_eq!(harness.state().session.history_labels().len(), steps + 1, "and add no step");
+    }
+
+    /// Alt pressed mid-drag hands the pointer to the camera and ends the frame drag where it is: let go of Alt with the button still down, the drag does not resume from where it began; one undo step
+    #[test]
+    fn alt_mid_drag_ends_a_frame_drag() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app("planar");
+        let steps = harness.state().session.history_labels().len();
+        let center = gizmo(&harness).center;
+        let to = center + vec2(40.0, 0.0);
+        press_and_move(&mut harness, center, to, Modifiers::NONE);
+        let slid = projection(&harness, layer);
+        let camera = harness.state().session.camera;
+
+        harness.event_modifiers(egui::Event::PointerMoved(to + vec2(20.0, 0.0)), Modifiers::ALT);
+        harness.run_steps(1);
+        assert_ne!(harness.state().session.camera, camera, "Alt turns the camera");
+        assert!(!frame_dragging(&harness), "and ends the frame drag");
+
+        for step in 2..=4 {
+            harness.event(egui::Event::PointerMoved(to + vec2(20.0, 5.0) * step as f32));
+            harness.run_steps(1);
+        }
+        assert_eq!(projection(&harness, layer), slid, "Alt let go, the frame stays where the drag left it");
+        harness.event(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        harness.run_steps(2);
+        assert_eq!(harness.state().session.history_labels().len(), steps + 1, "one undo step");
     }
 
     /// A click as a mouse sends it: move there, press, release

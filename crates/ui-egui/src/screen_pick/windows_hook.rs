@@ -1,53 +1,63 @@
 //! Windows: a low-level mouse hook on its own thread takes a left click outside the app's windows (the click never reaches the
-//! window under it) and reads the one pixel under it from the desktop through GDI; clicks on the app's own windows pass on. The
-//! system pointer is the eyedropper with its colour disc until the wait ends
+//! window under it), and the thread then reads the one pixel under it from the desktop through GDI; clicks on the app's own
+//! windows pass on. The system pointer is the eyedropper with its colour disc until the wait ends
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Instant;
 
 use winsafe::prelude::Handle;
 use winsafe::{HHOOK, HINSTANCE, HWND, MSG, POINT, co};
 
+use super::eyedropper_pointer::EyedropperPointer;
+use super::hook_state::HookState;
+use super::live_swatch::LiveSwatch;
 use super::pick_shared::over_windows;
-use super::windows_swatch::LiveSwatch;
+use super::release_wait::ReleaseWait;
 use super::{PickOutcome, PickShared};
 
 /// How often the hook thread wakes to see whether the pick ended in the app, in milliseconds
 const STOP_CHECK_MS: u32 = 50;
-
-/// The running pick the hook procedure reports to (a hook procedure has no context of its own)
-struct HookState {
-    /// Which pick this is: a pick that ends after the next one started leaves the next one's state alone
-    generation: u64,
-    shared: Arc<PickShared>,
-    outcomes: Sender<PickOutcome>,
-    ctx: egui::Context,
-    /// The press it took: its release is taken too, so the window under it sees no half click
-    pressed: bool,
-    done: bool,
-}
+/// The id asked for the stop-check timer (a thread timer gets its id from the system, which returns it)
+const STOP_CHECK_TIMER_ID: usize = 1;
 
 static HOOK: Mutex<Option<HookState>> = Mutex::new(None);
 static GENERATION: AtomicU64 = AtomicU64::new(0);
+/// Held from showing the eyedropper until the user's pointers are back: a pick's keeper never copies the last one's eyedropper
+static ONE_POINTER_KEEPER: Mutex<()> = Mutex::new(());
 
 /// Waits on this thread for a left click outside the app until it lands or `shared` stops the pick (`dpi` sizes the pointer)
 pub(super) fn run(shared: &Arc<PickShared>, outcomes: Sender<PickOutcome>, ctx: egui::Context, dpi: u32) {
+    // Taken before this pick's state goes in: the last pick's hook reports to its own state until it is gone
+    let keeper_turn = ONE_POINTER_KEEPER.lock().unwrap_or_else(PoisonError::into_inner);
+
     let unavailable = outcomes.clone();
     let generation = GENERATION.fetch_add(1, Ordering::Relaxed);
     if let Ok(mut hook) = HOOK.lock() {
-        *hook = Some(HookState { generation, shared: Arc::clone(shared), outcomes, ctx: ctx.clone(), pressed: false, done: false });
+        *hook = Some(HookState::new(generation, Arc::clone(shared), outcomes, ctx.clone()));
+    }
+
+    // A pick the app ended while the last one was finishing shows no pointer
+    if shared.stopped() {
+        clear_state(generation);
+        return;
     }
 
     // Before the hook: while it is in place this thread must keep reading messages, or every mouse move on the desktop stalls
-    let pointer = super::windows_pointer::SystemPointer::show(dpi);
-    let Ok(module) = HINSTANCE::GetModuleHandle(None) else { return finish(&unavailable, &ctx) };
+    let pointer = EyedropperPointer::show(dpi);
+    let Ok(module) = HINSTANCE::GetModuleHandle(None) else { return finish_unavailable(generation, &unavailable, &ctx) };
     let Ok(mut hook) = HHOOK::SetWindowsHookEx(co::WH::MOUSE_LL, mouse_hook, Some(&module), None) else {
-        return finish(&unavailable, &ctx);
+        return finish_unavailable(generation, &unavailable, &ctx);
     };
 
-    // A thread timer wakes GetMessage so the loop sees a stop and the disc follows; the hook procedure runs inside GetMessage
-    let timer = HWND::NULL.SetTimer(1, STOP_CHECK_MS, None);
+    // A thread timer wakes GetMessage so the loop sees a stop and a taken press; the hook procedure runs inside GetMessage
+    let Ok(timer) = HWND::NULL.SetTimer(STOP_CHECK_TIMER_ID, STOP_CHECK_MS, None) else {
+        // Without it a stop in the app would leave the hook in place until the next click
+        let _ = hook.UnhookWindowsHookEx();
+        return finish_unavailable(generation, &unavailable, &ctx);
+    };
+
     let mut message = MSG::default();
 
     // The disc follows on a thread of its own: this one must answer the hook at once, or every mouse move stalls
@@ -57,12 +67,33 @@ pub(super) fn run(shared: &Arc<PickShared>, outcomes: Sender<PickOutcome>, ctx: 
             let follow = std::thread::Builder::new().name("eyedropper disc".into());
             let _ = follow.spawn_scoped(scope, || LiveSwatch::follow(shown_event, *cell, shared, generation));
         }
-        while waiting(shared, generation) && matches!(winsafe::GetMessage(&mut message, None, 0, 0), Ok(true)) {}
-    });
-    if let Ok(timer) = timer {
+        while waiting(shared, generation) && matches!(winsafe::GetMessage(&mut message, None, 0, 0), Ok(true)) {
+            deliver_pick(generation);
+        }
+
+        // Unhooked before the scope joins the disc thread: no message is read from here on, and the desktop's mouse waits on a hook
+        let _ = hook.UnhookWindowsHookEx();
         let _ = HWND::NULL.KillTimer(timer);
-    }
-    let _ = hook.UnhookWindowsHookEx();
+
+        // A press and its release can both come in one wait for a message; the state's end stops the disc thread too
+        deliver_pick(generation);
+        clear_state(generation);
+    });
+
+    // The user's own pointers are back before the next pick's keeper may start
+    drop(pointer);
+    drop(keeper_turn);
+}
+
+/// Ends pick `generation` where no hook can be set: the pick stays on the model
+fn finish_unavailable(generation: u64, outcomes: &Sender<PickOutcome>, ctx: &egui::Context) {
+    clear_state(generation);
+    let _ = outcomes.send(PickOutcome::Unavailable);
+    ctx.request_repaint();
+}
+
+/// Takes pick `generation`'s state away, if the hook still holds it
+fn clear_state(generation: u64) {
     if let Ok(mut hook) = HOOK.lock()
         && hook.as_ref().is_some_and(|state| state.generation == generation)
     {
@@ -70,17 +101,40 @@ pub(super) fn run(shared: &Arc<PickShared>, outcomes: Sender<PickOutcome>, ctx: 
     }
 }
 
-fn finish(outcomes: &Sender<PickOutcome>, ctx: &egui::Context) {
-    let _ = outcomes.send(PickOutcome::Unavailable);
+/// Reads and sends the pixel under the press pick `generation` took, once, out of the hook procedure and its lock
+fn deliver_pick(generation: u64) {
+    let Some((point, outcomes, ctx)) = take_pending_pick(generation) else { return };
+
+    let outcome = screen_pixel(point).map_or(PickOutcome::Unavailable, PickOutcome::Picked);
+    let _ = outcomes.send(outcome);
     ctx.request_repaint();
+}
+
+/// The press pick `generation` took and not yet read, with where to send its colour
+fn take_pending_pick(generation: u64) -> Option<(POINT, Sender<PickOutcome>, egui::Context)> {
+    let mut hook = HOOK.lock().ok()?;
+    let state = hook.as_mut().filter(|state| state.generation == generation)?;
+    let point = state.pending_pick.take()?;
+    Some((point, state.outcomes.clone(), state.ctx.clone()))
 }
 
 /// Whether pick `generation` still waits: for its click until the app ends the pick, then for the release of the press it took
 pub(super) fn waiting(shared: &PickShared, generation: u64) -> bool {
-    let Ok(hook) = HOOK.lock() else { return false };
-    let Some(state) = hook.as_ref().filter(|state| state.generation == generation) else { return false };
+    let Ok(mut hook) = HOOK.lock() else { return false };
+    let Some(state) = hook.as_mut().filter(|state| state.generation == generation) else { return false };
 
-    state.pressed || (!state.done && !shared.stopped())
+    // A hook the system removed never sees the release: the button being up ends that wait
+    if state.release_wait.as_mut().is_some_and(|release_wait| release_wait.over(pick_button_down(), Instant::now())) {
+        state.release_wait = None;
+    }
+
+    state.release_wait.is_some() || (!state.done && !shared.stopped())
+}
+
+/// Whether the button that sends left clicks is physically down (the system reports the physical buttons, swapped or not)
+fn pick_button_down() -> bool {
+    let button = if winsafe::GetSystemMetrics(co::SM::SWAPBUTTON) != 0 { co::VK::RBUTTON } else { co::VK::LBUTTON };
+    winsafe::GetAsyncKeyState(button)
 }
 
 extern "system" fn mouse_hook(code: i32, wparam: usize, lparam: isize) -> isize {
@@ -92,14 +146,14 @@ extern "system" fn mouse_hook(code: i32, wparam: usize, lparam: isize) -> isize 
     winsafe::CallNextHookEx(code, wparam, lparam)
 }
 
-/// Whether the mouse message `message` is the pick's own: a left press outside the app (read, then taken) or its release
+/// Whether the mouse message `message` is the pick's own: a left press outside the app (noted, then taken) or its release
 fn take(message: usize) -> bool {
     let Ok(mut hook) = HOOK.lock() else { return false };
     let Some(state) = hook.as_mut() else { return false };
 
     let message = u32::try_from(message).unwrap_or_default();
-    if message == co::WM::LBUTTONUP.raw() && state.pressed {
-        state.pressed = false;
+    if message == co::WM::LBUTTONUP.raw() && state.release_wait.is_some() {
+        state.release_wait = None;
         return true;
     }
 
@@ -112,10 +166,9 @@ fn take(message: usize) -> bool {
         return false;
     }
 
-    let outcome = screen_pixel(point).map_or(PickOutcome::Unavailable, PickOutcome::Picked);
-    let _ = state.outcomes.send(outcome);
-    state.ctx.request_repaint();
-    state.pressed = true;
+    // Only noted here: the system removes a hook that answers too slowly, so the pixel is read after this returns
+    state.pending_pick = Some(point);
+    state.release_wait = Some(ReleaseWait::new(Instant::now()));
     state.done = true;
     true
 }

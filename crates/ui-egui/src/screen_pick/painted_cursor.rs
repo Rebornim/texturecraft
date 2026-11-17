@@ -1,22 +1,11 @@
 //! The eyedropper pointer over the app's own window: the system's pointer is hidden there and the eyedropper picture is drawn
 //! one screen pixel per picture pixel, its hotspot pixel on the screen pixel the pointer is in, with the colour disc beside it
 
-use super::{CursorImage, SwatchSide, swatch_reach, swatch_unit};
+use super::cursor_texture::CursorTexture;
+use super::{SwatchSide, swatch_reach, swatch_unit};
 
 /// The pointer cell's size in points (a system pointer's 32 pixels at 100 %)
 const CURSOR_POINTS: f32 = 32.0;
-
-/// What a pointer picture shows: its cell in pixels and the colour disc's colour and side, if any
-type CursorLook = (u32, Option<([u8; 3], SwatchSide)>);
-
-/// The eyedropper picture uploaded for one look, kept between frames
-#[derive(Clone)]
-struct CursorTexture {
-    texture: egui::TextureHandle,
-    look: CursorLook,
-    size: u32,
-    hotspot: [u32; 2],
-}
 
 /// Draws the eyedropper in place of the pointer over the app (and, given `area`, inside it), a disc of `swatch` (sRGB) by its tip
 pub fn paint(ctx: &egui::Context, area: Option<egui::Rect>, swatch: Option<[u8; 3]>) {
@@ -26,11 +15,12 @@ pub fn paint(ctx: &egui::Context, area: Option<egui::Rect>, swatch: Option<[u8; 
     let pixels_per_point = ctx.pixels_per_point();
     let cell = (CURSOR_POINTS * pixels_per_point).round() as u32;
     let side = swatch.map(|color| (color, disc_side(ctx.content_rect(), pointer, pixels_per_point, cell)));
-    let cursor = texture(ctx, (cell, side));
+    let cursor = CursorTexture::for_look(ctx, (cell, side));
     let rect = placement(pointer, pixels_per_point, cursor.size, cursor.hotspot);
+
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Debug, egui::Id::unique("eyedropper_cursor")));
-    let whole = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
-    painter.image(cursor.texture.id(), rect, whole, egui::Color32::WHITE);
+    let whole_texture = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
+    painter.image(cursor.texture.id(), rect, whole_texture, egui::Color32::WHITE);
 }
 
 /// Where a `size`-pixel pointer picture goes, in points, so its `hotspot` pixel covers the screen pixel `pointer` is in
@@ -48,27 +38,10 @@ fn disc_side(screen: egui::Rect, pointer: egui::Pos2, pixels_per_point: f32, cel
     SwatchSide::fitting([tip.x, tip.y], unit, swatch_reach(unit), bounds)
 }
 
-/// The eyedropper picture for `look`, uploaded again only when the look changes (the disc's colour, its side, the pixel size)
-fn texture(ctx: &egui::Context, look: CursorLook) -> CursorTexture {
-    let id = egui::Id::unique("eyedropper_cursor_texture");
-    if let Some(cursor) = ctx.data(|data| data.get_temp::<CursorTexture>(id)).filter(|cursor| cursor.look == look) {
-        return cursor;
-    }
-
-    let image = match look {
-        (cell, Some((color, side))) => CursorImage::eyedropper_with_swatch(cell, color, side),
-        (cell, None) => CursorImage::eyedropper(cell),
-    };
-    let pixels = egui::ColorImage::from_rgba_unmultiplied([image.size as usize; 2], &image.rgba);
-    let texture = ctx.load_texture("eyedropper_cursor", pixels, egui::TextureOptions::NEAREST);
-    let cursor = CursorTexture { texture, look, size: image.size, hotspot: image.hotspot };
-    ctx.data_mut(|data| data.insert_temp(id, cursor.clone()));
-    cursor
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::screen_pick::CursorImage;
 
     #[test]
     fn the_hotspot_pixel_covers_the_pixel_the_pointer_is_in() {

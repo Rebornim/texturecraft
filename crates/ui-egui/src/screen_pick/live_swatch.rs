@@ -7,8 +7,8 @@ use winsafe::guard::CloseHandleGuard;
 use winsafe::prelude::Handle;
 use winsafe::{HEVENT, HMONITOR, POINT, co};
 
+use super::eyedropper_pointer::swap_in;
 use super::windows_hook::{over_own_window, screen_pixel, waiting};
-use super::windows_pointer::swap_in;
 use super::{CursorImage, PickShared, SwatchSide, pick_shared::over_windows, swatch_reach, swatch_unit};
 
 /// How often the disc reads the colour under the tip (one display frame at 60 Hz)

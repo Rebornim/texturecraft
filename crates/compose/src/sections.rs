@@ -1,6 +1,7 @@
-//! The section controls of the Curvature, Ambient Occlusion, Position and World Space Normals generators
+//! The section controls of the Curvature, Ambient Occlusion, Position and World Space Normals generators, and the Light generator's shading
 
-use texturecraft_core::{AxisBlend, AxisLayer, Generator, GeneratorGlobal, GeneratorKind, SectionParameters};
+use texturecraft_core::{AxisBlend, AxisLayer, Generator, GeneratorGlobal, GeneratorKind, LightParameters, SectionParameters};
+use texturecraft_geom::glam::Vec3;
 
 /// Gaussian sigma of the section blur per unit of its slider, in texels at [`GeneratorGlobal::BLUR_RESOLUTION`]
 const BLUR_SIGMA_PER_UNIT: f32 = 4.5;
@@ -13,6 +14,15 @@ const FULL_CONTRAST_STEP_OFFSET: f32 = 4.6e-5;
 
 /// The order the axes combine in, as indices into [`SectionParameters::axes`]: top to bottom is the base, front to back goes last
 const AXIS_ORDER: [usize; 3] = [SectionParameters::TOP_TO_BOTTOM, SectionParameters::RIGHT_TO_LEFT, SectionParameters::FRONT_TO_BACK];
+
+/// Distance of a light-facing tangent plane from the centre of the position map's unit cube
+const ATTENUATION_PLANE_OFFSET: f32 = 0.5;
+
+/// Light attenuation above which the falloff fades the whole mesh towards black instead of steepening
+const ATTENUATION_STEEPEST: f32 = 0.5;
+
+/// Shortest decoded normal still given a direction
+const MIN_NORMAL_LENGTH: f32 = 1e-6;
 
 /// A map's three channels (0..1) combined by `axes`: each axis read from its channel, inverted, blended over the axes before it and weighted
 pub(crate) fn axes_signal(channels: [f32; 3], axes: &[AxisLayer; 3]) -> f32 {
@@ -89,6 +99,35 @@ fn contrasted(value: f32, contrast: f32) -> f32 {
         return if value > 0.5 + FULL_CONTRAST_STEP_OFFSET { 1.0 } else { 0.0 };
     }
     ((value - (0.5 - half_range)) / (2.0 * half_range)).clamp(0.0, 1.0)
+}
+
+/// The direction the light comes from: `horizontal` degrees around the up axis from -X towards +Z, `vertical` degrees above the horizon
+pub(crate) fn light_direction(horizontal: f32, vertical: f32) -> Vec3 {
+    let (horizontal, vertical) = (horizontal.to_radians(), vertical.to_radians());
+    Vec3::new(-vertical.cos() * horizontal.cos(), vertical.sin(), vertical.cos() * horizontal.sin())
+}
+
+/// The Light generator at a texel with world `normal` and `position` (0..1 across the mesh's bounds): lit, highlighted and faded with depth
+pub(crate) fn light_value(light: &LightParameters, normal: Vec3, position: Vec3, invert: bool) -> f32 {
+    let direction = light_direction(light.horizontal, light.vertical);
+    let normal = if normal.length() > MIN_NORMAL_LENGTH { normal.normalize() } else { Vec3::Y };
+
+    // Glossiness 0 lights the half facing away too, 0.5 is a plain diffuse falloff
+    let glossiness = light.glossiness.clamp(*LightParameters::GLOSSINESS_RANGE.start(), *LightParameters::GLOSSINESS_RANGE.end());
+    let threshold = 2.0 * glossiness - 1.0;
+    let diffuse = ((normal.dot(direction) - threshold) / (1.0 - threshold)).clamp(0.0, 1.0);
+    let highlight_level = light.highlight_level.clamp(0.0, 1.0);
+    let diffuse = if highlight_level >= 1.0 { if diffuse > 0.0 { 1.0 } else { 0.0 } } else { (diffuse / (1.0 - highlight_level)).clamp(0.0, 1.0) };
+
+    // Depth from the tangent plane facing the light
+    let depth = ATTENUATION_PLANE_OFFSET - (position - Vec3::splat(0.5)).dot(direction);
+    let attenuation = light.attenuation.clamp(0.0, 1.0);
+    let kept = if attenuation <= ATTENUATION_STEEPEST {
+        (1.0 - 2.0 * attenuation * depth).clamp(0.0, 1.0)
+    } else {
+        (1.0 - depth).clamp(0.0, 1.0) * (2.0 - 2.0 * attenuation)
+    };
+    kept * if invert { 1.0 - diffuse } else { diffuse }
 }
 
 #[cfg(test)]
@@ -195,5 +234,45 @@ mod tests {
         assert_eq!(blur_radius_at(GeneratorKind::AmbientOcclusion, &SectionParameters { blur: 0.0, ..section }, 2048), 0);
         let radius = blur_radius_at(GeneratorKind::AmbientOcclusion, &SectionParameters { blur: 1.0, ..section }, 2048) as f32;
         assert!((radius * (radius + 1.0)).sqrt() - 4.5 < 0.6, "three boxes of radius {radius} spread like sigma 4.5");
+    }
+
+    #[test]
+    fn light_angles_point_at_the_reference_axes() {
+        let close = |a: Vec3, b: Vec3| (a - b).length() < 1e-5;
+        assert!(close(light_direction(0.0, 0.0), Vec3::NEG_X));
+        assert!(close(light_direction(90.0, 0.0), Vec3::Z));
+        assert!(close(light_direction(180.0, 0.0), Vec3::X));
+        assert!(close(light_direction(33.0, 90.0), Vec3::Y));
+    }
+
+    #[test]
+    fn light_lights_the_faces_towards_it() {
+        let light = LightParameters { horizontal: 0.0, vertical: 0.0, attenuation: 0.0, ..LightParameters::defaults(GeneratorKind::Direction).unwrap() };
+        let middle = Vec3::splat(0.5);
+        assert_eq!(light_value(&light, Vec3::NEG_X, middle, false), 1.0);
+        assert_eq!(light_value(&light, Vec3::X, middle, false), 0.0);
+        assert!((light_value(&light, Vec3::new(-1.0, 1.0, 0.0), middle, false) - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-5, "a plain diffuse falloff");
+        assert_eq!(light_value(&light, Vec3::X, middle, true), 1.0, "invert lights the far side");
+
+        let half_lambert = LightParameters { glossiness: 0.0, ..light };
+        assert!((light_value(&half_lambert, Vec3::Y, middle, false) - 0.5).abs() < 1e-6, "glossiness 0 lights the side faces half");
+        let highlighted = LightParameters { highlight_level: 0.5, ..light };
+        assert!((light_value(&highlighted, Vec3::new(-1.0, 3.0, 0.0), middle, false) - 2.0 * 10f32.sqrt().recip()).abs() < 1e-5);
+        let saturated = LightParameters { highlight_level: 1.0, ..light };
+        assert_eq!(light_value(&saturated, Vec3::new(-0.01, 1.0, 0.0), middle, false), 1.0, "any lit texel is white");
+    }
+
+    #[test]
+    fn attenuation_darkens_the_side_away_from_the_light() {
+        let light = LightParameters { horizontal: 0.0, vertical: 0.0, glossiness: 0.0, ..LightParameters::defaults(GeneratorKind::Direction).unwrap() };
+        let near = light_value(&light, Vec3::Y, Vec3::new(0.0, 0.5, 0.5), false);
+        let far = light_value(&light, Vec3::Y, Vec3::new(1.0, 0.5, 0.5), false);
+        assert!((near - 0.5).abs() < 1e-6, "the face of the bounds towards the light keeps its value");
+        assert!((far - 0.25).abs() < 1e-6, "attenuation 0.25 halves it across the bounds");
+
+        let none = LightParameters { attenuation: 0.0, ..light };
+        assert_eq!(light_value(&none, Vec3::Y, Vec3::new(1.0, 0.5, 0.5), false), near);
+        let full = LightParameters { attenuation: 1.0, ..light };
+        assert_eq!(light_value(&full, Vec3::Y, Vec3::new(0.0, 0.5, 0.5), false), 0.0, "attenuation 1 is black everywhere");
     }
 }

@@ -62,9 +62,9 @@ pub fn find(name: &str) -> Option<&'static SmartMask> {
 
 const UP: [f32; 3] = [0.0, 1.0, 0.0];
 
-/// A mesh-map generator with explicit threshold, softness and noise breakup (curvature as baked, without detail sizes or the wear and section controls)
+/// A mesh-map generator with explicit threshold, softness and noise breakup (curvature as baked, without detail sizes or the wear, section and light controls)
 pub(crate) fn generator(kind: GeneratorKind, level: f32, softness: f32, noise: f32) -> EffectKind {
-    EffectKind::Generator(Generator { level, softness, noise_amount: noise, detail: None, wear: None, section: None, ..Generator::new(kind) })
+    EffectKind::Generator(Generator { level, softness, noise_amount: noise, detail: None, wear: None, section: None, light: None, ..Generator::new(kind) })
 }
 
 /// A direction or position generator (`invert` flips the result).
@@ -78,6 +78,7 @@ pub(crate) fn directional(kind: GeneratorKind, direction: [f32; 3], level: f32, 
         detail: None,
         wear: None,
         section: None,
+        light: None,
         ..Generator::new(kind)
     })
 }

@@ -18,7 +18,7 @@ pub fn dnd_release<T: std::any::Any + Send + Sync>(resp: &Response) -> Option<st
 /// Returns the response of the track (`.changed()` while dragged); for a value kept in the
 /// document, use [`slider_edit`].
 pub fn slider(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, decimals: usize) -> Response {
-    slider_inner(ui, label, value, range, decimals).0
+    slider_inner(ui, label, value, range, decimals, "").0
 }
 
 /// [`slider`] for a value re-read from the document every frame: `Some(merge)` on every frame
@@ -26,17 +26,22 @@ pub fn slider(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeI
 /// true for the later changes of one drag, so the edit that applies them (with the command's
 /// `merge` param) continues the drag's first undo step.
 pub fn slider_edit(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, decimals: usize) -> Option<bool> {
-    slider_inner(ui, label, value, range, decimals).1
+    slider_inner(ui, label, value, range, decimals, "").1
 }
 
-fn slider_inner(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, decimals: usize) -> (Response, Option<bool>) {
+/// [`slider_edit`] showing `suffix` after the value (a unit such as °), which a typed value may leave out
+pub fn slider_edit_with_suffix(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, decimals: usize, suffix: &str) -> Option<bool> {
+    slider_inner(ui, label, value, range, decimals, suffix).1
+}
+
+fn slider_inner(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, decimals: usize, suffix: &str) -> (Response, Option<bool>) {
     let tokens = Tokens::get(ui.ctx());
     let (minimum, maximum) = (*range.start(), *range.end());
     let width = ui.available_width();
     let font = egui::TextStyle::Body.resolve(ui.style());
     let value_width = [minimum, maximum]
         .into_iter()
-        .map(|bound| ui.painter().layout_no_wrap(format!("{bound:.decimals$}"), font.clone(), tokens.text).size().x)
+        .map(|bound| ui.painter().layout_no_wrap(format!("{bound:.decimals$}{suffix}"), font.clone(), tokens.text).size().x)
         .fold(44.0, f32::max);
     let mut edit = None;
     let field = ui
@@ -44,7 +49,7 @@ fn slider_inner(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::Rang
             ui.label(RichText::new(label).color(tokens.text));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let id = ui.next_auto_id();
-                let shown = format!("{value:.decimals$}");
+                let shown = format!("{value:.decimals$}{suffix}");
                 // Keep unfinished input while the document value is re-read each frame
                 let mut text = ui.data(|data| data.get_temp::<String>(id)).unwrap_or_else(|| shown.clone());
                 let response = ui.add(
@@ -65,7 +70,7 @@ fn slider_inner(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::Rang
                     if response.lost_focus()
                         && !escape
                         && text != shown
-                        && let Ok(parsed) = text.trim().parse::<f32>()
+                        && let Ok(parsed) = text.trim().strip_suffix(suffix).unwrap_or(text.trim()).trim_end().parse::<f32>()
                         && parsed.is_finite()
                         && parsed.clamp(minimum, maximum) != *value
                     {

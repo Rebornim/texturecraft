@@ -1,7 +1,7 @@
 use super::curvature::Curvature;
 use super::sampling::{pack, splitmix64, tangent_normal};
 use super::{position_projection::PositionProjection, source::Source, traced::Traced, transfer::Transfer};
-use crate::cage::{RayFrame, RayStart};
+use crate::cage::RayFrame;
 use crate::tracing::{ANY, Hemisphere, Query, Ray, RayKind, RayScene, TraceMesh};
 use crate::{BakeError, BakeRequest, MeshExtent};
 use rayon::prelude::*;
@@ -109,21 +109,19 @@ impl<'a> BakeContext<'a> {
     pub(crate) fn transfer_ray(&self, surface: &Surface, barycentric: [f32; 2]) -> (Ray, f32) {
         let start = self.ray_frame.start(surface, barycentric);
         let origin = start.origin(surface.pos, self.frontal);
-        let (direction, front) = match start {
-            RayStart::CageMesh(offset) => (offset.normalize(), offset.length()),
-            RayStart::Distance { up, scale } => (-up, self.frontal * scale),
-        };
+        let (direction, front, rear) = start.span(self.frontal, self.rear);
         let key = match self.settings.high_poly.match_mode {
             MeshMatchMode::Always => ANY,
             MeshMatchMode::ByMeshName => self.low.key.get(surface.tri as usize).copied().unwrap_or(ANY),
         };
-        (Ray { origin, direction, max_distance: front + self.rear, key }, front)
+        (Ray { origin, direction, max_distance: front + rear, key }, front)
     }
 
-    pub(crate) fn transfer(&self, hit: Option<Hit>, front: f32) -> Option<Transfer> {
+    /// What the transfer ray that ran `front` to the low poly and `ray_length` in all brought back from the high poly
+    pub(crate) fn transfer(&self, hit: Option<Hit>, front: f32, ray_length: f32) -> Option<Transfer> {
         let (high, hit) = (self.high.as_ref()?, hit?);
         let surface = surface_at(high.mesh, hit.tri, hit.u, hit.v)?;
-        Some(Transfer { surface, bary: [hit.u, hit.v], t: hit.t, front })
+        Some(Transfer { surface, bary: [hit.u, hit.v], t: hit.t, front, ray_length })
     }
 
     pub(crate) fn query(&self, transfer: Option<&Transfer>, low_surface: &Surface, seed: u64) -> Query {
@@ -244,7 +242,7 @@ impl<'a> BakeContext<'a> {
                     let relative_to_rays = self.settings.maps.height.parameters.normalization == texturecraft_core::HeightNormalization::RelativeToRayDistances;
                     [transfer.map_or(if relative_to_rays { 0.5 } else { 0.0 }, |hit| {
                         let height = hit.front - hit.t;
-                        if relative_to_rays { (0.5 + height / (hit.front + self.rear).max(1e-20)).clamp(0.0, 1.0) } else { height }
+                        if relative_to_rays { (0.5 + height / hit.ray_length.max(1e-20)).clamp(0.0, 1.0) } else { height }
                     }); 3]
                 }
                 BakedMap::Opacity if missed => [0.0; 3],

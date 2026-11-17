@@ -17,6 +17,9 @@ use super::*;
 #[path = "test/cage_shell.rs"]
 mod cage_shell;
 
+#[path = "test/fitted_cage.rs"]
+mod fitted_cage;
+
 #[path = "test/high_poly_reach.rs"]
 mod high_poly_reach;
 

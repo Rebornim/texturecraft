@@ -82,7 +82,7 @@ fn all_dropdowns_store_enum_choices() {
     assert_choices(&[bake::SkewCorrectionMethod::MeshNormalsBased, bake::SkewCorrectionMethod::FaceNormalsBased]);
     assert_choices(&bake::BakeResolution::ALL);
     assert_choices(&bake::BakeAntialiasing::ALL);
-    assert_choices(&[bake::CageType::DistanceBased, bake::CageType::CustomFile]);
+    assert_choices(&[bake::CageType::DistanceBased, bake::CageType::Automatic, bake::CageType::CustomFile]);
     assert_choices(&[bake::CurvatureMethod::NormalMap, bake::CurvatureMethod::Mesh]);
     assert_choices(&[
         bake::IdColorSource::VertexColor,

@@ -6,8 +6,7 @@ use std::collections::VecDeque;
 use texturecraft_geom::Mesh;
 use texturecraft_geom::glam::Vec3;
 
-/// How much farther than the high poly the cage reaches, as a fraction of the fitted distance: the fit reads both meshes at their vertices only
-/// Tuned with [`MARGIN_PER_DIAGONAL`] on two production meshes to the tightest pair whose rays miss no more texels than the default distances do
+/// How much farther than the high poly the cage reaches, as a fraction of the fitted distance: the fit reads both meshes at their vertices only. Tuned with [`MARGIN_PER_DIAGONAL`] on two production meshes: the tightest pair whose rays miss no more texels than the default distances do
 const MARGIN_PER_DISTANCE: f32 = 0.5;
 
 /// The least the cage reaches each way, as a fraction of the mesh diagonal, so a high poly lying on the low poly is still inside

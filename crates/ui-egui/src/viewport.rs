@@ -65,7 +65,7 @@ pub fn central(app: &mut TextureCraftApp, ui: &mut Ui) {
     let mode = app.ui.mode;
     let bake_painting = mode == crate::state::Mode::Baking
         && app.ui.bake_paint_brush.on
-        && !app.session.bake_meshes.high.is_empty()
+        && !app.session.doc.bake_meshes.high.is_empty()
         && app.session.doc.project.texture_sets.get(app.session.ts()).is_some_and(|texture_set| {
             let settings = &texture_set.bake;
             match app.ui.bake_paint_brush.target {

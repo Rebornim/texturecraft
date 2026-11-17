@@ -65,20 +65,77 @@ fn high_poly_meshes_drive_the_bake_and_round_trip() {
 
     // Save and reopen: meshes, cage and settings come back
     let reloaded = Session::from_project_bytes(&session.to_project_bytes().unwrap()).unwrap();
-    let names = |session: &Session| session.bake_meshes.high.iter().map(|h| (h.name.clone(), h.mesh.triangle_count())).collect::<Vec<_>>();
+    let names = |session: &Session| session.doc.bake_meshes.high.iter().map(|h| (h.name.clone(), h.mesh.triangle_count())).collect::<Vec<_>>();
     assert_eq!(names(&reloaded), names(&session));
-    assert_eq!(reloaded.bake_meshes.cage.as_ref().map(|c| c.name.as_str()), Some("cage.obj"));
+    assert_eq!(reloaded.doc.bake_meshes.cage.as_ref().map(|c| c.name.as_str()), Some("cage.obj"));
     assert_eq!(reloaded.doc.project.texture_sets[0].bake, session.doc.project.texture_sets[0].bake);
 
     execute(&mut session, "bake.highPoly.remove", &json!({ "name": "hp_high.obj" })).unwrap();
-    assert!(session.bake_meshes.high.is_empty());
+    assert!(session.doc.bake_meshes.high.is_empty());
     execute(&mut session, "bake.cage.clear", &Value::Null).unwrap();
-    assert!(session.bake_meshes.cage.is_none());
+    assert!(session.doc.bake_meshes.cage.is_none());
 
     // Without high polys the bake falls back to the low poly
     execute(&mut session, "bake.run", &json!({ "resolution": 128, "maps": ["opacity"] })).unwrap();
     assert!(session.doc.baked[&0].maps[&BakedMap::Opacity].iter().all(|v| *v == 1.0));
     let _ = std::fs::remove_dir_all(std::path::Path::new(&high).parent().unwrap());
+}
+
+#[test]
+fn high_poly_and_cage_edits_are_undo_steps() {
+    let mut session = plane_session();
+    execute(&mut session, "bake.settings", &json!({ "ts": "all", "useLowAsHigh": true })).unwrap();
+    let low = session.mesh.as_ref().clone();
+    let high_names = |session: &Session| session.doc.bake_meshes.high.iter().map(|high| high.name.clone()).collect::<Vec<_>>();
+    let merged_triangles = |session: &Session| session.doc.bake_meshes.merged_high().map(|merged| merged.mesh.triangle_count());
+
+    session.add_high_poly_bytes("part_high.obj", obj(&low, 0.002, f32::MAX, [1.0; 3]).into_bytes()).unwrap();
+    assert_eq!(session.undo_label(), Some("Add high poly mesh"));
+    assert!(!session.doc.project.texture_sets[0].bake.high_poly.use_low_as_high);
+
+    session.undo().unwrap();
+    assert!(high_names(&session).is_empty(), "undo takes the high poly out");
+    assert_eq!(merged_triangles(&session), None, "bakes no longer see it");
+    assert!(session.doc.project.texture_sets[0].bake.high_poly.use_low_as_high, "the setting the add changed comes back");
+
+    session.redo().unwrap();
+    assert_eq!(high_names(&session), ["part_high.obj"]);
+    assert_eq!(merged_triangles(&session), Some(low.triangle_count()));
+
+    execute(&mut session, "bake.highPoly.remove", &json!({ "index": 0 })).unwrap();
+    session.undo().unwrap();
+    assert_eq!(high_names(&session), ["part_high.obj"], "undo brings a removed high poly back");
+    execute(&mut session, "bake.highPoly.remove", &json!({ "all": true })).unwrap();
+    session.undo().unwrap();
+    assert_eq!(merged_triangles(&session), Some(low.triangle_count()));
+
+    session.set_cage_bytes("cage.obj", obj(&low, 0.05, f32::MAX, [1.0; 3]).into_bytes()).unwrap();
+    session.undo().unwrap();
+    assert!(session.doc.bake_meshes.cage.is_none(), "undo takes the cage out");
+    session.redo().unwrap();
+    execute(&mut session, "bake.cage.clear", &Value::Null).unwrap();
+    session.undo().unwrap();
+    assert_eq!(session.doc.bake_meshes.cage.as_ref().map(|cage| cage.name.as_str()), Some("cage.obj"), "undo brings a removed cage back");
+
+    let steps = session.history_labels().len();
+    execute(&mut session, "bake.highPoly.remove", &json!({ "all": true })).unwrap();
+    execute(&mut session, "bake.highPoly.remove", &json!({ "all": true })).unwrap();
+    execute(&mut session, "bake.cage.clear", &Value::Null).unwrap();
+    execute(&mut session, "bake.cage.clear", &Value::Null).unwrap();
+    assert_eq!(session.history_labels().len(), steps + 2, "removing nothing adds no step");
+}
+
+#[test]
+fn opening_a_project_with_bake_meshes_adds_no_undo_step() {
+    let mut session = plane_session();
+    let low = session.mesh.as_ref().clone();
+    session.add_high_poly_bytes("part_high.obj", obj(&low, 0.002, f32::MAX, [1.0; 3]).into_bytes()).unwrap();
+    session.set_cage_bytes("cage.obj", obj(&low, 0.05, f32::MAX, [1.0; 3]).into_bytes()).unwrap();
+
+    let reloaded = Session::from_project_bytes(&session.to_project_bytes().unwrap()).unwrap();
+    assert!(reloaded.doc.bake_meshes.cage.is_some() && reloaded.doc.bake_meshes.merged_high().is_some());
+    assert!(reloaded.history_labels().is_empty());
+    assert!(!reloaded.modified, "a project just opened has nothing to save");
 }
 
 #[test]
@@ -94,7 +151,7 @@ fn malformed_high_poly_input_errors_cleanly() {
     assert!(execute(&mut session, "bake.highPoly.add", &json!({ "path": "/definitely/missing.obj" })).is_err());
     assert!(execute(&mut session, "bake.highPoly.remove", &json!({ "index": 3 })).is_err());
     assert!(execute(&mut session, "bake.highPoly.remove", &Value::Null).is_err());
-    assert!(session.bake_meshes.high.is_empty() && session.bake_meshes.cage.is_none());
+    assert!(session.doc.bake_meshes.high.is_empty() && session.doc.bake_meshes.cage.is_none());
     assert_eq!(session.doc.project, before, "failed imports preserve project settings");
 }
 
@@ -380,7 +437,7 @@ fn opacity_samples_a_textured_gltf_high_poly() {
 
     // The textures come back with the project
     let reloaded = Session::from_project_bytes(&session.to_project_bytes().unwrap()).unwrap();
-    assert_eq!(reloaded.bake_meshes.high[0].base_color, session.bake_meshes.high[0].base_color);
+    assert_eq!(reloaded.doc.bake_meshes.high[0].base_color, session.doc.bake_meshes.high[0].base_color);
 }
 
 /// USDZ opacity uses the UsdPreviewSurface texture alpha
@@ -441,7 +498,7 @@ fn opacity_samples_textures_next_to_a_high_poly() {
 
         // The project holds the folded file: the textures come back without the folder
         let reloaded = Session::from_project_bytes(&session.to_project_bytes().unwrap()).unwrap();
-        assert_eq!(reloaded.bake_meshes.high[0].base_color, session.bake_meshes.high[0].base_color, "{file}");
+        assert_eq!(reloaded.doc.bake_meshes.high[0].base_color, session.doc.bake_meshes.high[0].base_color, "{file}");
     }
 
     // A missing image is named in the log; the high poly still loads, untextured
@@ -685,7 +742,7 @@ fn changing_the_mesh_keeps_the_bake_setup_and_marks_the_project_changed() {
     execute(&mut s, "file.changeMesh", &json!({ "path": low })).unwrap();
 
     assert_ne!(s.mesh_id, mesh_id, "the session is on a new mesh");
-    assert_eq!(s.bake_meshes.high.len(), 1, "the high poly stays");
+    assert_eq!(s.doc.bake_meshes.high.len(), 1, "the high poly stays");
     assert!(s.doc.bake_paint.keys().any(|(_, target)| *target == texturecraft_engine::core::BakePaintTarget::Skew), "the skew map stays");
     assert!(s.modified, "the project differs from the saved one");
     assert_eq!(s.images.len(), 1, "image resources are decoded in the new session");

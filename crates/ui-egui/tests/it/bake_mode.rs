@@ -552,7 +552,7 @@ fn a_loaded_cage_can_be_removed_while_the_cage_does_not_apply() {
     let session = &mut harness.state_mut().session;
     session.add_high_poly_bytes("High.obj", b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".to_vec()).unwrap();
     let mesh = session.mesh.clone();
-    session.bake_meshes.cage = Some(texturecraft_engine::BakeMesh { name: "Cage.obj".into(), bytes: Default::default(), mesh, base_color: Vec::new() });
+    session.doc.bake_meshes.cage = Some(texturecraft_engine::BakeMesh { name: "Cage.obj".into(), bytes: Default::default(), mesh, base_color: Vec::new() });
     let settings = &mut session.doc.project.texture_sets[0].bake;
     (settings.cage.kind, settings.high_poly.use_low_as_high) = (CageType::CustomFile, true);
     harness.run_steps(3);
@@ -560,7 +560,7 @@ fn a_loaded_cage_can_be_removed_while_the_cage_does_not_apply() {
     assert!(harness.get_by_label("Load Cage").accesskit_node().is_disabled(), "the cage does not apply");
     assert!(!harness.get_by_label("Remove Cage").accesskit_node().is_disabled());
     click(&mut harness, "Remove Cage");
-    assert!(harness.state().session.bake_meshes.cage.is_none());
+    assert!(harness.state().session.doc.bake_meshes.cage.is_none());
 }
 
 #[test]
@@ -605,7 +605,7 @@ fn the_high_poly_scene_is_a_list_with_add_and_remove() {
     harness.run_steps(3);
     harness.get_by_label("Remove").click();
     harness.run_steps(3);
-    assert!(harness.state().session.bake_meshes.high.is_empty());
+    assert!(harness.state().session.doc.bake_meshes.high.is_empty());
     assert!(harness.get_by_label("Remove").accesskit_node().is_disabled());
 }
 

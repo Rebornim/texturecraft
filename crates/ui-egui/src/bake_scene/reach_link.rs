@@ -87,7 +87,7 @@ impl ReachLink {
             return;
         }
 
-        let Some(vertex_count) = session.bake_meshes.merged_high().map(|high| high.mesh.positions.len()) else { return };
+        let Some(vertex_count) = session.doc.bake_meshes.merged_high().map(|high| high.mesh.positions.len()) else { return };
 
         out.bake_high_missed = Some((self.high_id, high_poly_missed(&self.reach, &shown.0, only_set, vertex_count)));
         self.shown = Some(shown);
@@ -164,7 +164,7 @@ mod tests {
         link.sync(&session, 2, None, &mut out);
         let (high_id, missed) = out.bake_high_missed.unwrap();
         assert_eq!(high_id, 2);
-        assert_eq!(missed, vec![0.0; session.bake_meshes.merged_high().unwrap().mesh.positions.len()]);
+        assert_eq!(missed, vec![0.0; session.doc.bake_meshes.merged_high().unwrap().mesh.positions.len()]);
         assert!(link.reach[0].is_none(), "the latest setting bakes without a high poly");
     }
 }

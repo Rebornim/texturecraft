@@ -409,7 +409,7 @@ fn window_snapshots() {
     save(&mut harness, &output_dir, "bake-curvature-mesh");
     select_map(&mut harness, "Height");
     save(&mut harness, &output_dir, "bake-height-manual");
-    harness.state_mut().session.bake_meshes.high.clear();
+    harness.state_mut().session.doc.bake_meshes.high.clear();
     harness.state_mut().ui.mode = Mode::Painting;
     save(&mut harness, &output_dir, "painting-restored");
 

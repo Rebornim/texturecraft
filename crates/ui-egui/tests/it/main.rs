@@ -40,6 +40,7 @@ mod folder_properties;
 mod frame_selection;
 mod generator_panel;
 mod help_menu_664;
+mod high_poly_loading;
 mod history_panel;
 mod import_resources;
 mod inactive_set_hint;

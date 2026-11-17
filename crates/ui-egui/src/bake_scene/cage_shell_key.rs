@@ -31,8 +31,8 @@ impl CageShellKey {
         let paint = |target| SharedHandle::of(session.doc.bake_paint.get(&(texture_set, target)));
         Some(CageShellKey {
             mesh_id: session.mesh_id,
-            high: SharedHandle::of(session.bake_meshes.merged_high().map(|high| &high.mesh)),
-            cage_file: SharedHandle::of(session.bake_meshes.cage.as_ref().map(|cage| &cage.mesh)),
+            high: SharedHandle::of(session.doc.bake_meshes.merged_high().map(|high| &high.mesh)),
+            cage_file: SharedHandle::of(session.doc.bake_meshes.cage.as_ref().map(|cage| &cage.mesh)),
             material: set.material,
             uv_tiles: set.uv_tiles.clone(),
             tile_resolutions: set.tile_resolutions.clone(),

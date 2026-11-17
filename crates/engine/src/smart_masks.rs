@@ -225,6 +225,7 @@ impl Session {
             .ok_or_else(|| EngineError::Other("the smart mask file has no mask".into()))?;
         let resources: BTreeMap<String, Arc<Vec<u8>>> = pf.resources.into_iter().map(|(k, v)| (k, Arc::new(v))).collect();
         let src = crate::session::Document {
+            bake_meshes: Default::default(),
             bake_paint: BTreeMap::new(),
             project: pf.project,
             pixels: pf.pixels,

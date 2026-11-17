@@ -90,7 +90,7 @@ pub mod uv_tile_cmds;
 pub mod view_cmds;
 pub mod warp_cmds;
 
-pub use bake::{BakeMesh, BakeMeshes, BakeTask, StreamedBake, StreamedMap};
+pub use bake::{BakeMesh, BakeMeshes, BakeTask, HighPolyLoad, StreamedBake, StreamedMap};
 pub use bake_preview::{BakePreview, PreviewShow};
 pub use commands::{CommandSpec, check_enabled, command_specs, execute, find};
 pub use fill_hit_test::FillHitTest;

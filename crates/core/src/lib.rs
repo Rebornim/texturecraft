@@ -48,6 +48,7 @@ pub mod pbr_validate;
 pub mod project;
 pub mod projector;
 pub mod randomized_seed;
+mod saved_decal;
 mod saved_projection;
 pub mod selection_background;
 mod shadow_mode;

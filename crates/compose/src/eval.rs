@@ -26,11 +26,12 @@ use crate::effect_histogram::EffectHistogram;
 use crate::environment_sh::EnvironmentSh;
 use crate::fill_copies::FillCopies;
 use crate::fill_copy::FillCopy;
+use crate::fill_place::FillPlace;
 use crate::held_fields::HeldFields;
 use crate::mask_gray::MaskGray;
 use crate::pattern::{Coords, image_samples, mesh_frame, pattern_pixels, procedural_in, world_noise};
 use crate::pattern_context::PatternContext;
-use crate::projector_cover::{framed_cover, projector_cover};
+use crate::projector_cover::{framed_cover, projector_cover, projector_covers_all};
 use crate::projector_depth::ProjectorDepth;
 use crate::shape_distance::distance_filter;
 use crate::slope_texel::slope_texel;
@@ -244,8 +245,14 @@ enum Content<'a> {
     Paint {
         preview: bool,
     },
-    /// A fill (with the Scale and Rotation of the folders around it laid on), with its projector's depth map when it culls by depth
-    Fill(Box<Cow<'a, Fill>>, Option<Arc<ProjectorDepth>>),
+    /// A fill (with the Scale and Rotation of the folders around it laid on)
+    Fill {
+        fill: Box<Cow<'a, Fill>>,
+        /// Its projector's depth map when it culls by depth
+        depth: Option<Arc<ProjectorDepth>>,
+        /// Whether it covers every texel (see [`covers_every_texel`]), so no texel asks
+        covers_all: bool,
+    },
     Group(Vec<Node<'a>>),
 }
 
@@ -264,6 +271,8 @@ struct EffectPlan<'a> {
     filtered_mask: Option<&'a Field>,
     /// The projector's depth map of a fill or material effect that culls by depth
     depth: Option<Arc<ProjectorDepth>>,
+    /// Whether a fill or material effect covers every texel (see [`covers_every_texel`]), so no texel asks
+    covers_all: bool,
     /// The viewport environment's light, for Baked Lighting Environment
     environment: Option<EnvironmentSh>,
     /// The source a point filter's image input reads (Grayscale Conversion's Custom Input)
@@ -2057,9 +2066,13 @@ fn effect_plans<'a>(
                 EffectKind::Generator(Generator { detail: Some(detail), .. }) => CurvatureSizes::of(inp, &detail.blurred_sizes_in_use()),
                 _ => None,
             };
-            let depth = match &effect.kind {
-                EffectKind::Fill { projection, .. } | EffectKind::Material(Fill { projection, .. }) => ProjectorDepth::of(inp.mesh, inp.bounds, projection),
-                _ => None,
+            let (depth, covers_all) = match &effect.kind {
+                EffectKind::Fill { projection, sampling, .. } | EffectKind::Material(Fill { projection, sampling, .. }) => {
+                    let depth = ProjectorDepth::of(inp.mesh, inp.bounds, projection);
+                    let covers_all = covers_every_texel(projection, *sampling, depth.as_deref());
+                    (depth, covers_all)
+                }
+                _ => (None, false),
             };
             let environment = match &effect.kind {
                 EffectKind::Filter(Filter::EnvironmentLighting { .. }) => Some(EnvironmentSh::of(&inp.project.display, inp.images)),
@@ -2076,6 +2089,7 @@ fn effect_plans<'a>(
                 curvature_sizes,
                 filtered_mask: None,
                 depth,
+                covers_all,
                 environment,
                 input: match &effect.kind {
                     EffectKind::Filter(filter) if !filter.is_neighbourhood() => ImageInput::of(filter).first().map(|input| effect.input(input)),
@@ -2267,7 +2281,11 @@ fn plan_content<'a>(
         .collect::<Vec<_>>();
     let content = match &layer.kind {
         LayerKind::Paint => Content::Paint { preview: previews(inp, PaintTarget::Layer(layer.id)) },
-        LayerKind::Fill(f) => Content::Fill(Box::new(offset_fill(f, around)), ProjectorDepth::of(inp.mesh, inp.bounds, &f.projection)),
+        LayerKind::Fill(f) => {
+            let depth = ProjectorDepth::of(inp.mesh, inp.bounds, &f.projection);
+            let covers_all = covers_every_texel(&f.projection, f.sampling, depth.as_deref());
+            Content::Fill { fill: Box::new(offset_fill(f, around)), depth, covers_all }
+        }
         LayerKind::Group { children, contents, .. } => {
             Content::Group(if kids { plan_in(inp, children, channels, tx, ty, depth + 1, fields, around.then(*contents)) } else { Vec::new() })
         }
@@ -2323,6 +2341,23 @@ fn over(c: &ChanPlan, mode: BlendMode, v: [f32; 3], cov: f32, p: [f32; 3], a: f3
     let b = if cov > 0.0 { blend_chan(c, mode, v, p) } else { p };
     let nc = a + cov * (1.0 - a);
     (mix3(v, b, a / nc.max(1e-5)), nc)
+}
+
+/// Whether a fill placed by `proj` repeats past its tile both ways, so no texel falls outside it (tri-planar never ends)
+fn repeats_everywhere(proj: &Projection, sampling: Sampling) -> bool {
+    sampling.wrap.repeats() == (true, true) || matches!(proj, Projection::Triplanar { .. })
+}
+
+/// Whether a fill placed by `proj` covers every texel: it repeats, nothing crops or culls it and it is not framed on the surface
+fn covers_every_texel(proj: &Projection, sampling: Sampling, depth: Option<&ProjectorDepth>) -> bool {
+    let framed = matches!(proj, Projection::Planar { placed: Some(_), .. } | Projection::Warp { .. });
+    let depth_culled = depth.is_some() && proj.depth_culling().is_some();
+    !framed && !depth_culled && repeats_everywhere(proj, sampling) && projector_covers_all(proj)
+}
+
+/// Whether a fill placed by `proj` is sampled once per copy of `sampling`'s symmetry
+fn takes_symmetry(proj: &Projection, sampling: Sampling) -> bool {
+    sampling.symmetry.on && proj.takes_symmetry()
 }
 
 /// Per-texel context.
@@ -2432,6 +2467,9 @@ impl<'a, 'b> Texel<'a, 'b> {
             return c;
         }
 
+        #[cfg(test)]
+        tests::COORDS_LOOKUPS.with(|count| count.set(count.get() + 1));
+
         let g = self.inp.gbuf;
         let c = match self.surface((self.y * g.width + self.x) as usize) {
             Some(s) => self.coords_of(s),
@@ -2446,12 +2484,14 @@ impl<'a, 'b> Texel<'a, 'b> {
     }
 
     /// The coordinates projections see at surface `s`: its UV, and its position in mesh radii from the mesh's centre
+    #[inline(always)]
     fn coords_of(&self, s: Surface) -> Coords {
         let (center, radius) = mesh_frame(self.inp.bounds);
         self.tile_uv(Coords { uv: s.uv, pos: (s.pos - center) / radius, nrm: s.nrm })
     }
 
     /// `c` with its UV moved out of the atlas on a UV-tiled set, so projections see the mesh's own UVs (patterns repeat per tile)
+    #[inline(always)]
     fn tile_uv(&self, mut c: Coords) -> Coords {
         if let Ok(set) = self.inp.project.texture_set(self.inp.ts)
             && let Some(grid) = set.tile_grid()
@@ -2502,6 +2542,7 @@ impl<'a, 'b> Texel<'a, 'b> {
     }
 
     /// The surface at G-buffer index `i`, as the fill copy being sampled sees it
+    #[inline(always)]
     fn surface(&self, i: usize) -> Option<Surface> {
         let mut s = self.inp.gbuf.surface(self.inp.mesh, i)?;
         if let Some(copy) = self.copy {
@@ -2523,10 +2564,8 @@ impl<'a, 'b> Texel<'a, 'b> {
 
     /// A fill's value and coverage through `proj`, from `one` (which samples it once): with `sampling`'s symmetry on, every copy of the projection is sampled and the copies are laid over each other, the texel's own copy on top
     fn symmetric(&mut self, proj: &Projection, sampling: Sampling, mut one: impl FnMut(&mut Self) -> ([f32; 3], f32)) -> ([f32; 3], f32) {
-        let symmetry = sampling.symmetry;
-
         // Most fills have no symmetry: they never pay for the surface lookup
-        if !(symmetry.on && proj.takes_symmetry()) {
+        if !takes_symmetry(proj, sampling) {
             return one(self);
         }
 
@@ -2538,7 +2577,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         let cached = self.coords.take();
         let mut value = [0.0f32; 3];
         let mut cover = 0.0f32;
-        for copy in FillCopies::new(&symmetry, world, center, radius) {
+        for copy in FillCopies::new(&sampling.symmetry, world, center, radius) {
             self.copy = Some(copy);
             self.coords = None;
             let (copy_value, copy_cover) = one(self);
@@ -2653,8 +2692,23 @@ impl<'a, 'b> Texel<'a, 'b> {
         }
     }
 
+    /// `place`'s fill sampled once at this texel: its value in channel `ch` (`source`, else the channel's default) and its coverage
+    #[inline(always)]
+    fn fill_texel(&mut self, place: FillPlace, source: Option<&Source>, ch: Channel) -> ([f32; 3], f32) {
+        let FillPlace { fill, depth, covers_all } = place;
+        let value = match source {
+            Some(source) => self.source(source, &fill.projection, fill.sampling, ch.kind()),
+            None => ch.default_value(),
+        };
+        let cover = if covers_all { 1.0 } else { self.cover(fill.sources.values(), &fill.projection, fill.sampling, depth) };
+        (value, cover)
+    }
+
     /// How much a fill projected by `proj` covers this texel: [`Texel::shape_cover`], then depth culling through the projector's `depth` map
     fn cover<'s>(&mut self, sources: impl Iterator<Item = &'s Source>, proj: &Projection, sampling: Sampling, depth: Option<&ProjectorDepth>) -> f32 {
+        #[cfg(test)]
+        tests::COVER_CALLS.with(|count| count.set(count.get() + 1));
+
         let cover = self.shape_cover(sources, proj, sampling);
         match depth.zip(proj.depth_culling()) {
             Some((depth, culling)) if cover > 0.0 => cover * self.world().map_or(1.0, |p| depth.cover(p, culling.hardness)),
@@ -2665,6 +2719,11 @@ impl<'a, 'b> Texel<'a, 'b> {
     /// How much a fill projected by `proj` covers this texel: wrap, shape crop and backface culling, and a cropped framed projection's image alpha
     fn shape_cover<'s>(&mut self, mut sources: impl Iterator<Item = &'s Source>, proj: &Projection, sampling: Sampling) -> f32 {
         let (Projection::Planar { projector, placed: Some(_), .. } | Projection::Warp { projector, .. }) = proj else {
+            // Repeating with nothing cropped or culled, a fill covers every texel without looking up where the texel is
+            if repeats_everywhere(proj, sampling) && projector_covers_all(proj) {
+                return 1.0;
+            }
+
             let coords = self.coords();
             return self.tile_cover(proj, &coords, sampling) * projector_cover(proj, &coords);
         };
@@ -2698,11 +2757,11 @@ impl<'a, 'b> Texel<'a, 'b> {
 
     /// 1 where a fill placed by `proj` at `coords` lands inside its 0..1 tile on every axis `sampling.wrap` does not repeat, else 0
     fn tile_cover(&self, proj: &Projection, coords: &Coords, sampling: Sampling) -> f32 {
-        let (across, down) = sampling.wrap.repeats();
-        if (across && down) || matches!(proj, Projection::Triplanar { .. }) {
+        if repeats_everywhere(proj, sampling) {
             return 1.0;
         }
 
+        let (across, down) = sampling.wrap.repeats();
         let [(uv, _), ..] = self.image_uvs(proj, coords);
         let inside = |t: f32, repeats: bool| repeats || (0.0..1.0).contains(&t);
         if inside(uv.x, across) && inside(uv.y, down) { 1.0 } else { 0.0 }
@@ -2946,10 +3005,12 @@ impl<'a, 'b> Texel<'a, 'b> {
                     }
                 }
                 EffectKind::Fill { source, projection, sampling } => {
-                    let ([fill, ..], cover) = self.symmetric(projection, *sampling, |t| {
+                    let once = |t: &mut Self| {
                         let fill = t.source(source, projection, *sampling, ChannelKind::Scalar);
-                        (fill, t.cover(std::iter::once(source), projection, *sampling, effect.depth.as_deref()))
-                    });
+                        let cover = if effect.covers_all { 1.0 } else { t.cover(std::iter::once(source), projection, *sampling, effect.depth.as_deref()) };
+                        (fill, cover)
+                    };
+                    let ([fill, ..], cover) = if takes_symmetry(projection, *sampling) { self.symmetric(projection, *sampling, once) } else { once(self) };
                     value += (blend1(effect.blend, value, fill) - value) * opacity * cover;
                 }
                 EffectKind::Generator(generator) => {
@@ -3041,7 +3102,7 @@ impl<'a, 'b> Texel<'a, 'b> {
                         mix_group(acc, &inner, &n.chans, m);
                     }
                 }
-                Content::Fill(..) | Content::Paint { .. } if m > 0.0 => {
+                Content::Fill { .. } | Content::Paint { .. } if m > 0.0 => {
                     let before = if n.anchors.iter().any(|a| a.1.is_some()) { Some(*acc) } else { None };
                     self.lit = self.lit_material(n, acc, m);
                     for c in &n.chans {
@@ -3194,16 +3255,15 @@ impl<'a, 'b> Texel<'a, 'b> {
             }
             None => {
                 let (v, cov) = match content {
-                    Content::Fill(f, depth) => {
+                    Content::Fill { fill, depth, covers_all } => {
                         let ch = Channel::ALL.get(c.ch).copied()?;
-                        self.symmetric(&f.projection, f.sampling, |t| {
-                            // A channel without a source fills with its default (no clone per texel)
-                            let v = match f.sources.get(&ch) {
-                                Some(s) => t.source(s, &f.projection, f.sampling, ch.kind()),
-                                None => ch.default_value(),
-                            };
-                            (v, t.cover(f.sources.values(), &f.projection, f.sampling, depth.as_deref()))
-                        })
+                        let source = fill.sources.get(&ch);
+                        let place = FillPlace { fill, depth: depth.as_deref(), covers_all: *covers_all };
+                        if takes_symmetry(&fill.projection, fill.sampling) {
+                            self.symmetric(&fill.projection, fill.sampling, |t| t.fill_texel(place, source, ch))
+                        } else {
+                            self.fill_texel(place, source, ch)
+                        }
                     }
                     Content::Paint { preview } => self.painted(c.data.as_deref(), c, *preview),
                     Content::Group(_) => return None,
@@ -3283,9 +3343,12 @@ impl<'a, 'b> Texel<'a, 'b> {
             }
             EffectKind::Material(f) => match Channel::ALL.get(c.ch).and_then(|ch| f.sources.get(ch).map(|s| (*ch, s))) {
                 Some((ch, s)) => {
-                    let (p, w) = self.symmetric(&f.projection, f.sampling, |t| {
-                        (t.source(s, &f.projection, f.sampling, ch.kind()), t.cover(f.sources.values(), &f.projection, f.sampling, e.depth.as_deref()))
-                    });
+                    let place = FillPlace { fill: f, depth: e.depth.as_deref(), covers_all: e.covers_all };
+                    let (p, w) = if takes_symmetry(&f.projection, f.sampling) {
+                        self.symmetric(&f.projection, f.sampling, |t| t.fill_texel(place, Some(s), ch))
+                    } else {
+                        self.fill_texel(place, Some(s), ch)
+                    };
                     over(c, e.blend, v, cov, p, w * o)
                 }
                 None => (v, cov),
@@ -4320,6 +4383,58 @@ mod tests {
         (0..3).all(|i| (a[i] - b[i]).abs() < 2e-4)
     }
 
+    thread_local! {
+        /// How many times a texel looked up its place on the surface on this thread
+        pub(super) static COORDS_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        /// How many times a texel worked out how much of it a fill covers on this thread
+        pub(super) static COVER_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// How many texels looked up their place on the surface while `f` composites, on one thread so the count sees them all
+    fn coords_lookups(f: &Fixture) -> usize {
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+        pool.install(|| {
+            COORDS_LOOKUPS.with(|count| count.set(0));
+            run(f, None);
+            COORDS_LOOKUPS.with(std::cell::Cell::get)
+        })
+    }
+
+    #[test]
+    fn a_repeating_uniform_fill_covers_every_texel_without_looking_up_where_it_is() {
+        let mut f = fixture();
+        let id = fill_layer(&mut f.project, [1.0, 0.0, 0.0], 0.2);
+        assert_eq!(coords_lookups(&f), 0, "a uniform fill that repeats needs no texel's place, as before fills could crop");
+
+        // Not repeating, it crops to its tile, so it has to know where each texel lands
+        let Ok(LayerKind::Fill(fill)) = f.project.layer_mut(id).map(|layer| &mut layer.kind) else { panic!("fill layer") };
+        fill.sampling.wrap = texturecraft_core::UvWrap::None;
+        assert!(coords_lookups(&f) > 0);
+    }
+
+    /// How many times a texel worked out a fill's coverage while `f` composites, on one thread so the count sees them all
+    fn cover_calls(f: &Fixture) -> usize {
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+        pool.install(|| {
+            COVER_CALLS.with(|count| count.set(0));
+            run(f, None);
+            COVER_CALLS.with(std::cell::Cell::get)
+        })
+    }
+
+    #[test]
+    fn a_fill_covering_every_texel_is_decided_once_per_tile_not_per_texel() {
+        let mut f = fixture();
+        let id = fill_layer(&mut f.project, [1.0, 0.0, 0.0], 0.2);
+        assert_eq!(cover_calls(&f), 0, "a repeating fill with nothing cropped or culled covers every texel, so no texel asks");
+        assert!(close(run(&f, None).value(Channel::BaseColor, 5, 5), [1.0, 0.0, 0.0]));
+
+        // Not repeating, it crops to its tile, so each texel works its coverage out
+        let Ok(LayerKind::Fill(fill)) = f.project.layer_mut(id).map(|layer| &mut layer.kind) else { panic!("fill layer") };
+        fill.sampling.wrap = texturecraft_core::UvWrap::None;
+        assert!(cover_calls(&f) > 0);
+    }
+
     #[test]
     fn retained_filter_buffers_release_after_the_last_tile() {
         for resolution in [128, 512] {
@@ -5138,7 +5253,10 @@ soft {soft:?}"
             f.project.texture_sets[0].resolution = WIDTH;
             let id = f.project.alloc_id();
             let mut fill = Fill::default();
-            fill.sources.insert(Channel::Roughness, Source::Procedural { pattern: Procedural::new(ProceduralKind::Checker), low: [0.0; 3], high: [1.0; 3], ramp: Vec::new() });
+            fill.sources.insert(
+                Channel::Roughness,
+                Source::Procedural { pattern: Procedural::new(ProceduralKind::Checker), low: [0.0; 3], high: [1.0; 3], ramp: Vec::new() },
+            );
             f.project.insert_layer(0, Layer::new(id, "F", LayerKind::Fill(fill), &[Channel::Roughness]), None, false).unwrap();
             if let Some(filter) = filter {
                 content_fx(&mut f, id, EffectKind::Filter(filter.clone()));

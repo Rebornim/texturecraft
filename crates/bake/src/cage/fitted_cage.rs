@@ -6,11 +6,15 @@ use std::collections::VecDeque;
 use texturecraft_geom::Mesh;
 use texturecraft_geom::glam::Vec3;
 
-/// How much farther than the high poly the cage reaches, as a fraction of the fitted distance: the fit reads the high poly at its vertices only
-const MARGIN_PER_DISTANCE: f32 = 0.1;
+/// How much farther than the high poly the cage reaches, as a fraction of the fitted distance: the fit reads both meshes at their vertices only
+/// Tuned with [`MARGIN_PER_DIAGONAL`] on two production meshes to the tightest pair whose rays miss no more texels than the default distances do
+const MARGIN_PER_DISTANCE: f32 = 0.5;
 
 /// The least the cage reaches each way, as a fraction of the mesh diagonal, so a high poly lying on the low poly is still inside
-const MARGIN_PER_DIAGONAL: f32 = 1e-3;
+const MARGIN_PER_DIAGONAL: f32 = 4e-3;
+
+/// How many times farther than the nearest high-poly point a low-poly vertex's ray may find the high poly: beyond it (a surface more than about 75 degrees off the ray) the ray has left the vertex's own part
+const MAX_RAY_PER_NEAREST_DISTANCE: f32 = 4.0;
 
 /// The automatic cage: how far the transfer rays start in front of each low-poly vertex and how far they run behind it, fitted to the high poly
 pub(crate) struct FittedCage {
@@ -68,7 +72,7 @@ impl FittedCage {
     }
 }
 
-/// Per low-poly vertex, how far along its ray normal the nearest high-poly surface in front of it (positive) or behind it (negative) is, within `max_distance`
+/// Per low-poly vertex, how far along its ray normal the high-poly surface in front of it (positive) or behind it (negative) is. A ray that only finds a surface much farther than the nearest high-poly point (within `max_distance`) found another part, so the vertex takes that nearest point's height instead
 fn heights_at_low_vertices(low: &Mesh, high: HighPoly, ray_normals: &[Vec3], keys: &NameKeys, max_distance: f32) -> Vec<Option<f32>> {
     low.positions
         .par_iter()
@@ -77,13 +81,17 @@ fn heights_at_low_vertices(low: &Mesh, high: HighPoly, ray_normals: &[Vec3], key
         .map(|(vertex, (&position, &up))| {
             let low_key = keys.low_vertices.get(vertex);
             let rays_reach = |triangle: u32| NameKeys::matches(low_key, keys.high_triangles.get(triangle as usize));
-            let distance = |direction: Vec3| high.bvh.closest_filtered(position, direction, max_distance, &rays_reach).map(|hit| hit.t);
-            match (distance(up), distance(-up)) {
-                (Some(front), Some(rear)) => Some(if front <= rear { front } else { -rear }),
-                (Some(front), None) => Some(front),
-                (None, Some(rear)) => Some(-rear),
-                (None, None) => None,
-            }
+            let nearest = high.bvh.nearest(position, max_distance, &rays_reach)?;
+            let nearest_position = interpolate(high.mesh, &high.mesh.positions, nearest.tri, [nearest.u, nearest.v])?;
+            let ray_limit = nearest.t * MAX_RAY_PER_NEAREST_DISTANCE + MARGIN_PER_DIAGONAL * max_distance;
+            let distance = |direction: Vec3| high.bvh.closest_filtered(position, direction, ray_limit, &rays_reach).map(|hit| hit.t);
+
+            Some(match (distance(up), distance(-up)) {
+                (Some(front), Some(rear)) if front <= rear => front,
+                (Some(front), None) => front,
+                (_, Some(rear)) => -rear,
+                (None, None) => (nearest_position - position).dot(up),
+            })
         })
         .collect()
 }

@@ -17,6 +17,7 @@ mod generator_micro_details;
 mod generator_sections;
 mod generator_swap;
 mod generator_texture;
+mod generator_three_d_distance;
 mod generator_wear;
 mod high_poly_missed;
 mod instances;

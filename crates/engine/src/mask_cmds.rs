@@ -8,6 +8,7 @@ use texturecraft_core::{
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
+use crate::distance_params::distance_from;
 use crate::layer_cmds::projection_from;
 use crate::micro_params::{MICRO_HEIGHT_INPUT, MICRO_NORMAL_INPUT, micro_from, swapped_micro};
 use crate::session::StackTarget;
@@ -51,7 +52,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add generator",
             ["Layers", "Effects"],
             None,
-            "{layer?, name?, generator?: edgeWear|dirt|fiberGlassEdgeWear|thinAreas|curvature|ambientOcclusion|position|worldSpaceNormals|direction, wearLevel?, wearContrast?, grungeAmount?, grungeScale?: 1..16, triplanar?, triplanarContrast?, edgesSmoothness?: 0..16, aoMasking?, curvatureWeight?, edgesMasking?, useCustomGrunge? (the image: effect.set input: grunge) (wear controls: edgeWear, fiberGlassEdgeWear and dirt), sectionInvert?, sectionBlur?: 0..16 (ambientOcclusion, worldSpaceNormals), sectionBalance? (not curvature), sectionContrast?, sectionBrightness?: -1..1 (not ambientOcclusion), rightLeft|topBottom|frontBack + Invert?|Blend?: normal|add|subtract|multiply|addSub|max|Weight? (position, worldSpaceNormals), useTexture?, textureOpacity?, textureInvert?, textureGrayscale?: desaturation|luma|average|max|min|red|green|blue, textureBlend?: normal|add|subtract|multiply|addSub|max|min|overlay|screen|softLight, textureScale?: 0.01..10, textureContrast?: -1..1, textureBrightness?: -1..1, textureTriplanar?, textureTriplanarContrast? (the texture itself: effect.set input: texture) (section controls: curvature, ambientOcclusion, position, worldSpaceNormals), useMicroDetails? (curvature, ambientOcclusion), microHeight?, microNormal? (the images: effect.set input: microHeight|microNormal, an image or a value), microCurvatureType?: standard|sobel|smooth, microCurvatureIntensity?: 0..5 on curvature, 0..1 on the wear kinds, microHeightIntensity?: 0..10 (curvature and the wear kinds), microAoRadius?, microAoDepth? (ambientOcclusion and the wear kinds) (micro details), lightHorizontal?: 0..360, lightVertical?: 0..360, highlightGlossiness?, highlightLevel?, lightAttenuation? (light controls: direction), level?, softness?, noise?, noiseScale?, offset?: -1..1 added to the result, direction? (instead keep edgeWear, dirt, curvature, ambientOcclusion, position and direction on the earlier model), invert?, blur?: 0..1, balance?: 0..1 (0.5 unchanged), contrast?: 0..1, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3 (1/8..x8), mode?: edges|cavities|both|raw, sizes?: [7 weights 0..1, finest first] (curvature and edgeWear)}",
+            "{layer?, name?, generator?: edgeWear|dirt|fiberGlassEdgeWear|thinAreas|curvature|ambientOcclusion|position|worldSpaceNormals|direction|3dDistance, wearLevel?, wearContrast?, grungeAmount?, grungeScale?: 1..16, triplanar?, triplanarContrast?, edgesSmoothness?: 0..16, aoMasking?, curvatureWeight?, edgesMasking?, useCustomGrunge? (the image: effect.set input: grunge) (wear controls: edgeWear, fiberGlassEdgeWear and dirt), sectionInvert?, sectionBlur?: 0..16 (ambientOcclusion, worldSpaceNormals), sectionBalance? (not curvature), sectionContrast?, sectionBrightness?: -1..1 (not ambientOcclusion), rightLeft|topBottom|frontBack + Invert?|Blend?: normal|add|subtract|multiply|addSub|max|Weight? (position, worldSpaceNormals), useTexture?, textureOpacity?, textureInvert?, textureGrayscale?: desaturation|luma|average|max|min|red|green|blue, textureBlend?: normal|add|subtract|multiply|addSub|max|min|overlay|screen|softLight, textureScale?: 0.01..10, textureContrast?: -1..1, textureBrightness?: -1..1, textureTriplanar?, textureTriplanarContrast? (the texture itself: effect.set input: texture) (section controls: curvature, ambientOcclusion, position, worldSpaceNormals), useMicroDetails? (curvature, ambientOcclusion), microHeight?, microNormal? (the images: effect.set input: microHeight|microNormal, an image or a value), microCurvatureType?: standard|sobel|smooth, microCurvatureIntensity?: 0..5 on curvature, 0..1 on the wear kinds, microHeightIntensity?: 0..10 (curvature and the wear kinds), microAoRadius?, microAoDepth? (ambientOcclusion and the wear kinds) (micro details), distanceX?, distanceY?, distanceZ? (the point across the mesh's bounds), distanceRadius?: 0..1.5, distanceOffset? (0 all black, 1 all white), distanceContrast? (3dDistance, which also takes invert), lightHorizontal?: 0..360, lightVertical?: 0..360, highlightGlossiness?, highlightLevel?, lightAttenuation? (light controls: direction), level?, softness?, noise?, noiseScale?, offset?: -1..1 added to the result, direction? (instead keep edgeWear, dirt, curvature, ambientOcclusion, position and direction on the earlier model), invert?, blur?: 0..1, balance?: 0..1 (0.5 unchanged), contrast?: 0..1, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3 (1/8..x8), mode?: edges|cavities|both|raw, sizes?: [7 weights 0..1, finest first] (curvature and edgeWear)}",
             has_layer,
             add_generator
         ),
@@ -622,6 +623,7 @@ fn generator_from(command: &str, params: &Value, generator: &mut Generator) -> R
     section_from(command, params, generator)?;
     let earlier_keys: &[&str] = if WearParameters::defaults(generator.kind).is_some() { &EARLIER_WEAR_KEYS } else { &EARLIER_SECTION_KEYS };
     micro_from(command, params, generator, earlier_keys)?;
+    distance_from(command, params, generator)?;
     if let Some(level) = f32p(params, "level") {
         generator.level = level.clamp(0.0, 1.0);
     }
@@ -995,7 +997,8 @@ fn swapped_kind(current: &Generator, kind: GeneratorKind) -> Generator {
         noise_amount: current.noise_amount,
         noise_scale: current.noise_scale,
         seed: current.seed,
-        offset: current.offset,
+        // The offset belongs to the earlier model, which these kinds lack
+        offset: if kind.has_no_earlier_model() { 0.0 } else { current.offset },
         direction: current.direction,
         invert: current.invert,
         global: current.global,

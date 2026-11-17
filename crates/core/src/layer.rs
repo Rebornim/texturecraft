@@ -10,6 +10,7 @@ mod axis_blend;
 mod axis_layer;
 mod curvature_detail;
 mod curvature_mode;
+mod distance_parameters;
 mod generator_global;
 mod grayscale_conversion;
 mod light_parameters;
@@ -26,6 +27,7 @@ pub use axis_blend::AxisBlend;
 pub use axis_layer::AxisLayer;
 pub use curvature_detail::CurvatureDetail;
 pub use curvature_mode::CurvatureMode;
+pub use distance_parameters::DistanceParameters;
 pub use generator_global::GeneratorGlobal;
 pub use grayscale_conversion::GrayscaleConversion;
 pub use light_parameters::LightParameters;
@@ -533,10 +535,12 @@ pub enum GeneratorKind {
     FiberGlassEdgeWear,
     /// The world space normal's axes combined into one gray
     WorldSpaceNormals,
+    /// White around a point across the mesh's bounds, fading with the distance from it
+    ThreeDDistance,
 }
 
 impl GeneratorKind {
-    pub const ALL: [GeneratorKind; 9] = [
+    pub const ALL: [GeneratorKind; 10] = [
         GeneratorKind::EdgeWear,
         GeneratorKind::Dirt,
         GeneratorKind::ThinAreas,
@@ -546,6 +550,7 @@ impl GeneratorKind {
         GeneratorKind::Direction,
         GeneratorKind::FiberGlassEdgeWear,
         GeneratorKind::WorldSpaceNormals,
+        GeneratorKind::ThreeDDistance,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -558,6 +563,7 @@ impl GeneratorKind {
             GeneratorKind::Direction => "Light",
             GeneratorKind::FiberGlassEdgeWear => "Fiber Glass Edge Wear",
             GeneratorKind::WorldSpaceNormals => "World Space Normals",
+            GeneratorKind::ThreeDDistance => "3D Distance",
         }
     }
 
@@ -573,12 +579,13 @@ impl GeneratorKind {
             GeneratorKind::Direction => "Direction",
             GeneratorKind::FiberGlassEdgeWear => "FiberGlassEdgeWear",
             GeneratorKind::WorldSpaceNormals => "WorldSpaceNormals",
+            GeneratorKind::ThreeDDistance => "ThreeDDistance",
         }
     }
 
-    /// Whether the generator picker offers this kind (Thin areas only loads from saved projects and smart masks)
+    /// Whether the generator picker offers this kind (Thin areas only loads from saved projects and smart masks; 3D Distance waits for its panel)
     pub fn in_picker(self) -> bool {
-        self != GeneratorKind::ThinAreas
+        !matches!(self, GeneratorKind::ThinAreas | GeneratorKind::ThreeDDistance)
     }
 
     /// Whether the kind's result depends on its seed
@@ -593,10 +600,15 @@ impl GeneratorKind {
             GeneratorKind::Curvature => &[BakedMap::Curvature],
             GeneratorKind::AmbientOcclusion => &[BakedMap::AmbientOcclusion],
             GeneratorKind::ThinAreas => &[BakedMap::Thickness],
-            GeneratorKind::Position => &[BakedMap::Position],
+            GeneratorKind::Position | GeneratorKind::ThreeDDistance => &[BakedMap::Position],
             GeneratorKind::WorldSpaceNormals => &[BakedMap::WorldNormal],
             GeneratorKind::Direction => &[BakedMap::WorldNormal, BakedMap::Position],
         }
+    }
+
+    /// Whether the kind was added with the reference's controls only, so it never computes with level, softness and noise
+    pub fn has_no_earlier_model(self) -> bool {
+        matches!(self, GeneratorKind::FiberGlassEdgeWear | GeneratorKind::ThreeDDistance)
     }
 
     pub fn parse(s: &str) -> Option<GeneratorKind> {
@@ -661,6 +673,9 @@ pub struct Generator {
     /// The micro details of Curvature, Ambient Occlusion and the wear kinds (None: never touched, their defaults: off); boxed, so a generator effect stays small
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub micro: Option<Box<MicroDetails>>,
+    /// The 3D Distance generator's controls (None on every other kind); boxed, so a generator effect stays small
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distance: Option<Box<DistanceParameters>>,
 }
 
 impl Generator {
@@ -673,12 +688,17 @@ impl Generator {
 
     /// The global blur, balance and contrast the generator applies: none on the wear and light controls, which have no such controls
     pub fn applied_global(&self) -> GeneratorGlobal {
-        if self.wear.is_some() || self.light.is_some() || self.kind == GeneratorKind::FiberGlassEdgeWear { GeneratorGlobal::default() } else { self.global }
+        if self.wear.is_some() || self.light.is_some() || self.kind.has_no_earlier_model() { GeneratorGlobal::default() } else { self.global }
     }
 
     /// The section controls the generator computes with: its own, World Space Normals' defaults when it has none (it has no earlier model), else None
     pub fn section_controls(&self) -> Option<SectionParameters> {
         self.section.or_else(|| SectionParameters::defaults(self.kind).filter(|_| self.kind == GeneratorKind::WorldSpaceNormals))
+    }
+
+    /// The 3D Distance controls the generator computes with: its own, else the defaults on a 3D Distance generator
+    pub fn distance_controls(&self) -> Option<DistanceParameters> {
+        self.distance.as_deref().copied().or_else(|| (self.kind == GeneratorKind::ThreeDDistance).then(DistanceParameters::default))
     }
 
     /// The mode and detail sizes the generator reads its curvature with: its own, the defaults on Curvature's section controls, else None
@@ -712,7 +732,7 @@ impl Generator {
 
     /// Whether the generator is on the level, softness and noise it had before the reference app's controls
     pub fn on_earlier_model(&self) -> bool {
-        self.wear.is_none() && self.light.is_none() && self.section_controls().is_none() && self.kind != GeneratorKind::FiberGlassEdgeWear
+        self.wear.is_none() && self.light.is_none() && self.section_controls().is_none() && !self.kind.has_no_earlier_model()
     }
 
     pub fn new(kind: GeneratorKind) -> Generator {
@@ -748,6 +768,7 @@ impl Generator {
             texture: None,
             grunge: None,
             micro: None,
+            distance: (kind == GeneratorKind::ThreeDDistance).then(Box::default),
         }
     }
 

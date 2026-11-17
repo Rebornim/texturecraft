@@ -52,7 +52,11 @@ impl MicroDetails {
             GeneratorKind::EdgeWear | GeneratorKind::Dirt | GeneratorKind::FiberGlassEdgeWear => {
                 Some(MicroDetails { height: false, normal: false, curvature_intensity: 0.5, ..shared })
             }
-            GeneratorKind::ThinAreas | GeneratorKind::Position | GeneratorKind::Direction | GeneratorKind::WorldSpaceNormals => None,
+            GeneratorKind::ThinAreas
+            | GeneratorKind::Position
+            | GeneratorKind::Direction
+            | GeneratorKind::WorldSpaceNormals
+            | GeneratorKind::ThreeDDistance => None,
         }
     }
 

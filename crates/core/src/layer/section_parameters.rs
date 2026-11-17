@@ -35,7 +35,12 @@ impl SectionParameters {
         let defaults = SectionParameters { invert: false, blur: 0.0, balance: 0.5, contrast: 0.0, brightness: 0.0, axes: [axis(0.0), axis(1.0), axis(0.0)] };
         match kind {
             GeneratorKind::Curvature | GeneratorKind::AmbientOcclusion | GeneratorKind::Position | GeneratorKind::WorldSpaceNormals => Some(defaults),
-            GeneratorKind::EdgeWear | GeneratorKind::Dirt | GeneratorKind::ThinAreas | GeneratorKind::Direction | GeneratorKind::FiberGlassEdgeWear => None,
+            GeneratorKind::EdgeWear
+            | GeneratorKind::Dirt
+            | GeneratorKind::ThinAreas
+            | GeneratorKind::Direction
+            | GeneratorKind::FiberGlassEdgeWear
+            | GeneratorKind::ThreeDDistance => None,
         }
     }
 

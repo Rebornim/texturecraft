@@ -58,7 +58,8 @@ impl WearParameters {
             | GeneratorKind::AmbientOcclusion
             | GeneratorKind::Position
             | GeneratorKind::Direction
-            | GeneratorKind::WorldSpaceNormals => None,
+            | GeneratorKind::WorldSpaceNormals
+            | GeneratorKind::ThreeDDistance => None,
         }
     }
 

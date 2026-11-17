@@ -362,7 +362,7 @@ fn bake_rows(
         true => {
             let (rays, frontal_distances): (Vec<tracing::Ray>, Vec<f32>) = samples().map(|sample| context.transfer_ray(&sample.surface, sample.bary)).unzip();
             let hits = scene.closest(1, &rays, context.ignore_transfer_backface())?;
-            hits.into_par_iter().zip(frontal_distances).map(|(hit, front)| context.transfer(hit, front)).collect()
+            hits.into_par_iter().zip(&rays).zip(frontal_distances).map(|((hit, ray), front)| context.transfer(hit, front, ray.max_distance)).collect()
         }
         false => Vec::new(),
     };

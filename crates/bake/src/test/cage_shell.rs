@@ -60,6 +60,12 @@ fn the_cage_corners_are_the_bake_ray_origins() {
         face_normals
     };
     assert_cage_matches_the_ray_origins(&request(&face_normals));
+    let automatic = {
+        let mut automatic = bake_settings.clone();
+        automatic.cage.kind = CageType::Automatic;
+        automatic
+    };
+    assert_cage_matches_the_ray_origins(&request(&automatic));
 }
 
 #[test]

@@ -93,7 +93,11 @@ pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSe
                     ui,
                     tr("Cage Type"),
                     &mut settings.cage.kind,
-                    &[(CageType::DistanceBased, tr("Distance-Based")), (CageType::CustomFile, tr("Custom File"))],
+                    &[
+                        (CageType::DistanceBased, tr("Distance-Based")),
+                        (CageType::Automatic, tr("Automatic (Experimental)")),
+                        (CageType::CustomFile, tr("Custom File")),
+                    ],
                 );
                 if settings.cage.kind == CageType::DistanceBased {
                     paint_button(app, ui, BakePaintTarget::Cage);
@@ -167,6 +171,8 @@ fn skew_unavailable_reason(settings: &BakeSettings, has_high: bool) -> &'static 
         tr("Skew Correction is not available while the low poly mesh is used as the high poly mesh.")
     } else if settings.cage.kind == CageType::CustomFile {
         tr("Skew Correction needs a distance-based cage: a custom cage file sets the ray directions itself.")
+    } else if settings.cage.kind == CageType::Automatic {
+        tr("Skew Correction needs a distance-based cage: the automatic cage is fitted to the high poly as it is.")
     } else {
         tr("Skew Correction needs Average Normals turned on in the cage settings.")
     }

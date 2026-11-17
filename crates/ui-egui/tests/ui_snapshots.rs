@@ -1917,6 +1917,28 @@ fn color_selection_snapshots() {
     let mut harness = shoot(false);
     save(&mut harness, &output_dir, "colorsel-new");
 
+    // Picking with an ID Mask image chosen by hand and nothing baked: the model shows that image
+    let quarters = image::RgbaImage::from_fn(8, 8, |x, y| match (x < 4, y < 4) {
+        (true, true) => image::Rgba([214, 255, 0, 255]),
+        (false, true) => image::Rgba([255, 49, 0, 255]),
+        (true, false) => image::Rgba([255, 0, 247, 255]),
+        (false, false) => image::Rgba([20, 90, 255, 255]),
+    });
+    let mut png = Vec::new();
+    quarters.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let mut harness = shoot(false);
+    let effect = match harness.state().session.target {
+        texturecraft_engine::StackTarget::Effect(effect) => effect,
+        other => panic!("the color selection is selected, not {other:?}"),
+    };
+    harness.state_mut().session.doc.baked.clear();
+    let name = harness.state_mut().session.import_resource_bytes("parts.png", png).unwrap();
+    harness.state_mut().run("effect.set", json!({"effect": effect.0, "idMap": name}));
+    harness.run_steps(4);
+    harness.get_by_label("Pick color").click();
+    harness.run_steps(8);
+    save(&mut harness, &output_dir, "colorsel-image-pick");
+
     let mut harness = shoot(true);
     let row = harness.get_by_label("Pick color R 255 G 49 B 0").rect().center();
     harness.hover_at(row);

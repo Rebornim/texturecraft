@@ -9,7 +9,7 @@ use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, ScreenDescriptor
 use rayon::prelude::*;
 use texturecraft_engine::Session;
 use texturecraft_engine::compose::{DisplayKind, ImageRes, kinds_for, tile_bytes};
-use texturecraft_engine::core::{BakedMap, Channel};
+use texturecraft_engine::core::{BakedMap, Channel, LayerId};
 use texturecraft_engine::geom::Mesh;
 use texturecraft_render::{BakeVisualization, CageGeometry, Frame, Renderer, wgpu};
 
@@ -19,9 +19,11 @@ use crate::bake_scene::{BakeSceneLink, CageUpload};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AuxView {
     MeshMap(BakedMap),
-    Mask(texturecraft_engine::core::LayerId),
+    Mask(LayerId),
     /// The quick mask being edited, over the base color.
     QuickMask,
+    /// The image a color selection reads as its ID mask on its texture set, the ID mesh map on the others (its pick mode)
+    IdMask(LayerId),
 }
 
 /// A texture set's texels across and down, and its mesh material.
@@ -271,28 +273,10 @@ impl GpuLink {
         }
 
         match aux_map {
-            Some(AuxView::MeshMap(map)) => {
-                for texture_set in 0..session.caches.len() {
-                    // Streamed bake maps replace document maps while the bake is visible
-                    let preview = session.bake_preview_baked(texture_set);
-                    let baked = preview.or_else(|| session.doc.baked.get(&texture_set));
-                    let have = baked.and_then(|baked| baked.maps.get(&map));
-                    let revision = have.map(|data| Arc::as_ptr(data) as u64).unwrap_or(0);
-                    let key = (format!("{map:?}{}", if preview.is_some() { "~" } else { "" }), revision);
-                    if self.aux.get(&texture_set) == Some(&key) {
-                        continue;
-                    }
-                    let Some(cache) = session.caches.get(texture_set) else { continue };
-
-                    let resolution = texturecraft_render::aux_size(cache.size);
-                    let rgba = if preview.is_some() && have.is_none() {
-                        texturecraft_render::mesh_maps::neutral_rgba(map, resolution)
-                    } else {
-                        texturecraft_render::mesh_maps::mesh_map_rgba(baked, map, resolution, cache.size, &cache.composite.block_scales)
-                    };
-                    out.aux.push((texture_set, resolution, rgba));
-                    self.aux.insert(texture_set, key);
-                }
+            Some(AuxView::MeshMap(map)) => self.sync_mesh_maps(session, map, None, &mut out),
+            Some(AuxView::IdMask(effect)) => {
+                let shown = self.sync_id_mask(session, effect, &mut out);
+                self.sync_mesh_maps(session, BakedMap::Id, shown, &mut out);
             }
             Some(AuxView::Mask(id)) => {
                 if let Some((texture_set, _, _)) = session.doc.project.locate(id) {
@@ -327,6 +311,50 @@ impl GpuLink {
 
         self.bake_scene.sync(session, bake, &mut out);
         out
+    }
+
+    /// Queues mesh map `map` for every texture set but `skip` whose aux texture shows something else
+    fn sync_mesh_maps(&mut self, session: &Session, map: BakedMap, skip: Option<usize>, out: &mut SceneSync) {
+        for texture_set in 0..session.caches.len() {
+            if skip == Some(texture_set) {
+                continue;
+            }
+
+            // Streamed bake maps replace document maps while the bake is visible
+            let preview = session.bake_preview_baked(texture_set);
+            let baked = preview.or_else(|| session.doc.baked.get(&texture_set));
+            let have = baked.and_then(|baked| baked.maps.get(&map));
+            let revision = have.map(|data| Arc::as_ptr(data) as u64).unwrap_or(0);
+            let key = (format!("{map:?}{}", if preview.is_some() { "~" } else { "" }), revision);
+            if self.aux.get(&texture_set) == Some(&key) {
+                continue;
+            }
+
+            let Some(cache) = session.caches.get(texture_set) else { continue };
+            let resolution = texturecraft_render::aux_size(cache.size);
+            let rgba = if preview.is_some() && have.is_none() {
+                texturecraft_render::mesh_maps::neutral_rgba(map, resolution)
+            } else {
+                texturecraft_render::mesh_maps::mesh_map_rgba(baked, map, resolution, cache.size, &cache.composite.block_scales)
+            };
+            out.aux.push((texture_set, resolution, rgba));
+            self.aux.insert(texture_set, key);
+        }
+    }
+
+    /// Queues the image color selection `effect` reads as its ID mask on its texture set; the texture set it shows on, None when it reads the ID mesh map
+    fn sync_id_mask(&mut self, session: &Session, effect: LayerId, out: &mut SceneSync) -> Option<usize> {
+        let (texture_set, image) = session.id_mask_image(effect)?;
+        let cache = session.caches.get(texture_set)?;
+        let resolution = texturecraft_render::aux_size(cache.size);
+        let key = (format!("idMask{}:{resolution}", effect.0), Arc::as_ptr(image) as u64);
+        if self.aux.get(&texture_set) != Some(&key)
+            && let Some(rgba) = session.id_mask_view_rgba(effect, resolution)
+        {
+            out.aux.push((texture_set, resolution, rgba));
+            self.aux.insert(texture_set, key);
+        }
+        Some(texture_set)
     }
 }
 

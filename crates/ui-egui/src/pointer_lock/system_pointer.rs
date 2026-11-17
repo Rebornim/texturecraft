@@ -10,7 +10,6 @@ pub(crate) struct SystemPointer {
     pub(crate) locked: bool,
     pub(crate) hidden: bool,
     pub(crate) put_backs: usize,
-
     /// The system folds a put-back into the next move, as Windows does, instead of reporting it as a move of its own
     pub(crate) folds: bool,
 }

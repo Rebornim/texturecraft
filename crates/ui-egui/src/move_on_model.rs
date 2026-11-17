@@ -81,13 +81,33 @@ pub(crate) fn pad(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, squa
     hold(app, &ctx, &response, target);
 }
 
-/// Whether a Move on model hold is under way, or let go this frame (that release is no click in the view); the 3D view then keeps its camera, brush and gizmos still. Ends a hold whose pad went away
+/// Whether a Move on model hold is under way, or let go this frame (that release is no click in the view); the 3D view then keeps its camera, brush and gizmos still. Ends a hold whose window lost the focus
 pub(crate) fn holding(app: &mut TextureCraftApp, ctx: &egui::Context) -> bool {
     let held = app.moving_on_model.is_some();
-    if held && !ctx.input(|input| input.pointer.primary_down()) {
+    if held && !still_pressed(ctx) {
         end(app, ctx);
     }
     held
+}
+
+/// Ends a hold whose fill or pad went away, once a frame whichever views show
+pub(crate) fn end_when_gone(app: &mut TextureCraftApp, ctx: &egui::Context) {
+    let Some(target) = app.moving_on_model else { return };
+
+    if target.projection(app).is_none() || pad_gone(ctx) {
+        end(app, ctx);
+    }
+}
+
+/// Whether the held pad was not drawn last pass nor this one (its layer was deselected, its panel hidden)
+fn pad_gone(ctx: &egui::Context) -> bool {
+    let last_drawn = ctx.data(|data| data.get_temp::<MoveHold>(hold_id())).map(|held| held.pass);
+    last_drawn.is_none_or(|pass| pass.saturating_add(1) < ctx.cumulative_pass_nr())
+}
+
+/// Whether the left button still holds: a window that lost the focus gets no release, so the hold ends there as on one
+fn still_pressed(ctx: &egui::Context) -> bool {
+    ctx.input(|input| input.pointer.primary_down()) && !crate::viewport::focus_lost(ctx)
 }
 
 fn end(app: &mut TextureCraftApp, ctx: &egui::Context) {
@@ -97,17 +117,22 @@ fn end(app: &mut TextureCraftApp, ctx: &egui::Context) {
 
 /// A press on the pad starts the hold; each frame until the left button lets go, pointer moves and wheel steps edit the projection
 fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, pad: &egui::Response, target: MoveOnModel) {
-    let (primary, turn, pointer) =
-        ctx.input(|input| (input.pointer.primary_down(), input.modifiers.shift || input.pointer.secondary_down(), input.pointer.latest_pos()));
+    let primary = still_pressed(ctx);
+    let (pressed, turn, pointer) =
+        ctx.input(|input| (input.pointer.primary_pressed(), input.modifiers.shift || input.pointer.secondary_down(), input.pointer.latest_pos()));
     let pass = ctx.cumulative_pass_nr();
     let mut held = ctx.data(|data| data.get_temp::<MoveHold>(hold_id())).filter(|held| held.target == target);
+
+    // Only a fresh press starts it: after a focus loss egui still has the left button down
     if held.is_none()
         && primary
+        && pressed
         && pad.is_pointer_button_down_on()
         && let Some(at) = pointer
     {
         held = Some(MoveHold { target, last: at, stepped: false, pass: pass.wrapping_sub(1) });
     }
+
     let Some(mut held) = held.filter(|_| primary && target.projection(app).is_some()) else {
         if app.moving_on_model == Some(target) {
             end(app, ctx);
@@ -187,10 +212,11 @@ fn dragged(app: &TextureCraftApp, target: MoveOnModel, from: Pos2, to: Pos2, tur
         return Some(("layer.fill.projection", round.slid(app, rect, from, to)?));
     }
 
-    let (_, rotation, offset) = placement(&target.projection(app)?)?;
+    let projection = target.projection(app)?;
+    let (_, rotation, offset) = placement(&projection)?;
     let slide = delta * SLIDE_PER_HEIGHT / rect.height().max(1.0);
     let offset = [offset[0] - slide.x, offset[1] - slide.y];
-    let mut params = match (turn, target.projection(app)?) {
+    let mut params = match (turn, projection) {
         (true, _) => json!({"rotation": rotation + delta.x * TURN_PER_POINT}),
         (false, Projection::Uv { .. }) => json!({"offset": offset}),
         (false, _) => json!({"uvOffset": offset}),
@@ -227,6 +253,8 @@ mod tests {
     use super::*;
     use crate::frame_gizmo::tests::{drag, fill_app, projection};
     use crate::pointer_lock::system_pointer::SystemPointer;
+    use crate::round_gizmo::tests::on_the_model_off_the_handles;
+    use crate::state::ViewLayout;
 
     type Harness = egui_kittest::Harness<'static, TextureCraftApp>;
 
@@ -301,9 +329,50 @@ mod tests {
         assert_eq!(harness.state().session.camera, camera, "the camera kept still");
 
         // The 3D view has its drags back: a drag on the model off the projector's handles moves nothing
-        let off = rect.center() + vec2(-100.0, 80.0);
+        let off = on_the_model_off_the_handles(&harness);
         drag(&mut harness, off, off + vec2(60.0, 0.0), Modifiers::NONE);
         assert_eq!(projection(&harness, layer), slid, "no mode is left on");
+    }
+
+    /// Losing the focus mid-hold (Alt+Tab) ends it as letting go does: one undo step, the pointer shown, and moves after it (egui still has the button down) leave the projection alone
+    #[test]
+    fn losing_the_window_focus_mid_hold_ends_it_as_letting_go_does() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app("triplanar");
+        let steps = harness.state().session.history_labels().len();
+        let mut pointer = press_the_button(&mut harness);
+        pointer.drags(&mut harness, vec2(-60.0, 0.0), 10, Modifiers::NONE);
+        assert_eq!(harness.state().moving_on_model, Some(MoveOnModel::layer(layer)), "the hold is under way");
+
+        harness.input_mut().events.push(egui::Event::WindowFocused(false));
+        pointer.frame(&mut harness);
+        let left = projection(&harness, layer);
+        assert_eq!(harness.state().moving_on_model, None, "the focus loss ends the hold");
+        assert!(!pointer.hidden, "the pointer shows again");
+        assert_eq!(harness.state().session.history_labels().len(), steps + 1, "one undo step, as letting go makes");
+
+        pointer.drags(&mut harness, vec2(-60.0, 0.0), 10, Modifiers::NONE);
+        assert_eq!(harness.state().moving_on_model, None, "the button still down in egui starts no new hold");
+        assert_eq!(projection(&harness, layer), left, "moves after it leave the projection alone");
+    }
+
+    /// Removing the held fill mid-hold (its pad goes with it) ends the hold at once, the button still down, with or without the 3D view: the pointer shows
+    #[test]
+    fn removing_the_held_fill_ends_the_hold() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        for layout in [ViewLayout::Split, ViewLayout::Only2D] {
+            let (mut harness, layer) = fill_app("triplanar");
+            harness.state_mut().ui.layout = layout;
+            harness.run_steps(2);
+            let mut pointer = press_the_button(&mut harness);
+            pointer.drags(&mut harness, vec2(-60.0, 0.0), 10, Modifiers::NONE);
+            assert_eq!(harness.state().moving_on_model, Some(MoveOnModel::layer(layer)), "{layout:?}: the hold is under way");
+
+            harness.state_mut().run("layer.remove", json!({"layer": layer.0})).unwrap();
+            pointer.frame(&mut harness);
+            assert_eq!(harness.state().moving_on_model, None, "{layout:?}: the hold ended with its fill");
+            assert!(!pointer.hidden, "{layout:?}: the pointer shows again");
+        }
     }
 
     /// The preview square is the pad: a press anywhere on it, its corner too, starts the hold and holds the pointer

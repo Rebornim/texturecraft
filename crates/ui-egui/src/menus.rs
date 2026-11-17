@@ -382,21 +382,21 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
             app.session.tool.brush.size = (app.session.tool.brush.size * scale).clamp(MIN_BRUSH_SIZE, MAX_BRUSH_SIZE);
         }
 
+        // The open list or the picker window closes on this Escape itself
+        let escape_is_free = !popup_open && !picker_open;
         if app.ui.windows.project_config.is_some() {
             // Its keys are Escape (close) and Enter (OK); a stroke in progress isn't touched
             #[cfg(not(target_arch = "wasm32"))]
             crate::project_config::keys_in(app, input, nothing_focused, popup_open);
         } else if !popup_open && app.picking_color.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.picking_color = None;
-        } else if popup_open || picker_open {
-            // The open list or the picker window closes on this Escape itself
-        } else if app.properties_popup.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if escape_is_free && app.properties_popup.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.properties_popup = None;
-        } else if crate::rail_popup::is_visible(app) && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if escape_is_free && crate::rail_popup::is_visible(app) && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.ui.rail_panel = None;
-        } else if app.picking_id_color.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if escape_is_free && app.picking_id_color.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
             crate::id_color_pick::IdColorPick::end(app);
-        } else if app.ui.mode == Mode::Painting && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if escape_is_free && app.ui.mode == Mode::Painting && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.session.cancel_stroke();
             app.session.cancel_path();
         }

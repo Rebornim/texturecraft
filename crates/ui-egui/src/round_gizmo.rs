@@ -2,17 +2,18 @@
 
 use egui::{Color32, PointerButton, Pos2, Rect, Stroke, Ui};
 use serde_json::{Value, json};
+use texturecraft_engine::compose::pattern::mesh_frame;
 use texturecraft_engine::core::Projection;
 use texturecraft_engine::geom::glam::{EulerRot, Mat3, Quat, Vec2, Vec3};
 
 use crate::TextureCraftApp;
 use crate::frame_gizmo::{
-    ARROW, HALO, HALO_EXTRA_WIDTH, SHAFT_WIDTH, TURN_RING, arrow_distance, center_distance, dashed_outline, distance_to_segment, handle_dot, move_handles,
-    nearest,
+    ARROW, EDGE_ON_FACING, HALO, HALO_EXTRA_WIDTH, MIN_SCREEN_SPAN, SHAFT_WIDTH, TURN_RING, arrow_distance, center_distance, dashed_outline,
+    distance_to_segment, handle_dot, move_handles, nearest, ring_open,
 };
 use crate::move_on_model::MoveOnModel;
 use crate::theme::{AXIS_COLORS, Tokens};
-use crate::viewport::project;
+use crate::viewport::{focus_lost, project, view_ray};
 
 mod round_drag;
 mod round_grab;
@@ -67,6 +68,8 @@ pub(crate) const MIN_STRETCH: f32 = 0.001;
 const MAX_STRETCH: f32 = 1000.0;
 /// The least offset per unit of a projector's own size, so a zero-sized mesh moves nothing to infinity
 pub(crate) const MIN_OFFSET_PER_LOCAL: f32 = 1e-6;
+/// How far along each direction its screen step is measured, in mesh radii: half way out, inside the model, where perspective bends it little
+const STEP_PROBE_RADII: f32 = 0.5;
 
 fn drag_id() -> egui::Id {
     egui::Id::unique("tc_round_drag")
@@ -91,14 +94,15 @@ impl RoundGizmo {
             Projection::Cylindrical { axis, offset, projector, .. } => (Shape::Cylinder(usize::from(axis.min(2))), offset, projector, 1.0),
             _ => return None,
         };
+
         let (lo, hi) = app.session.mesh.bounds();
-        let mesh_center = (lo + hi) * 0.5;
-        let radius = ((hi - lo).length() * 0.5).max(1e-4);
+        let (mesh_center, radius) = mesh_frame((lo, hi));
         let [x, y, z] = projector.rotation.map(f32::to_radians);
         let turn = Mat3::from_euler(EulerRot::ZYX, z, y, x);
         let stretch = Vec3::from(projector.scale).max(Vec3::splat(MIN_STRETCH));
         let offset_per_local = if offset_per_local.abs() < MIN_OFFSET_PER_LOCAL { MIN_OFFSET_PER_LOCAL } else { offset_per_local };
         let local = -Vec3::from(offset) / offset_per_local;
+
         let mut gizmo = RoundGizmo {
             target,
             mesh_center,
@@ -123,16 +127,22 @@ impl RoundGizmo {
         let world = |point: Vec3| mesh_center + turn * (stretch * point) * radius;
         let at = |point: Vec3| project(app, rect, world(point));
 
-        // The arrows run along the projector's turned directions; the rings turn round them
+        // The arrows run along the projector's turned directions
         let directions = gizmo.directions();
-        let reach = radius * 0.5;
+        let reach = radius * STEP_PROBE_RADII;
         gizmo.steps = directions.map(|direction| Some((project(app, rect, origin + direction * reach)? - gizmo.center) / reach));
-        gizmo.arrows = gizmo.steps.map(|step| step.filter(|step| step.length() * reach > 1.0).map(|step| gizmo.center + step.normalized() * ARROW));
+        gizmo.arrows = gizmo.steps.map(|step| step.filter(|step| step.length() * reach > MIN_SCREEN_SPAN).map(|step| gizmo.center + step.normalized() * ARROW));
+
+        // The rings turn round them, each one seen too near edge on left out (empty: neither drawn nor grabbed)
         let forward = app.session.camera.forward();
         let right = forward.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X);
         let pixels = (project(app, rect, origin + right * reach)? - gizmo.center).length() / reach;
         let ring = TURN_RING / pixels.max(f32::MIN_POSITIVE);
         gizmo.rings = directions.map(|direction| {
+            if !ring_open(app, rect, gizmo.center, direction) {
+                return Vec::new();
+            }
+
             let (u, v) = direction.any_orthonormal_pair();
             circle(|t| project(app, rect, origin + (u * t.x + v * t.y) * ring))
         });
@@ -201,7 +211,7 @@ impl RoundGizmo {
 
                 // Its height: a double arrow along the axis (seen end on, a dot)
                 let along_axis = match (at(local + along * half_height), at(local - along * half_height)) {
-                    (Some(top), Some(bottom)) => Some(top - bottom).filter(|span| span.length() > 1.0).map(egui::Vec2::normalized),
+                    (Some(top), Some(bottom)) => Some(top - bottom).filter(|span| span.length() > MIN_SCREEN_SPAN).map(egui::Vec2::normalized),
                     _ => None,
                 };
                 if let Some(rim) = top.iter().copied().min_by(|a, b| a.y.total_cmp(&b.y)) {
@@ -346,10 +356,9 @@ fn circle(at: impl Fn(Vec2) -> Option<Pos2>) -> Vec<Pos2> {
 
 /// Where screen point `p` meets the plane facing the camera through `origin`
 fn on_view_plane(app: &TextureCraftApp, rect: Rect, origin: Vec3, forward: Vec3, p: Pos2) -> Option<Vec3> {
-    let ndc = Vec2::new((p.x - rect.left()) / rect.width() * 2.0 - 1.0, 1.0 - (p.y - rect.top()) / rect.height() * 2.0);
-    let ray = app.session.camera.ray(ndc, rect.width() / rect.height().max(1.0));
+    let ray = view_ray(app, rect, p);
     let facing = ray.dir.dot(forward);
-    if facing.abs() < 1e-4 {
+    if facing.abs() < EDGE_ON_FACING {
         return None;
     }
 
@@ -384,9 +393,10 @@ pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Respons
         drag = Some(RoundDrag { grab, from, start: gizmo.clone(), stepped: false });
     }
 
-    let dragging = response.dragged_by(PointerButton::Primary) || response.drag_started_by(PointerButton::Primary);
+    // A window that lost the focus gets no release: the drag ends there
+    let dragging = (response.dragged_by(PointerButton::Primary) || response.drag_started_by(PointerButton::Primary)) && !focus_lost(ctx);
     let Some(mut drag) = drag.filter(|_| dragging) else {
-        ctx.data_mut(|data| data.remove::<RoundDrag>(drag_id()));
+        let_go(ctx);
         return false;
     };
 
@@ -401,6 +411,11 @@ pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Respons
     }
     ctx.data_mut(|data| data.insert_temp(drag_id(), drag));
     true
+}
+
+/// Ends a projector drag under way where it is: its undo step stays one step
+pub(crate) fn let_go(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<RoundDrag>(drag_id()));
 }
 
 /// The projector over the 3D view: dashed shape, rings, arrows, centre square and dots; the cursor shows what the handle under it does
@@ -437,13 +452,13 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use egui::{Modifiers, vec2};
     use egui_kittest::kittest::Queryable;
     use texturecraft_engine::core::{LayerId, Projection, Projector};
 
     use super::*;
-    use crate::frame_gizmo::tests::{drag, drag_frames, fill_app, panel_xyz, projection};
+    use crate::frame_gizmo::tests::{ball_app, drag, drag_frames, fill_app, panel_xyz, press_and_move, projection};
 
     fn gizmo(harness: &egui_kittest::Harness<'_, TextureCraftApp>) -> RoundGizmo {
         RoundGizmo::of(harness.state(), harness.state().viewport_rect).unwrap()
@@ -557,8 +572,10 @@ mod tests {
                 }
             };
 
+            // A sphere's one dot scales it evenly, a cylinder's height arrow stretches it along its axis
             let start = gizmo(&harness);
-            let dot = start.sizes[0].at;
+            let axes = if kind == "spherical" { [true; 3] } else { [false, true, false] };
+            let dot = start.sizes.iter().find(|size| size.axes == axes).unwrap_or_else(|| panic!("{kind}: its size handle {axes:?}")).at;
             drag_frames(&mut harness, layer, dot, start.center + (dot - start.center) * 1.5, Modifiers::NONE, true, read);
             let tip = gizmo(&harness).arrows[0].unwrap();
             let center = gizmo(&harness).center;
@@ -576,13 +593,84 @@ mod tests {
         }
     }
 
+    /// Whether a projector drag is under way
+    fn round_dragging(harness: &egui_kittest::Harness<'_, TextureCraftApp>) -> bool {
+        harness.ctx.data(|data| data.get_temp::<RoundDrag>(drag_id())).is_some()
+    }
+
+    /// Losing the focus mid-drag (Alt+Tab) ends a projector drag as a release does: one undo step, and moves after it (egui still has the button down) leave the projector alone
+    #[test]
+    fn losing_the_window_focus_ends_a_projector_drag() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app("spherical");
+        let steps = harness.state().session.history_labels().len();
+        let center = gizmo(&harness).center;
+        let to = center + vec2(40.0, 0.0);
+        press_and_move(&mut harness, center, to, Modifiers::NONE);
+        assert!(round_dragging(&harness), "the centre square is held");
+
+        harness.event(egui::Event::WindowFocused(false));
+        harness.run_steps(1);
+        let left = projection(&harness, layer);
+        assert!(!round_dragging(&harness), "the focus loss ends the drag");
+        assert_eq!(harness.state().session.history_labels().len(), steps + 1, "as one undo step");
+
+        for step in 1..=3 {
+            harness.event(egui::Event::PointerMoved(to + vec2(20.0, 10.0) * step as f32));
+            harness.run_steps(1);
+        }
+        assert_eq!(projection(&harness, layer), left, "moves after it leave the projector where it was");
+    }
+
+    /// Alt pressed mid-drag hands the pointer to the camera and ends the projector drag where it is: let go of Alt with the button still down, the drag does not resume; one undo step
+    #[test]
+    fn alt_mid_drag_ends_a_projector_drag() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app("spherical");
+        let steps = harness.state().session.history_labels().len();
+        let center = gizmo(&harness).center;
+        let to = center + vec2(40.0, 0.0);
+        press_and_move(&mut harness, center, to, Modifiers::NONE);
+        let slid = projection(&harness, layer);
+        let camera = harness.state().session.camera;
+
+        harness.event_modifiers(egui::Event::PointerMoved(to + vec2(20.0, 0.0)), Modifiers::ALT);
+        harness.run_steps(1);
+        assert_ne!(harness.state().session.camera, camera, "Alt turns the camera");
+        assert!(!round_dragging(&harness), "and ends the projector drag");
+
+        for step in 2..=4 {
+            harness.event(egui::Event::PointerMoved(to + vec2(20.0, 5.0) * step as f32));
+            harness.run_steps(1);
+        }
+        assert_eq!(projection(&harness, layer), slid, "Alt let go, the projector stays where the drag left it");
+        harness.event(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        harness.run_steps(2);
+        assert_eq!(harness.state().session.history_labels().len(), steps + 1, "one undo step");
+    }
+
+    /// Seen edge on a ring is a line, whose screen-angle turn would jump half a turn across the centre: from straight in front (no yaw) the X ring is neither drawn nor grabbed while the Y and Z rings stay; turned aside, it opens and shows again
+    #[test]
+    fn a_ring_seen_edge_on_is_neither_drawn_nor_grabbed() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, _) = fill_app("spherical");
+        harness.state_mut().session.camera.yaw = 0.0;
+        harness.run_steps(2);
+
+        let front = gizmo(&harness);
+        assert!(front.rings[0].is_empty(), "the X ring seen edge on is left out: {:?}", front.rings[0]);
+        assert!(front.rings[1..].iter().all(|ring| !ring.is_empty()), "the Y and Z rings show");
+        let on_the_line = front.center + vec2(0.0, 40.0);
+        assert_ne!(front.grab(on_the_line), Some(RoundGrab::Ring(0)), "a press where its line would be does not grab it");
+
+        harness.state_mut().session.camera.yaw = 0.5;
+        harness.run_steps(2);
+        assert!(gizmo(&harness).rings.iter().all(|ring| !ring.is_empty()), "turned aside, every ring shows");
+    }
+
     /// A paint layer on the ball whose mask holds a fill effect (selected) projecting `kind`: painting there paints the mask
     fn mask_fill_app(kind: &str) -> (egui_kittest::Harness<'static, TextureCraftApp>, LayerId) {
-        let session =
-            texturecraft_engine::Session::new_project("Gizmo", texturecraft_engine::geom::primitives::sphere(1.0, 48, 24), "builtin:sphere", None, 128)
-                .unwrap();
-        let mut harness = egui_kittest::Harness::builder().with_size(vec2(1600.0, 960.0)).build_eframe(|context| TextureCraftApp::new(context, session));
-        harness.run_steps(4);
+        let mut harness = ball_app(false);
         let mut png = Vec::new();
         image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 255, 255, 255])).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
         let image = harness.state_mut().session.import_resource_bytes("decal.png", png).unwrap();
@@ -601,7 +689,7 @@ mod tests {
     }
 
     /// A point on the model clear of every handle of the shown gizmo
-    fn on_the_model_off_the_handles(harness: &egui_kittest::Harness<'_, TextureCraftApp>) -> Pos2 {
+    pub(crate) fn on_the_model_off_the_handles(harness: &egui_kittest::Harness<'_, TextureCraftApp>) -> Pos2 {
         let app = harness.state();
         let rect = app.viewport_rect;
         let round = RoundGizmo::of(app, rect);
@@ -617,9 +705,9 @@ mod tests {
             .expect("the model shows past the handles")
     }
 
-    /// With painting on and every projection, a drag on the model away from the gizmo paints (the projection stays put); only a drag that starts on a handle moves the projection, and it paints nothing
+    /// With every projection, a drag on the model away from the gizmo leaves the projection put (and paints nothing: no tool acts on a selected fill effect); only a drag that starts on a handle moves the projection
     #[test]
-    fn only_a_handle_moves_the_projection_and_any_other_drag_on_the_model_paints() {
+    fn only_a_handle_moves_the_projection_and_any_other_drag_on_the_model_leaves_it() {
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         for kind in ["planar", "warp", "triplanar", "spherical", "cylindrical"] {
             let (mut harness, effect) = mask_fill_app(kind);
@@ -630,15 +718,15 @@ mod tests {
             let from = on_the_model_off_the_handles(&harness);
             drag(&mut harness, from, from + vec2(30.0, 0.0), Modifiers::NONE);
             assert_eq!(effect_projection(&harness, effect), before, "{kind}: a drag off the handles leaves the projection alone");
-            assert_eq!(harness.state().session.history_labels().len(), steps + 1, "{kind}: and paints one stroke");
+            assert_eq!(harness.state().session.history_labels().len(), steps, "{kind}: and adds no undo step");
 
             let center = match RoundGizmo::of(harness.state(), rect) {
                 Some(round) => round.center,
-                None => crate::frame_gizmo::FrameGizmo::of(harness.state(), rect).expect("{kind}: a gizmo shows").center,
+                None => crate::frame_gizmo::FrameGizmo::of(harness.state(), rect).unwrap_or_else(|| panic!("{kind}: a gizmo shows")).center,
             };
             drag(&mut harness, center, center + vec2(0.0, -30.0), Modifiers::NONE);
             assert_ne!(effect_projection(&harness, effect), before, "{kind}: the centre square moves it");
-            assert_eq!(harness.state().session.history_labels().len(), steps + 2, "{kind}: one step, no stroke");
+            assert_eq!(harness.state().session.history_labels().len(), steps + 1, "{kind}: one step, no stroke");
         }
     }
 

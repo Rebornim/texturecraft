@@ -1,8 +1,8 @@
-//! The eyedropper pointer with its colour disc: the pipette as the plain pointer draws it and, beside its tip, a disc of the
+//! The eyedropper pointer's colour disc, drawn beside the pipette's tip by `CursorImage::eyedropper_with_swatch`: a disc of the
 //! colour under the tip in a crisp white outline and a faint dark outer ring, so it reads on white and on black alike; one
 //! picture, so the disc moves with the pointer itself and never lags or flickers
 
-use super::{CursorImage, SwatchSide};
+use super::CursorImage;
 
 /// The pointer cell the disc's sizes are given for (a system pointer at 100 %), in pixels
 const NOMINAL_CELL_PX: f32 = 32.0;
@@ -14,43 +14,6 @@ const OUTLINE_PX: f32 = 2.0;
 const RING_PX: f32 = 1.0;
 /// How dark the outer ring is: faint, only enough to edge the white outline on a white ground
 const RING_ALPHA: f32 = 0.45;
-/// The largest picture made, in pixels (the largest pointer the systems take)
-const MAX_PICTURE_PX: u32 = 256;
-
-impl CursorImage {
-    /// The eyedropper in a `cell`-pixel pointer with a disc of `color` (8-bit sRGB) on `side` of its tip; its hotspot is the tip
-    pub fn eyedropper_with_swatch(cell: u32, color: [u8; 3], side: SwatchSide) -> Self {
-        let pipette = CursorImage::eyedropper(cell);
-        let unit = swatch_unit(cell);
-        let reach = swatch_reach(unit);
-        let [tip_x, tip_y] = pipette.hotspot.map(|edge| edge as f32 + 0.5);
-        let [dx, dy] = side.offset();
-        let center = [tip_x + dx * unit, tip_y + dy * unit];
-
-        // The picture spans the pipette's cell and the disc, as a square
-        let left = (center[0] - reach).floor().min(0.0);
-        let top = (center[1] - reach).floor().min(0.0);
-        let right = (center[0] + reach).ceil().max(pipette.size as f32);
-        let bottom = (center[1] + reach).ceil().max(pipette.size as f32);
-        let side_px = (right - left).max(bottom - top) as u32;
-        if side_px > MAX_PICTURE_PX && cell > 1 {
-            let smaller = (cell as f32 * MAX_PICTURE_PX as f32 / side_px as f32).floor() as u32;
-            return CursorImage::eyedropper_with_swatch(smaller.min(cell - 1), color, side);
-        }
-
-        let mut rgba = Vec::with_capacity((side_px * side_px * 4) as usize);
-        for y in 0..side_px {
-            for x in 0..side_px {
-                let [cell_x, cell_y] = [x as f32 + left, y as f32 + top];
-                let under = pipette_pixel(&pipette, cell_x, cell_y);
-                let distance = ((cell_x + 0.5 - center[0]).powi(2) + (cell_y + 0.5 - center[1]).powi(2)).sqrt();
-                rgba.extend_from_slice(&over(disc_pixel(distance, unit, color), under));
-            }
-        }
-        let hotspot = [pipette.hotspot[0] + (-left) as u32, pipette.hotspot[1] + (-top) as u32];
-        CursorImage { size: side_px, rgba, hotspot }
-    }
-}
 
 /// Pixels to a nominal pointer pixel for a `cell`-pixel pointer
 pub fn swatch_unit(cell: u32) -> f32 {
@@ -63,7 +26,7 @@ pub fn swatch_reach(unit: f32) -> f32 {
 }
 
 /// The pipette's pixel at `(x, y)` of its cell, clear outside it
-fn pipette_pixel(pipette: &CursorImage, x: f32, y: f32) -> [u8; 4] {
+pub(super) fn pipette_pixel(pipette: &CursorImage, x: f32, y: f32) -> [u8; 4] {
     if x < 0.0 || y < 0.0 {
         return [0; 4];
     }
@@ -78,7 +41,7 @@ fn pipette_pixel(pipette: &CursorImage, x: f32, y: f32) -> [u8; 4] {
 }
 
 /// The disc's straight-alpha pixel `distance` pixels from its centre: the colour, the white outline round it, the faint ring
-fn disc_pixel(distance: f32, unit: f32, color: [u8; 3]) -> [u8; 4] {
+pub(super) fn disc_pixel(distance: f32, unit: f32, color: [u8; 3]) -> [u8; 4] {
     let fill_radius = FILL_RADIUS_PX * unit;
     let outline_radius = fill_radius + OUTLINE_PX * unit;
     let ring_radius = outline_radius + (RING_PX * unit).max(1.0);
@@ -92,7 +55,7 @@ fn disc_pixel(distance: f32, unit: f32, color: [u8; 3]) -> [u8; 4] {
 }
 
 /// `top` over `bottom`, both straight-alpha RGBA
-fn over(top: [u8; 4], bottom: [u8; 4]) -> [u8; 4] {
+pub(super) fn over(top: [u8; 4], bottom: [u8; 4]) -> [u8; 4] {
     let top_alpha = f32::from(top[3]) / 255.0;
     let bottom_alpha = f32::from(bottom[3]) / 255.0 * (1.0 - top_alpha);
     let alpha = top_alpha + bottom_alpha;
@@ -111,6 +74,8 @@ fn to_byte(share: f32) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::screen_pick::SwatchSide;
+    use crate::screen_pick::cursor_image::MAX_PICTURE_PX;
 
     const SIDES: [SwatchSide; 4] = [SwatchSide::BelowRight, SwatchSide::BelowLeft, SwatchSide::AboveLeft, SwatchSide::AboveRight];
 

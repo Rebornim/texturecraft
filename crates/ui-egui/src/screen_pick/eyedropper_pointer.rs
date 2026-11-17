@@ -36,11 +36,16 @@ const POINTERS: [co::OCR; 11] = [
     co::OCR::HAND,
 ];
 
+/// The keeper's exit code for a command line it can't read
+const EXIT_BAD_ARGS: i32 = 2;
+/// The keeper's exit code when the app's process, its event or the eyedropper can't be had
+const EXIT_UNAVAILABLE: i32 = 1;
+
 /// Each pick's own stop event
 static NEXT_PICK: AtomicU64 = AtomicU64::new(0);
 
 /// The eyedropper as the system pointer, until this is dropped
-pub(super) struct SystemPointer {
+pub(super) struct EyedropperPointer {
     keeper: CloseHandlePiGuard,
     stop: CloseHandleGuard<HEVENT>,
     /// The event the keeper sets once it has kept the user's pointers, held so it lives as long as the pick
@@ -51,24 +56,36 @@ pub(super) struct SystemPointer {
     pub(super) cell: u32,
 }
 
-impl SystemPointer {
+impl EyedropperPointer {
     /// Starts the keeper for a window at `dpi` dots per inch; `None` leaves the system pointer as it is
     pub(super) fn show(dpi: u32) -> Option<Self> {
         let program = std::env::current_exe().ok()?;
         let parent = std::process::id();
+
+        // The pick's stop event, and the event the keeper sets once it has kept the user's pointers
         let stop_name = format!("Local\\texturecraft-eyedropper-{parent}-{}", NEXT_PICK.fetch_add(1, Ordering::Relaxed));
         let stop = HEVENT::CreateEvent(None, true, false, Some(&stop_name)).ok()?;
         let args = KeeperArgs { parent, stop: stop_name, dpi };
         let shown_event = args.shown_event();
         let shown = HEVENT::CreateEvent(None, true, false, Some(&shown_event)).ok()?;
+
         let cell = args.pointer_px(winsafe::GetSystemMetricsForDpi(co::SM::CXCURSOR, dpi).ok());
         let command_line = args.command_line(program.to_str()?);
+
         let mut startup = STARTUPINFO::default();
 
         // No "app starting" pointer for the keeper: it shows no window and never asks for input
         startup.dwFlags = co::STARTF::FORCEOFFFEEDBACK;
         let keeper = winsafe::CreateProcess(None, Some(&command_line), None, None, false, co::CREATE::NO_WINDOW, &[], None, &mut startup);
-        Some(SystemPointer { keeper: keeper.ok()?, stop, _shown: shown, shown_event, cell })
+        Some(EyedropperPointer { keeper: keeper.ok()?, stop, _shown: shown, shown_event, cell })
+    }
+}
+
+impl Drop for EyedropperPointer {
+    fn drop(&mut self) {
+        // Waited for (at most RESTORE_WAIT_MS): windows_hook::run starts the next pick's keeper only after the user's pointers are back
+        let _ = self.stop.SetEvent();
+        let _ = self.keeper.hProcess.WaitForSingleObject(Some(RESTORE_WAIT_MS));
     }
 }
 
@@ -80,27 +97,25 @@ pub(super) fn swap_in(image: &CursorImage) -> bool {
     true
 }
 
-impl Drop for SystemPointer {
-    fn drop(&mut self) {
-        // Waited for, so the next pick's keeper never takes the eyedropper for the user's own pointer
-        let _ = self.stop.SetEvent();
-        let _ = self.keeper.hProcess.WaitForSingleObject(Some(RESTORE_WAIT_MS));
-    }
-}
-
 /// The keeper process's work and exit code: the eyedropper as the system pointer until the pick ends or the app is gone
 pub fn keep_pointer() -> i32 {
     let args: Vec<String> = std::env::args().skip(2).collect();
-    let Some(keeper) = KeeperArgs::parse(&args) else { return 2 };
-    let Ok(app) = HPROCESS::OpenProcess(co::PROCESS::SYNCHRONIZE, false, keeper.parent) else { return 1 };
-    let Ok(stop) = HEVENT::NULL.OpenEvent(co::EVENT_RIGHTS::SYNCHRONIZE, false, &keeper.stop) else { return 1 };
+    let Some(keeper) = KeeperArgs::parse(&args) else { return EXIT_BAD_ARGS };
+    let Ok(app) = HPROCESS::OpenProcess(co::PROCESS::SYNCHRONIZE, false, keeper.parent) else { return EXIT_UNAVAILABLE };
+    let Ok(stop) = HEVENT::NULL.OpenEvent(co::EVENT_RIGHTS::SYNCHRONIZE, false, &keeper.stop) else { return EXIT_UNAVAILABLE };
     if ended(stop.WaitForSingleObject(Some(0))) {
         return 0;
     }
 
     let size = keeper.pointer_px(winsafe::GetSystemMetricsForDpi(co::SM::CXCURSOR, keeper.dpi).ok());
-    let Some(eyedropper) = load(&CursorImage::eyedropper(size)) else { return 1 };
+    let Some(eyedropper) = load(&CursorImage::eyedropper(size)) else { return EXIT_UNAVAILABLE };
     let originals: Vec<_> = POINTERS.iter().filter_map(|&pointer| Some((pointer, current(pointer)?))).collect();
+
+    // A pointer whose copy failed could never be put back: the user's pointers then stay as they are
+    if !every_pointer_kept(originals.len()) {
+        return EXIT_UNAVAILABLE;
+    }
+
     swap_all(&eyedropper);
 
     // The app may change the picture from now on: the user's own pointers are kept
@@ -110,12 +125,20 @@ pub fn keep_pointer() -> i32 {
 
     // Ends when the app sets the stop event (the pick ended) or its process ends (closed, killed, crashed)
     while !ended(stop.WaitForSingleObject(Some(0))) && !ended(app.WaitForSingleObject(Some(WATCH_MS))) {}
+
+    // The user's own pointers back; the system owns each one it took
     for (pointer, mut original) in originals {
         if original.SetSystemCursor(pointer).is_ok() {
             let _ = original.leak();
         }
     }
+
     0
+}
+
+/// Whether a copy of each pointer swapped was kept (`kept` copies), so each can be put back
+fn every_pointer_kept(kept: usize) -> bool {
+    kept == POINTERS.len()
 }
 
 /// `picture` as each of the system pointers other apps show
@@ -152,4 +175,15 @@ fn load(image: &CursorImage) -> Option<DestroyCursorGuard> {
     let loaded = HINSTANCE::NULL.LoadImageCursor(IdOcrStr::from_str(&file.to_string_lossy()), SIZE::default(), co::LR::LOADFROMFILE);
     let _ = std::fs::remove_file(&file);
     loaded.ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_pointers_are_swapped_only_when_each_one_can_be_put_back() {
+        assert!(every_pointer_kept(POINTERS.len()), "every pointer kept: the eyedropper shows");
+        assert!(!every_pointer_kept(POINTERS.len() - 1), "one copy failed: the user's pointers stay as they are");
+    }
 }

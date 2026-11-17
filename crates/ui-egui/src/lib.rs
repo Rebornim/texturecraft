@@ -94,6 +94,7 @@ mod picker_group;
 mod picker_tab;
 mod placement;
 mod pointer_lock;
+mod popup_drag;
 mod preview_dots;
 mod preview_image;
 mod preview_outline;
@@ -1089,6 +1090,9 @@ impl eframe::App for TextureCraftApp {
         if !self.session.project_open {
             self.ui.mode = state::Mode::Painting;
         }
+
+        // Before any popup draws, so one a drag closes is gone from this frame
+        popup_drag::close_on_drag_outside(&ctx);
 
         if !self.ui.hide_ui {
             titlebar::show(self, ui);

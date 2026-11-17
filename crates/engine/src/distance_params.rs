@@ -1,10 +1,10 @@
 //! The controls of the kinds with only the reference's own controls (3D Distance, 3D Linear Gradient, UV Border Distance, Grayscale Conversion) that `effect.add.generator` and `effect.set` take
 
 use serde_json::Value;
-use texturecraft_core::{Generator, GeneratorKind, GrayscaleConversion, KindControls};
+use texturecraft_core::{DrippingRustParameters, Generator, GeneratorKind, GrayscaleConversion, KindControls};
 
 use crate::Result;
-use crate::commands::{bad, boolp, color_param, f32p};
+use crate::commands::{bad, boolp, color_param, f32p, u64p};
 
 /// The 3D Distance controls: the point's X, Y and Z across the mesh's bounds, then the radius, offset and contrast
 pub const DISTANCE_KEYS: [&str; 6] = ["distanceX", "distanceY", "distanceZ", "distanceRadius", "distanceOffset", "distanceContrast"];
@@ -18,6 +18,10 @@ pub const BORDER_DISTANCE_KEYS: [&str; 4] = ["borderDistance", "borderSmoothness
 /// The Grayscale Conversion controls (its image is the `image` input)
 pub const GRAYSCALE_KEYS: [&str; 6] = ["grayscaleType", "grayscaleBalance", "grayscaleContrast", "grayscaleTile", "grayscaleRotation", "grayscaleSafeRotation"];
 
+/// The Dripping Rust controls (it also takes the seed and invert)
+pub const DRIPPING_RUST_KEYS: [&str; 7] =
+    ["rustSpreading", "rustContrast", "spreadingSmoothness", "dripsIntensity", "dripsSmoothness", "dripsSamples", "dripsAxis"];
+
 /// The controls of the earlier model and the global adjustments, which these kinds don't have
 const OTHER_MODEL_KEYS: [&str; 9] = ["level", "softness", "noise", "noiseScale", "offset", "direction", "blur", "balance", "contrast"];
 
@@ -29,6 +33,7 @@ pub fn distance_from(command: &str, params: &Value, generator: &mut Generator) -
         (&LINEAR_GRADIENT_KEYS[..], GeneratorKind::ThreeDLinearGradient),
         (&BORDER_DISTANCE_KEYS[..], GeneratorKind::UvBorderDistance),
         (&GRAYSCALE_KEYS[..], GeneratorKind::GrayscaleConversion),
+        (&DRIPPING_RUST_KEYS[..], GeneratorKind::DrippingRust),
     ] {
         if let Some(key) = first_given(params, keys).filter(|_| kind != owner) {
             return Err(bad(command, format!("{} has no `{key}`: only {} has it", kind.label(), owner.label())));
@@ -45,6 +50,9 @@ pub fn distance_from(command: &str, params: &Value, generator: &mut Generator) -
     }
     if kind == GeneratorKind::GrayscaleConversion {
         return grayscale_from(command, params, generator);
+    }
+    if kind == GeneratorKind::DrippingRust {
+        return dripping_rust_from(command, params, generator);
     }
     if kind == GeneratorKind::UvBorderDistance {
         let mut border = generator.border_distance_controls().unwrap_or_default();
@@ -116,6 +124,36 @@ fn grayscale_from(command: &str, params: &Value, generator: &mut Generator) -> R
         grayscale.safe_rotation = safe;
     }
     generator.controls = Some(Box::new(KindControls::Grayscale(grayscale.clamped())));
+    Ok(())
+}
+
+/// The Dripping Rust controls in `params` (the generator is one)
+fn dripping_rust_from(command: &str, params: &Value, generator: &mut Generator) -> Result<()> {
+    let Some(KindControls::DrippingRust(mut rust)) = generator.kind_controls() else { return Ok(()) };
+    for (key, value) in [
+        ("rustSpreading", &mut rust.spreading),
+        ("rustContrast", &mut rust.contrast),
+        ("spreadingSmoothness", &mut rust.spreading_smoothness),
+        ("dripsIntensity", &mut rust.drips_intensity),
+        ("dripsSmoothness", &mut rust.drips_smoothness),
+    ] {
+        if let Some(given) = f32p(params, key) {
+            *value = given;
+        }
+    }
+    if let Some(samples) = u64p(params, "dripsSamples") {
+        rust.drips_samples = samples.min(u64::from(DrippingRustParameters::MAX_SAMPLES)) as u32;
+    }
+    if let Some(value) = params.get("dripsAxis") {
+        let name = value.as_str().ok_or_else(|| bad(command, "`dripsAxis` must be x, y or z"))?;
+        rust.axis = match name.to_ascii_lowercase().as_str() {
+            "x" => 0,
+            "y" => 1,
+            "z" => 2,
+            _ => return Err(bad(command, format!("unknown axis `{name}`: x, y or z"))),
+        };
+    }
+    generator.controls = Some(Box::new(KindControls::DrippingRust(rust.clamped())));
     Ok(())
 }
 

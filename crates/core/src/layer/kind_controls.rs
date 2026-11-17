@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{BorderDistanceParameters, DistanceParameters, GeneratorKind, GrayscaleConversionParameters, LinearGradientParameters};
+use super::{BorderDistanceParameters, DistanceParameters, DrippingRustParameters, GeneratorKind, GrayscaleConversionParameters, LinearGradientParameters};
 
 /// The controls of a kind that has only the reference's own controls, no earlier model: one variant per kind
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -10,6 +10,7 @@ pub enum KindControls {
     LinearGradient(LinearGradientParameters),
     BorderDistance(BorderDistanceParameters),
     Grayscale(GrayscaleConversionParameters),
+    DrippingRust(DrippingRustParameters),
 }
 
 impl KindControls {
@@ -20,6 +21,7 @@ impl KindControls {
             GeneratorKind::ThreeDLinearGradient => Some(KindControls::LinearGradient(LinearGradientParameters::default())),
             GeneratorKind::UvBorderDistance => Some(KindControls::BorderDistance(BorderDistanceParameters::default())),
             GeneratorKind::GrayscaleConversion => Some(KindControls::Grayscale(GrayscaleConversionParameters::default())),
+            GeneratorKind::DrippingRust => Some(KindControls::DrippingRust(DrippingRustParameters::default())),
             GeneratorKind::EdgeWear
             | GeneratorKind::Dirt
             | GeneratorKind::ThinAreas
@@ -39,6 +41,7 @@ impl KindControls {
             KindControls::LinearGradient(gradient) => KindControls::LinearGradient(gradient.clamped()),
             KindControls::BorderDistance(border) => KindControls::BorderDistance(border.clamped()),
             KindControls::Grayscale(grayscale) => KindControls::Grayscale(grayscale.clamped()),
+            KindControls::DrippingRust(rust) => KindControls::DrippingRust(rust.clamped()),
         }
     }
 
@@ -49,6 +52,7 @@ impl KindControls {
             KindControls::LinearGradient(_) => GeneratorKind::ThreeDLinearGradient,
             KindControls::BorderDistance(_) => GeneratorKind::UvBorderDistance,
             KindControls::Grayscale(_) => GeneratorKind::GrayscaleConversion,
+            KindControls::DrippingRust(_) => GeneratorKind::DrippingRust,
         }
     }
 }

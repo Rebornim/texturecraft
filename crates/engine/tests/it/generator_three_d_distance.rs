@@ -1,8 +1,9 @@
-//! The 3D Distance, 3D Linear Gradient and UV Border Distance generators through `effect.add.generator` and `effect.set`: its controls, the controls it lacks, and a gradient around its point
+//! The generators with only their own controls (3D Distance, 3D Linear Gradient, UV Border Distance, Grayscale Conversion, Dripping Rust) through `effect.add.generator` and `effect.set`: their controls and the controls they lack
 
 use serde_json::{Value, json};
 use texturecraft_engine::core::{
-    BorderDistanceParameters, DistanceParameters, EffectKind, Generator, GeneratorKind, GrayscaleConversion, LayerId, LinearGradientParameters, Source,
+    BorderDistanceParameters, DistanceParameters, DrippingRustParameters, EffectKind, Generator, GeneratorKind, GrayscaleConversion, KindControls, LayerId,
+    LinearGradientParameters, Source,
 };
 use texturecraft_engine::{Session, execute};
 
@@ -119,4 +120,20 @@ fn grayscale_conversion_takes_its_controls_and_its_image() {
     let curvature = add(&mut session, json!({"generator": "curvature"}));
     assert!(execute(&mut session, "effect.set", &json!({"effect": curvature, "input": "image", "inputImage": name})).is_err());
     assert!(execute(&mut session, "effect.set", &json!({"effect": curvature, "grayscaleTile": 2})).is_err());
+}
+
+#[test]
+fn dripping_rust_takes_its_controls_its_seed_and_its_axis() {
+    let mut session = session();
+    let params = json!({"generator": "Dripping Rust", "rustSpreading": 0.7, "dripsIntensity": 0.4, "dripsSamples": 99, "dripsAxis": "X", "seed": 3});
+    let effect = add(&mut session, params);
+
+    let made = generator(&session, effect);
+    let expected = DrippingRustParameters { spreading: 0.7, drips_intensity: 0.4, drips_samples: 32, axis: 0, ..DrippingRustParameters::default() };
+    assert_eq!(made.kind_controls(), Some(KindControls::DrippingRust(expected)), "samples stop at 32");
+    assert_eq!(made.seed, 3);
+    assert!(execute(&mut session, "effect.set", &json!({"effect": effect, "dripsAxis": "w"})).is_err());
+    assert!(execute(&mut session, "effect.set", &json!({"effect": effect, "level": 0.2})).is_err());
+    let curvature = add(&mut session, json!({"generator": "curvature"}));
+    assert!(execute(&mut session, "effect.set", &json!({"effect": curvature, "rustSpreading": 0.2})).is_err());
 }

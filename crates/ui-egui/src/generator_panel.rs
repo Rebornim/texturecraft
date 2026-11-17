@@ -113,6 +113,9 @@ fn attributes(ui: &mut Ui, kind: GeneratorKind) {
         }
         GeneratorKind::UvBorderDistance => (tr("A gradient in from the UV islands' borders."), [tr("mask"), tr("generator"), tr("grayscale"), tr("uv")]),
         GeneratorKind::GrayscaleConversion => (tr("An image turned gray."), [tr("mask"), tr("generator"), tr("grayscale"), tr("image")]),
+        GeneratorKind::DrippingRust => {
+            (tr("Rust in occluded areas, running down in drips."), [tr("mask"), tr("generator"), tr("grayscale"), tr("ambient occlusion")])
+        }
     };
 
     // Wrapped rows: a long line must not widen the panel past its edge

@@ -1,11 +1,12 @@
 //! The UV Border Distance generator: how far each texel lies inside its UV island, as a gradient built once per UV layout and settings
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use rayon::prelude::*;
-use texturecraft_core::{BlockScales, BorderDistanceParameters, GeneratorGlobal};
+use texturecraft_core::{BorderDistanceParameters, GeneratorGlobal};
 
-use crate::eval::{Inputs, blur};
+use crate::eval::Inputs;
+use crate::working_field::{FieldCache, blur_blocks};
 
 /// How far in the gradient reaches at Distance 1, in UV units (fitted: about half a UV tile)
 const REACH_PER_DISTANCE: f32 = 0.4936;
@@ -16,70 +17,11 @@ const SMOOTHNESS_SIGMA_2K: f32 = 45.0;
 /// The UV tile resolution [`SMOOTHNESS_SIGMA_2K`] is measured at
 const REFERENCE_TILE_TEXELS: f32 = 2048.0;
 
-/// Most gradients cached, and the bytes they may hold (the newest is kept whatever its size)
-const CACHE_ENTRIES: usize = 8;
-const CACHE_BYTES: usize = 256 << 20;
-
-/// Texels between the samples a layout's fingerprint reads: dense enough to tell UV edits apart, sparse enough to read once per tile
-const FINGERPRINT_STRIDE: usize = 31;
-
-/// What a gradient was built from: the working layout (size, coverage fingerprint, UV tile block, tile scales) and the settings' bits
-#[derive(Clone, PartialEq)]
-struct Key {
-    /// The g-buffer's triangle data by address, beside its fingerprint
-    layout: usize,
-    size: (u32, u32),
-    fingerprint: u64,
-    block: (u32, u32),
-    scales: BlockScales,
-    settings: [u32; 2],
-}
-
-static CACHE: Mutex<Vec<(Key, Arc<Vec<f32>>)>> = Mutex::new(Vec::new());
+static CACHE: FieldCache = FieldCache::new();
 
 /// The gradient before balance, contrast and invert for every working texel of `inp` (0 outside the islands)
 pub(crate) fn border_gradient(inp: &Inputs, border: &BorderDistanceParameters) -> Arc<Vec<f32>> {
-    let gbuf = inp.gbuf;
-    let size = (gbuf.width, gbuf.height);
-    let grid = inp.project.texture_set(inp.ts).ok().and_then(|set| set.tile_grid());
-    let block = grid.map_or(size, |grid| (size.0 / grid.cols.max(1), size.1 / grid.rows.max(1)));
-    let block = (block.0.clamp(1, size.0.max(1)), block.1.clamp(1, size.1.max(1)));
-    let fingerprint = gbuf.tri.iter().step_by(FINGERPRINT_STRIDE).fold(gbuf.tri.len() as u64, |hash, tri| hash.rotate_left(5) ^ u64::from(*tri));
-    let key = Key {
-        layout: gbuf.tri.as_ptr() as usize,
-        size,
-        fingerprint,
-        block,
-        scales: inp.block_scales.clone(),
-        settings: [border.distance.to_bits(), border.smoothness.to_bits()],
-    };
-
-    let cached = {
-        let cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        cache.iter().find(|(cached, _)| *cached == key).map(|(_, gradient)| gradient.clone())
-    };
-    if let Some(gradient) = cached {
-        return gradient;
-    }
-
-    // Built without the cache locked: the build runs parallel work
-    let gradient = Arc::new(build(inp, border, block));
-    let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    cache.retain(|(cached, _)| *cached != key);
-    cache.push((key, gradient.clone()));
-    let mut bytes = 0usize;
-    let keep = cache
-        .iter()
-        .rev()
-        .take_while(|(_, built)| {
-            bytes = bytes.saturating_add(built.len().saturating_mul(size_of::<f32>()));
-            bytes <= CACHE_BYTES
-        })
-        .count()
-        .clamp(1, CACHE_ENTRIES);
-    let excess = cache.len().saturating_sub(keep);
-    cache.drain(..excess);
-    gradient
+    CACHE.get_or_build(inp, &[], vec![border.distance.to_bits(), border.smoothness.to_bits()], |block| build(inp, border, block))
 }
 
 /// The value at a working texel: the gradient balanced, contrasted and inverted
@@ -196,30 +138,6 @@ fn squared_distance_line(line: &mut [f32]) {
         let vertex = vertices.get(current).copied().unwrap_or(index);
         let offset = index as f32 - vertex as f32;
         *value = offset * offset + value_at(vertex);
-    }
-}
-
-/// `data` blurred one UV tile block at a time by the radius `radius_at` gives for the block's corner, reading black past each block's edges
-fn blur_blocks(data: &mut [f32], (width, height): (u32, u32), block: (u32, u32), radius_at: impl Fn(u32, u32) -> usize) {
-    for top in (0..height).step_by(block.1 as usize) {
-        for left in (0..width).step_by(block.0 as usize) {
-            let (columns, rows) = (block.0.min(width - left) as usize, block.1.min(height - top) as usize);
-            let index = |column: usize, row: usize| (top as usize + row) * width as usize + left as usize + column;
-            let mut values: Vec<f32> = (0..rows)
-                .flat_map(|row| (0..columns).map(move |column| (column, row)))
-                .map(|(column, row)| data.get(index(column, row)).copied().unwrap_or(0.0))
-                .collect();
-            let radius = radius_at(left, top);
-            if radius == 0 {
-                continue;
-            }
-            blur(&mut values, columns, rows, radius);
-            for (offset, value) in values.into_iter().enumerate() {
-                if let Some(target) = data.get_mut(index(offset % columns, offset / columns)) {
-                    *target = value;
-                }
-            }
-        }
     }
 }
 

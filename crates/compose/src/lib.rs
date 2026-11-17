@@ -12,6 +12,7 @@ pub mod below;
 mod curvature_size_level;
 pub mod curvature_sizes;
 pub mod display;
+mod dripping_rust;
 pub mod eval;
 mod generator_maps;
 mod held_fields;
@@ -28,6 +29,7 @@ mod uv_border_distance;
 mod wear;
 mod wear_inputs;
 mod wear_scan;
+mod working_field;
 
 pub use below::{BelowCache, StackKey};
 pub use display::{DisplayKind, tile_bytes};

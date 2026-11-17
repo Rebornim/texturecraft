@@ -5,6 +5,7 @@ use std::sync::Arc;
 use texturecraft_core::{BakedMap, Generator, KindControls, MicroDetails};
 
 use crate::curvature_sizes::CurvatureSizes;
+use crate::dripping_rust::rust_field;
 use crate::eval::Inputs;
 use crate::micro_details::{LayoutMap, MicroCurvature, micro_occlusion};
 use crate::uv_border_distance::border_gradient;
@@ -20,6 +21,8 @@ pub(crate) struct GeneratorMaps {
     pub micro_occlusion: Option<Arc<LayoutMap>>,
     /// The UV Border Distance gradient at every working texel
     pub border_gradient: Option<Arc<Vec<f32>>>,
+    /// The Dripping Rust field at every working texel
+    pub rust_field: Option<Arc<Vec<f32>>>,
     /// The controls of a kind with only its own controls, brought into range
     pub controls: Option<Arc<KindControls>>,
 }
@@ -40,6 +43,10 @@ impl GeneratorMaps {
             Some(KindControls::BorderDistance(border)) => Some(border_gradient(inp, border)),
             _ => None,
         };
-        GeneratorMaps { sizes, micro_curvature, micro_occlusion, border_gradient, controls: controls.map(Arc::new) }
+        let rust_field = match &controls {
+            Some(KindControls::DrippingRust(rust)) => Some(rust_field(inp, rust, generator.seed)),
+            _ => None,
+        };
+        GeneratorMaps { sizes, micro_curvature, micro_occlusion, border_gradient, rust_field, controls: controls.map(Arc::new) }
     }
 }

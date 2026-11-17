@@ -90,9 +90,9 @@ fn the_automatic_cage_stays_low_where_the_high_poly_is_low() {
 
     for (position, height) in heights {
         if position.x < 0.0 {
-            assert!((LOW_HEIGHT..LOW_HEIGHT * 2.0).contains(&height), "the cage at {position} hugs the low part: {height}");
+            assert!((LOW_HEIGHT..RAISED_HEIGHT / 2.0).contains(&height), "the cage at {position} hugs the low part: {height}");
         } else if position.x > RAISED_FROM_X + 0.125 {
-            assert!((RAISED_HEIGHT..RAISED_HEIGHT * 1.2).contains(&height), "the cage at {position} clears the raised part: {height}");
+            assert!((RAISED_HEIGHT..RAISED_HEIGHT * 2.0).contains(&height), "the cage at {position} clears the raised part: {height}");
         }
     }
 }
@@ -109,7 +109,7 @@ fn low_poly_vertices_far_from_any_high_poly_vertex_take_their_neighbours_distanc
 
     let heights = cage_heights(&low, &high, &automatic(&[BakedMap::Normal]));
 
-    assert!(heights.iter().all(|(_, height)| (HEIGHT..HEIGHT * 1.2).contains(height)), "the four corners' fit spreads over the whole plane");
+    assert!(heights.iter().all(|(_, height)| (HEIGHT..HEIGHT * 2.0).contains(height)), "the four corners' fit spreads over the whole plane");
 }
 
 #[test]

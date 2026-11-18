@@ -20,7 +20,7 @@ impl FillCopies {
     /// The copies `symmetry` makes for a texel at world point `point`, on a mesh whose bounds have centre `center` and radius `radius`
     pub fn new(symmetry: &FillSymmetry, point: Vec3, center: Vec3, radius: f32) -> FillCopies {
         let reach = FillSymmetry::REACH;
-        let position = Vec3::from(symmetry.position.map(|v| if v.is_finite() { v.clamp(-reach, reach) } else { 0.0 }));
+        let position = Vec3::from(symmetry.position.map(|coordinate| if coordinate.is_finite() { coordinate.clamp(-reach, reach) } else { 0.0 }));
         let pivot = center + position * radius;
         let axis = symmetry.axis_index();
         let count = symmetry.copies();

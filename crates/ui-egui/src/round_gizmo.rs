@@ -244,16 +244,6 @@ impl RoundGizmo {
         Vec3::AXES.map(|axis| self.turn * axis)
     }
 
-    /// The cursor over or dragging `grab`: a size handle's resize cursor runs along its arrow
-    fn cursor(&self, grab: RoundGrab, dragging: bool) -> egui::CursorIcon {
-        match grab {
-            RoundGrab::Slide if dragging => egui::CursorIcon::Grabbing,
-            RoundGrab::Slide => egui::CursorIcon::Grab,
-            RoundGrab::Axis(_) | RoundGrab::Ring(_) => egui::CursorIcon::Move,
-            RoundGrab::Size(axes) => self.sizes.iter().find(|size| size.axes == axes).map_or(egui::CursorIcon::ResizeNeSw, SizeHandle::cursor),
-        }
-    }
-
     /// The `layer.fill.projection` params that slide the projector across the view from `from` to `to`, as its centre square does
     pub(crate) fn slid(&self, app: &TextureCraftApp, rect: Rect, from: Pos2, to: Pos2) -> Option<Value> {
         self.params(app, rect, RoundGrab::Slide, from, to)
@@ -335,6 +325,16 @@ impl Gizmo for RoundGizmo {
     fn edit(&self, app: &TextureCraftApp, rect: Rect, grab: RoundGrab, from: Pos2, to: Pos2) -> Option<(&'static str, Value)> {
         Some(("layer.fill.projection", self.params(app, rect, grab, from, to)?))
     }
+
+    /// A size handle's resize cursor runs along its arrow
+    fn cursor(&self, grab: RoundGrab, dragging: bool) -> egui::CursorIcon {
+        match grab {
+            RoundGrab::Slide if dragging => egui::CursorIcon::Grabbing,
+            RoundGrab::Slide => egui::CursorIcon::Grab,
+            RoundGrab::Axis(_) | RoundGrab::Ring(_) => egui::CursorIcon::Move,
+            RoundGrab::Size(axes) => self.sizes.iter().find(|size| size.axes == axes).map_or(egui::CursorIcon::ResizeNeSw, SizeHandle::cursor),
+        }
+    }
 }
 
 /// A size handle that stretches one way: a double arrow through `at` along `along`, `fill` over a dark halo like the axis arrows
@@ -387,20 +387,6 @@ fn on_view_plane(app: &TextureCraftApp, rect: Rect, origin: Vec3, forward: Vec3,
 
     let hit = ray.origin + ray.dir * ((origin - ray.origin).dot(forward) / facing);
     hit.is_finite().then_some(hit)
-}
-
-/// Drags on the projector's handles; returns whether a drag owns the pointer. The cursor shows what the handle under it, or the one dragged, does (only while the gizmo takes input: an Alt orbit or a held Move on model keeps its own)
-pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response, rect: Rect, gizmo: Option<&RoundGizmo>) -> bool {
-    let ctx = ui.ctx();
-    let owned = crate::projection_gizmo::input(app, ctx, response, rect, gizmo);
-    let cursor = gizmo.and_then(|gizmo| match dragging::<RoundGizmo>(ctx) {
-        Some(drag) => Some(gizmo.cursor(drag.grab, true)),
-        None => response.hover_pos().and_then(|hover| gizmo.grab(hover)).map(|grab| gizmo.cursor(grab, false)),
-    });
-    if let Some(cursor) = cursor {
-        ctx.set_cursor_icon(cursor);
-    }
-    owned
 }
 
 /// The projector over the 3D view: dashed shape, rings, arrows, centre square and dots, the handle under the pointer lit
@@ -804,6 +790,28 @@ pub(crate) mod tests {
         let scale = projector_and_offset(&projection(&harness, layer)).0.scale;
         let expected = [-1.5, 1.5, 1.5];
         assert!(scale.iter().zip(expected).all(|(axis, wanted)| (axis - wanted).abs() < 1e-3), "a resize scales it evenly, still mirrored: {scale:?}");
+    }
+
+    /// A box mirrored along X (a negative scale from a project file) keeps its X double arrow on the face toward the camera, where the unmirrored box shows it
+    #[test]
+    fn a_mirrored_box_keeps_its_face_arrow_toward_the_camera() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app("triplanar");
+        let x_face_arrow = |harness: &egui_kittest::Harness<'_, TextureCraftApp>| {
+            gizmo(harness).sizes.iter().find(|size| size.axes == [true, false, false]).map(|size| size.at)
+        };
+        let unmirrored = x_face_arrow(&harness).expect("an X face arrow");
+        match &mut harness.state_mut().session.doc.project.layer_mut(layer).unwrap().kind {
+            LayerKind::Fill(fill) => match &mut fill.projection {
+                Projection::Triplanar { projector, .. } => projector.scale = [-1.0, 1.0, 1.0],
+                other => panic!("a tri-planar projection: {other:?}"),
+            },
+            other => panic!("a fill layer: {other:?}"),
+        }
+        harness.run_steps(2);
+
+        let mirrored = x_face_arrow(&harness).expect("the mirrored box's X face arrow");
+        assert!(mirrored.distance(unmirrored) < 0.5, "the arrow stays on the near face: {mirrored:?}, unmirrored {unmirrored:?}");
     }
 
     /// The pointer over a handle shows what it does only while the gizmo takes input: with Alt held the camera orbits, and the handle's cursor is not shown

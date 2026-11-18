@@ -78,6 +78,7 @@ mod preview_worker;
 pub mod profile;
 #[cfg(not(target_arch = "wasm32"))]
 mod project_config;
+mod projection_gizmo;
 mod projection_kind;
 mod projection_preview;
 mod projector_outline;

@@ -14,8 +14,8 @@ use crate::commands::{
 use crate::{EngineError, Result, Session, cmd, session::StackTarget};
 
 /// The smallest scale or tiling, and the largest scale, tiling or offset a fill's placement takes
-const MIN_SCALE: f32 = 0.001;
-const MAX_PLACEMENT: f32 = 1000.0;
+pub const MIN_SCALE: f32 = 0.001;
+pub const MAX_PLACEMENT: f32 = 1000.0;
 
 /// The highest contrast a procedural pattern takes
 const MAX_PATTERN_CONTRAST: f32 = 20.0;

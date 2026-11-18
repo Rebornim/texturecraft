@@ -1,26 +1,26 @@
 //! The selected tri-planar, spherical or cylindrical fill shows its projector round the whole model: a dashed box, sphere or cylinder with the centre square, X/Y/Z arrows and turn rings, and size handles: a dot scales it evenly (or a cylinder across its axis), a double arrow stretches it along one direction. Only a press on one of those handles moves it: any other drag paints or turns the camera
 
-use egui::{Color32, PointerButton, Pos2, Rect, Stroke, Ui};
+use egui::{Color32, Pos2, Rect, Stroke, Ui};
 use serde_json::{Value, json};
-use texturecraft_engine::compose::pattern::mesh_frame;
+use texturecraft_engine::compose::pattern::{mesh_frame, nonzero_stretch, projector_stretch};
 use texturecraft_engine::core::Projection;
 use texturecraft_engine::geom::glam::{EulerRot, Mat3, Quat, Vec2, Vec3};
+use texturecraft_engine::layer_cmds::{MAX_PLACEMENT, MIN_SCALE};
 
 use crate::TextureCraftApp;
 use crate::frame_gizmo::{
-    ARROW, EDGE_ON_FACING, HALO, HALO_EXTRA_WIDTH, MIN_SCREEN_SPAN, SHAFT_WIDTH, TURN_RING, arrow_distance, center_distance, dashed_outline,
-    distance_to_segment, handle_dot, move_handles, nearest, ring_open,
+    ARROW, EDGE_ON_FACING, HALO, HALO_EXTRA_WIDTH, HANDLE_EDGE, MIN_HANDLE_REACH, MIN_SCREEN_SPAN, SHAFT_WIDTH, TURN_RING, arrow_distance, center_distance,
+    dashed_outline, distance_to_segment, handle_dot, move_handles, nearest, ring_open,
 };
 use crate::move_on_model::MoveOnModel;
+use crate::projection_gizmo::{Gizmo, dragging};
 use crate::theme::{AXIS_COLORS, Tokens};
-use crate::viewport::{focus_lost, project, view_ray};
+use crate::viewport::{project, view_ray};
 
-mod round_drag;
 mod round_grab;
 mod shape;
 mod size_handle;
 
-use round_drag::RoundDrag;
 pub(crate) use round_grab::RoundGrab;
 use shape::Shape;
 pub(crate) use size_handle::SizeHandle;
@@ -32,7 +32,7 @@ pub(crate) struct RoundGizmo {
     /// Mesh centre and radius: the projector reads positions around it in radii
     mesh_center: Vec3,
     radius: f32,
-    /// The projector's turn and per-axis scale
+    /// The projector's turn and per-axis scale (a mirrored axis keeps its sign, as the projection reads it)
     turn: Mat3,
     stretch: Vec3,
     /// The projection's centre in the projector's units, and what offset puts it there (offset = -local × this)
@@ -63,11 +63,9 @@ const SIZE_ARROW_HEAD_HALF_WIDTH: f32 = 5.0;
 const FACE_CLEARANCE: f32 = 40.0;
 /// Points on a drawn circle
 pub(crate) const CIRCLE_POINTS: usize = 48;
-/// The projector's scale limits (as `layer.fill.projection` takes them)
-pub(crate) const MIN_STRETCH: f32 = 0.001;
-const MAX_STRETCH: f32 = 1000.0;
-/// The least offset per unit of a projector's own size, so a zero-sized mesh moves nothing to infinity
-pub(crate) const MIN_OFFSET_PER_LOCAL: f32 = 1e-6;
+/// A box's corners, and the bit of a corner's index that flips it along each axis
+const BOX_CORNERS: usize = 8;
+const BOX_AXIS_BITS: [usize; 3] = [1, 2, 4];
 /// How far along each direction its screen step is measured, in mesh radii: half way out, inside the model, where perspective bends it little
 const STEP_PROBE_RADII: f32 = 0.5;
 
@@ -95,14 +93,13 @@ impl RoundGizmo {
             _ => return None,
         };
 
-        let (lo, hi) = app.session.mesh.bounds();
-        let (mesh_center, radius) = mesh_frame((lo, hi));
+        let (lower, upper) = app.session.mesh.bounds();
+        let (mesh_center, radius) = mesh_frame((lower, upper));
         let [x, y, z] = projector.rotation.map(f32::to_radians);
         let turn = Mat3::from_euler(EulerRot::ZYX, z, y, x);
-        let stretch = Vec3::from(projector.scale).max(Vec3::splat(MIN_STRETCH));
-        let offset_per_local = if offset_per_local.abs() < MIN_OFFSET_PER_LOCAL { MIN_OFFSET_PER_LOCAL } else { offset_per_local };
+        let stretch = projector_stretch(&projector);
+        let offset_per_local = nonzero_stretch(offset_per_local);
         let local = -Vec3::from(offset) / offset_per_local;
-
         let mut gizmo = RoundGizmo {
             target,
             mesh_center,
@@ -124,120 +121,119 @@ impl RoundGizmo {
         }
 
         gizmo.center = project(app, rect, origin)?;
-        let world = |point: Vec3| mesh_center + turn * (stretch * point) * radius;
-        let at = |point: Vec3| project(app, rect, world(point));
-
-        // The arrows run along the projector's turned directions
-        let directions = gizmo.directions();
-        let reach = radius * STEP_PROBE_RADII;
-        gizmo.steps = directions.map(|direction| Some((project(app, rect, origin + direction * reach)? - gizmo.center) / reach));
-        gizmo.arrows = gizmo.steps.map(|step| step.filter(|step| step.length() * reach > MIN_SCREEN_SPAN).map(|step| gizmo.center + step.normalized() * ARROW));
-
-        // The rings turn round them, each one seen too near edge on left out (empty: neither drawn nor grabbed)
-        let forward = app.session.camera.forward();
-        let right = forward.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X);
-        let pixels = (project(app, rect, origin + right * reach)? - gizmo.center).length() / reach;
-        let ring = TURN_RING / pixels.max(f32::MIN_POSITIVE);
-        gizmo.rings = directions.map(|direction| {
-            if !ring_open(app, rect, gizmo.center, direction) {
-                return Vec::new();
-            }
-
-            let (u, v) = direction.any_orthonormal_pair();
-            circle(|t| project(app, rect, origin + (u * t.x + v * t.y) * ring))
-        });
+        gizmo.move_and_turn_handles(app, rect, origin)?;
 
         // The shape, sized round the mesh in the projector's units; a size handle past the view's edge waits at the edge, where it can be grabbed
+        let at = |point: Vec3| project(app, rect, mesh_center + turn * (stretch * point) * radius);
         let view = rect.shrink(SIZE_ARROW);
-        let keep_in_view = |point: Pos2| point.clamp(view.min, view.max);
-        let dot = |at: Pos2, axes: [bool; 3]| SizeHandle { at: keep_in_view(at), axes, along: None };
-        let only = |axis: usize| {
-            let mut axes = [false; 3];
-            axes[axis] = true;
-            axes
-        };
-        let half = (hi - lo) * 0.5 / radius;
+        let half = (upper - lower) * 0.5 / radius;
+        let forward = app.session.camera.forward();
 
         // The view direction in the projector's units: what faces the camera there
         let facing = (turn.transpose() * forward / stretch).try_normalize().unwrap_or(Vec3::Z);
         match shape {
-            Shape::Box => {
-                let size = half * BOX_REACH;
-                let corner = |index: usize| local + size * Vec3::new(sign(index, 0), sign(index, 1), sign(index, 2));
-                for a in 0..8 {
-                    for bit in [1, 2, 4] {
-                        let b = a | bit;
-                        if b != a
-                            && let (Some(from), Some(to)) = (at(corner(a)), at(corner(b)))
-                        {
-                            gizmo.outline.push(vec![from, to]);
-                        }
-                    }
-                }
+            Shape::Box => gizmo.box_handles(at, half * BOX_REACH, forward, view),
+            Shape::Sphere => gizmo.sphere_handles(at, half.max_element() * SPHERE_REACH, facing, view),
+            Shape::Cylinder(axis) => gizmo.cylinder_handles(at, axis, half, facing, view),
+        }
+        Some(gizmo)
+    }
 
-                // The corner up and right on screen scales it evenly; a double arrow on the face turned towards the camera stretches it along each direction
-                let corners = (0..8).filter_map(|index| at(corner(index)));
-                if let Some(top_right) = corners.max_by(|a, b| (a.x - a.y).total_cmp(&(b.x - b.y))) {
-                    gizmo.sizes.push(dot(top_right, [true; 3]));
-                }
-                for (axis, direction) in directions.iter().enumerate() {
-                    let toward = if direction.dot(forward) > 0.0 { -1.0 } else { 1.0 };
-                    let Some(face) = at(local + Vec3::AXES[axis] * size * toward) else { continue };
-                    let out = face - gizmo.center;
-                    if out.length() >= FACE_CLEARANCE {
-                        gizmo.sizes.push(SizeHandle { at: keep_in_view(face), axes: only(axis), along: Some(out.normalized()) });
-                    }
-                }
+    /// The arrows along the projector's turned directions and the rings that turn round them, each ring seen too near edge on left out (empty: neither drawn nor grabbed)
+    fn move_and_turn_handles(&mut self, app: &TextureCraftApp, rect: Rect, origin: Vec3) -> Option<()> {
+        let center = self.center;
+        let directions = self.directions();
+        let reach = self.radius * STEP_PROBE_RADII;
+        self.steps = directions.map(|direction| Some((project(app, rect, origin + direction * reach)? - center) / reach));
+        self.arrows = self.steps.map(|step| step.filter(|step| step.length() * reach > MIN_SCREEN_SPAN).map(|step| center + step.normalized() * ARROW));
+
+        let right = app.session.camera.forward().cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X);
+        let pixels = (project(app, rect, origin + right * reach)? - center).length() / reach;
+        let ring = TURN_RING / pixels.max(f32::MIN_POSITIVE);
+        self.rings = directions.map(|direction| {
+            if !ring_open(app, rect, center, direction) {
+                return Vec::new();
             }
-            Shape::Sphere => {
-                let radius = half.max_element() * SPHERE_REACH;
-                let (u, v) = facing.any_orthonormal_pair();
-                let silhouette = circle(|t| at(local + (u * t.x + v * t.y) * radius));
 
-                // A sphere only scales evenly: one dot, on its right side
-                if let Some(side) = silhouette.iter().copied().max_by(|a, b| a.x.total_cmp(&b.x)) {
-                    gizmo.sizes.push(dot(side, [true; 3]));
-                }
-                gizmo.outline.push(silhouette);
-                gizmo.outline.push(circle(|t| at(local + Vec3::new(t.x, 0.0, t.y) * radius)));
-            }
-            Shape::Cylinder(axis) => {
-                let along = Vec3::AXES[axis];
-                let (u, v) = (Vec3::AXES[(axis + 1) % 3], Vec3::AXES[(axis + 2) % 3]);
-                let radius = (half * (Vec3::ONE - along)).max_element() * CYLINDER_REACH;
-                let half_height = half[axis] * CYLINDER_HEIGHT;
-                let cap = |height: f32| circle(|t| at(local + along * height + (u * t.x + v * t.y) * radius));
-                let top = cap(half_height);
+            let (tangent, bitangent) = direction.any_orthonormal_pair();
+            circle(|unit| project(app, rect, origin + (tangent * unit.x + bitangent * unit.y) * ring))
+        });
+        Some(())
+    }
 
-                // Its height: a double arrow along the axis (seen end on, a dot)
-                let along_axis = match (at(local + along * half_height), at(local - along * half_height)) {
-                    (Some(top), Some(bottom)) => Some(top - bottom).filter(|span| span.length() > MIN_SCREEN_SPAN).map(egui::Vec2::normalized),
-                    _ => None,
-                };
-                if let Some(rim) = top.iter().copied().min_by(|a, b| a.y.total_cmp(&b.y)) {
-                    gizmo.sizes.push(SizeHandle { at: keep_in_view(rim), axes: only(axis), along: along_axis });
-                }
-                gizmo.outline.extend([top, cap(-half_height)]);
-
-                // The two side lines, where the round side turns away from the camera
-                if let Some(side) = along.cross(facing - along * facing.dot(along)).try_normalize() {
-                    let mut sides = Vec::new();
-                    for edge in [side, -side] {
-                        let line = [at(local + edge * radius + along * half_height), at(local + edge * radius - along * half_height)];
-                        if let [Some(a), Some(b)] = line {
-                            gizmo.outline.push(vec![a, b]);
-                            sides.push(a.lerp(b, 0.5));
-                        }
-                    }
-                    if let Some(side) = sides.into_iter().max_by(|a, b| a.x.total_cmp(&b.x)) {
-                        let mut across = [true; 3];
-                        across[axis] = false;
-                        gizmo.sizes.push(dot(side, across));
-                    }
+    /// A box of half size `size`: its edges, a dot on the corner up and right on screen that scales it evenly, and a double arrow on each face turned towards the camera that stretches it along that direction
+    fn box_handles(&mut self, at: impl Fn(Vec3) -> Option<Pos2>, size: Vec3, forward: Vec3, view: Rect) {
+        let local = self.local;
+        let corner = |index: usize| local + size * Vec3::new(sign(index, 0), sign(index, 1), sign(index, 2));
+        for first_corner in 0..BOX_CORNERS {
+            for bit in BOX_AXIS_BITS {
+                let second_corner = first_corner | bit;
+                if second_corner != first_corner
+                    && let (Some(from), Some(to)) = (at(corner(first_corner)), at(corner(second_corner)))
+                {
+                    self.outline.push(vec![from, to]);
                 }
             }
         }
-        Some(gizmo)
+
+        let corners = (0..BOX_CORNERS).filter_map(|index| at(corner(index)));
+        if let Some(top_right) = corners.max_by(|first, second| (first.x - first.y).total_cmp(&(second.x - second.y))) {
+            self.sizes.push(SizeHandle { at: kept_in(view, top_right), axes: [true; 3], along: None });
+        }
+        for (axis, direction) in self.directions().iter().enumerate() {
+            let toward = if direction.dot(forward) > 0.0 { -1.0 } else { 1.0 };
+            let Some(face) = at(local + Vec3::AXES[axis] * size * toward) else { continue };
+            let out = face - self.center;
+            if out.length() >= FACE_CLEARANCE {
+                self.sizes.push(SizeHandle { at: kept_in(view, face), axes: only_axis(axis), along: Some(out.normalized()) });
+            }
+        }
+    }
+
+    /// A sphere of `radius`: its silhouette across `facing` and its equator, and one dot on its right side (a sphere only scales evenly)
+    fn sphere_handles(&mut self, at: impl Fn(Vec3) -> Option<Pos2>, radius: f32, facing: Vec3, view: Rect) {
+        let local = self.local;
+        let (tangent, bitangent) = facing.any_orthonormal_pair();
+        let silhouette = circle(|unit| at(local + (tangent * unit.x + bitangent * unit.y) * radius));
+        if let Some(side) = silhouette.iter().copied().max_by(|first, second| first.x.total_cmp(&second.x)) {
+            self.sizes.push(SizeHandle { at: kept_in(view, side), axes: [true; 3], along: None });
+        }
+        self.outline.push(silhouette);
+        self.outline.push(circle(|unit| at(local + Vec3::new(unit.x, 0.0, unit.y) * radius)));
+    }
+
+    /// A cylinder round `axis` over a mesh of half sizes `half`: its caps and side lines, a double arrow on the top rim that stretches its height (seen end on, a dot) and a dot on its right side that scales it across
+    fn cylinder_handles(&mut self, at: impl Fn(Vec3) -> Option<Pos2>, axis: usize, half: Vec3, facing: Vec3, view: Rect) {
+        let local = self.local;
+        let along = Vec3::AXES[axis];
+        let (tangent, bitangent) = (Vec3::AXES[(axis + 1) % 3], Vec3::AXES[(axis + 2) % 3]);
+        let radius = (half * (Vec3::ONE - along)).max_element() * CYLINDER_REACH;
+        let half_height = half[axis] * CYLINDER_HEIGHT;
+        let cap = |height: f32| circle(|unit| at(local + along * height + (tangent * unit.x + bitangent * unit.y) * radius));
+        let top = cap(half_height);
+        let along_axis = match (at(local + along * half_height), at(local - along * half_height)) {
+            (Some(top), Some(bottom)) => Some(top - bottom).filter(|span| span.length() > MIN_SCREEN_SPAN).map(egui::Vec2::normalized),
+            _ => None,
+        };
+        if let Some(rim) = top.iter().copied().min_by(|first, second| first.y.total_cmp(&second.y)) {
+            self.sizes.push(SizeHandle { at: kept_in(view, rim), axes: only_axis(axis), along: along_axis });
+        }
+        self.outline.extend([top, cap(-half_height)]);
+
+        // The two side lines, where the round side turns away from the camera
+        let Some(side) = along.cross(facing - along * facing.dot(along)).try_normalize() else { return };
+        let mut sides = Vec::new();
+        for edge in [side, -side] {
+            if let (Some(top), Some(bottom)) = (at(local + edge * radius + along * half_height), at(local + edge * radius - along * half_height)) {
+                self.outline.push(vec![top, bottom]);
+                sides.push(top.lerp(bottom, 0.5));
+            }
+        }
+        if let Some(side) = sides.into_iter().max_by(|first, second| first.x.total_cmp(&second.x)) {
+            let mut across = [true; 3];
+            across[axis] = false;
+            self.sizes.push(SizeHandle { at: kept_in(view, side), axes: across, along: None });
+        }
     }
 
     /// A point in the projector's units, in the world
@@ -272,11 +268,11 @@ impl RoundGizmo {
 
     /// The `layer.fill.projection` params that slide the projector across the view from `from` to `to`, as its centre square does
     pub(crate) fn slid(&self, app: &TextureCraftApp, rect: Rect, from: Pos2, to: Pos2) -> Option<Value> {
-        self.edit(app, rect, RoundGrab::Slide, from, to)
+        self.params(app, rect, RoundGrab::Slide, from, to)
     }
 
-    /// The `layer.fill.projection` params a drag of `grab` from `from` to `to` sets
-    fn edit(&self, app: &TextureCraftApp, rect: Rect, grab: RoundGrab, from: Pos2, to: Pos2) -> Option<Value> {
+    /// The `layer.fill.projection` params a drag of `grab` from `from` to `to` sets; only a size handle sets the scale, so a mirrored axis keeps its sign through a slide or turn
+    fn params(&self, app: &TextureCraftApp, rect: Rect, grab: RoundGrab, from: Pos2, to: Pos2) -> Option<Value> {
         let origin = self.world(self.local);
         let (turn, stretch, center) = match grab {
             RoundGrab::Slide => {
@@ -299,11 +295,11 @@ impl RoundGizmo {
                 (turn, self.stretch, origin)
             }
             RoundGrab::Size(axes) => {
-                // How far the pointer went along the line from the centre through where the handle was grabbed
+                // How far the pointer went along the line from the centre through where the handle was grabbed; the command keeps the scale in its limits, so does the offset worked out here
                 let reach = from - self.center;
-                let scale = (to - self.center).dot(reach) / reach.length_sq().max(1.0);
+                let scale = (to - self.center).dot(reach) / reach.length_sq().max(MIN_HANDLE_REACH);
                 let stretch = Vec3::from(axes.map(|on| if on { scale } else { 1.0 })) * self.stretch;
-                (self.turn, stretch.clamp(Vec3::splat(MIN_STRETCH), Vec3::splat(MAX_STRETCH)), origin)
+                (self.turn, stretch.clamp(Vec3::splat(MIN_SCALE), Vec3::splat(MAX_PLACEMENT)), origin)
             }
         };
 
@@ -320,27 +316,60 @@ impl RoundGizmo {
         let mut params = self.target.target();
         params["offset"] = json!(offset.to_array());
         params["projectorRotation"] = json!(rotation);
-        params["projectorScale"] = json!(stretch.to_array());
+        if matches!(grab, RoundGrab::Size(_)) {
+            params["projectorScale"] = json!(stretch.to_array());
+        }
         Some(params)
+    }
+}
+
+impl Gizmo for RoundGizmo {
+    type Grab = RoundGrab;
+
+    fn drag_id() -> egui::Id {
+        drag_id()
+    }
+
+    fn grab(&self, p: Pos2) -> Option<RoundGrab> {
+        RoundGizmo::grab(self, p)
+    }
+
+    fn same_projection(&self, other: &RoundGizmo) -> bool {
+        self.target == other.target
+    }
+
+    fn edit(&self, app: &TextureCraftApp, rect: Rect, grab: RoundGrab, from: Pos2, to: Pos2) -> Option<(&'static str, Value)> {
+        Some(("layer.fill.projection", self.params(app, rect, grab, from, to)?))
     }
 }
 
 /// A size handle that stretches one way: a double arrow through `at` along `along`, `fill` over a dark halo like the axis arrows
 fn size_arrow(painter: &egui::Painter, at: Pos2, along: egui::Vec2, fill: Color32) {
-    let edge = Stroke::new(1.0, Color32::from_black_alpha(200));
     let side = along.rot90() * SIZE_ARROW_HEAD_HALF_WIDTH;
     let shaft = [at - along * (SIZE_ARROW - SIZE_ARROW_HEAD), at + along * (SIZE_ARROW - SIZE_ARROW_HEAD)];
     painter.line_segment(shaft, Stroke::new(SHAFT_WIDTH + HALO_EXTRA_WIDTH, HALO));
     painter.line_segment(shaft, Stroke::new(SHAFT_WIDTH, fill));
     for direction in [along, -along] {
         let base = at + direction * (SIZE_ARROW - SIZE_ARROW_HEAD);
-        painter.add(egui::Shape::convex_polygon(vec![at + direction * SIZE_ARROW, base + side, base - side], fill, edge));
+        painter.add(egui::Shape::convex_polygon(vec![at + direction * SIZE_ARROW, base + side, base - side], fill, HANDLE_EDGE));
     }
 }
 
 /// -1 or 1: bit `bit` of a box corner's index
 fn sign(index: usize, bit: usize) -> f32 {
     if index >> bit & 1 == 1 { 1.0 } else { -1.0 }
+}
+
+/// Which projector directions a handle along `axis` alone works on
+fn only_axis(axis: usize) -> [bool; 3] {
+    let mut axes = [false; 3];
+    axes[axis] = true;
+    axes
+}
+
+/// `point` kept inside `view`, where a handle past its edge can still be grabbed
+fn kept_in(view: Rect, point: Pos2) -> Pos2 {
+    point.clamp(view.min, view.max)
 }
 
 /// A closed circle of screen points from `at` (given the unit circle's points); empty when a point is off screen
@@ -366,65 +395,11 @@ fn on_view_plane(app: &TextureCraftApp, rect: Rect, origin: Vec3, forward: Vec3,
     hit.is_finite().then_some(hit)
 }
 
-/// Whether the pointer is over one of the selected projector's handles or dragging one (the brush cursor hides there and a press there doesn't paint)
-pub(crate) fn hovered(app: &TextureCraftApp, ui: &Ui, rect: Rect) -> bool {
-    let dragging = ui.ctx().data(|data| data.get_temp::<RoundDrag>(drag_id())).is_some();
-    dragging
-        || ui
-            .ctx()
-            .pointer_hover_pos()
-            .is_some_and(|hover| rect.contains(hover) && RoundGizmo::shown(app, rect).is_some_and(|gizmo| gizmo.grab(hover).is_some()))
-}
-
-/// Whether screen point `at` is on one of the selected projector's handles
-pub(crate) fn handle_at(app: &TextureCraftApp, rect: Rect, at: Pos2) -> bool {
-    rect.contains(at) && RoundGizmo::shown(app, rect).is_some_and(|gizmo| gizmo.grab(at).is_some())
-}
-
-/// Drags on the projector's handles (one undo step per drag, the projection updates live); returns whether a drag owns the pointer
-pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response, rect: Rect) -> bool {
-    let ctx = ui.ctx();
-    let gizmo = RoundGizmo::shown(app, rect);
-    let mut drag = ctx.data(|data| data.get_temp::<RoundDrag>(drag_id())).filter(|drag| gizmo.as_ref().is_some_and(|gizmo| gizmo.target == drag.start.target));
-    if response.drag_started_by(PointerButton::Primary)
-        && let (Some(gizmo), Some(from)) = (&gizmo, ctx.input(|input| input.pointer.press_origin()))
-        && let Some(grab) = gizmo.grab(from)
-    {
-        drag = Some(RoundDrag { grab, from, start: gizmo.clone(), stepped: false });
-    }
-
-    // A window that lost the focus gets no release: the drag ends there
-    let dragging = (response.dragged_by(PointerButton::Primary) || response.drag_started_by(PointerButton::Primary)) && !focus_lost(ctx);
-    let Some(mut drag) = drag.filter(|_| dragging) else {
-        let_go(ctx);
-        return false;
-    };
-
-    if let Some(pointer) = response.interact_pointer_pos().filter(|_| ctx.input(|input| input.pointer.delta() != egui::Vec2::ZERO))
-        && let Some(mut params) = drag.start.edit(app, rect, drag.grab, drag.from, pointer)
-    {
-        params["merge"] = json!(drag.stepped);
-        drag.stepped |= texturecraft_engine::execute(&mut app.session, "layer.fill.projection", &params).is_ok();
-
-        // The panel drew before this edit: one more frame shows its fields and preview where the projector is now
-        ctx.request_repaint();
-    }
-    ctx.data_mut(|data| data.insert_temp(drag_id(), drag));
-    true
-}
-
-/// Ends a projector drag under way where it is: its undo step stays one step
-pub(crate) fn let_go(ctx: &egui::Context) {
-    ctx.data_mut(|data| data.remove::<RoundDrag>(drag_id()));
-}
-
 /// The projector over the 3D view: dashed shape, rings, arrows, centre square and dots; the cursor shows what the handle under it does
-pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
-    let Some(gizmo) = RoundGizmo::shown(app, rect) else { return };
-
+pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect, gizmo: &RoundGizmo) {
     let tokens = Tokens::get(ui.ctx());
     let painter = ui.painter_at(rect);
-    let active = ui.ctx().data(|data| data.get_temp::<RoundDrag>(drag_id())).map(|drag| drag.grab);
+    let active = dragging::<RoundGizmo>(ui.ctx()).map(|drag| drag.grab);
 
     // A held Move on model button owns the cursor
     let hovered = ui.ctx().pointer_hover_pos().filter(|hover| rect.contains(*hover) && app.moving_on_model.is_none()).and_then(|hover| gizmo.grab(hover));
@@ -453,7 +428,7 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use egui::{Modifiers, vec2};
+    use egui::{Modifiers, PointerButton, vec2};
     use egui_kittest::kittest::Queryable;
     use texturecraft_engine::core::{LayerId, Projection, Projector};
 
@@ -519,8 +494,9 @@ pub(crate) mod tests {
         assert!(turned.rotation[2].abs() > 30.0 && turned.rotation[0].abs() < 1e-2, "{:?}", turned.rotation);
         assert!(gizmo(&harness).center.distance(moved.center) < 1.0, "turning keeps the centre");
 
-        let dot = gizmo(&harness).sizes[0].at;
-        let center = gizmo(&harness).center;
+        let scaling = gizmo(&harness);
+        let dot = scaling.sizes.iter().find(|size| size.axes == [true; 3]).expect("the even-scale dot").at;
+        let center = scaling.center;
         assert_eq!(gizmo(&harness).grab(dot), Some(RoundGrab::Size([true; 3])));
         drag(&mut harness, dot, center + (dot - center) * 1.5, Modifiers::NONE);
         let (scaled, _) = projector_and_offset(&projection(&harness, layer));
@@ -534,7 +510,8 @@ pub(crate) mod tests {
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (mut harness, layer) = fill_app("cylindrical");
         let cylinder = gizmo(&harness);
-        let SizeHandle { at: top, axes, along } = cylinder.sizes[0];
+        let height = cylinder.sizes.iter().find(|size| size.axes == [false, true, false]).expect("the height handle");
+        let SizeHandle { at: top, axes, along } = *height;
         assert_eq!(axes, [false, true, false], "the top handle works along the axis");
         let along = along.expect("the height handle is a double arrow");
         assert!(along.y.abs() > 0.99, "drawn upright, along the upright axis: {along:?}");
@@ -595,7 +572,7 @@ pub(crate) mod tests {
 
     /// Whether a projector drag is under way
     fn round_dragging(harness: &egui_kittest::Harness<'_, TextureCraftApp>) -> bool {
-        harness.ctx.data(|data| data.get_temp::<RoundDrag>(drag_id())).is_some()
+        dragging::<RoundGizmo>(&harness.ctx).is_some()
     }
 
     /// Losing the focus mid-drag (Alt+Tab) ends a projector drag as a release does: one undo step, and moves after it (egui still has the button down) leave the projector alone
@@ -767,6 +744,34 @@ pub(crate) mod tests {
             "and only across: {:?}",
             stretched.scale
         );
+    }
+
+    /// A projector a project file mirrors along X (a negative scale, as the projection reads it) stays mirrored through a slide and a turn, and the gizmo draws it mirrored
+    #[test]
+    fn a_mirrored_projector_keeps_its_mirror_through_a_slide_and_a_turn() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app("spherical");
+        let mirrored = [-1.0, 1.0, 1.0];
+        match &mut harness.state_mut().session.doc.project.layer_mut(layer).unwrap().kind {
+            texturecraft_engine::core::LayerKind::Fill(fill) => match &mut fill.projection {
+                Projection::Spherical { projector, .. } => projector.scale = mirrored,
+                other => panic!("a spherical projection: {other:?}"),
+            },
+            other => panic!("a fill layer: {other:?}"),
+        }
+        harness.run_steps(2);
+
+        let start = gizmo(&harness);
+        assert_eq!(start.stretch, Vec3::from(mirrored), "the gizmo reads the mirror as the projection does");
+        drag(&mut harness, start.center, start.center + vec2(30.0, -20.0), Modifiers::NONE);
+        let (slid, offset) = projector_and_offset(&projection(&harness, layer));
+        assert_eq!(slid.scale, mirrored, "a slide keeps the mirror");
+        assert!(offset.iter().any(|axis| axis.abs() > 0.05), "and slides it: {offset:?}");
+
+        let tip = gizmo(&harness).arrows[1].unwrap();
+        let center = gizmo(&harness).center;
+        drag(&mut harness, tip, tip + (tip - center).normalized() * 20.0, Modifiers::NONE);
+        assert_eq!(projector_and_offset(&projection(&harness, layer)).0.scale, mirrored, "so does a move along an arrow");
     }
 
     /// A plain left press on the projector's handle while a colour picker is open only closes the picker: no stroke, no slide, and the press after it works again

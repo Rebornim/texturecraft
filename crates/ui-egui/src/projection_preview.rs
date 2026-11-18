@@ -16,7 +16,8 @@ use texturecraft_engine::geom::glam::{Vec2, Vec3};
 
 use rayon::prelude::*;
 
-use crate::preview_outline::ProjectorOutline;
+use crate::projector_outline::ProjectorOutline;
+use crate::slot_thumbnail::FULL_UV;
 use crate::theme::Tokens;
 
 mod preview_shape;
@@ -31,43 +32,114 @@ use view::View;
 
 /// Largest preview side in pixels; the square is never drawn bigger than this
 const MAX_SIDE_PX: usize = 256;
+
 /// Rays per pixel along each axis (smooth outline)
 const SUPERSAMPLE: usize = 2;
+
 /// Rays per pixel along each axis while a drag is held: a quarter of the rays, so the square keeps up with the pointer; the full picture follows on release
 const DRAG_SUPERSAMPLE: usize = 1;
-/// Checker cells across one repeat of the source along each axis
-const CHECKER_CELLS: f32 = 4.0;
-/// Half the view's width and height, in mesh radii: as near as the view comes, and as far as it zooms out (the shape at half its size)
+
+/// Checker cells across one repeat of the source along each axis, in this square and in a warp's frame alike (an untiled, unturned image shows 4 × 4 cells), so a fill looks the same in both
+pub(crate) const CHECKER_CELLS: f32 = 4.0;
+
+/// Half the view's width and height, in mesh radii: as near as the view comes
 const VIEW_HALF: f32 = 1.0;
+
+/// Half the view's width and height as far as it zooms out, in mesh radii (the shape at half its size)
 const MAX_VIEW_HALF: f32 = 2.0;
+
 /// Room left round the projector when the view zooms out to it
 const FIT_MARGIN: f32 = 1.12;
+
 /// How far in front of the middle the rays start, in mesh radii (past every shape and every outline point tested for cover)
 const CAMERA_DISTANCE: f32 = 3.0;
+
 /// Screen length of the pieces an outline is split into to find its hidden parts (points)
 const OUTLINE_STEP: f32 = 3.0;
-/// The outline's dashes where the shape hides it, and the edge marker's dashes (points)
+
+/// The most pieces one outline segment is split into, however long it runs on screen
+const MAX_OUTLINE_PIECES: f32 = 256.0;
+
+/// The outline's dashes where the shape hides it (points)
 const HIDDEN_DASH: f32 = 3.0;
+
+/// The edge marker's dashes (points)
 const EDGE_DASH: f32 = 6.0;
-/// The edge marker's inset from the square's side, its chevron's arm and the dot at a planar's direction tip (points)
+
+/// The edge marker's inset from the square's side (points)
 const EDGE_INSET: f32 = 2.0;
+
+/// The edge marker's chevron arm (points)
 const CHEVRON_ARM: f32 = 5.0;
+
+/// The clear margin round the chevron, so the dashes and the shape stop short of it (points)
+const CHEVRON_PATCH_MARGIN: f32 = 1.5;
+
+/// The dot at a planar's direction tip (points)
 const TIP_DOT: f32 = 2.2;
-/// Camera turn around the up axis and down from level (degrees): three faces of the cube and the cylinder's top show
+
+/// How far the field-coloured rim under the tip dot reaches past it (points)
+const TIP_DOT_RIM: f32 = 0.8;
+
+/// The width of the field-coloured line under the outline, which keeps it readable on the checker (points)
+const OUTLINE_UNDER_WIDTH: f32 = 2.5;
+
+/// The width of the outline itself (points)
+const OUTLINE_WIDTH: f32 = 1.2;
+
+/// How strong the line under the outline and the outline show where the camera sees them
+const SEEN_SHADES: (f32, f32) = (0.55, 1.0);
+
+/// How strong the line under the outline and the outline show where the shape hides them: fainter
+const HIDDEN_SHADES: (f32, f32) = (0.35, 0.65);
+
+/// Points a point may lie past a side of the square and still count as inside it (a point on the side's pixel rounds either way)
+const PAST_SIDE_SLACK: f32 = 0.5;
+
+/// Camera turn around the up axis (degrees): three faces of the cube and the cylinder's top show
 const CAMERA_YAW: f32 = 35.0;
+
+/// Camera turn down from level (degrees)
 const CAMERA_PITCH: f32 = 25.0;
+
+/// Where the light comes from, along the view's right, up and towards the eye: above and to the left of the camera
+const LIGHT_FROM: [f32; 3] = [-0.5, 0.6, 0.6];
+
 /// Light that reaches faces turned away from the light
 const AMBIENT: f32 = 0.3;
-/// Shapes in mesh radii, inside the unit sphere the compositor's coordinates span
+
+/// The sphere's radius, in mesh radii, inside the unit sphere the compositor's coordinates span
 const SPHERE_RADIUS: f32 = 0.85;
+
+/// The cylinder's radius, in mesh radii
 const CYLINDER_RADIUS: f32 = 0.55;
+
+/// Half the cylinder's height, in mesh radii
 const CYLINDER_HALF_HEIGHT: f32 = 0.7;
+
+/// Half the cube's side, in mesh radii
 const CUBE_HALF: f32 = 0.55;
-/// Checker shades, as fractions of the way from `field` to `text`
+
+/// The checker's dark cells, as a fraction of the way from `field` to `text`
 const CHECKER_DARK: f32 = 0.12;
+
+/// The checker's light cells, as a fraction of the way from `field` to `text`
 const CHECKER_LIGHT: f32 = 1.0;
+
 /// The shape where the projection does not reach, as a fraction of the way from `field` to `text`
 const UNCOVERED: f32 = 0.45;
+
+/// How much of the projection reaches a ray past which it counts as covered, for the edge of its reach
+const HALF_COVERED: f32 = 0.5;
+
+/// How far a ray on the edge of the projection's reach is drawn from the accent towards the shape's colour
+const EDGE_BLEND: f32 = 0.5;
+
+/// The smallest model radius and frame half size the preview divides by, in mesh units and mesh radii
+const MIN_SIZE: f32 = 1e-4;
+
+/// A ray this close to parallel to a face or the cylinder's axis never meets it
+const PARALLEL_TOLERANCE: f32 = 1e-6;
 
 /// Draw the preview of `projection` on a mesh within `bounds` into `rect`, rendered once per projection, size and theme, with a quarter of the rays while a drag is held (None for projections without one: UV, warp)
 pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Projection, bounds: (Vec3, Vec3), tokens: &Tokens) -> Option<()> {
@@ -100,7 +172,7 @@ pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Pro
             texture
         }
     };
-    painter.image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    painter.image(texture.id(), rect, FULL_UV, Color32::WHITE);
     if let Some(outline) = &outline {
         let painter = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
         let screen = Screen { view: View::new(), rect, half };
@@ -133,8 +205,8 @@ fn shown_projection(projection: &Projection, bounds: (Vec3, Vec3)) -> Option<Pro
             let Projection::Planar { placed: Some(frame), projector, .. } = &landed else { return None };
 
             // The sphere stands for the model: its radius is the model's largest half size
-            let radius = ((bounds.1 - bounds.0) * 0.5).max_element().max(1e-4);
-            let half = frame.size.map(|side| (SPHERE_RADIUS * side / (2.0 * radius)).max(1e-4));
+            let radius = ((bounds.1 - bounds.0) * 0.5).max_element().max(MIN_SIZE);
+            let half = frame.size.map(|side| (SPHERE_RADIUS * side / (2.0 * radius)).max(MIN_SIZE));
             let turn = upright_turn(frame).unwrap_or(0.0);
 
             // Slid across its own plane away from the mesh's centre: off the sphere's middle by as much
@@ -186,8 +258,8 @@ fn view_half(outline: Option<&ProjectorOutline>) -> f32 {
 
 /// The outline's line in the text colour and the field-coloured line under it that keeps it readable on the checker, as the 3D view's gizmo draws its white outline on a dark shadow (the square's field is light in the light themes); fainter where the shape hides it
 fn outline_strokes(hidden: bool, tokens: &Tokens) -> [Stroke; 2] {
-    let (under, over) = if hidden { (0.35, 0.65) } else { (0.55, 1.0) };
-    [Stroke::new(2.5, tokens.field.gamma_multiply(under)), Stroke::new(1.2, tokens.text.gamma_multiply(over))]
+    let (under, over) = if hidden { HIDDEN_SHADES } else { SEEN_SHADES };
+    [Stroke::new(OUTLINE_UNDER_WIDTH, tokens.field.gamma_multiply(under)), Stroke::new(OUTLINE_WIDTH, tokens.text.gamma_multiply(over))]
 }
 
 /// The projector outline over the preview: solid where the camera sees it, dashed where the shape hides it, a dot where a planar's image travels to
@@ -197,7 +269,7 @@ fn draw_outline(painter: &Painter, screen: &Screen, shape: PreviewShape, outline
         let mut runs: Vec<(bool, Vec<Pos2>)> = Vec::new();
         for pair in line.windows(2) {
             let [from, to] = [pair[0], pair[1]];
-            let pieces = ((screen.at(to) - screen.at(from)).length() / OUTLINE_STEP).ceil().clamp(1.0, 256.0) as usize;
+            let pieces = ((screen.at(to) - screen.at(from)).length() / OUTLINE_STEP).ceil().clamp(1.0, MAX_OUTLINE_PIECES) as usize;
             for piece in 0..pieces {
                 let (start, end) = (from.lerp(to, piece as f32 / pieces as f32), from.lerp(to, (piece + 1) as f32 / pieces as f32));
                 let hidden = screen.hidden(shape, start.lerp(end, 0.5));
@@ -219,16 +291,16 @@ fn draw_outline(painter: &Painter, screen: &Screen, shape: PreviewShape, outline
     }
     if let Some(tip) = outline.tip {
         let [under, over] = outline_strokes(false, tokens);
-        painter.circle_filled(screen.at(tip), TIP_DOT + 0.8, under.color);
+        painter.circle_filled(screen.at(tip), TIP_DOT + TIP_DOT_RIM, under.color);
         painter.circle_filled(screen.at(tip), TIP_DOT, over.color);
     }
 }
 
 /// The sides of `rect` some of `points` lie past: left, right, top, bottom
 pub(crate) fn passed_sides(points: impl Iterator<Item = Pos2>, rect: Rect) -> [bool; 4] {
-    let past = 0.5;
-    points.fold([false; 4], |[left, right, top, bottom], p| {
-        [left || p.x < rect.left() - past, right || p.x > rect.right() + past, top || p.y < rect.top() - past, bottom || p.y > rect.bottom() + past]
+    let outer = rect.expand(PAST_SIDE_SLACK);
+    points.fold([false; 4], |[left, right, top, bottom], point| {
+        [left || point.x < outer.left(), right || point.x > outer.right(), top || point.y < outer.top(), bottom || point.y > outer.bottom()]
     })
 }
 
@@ -256,7 +328,7 @@ pub(crate) fn edge_markers(painter: &Painter, rect: Rect, sides: [bool; 4], toke
         }
 
         // The chevron on a clear patch, so the dashes and the shape do not run through it
-        let patch = Rect::from_points(&chevron).expand(1.5);
+        let patch = Rect::from_points(&chevron).expand(CHEVRON_PATCH_MARGIN);
         painter.rect_filled(patch, 0, tokens.field);
         for stroke in outline_strokes(false, tokens) {
             painter.add(Shape::line(chevron.clone(), stroke));
@@ -264,6 +336,7 @@ pub(crate) fn edge_markers(painter: &Painter, rect: Rect, sides: [bool; 4], toke
     }
 }
 
+/// The shape the preview shows `projection` on: a cylinder for a cylindrical, a cube for a tri-planar, else a sphere
 fn shape_for(projection: &Projection) -> PreviewShape {
     match projection {
         Projection::Cylindrical { .. } => PreviewShape::Cylinder,
@@ -276,7 +349,8 @@ fn shape_for(projection: &Projection) -> PreviewShape {
 fn render(projection: &Projection, side: usize, half: f32, supersample: usize, tokens: &Tokens) -> ColorImage {
     let shape = shape_for(projection);
     let View { eye, forward, right, up } = View::new();
-    let light = (-0.5 * right + 0.6 * up + 0.6 * eye).normalize_or_zero();
+    let [light_right, light_up, light_eye] = LIGHT_FROM;
+    let light = (light_right * right + light_up * up + light_eye * eye).normalize_or_zero();
 
     let field = tokens.field;
     let (background, text) = (linear(field), linear(tokens.text));
@@ -307,7 +381,7 @@ fn render(projection: &Projection, side: usize, half: f32, supersample: usize, t
         for sub in 0..supersample * supersample {
             let (rx, ry) = (x * supersample + sub % supersample, y * supersample + sub / supersample);
             let color = match samples.get(ry * rays + rx).copied().flatten() {
-                Some((color, cover)) if on_edge(&samples, rays, rx, ry, cover) => edge.lerp(color, 0.5),
+                Some((color, cover)) if on_edge(&samples, rays, rx, ry, cover) => edge.lerp(color, EDGE_BLEND),
                 Some((color, _)) => color,
                 None => background,
             };
@@ -320,12 +394,14 @@ fn render(projection: &Projection, side: usize, half: f32, supersample: usize, t
 
 /// Where the projection's reach ends on the shape: covered here, not on a neighbouring ray of the shape
 fn on_edge(samples: &[Option<(Vec3, f32)>], rays: usize, x: usize, y: usize, cover: f32) -> bool {
-    if cover <= 0.5 {
+    if cover <= HALF_COVERED {
         return false;
     }
 
     let neighbours = [(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)];
-    neighbours.into_iter().any(|(nx, ny)| nx < rays && ny < rays && samples.get(ny * rays + nx).copied().flatten().is_some_and(|(_, cover)| cover <= 0.5))
+    neighbours
+        .into_iter()
+        .any(|(nx, ny)| nx < rays && ny < rays && samples.get(ny * rays + nx).copied().flatten().is_some_and(|(_, cover)| cover <= HALF_COVERED))
 }
 
 /// The unlit colour at a hit and how much of the projection reaches it, from the dark and light checker and the uncovered shape `shades` in linear light
@@ -344,73 +420,84 @@ fn surface(projection: &Projection, hit: &Coords, shades: [Vec3; 3]) -> (Vec3, f
 /// The nearest hit of the ray from `origin` along unit `dir` on the preview shape
 fn intersect(shape: PreviewShape, origin: Vec3, dir: Vec3) -> Option<Coords> {
     match shape {
-        PreviewShape::Sphere => {
-            let b = origin.dot(dir);
-            let c = origin.length_squared() - SPHERE_RADIUS * SPHERE_RADIUS;
-            let disc = b * b - c;
-            if disc < 0.0 {
+        PreviewShape::Sphere => intersect_sphere(origin, dir),
+        PreviewShape::Cube => intersect_cube(origin, dir),
+        PreviewShape::Cylinder => intersect_cylinder(origin, dir),
+    }
+}
+
+/// The nearer hit of the ray from `ray_origin` along unit `ray_dir` on the sphere round the middle
+fn intersect_sphere(ray_origin: Vec3, ray_dir: Vec3) -> Option<Coords> {
+    // |origin + t·dir|² = r², with |dir| = 1: t² + 2·half_b·t + c = 0
+    let half_b = ray_origin.dot(ray_dir);
+    let c = ray_origin.length_squared() - SPHERE_RADIUS * SPHERE_RADIUS;
+    let discriminant = half_b * half_b - c;
+    if discriminant < 0.0 {
+        return None;
+    }
+
+    let point = ray_origin + ray_dir * (-half_b - discriminant.sqrt());
+    Some(hit(point, point.normalize_or_zero()))
+}
+
+/// Where the ray from `ray_origin` along `ray_dir` enters the cube round the middle: the latest of the three slabs' entries, before the earliest exit
+fn intersect_cube(ray_origin: Vec3, ray_dir: Vec3) -> Option<Coords> {
+    let (mut near, mut far, mut nrm) = (f32::NEG_INFINITY, f32::INFINITY, Vec3::ZERO);
+    for axis in 0..3 {
+        let (start, along) = (ray_origin[axis], ray_dir[axis]);
+        if along.abs() < PARALLEL_TOLERANCE {
+            if start.abs() > CUBE_HALF {
                 return None;
             }
 
-            let pos = origin + dir * (-b - disc.sqrt());
-            Some(hit(pos, pos.normalize_or_zero()))
+            continue;
         }
-        PreviewShape::Cube => {
-            let (mut near, mut far, mut nrm) = (f32::NEG_INFINITY, f32::INFINITY, Vec3::ZERO);
-            for axis in 0..3 {
-                let (o, d) = (origin[axis], dir[axis]);
-                if d.abs() < 1e-6 {
-                    if o.abs() > CUBE_HALF {
-                        return None;
-                    }
 
-                    continue;
-                }
-
-                let (t0, t1) = ((-CUBE_HALF - o) / d, (CUBE_HALF - o) / d);
-                let (enter, exit) = (t0.min(t1), t0.max(t1));
-                if enter > near {
-                    near = enter;
-                    nrm = Vec3::ZERO;
-                    nrm[axis] = -d.signum();
-                }
-                far = far.min(exit);
-            }
-            (near <= far && near.is_finite()).then(|| hit(origin + dir * near, nrm))
+        let (low_face, high_face) = ((-CUBE_HALF - start) / along, (CUBE_HALF - start) / along);
+        let (enter, exit) = (low_face.min(high_face), low_face.max(high_face));
+        if enter > near {
+            near = enter;
+            nrm = Vec3::ZERO;
+            nrm[axis] = -along.signum();
         }
-        PreviewShape::Cylinder => {
-            let mut best: Option<(f32, Coords)> = None;
-            let mut keep = |t: f32, hit: Coords| {
-                if t > 0.0 && best.as_ref().is_none_or(|(best_t, _)| t < *best_t) {
-                    best = Some((t, hit));
-                }
-            };
+        far = far.min(exit);
+    }
+    (near <= far && near.is_finite()).then(|| hit(ray_origin + ray_dir * near, nrm))
+}
 
-            // The side: x² + z² = r² within the height
-            let (a, b) = (dir.x * dir.x + dir.z * dir.z, origin.x * dir.x + origin.z * dir.z);
-            let c = origin.x * origin.x + origin.z * origin.z - CYLINDER_RADIUS * CYLINDER_RADIUS;
-            let disc = b * b - a * c;
-            if a > 1e-6 && disc >= 0.0 {
-                let t = (-b - disc.sqrt()) / a;
-                let pos = origin + dir * t;
-                if pos.y.abs() <= CYLINDER_HALF_HEIGHT {
-                    keep(t, hit(pos, Vec3::new(pos.x, 0.0, pos.z).normalize_or_zero()));
-                }
-            }
+/// The nearest hit in front of `ray_origin` along `ray_dir` on the upright cylinder round the middle: its side or one of its caps
+fn intersect_cylinder(ray_origin: Vec3, ray_dir: Vec3) -> Option<Coords> {
+    let mut best: Option<(f32, Coords)> = None;
+    let mut keep = |distance: f32, hit: Coords| {
+        if distance > 0.0 && best.as_ref().is_none_or(|(best_distance, _)| distance < *best_distance) {
+            best = Some((distance, hit));
+        }
+    };
 
-            // The caps
-            if dir.y.abs() > 1e-6 {
-                for sign in [1.0, -1.0] {
-                    let t = (sign * CYLINDER_HALF_HEIGHT - origin.y) / dir.y;
-                    let pos = origin + dir * t;
-                    if pos.x * pos.x + pos.z * pos.z <= CYLINDER_RADIUS * CYLINDER_RADIUS {
-                        keep(t, hit(pos, Vec3::Y * sign));
-                    }
-                }
-            }
-            best.map(|(_, hit)| hit)
+    // The side: x² + z² = r² within the height, a·t² + 2·half_b·t + c = 0
+    let a = ray_dir.x * ray_dir.x + ray_dir.z * ray_dir.z;
+    let half_b = ray_origin.x * ray_dir.x + ray_origin.z * ray_dir.z;
+    let c = ray_origin.x * ray_origin.x + ray_origin.z * ray_origin.z - CYLINDER_RADIUS * CYLINDER_RADIUS;
+    let discriminant = half_b * half_b - a * c;
+    if a > PARALLEL_TOLERANCE && discriminant >= 0.0 {
+        let distance = (-half_b - discriminant.sqrt()) / a;
+        let point = ray_origin + ray_dir * distance;
+        if point.y.abs() <= CYLINDER_HALF_HEIGHT {
+            keep(distance, hit(point, Vec3::new(point.x, 0.0, point.z).normalize_or_zero()));
         }
     }
+
+    // The caps
+    if ray_dir.y.abs() > PARALLEL_TOLERANCE {
+        for sign in [1.0, -1.0] {
+            let distance = (sign * CYLINDER_HALF_HEIGHT - ray_origin.y) / ray_dir.y;
+            let point = ray_origin + ray_dir * distance;
+            if point.x * point.x + point.z * point.z <= CYLINDER_RADIUS * CYLINDER_RADIUS {
+                keep(distance, hit(point, Vec3::Y * sign));
+            }
+        }
+    }
+    best.map(|(_, hit)| hit)
 }
 
 /// A shape point the camera sees, in the compositor's coordinates (no texture coordinates)
@@ -418,11 +505,13 @@ fn hit(pos: Vec3, nrm: Vec3) -> Coords {
     Coords { uv: Vec2::ZERO, pos, nrm }
 }
 
+/// `color` in linear light
 fn linear(color: Color32) -> Vec3 {
     let rgba = egui::Rgba::from(color);
     Vec3::new(rgba.r(), rgba.g(), rgba.b())
 }
 
+/// A linear-light `color` back as a display colour
 fn from_linear(color: Vec3) -> Color32 {
     egui::Rgba::from_rgb(color.x, color.y, color.z).into()
 }

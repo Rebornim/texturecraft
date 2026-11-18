@@ -1081,14 +1081,11 @@ fn symmetry_from(p: &Value, cmd: &str, current: FillSymmetry) -> Result<FillSymm
         let (fewest, most) = (u64::from(*FillSymmetry::COUNTS.start()), u64::from(*FillSymmetry::COUNTS.end()));
         symmetry.count = u32::try_from(count.clamp(fewest, most)).unwrap_or(*FillSymmetry::COUNTS.start());
     }
-    symmetry.span = f32p(p, "angleSpan").map_or(symmetry.span, |span| span.clamp(MIN_ANGLE_SPAN, FULL_TURN_DEGREES));
+    symmetry.span = f32p(p, "angleSpan").map_or(symmetry.span, |span| span.clamp(*FillSymmetry::SPANS.start(), *FillSymmetry::SPANS.end()));
     Ok(symmetry)
 }
 
-/// The narrowest a radial symmetry's copies may spread, in degrees
-const MIN_ANGLE_SPAN: f32 = 1.0;
-
-/// `key` as `N` finite numbers clamped to `lo..=hi`: an array of `N`, or one number for all.
+/// `key` as `N` finite numbers clamped to `lo..=hi`: an array of `N`, or one number for all
 fn floats<const N: usize>(p: &Value, key: &str, lo: f32, hi: f32) -> Option<[f32; N]> {
     let one = |x: &Value| x.as_f64().map(|f| f as f32).filter(|f| f.is_finite()).map(|f| f.clamp(lo, hi));
     match p.get(key)? {

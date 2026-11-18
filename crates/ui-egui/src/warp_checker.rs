@@ -2,12 +2,12 @@
 
 use egui::Pos2;
 use texturecraft_engine::compose::pattern::FRAME_UV_CENTER;
+use texturecraft_engine::paint::FULL_TURN_DEGREES;
 
 use crate::fill_pictures::PREVIEW_MIN_TILES;
 use crate::placement::Placement;
+use crate::projection_preview::CHECKER_CELLS;
 
-/// Checker cells along each axis of one repeat of the image (an untiled, unturned image shows 4 × 4 cells across the frame)
-pub(crate) const CELLS_PER_TILE: f32 = 4.0;
 /// Most repeats drawn across the frame: beyond this the checker is too fine to read and too many cells to draw each frame
 const MAX_TILES: f32 = 6.0;
 
@@ -23,7 +23,7 @@ pub(crate) fn warp_checker(quad: [Pos2; 4], placement: Placement) -> Vec<(Vec<Po
 
     // The checker repeats every tile, so only the offset within one tile matters (and the cell numbers stay small)
     let offset = placement.offset.map(|offset| if offset.is_finite() { offset.rem_euclid(1.0) } else { 0.0 });
-    let rotation = if placement.rotation.is_finite() { placement.rotation.rem_euclid(360.0) } else { 0.0 };
+    let rotation = if placement.rotation.is_finite() { placement.rotation.rem_euclid(FULL_TURN_DEGREES) } else { 0.0 };
     let (sin, cos) = rotation.to_radians().sin_cos();
     let [middle_u, middle_v] = FRAME_UV_CENTER.to_array();
 
@@ -31,15 +31,15 @@ pub(crate) fn warp_checker(quad: [Pos2; 4], placement: Placement) -> Vec<(Vec<Po
     let to_cells = |[u, v]: [f32; 2]| -> [f32; 2] {
         let (u, v) = (u - middle_u, v - middle_v);
         let (x, y) = (u * cos - v * sin + middle_u, u * sin + v * cos + middle_v);
-        [(x * tiling[0] + offset[0]) * CELLS_PER_TILE, (y * tiling[1] + offset[1]) * CELLS_PER_TILE]
+        [(x * tiling[0] + offset[0]) * CHECKER_CELLS, (y * tiling[1] + offset[1]) * CHECKER_CELLS]
     };
     let to_frame = |[x, y]: [f32; 2]| -> [f32; 2] {
-        let (x, y) = ((x / CELLS_PER_TILE - offset[0]) / tiling[0] - middle_u, (y / CELLS_PER_TILE - offset[1]) / tiling[1] - middle_v);
+        let (x, y) = ((x / CHECKER_CELLS - offset[0]) / tiling[0] - middle_u, (y / CHECKER_CELLS - offset[1]) / tiling[1] - middle_v);
         [x * cos + y * sin + middle_u, -x * sin + y * cos + middle_v]
     };
     let corners = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]].map(to_cells);
-    let low = |axis: usize| corners.iter().map(|c| c[axis]).fold(f32::INFINITY, f32::min).floor() as i32;
-    let high = |axis: usize| corners.iter().map(|c| c[axis]).fold(f32::NEG_INFINITY, f32::max).ceil() as i32;
+    let low = |axis: usize| corners.iter().map(|corner| corner[axis]).fold(f32::INFINITY, f32::min).floor() as i32;
+    let high = |axis: usize| corners.iter().map(|corner| corner[axis]).fold(f32::NEG_INFINITY, f32::max).ceil() as i32;
     let mut cells = Vec::new();
 
     // One outline and one cutting buffer for every cell: only the drawn outlines are kept
@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn hostile_placements_draw_a_bounded_checker() {
         // The most cells a turned frame spans along an axis: its diagonal at the finest tiling, rounded out at both ends
-        let cells_per_axis = (MAX_TILES * CELLS_PER_TILE * std::f32::consts::SQRT_2).ceil() + 1.0;
+        let cells_per_axis = (MAX_TILES * CHECKER_CELLS * std::f32::consts::SQRT_2).ceil() + 1.0;
         let most_cells = (cells_per_axis * cells_per_axis) as usize;
         for placement in [
             Placement { tiling: [f32::NAN, 1e9], ..STILL },

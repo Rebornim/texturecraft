@@ -2,6 +2,8 @@
 
 use texturecraft_engine::core::Projection;
 
+use crate::i18n::n_;
+
 /// The projections a fill's Projection dropdown offers, with their command ids
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProjectionKind {
@@ -38,6 +40,7 @@ impl ProjectionKind {
         }
     }
 
+    /// The kind `projection` is, as the Projection dropdown lists it
     pub(crate) fn of(projection: &Projection) -> ProjectionKind {
         match projection {
             Projection::UvTile => ProjectionKind::UvTile,
@@ -52,7 +55,6 @@ impl ProjectionKind {
 
     /// The dropdown's name for it
     pub(crate) fn label(self) -> &'static str {
-        use crate::i18n::n_;
         match self {
             ProjectionKind::UvTile => n_("Fill (Match per UV Tile)"),
             ProjectionKind::Uv => n_("UV projection"),

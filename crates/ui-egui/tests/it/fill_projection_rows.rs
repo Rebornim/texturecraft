@@ -1,52 +1,29 @@
 //! A fill's Fill section shows the rows its projection has, and each new row changes the projection
 
-use egui::{Event, Modifiers, PointerButton, Pos2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::json;
-use texturecraft_engine::core::{LayerId, LayerKind, Projection, ShapeCrop};
+use texturecraft_engine::core::{Fill, LayerId, Projection, ShapeCrop};
 use texturecraft_ui_egui::TextureCraftApp;
 
-use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
-
-/// Tall enough that Properties shows the whole fill without scrolling
-const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1400.0);
+use crate::fill_support::{click_label, fill_app, fill_of};
+use crate::filter_support::click_at;
+use crate::{PROPERTIES_WINDOW, SETTLE_FRAMES};
 
 /// The app with a new fill layer (projected as `projection`) selected in Properties, and its layer id
 fn app_with_fill(projection: &str) -> (Harness<'static, TextureCraftApp>, u64) {
-    let mut session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();
-    let added = texturecraft_engine::execute(&mut session, "layer.add.fill", &json!({})).unwrap();
-    let layer = added["layer"].as_u64().unwrap();
-    texturecraft_engine::execute(&mut session, "layer.fill.projection", &json!({"layer": layer, "projection": projection})).unwrap();
-
-    let mut harness = Harness::builder().with_size(WINDOW_SIZE).build_eframe(|cc| TextureCraftApp::new(cc, session));
-
-    // The labels below are English; a first run would speak the system's language
-    harness.state_mut().ui.prefs.language = "en".into();
-    harness.run_steps(STARTUP_FRAMES);
+    let (harness, LayerId(layer)) = fill_app(json!({}), Some(projection), None, PROPERTIES_WINDOW);
     (harness, layer)
 }
 
 /// The fill layer's projection as the document holds it
 fn projection(harness: &Harness<'_, TextureCraftApp>, layer: u64) -> Projection {
-    match &harness.state().session.doc.project.layer(LayerId(layer)).unwrap().kind {
-        LayerKind::Fill(fill) => fill.projection.clone(),
-        other => panic!("not a fill: {other:?}"),
-    }
+    fill(harness, layer).projection
 }
 
-fn click(harness: &mut Harness<'_, TextureCraftApp>, label: &str) {
-    harness.get_by_label(label).click();
-    harness.run_steps(SETTLE_FRAMES);
-}
-
-/// Press and release the left button at `at` without moving
-fn click_at(harness: &mut Harness<'_, TextureCraftApp>, at: Pos2) {
-    harness.hover_at(at);
-    harness.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
-    harness.run_steps(1);
-    harness.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
-    harness.run_steps(SETTLE_FRAMES);
+/// The fill layer as the document holds it
+fn fill(harness: &Harness<'_, TextureCraftApp>, layer: u64) -> Fill {
+    fill_of(harness, LayerId(layer))
 }
 
 #[test]
@@ -84,8 +61,8 @@ fn each_projection_shows_its_own_rows() {
 #[test]
 fn culling_toggles_change_the_projection() {
     let (mut harness, layer) = app_with_fill("planar");
-    click(&mut harness, "Depth culling");
-    click(&mut harness, "Backface culling");
+    click_label(&mut harness, "Depth culling");
+    click_label(&mut harness, "Backface culling");
     let Projection::Planar { projector, .. } = projection(&harness, layer) else { panic!("still planar") };
     assert!(!projector.depth.on, "a new planar starts depth culled; the toggle turns it off");
     assert!(projector.backface.on);
@@ -156,8 +133,8 @@ fn shape_crop_sits_beside_its_label_and_a_warps_depth_explains_itself() {
 fn shape_crop_is_picked_from_its_list() {
     // Tri-planar's Shape crop sits highest in the panel, in view
     let (mut harness, layer) = app_with_fill("triplanar");
-    click(&mut harness, "Extends Outside Shape");
-    click(&mut harness, "Cropped to Shape");
+    click_label(&mut harness, "Extends Outside Shape");
+    click_label(&mut harness, "Cropped to Shape");
     let Projection::Triplanar { projector, .. } = projection(&harness, layer) else { panic!("still tri-planar") };
     assert_eq!(projector.crop, ShapeCrop::Cropped);
 }
@@ -166,11 +143,11 @@ fn shape_crop_is_picked_from_its_list() {
 fn triplanar_hardness_runs_from_soft_to_the_hardest_blend() {
     let (mut harness, layer) = app_with_fill("triplanar");
     let track = harness.get_by_label("Hardness").rect();
-    click_at(&mut harness, Pos2::new(track.right() - 1.0, track.center().y));
+    click_at(&mut harness, egui::pos2(track.right() - 1.0, track.center().y));
     let Projection::Triplanar { sharpness, .. } = projection(&harness, layer) else { panic!("still tri-planar") };
     assert!(sharpness > 48.0, "Hardness 1 is the hardest blend, 64: {sharpness}");
 
-    click_at(&mut harness, Pos2::new(track.left() + 1.0, track.center().y));
+    click_at(&mut harness, egui::pos2(track.left() + 1.0, track.center().y));
     let Projection::Triplanar { sharpness, .. } = projection(&harness, layer) else { panic!("still tri-planar") };
     assert!(sharpness < 1.5, "Hardness 0 is the softest, 1: {sharpness}");
 }
@@ -182,7 +159,7 @@ fn reset_frame_puts_a_warps_corners_back() {
     texturecraft_engine::execute(&mut harness.state_mut().session, "layer.fill.projection", &pulled).unwrap();
     harness.run_steps(SETTLE_FRAMES);
 
-    click(&mut harness, "Reset frame");
+    click_label(&mut harness, "Reset frame");
     let Projection::Warp { corners, .. } = projection(&harness, layer) else { panic!("still a warp") };
     assert_eq!(corners, Projection::FRAME_CORNERS);
 }
@@ -191,17 +168,9 @@ fn reset_frame_puts_a_warps_corners_back() {
 fn the_3d_projection_settings_fold_away() {
     let (mut harness, _) = app_with_fill("spherical");
     assert!(harness.query_by_label("Scale X").is_some(), "the band starts open");
-    click(&mut harness, "3D projection settings");
+    click_label(&mut harness, "3D projection settings");
     assert!(harness.query_by_label("Scale X").is_none());
     assert!(harness.query_by_label("Spherical projection").is_some(), "the rows above it stay");
-}
-
-/// The fill layer as the document holds it
-fn fill(harness: &Harness<'_, TextureCraftApp>, layer: u64) -> texturecraft_engine::core::Fill {
-    match &harness.state().session.doc.project.layer(LayerId(layer)).unwrap().kind {
-        LayerKind::Fill(fill) => fill.clone(),
-        other => panic!("not a fill: {other:?}"),
-    }
 }
 
 #[test]

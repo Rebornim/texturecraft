@@ -5,10 +5,10 @@ use egui::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::json;
-use texturecraft_engine::execute;
+use texturecraft_engine::{Tool, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 
-use crate::{BAKE_RESOLUTION, REDRAW_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+use crate::{BAKE_RESOLUTION, REDRAW_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION, click_at, click_widget};
 
 /// Short enough that a fill's Properties scrolls
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1000.0);
@@ -55,17 +55,11 @@ fn harness_sized(size: egui::Vec2) -> Harness<'static, TextureCraftApp> {
     harness
 }
 
-/// A press and release at `at`, as the pointer does
-fn click_at(harness: &mut Harness<'_, TextureCraftApp>, at: egui::Pos2) {
-    harness.drag_at(at);
-    harness.drop_at(at);
-    harness.run_steps(REDRAW_FRAMES);
-}
-
 /// Selects the Layers panel row labelled `name` by clicking it
 fn select_row(harness: &mut Harness<'_, TextureCraftApp>, name: &str) {
     let at = harness.get_by_label(name).rect().center();
     click_at(harness, at);
+    harness.run_steps(REDRAW_FRAMES);
 }
 
 /// Whether the docked jump tab `name` is the lit one, i.e. its section is in view
@@ -75,12 +69,25 @@ fn tab_lit(harness: &Harness<'_, TextureCraftApp>, name: &str) -> bool {
 
 #[test]
 fn coming_back_to_a_layer_lands_where_its_properties_were_scrolled() {
+    lands_where_each_layer_was_scrolled(harness());
+}
+
+#[test]
+fn a_greyed_polygon_fill_tool_keeps_each_layers_own_place() {
+    // Polygon fill can't fill a fill layer, so the layer's own sheet shows, and it keeps its own place as with any tool
     let mut harness = harness();
+    harness.state_mut().session.tool.tool = Tool::PolygonFill;
+    harness.run_steps(REDRAW_FRAMES);
+    lands_where_each_layer_was_scrolled(harness);
+}
+
+/// Scrolls Fill A down to MATERIAL, then checks a folder in between keeps it there and Fill B keeps its own place, the top
+fn lands_where_each_layer_was_scrolled(mut harness: Harness<'_, TextureCraftApp>) {
     select_row(&mut harness, "Fill A");
     assert!(tab_lit(&harness, "Fill"), "a fill never shown starts at the top");
 
-    let material = harness.get_by_role_and_label(Role::Tab, "Material").rect().center();
-    click_at(&mut harness, material);
+    click_widget(&mut harness, Role::Tab, "Material");
+    harness.run_steps(REDRAW_FRAMES);
     assert!(tab_lit(&harness, "Material"), "the jump scrolled down to MATERIAL");
 
     select_row(&mut harness, "Folder");

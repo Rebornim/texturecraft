@@ -8,7 +8,7 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::docking::{Dock, PROPERTIES_MIN_WIDTH};
 
-use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+use crate::{BAKE_RESOLUTION, DRAG_STEP_FRAMES, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION, panel_close_button};
 
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 960.0);
 
@@ -56,25 +56,24 @@ fn properties_title(harness: &Harness<'_, TextureCraftApp>) -> egui::Rect {
 /// Width of the Properties header bar, from its title's left edge to its close button's right edge
 fn properties_header_width(harness: &Harness<'_, TextureCraftApp>) -> f32 {
     let title = properties_title(harness);
-    let close = harness
-        .get_all_by_role(Role::Button)
-        .filter(|button| button.accesskit_node().label().as_deref() == Some("Close Panel"))
-        .map(|button| button.rect())
-        .filter(|close| close.min.x > title.max.x && title.y_range().contains(close.center().y))
-        .min_by(|a, b| a.min.x.total_cmp(&b.min.x))
-        .expect("the Properties close button");
-    close.max.x - title.min.x
+    panel_close_button(harness, title).max.x - title.min.x
 }
 
+/// Moves of a divider drag, so the dock follows the pointer as it does by hand
+const DRAG_MOVES: usize = 4;
+
+/// Drags with the primary button from `from` to `to` in [`DRAG_MOVES`] moves
 fn drag(harness: &mut Harness<'_, TextureCraftApp>, from: Pos2, to: Pos2) {
     harness.hover_at(from);
     harness.run_steps(1);
     harness.event(Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
-    harness.run_steps(2);
-    for step in 1..=4 {
-        harness.hover_at(from + (to - from) * (step as f32 / 4.0));
+    harness.run_steps(DRAG_STEP_FRAMES);
+
+    for step in 1..=DRAG_MOVES {
+        harness.hover_at(from + (to - from) * (step as f32 / DRAG_MOVES as f32));
         harness.run_steps(1);
     }
+
     harness.event(Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
     harness.run_steps(SETTLE_FRAMES);
 }

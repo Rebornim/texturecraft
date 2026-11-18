@@ -161,7 +161,7 @@ fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect:
     let (name, source) = if empty { (tr("Filter"), tr("None")) } else { (tr(filter.label()), tr("Filter")) };
     let slot = if empty { sheet.slot(&picture, name, source, None, false, false) } else { sheet.slot_restorable(&picture, name, source, changed) };
     if slot.clear {
-        app.run("effect.set", json!({"effect": effect.0, "filter": "none"}));
+        app.run("effect.set", json!({"effect": effect.0, "filter": texturecraft_engine::mask_cmds::EMPTY_FILTER}));
     }
     crate::filter_slot::picker(app, &slot.pick, effect.0, def.map(|def| def.id));
     slot.reset

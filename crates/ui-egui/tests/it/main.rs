@@ -117,6 +117,10 @@ mod symmetry;
 mod symmetry_2d;
 mod tile_generator_panel;
 
+use egui_kittest::Harness;
+use egui_kittest::kittest::{NodeT, Queryable};
+use texturecraft_ui_egui::TextureCraftApp;
+
 /// Window of the Properties tests: tall enough that a whole sheet shows without scrolling
 const PROPERTIES_WINDOW: egui::Vec2 = egui::vec2(1600.0, 1400.0);
 
@@ -179,4 +183,32 @@ fn assert_list_leaves_the_wheel_and_closes(
         harness.run_steps(DRAG_STEP_FRAMES);
     }
     assert!(!egui::Popup::is_any_open(&harness.ctx), "a click outside closes the list");
+}
+
+/// Presses and releases the primary button at `at` without moving, as a pointer click does
+fn click_at(harness: &mut Harness<'_, TextureCraftApp>, at: egui::Pos2) {
+    harness.hover_at(at);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        harness.run_steps(1);
+    }
+
+    harness.run_steps(SETTLE_FRAMES);
+}
+
+/// Clicks the middle of the widget with `role` and `label` through the pointer
+fn click_widget(harness: &mut Harness<'_, TextureCraftApp>, role: egui::Role, label: &str) {
+    let at = harness.get_by_role_and_label(role, label).rect().center();
+    click_at(harness, at);
+}
+
+/// The close button nearest the right of a docked panel's `title` (its tab or header title), on the same row
+fn panel_close_button(harness: &Harness<'_, TextureCraftApp>, title: egui::Rect) -> egui::Rect {
+    harness
+        .get_all_by_role(egui::Role::Button)
+        .filter(|button| button.accesskit_node().label().as_deref() == Some("Close Panel"))
+        .map(|button| button.rect())
+        .filter(|close| close.min.x > title.max.x && title.y_range().contains(close.center().y))
+        .min_by(|a, b| a.min.x.total_cmp(&b.min.x))
+        .expect("a close button right of the title")
 }

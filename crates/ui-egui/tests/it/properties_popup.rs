@@ -9,10 +9,35 @@ use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::properties_popup::{self, PropertiesPopup};
 use texturecraft_ui_egui::state::{Mode, ViewLayout};
 
+use crate::{BAKE_RESOLUTION, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+
+/// A common laptop window
+const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 960.0);
+
+/// Tall enough that the docked list ends before a fill's MATERIAL caption reaches its top
+const JUMP_TAB_WINDOW: egui::Vec2 = egui::vec2(1600.0, 1300.0);
+
+/// Width of the docked jump tab strip, from its Fill tab across its other two
+const DOCKED_STRIP_WIDTH: f32 = 300.0;
+
+/// Frames for a jump tab's scroll to land
+const JUMP_FRAMES: usize = 4;
+
+/// Frames for a selection made through the engine to show
+const SELECT_FRAMES: usize = 3;
+
 fn harness() -> Harness<'static, TextureCraftApp> {
-    let session = texturecraft_engine::sample_session(256, 64).unwrap();
-    let mut harness = Harness::builder().with_size(vec2(1600.0, 960.0)).build_eframe(|cc| TextureCraftApp::new(cc, session));
-    harness.run_steps(4);
+    harness_sized(WINDOW_SIZE)
+}
+
+/// The sample project's app in a window of `size`, speaking English
+fn harness_sized(size: egui::Vec2) -> Harness<'static, TextureCraftApp> {
+    let session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();
+    let mut harness = Harness::builder().with_size(size).build_eframe(|cc| TextureCraftApp::new(cc, session));
+
+    // The labels below are English; a first run would speak the system's language
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(STARTUP_FRAMES);
     harness
 }
 
@@ -164,30 +189,25 @@ fn tab_lit(harness: &Harness<'_, TextureCraftApp>, area: egui::Rect, name: &str)
 
 #[test]
 fn its_jump_tabs_scroll_to_a_section_and_light_it_without_moving_the_docked_panel() {
-    // Tall enough that the list ends before MATERIAL's caption reaches its top
-    let session = texturecraft_engine::sample_session(256, 64).unwrap();
-    let mut harness = Harness::builder().with_size(vec2(1600.0, 1300.0)).build_eframe(|cc| TextureCraftApp::new(cc, session));
-    harness.run_steps(4);
-    harness.state_mut().ui.prefs.language = "en".into();
+    let mut harness = harness_sized(JUMP_TAB_WINDOW);
     let fill = harness.state().session.doc.project.layers.values().find(|layer| matches!(layer.kind, LayerKind::Fill(_))).map(|layer| layer.id.0).unwrap();
     texturecraft_engine::execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": fill})).unwrap();
     texturecraft_engine::execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": fill, "projection": "uv"})).unwrap();
-    harness.run_steps(3);
+    harness.run_steps(SELECT_FRAMES);
 
     let center = view_center(&harness);
     click(&mut harness, PointerButton::Secondary, center);
     let popup = harness.ctx.memory(|memory| memory.area_rect(properties_popup::area_id())).unwrap();
     let docked_fill = harness.get_all_by_role_and_label(Role::Tab, "Fill").map(|tab| tab.rect()).find(|tab| !popup.contains_rect(*tab)).unwrap();
 
-    // The docked strip: from its Fill tab across its other two
-    let docked = egui::Rect::from_min_max(docked_fill.min, docked_fill.max + vec2(300.0, 0.0));
+    let docked = egui::Rect::from_min_max(docked_fill.min, docked_fill.max + vec2(DOCKED_STRIP_WIDTH, 0.0));
     let in_popup = |harness: &Harness<'_, TextureCraftApp>, label: &str| harness.query_all_by_label(label).any(|node| popup.contains_rect(node.rect()));
     assert!(tab_lit(&harness, popup, "Fill"), "it opens on Fill");
     assert!(in_popup(&harness, "UV projection"));
 
     let material = harness.get_all_by_role_and_label(Role::Tab, "Material").find(|tab| popup.contains_rect(tab.rect())).unwrap().rect().center();
     click(&mut harness, PointerButton::Primary, material);
-    harness.run_steps(4);
+    harness.run_steps(JUMP_FRAMES);
     assert!(is_open(&harness), "a tab click keeps it open");
     assert!(!in_popup(&harness, "UV projection"), "the list jumped down to MATERIAL");
     assert!(tab_lit(&harness, popup, "Material"), "the section in view is lit");

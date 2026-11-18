@@ -154,8 +154,7 @@ pub fn prefilter(env: &EnvImage, levels: u32) -> Vec<EnvImage> {
     out
 }
 
-/// Diffuse irradiance as 9 SH coefficients (already convolved with the cosine lobe and divided
-/// by π, so `Σ c·Y(n)` times albedo is the diffuse radiance).
+/// Diffuse irradiance as 9 SH coefficients, convolved with the cosine lobe and divided by π, so `Σ c·Y(n)` times albedo is the diffuse radiance
 pub fn sh9(env: &EnvImage) -> [[f32; 3]; 9] {
     environment_sky::sh9_averaged(env.width, env.height, |x, y| env.get(x as i64, y as i64))
 }

@@ -7,12 +7,10 @@ use serde_json::json;
 use texturecraft_engine::core::{Channel, LayerId, LayerKind, ProceduralKind, Source};
 use texturecraft_ui_egui::TextureCraftApp;
 
+use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION, click_at, click_widget};
+
 /// Tall enough that Properties shows a fill's cards and an open picker without scrolling the panel
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1600.0);
-const TEXTURE_RESOLUTION: u32 = 256;
-const BAKE_RESOLUTION: u32 = 64;
-const STARTUP_FRAMES: usize = 4;
-const SETTLE_FRAMES: usize = 3;
 /// Frames for the grid's scroll to the current tile to finish its animation
 const SCROLL_FRAMES: usize = 25;
 /// A channel slot low in the Material card, with too little room under it for the picker in [`WINDOW_SIZE`]
@@ -27,6 +25,10 @@ const OUTSIDE_THE_PICKER: egui::Vec2 = egui::vec2(-400.0, 0.0);
 const SNAPSHOT_WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1000.0);
 /// Frames for the hovered tile's fill to show before the snapshot
 const HOVER_FRAMES: usize = 8;
+/// A wheel turn over the 3D view, enough to zoom it
+const VIEW_WHEEL: egui::Vec2 = egui::vec2(0.0, 60.0);
+/// A wheel turn down over the grid, enough to scroll it past its first row
+const GRID_WHEEL: egui::Vec2 = egui::vec2(0.0, -400.0);
 
 /// The app with a new fill layer selected on its Material tab, the layer's id; `prepare` runs on the session first
 fn app_with_fill(prepare: impl FnOnce(&mut texturecraft_engine::Session, LayerId)) -> (Harness<'static, TextureCraftApp>, LayerId) {
@@ -39,8 +41,7 @@ fn app_with_fill(prepare: impl FnOnce(&mut texturecraft_engine::Session, LayerId
     // The labels below are English; a first run would speak the system's language
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(STARTUP_FRAMES);
-    harness.get_by_role_and_label(Role::Tab, "Material").click();
-    harness.run_steps(SETTLE_FRAMES);
+    click_widget(&mut harness, Role::Tab, "Material");
     (harness, layer)
 }
 
@@ -53,13 +54,12 @@ fn source(harness: &Harness<'_, TextureCraftApp>, layer: LayerId, channel: Chann
 
 /// Clicks the slot named `slot`, which opens or closes its picker
 fn click_slot(harness: &mut Harness<'_, TextureCraftApp>, slot: &str) {
-    harness.get_by_role_and_label(Role::ComboBox, slot).click();
-    harness.run_steps(SETTLE_FRAMES);
+    click_widget(harness, Role::ComboBox, slot);
 }
 
+/// Clicks the picker's tile labelled `label`
 fn click_tile(harness: &mut Harness<'_, TextureCraftApp>, label: &str) {
-    harness.get_by_role_and_label(Role::ListBoxOption, label).click();
-    harness.run_steps(SETTLE_FRAMES);
+    click_widget(harness, Role::ListBoxOption, label);
 }
 
 fn type_search(harness: &mut Harness<'_, TextureCraftApp>, text: &str) {
@@ -94,8 +94,7 @@ fn an_alpha_from_the_search_becomes_the_channels_source() {
     // The search field has the focus as the picker opens and searches every Resources group
     type_search(&mut harness, "crack");
     assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Clouds").is_none(), "the search hides what doesn't match");
-    harness.get_by_role_and_label(Role::Button, "Clear search").click();
-    harness.run_steps(SETTLE_FRAMES);
+    click_widget(&mut harness, Role::Button, "Clear search");
     assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Clouds").is_some(), "× clears the search");
     type_search(&mut harness, "crack");
 
@@ -130,8 +129,7 @@ fn the_anchor_points_tab_lists_the_stacks_anchors() {
     });
     let reader = harness.state().session.selected_layer().unwrap();
     click_slot(&mut harness, "Roughness");
-    harness.get_by_role_and_label(Role::Tab, "Anchor points").click();
-    harness.run_steps(SETTLE_FRAMES);
+    click_widget(&mut harness, Role::Tab, "Anchor points");
     assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Clouds").is_none(), "the tab shows anchors only");
 
     let anchor = harness.get_all_by_role(Role::ListBoxOption).find_map(|node| node.accesskit_node().label().filter(|label| label.contains("Edge wear")));
@@ -147,20 +145,10 @@ fn the_anchor_points_tab_lists_mask_anchor_points_by_name() {
     });
     let reader = harness.state().session.selected_layer().unwrap();
     click_slot(&mut harness, "Roughness");
-    harness.get_by_role_and_label(Role::Tab, "Anchor points").click();
-    harness.run_steps(SETTLE_FRAMES);
+    click_widget(&mut harness, Role::Tab, "Anchor points");
     let anchor = harness.get_all_by_role(Role::ListBoxOption).find_map(|node| node.accesskit_node().label().filter(|label| label.starts_with("Dirt mask")));
     click_tile(&mut harness, &anchor.expect("the mask anchor point below is offered under its own name"));
     assert!(matches!(source(&harness, reader, Channel::Roughness), Source::Anchor { .. }));
-}
-
-/// Press and release the primary button at `at` without moving
-fn click_at(harness: &mut Harness<'_, TextureCraftApp>, at: egui::Pos2) {
-    harness.hover_at(at);
-    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
-    harness.run_steps(1);
-    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
-    harness.run_steps(SETTLE_FRAMES);
 }
 
 #[test]
@@ -172,7 +160,7 @@ fn escape_or_a_click_outside_closes_it_and_the_wheel_still_zooms_the_view() {
     harness.hover_at(view);
     harness.event(egui::Event::MouseWheel {
         unit: egui::MouseWheelUnit::Point,
-        delta: egui::vec2(0.0, 60.0),
+        delta: VIEW_WHEEL,
         phase: egui::TouchPhase::Move,
         source: egui::MouseWheelSource::Wheel,
         modifiers: egui::Modifiers::NONE,
@@ -198,7 +186,7 @@ fn escape_or_a_click_outside_closes_it_and_the_wheel_still_zooms_the_view() {
     harness.hover_at(first_tile.center());
     harness.event(egui::Event::MouseWheel {
         unit: egui::MouseWheelUnit::Point,
-        delta: egui::vec2(0.0, -400.0),
+        delta: GRID_WHEEL,
         phase: egui::TouchPhase::Move,
         source: egui::MouseWheelSource::Wheel,
         modifiers: egui::Modifiers::NONE,
@@ -245,8 +233,7 @@ fn picker_above_its_slot_snapshot() {
     let mut harness = Harness::builder().with_size(SNAPSHOT_WINDOW_SIZE).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(STARTUP_FRAMES);
-    harness.get_by_role_and_label(Role::Tab, "Material").click();
-    harness.run_steps(SETTLE_FRAMES);
+    click_widget(&mut harness, Role::Tab, "Material");
     click_slot(&mut harness, "Roughness");
     harness.hover_at(harness.get_by_role_and_label(Role::ListBoxOption, FIRST_TILE).rect().center());
     harness.run_steps(HOVER_FRAMES);

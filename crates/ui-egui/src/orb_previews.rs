@@ -304,10 +304,15 @@ mod tests {
     fn a_new_image_under_a_cached_ones_name_and_size_gets_its_own_picture() {
         let ctx = Context::default();
         let place = Id::unique("orb");
-        let first = image_orb(Arc::new(ImageRes::new(2, 2, vec![[0.1; 4]; 4], false)));
+        let image = Arc::new(ImageRes::new(2, 2, vec![[0.1; 4]; 4], false));
+        let first = image_orb(Arc::clone(&image));
         draw_until_settled(&ctx, place, &first);
         let first_key = first.key;
         drop(first);
+
+        // The cached picture holds the image weakly, so its address stays taken however the allocator reuses blocks
+        assert!(Arc::weak_count(&image) >= 1, "the cached picture keeps the image's address");
+        drop(image);
 
         // Same name and size: the freed image's address must not come back to the cached picture's key
         let second = image_orb(Arc::new(ImageRes::new(2, 2, vec![[0.9; 4]; 4], false)));

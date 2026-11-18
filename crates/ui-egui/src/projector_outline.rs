@@ -1,7 +1,7 @@
 //! The projector a 3D projection's preview square draws round its object, as the 3D view's gizmo shows it round the model: a planar's frame with the dot its image travels to, a sphere's rim, equator and meridian, a tri-planar box or a cylinder
 
 use texturecraft_engine::compose::axis_frame::axis_frame;
-use texturecraft_engine::compose::pattern::decal_axes;
+use texturecraft_engine::compose::pattern::{cylinder_axis_index, decal_axes};
 use texturecraft_engine::core::Projection;
 use texturecraft_engine::geom::glam::{Vec2, Vec3};
 
@@ -22,9 +22,6 @@ const BOX_CORNERS: usize = 8;
 
 /// The bit of a box corner's index for each axis: flipping one walks along an edge
 const AXIS_BITS: [usize; 3] = [1, 2, 4];
-
-/// The last axis index, Z: a stored axis past it reads as Z
-const LAST_AXIS: u8 = 2;
 
 /// The projector's outline in the preview's coordinates (the compositor's: the mesh's centre at the origin, its half diagonal 1)
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -73,7 +70,7 @@ impl ProjectorOutline {
             }
             Projection::Cylindrical { axis, offset, projector, .. } => {
                 let place = Place::new(projector.rotation, projector.scale, Vec3::from(*offset), 1.0);
-                let axis = usize::from((*axis).min(LAST_AXIS));
+                let axis = cylinder_axis_index(*axis);
                 let along = Vec3::AXES[axis];
                 let (u, v) = (Vec3::AXES[(axis + 1) % Vec3::AXES.len()], Vec3::AXES[(axis + 2) % Vec3::AXES.len()]);
                 let radius = (object * (Vec3::ONE - along)).max_element() * CYLINDER_REACH;
@@ -155,6 +152,20 @@ mod tests {
         let triplanar = Projection::triplanar();
         assert_eq!(ProjectorOutline::of(&triplanar, Vec3::splat(0.55)).unwrap().lines.len(), 12, "a box's edges");
         assert!(ProjectorOutline::of(&Projection::UvTile, BALL).is_none());
+    }
+
+    #[test]
+    fn a_cylinder_axis_past_z_wraps_round_y_as_the_compositor_reads_it() {
+        let cylinder = |axis: u8| Projection::Cylindrical {
+            scale: 1.0,
+            axis,
+            uv: UvTransform::default(),
+            offset: [0.0; 3],
+            projector: Projector::default(),
+            angle: 360.0,
+        };
+        let object = Vec3::new(0.55, 0.7, 0.4);
+        assert_eq!(ProjectorOutline::of(&cylinder(3), object), ProjectorOutline::of(&cylinder(1), object));
     }
 
     #[test]

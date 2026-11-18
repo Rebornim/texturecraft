@@ -4,7 +4,7 @@ use serde_json::Value;
 use texturecraft_core::{Projection, Sampling};
 
 use crate::commands::{CommandSpec, has_layer};
-use crate::layer_cmds::{fill_target, new_unframed_projection, placement_mut};
+use crate::layer_cmds::{UNFRAMED_PROJECTION_IDS, fill_target, new_unframed_projection, placement_mut};
 use crate::{Result, Session, cmd};
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -26,16 +26,17 @@ pub fn reset_sampling(current: Sampling) -> Sampling {
 
 /// The defaults of `current`'s projection kind: a new fill's projection of that kind, with the frame a placed planar or a warp projects from kept
 pub fn reset_projection_of(current: &Projection) -> Projection {
-    let id = match current {
-        Projection::Uv { .. } => "uv",
-        Projection::UvTile => "uvTile",
-        Projection::Triplanar { .. } => "triplanar",
-        Projection::Planar { .. } => "planar",
-        Projection::Spherical { .. } => "spherical",
-        Projection::Cylindrical { .. } => "cylindrical",
-        Projection::Warp { frame, .. } => return Projection::warp(*frame),
-    };
-    let mut fresh = new_unframed_projection(id).unwrap_or_default();
+    if let Projection::Warp { frame, .. } = current {
+        return Projection::warp(*frame);
+    }
+
+    // The new projection of the same kind; one no id makes (none today) stays as it is
+    let same_kind = UNFRAMED_PROJECTION_IDS
+        .iter()
+        .filter_map(|id| new_unframed_projection(id))
+        .find(|fresh| std::mem::discriminant(fresh) == std::mem::discriminant(current));
+    let Some(mut fresh) = same_kind else { return current.clone() };
+
     if let (Projection::Planar { placed, .. }, Projection::Planar { placed: Some(frame), .. }) = (&mut fresh, current) {
         *placed = Some(*frame);
     }
@@ -61,4 +62,41 @@ fn reset_projection(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     Ok(Value::Null)
+}
+
+#[cfg(test)]
+mod tests {
+    use texturecraft_core::{Decal, Projector};
+
+    use super::*;
+
+    #[test]
+    fn every_projection_kind_resets_to_its_own_kind() {
+        let frame = Decal {
+            center: [0.0; 3],
+            normal: [0.0, 0.0, 1.0],
+            up: [0.0, 1.0, 0.0],
+            size: [1.0, 1.0],
+            rotation: 0.0,
+            offset: [0.0; 2],
+            depth: 0.5,
+            symmetry: None,
+            flip: [false; 2],
+        };
+        let mut kinds: Vec<Projection> = UNFRAMED_PROJECTION_IDS.iter().filter_map(|id| new_unframed_projection(id)).collect();
+        assert_eq!(kinds.len(), UNFRAMED_PROJECTION_IDS.len(), "every listed id makes a projection");
+
+        kinds.extend([Projection::warp(frame), Projection::decal(frame)]);
+        for kind in kinds {
+            let turned = match kind.clone() {
+                Projection::Planar { scale, axis, offset, uv, placed, .. } => {
+                    Projection::Planar { scale: scale * 2.0, axis, offset, uv, placed, projector: Projector { rotation: [10.0; 3], ..Projector::default() } }
+                }
+                other => other,
+            };
+            let reset = reset_projection_of(&turned);
+            assert_eq!(std::mem::discriminant(&reset), std::mem::discriminant(&kind), "{kind:?}");
+            assert_eq!(reset.frame(), kind.frame(), "the frame stays where it is placed");
+        }
+    }
 }

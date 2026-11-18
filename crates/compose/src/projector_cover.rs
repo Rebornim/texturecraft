@@ -3,12 +3,16 @@
 use texturecraft_core::{Backface, Decal, DecalFlip, Projection, Projector, ShapeCrop};
 use texturecraft_geom::glam::{Vec2, Vec3};
 
+use crate::frame_placement::warp_reach;
 use crate::organic::smoothstep;
 use crate::pattern::{Coords, depth_fade, frame_crop, frame_facing, frame_local, placed_uv, projector_local};
 use crate::warp::warp_uv;
 
 /// Nearer a cylinder's axis than this a texel has no outward direction, so it counts as facing out
 const MIN_AXIS_DISTANCE: f32 = 1e-6;
+
+/// The turn (in cosine) over which backface culling fades at hardness 0
+const BACKFACE_FADE: f32 = 0.6;
 
 /// The shape crop and backface culling [`projector_cover`] applies, None where it lets every texel through
 fn cropping_projector(proj: &Projection) -> Option<&Projector> {
@@ -28,21 +32,21 @@ pub fn projector_covers_all(proj: &Projection) -> bool {
     cropping_projector(proj).is_none()
 }
 
-/// How much of the texel at `c` the projection reaches through its shape crop and backface culling
-pub fn projector_cover(proj: &Projection, c: &Coords) -> f32 {
+/// How much of the texel at `coords` the projection reaches through its shape crop and backface culling; not for placed planars or warps (see [`framed_cover`])
+pub fn projector_cover(proj: &Projection, coords: &Coords) -> f32 {
     let Some(projector) = cropping_projector(proj) else { return 1.0 };
 
-    let local = projector_local(projector, c);
+    let local = projector_local(projector, coords);
     let (inside, facing) = match proj {
         Projection::Triplanar { .. } => (local.pos.abs().max_element() <= 1.0, None),
         Projection::Planar { scale, axis, offset, .. } => {
-            let p = local.pos * *scale + Vec3::from(*offset);
+            let scaled = local.pos * *scale + Vec3::from(*offset);
 
             // The frame across the axis, and the side the image reads the right way round from
             let (frame, facing) = match axis {
-                0 => (p.z.abs().max(p.y.abs()), -local.nrm.x),
-                1 => (p.x.abs().max(p.z.abs()), local.nrm.y),
-                _ => (p.x.abs().max(p.y.abs()), local.nrm.z),
+                0 => (scaled.z.abs().max(scaled.y.abs()), -local.nrm.x),
+                1 => (scaled.x.abs().max(scaled.z.abs()), local.nrm.y),
+                _ => (scaled.x.abs().max(scaled.y.abs()), local.nrm.z),
             };
             (frame <= 1.0, Some(facing))
         }
@@ -73,6 +77,11 @@ pub fn projector_cover(proj: &Projection, c: &Coords) -> f32 {
 
 /// How much a face turned `facing` (the cosine of its turn from the projection) keeps
 pub fn backface_cover(backface: &Backface, facing: f32) -> f32 {
+    // A hand-edited NaN angle or hardness keeps the layer visible rather than making its texels NaN
+    if !(backface.angle.is_finite() && backface.hardness.is_finite()) {
+        return 1.0;
+    }
+
     // cos(angle) as sin(90 - angle): exactly 0 at 90 degrees
     let threshold = (90.0 - backface.angle).to_radians().sin();
     let width = (1.0 - backface.hardness.clamp(0.0, 1.0)) * BACKFACE_FADE;
@@ -142,12 +151,9 @@ pub fn warp_cover(frame: &Decal, corners: &[[f32; 2]; 4], depth: f32, projector:
     }
 
     let inside = (0.0..=1.0).contains(&uv.x) && (0.0..=1.0).contains(&uv.y);
-    let reach = depth * frame.size[0].max(frame.size[1]);
+    let reach = warp_reach(frame.size, depth);
     Some((uv, if inside { depth_fade(local.z, reach) } else { 0.0 }))
 }
-
-/// The turn (in cosine) over which backface culling fades at hardness 0
-const BACKFACE_FADE: f32 = 0.6;
 
 #[cfg(test)]
 mod tests {
@@ -166,6 +172,13 @@ mod tests {
 
         let w = smoothstep(0.0, 0.3, facing) * (1.0 - smoothstep(0.75 * depth, depth, lz));
         Some((Vec2::new(lx + 0.5, 0.5 - ly), w))
+    }
+
+    #[test]
+    fn a_nan_backface_angle_or_hardness_culls_nothing() {
+        for backface in [Backface { on: true, angle: f32::NAN, hardness: 0.5 }, Backface { on: true, angle: 60.0, hardness: f32::NAN }] {
+            assert_eq!(backface_cover(&backface, -0.5), 1.0, "{backface:?}");
+        }
     }
 
     #[test]

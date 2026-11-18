@@ -11,8 +11,11 @@ pub use repeat_mode::RepeatMode;
 /// A turn this close to a whole number of quarter turns (in quarter turns) keeps the tile's edges meeting as it is
 const SQUARE_TURN_TOLERANCE: f32 = 1e-4;
 
-/// A shift this small (a share of the tile) moves no texel
-const IDENTITY_SHIFT_TOLERANCE: f32 = 1e-6;
+/// A shift or step this small (a share of the tile) moves no texel
+const IDENTITY_TOLERANCE: f32 = 1e-6;
+
+/// Degrees in a quarter turn
+const QUARTER_TURN_DEGREES: f32 = 90.0;
 
 /// A Transform filter: each UV tile's content scaled, turned and moved about the tile's centre, then flipped
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -52,12 +55,14 @@ impl TileTransform {
         let finite = |value: f32, fallback: f32| if value.is_finite() { value } else { fallback };
         let (low, high) = Self::SCALING;
         let scaling = self.scaling.map(|scale| finite(scale, 1.0).clamp(low, high));
-        let (sin, cos) = finite(self.rotation, 0.0).to_radians().sin_cos();
+        let rotation = finite(self.rotation, 0.0);
+        let (sin, cos) = rotation.to_radians().sin_cos();
 
         // Turn, then scale (a fill's Tiling convention): one step across moves (cos, sin) scaled
         let mut columns = [[cos * scaling[0], sin * scaling[1]], [-sin * scaling[0], cos * scaling[1]]];
-        let quarter_turns = finite(self.rotation, 0.0) / 90.0;
+        let quarter_turns = rotation / QUARTER_TURN_DEGREES;
         let square = (quarter_turns - quarter_turns.round()).abs() < SQUARE_TURN_TOLERANCE;
+
         if self.tile_safe && !square {
             // Whole steps of the source per tile edge keep the edges meeting; a step can never vanish
             for column in &mut columns {
@@ -69,6 +74,7 @@ impl TileTransform {
                 };
             }
         }
+
         let [flip_x, flip_y] = self.flip.sides();
         if flip_x {
             columns[0] = columns[0].map(|v| -v);
@@ -76,6 +82,7 @@ impl TileTransform {
         if flip_y {
             columns[1] = columns[1].map(|v| -v);
         }
+
         let offset = self.offset.map(|along| finite(along, 0.0).clamp(-Self::MAX_OFFSET, Self::MAX_OFFSET));
 
         // About the tile's centre: the centre reads the centre moved by the offset
@@ -83,26 +90,29 @@ impl TileTransform {
         (columns, shift)
     }
 
-    /// Where the texel at `uv` reads from in its tile (0..1), or None where the content does not repeat and no longer reaches
-    pub fn source(&self, [u, v]: [f32; 2]) -> Option<[f32; 2]> {
-        let (columns, shift) = self.affine();
-        let at = [0, 1].map(|axis| columns[0][axis] * u + columns[1][axis] * v + shift[axis]);
-        match self.repeat {
-            RepeatMode::HorizontallyAndVertically => Some(at.map(|a| a.rem_euclid(1.0))),
-            RepeatMode::None => at.iter().all(|a| (0.0..=1.0).contains(a)).then_some(at),
-        }
-    }
-
-    /// Whether it changes nothing
+    /// Whether it changes nothing (a turn a hair short of a whole one included)
     pub fn is_identity(&self) -> bool {
         let (columns, shift) = self.affine();
-        columns == [[1.0, 0.0], [0.0, 1.0]] && shift.iter().all(|along| along.abs() < IDENTITY_SHIFT_TOLERANCE)
+        let steps = [columns[0][0] - 1.0, columns[0][1], columns[1][0], columns[1][1] - 1.0];
+        steps.iter().chain(&shift).all(|along| along.abs() < IDENTITY_TOLERANCE)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl TileTransform {
+        /// Where the texel at `uv` reads from in its tile (0..1), or None where the content does not repeat and no longer reaches (the renderer's read, without its bilinear corners)
+        fn source(&self, [u, v]: [f32; 2]) -> Option<[f32; 2]> {
+            let (columns, shift) = self.affine();
+            let at = [0, 1].map(|axis| columns[0][axis] * u + columns[1][axis] * v + shift[axis]);
+            match self.repeat {
+                RepeatMode::HorizontallyAndVertically => Some(at.map(|along| along.rem_euclid(1.0))),
+                RepeatMode::None => at.iter().all(|along| (0.0..=1.0).contains(along)).then_some(at),
+            }
+        }
+    }
 
     fn near(a: [f32; 2], b: [f32; 2]) -> bool {
         (a[0] - b[0]).abs() < 1e-4 && (a[1] - b[1]).abs() < 1e-4
@@ -154,6 +164,15 @@ mod tests {
         // A turn just short of a whole one is square too (a tiny negative turn is stored that way)
         let nearly_whole = TileTransform { scaling: [1.5, 1.5], rotation: 359.99995, ..TileTransform::LIBRARY };
         assert!((nearly_whole.affine().0[0][0] - 1.5).abs() < 1e-5, "{:?}", nearly_whole.affine().0);
+    }
+
+    #[test]
+    fn a_turn_a_hair_short_of_a_whole_one_changes_nothing() {
+        for tile_safe in [true, false] {
+            let transform = TileTransform { rotation: 359.99998, tile_safe, ..TileTransform::LIBRARY };
+            assert!(transform.is_identity(), "tile safe {tile_safe}: {:?}", transform.affine());
+        }
+        assert!(!TileTransform { rotation: 359.9, tile_safe: false, ..TileTransform::LIBRARY }.is_identity());
     }
 
     #[test]

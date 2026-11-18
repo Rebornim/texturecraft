@@ -756,7 +756,7 @@ impl Session {
         let added_resource_names: BTreeSet<&str> =
             self.doc.resources.keys().filter(|name| !previous_document.resources.contains_key(*name)).map(String::as_str).collect();
         let uses_added_resource = |texture_set_index: usize| {
-            use texturecraft_core::{EffectKind, Fill, Source};
+            use texturecraft_core::{EffectKind, Fill};
 
             let is_added = |name: &str| added_resource_names.contains(name);
             let uses_fill = |fill: &Fill| {

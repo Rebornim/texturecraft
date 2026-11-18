@@ -489,6 +489,28 @@ fn a_decal_edit_that_changes_nothing_adds_no_undo_step() {
     assert_eq!(s.history_labels().len(), steps + 1, "a turn is an edit");
 }
 
+/// Inspect shows the frame a decal was placed on, for a decal placed as a mask as for one placed as a layer
+#[test]
+fn inspect_shows_a_mask_decals_frame_as_a_layer_decals() {
+    let mut s = session();
+    let ramp = s.import_resource_bytes("ramp.png", ramp_png()).unwrap();
+    let placement = json!({"image": ramp, "position": [0, 0, 1], "normal": [0, 0, 1], "size": 0.5});
+    let layer_decal = execute(&mut s, "layer.add.decal", &placement).unwrap();
+    let mut mask_placement = placement.clone();
+    mask_placement["channel"] = json!("mask");
+    let mask_decal = execute(&mut s, "layer.add.decal", &mask_placement).unwrap();
+
+    let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap();
+    let layers = inspect["layers"].as_array().unwrap();
+    let row = |id: &Value| layers.iter().find(|layer| &layer["id"] == id).unwrap().clone();
+    let layer_frame = row(&layer_decal["layer"])["fill"]["decal"].clone();
+    let mask_effects = row(&mask_decal["layer"])["mask"]["effects"].clone();
+    let mask_effect = mask_effects.as_array().unwrap().iter().find(|effect| effect["id"] == mask_decal["maskEffect"]).unwrap().clone();
+
+    assert_eq!(layer_frame, layer_decal["decal"], "a layer decal's frame");
+    assert_eq!(mask_effect["decal"], mask_decal["decal"], "a mask decal's frame");
+}
+
 /// `depth` on a warp sets how far it reaches: its Projection Depth becomes the depth over the frame's longer side
 #[test]
 fn a_warps_depth_sets_its_projection_depth() {

@@ -6,11 +6,8 @@ use texturecraft_core::project::DisplaySettings;
 use texturecraft_core::{Channel, DIELECTRIC_REFLECTANCE, finite_unit, mix3};
 use texturecraft_geom::glam::Vec3;
 
-use crate::environment_sky::{VIEWPORT_WIDTH, dir_of, radiance, sh_basis, sh9_averaged};
+use crate::environment_sky::{VIEWPORT_WIDTH, dir_of, environment_linear, radiance, sh_basis, sh9_averaged};
 use crate::store::{ImageRes, ImageStore};
-
-/// The brightest radiance the viewport keeps of an imported environment (it stores half floats)
-const HALF_FLOAT_MAX: f32 = 65_000.0;
 
 /// The diffuse light of the viewport environment and the turn the viewport gives it
 pub struct EnvironmentSh {
@@ -81,10 +78,7 @@ fn built_in_sh(name: &str) -> [[f32; 3]; 9] {
 
 /// The coefficients of an imported equirect image, every texel averaged in as the viewport does
 fn image_sh(image: &ImageRes) -> [[f32; 3]; 9] {
-    let linear = |v: f32| {
-        let v = if v.is_finite() { v.clamp(0.0, HALF_FLOAT_MAX) } else { 0.0 };
-        if image.srgb { texturecraft_texel::srgb_to_linear(v.min(1.0)) } else { v }
-    };
+    let linear = |v: f32| environment_linear(v, image.srgb);
     sh9_averaged(image.width, image.height, |x, y| {
         let texel = image.rgba.get((y as usize) * image.width as usize + x as usize).copied().unwrap_or([0.0; 4]);
         Vec3::new(linear(texel[0]), linear(texel[1]), linear(texel[2]))
@@ -117,6 +111,36 @@ mod tests {
         assert!((here - turned).abs().max_element() > 0.05, "{here} vs {turned}");
         let night = EnvironmentSh::of(&DisplaySettings { environment: "Night".into(), ..DisplaySettings::default() }, &ImageStore::default());
         assert!(night.irradiance(Vec3::Y, 0.0, 0.0).element_sum() < sh.irradiance(Vec3::Y, 0.0, 0.0).element_sum(), "the cache follows the environment");
+    }
+
+    /// Tiles on the thread pool that ask for a new light finish: the light is worked out with the cache unlocked, so a worker that steals another tile while it waits for its share of the averaging never waits for its own lock
+    #[test]
+    fn tiles_asking_for_a_new_light_on_the_thread_pool_finish() {
+        use rayon::prelude::*;
+
+        const WORKERS: usize = 8;
+        const TILES: usize = 1024;
+        // One tile in so many asks for the light; the rest finish at once, so their workers are free to steal the averaging's work
+        const LIT_EVERY: usize = 128;
+        const ROUNDS: usize = 20;
+        const PATIENCE: std::time::Duration = std::time::Duration::from_secs(60);
+
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let Ok(pool) = rayon::ThreadPoolBuilder::new().num_threads(WORKERS).build() else { return };
+            pool.install(|| {
+                for round in 0..ROUNDS {
+                    // Each round shows another environment, so its first tile misses the cache
+                    let environment = if round % 2 == 0 { "Sunset" } else { "Night" };
+                    let display = DisplaySettings { environment: environment.into(), ..DisplaySettings::default() };
+                    (0..TILES).into_par_iter().filter(|tile| tile % LIT_EVERY == 0).for_each(|_| {
+                        EnvironmentSh::of(&display, &ImageStore::default());
+                    });
+                }
+            });
+            let _ = done.send(());
+        });
+        assert!(finished.recv_timeout(PATIENCE).is_ok(), "the tiles deadlocked on the cache");
     }
 
     /// Diffuse occlusion darkens non-metals by the ambient occlusion; metals take their light from the reflections, which only specular occlusion darkens

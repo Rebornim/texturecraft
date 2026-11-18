@@ -11,10 +11,10 @@ use std::sync::Arc;
 use rayon::prelude::*;
 use texturecraft_core::{
     AnisotropicKuwahara, BakedMap, Bevel, BevelSmooth, BlendMode, BlockScales, Channel, ChannelKind, ColorMatch, CompareSource, ContentsOffset,
-    CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter, Filtering, Generator, GeneratorKind, HeightMask, HeightToNormal, HighpassSpace,
-    ImageInput, Layer, LayerId, LayerKind, Mask, MaskBackground, MaskOutline, MicroDetail, Mirror, NormalFormat, Project, Projection, RepeatMode, Sampling,
-    ShapeCrop, Source, SourceColorMode, SourceSlopeBlur, SourceWarp, StylizedLighting, TargetColorMode, TextureSet, TileGrid, TileTransform, blend1, blend3,
-    lum, mix3, per_unit, posterize,
+    CurvatureDetail, CurvatureMode, Effect, EffectKind, FLAT_CURVATURE, Fill, Filter, Filtering, Generator, GeneratorKind, HeightMask, HeightToNormal,
+    HighpassSpace, ImageInput, Layer, LayerId, LayerKind, Mask, MaskBackground, MaskOutline, MicroDetail, Mirror, NormalFormat, Project, Projection,
+    RepeatMode, Sampling, ShapeCrop, Source, SourceColorMode, SourceSlopeBlur, SourceWarp, StylizedShading, TargetColorMode, TextureSet, TileGrid,
+    TileTransform, blend1, blend3, lum, mix3, per_unit, posterize,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, Surface, UvGBuffer};
@@ -48,9 +48,6 @@ const SEAM_JUMP_SHARE: f32 = 0.25;
 
 /// Stack values being composited, per channel.
 type Acc = [[f32; 3]; NCH];
-
-/// The baked curvature of a flat surface (below: cavities, above: edges)
-const FLAT_CURVATURE: f32 = 0.5;
 
 /// How tall a baked height of 1 stands, as a fraction of a UV tile, when Baked Lighting Stylized tilts normals by its slope
 const HEIGHT_RELIEF: f32 = 1.0 / 32.0;
@@ -275,6 +272,8 @@ struct EffectPlan<'a> {
     covers_all: bool,
     /// The viewport environment's light, for Baked Lighting Environment
     environment: Option<EnvironmentSh>,
+    /// Baked Lighting Stylized's settings worked out once for every texel it shades
+    stylized: Option<StylizedShading>,
     /// The source a point filter's image input reads (Grayscale Conversion's Custom Input)
     input: Option<Source>,
 }
@@ -2098,6 +2097,10 @@ fn effect_plans<'a>(
                 EffectKind::Filter(Filter::EnvironmentLighting { .. }) => Some(EnvironmentSh::of(&inp.project.display, inp.images)),
                 _ => None,
             };
+            let stylized = match &effect.kind {
+                EffectKind::Filter(filter @ Filter::BakedLighting { .. }) => filter.stylized_lighting().map(|(settings, light)| settings.shading(light)),
+                _ => None,
+            };
             let blend = effect.applied_blend(channel);
             EffectPlan {
                 id: effect.id,
@@ -2111,6 +2114,7 @@ fn effect_plans<'a>(
                 depth,
                 covers_all,
                 environment,
+                stylized,
                 input: match &effect.kind {
                     EffectKind::Filter(filter) if !filter.is_neighbourhood() => ImageInput::of(filter).first().map(|input| effect.input(input)),
                     _ => None,
@@ -2635,13 +2639,12 @@ impl<'a, 'b> Texel<'a, 'b> {
         (value.map(|v| v / cover), cover)
     }
 
-    /// The normal Baked Lighting Stylized lights: the mesh's, or (Mesh + Height + Normal) its [`Texel::detail_normal`]
-    fn lit_normal(&mut self, stylized: &StylizedLighting) -> [f32; 3] {
-        if stylized.mesh_only {
-            return self.coords().nrm.to_array();
+    /// The normal Baked Lighting Stylized lights: the mesh's (no `relief`), or (Mesh + Height + Normal) its [`Texel::detail_normal`] at `relief`
+    fn lit_normal(&mut self, relief: Option<f32>) -> [f32; 3] {
+        match relief {
+            Some(relief) => self.detail_normal(relief),
+            None => self.coords().nrm.to_array(),
         }
-
-        self.detail_normal(stylized.height_to_normal)
     }
 
     /// The baked world normal (the mesh's without one) tilted by the baked height's slope times `relief`
@@ -3393,12 +3396,12 @@ impl<'a, 'b> Texel<'a, 'b> {
             EffectKind::Filter(filter @ Filter::BakedLighting { .. }) => match Channel::ALL.get(chan_plan.ch) {
                 Some(Channel::BaseColor) => {
                     let ao = self.baked(BakedMap::AmbientOcclusion).unwrap_or(1.0);
-                    let lit = match filter.stylized_lighting() {
-                        Some((stylized, light)) => {
-                            let nrm = self.lit_normal(stylized);
+                    let lit = match &effect.stylized {
+                        Some(stylized) => {
+                            let nrm = self.lit_normal(stylized.relief());
                             let curvature = self.baked(BakedMap::Curvature).unwrap_or(FLAT_CURVATURE);
                             let material = self.lit.unwrap_or_else(|| Channel::ALL.map(Channel::default_value));
-                            stylized.shade(light, value, nrm, [ao, curvature], &material)
+                            stylized.shade(value, nrm, [ao, curvature], &material)
                         }
                         None => {
                             let factor = filter.baked_light(self.coords().nrm.to_array(), ao).unwrap_or(1.0);
@@ -4331,7 +4334,9 @@ pub fn flatten_layer(inputs: &Inputs, id: LayerId, tiles: &[(u32, u32)]) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
-    use texturecraft_core::{ChannelBlend, CompareOp, Effect, Layer, OutputResolution, PbrValidate, Procedural, ProceduralKind, ResolutionMode, TextureSet};
+    use texturecraft_core::{
+        ChannelBlend, CompareOp, Effect, Layer, OutputResolution, PbrValidate, Procedural, ProceduralKind, ResolutionMode, StylizedLighting, TextureSet,
+    };
     use texturecraft_geom::primitives;
 
     struct Fixture {

@@ -13,8 +13,17 @@ pub const VIEWPORT_WIDTH: u32 = 512;
 /// The width an environment is box-averaged down to before its diffuse light is worked out: averaging keeps a sun smaller than a texel
 const SH_WIDTH: u32 = 128;
 
+/// The brightest radiance the viewport keeps of an imported environment (it stores half floats)
+const HALF_FLOAT_MAX: f32 = 65_000.0;
+
 /// The irradiance convolution factor of each SH band (the cosine lobe's π, 2π/3 and π/4), one per coefficient
 const COSINE_LOBE_BANDS: [f32; 9] = [PI, 2.0 * PI / 3.0, 2.0 * PI / 3.0, 2.0 * PI / 3.0, PI / 4.0, PI / 4.0, PI / 4.0, PI / 4.0, PI / 4.0];
+
+/// The linear radiance of a component `v` of an imported environment's texel (sRGB-encoded when `srgb`): not a number is 0, capped at the half-float range, sRGB at 1
+pub fn environment_linear(v: f32, srgb: bool) -> f32 {
+    let v = if v.is_finite() { v.clamp(0.0, HALF_FLOAT_MAX) } else { 0.0 };
+    if srgb { texturecraft_texel::srgb_to_linear(v.min(1.0)) } else { v }
+}
 
 /// The direction at equirect place `u = φ / 2π`, `v = θ / π`: `(sin θ cos φ, cos θ, sin θ sin φ)`, row 0 straight up
 pub fn dir_of(u: f32, v: f32) -> Vec3 {
@@ -125,7 +134,7 @@ pub fn sh9(width: u32, height: u32, radiance: impl Fn(u32, u32) -> Vec3) -> [[f3
     std::array::from_fn(|k| (sums[k] * COSINE_LOBE_BANDS[k] / PI).to_array())
 }
 
-/// [`sh9`] of the equirect image `width` x `height` whose texels `radiance` gives, box-halved while wider than [`SH_WIDTH`] so every texel counts
+/// [`sh9`] of the equirect image `width` x `height` whose texels `radiance` gives, box-halved while wider than [`SH_WIDTH`] (an odd last row or column is dropped, as the viewport drops it)
 pub fn sh9_averaged(width: u32, height: u32, radiance: impl Fn(u32, u32) -> Vec3 + Sync) -> [[f32; 3]; 9] {
     if width <= SH_WIDTH {
         return sh9(width, height, radiance);

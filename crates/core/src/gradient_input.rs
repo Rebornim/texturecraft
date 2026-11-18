@@ -102,6 +102,8 @@ pub fn ramp(colors: &[[f32; 3]], positions: &[f32], linear: bool, t: f32) -> Opt
     })
 }
 
+// A copy of texturecraft_texel's: texel and core are both layer 0, so core cannot use it
+
 /// sRGB transfer of a linear component
 pub(crate) fn linear_to_srgb(v: f32) -> f32 {
     let v = v.clamp(0.0, 1.0);

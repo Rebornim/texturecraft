@@ -3,20 +3,14 @@
 use std::sync::{Arc, Mutex};
 
 use texturecraft_core::project::DisplaySettings;
-use texturecraft_core::{Channel, mix3};
+use texturecraft_core::{Channel, DIELECTRIC_REFLECTANCE, finite_unit, mix3};
 use texturecraft_geom::glam::Vec3;
 
-use crate::environment_sky::{radiance, sh_basis, sh9};
+use crate::environment_sky::{VIEWPORT_WIDTH, dir_of, radiance, sh_basis, sh9_averaged};
 use crate::store::{ImageRes, ImageStore};
 
-/// The width of the grid a built-in environment is sampled on (half as tall): its light varies slowly, so this is plenty for 9 coefficients
-const BUILT_IN_WIDTH: u32 = 64;
-
-/// The width an imported environment image is read at (every texel past it is skipped, not averaged: diffuse light is smooth)
-const IMAGE_WIDTH: u32 = 128;
-
-/// The reflectance of non-metals at normal incidence
-const DIELECTRIC_REFLECTANCE: f32 = 0.04;
+/// The brightest radiance the viewport keeps of an imported environment (it stores half floats)
+const HALF_FLOAT_MAX: f32 = 65_000.0;
 
 /// The diffuse light of the viewport environment and the turn the viewport gives it
 pub struct EnvironmentSh {
@@ -49,55 +43,50 @@ impl EnvironmentSh {
 
         let coefficients = match &image {
             Some(image) => image_sh(image),
-            None => sh9(BUILT_IN_WIDTH, BUILT_IN_WIDTH / 2, |x, y| {
-                let d = crate::environment_sky::dir_of((x as f32 + 0.5) / BUILT_IN_WIDTH as f32, (y as f32 + 0.5) / (BUILT_IN_WIDTH / 2) as f32);
-                radiance(&display.environment, d)
-            }),
+            None => built_in_sh(&display.environment),
         };
         *cache = Some((display.environment.clone(), image, Arc::new(coefficients)));
         EnvironmentSh { coefficients, rotation }
     }
 
-    /// The diffuse light reaching a surface facing world direction `nrm` with the environment turned `horizontal` and tilted `vertical` (radians) past the viewport's turn
-    pub fn irradiance(&self, nrm: Vec3, horizontal: f32, vertical: f32) -> Vec3 {
-        let (sv, cv) = vertical.sin_cos();
-        let tilted = Vec3::new(nrm.x, cv * nrm.y - sv * nrm.z, sv * nrm.y + cv * nrm.z);
+    /// The diffuse light reaching a surface facing world direction `normal` with the environment turned `horizontal` and tilted `vertical` (radians) past the viewport's turn
+    pub fn irradiance(&self, normal: Vec3, horizontal: f32, vertical: f32) -> Vec3 {
+        let (sin_tilt, cos_tilt) = vertical.sin_cos();
+        let tilted = Vec3::new(normal.x, cos_tilt * normal.y - sin_tilt * normal.z, sin_tilt * normal.y + cos_tilt * normal.z);
 
         // Turned as the viewport turns its environment
-        let (s, c) = (self.rotation + horizontal).sin_cos();
-        let d = Vec3::new(c * tilted.x - s * tilted.z, tilted.y, s * tilted.x + c * tilted.z);
-        let light = sh_basis(d).iter().zip(&self.coefficients).fold(Vec3::ZERO, |sum, (y, c)| sum + Vec3::from(*c) * *y);
+        let (sin_turn, cos_turn) = (self.rotation + horizontal).sin_cos();
+        let direction = Vec3::new(cos_turn * tilted.x - sin_turn * tilted.z, tilted.y, sin_turn * tilted.x + cos_turn * tilted.z);
+        let light = sh_basis(direction).iter().zip(&self.coefficients).fold(Vec3::ZERO, |sum, (basis, coefficient)| sum + Vec3::from(*coefficient) * *basis);
         light.max(Vec3::ZERO)
     }
 
-    /// Baked Lighting Environment's lit base color: linear `albedo` facing `nrm`, its metal read from `channels` (straight values by [`Channel::index`]), in `light` (the environment's diffuse light at the surface, exposure applied), darkened by ambient occlusion `ao` by `[diffuse, specular]` occlusion. The viewer looks straight at the surface, so what it reflects is the light around the normal
+    /// Baked Lighting Environment's lit base color: linear `albedo`, its metal read from `channels` (straight values by [`Channel::index`]), in `light` (the environment's diffuse light at the surface, exposure applied), darkened by ambient occlusion `ao` by `[diffuse, specular]` occlusion. The viewer looks straight at the surface, so what it reflects is the light around the normal
     pub fn shade(albedo: [f32; 3], light: Vec3, ao: f32, [diffuse_occlusion, specular_occlusion]: [f32; 2], channels: &[[f32; 3]]) -> [f32; 3] {
-        let unit = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 };
         let ao = if ao.is_finite() { ao.clamp(0.0, 1.0) } else { 1.0 };
-        let metal = unit(channels.get(Channel::Metallic.index()).map_or(0.0, |m| m[0]));
+        let metal = finite_unit(channels.get(Channel::Metallic.index()).map_or(0.0, |m| m[0]));
         let f0 = mix3([DIELECTRIC_REFLECTANCE; 3], albedo, metal);
-        let diffuse = 1.0 + (ao - 1.0) * unit(diffuse_occlusion);
-        let specular = 1.0 + (ao - 1.0) * unit(specular_occlusion);
-        let light = light.to_array();
-        std::array::from_fn(|k| unit(albedo[k] * (1.0 - metal) * light[k] * diffuse + f0[k] * light[k] * specular))
+        let diffuse = 1.0 + (ao - 1.0) * finite_unit(diffuse_occlusion);
+        let specular = 1.0 + (ao - 1.0) * finite_unit(specular_occlusion);
+        let incoming = light.to_array();
+        std::array::from_fn(|k| finite_unit(albedo[k] * (1.0 - metal) * incoming[k] * diffuse + f0[k] * incoming[k] * specular))
     }
 }
 
-/// The coefficients of an imported equirect image, read every few texels
+/// The coefficients of built-in environment `name` as the viewport works them out: drawn at its width, then averaged
+fn built_in_sh(name: &str) -> [[f32; 3]; 9] {
+    let (width, height) = (VIEWPORT_WIDTH, VIEWPORT_WIDTH / 2);
+    sh9_averaged(width, height, |x, y| radiance(name, dir_of((x as f32 + 0.5) / width as f32, (y as f32 + 0.5) / height as f32)))
+}
+
+/// The coefficients of an imported equirect image, every texel averaged in as the viewport does
 fn image_sh(image: &ImageRes) -> [[f32; 3]; 9] {
-    let (w, h) = (image.width.clamp(1, IMAGE_WIDTH), image.height.clamp(1, IMAGE_WIDTH / 2));
     let linear = |v: f32| {
-        if image.srgb {
-            texturecraft_texel::srgb_to_linear(v.clamp(0.0, 1.0))
-        } else if v.is_finite() {
-            v.max(0.0)
-        } else {
-            0.0
-        }
+        let v = if v.is_finite() { v.clamp(0.0, HALF_FLOAT_MAX) } else { 0.0 };
+        if image.srgb { texturecraft_texel::srgb_to_linear(v.min(1.0)) } else { v }
     };
-    sh9(w, h, |x, y| {
-        let (ix, iy) = (x * image.width / w, y * image.height / h);
-        let texel = image.rgba.get((iy as usize) * image.width as usize + ix as usize).copied().unwrap_or([0.0; 4]);
+    sh9_averaged(image.width, image.height, |x, y| {
+        let texel = image.rgba.get((y as usize) * image.width as usize + x as usize).copied().unwrap_or([0.0; 4]);
         Vec3::new(linear(texel[0]), linear(texel[1]), linear(texel[2]))
     })
 }
@@ -111,9 +100,9 @@ mod tests {
     fn a_uniform_image_lights_every_way_alike() {
         let image = |v: f32| ImageRes { width: 32, height: 16, rgba: vec![[v, v, v, 1.0]; 32 * 16], srgb: false, mips: Default::default() };
         let sh = EnvironmentSh { coefficients: image_sh(&image(0.5)), rotation: 1.0 };
-        for nrm in [Vec3::Y, Vec3::X, Vec3::NEG_Y, Vec3::new(0.6, 0.0, 0.8)] {
-            let light = sh.irradiance(nrm, 0.3, 0.7);
-            assert!((light - Vec3::splat(0.5)).abs().max_element() < 0.02, "{nrm}: {light}");
+        for normal in [Vec3::Y, Vec3::X, Vec3::NEG_Y, Vec3::new(0.6, 0.0, 0.8)] {
+            let light = sh.irradiance(normal, 0.3, 0.7);
+            assert!((light - Vec3::splat(0.5)).abs().max_element() < 0.02, "{normal}: {light}");
         }
     }
 
@@ -141,5 +130,41 @@ mod tests {
         let metal = |occlusion| EnvironmentSh::shade([0.5; 3], light, 0.2, occlusion, &channels)[0];
         assert_eq!(metal([1.0, 0.0]), metal([0.0, 0.0]));
         assert!(metal([0.0, 1.0]) < metal([0.0, 0.0]) * 0.5);
+    }
+
+    /// The coefficients of `radiance` read at every place of a fine grid, the integral the averaged ones must match
+    fn fine_sh(width: u32, radiance: impl Fn(Vec3) -> Vec3) -> [[f32; 3]; 9] {
+        let height = width / 2;
+        crate::environment_sky::sh9(width, height, |x, y| radiance(dir_of((x as f32 + 0.5) / width as f32, (y as f32 + 0.5) / height as f32)))
+    }
+
+    /// Sunset's sun is smaller than a texel of a coarse grid: averaging the viewport's drawing keeps its light, as the viewport does
+    #[test]
+    fn a_small_sun_lights_as_the_viewport_shows_it() {
+        let display = DisplaySettings { environment: "Sunset".into(), ..DisplaySettings::default() };
+
+        let baked = EnvironmentSh::of(&display, &ImageStore::default()).coefficients;
+        let fine = fine_sh(1024, |direction| radiance("Sunset", direction));
+
+        for (baked, fine) in baked.iter().zip(&fine) {
+            for (baked, fine) in baked.iter().zip(fine) {
+                assert!((baked - fine).abs() < 0.02, "{baked} vs {fine}");
+            }
+        }
+    }
+
+    /// An imported image's small bright patch counts though it falls between the texels a coarse read would take
+    #[test]
+    fn a_small_bright_patch_of_an_image_counts() {
+        const BRIGHT: f32 = 500.0;
+        let (width, height) = (1024u32, 512u32);
+        let patch = |x: u32, y: u32| (97..101).contains(&x) && (193..197).contains(&y);
+        let rgba = (0..width * height).map(|i| if patch(i % width, i / width) { [BRIGHT, BRIGHT, BRIGHT, 1.0] } else { [0.0, 0.0, 0.0, 1.0] }).collect();
+        let image = ImageRes { width, height, rgba, srgb: false, mips: Default::default() };
+
+        let averaged = image_sh(&image)[0][0];
+        let exact = crate::environment_sky::sh9(width, height, |x, y| if patch(x, y) { Vec3::splat(BRIGHT) } else { Vec3::ZERO })[0][0];
+
+        assert!(exact > 0.01 && (averaged - exact).abs() < exact * 0.05, "{averaged} vs {exact}");
     }
 }

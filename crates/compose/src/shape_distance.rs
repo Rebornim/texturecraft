@@ -64,9 +64,13 @@ pub(crate) fn distance_filter(
         Filter::BevelSmooth(smooth) => {
             let inside = shapes(&|value| smooth.inside(value));
             let edge = edge_distances(&inside, (width, height), false);
-            let reach = smooth.reach(res);
-            let mut ramp: Vec<f32> =
-                inside.par_iter().zip(edge.par_iter()).enumerate().map(|(texel, (inside, edge))| smooth.value(*inside, *edge, reach * map(texel))).collect();
+            let (reach, curve) = (smooth.reach(res), smooth.curve());
+            let mut ramp: Vec<f32> = inside
+                .par_iter()
+                .zip(edge.par_iter())
+                .enumerate()
+                .map(|(texel, (inside, edge))| smooth.value(curve, *inside, *edge, reach * map(texel)))
+                .collect();
             smoothed(&mut ramp, smooth.smoothing_texels(res));
             (inside, Box::new(move |texel, _, value| ramp.get(texel).copied().unwrap_or(value)))
         }

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::directional_light::DirectionalLight;
 use crate::lighting_output::LightingOutput;
 use crate::sun_and_sky::SunAndSky;
-use crate::{Channel, mix3};
+use crate::{Channel, finite_unit, mix3};
 
 /// Baked Lighting Stylized's settings past the sun's direction and strength, the sky's strength and Diffuse AO (kept on the filter, as Baked Lighting saved them)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -40,6 +40,16 @@ pub struct StylizedLighting {
     pub height_to_normal: f32,
 }
 
+/// The reflectance of non-metals at normal incidence
+pub const DIELECTRIC_REFLECTANCE: f32 = 0.04;
+
+/// The curvature map's value on a flat surface (below it concave, above convex) and the scale that takes either side to 0..1
+const FLAT_CURVATURE: f32 = 0.5;
+const CURVATURE_SIDE_SCALE: f32 = 2.0;
+
+/// The Cook-Torrance denominator 4·(n·l)·(n·v) with the viewer straight on (n·v = 1), n·l cancelled by the light's own facing
+const COOK_TORRANCE_DENOMINATOR: f32 = 4.0;
+
 /// The roughness highlights never go below (a mirror would be a single texel of infinite light)
 const MIN_ROUGHNESS: f32 = 0.08;
 
@@ -62,7 +72,7 @@ impl StylizedLighting {
         edges_smoothness: 0.0,
         specular_glossiness: false,
         output: LightingOutput::Diffuse,
-        dielectric_reflectance: 0.04,
+        dielectric_reflectance: DIELECTRIC_REFLECTANCE,
         mesh_only: true,
         height_to_normal: 1.0,
     };
@@ -89,31 +99,31 @@ impl StylizedLighting {
     /// The lit base color of linear `albedo` facing `normal` (world space, unit) with baked ambient occlusion `ao` and curvature `curvature` (0.5 flat), its material read from `channels` (straight values by [`Channel::index`]); the viewer looks straight at the surface
     pub fn shade(&self, light: SunAndSky, albedo: [f32; 3], normal: [f32; 3], [ao, curvature]: [f32; 2], channels: &[[f32; 3]]) -> [f32; 3] {
         let channel = |channel: Channel| channels.get(channel.index()).copied().unwrap_or_else(|| channel.default_value());
-        let unit = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 };
         let ao = if ao.is_finite() { ao.clamp(0.0, 1.0) } else { 1.0 };
-        let curvature = if curvature.is_finite() { curvature } else { 0.5 };
-        let cavity = fade_in((0.5 - curvature) * 2.0, self.cavity_smoothness);
-        let edge = fade_in((curvature - 0.5) * 2.0, self.edges_smoothness);
+        let curvature = if curvature.is_finite() { curvature } else { FLAT_CURVATURE };
+        let cavity = fade_in((FLAT_CURVATURE - curvature) * CURVATURE_SIDE_SCALE, self.cavity_smoothness);
+        let edge = fade_in((curvature - FLAT_CURVATURE) * CURVATURE_SIDE_SCALE, self.edges_smoothness);
 
         let (roughness, f0, diffuse_albedo) = if self.specular_glossiness {
-            (1.0 - unit(channel(Channel::Glossiness)[0]), channel(Channel::Specular).map(unit), albedo)
+            (1.0 - finite_unit(channel(Channel::Glossiness)[0]), channel(Channel::Specular).map(finite_unit), albedo)
         } else {
-            let metal = unit(channel(Channel::Metallic)[0]);
-            let f0 = mix3([unit(self.dielectric_reflectance); 3], albedo, metal);
+            let metal = finite_unit(channel(Channel::Metallic)[0]);
+            let f0 = mix3([finite_unit(self.dielectric_reflectance); 3], albedo, metal);
 
             // Without highlights the whole base color is lit, as Baked Lighting did
             let kept = if self.output.specular() { 1.0 - metal } else { 1.0 };
-            (unit(channel(Channel::Roughness)[0]), f0, albedo.map(|x| x * kept))
+            (finite_unit(channel(Channel::Roughness)[0]), f0, albedo.map(|x| x * kept))
         };
         let roughness = roughness.max(MIN_ROUGHNESS);
 
         let lights = std::iter::once((light.sun.direction(), light.sun.intensity, self.sun_color))
             .chain(self.lights.iter().map(|extra| (extra.direction(), extra.intensity, extra.color)));
         let sky = self.ambient(normal);
-        let diffuse_ao = 1.0 + (ao - 1.0) * unit(light.diffuse_ao);
-        let specular_ao = 1.0 + (ao - 1.0) * unit(self.specular_ao);
-        let diffuse_cavity = 1.0 - cavity * unit(self.diffuse_cavity);
-        let specular_cavity = 1.0 - cavity * unit(self.specular_cavity);
+
+        let diffuse_ao = 1.0 + (ao - 1.0) * finite_unit(light.diffuse_ao);
+        let specular_ao = 1.0 + (ao - 1.0) * finite_unit(self.specular_ao);
+        let diffuse_cavity = 1.0 - cavity * finite_unit(self.diffuse_cavity);
+        let specular_cavity = 1.0 - cavity * finite_unit(self.specular_cavity);
 
         let mut diffuse = sky.map(|sky_light| sky_light * light.sky_intensity * diffuse_ao * diffuse_cavity);
         let mut specular = [0.0f32; 3];
@@ -125,31 +135,34 @@ impl StylizedLighting {
 
             let half = normalize([normal[0] + direction[0], normal[1] + direction[1], normal[2] + direction[2]]);
             let normal_dot_half = dot(normal, half).max(0.0);
-            let highlight = ggx(normal_dot_half, roughness) / 4.0 * facing * specular_cavity;
-            for k in 0..3 {
-                diffuse[k] += color[k] * intensity * facing;
-                specular[k] += color[k] * intensity * highlight * schlick(f0[k], normal_dot_half);
+            let highlight = ggx(normal_dot_half, roughness) / COOK_TORRANCE_DENOMINATOR * facing * specular_cavity;
+            for (((diffuse, specular), color), f0) in diffuse.iter_mut().zip(&mut specular).zip(color).zip(f0) {
+                *diffuse += color * intensity * facing;
+                *specular += color * intensity * highlight * schlick(f0, normal_dot_half);
             }
         }
-        for k in 0..3 {
-            specular[k] += f0[k] * sky[k] * light.sky_intensity * specular_ao * specular_cavity;
+        for ((specular, f0), sky_light) in specular.iter_mut().zip(f0).zip(sky) {
+            *specular += f0 * sky_light * light.sky_intensity * specular_ao * specular_cavity;
         }
 
-        let mut out = [0.0f32; 3];
-        for k in 0..3 {
+        let edges_intensity = finite_unit(self.edges_intensity);
+        std::array::from_fn(|k| {
             let lit = if self.output.diffuse() { diffuse_albedo[k] * diffuse[k] } else { 0.0 };
             let shine = if self.output.specular() { specular[k] } else { 0.0 };
-            let shaded = unit(lit + shine);
-            out[k] = unit(shaded + (1.0 - shaded) * edge * unit(self.edges_intensity));
-        }
-        out
+            let shaded = finite_unit(lit + shine);
+            finite_unit(shaded + (1.0 - shaded) * edge * edges_intensity)
+        })
     }
 }
 
-/// `amount` (clamped 0..1) reaching full over `smoothness`
+/// `amount` (clamped 0..1) reaching full over `smoothness`: a step when it is about 0 or not a number
 fn fade_in(amount: f32, smoothness: f32) -> f32 {
     let amount = amount.clamp(0.0, 1.0);
-    if smoothness <= MIN_SMOOTHNESS { if amount > 0.0 { 1.0 } else { 0.0 } } else { (amount / smoothness).min(1.0) }
+    if smoothness.is_nan() || smoothness <= MIN_SMOOTHNESS {
+        return if amount > 0.0 { 1.0 } else { 0.0 };
+    }
+
+    (amount / smoothness).min(1.0)
 }
 
 /// The GGX distribution of microfacets facing `normal_dot_half` (the cosine between the normal and the half vector) at `roughness`
@@ -182,6 +195,12 @@ mod tests {
     use crate::Filter;
 
     const UP: [f32; 3] = [0.0, 1.0, 0.0];
+
+    /// A smoothness that is not a number switches cavity and edges on as a step: a flat surface stays untouched
+    #[test]
+    fn a_nan_smoothness_fades_in_as_a_step() {
+        assert_eq!((fade_in(0.0, f32::NAN), fade_in(0.3, f32::NAN)), (0.0, 1.0));
+    }
 
     fn material(roughness: f32) -> Vec<[f32; 3]> {
         let mut channels: Vec<[f32; 3]> = Channel::ALL.iter().map(|c| c.default_value()).collect();

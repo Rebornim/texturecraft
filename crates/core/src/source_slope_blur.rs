@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{SlopeBlending, SourceWarp, WarpSource, WarpSourceMode};
+use crate::{SlopeBlending, SourceWarp, WarpSource, WarpSourceMode, source_warp};
 
 /// Values read downhill along a source's slope, averaged or kept at their smallest or largest
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -27,8 +27,7 @@ impl SourceSlopeBlur {
 
     /// How many texels downhill a texel reads at most at `res` texels across a UV tile
     pub fn move_texels(&self, res: u32) -> f32 {
-        let intensity = if self.intensity.is_finite() { self.intensity.clamp(0.0, 1.0) } else { 0.0 };
-        intensity / f32::from(self.divider.max(1)) * res as f32
+        source_warp::move_texels(self.intensity, self.divider, res)
     }
 
     /// How many of `most` reads along the way Quality keeps (at least one past the texel itself)

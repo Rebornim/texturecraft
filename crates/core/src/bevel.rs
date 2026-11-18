@@ -91,6 +91,8 @@ mod tests {
         let bevel = Bevel { distance: f32::NAN, smoothing: f32::INFINITY, ..Bevel::LIBRARY };
         assert_eq!((bevel.reach(2048), bevel.smoothing_texels(2048)), (0.0, 0.0));
         assert_eq!(bevel.slope(true, 3.0, 0.0), 1.0, "no reach leaves the shapes whole");
-        assert_eq!(Bevel { distance: -9.0, smoothing: 9.0, ..bevel }.reach(1024), 1024.0);
+        let excessive = Bevel { distance: -9.0, smoothing: 9.0, ..bevel };
+        assert_eq!(excessive.reach(1024), 1024.0);
+        assert_eq!(excessive.smoothing_texels(2048), Bevel::SMOOTHING_MAX * Bevel::SMOOTHING_TEXELS, "smoothing stops at its largest");
     }
 }

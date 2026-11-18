@@ -1,15 +1,22 @@
-//! The built-in environments (drawn in code, no image assets) and their diffuse light as spherical harmonics: the viewport
-//! lights with them and Baked Lighting Environment bakes them into the base color
-//!
-//! Equirect convention: `u = φ / 2π`, `v = θ / π`, direction `(sin θ cos φ, cos θ, sin θ sin φ)`; row 0 is straight up
+//! The built-in environments (drawn in code, no image assets) and their diffuse light as spherical harmonics, for the viewport and Baked Lighting Environment
 
 use std::f32::consts::{PI, TAU};
 
+use rayon::prelude::*;
 use texturecraft_geom::glam::{Vec2, Vec3};
 
 use crate::soft_box::SoftBox;
 
-/// The direction at equirect place `u`, `v` (row 0 straight up)
+/// The width the viewport draws a built-in environment at (half as tall)
+pub const VIEWPORT_WIDTH: u32 = 512;
+
+/// The width an environment is box-averaged down to before its diffuse light is worked out: averaging keeps a sun smaller than a texel
+const SH_WIDTH: u32 = 128;
+
+/// The irradiance convolution factor of each SH band (the cosine lobe's π, 2π/3 and π/4), one per coefficient
+const COSINE_LOBE_BANDS: [f32; 9] = [PI, 2.0 * PI / 3.0, 2.0 * PI / 3.0, 2.0 * PI / 3.0, PI / 4.0, PI / 4.0, PI / 4.0, PI / 4.0, PI / 4.0];
+
+/// The direction at equirect place `u = φ / 2π`, `v = θ / π`: `(sin θ cos φ, cos θ, sin θ sin φ)`, row 0 straight up
 pub fn dir_of(u: f32, v: f32) -> Vec3 {
     let (theta, phi) = (v * PI, u * TAU);
     Vec3::new(theta.sin() * phi.cos(), theta.cos(), theta.sin() * phi.sin())
@@ -82,7 +89,7 @@ pub fn radiance(name: &str, d: Vec3) -> Vec3 {
     }
 }
 
-/// The 9 spherical-harmonics basis functions at unit direction `d`
+/// The 9 real spherical-harmonics basis functions at unit direction `d` (the standard band 0..2 constants)
 pub fn sh_basis(d: Vec3) -> [f32; 9] {
     let (x, y, z) = (d.x, d.y, d.z);
     [
@@ -101,20 +108,48 @@ pub fn sh_basis(d: Vec3) -> [f32; 9] {
 /// Diffuse irradiance as 9 SH coefficients of the equirect image `width` x `height` whose texels `radiance` gives (already convolved with the cosine lobe and divided by π, so `Σ c·Y(n)` times albedo is the diffuse radiance)
 pub fn sh9(width: u32, height: u32, radiance: impl Fn(u32, u32) -> Vec3) -> [[f32; 3]; 9] {
     let (w, h) = (width.max(1), height.max(1));
-    let mut c = [Vec3::ZERO; 9];
+    let mut sums = [Vec3::ZERO; 9];
     for y in 0..h {
         let theta = PI * (y as f32 + 0.5) / h as f32;
-        let dw = (TAU / w as f32) * (PI / h as f32) * theta.sin();
+        let solid_angle = (TAU / w as f32) * (PI / h as f32) * theta.sin();
         for x in 0..w {
-            let d = dir_of((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+            let direction = dir_of((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
 
             // No firefly clamp: the projection integrates, so a bright sun lights diffuse fully
-            let l = radiance(x, y) * dw;
-            for (k, ylm) in sh_basis(d).iter().enumerate() {
-                c[k] += l * *ylm;
+            let weighted = radiance(x, y) * solid_angle;
+            for (sum, basis) in sums.iter_mut().zip(sh_basis(direction)) {
+                *sum += weighted * basis;
             }
         }
     }
-    let a = [PI, 2.0 * PI / 3.0, 2.0 * PI / 3.0, 2.0 * PI / 3.0, PI / 4.0, PI / 4.0, PI / 4.0, PI / 4.0, PI / 4.0];
-    std::array::from_fn(|k| (c[k] * a[k] / PI).to_array())
+    std::array::from_fn(|k| (sums[k] * COSINE_LOBE_BANDS[k] / PI).to_array())
+}
+
+/// [`sh9`] of the equirect image `width` x `height` whose texels `radiance` gives, box-halved while wider than [`SH_WIDTH`] so every texel counts
+pub fn sh9_averaged(width: u32, height: u32, radiance: impl Fn(u32, u32) -> Vec3 + Sync) -> [[f32; 3]; 9] {
+    if width <= SH_WIDTH {
+        return sh9(width, height, radiance);
+    }
+
+    let mut image = half(width, height, radiance);
+    while image.0 > SH_WIDTH {
+        let (w, h, data) = &image;
+        image = half(*w, *h, |x, y| data.get((y * w + x) as usize).copied().unwrap_or(Vec3::ZERO));
+    }
+    let (w, h, data) = image;
+    sh9(w, h, |x, y| data.get((y * w + x) as usize).copied().unwrap_or(Vec3::ZERO))
+}
+
+/// The equirect image `width` x `height` whose texels `texel` gives, box-downsampled by 2 (wrapping around, clamped at the poles): its width, height and texels
+pub fn half(width: u32, height: u32, texel: impl Fn(u32, u32) -> Vec3 + Sync) -> (u32, u32, Vec<Vec3>) {
+    let (w, h) = ((width / 2).max(1), (height / 2).max(1));
+    let get = |x: u32, y: u32| texel(x % width.max(1), y.min(height.saturating_sub(1)));
+    let mut data = vec![Vec3::ZERO; (w * h) as usize];
+    data.par_chunks_mut(w as usize).enumerate().for_each(|(y, row)| {
+        for (x, texel) in row.iter_mut().enumerate() {
+            let (sx, sy) = (x as u32 * 2, y as u32 * 2);
+            *texel = (get(sx, sy) + get(sx + 1, sy) + get(sx, sy + 1) + get(sx + 1, sy + 1)) * 0.25;
+        }
+    });
+    (w, h, data)
 }

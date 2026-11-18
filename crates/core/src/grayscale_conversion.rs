@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::blend::lum;
-use crate::gradient_input::shape;
+use crate::gradient_input::{NEUTRAL_BALANCE, shape_gray};
 use crate::layer::per_unit;
 use crate::{ChannelKind, ConversionMode};
 
@@ -26,7 +26,7 @@ impl GrayscaleConversion {
     pub const LIBRARY: GrayscaleConversion = GrayscaleConversion {
         custom_input: false,
         invert: false,
-        balance: 0.5,
+        balance: NEUTRAL_BALANCE,
         contrast: 0.0,
         mode: ConversionMode::ChannelsWeights,
         weights: [0.33, 0.33, 0.33, 0.0],
@@ -40,7 +40,7 @@ impl GrayscaleConversion {
 
     /// The shaped gray of straight color `rgb` with coverage `alpha`
     pub fn gray(&self, rgb: [f32; 3], alpha: f32) -> f32 {
-        shape(self.mode.gray(rgb, alpha, self.weights), self.balance, self.contrast, self.invert)
+        shape_gray(self.mode.gray(rgb, alpha, self.weights), self.balance, self.contrast, self.invert)
     }
 
     /// `v` of a `kind` channel (coverage `alpha`) or `custom_input` turned gray: colors gray, scalar and signed in their range, normals as they are

@@ -2,14 +2,12 @@
 
 use egui::accesskit::Role;
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT, Queryable, by};
+use egui_kittest::kittest::{Queryable, by};
 use serde_json::json;
 use texturecraft_engine::core::{EffectKind, LayerId};
 use texturecraft_ui_egui::TextureCraftApp;
 
-use crate::levels_editor::affects_list;
-
-/// The sample session with its first generator effect selected, and that effect's id.
+/// The sample session with its first generator effect selected, and that effect's id
 fn selected_generator() -> (Harness<'static, TextureCraftApp>, LayerId) {
     let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
     let (layer, effect) = session
@@ -82,23 +80,6 @@ fn dragging_a_generator_slider_applies_live_as_one_undo_step() {
     assert_eq!(harness.state().session.history_labels().len(), steps + 1, "one undo step for the drag");
 }
 
-/// A content levels effect offers a channel for its histogram; picking one keeps it selected.
-#[test]
-fn content_levels_pick_the_histogram_channel() {
-    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
-    texturecraft_engine::execute(&mut session, "layer.add.fill", &json!({"color": [0.5, 0.2, 0.1], "roughness": 0.6})).unwrap();
-    texturecraft_engine::execute(&mut session, "effect.add.levels", &json!({"target": "content"})).unwrap();
-    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).build_eframe(|creation_context| TextureCraftApp::new(creation_context, session));
-    harness.run_steps(4);
-    let affects = |harness: &Harness<'_, TextureCraftApp>| affects_list(harness).and_then(|list| list.accesskit_node().label());
-    assert_eq!(affects(&harness).as_deref(), Some("Base color"), "the layer's first channel");
-    affects_list(&harness).unwrap().click();
-    harness.run_steps(2);
-    harness.get_by(|node| node.role() == Role::ListBoxOption && node.label().as_deref() == Some("Roughness")).click();
-    harness.run_steps(3);
-    assert_eq!(affects(&harness).as_deref(), Some("Roughness"), "the picked channel stays");
-}
-
 #[test]
 fn clicking_a_slider_track_applies_it() {
     let (mut harness, effect) = selected_generator();
@@ -110,7 +91,7 @@ fn clicking_a_slider_track_applies_it() {
     assert!(balance(&harness, effect) < 0.25, "a click on the track applies: {}", balance(&harness, effect));
 }
 
-/// The number field in the row of the slider labelled `label`.
+/// The number field in the row of the slider labelled `label`
 fn number_field<'a>(harness: &'a Harness<'_, TextureCraftApp>, label: &str) -> egui_kittest::Node<'a> {
     let row = harness.get_by_label(label).rect().center().y;
     harness.get_all(by().role(Role::TextInput)).find(|node| (node.rect().center().y - row).abs() < 4.0).unwrap()

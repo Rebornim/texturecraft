@@ -2,7 +2,7 @@
 
 use texturecraft_engine::core::{Channel, CompareOp, CompareSource};
 
-/// What compare mask `effect_id` holds
+/// What a compare mask holds: its operator, constant, tolerance, sources, channel and hardness
 #[derive(Clone, Copy)]
 pub(crate) struct CompareSettings {
     pub(crate) op: CompareOp,

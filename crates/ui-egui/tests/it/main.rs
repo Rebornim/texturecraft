@@ -141,3 +141,42 @@ const SLIDER_END_INSET: f32 = 5.0;
 
 /// Frames for an input that redraws Properties (another selection, source or operator) to show
 const REDRAW_FRAMES: usize = 4;
+
+/// One wheel notch over the view, in points
+const WHEEL_NOTCH: f32 = 60.0;
+
+/// How far left of a list's button a click lands, clear of the list and its popup
+const OUTSIDE_OFFSET: f32 = 400.0;
+
+/// A Properties list that `open` opens (returning its button's rect) leaves the view its wheel, and closes on Escape and on a click outside
+fn assert_list_leaves_the_wheel_and_closes(
+    harness: &mut egui_kittest::Harness<'_, texturecraft_ui_egui::TextureCraftApp>,
+    open: impl Fn(&mut egui_kittest::Harness<'_, texturecraft_ui_egui::TextureCraftApp>) -> egui::Rect,
+) {
+    open(harness);
+    assert!(egui::Popup::is_any_open(&harness.ctx), "the list opens");
+    let distance = harness.state().session.camera.distance;
+    harness.hover_at(harness.state().viewport_rect.center());
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, WHEEL_NOTCH),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Wheel,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(REDRAW_FRAMES);
+    assert_ne!(harness.state().session.camera.distance, distance, "the wheel over the view zooms with the list open");
+
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(!egui::Popup::is_any_open(&harness.ctx), "Escape closes the list");
+
+    let button = open(harness);
+    let outside = egui::pos2(button.min.x - OUTSIDE_OFFSET, button.min.y);
+    harness.hover_at(outside);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: outside, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        harness.run_steps(DRAG_STEP_FRAMES);
+    }
+    assert!(!egui::Popup::is_any_open(&harness.ctx), "a click outside closes the list");
+}

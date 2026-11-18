@@ -1,8 +1,8 @@
 //! A fill's whole material: set every channel of a fill layer or content fill effect from one built-in material at once
 
-use serde_json::Value;
 use std::collections::BTreeMap;
 
+use serde_json::Value;
 use texturecraft_core::{Channel, EffectKind, Fill, LayerKind, Project, Source};
 
 use crate::commands::{CommandSpec, bad, has_layer, strp};

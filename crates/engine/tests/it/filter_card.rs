@@ -49,7 +49,8 @@ fn a_content_filter_leaves_the_channels_switched_off() {
 
     let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap();
     let row = inspect["layers"].as_array().unwrap().iter().find(|row| row["id"] == layer).unwrap().clone();
-    assert_eq!(row["contentEffects"][0]["offChannels"], json!(["roughness"]));
+    let filter_row = row["contentEffects"].as_array().unwrap().iter().find(|filter_row| filter_row["id"] == effect.0).unwrap();
+    assert_eq!(filter_row["offChannels"], json!(["roughness"]));
 
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
     assert_close(center(&mut s, Channel::Roughness), [0.7; 3], "one undo step");

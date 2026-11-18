@@ -244,6 +244,16 @@ mod tests {
     }
 
     #[test]
+    fn a_nan_hardness_culls_nothing() {
+        let mesh = two_squares(0.5, -0.5);
+        let depth = ProjectorDepth::build(ProjectorView::of(&planar_z(true, 1.0), mesh.bounds()).unwrap(), &mesh).unwrap();
+
+        let behind = depth.cover(Vec3::new(0.5, 0.3, -0.5), f32::NAN);
+
+        assert_eq!(behind, 1.0, "a hand-edited NaN hardness keeps the back square visible");
+    }
+
+    #[test]
     fn a_mesh_edited_where_its_fingerprint_does_not_look_is_rebuilt_once_forgotten() {
         // Unused vertices spread the fingerprint's samples so the front square's right edge is not among them
         let mut mesh = two_squares(0.5, -0.5);

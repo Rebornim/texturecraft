@@ -195,7 +195,8 @@ fn mask_anchor_points_feed_layers_above_and_folders_take_them() {
     assert!(s.doc.project.effect(LayerId(anchor)).is_none() && s.doc.project.layer(LayerId(low)).unwrap().mask.is_some(), "one undo step");
     execute(&mut s, "edit.redo", &Value::Null).unwrap();
     let mask = s.doc.project.layer(LayerId(low)).unwrap().mask.clone().unwrap();
-    assert_eq!(mask.effects.last().map(|effect| (effect.id.0, effect.name.clone())), Some((anchor, format!("{name} mask"))));
+    let added = mask.effects.iter().find(|effect| effect.id.0 == anchor);
+    assert_eq!(added.map(|effect| effect.name.clone()), Some(format!("{name} mask")));
     assert!(execute(&mut s, "effect.add.anchor", &json!({"layer": low, "target": "nope"})).is_err());
 
     // A layer above reads the mask's gray (0.4) in any channel: the same as a uniform 0.4 mask

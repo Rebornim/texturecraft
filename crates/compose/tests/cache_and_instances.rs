@@ -7,9 +7,10 @@ use std::collections::BTreeMap;
 use texturecraft_compose::{
     BelowCache, Composite, Inputs, MaskGray, PaintTarget, PixelStore, StrokePreview, all_tiles, composite_tiles, composite_tiles_cached,
 };
+use texturecraft_core::project::ENV_RESOURCE_PREFIX;
 use texturecraft_core::{
-    BakedMap, BlendMode, Channel, Effect, EffectKind, Fill, Filter, Generator, GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground,
-    Procedural, ProceduralKind, Project, Projection, Source, TextureSet,
+    BakedMap, BlendMode, Channel, ColorSelection, CompareOp, CompareSource, Effect, EffectKind, Fill, Filter, Generator, GeneratorKind, GrayscaleConversion,
+    HeightMask, ImageInput, Layer, LayerId, LayerKind, Mask, MaskBackground, Procedural, ProceduralKind, Project, Projection, Source, TextureSet,
 };
 use texturecraft_geom::{Mesh, UvGBuffer, primitives};
 use texturecraft_texel::{TILE, TileImage, to_u16};
@@ -892,4 +893,93 @@ fn generator_input_image_changes_invalidate_stack_key() {
 
     images.remove("used");
     assert!(key(&images) != original, "removing a generator input must invalidate the cache");
+}
+
+#[test]
+fn compare_masks_reading_layers_fall_back_to_full_evaluation() {
+    let mut f = fixture();
+    let n = nested_stack(&mut f);
+    let compare = effect(
+        &mut f,
+        EffectKind::Compare {
+            op: CompareOp::GreaterThan,
+            value: 0.5,
+            tolerance: 0.0,
+            left: CompareSource::LayersBelow,
+            right: CompareSource::ThisLayer,
+            channel: Channel::Roughness,
+            hardness: 1.0,
+        },
+    );
+
+    // A mask above the hot layer compares the stack below it
+    f.project.layer_mut(n.g2_above).unwrap().mask.as_mut().unwrap().effects.push(compare);
+
+    for hot in [n.deep, n.top] {
+        assert!(check_cached(&f, 0, hot).is_empty(), "compare masks read the stack: nothing cached");
+    }
+}
+
+/// The key of set 0's whole stack over `images`
+fn stack_key(fixture: &Fixture, images: &texturecraft_compose::ImageStore) -> texturecraft_compose::StackKey {
+    let roots = &fixture.project.texture_sets[0].stack;
+    texturecraft_compose::StackKey::new(&fixture.project, &fixture.pixels, &Default::default(), images, 0, roots).unwrap()
+}
+
+/// A flat image resource of `value`
+fn flat_image(value: f32) -> std::sync::Arc<texturecraft_compose::ImageRes> {
+    std::sync::Arc::new(texturecraft_compose::ImageRes::new(RES, RES, vec![[value; 4]; (RES * RES) as usize], false))
+}
+
+#[test]
+fn filter_inputs_and_id_map_images_changes_invalidate_stack_key() {
+    let mut fixture = fixture();
+    heavy_stack(&mut fixture);
+    let bottom_layer = fixture.project.texture_sets[0].stack[0];
+    let conversion = GrayscaleConversion { custom_input: true, ..GrayscaleConversion::LIBRARY };
+    let mut filter = effect(&mut fixture, EffectKind::Filter(Filter::GrayscaleConversion(conversion)));
+    filter.inputs.insert(ImageInput::CUSTOM_INPUT.id.into(), Source::image("input"));
+    let mut selection = ColorSelection::new(vec![[1.0, 0.0, 0.0]], 0.1);
+    selection.id_map = Some("id".into());
+    let selection = effect(&mut fixture, EffectKind::ColorSelection(selection));
+    let layer = fixture.project.layer_mut(bottom_layer).unwrap();
+    layer.content_effects.push(filter);
+    layer.mask = Some(Mask::new(MaskBackground::White));
+    layer.mask.as_mut().unwrap().effects.push(selection);
+    let mut images = texturecraft_compose::ImageStore::default();
+    images.insert("input".into(), flat_image(0.1));
+    images.insert("id".into(), flat_image(0.1));
+
+    for name in ["input", "id"] {
+        let original = stack_key(&fixture, &images);
+        images.insert(name.into(), flat_image(0.9));
+        assert!(stack_key(&fixture, &images) != original, "replacing the {name} image must invalidate the cache");
+    }
+}
+
+#[test]
+fn the_environment_keys_the_stack_only_while_environment_lighting_reads_it() {
+    let mut fixture = fixture();
+    heavy_stack(&mut fixture);
+    let bottom_layer = fixture.project.texture_sets[0].stack[0];
+    let mut images = texturecraft_compose::ImageStore::default();
+    images.insert("sky".into(), flat_image(0.5));
+    fixture.project.display.environment = format!("{ENV_RESOURCE_PREFIX}sky");
+    let unlit = stack_key(&fixture, &images);
+
+    fixture.project.display.env_rotation += 90.0;
+    assert_eq!(stack_key(&fixture, &images), unlit, "without Baked Lighting Environment the turn changes nothing");
+
+    let lighting =
+        Filter::EnvironmentLighting { horizontal: 0.0, vertical: 0.0, exposure: 0.0, height_intensity: 0.0, ambient_occlusion: 0.0, specular_occlusion: 0.0 };
+    let lighting = effect(&mut fixture, EffectKind::Filter(lighting));
+    fixture.project.layer_mut(bottom_layer).unwrap().content_effects.push(lighting);
+    let lit = stack_key(&fixture, &images);
+    fixture.project.display.env_rotation += 90.0;
+    let turned = stack_key(&fixture, &images);
+    assert!(turned != lit, "turning the environment invalidates the cache");
+    assert_eq!(lit.changed_tiles(&turned), None, "and recomposites every tile");
+
+    images.insert("sky".into(), flat_image(0.9));
+    assert!(stack_key(&fixture, &images) != turned, "replacing the environment image invalidates the cache");
 }

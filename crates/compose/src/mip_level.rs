@@ -14,7 +14,7 @@ pub struct MipLevel {
 const TEXEL_SHARE: f32 = 0.25;
 
 impl MipLevel {
-    /// `rgba` halved: each texel averages the 2 × 2 texels it covers (odd sizes wrap)
+    /// `rgba` halved: each texel averages the 2 × 2 texels it covers (a size of 1 wraps; an odd size above leaves out its last row or column)
     pub(crate) fn halve(rgba: &[[f32; 4]], width: u32, height: u32) -> MipLevel {
         let (w, h) = ((width / 2).max(1), (height / 2).max(1));
         let mut halved = Vec::with_capacity(w as usize * h as usize);

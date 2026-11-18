@@ -43,9 +43,14 @@ const MODES: [&str; 2] = [n_("Material"), n_("Channels")];
 const MATERIAL_MODE: usize = 0;
 const CHANNELS_MODE: usize = 1;
 
-/// Pattern scale and contrast a procedural's sliders run over (typed values stay inside them too)
+/// Pattern scale a procedural's slider runs over (typed values stay inside it too)
 const PATTERN_SCALE: std::ops::RangeInclusive<f32> = 0.1..=32.0;
+
+/// Pattern contrast a procedural's slider runs over
 const PATTERN_CONTRAST: std::ops::RangeInclusive<f32> = 0.0..=2.0;
+
+/// Pattern balance a procedural's slider runs over: below the middle darker, above lighter
+const PATTERN_BALANCE: std::ops::RangeInclusive<f32> = -1.0..=1.0;
 
 /// The size a pattern's Resolution reads the texture set at when none is open: a new project's default
 const FALLBACK_TEXTURE_SET_SIZE: u32 = 2048;
@@ -365,7 +370,7 @@ fn scale_and_contrast(sheet: &mut PropertySheet<'_>, edited: &mut Procedural) ->
 /// A pattern's Balance and Seed rows; returns the edit like [`scale_and_contrast`]
 fn balance_and_seed(sheet: &mut PropertySheet<'_>, edited: &mut Procedural) -> Option<(&'static str, Value, bool)> {
     let mut edit = None;
-    if let Some(merge) = sheet.signed_slider(tr("Balance"), &mut edited.balance, -1.0..=1.0, 2) {
+    if let Some(merge) = sheet.signed_slider(tr("Balance"), &mut edited.balance, PATTERN_BALANCE, 2) {
         edit = Some(("balance", json!(edited.balance), merge));
     }
     if sheet.seed(tr("Seed"), &mut edited.seed) {

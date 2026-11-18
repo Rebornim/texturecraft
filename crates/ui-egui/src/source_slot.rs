@@ -5,6 +5,7 @@ use texturecraft_engine::core::{Channel, ChannelKind, ImageInput};
 
 use crate::i18n::tr;
 
+/// The one source a slot card edits, and how its values read
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum SourceSlot {
     Channel(Channel),

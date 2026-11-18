@@ -14,7 +14,7 @@ use crate::dock::with;
 use crate::fill_pictures::{
     angle_picture, backface_picture, crop_picture, depth_picture, filtering_picture, projection_picture, warp_preview, window_preview, wrap_picture,
 };
-use crate::i18n::{filtering_label, tr, wrap_label};
+use crate::i18n::{filtering_label, n_, tr, wrap_label};
 use crate::move_on_model::MoveOnModel;
 use crate::placement::Placement;
 use crate::projection_kind::ProjectionKind;
@@ -104,13 +104,16 @@ pub(crate) fn placement_sections(app: &mut TextureCraftApp, sheet: &mut Property
     crate::fill_symmetry_panel::symmetry_section(app, sheet, &fill.projection, fill.sampling, base);
 }
 
+/// Runs `layer.fill.projection` on the fill `base` names with `fields`
+pub(crate) fn run_projection(app: &mut TextureCraftApp, base: &Value, fields: Value) {
+    app.run("layer.fill.projection", with(base, fields));
+}
+
 /// Projection, Scale, the preview with size and offset (held, it moves the projection on the model), Rotation, the culling rows, then the Filtering and edges and 3D projection settings bands
 fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, salt: FillKey, reader: LayerId) {
     let tokens = Tokens::get(sheet.ui.ctx());
     let kind = ProjectionKind::of(&fill.projection);
-    let run = |app: &mut TextureCraftApp, fields: Value| {
-        app.run("layer.fill.projection", with(base, fields));
-    };
+    let run = |app: &mut TextureCraftApp, fields: Value| run_projection(app, base, fields);
 
     let picture = |painter: &Painter, rect: Rect, kind: ProjectionKind| projection_picture(painter, rect, kind, &tokens);
 
@@ -211,7 +214,6 @@ fn projector_of(projection: &Projection) -> Option<&Projector> {
 
 /// The name of a Shape crop choice; both fit beside the label at the default panel width
 fn crop_label(crop: ShapeCrop) -> &'static str {
-    use crate::i18n::n_;
     match crop {
         ShapeCrop::Cropped => n_("Cropped to Shape"),
         ShapeCrop::ExtendsOutside => n_("Extends Outside Shape"),
@@ -236,7 +238,7 @@ fn frame_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &F
     // Its i tells it apart from Depth culling; it keeps the column every projection shares
     sheet.info(tr("How far the warp projection reaches into the mesh, in front of and behind its frame, in lengths of the frame's longer side. It bounds the fill only when cropped to its shape."));
     if let Some(merge) = sheet.slider_led(RowLead::Loose(tr("Depth")), &mut depth, PROJECTION_DEPTH_TRACK, 2, "") {
-        app.run("layer.fill.projection", with(base, json!({"projectionDepth": depth, "merge": merge})));
+        run_projection(app, base, json!({"projectionDepth": depth, "merge": merge}));
     }
     if sheet.button(ic::ARROW_CLOCKWISE, tr("Reset frame")).clicked() {
         app.run("layer.fill.resetFrame", base.clone());
@@ -246,9 +248,7 @@ fn frame_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &F
 /// Cylindrical Angle, then Depth culling (planar, warp) and Backface culling (planar, cylindrical), each with its settings under it
 fn culling_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value) {
     let tokens = Tokens::get(sheet.ui.ctx());
-    let run = |app: &mut TextureCraftApp, fields: Value| {
-        app.run("layer.fill.projection", with(base, fields));
-    };
+    let run = |app: &mut TextureCraftApp, fields: Value| run_projection(app, base, fields);
     let (projector, angle) = match &fill.projection {
         Projection::Cylindrical { projector, angle, .. } => (projector, Some(*angle)),
         Projection::Planar { projector, .. } | Projection::Warp { projector, .. } => (projector, None),
@@ -378,30 +378,25 @@ fn placement_rows(
             Some(_) => tiling_for_length(&fill.projection, size, values.map(|cm| cm / CM_PER_UNIT)).unwrap_or(tiling),
             None => values,
         };
-        app.run("layer.fill.projection", with(base, json!({"tiling": tiling, "merge": merge})));
+        run_projection(app, base, json!({"tiling": tiling, "merge": merge}));
     }
     if let Some(merge) = edit.lower {
         let fields = match hardness {
             Some(hardness) => json!({"sharpness": triplanar_sharpness(hardness), "merge": merge}),
             None => json!({offset_key: lower_offset, "merge": merge}),
         };
-        app.run("layer.fill.projection", with(base, fields));
+        run_projection(app, base, fields);
     }
 
     let mut degrees = rotation;
     if let Some(merge) = sheet.angle(tr("Rotation"), &mut degrees, ROTATION_RANGE) {
-        app.run("layer.fill.projection", with(base, json!({"rotation": degrees, "merge": merge})));
+        run_projection(app, base, json!({"rotation": degrees, "merge": merge}));
     }
 }
 
 /// One X, Y, Z row of the 3D projection settings
 fn xyz_fields(values: [f32; 3], speed: f32, decimals: usize, suffix: &'static str) -> [NumberField<'static>; 3] {
-    let mut fields = AXIS_NAMES.map(|tag| NumberField { tag, tag_color: None, value: 0.0, speed, decimals, suffix });
-    for ((field, value), color) in fields.iter_mut().zip(values).zip(AXIS_COLORS) {
-        field.value = value;
-        field.tag_color = Some(color);
-    }
-    fields
+    std::array::from_fn(|axis| NumberField { tag: AXIS_NAMES[axis], tag_color: Some(AXIS_COLORS[axis]), value: values[axis], speed, decimals, suffix })
 }
 
 /// The 3D projection settings: the projector's Offset, Rotation and Scale in X, Y and Z; a frame on the surface shows its own (where its centre is, how it is turned, how big it is), the same values its gizmo drags
@@ -442,17 +437,20 @@ fn world_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &F
     if let Some(offset) = offset {
         let mut fields = xyz_fields(offset, OFFSET_FIELD_SPEED, 2, "");
         if let Some((_, merge)) = sheet.number_fields(tr("Offset"), &mut fields, None, true) {
-            app.run("layer.fill.projection", with(base, json!({"offset": edited(&fields), "merge": merge})));
+            run_projection(app, base, json!({"offset": edited(&fields), "merge": merge}));
         }
     }
     let mut fields = xyz_fields(projector.rotation, ROTATION_FIELD_SPEED, 0, "°");
     if let Some((_, merge)) = sheet.number_fields(tr("Rotation"), &mut fields, None, true) {
-        app.run("layer.fill.projection", with(base, json!({"projectorRotation": edited(&fields), "merge": merge})));
+        run_projection(app, base, json!({"projectorRotation": edited(&fields), "merge": merge}));
     }
     if let Some((scale, merge)) = scale_row(sheet, projector.scale, salt) {
-        app.run("layer.fill.projection", with(base, json!({"projectorScale": scale, "merge": merge})));
+        run_projection(app, base, json!({"projectorScale": scale, "merge": merge}));
     }
 }
+
+/// The least size of the edited axis's scale a linked edit scales the others from by a factor
+const MIN_LINKED_SCALE_BASE: f32 = f32::EPSILON;
 
 /// The Scale X, Y, Z row with its link: the new scale and whether it continues the drag's undo step; linked, one field scales all three by the same factor
 fn scale_row(sheet: &mut PropertySheet<'_>, scale: [f32; 3], salt: FillKey) -> Option<(Vec<f32>, bool)> {
@@ -468,8 +466,9 @@ fn scale_row(sheet: &mut PropertySheet<'_>, scale: [f32; 3], salt: FillKey) -> O
     let (axis, merge) = edit?;
     let mut values: Vec<f32> = fields.iter().map(|field| field.value).collect();
     if linked && let (Some(&value), Some(&before)) = (values.get(axis), scale.get(axis)) {
-        let factor = if before.abs() > f32::EPSILON { value / before } else { 1.0 };
-        values = scale.iter().map(|old| if before.abs() > f32::EPSILON { old * factor } else { value }).collect();
+        // From a scale of about zero no factor reaches the new value: all three take it instead
+        let factor = (before.abs() > MIN_LINKED_SCALE_BASE).then(|| value / before);
+        values = scale.iter().map(|old| factor.map_or(value, |factor| old * factor)).collect();
     }
     Some((values, merge))
 }

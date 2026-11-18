@@ -8,8 +8,9 @@ use texturecraft_engine::core::{Channel, CookResolution, LayerId, LayerKind, Lin
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::screen_pick::{PickOutcome, ScreenPick};
 
-use crate::filter_support::undo_depth;
-use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+use crate::fill_support::{click_node, fill_app};
+use crate::filter_support::{click_at, undo_depth};
+use crate::{SETTLE_FRAMES, TEXTURE_RESOLUTION};
 
 /// Tall enough that Properties shows the whole fill and an open source list without scrolling
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1600.0);
@@ -19,17 +20,7 @@ const SCROLL_FRAMES: usize = 25;
 
 /// The app with a new fill layer (`settings` given to layer.add.fill) selected and its Material tab clicked, and the layer's id
 fn app_with_fill(settings: serde_json::Value) -> (Harness<'static, TextureCraftApp>, LayerId) {
-    let mut session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();
-    let added = texturecraft_engine::execute(&mut session, "layer.add.fill", &settings).unwrap();
-    let layer = LayerId(added["layer"].as_u64().unwrap());
-    let mut harness = Harness::builder().with_size(WINDOW_SIZE).build_eframe(|cc| TextureCraftApp::new(cc, session));
-
-    // The labels below are English; a first run would speak the system's language
-    harness.state_mut().ui.prefs.language = "en".into();
-    harness.run_steps(STARTUP_FRAMES);
-    harness.get_by_role_and_label(Role::Tab, "Material").click();
-    harness.run_steps(SETTLE_FRAMES);
-    (harness, layer)
+    fill_app(settings, None, Some("Material"), WINDOW_SIZE)
 }
 
 fn source(harness: &Harness<'_, TextureCraftApp>, layer: LayerId, channel: Channel) -> Source {
@@ -43,8 +34,7 @@ fn source(harness: &Harness<'_, TextureCraftApp>, layer: LayerId, channel: Chann
 fn click(harness: &mut Harness<'_, TextureCraftApp>, role: Role, label: &str) {
     // A link without a package fails to re-cook with a toast, which must not take the click
     harness.state_mut().toasts.clear();
-    harness.get_by_role_and_label(role, label).click();
-    harness.run_steps(SETTLE_FRAMES);
+    click_node(harness, role, label);
 }
 
 /// Scrolls the `role` named `label` into view (the scroll animates for about twenty frames), then clicks it
@@ -60,8 +50,9 @@ fn click_bar_eyedropper(harness: &mut Harness<'_, TextureCraftApp>) {
     let eyedropper = harness
         .get_all_by_role_and_label(Role::Button, "Pick color")
         .find(|node| bar.y_range().contains(node.rect().center().y) && node.rect().left() >= bar.right())
-        .unwrap();
-    eyedropper.click();
+        .unwrap()
+        .rect();
+    click_at(harness, eyedropper.center());
 }
 
 /// Clicks the open picker's own eyedropper, beside its hex field
@@ -69,16 +60,15 @@ fn click_picker_eyedropper(harness: &mut Harness<'_, TextureCraftApp>) {
     let hex = harness.get_by_role_and_label(Role::TextInput, "Hex color").rect();
     let title = harness.get_by_role_and_label(Role::TitleBar, "Base color").rect();
     let in_picker_row = |at: egui::Pos2| hex.y_range().contains(at.y) && at.x >= hex.right() && at.x <= title.right() + CLOSE_ROOM;
-    let eyedropper = harness.get_all_by_role_and_label(Role::Button, "Pick color").find(|node| in_picker_row(node.rect().center())).unwrap();
-    eyedropper.click();
+    let eyedropper = harness.get_all_by_role_and_label(Role::Button, "Pick color").map(|node| node.rect().center()).find(|at| in_picker_row(*at)).unwrap();
+    click_at(harness, eyedropper);
 }
 
 /// Clicks the `role` named `label` that sits in the row of the slot named `slot` (bands above have their own ⟲)
 fn click_in_slot(harness: &mut Harness<'_, TextureCraftApp>, slot: &str, role: Role, label: &str) {
     let row = harness.get_by_role_and_label(Role::ComboBox, slot).rect();
-    let node = harness.get_all_by_role_and_label(role, label).find(|node| row.contains(node.rect().center())).unwrap();
-    node.click();
-    harness.run_steps(SETTLE_FRAMES);
+    let at = harness.get_all_by_role_and_label(role, label).map(|node| node.rect().center()).find(|at| row.contains(*at)).unwrap();
+    click_at(harness, at);
 }
 
 #[test]
@@ -161,32 +151,8 @@ fn a_linked_material_shows_its_inputs_and_the_switch_shows_its_channels() {
     let (mut harness, layer) = app_with_fill(json!({}));
     assert!(harness.query_by_role_and_label(Role::RadioButton, "Material").is_some(), "every fill has the switch");
 
-    let wear = LinkParam {
-        id: "wear".into(),
-        label: "Wear".into(),
-        group: String::new(),
-        value: json!({"t": "float", "v": 0.5}),
-        default: json!({"t": "float", "v": 0.5}),
-        min: 0.0,
-        max: 1.0,
-        options: Vec::new(),
-    };
-    let link = MaterialLink {
-        name: "Painted steel".into(),
-        package: String::new(),
-        graph: "main".into(),
-        params: vec![wear],
-        presets: Vec::new(),
-        inputs: Vec::new(),
-        size: 256,
-        resolution: None,
-        mapping: Default::default(),
-        outputs: Default::default(),
-    };
-    if let Some(LayerKind::Fill(fill)) = harness.state_mut().session.doc.project.layers.get_mut(&layer).map(|layer| &mut layer.kind) {
-        fill.link = Some(Box::new(link));
-    }
-    harness.run_steps(SETTLE_FRAMES);
+    let wear = float_param("wear", "Wear", 0.5);
+    link_fill(&mut harness, layer, vec![wear], &[]);
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Painted steel").is_some(), "the Material side shows the whole material");
     assert!(harness.query_by_role_and_label(Role::Slider, "Wear").is_some(), "with its inputs");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Metallic").is_none(), "and no channel cards");
@@ -200,32 +166,8 @@ fn a_linked_material_shows_its_inputs_and_the_switch_shows_its_channels() {
 #[test]
 fn dragging_a_linked_material_input_adds_one_undo_step() {
     let (mut harness, layer) = app_with_fill(json!({}));
-    let wear = LinkParam {
-        id: "wear".into(),
-        label: "Wear".into(),
-        group: String::new(),
-        value: json!({"t": "float", "v": 0.25}),
-        default: json!({"t": "float", "v": 0.25}),
-        min: 0.0,
-        max: 1.0,
-        options: Vec::new(),
-    };
-    let link = MaterialLink {
-        name: "Painted steel".into(),
-        package: String::new(),
-        graph: "main".into(),
-        params: vec![wear],
-        presets: Vec::new(),
-        inputs: Vec::new(),
-        size: 256,
-        resolution: None,
-        mapping: Default::default(),
-        outputs: Default::default(),
-    };
-    if let Some(LayerKind::Fill(fill)) = harness.state_mut().session.doc.project.layers.get_mut(&layer).map(|layer| &mut layer.kind) {
-        fill.link = Some(Box::new(link));
-    }
-    harness.run_steps(SETTLE_FRAMES);
+    let wear = float_param("wear", "Wear", 0.25);
+    link_fill(&mut harness, layer, vec![wear], &[]);
     let steps = harness.state().session.history_labels().len();
 
     let track = harness.get_by_role_and_label(Role::Slider, "Wear").rect();
@@ -241,32 +183,8 @@ fn dragging_a_linked_material_input_adds_one_undo_step() {
 fn dragging_in_a_linked_colour_picker_adds_one_undo_step() {
     let (mut harness, layer) = app_with_fill(json!({}));
     let gray = json!({"t": "color", "v": [0.5, 0.5, 0.5, 1.0]});
-    let tint = LinkParam {
-        id: "tint".into(),
-        label: "Tint".into(),
-        group: String::new(),
-        value: gray.clone(),
-        default: gray.clone(),
-        min: 0.0,
-        max: 1.0,
-        options: Vec::new(),
-    };
-    let link = MaterialLink {
-        name: "Painted steel".into(),
-        package: String::new(),
-        graph: "main".into(),
-        params: vec![tint],
-        presets: Vec::new(),
-        inputs: Vec::new(),
-        size: 256,
-        resolution: None,
-        mapping: Default::default(),
-        outputs: Default::default(),
-    };
-    if let Some(LayerKind::Fill(fill)) = harness.state_mut().session.doc.project.layers.get_mut(&layer).map(|layer| &mut layer.kind) {
-        fill.link = Some(Box::new(link));
-    }
-    harness.run_steps(SETTLE_FRAMES);
+    let tint = LinkParam { value: gray.clone(), default: gray.clone(), ..float_param("tint", "Tint", 0.0) };
+    link_fill(&mut harness, layer, vec![tint], &[]);
     let steps = harness.state().session.history_labels().len();
 
     // The swatch sits right of its label; its picker's saturation and value square lies under the R, G, B row
@@ -298,22 +216,7 @@ const SQUARE_REACH: f32 = 80.0;
 #[test]
 fn a_linked_material_maps_its_channels_and_picks_its_resolution() {
     let (mut harness, layer) = app_with_fill(json!({}));
-    let link = MaterialLink {
-        name: "Painted steel".into(),
-        package: String::new(),
-        graph: "main".into(),
-        params: Vec::new(),
-        presets: Vec::new(),
-        inputs: Vec::new(),
-        size: 256,
-        resolution: None,
-        mapping: Default::default(),
-        outputs: [("baseColor", "steel_base.png"), ("roughness", "steel_rough.png")].map(|(output, image)| (output.to_owned(), image.to_owned())).into(),
-    };
-    if let Some(LayerKind::Fill(fill)) = harness.state_mut().session.doc.project.layers.get_mut(&layer).map(|layer| &mut layer.kind) {
-        fill.link = Some(Box::new(link));
-    }
-    harness.run_steps(SETTLE_FRAMES);
+    link_fill(&mut harness, layer, Vec::new(), &[("baseColor", "steel_base.png"), ("roughness", "steel_rough.png")]);
     let link = |harness: &Harness<'_, TextureCraftApp>| match &harness.state().session.doc.project.layer(layer).unwrap().kind {
         LayerKind::Fill(fill) => fill.link.as_deref().unwrap().clone(),
         other => panic!("not a fill: {other:?}"),
@@ -337,6 +240,41 @@ fn a_linked_material_maps_its_channels_and_picks_its_resolution() {
     assert_eq!(link(&harness).resolution, Some(CookResolution::Relative(2)), "1024 is the texture set's ×4");
 }
 
+/// Links the fill `layer` to a material with `params` and image `outputs` (output, image), as a cooked link leaves it
+fn link_fill(harness: &mut Harness<'_, TextureCraftApp>, layer: LayerId, params: Vec<LinkParam>, outputs: &[(&str, &str)]) {
+    let link = MaterialLink {
+        name: "Painted steel".into(),
+        package: String::new(),
+        graph: "main".into(),
+        params,
+        presets: Vec::new(),
+        inputs: Vec::new(),
+        size: 256,
+        resolution: None,
+        mapping: Default::default(),
+        outputs: outputs.iter().map(|(output, image)| ((*output).to_owned(), (*image).to_owned())).collect(),
+    };
+    if let Some(LayerKind::Fill(fill)) = harness.state_mut().session.doc.project.layers.get_mut(&layer).map(|layer| &mut layer.kind) {
+        fill.link = Some(Box::new(link));
+    }
+    harness.run_steps(SETTLE_FRAMES);
+}
+
+/// A 0..1 number input `id` shown as `label`, at `value` and by default
+fn float_param(id: &str, label: &str, value: f64) -> LinkParam {
+    let value = json!({"t": "float", "v": value});
+    LinkParam { id: id.into(), label: label.into(), group: String::new(), value: value.clone(), default: value, min: 0.0, max: 1.0, options: Vec::new() }
+}
+
+/// Types the sRGB code `hex` into the open picker's Hex field and confirms it
+fn type_hex(harness: &mut Harness<'_, TextureCraftApp>, hex: &str) {
+    click(harness, Role::TextInput, "Hex color");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.event(egui::Event::Text(hex.into()));
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(SETTLE_FRAMES);
+}
+
 /// The fill's uniform base colour (linear)
 fn base_color(harness: &Harness<'_, TextureCraftApp>, layer: LayerId) -> [f32; 3] {
     let Source::Uniform(color) = source(harness, layer, Channel::BaseColor) else { panic!("a uniform colour") };
@@ -350,11 +288,7 @@ fn the_colour_bar_opens_the_picker_which_types_restores_and_waits_for_an_eyedrop
     click(&mut harness, Role::Button, "Base color");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "the picker shows its colour space");
 
-    click(&mut harness, Role::TextInput, "Hex color");
-    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
-    harness.event(egui::Event::Text("FF8000".into()));
-    harness.key_press(egui::Key::Enter);
-    harness.run_steps(SETTLE_FRAMES);
+    type_hex(&mut harness, "FF8000");
     let typed = base_color(&harness, layer);
     let expected = [1.0, texturecraft_engine::texel::srgb_to_linear(128.0 / 255.0), 0.0];
     assert!(typed.iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-3), "the typed sRGB code is stored linear: {typed:?}");
@@ -402,9 +336,9 @@ fn the_picker_is_a_window_beside_the_panel_that_its_title_drags_and_its_close_or
     let close = harness
         .get_all_by_role_and_label(Role::Button, "Close")
         .find(|node| moved.y_range().contains(node.rect().center().y) && node.rect().left() >= moved.right())
-        .unwrap();
-    close.click();
-    harness.run_steps(SETTLE_FRAMES);
+        .unwrap()
+        .rect();
+    click_at(&mut harness, close.center());
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "× closes it");
 
     click(&mut harness, Role::Button, "Base color");
@@ -462,11 +396,7 @@ fn the_swatches_row_keeps_the_picker_colour_in_the_project_applies_it_on_a_click
     let (mut harness, layer) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
     let before = base_color(&harness, layer);
     click(&mut harness, Role::Button, "Base color");
-    click(&mut harness, Role::TextInput, "Hex color");
-    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
-    harness.event(egui::Event::Text("FF8000".into()));
-    harness.key_press(egui::Key::Enter);
-    harness.run_steps(SETTLE_FRAMES);
+    type_hex(&mut harness, "FF8000");
     let orange = base_color(&harness, layer);
 
     let add = harness.get_by_role_and_label(Role::Button, "Add swatch").rect();

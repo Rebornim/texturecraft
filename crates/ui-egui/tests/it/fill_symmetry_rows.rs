@@ -4,68 +4,68 @@ use egui::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
-use texturecraft_engine::core::{FillSymmetry, LayerId, LayerKind, SymmetryKind};
+use texturecraft_engine::core::{FillSymmetry, LayerId, SymmetryKind};
 use texturecraft_ui_egui::TextureCraftApp;
 
-use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
-
-/// Tall enough that Properties shows the whole fill without scrolling
-const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1400.0);
+use crate::fill_support::{click_label, click_node, fill_app, fill_of};
+use crate::filter_support::{along, click_at, drag, undo_depth};
+use crate::{PROPERTIES_WINDOW, SETTLE_FRAMES};
 
 /// The app with a new fill layer (projected as `projection`) selected, its Symmetry tab clicked, and its layer id
 fn app_with_fill(projection: &str) -> (Harness<'static, TextureCraftApp>, u64) {
-    let mut session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();
-    let added = texturecraft_engine::execute(&mut session, "layer.add.fill", &json!({})).unwrap();
-    let layer = added["layer"].as_u64().unwrap();
-    texturecraft_engine::execute(&mut session, "layer.fill.projection", &json!({"layer": layer, "projection": projection})).unwrap();
-
-    let mut harness = Harness::builder().with_size(WINDOW_SIZE).build_eframe(|cc| TextureCraftApp::new(cc, session));
-
-    // The labels below are English; a first run would speak the system's language
-    harness.state_mut().ui.prefs.language = "en".into();
-    harness.run_steps(STARTUP_FRAMES);
-    harness.get_by_role_and_label(Role::Tab, "Symmetry").click();
-    harness.run_steps(SETTLE_FRAMES);
+    let (harness, LayerId(layer)) = fill_app(json!({}), Some(projection), Some("Symmetry"), PROPERTIES_WINDOW);
     (harness, layer)
 }
 
 /// The fill layer's symmetry as the document holds it
 fn symmetry(harness: &Harness<'_, TextureCraftApp>, layer: u64) -> FillSymmetry {
-    match &harness.state().session.doc.project.layer(LayerId(layer)).unwrap().kind {
-        LayerKind::Fill(fill) => fill.sampling.symmetry,
-        other => panic!("not a fill: {other:?}"),
-    }
+    fill_of(harness, LayerId(layer)).sampling.symmetry
 }
 
-fn click(harness: &mut Harness<'_, TextureCraftApp>, role: Role, label: &str) {
-    harness.get_by_role_and_label(role, label).click();
+/// The app with a planar fill's radial symmetry on (six copies over a full turn) and its radial rows showing
+fn app_with_radial() -> (Harness<'static, TextureCraftApp>, u64) {
+    let (mut harness, layer) = app_with_fill("planar");
+    harness.state_mut().run("layer.fill.projection", json!({"layer": layer, "symmetry": true, "symmetryType": "radial"}));
     harness.run_steps(SETTLE_FRAMES);
+    (harness, layer)
 }
+
+/// Where the Count track shows `count` copies
+fn count_at(harness: &Harness<'_, TextureCraftApp>, count: f32) -> egui::Pos2 {
+    let track = harness.get_by_role_and_label(Role::Slider, "Count").rect();
+    along(track, (count - COUNT_TRACK_FEWEST) / (COUNT_TRACK_MOST - COUNT_TRACK_FEWEST))
+}
+
+/// The Count track's start: the fewest copies
+const COUNT_TRACK_FEWEST: f32 = 2.0;
+
+/// The Count track's end; a typed count reaches further
+const COUNT_TRACK_MOST: f32 = 16.0;
 
 #[test]
 fn the_symmetry_switch_shows_its_rows_and_each_row_changes_the_symmetry() {
     let (mut harness, layer) = app_with_fill("planar");
     assert!(harness.query_by_label("Mirror symmetry").is_none(), "off, the section is the caption alone");
 
-    click(&mut harness, Role::CheckBox, "Symmetry");
+    click_node(&mut harness, Role::CheckBox, "Symmetry");
     assert!(symmetry(&harness, layer).on);
     assert!(harness.query_by_label("Axis position X").is_some(), "a mirror across X moves along X");
     assert!(harness.query_by_label("Count").is_none(), "a mirror has no radial rows");
 
-    click(&mut harness, Role::RadioButton, "Y");
+    click_node(&mut harness, Role::RadioButton, "Y");
     assert_eq!(symmetry(&harness, layer).axis, 1);
-    click(&mut harness, Role::CheckBox, "Flip copy U");
+    click_node(&mut harness, Role::CheckBox, "Flip copy U");
     assert_eq!(symmetry(&harness, layer).flip, [true, false]);
 
-    click(&mut harness, Role::ComboBox, "Mirror symmetry");
-    click(&mut harness, Role::ListBoxOption, "Radial symmetry");
+    click_node(&mut harness, Role::ComboBox, "Mirror symmetry");
+    click_node(&mut harness, Role::ListBoxOption, "Radial symmetry");
     assert_eq!(symmetry(&harness, layer).kind, SymmetryKind::Radial);
     for label in ["Count", "Angle span", "Axis position X", "Axis position Z"] {
         assert!(harness.query_by_label(label).is_some(), "radial round Y: {label}");
     }
     assert!(harness.query_by_label("Axis position Y").is_none(), "the turning axis does not move along itself");
 
-    click(&mut harness, Role::CheckBox, "Symmetry");
+    click_node(&mut harness, Role::CheckBox, "Symmetry");
     assert!(!symmetry(&harness, layer).on);
     assert_eq!(symmetry(&harness, layer).kind, SymmetryKind::Radial, "switched off, the settings stay");
 }
@@ -74,8 +74,38 @@ fn the_symmetry_switch_shows_its_rows_and_each_row_changes_the_symmetry() {
 fn a_uv_fill_says_why_in_place_of_the_symmetry_switch() {
     let (mut harness, layer) = app_with_fill("uv");
     assert!(harness.query_by_role_and_label(Role::CheckBox, "Symmetry").is_none(), "no switch to click");
-    harness.get_by_label("Not available with UV projection").click();
-    harness.run_steps(SETTLE_FRAMES);
+    click_label(&mut harness, "Not available with UV projection");
     assert!(!symmetry(&harness, layer).on, "a UV projection has no symmetry to switch on");
     assert!(harness.query_by_label("Type").is_none(), "its settings stay hidden, not greyed");
+}
+
+/// A click on the Count track that rounds to the count it has changes nothing and adds no undo step; a drag to the next whole count is one step
+#[test]
+fn a_count_click_that_keeps_the_count_adds_no_undo_step_and_a_drag_to_the_next_adds_one() {
+    let (mut harness, layer) = app_with_radial();
+    let steps = undo_depth(&harness);
+
+    let inside = count_at(&harness, 6.2);
+    click_at(&mut harness, inside);
+    assert_eq!(symmetry(&harness, layer).count, 6);
+    assert_eq!(undo_depth(&harness), steps, "a count that stays six is no edit");
+
+    let (from, to) = (count_at(&harness, 6.0), count_at(&harness, 7.3));
+    drag(&mut harness, from, to);
+    assert_eq!(symmetry(&harness, layer).count, 7);
+    assert_eq!(undo_depth(&harness), steps + 1, "the drag's frames merge into one step");
+}
+
+/// A typed count reaches past the track's end, up to the engine's most copies, as the symmetry popup's Count does
+#[test]
+fn a_typed_count_reaches_past_the_track_to_the_engines_most() {
+    let (mut harness, layer) = app_with_radial();
+
+    click_node(&mut harness, Role::Label, "Count value");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.event(egui::Event::Text("40".into()));
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(SETTLE_FRAMES);
+
+    assert_eq!(symmetry(&harness, layer).count, 40);
 }

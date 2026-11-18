@@ -25,6 +25,7 @@ mod file_dialogs;
 mod fill_channel_image;
 mod fill_material_rows;
 mod fill_projection_rows;
+mod fill_support;
 mod fill_symmetry_rows;
 mod filter_picker;
 mod folder_properties;

@@ -6,11 +6,13 @@ use serde_json::json;
 use texturecraft_engine::core::{Channel, LayerId, LayerKind, Source};
 use texturecraft_ui_egui::TextureCraftApp;
 
+use crate::fill_support::{click_label, click_node};
+
 /// Opens the Roughness slot's source picker on the Material tab and types `search` into its search field, which has the focus
 fn open_roughness_source_menu(harness: &mut Harness<'_, TextureCraftApp>, search: &str) {
-    harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
+    click_node(harness, egui::Role::Tab, "Material");
     harness.run_steps(3);
-    harness.get_by_role_and_label(egui::Role::ComboBox, "Roughness").click();
+    click_node(harness, egui::Role::ComboBox, "Roughness");
     harness.run_steps(2);
     harness.event(egui::Event::Text(search.into()));
     harness.run_steps(2);
@@ -31,7 +33,7 @@ fn a_fill_channel_takes_an_image_from_its_source_picker() {
     harness.run_steps(4);
 
     open_roughness_source_menu(&mut harness, "rough");
-    harness.get_by_role_and_label(egui::Role::ListBoxOption, &name).click();
+    click_node(&mut harness, egui::Role::ListBoxOption, &name);
     harness.run_steps(3);
 
     let LayerKind::Fill(fill) = &harness.state().session.doc.project.layers[&layer].kind else { panic!("a fill layer") };
@@ -124,26 +126,26 @@ fn a_mask_fill_selects_an_image_edits_projection_and_returns_to_uniform() {
     harness.run_steps(4);
 
     // The mask fill's Grayscale slot opens the source picker; its search finds the image
-    harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").click();
+    click_node(&mut harness, egui::Role::ComboBox, "Grayscale");
     harness.run_steps(2);
     harness.event(egui::Event::Text("mask".into()));
     harness.run_steps(2);
-    harness.get_by_role_and_label(egui::Role::ListBoxOption, &image_name).click();
+    click_node(&mut harness, egui::Role::ListBoxOption, &image_name);
     harness.run_steps(3);
 
     let effect = &harness.state().session.doc.project.effect(effect_id).unwrap().1.kind;
     assert!(matches!(effect, EffectKind::Fill { source: Source::Image { name, .. }, .. } if name == &image_name));
 
-    harness.get_by_role_and_label(egui::Role::ComboBox, "UV projection").click();
+    click_node(&mut harness, egui::Role::ComboBox, "UV projection");
     harness.run_steps(2);
-    harness.get_by_label("Tri-planar projection").click();
+    click_label(&mut harness, "Tri-planar projection");
     harness.run_steps(3);
 
     let effect = &harness.state().session.doc.project.effect(effect_id).unwrap().1.kind;
     assert!(matches!(effect, EffectKind::Fill { projection: Projection::Triplanar { .. }, .. }));
 
     // The slot's × puts the mask fill back to a uniform value
-    harness.get_by_role_and_label(egui::Role::Button, "Clear").click();
+    click_node(&mut harness, egui::Role::Button, "Clear");
     harness.run_steps(3);
 
     let effect = &harness.state().session.doc.project.effect(effect_id).unwrap().1.kind;
@@ -164,7 +166,7 @@ fn a_normal_image_can_be_marked_directx() {
     h.state_mut().ui.prefs.language = "en".into();
     h.run_steps(4);
 
-    h.get_by_role_and_label(egui::Role::Tab, "Material").click();
+    click_node(&mut h, egui::Role::Tab, "Material");
     h.run_steps(3);
 
     // The normal image's convention sits in the slot's folded Attributes
@@ -172,9 +174,9 @@ fn a_normal_image_can_be_marked_directx() {
 
     // The scroll animates for about twenty frames
     h.run_steps(30);
-    h.get_by_role_and_label(egui::Role::Button, "Attributes").click();
+    click_node(&mut h, egui::Role::Button, "Attributes");
     h.run_steps(3);
-    h.get_by_role_and_label(egui::Role::RadioButton, "DirectX").click();
+    click_node(&mut h, egui::Role::RadioButton, "DirectX");
     h.run_steps(3);
 
     let LayerKind::Fill(fill) = &h.state().session.doc.project.layers[&layer].kind else { panic!("a fill layer") };

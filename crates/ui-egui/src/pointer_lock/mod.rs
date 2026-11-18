@@ -78,7 +78,7 @@ pub(crate) fn rewrite(ctx: &Context, raw: &mut RawInput) {
 pub(crate) fn settle(ctx: &Context) {
     let asked = ctx.data(|data| data.get_temp::<u64>(asked_id())) == Some(ctx.cumulative_pass_nr());
     let held = ctx.data(|data| data.get_temp::<Lock>(lock_id())).filter(|lock| !lock.let_go);
-    let lock = match (asked, held) {
+    let mut lock = match (asked, held) {
         (true, Some(lock)) => lock,
         (true, None) => {
             let hold = ctx.data(|data| data.get_temp::<Hold>(hold_override_id())).unwrap_or_else(Hold::of_platform);
@@ -108,7 +108,6 @@ pub(crate) fn settle(ctx: &Context) {
         (false, None) => return,
     };
 
-    let mut lock = lock;
     ctx.set_cursor_icon(CursorIcon::None);
     if lock.hold.puts_back() && lock.seen.distance(lock.anchor) > PUT_BACK_REACH {
         ctx.send_viewport_cmd(ViewportCommand::CursorPosition(lock.anchor));

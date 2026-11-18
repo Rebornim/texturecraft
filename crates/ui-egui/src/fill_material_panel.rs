@@ -24,6 +24,8 @@ use crate::fill_panel::{FillKey, fill_key};
 use crate::i18n::{n_, tr};
 use crate::material_orb::material_orb;
 use crate::orb_material::OrbMaterial;
+use crate::pattern_panel::tile_generator_sections;
+use crate::pattern_target::PatternTarget;
 use crate::picker_group::PickerGroup;
 use crate::picker_tab::PickerTab;
 use crate::property_sheet::PropertySheet;
@@ -289,10 +291,8 @@ fn source_choice(source: &Source) -> SourceChoice {
 
 /// The source picker's tabs: Resources (Procedurals, Textures with Import... first, Alphas in their shelf groups, Uniform) and the stack's Anchor points
 fn source_tabs(thumbs: &mut Thumbs, ctx: &egui::Context, images: &ImageStore, anchors: &[(LayerId, String)], uniform: Color32) -> Vec<PickerTab<SourceChoice>> {
-    let procedurals = ProceduralKind::ALL
-        .into_iter()
-        .map(|kind| tile(SourceChoice::Procedural(kind), tr(kind.label()), None, TilePicture::Texture(thumbs.procedural(ctx, kind))))
-        .collect();
+    let procedurals =
+        ProceduralKind::ALL.into_iter().map(|kind| tile(SourceChoice::Procedural(kind), tr(kind.label()), None, TilePicture::Procedural(kind))).collect();
     let textures = ResourcePickerItem::textures(images, SourceChoice::Import, |name| SourceChoice::Image(name.to_owned()));
     let alphas = alphas::library()
         .iter()
@@ -448,6 +448,13 @@ fn procedural_rows(
         let mut settings = json!({"procedural": kind, "merge": merge});
         settings[key] = value;
         app.run("layer.fill.set", set(settings));
+    }
+
+    // The Tile Generator's own parameters and image inputs follow the rows every pattern has
+    if let Some(tile) = pattern.tile.as_deref() {
+        let base = set(json!({"low": low, "high": high}));
+        let target = PatternTarget { command: "layer.fill.set", salt: base.to_string(), base };
+        sheet.embed(|ui| tile_generator_sections(app, ui, &target, pattern, tile));
     }
 }
 

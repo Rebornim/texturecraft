@@ -5,7 +5,7 @@ use texturecraft_engine::compose::pattern::{cylinder_axis_index, decal_axes};
 use texturecraft_engine::core::Projection;
 use texturecraft_engine::geom::glam::{Vec2, Vec3};
 
-use crate::round_gizmo::{BOX_REACH, CIRCLE_POINTS, CYLINDER_HEIGHT, CYLINDER_REACH, SPHERE_REACH};
+use crate::round_gizmo::{BOX_REACH, CIRCLE_POINTS, CYLINDER_HEIGHT, CYLINDER_REACH, SPHERE_REACH, box_corner, box_edges};
 
 mod place;
 
@@ -16,12 +16,6 @@ const FRAME_GAP: f32 = 0.15;
 
 /// How far a planar's direction line reaches back from its frame (preview units)
 const DIRECTION_LENGTH: f32 = 0.35;
-
-/// A box's corners: each index's three low bits pick its low (0) or high (1) side along X, Y and Z
-const BOX_CORNERS: usize = 8;
-
-/// The bit of a box corner's index for each axis: flipping one walks along an edge
-const AXIS_BITS: [usize; 3] = [1, 2, 4];
 
 /// The projector's outline in the preview's coordinates (the compositor's: the mesh's centre at the origin, its half diagonal 1)
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -47,17 +41,8 @@ impl ProjectorOutline {
             Projection::Triplanar { scale, offset, projector, .. } => {
                 let place = Place::new(projector.rotation, projector.scale, Vec3::from(*offset), *scale);
                 let size = object * BOX_REACH;
-                let corner = |corner_index: usize| place.local + size * Vec3::new(sign(corner_index, 0), sign(corner_index, 1), sign(corner_index, 2));
-
-                // Each edge once: from a corner on an axis's low side to the corner across that axis
-                let mut lines = Vec::new();
-                for corner_index in 0..BOX_CORNERS {
-                    for bit in AXIS_BITS {
-                        if corner_index & bit == 0 {
-                            lines.push(vec![place.world(corner(corner_index)), place.world(corner(corner_index | bit))]);
-                        }
-                    }
-                }
+                let corner = |index: usize| place.world(place.local + size * box_corner(index));
+                let lines = box_edges().map(|(first, second)| vec![corner(first), corner(second)]).collect();
 
                 ProjectorOutline { lines, tip: None, center: place.world(place.local) }
             }
@@ -109,11 +94,6 @@ fn planar(size: [f32; 2], (origin, across, up, out): (Vec3, Vec3, Vec3, Vec3), o
     let corners = [center - across - up, center + across - up, center + across + up, center - across + up, center - across - up];
     let tip = center - out * DIRECTION_LENGTH;
     ProjectorOutline { lines: vec![corners.to_vec(), vec![center, tip]], tip: Some(tip), center }
-}
-
-/// -1 or 1: bit `axis` of a box corner's index
-fn sign(index: usize, axis: usize) -> f32 {
-    if index >> axis & 1 == 1 { 1.0 } else { -1.0 }
 }
 
 /// A closed circle through `at` of the unit circle's points

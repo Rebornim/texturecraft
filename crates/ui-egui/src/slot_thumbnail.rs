@@ -30,7 +30,7 @@ pub(crate) fn thumbnail(app: &mut TextureCraftApp, ctx: &egui::Context, source: 
         // The stack the anchor point keeps, as the Layers panel shows that point (the glyph while it renders)
         Source::Anchor { anchor, channel, .. } => app
             .layer_panel
-            .texture(ctx, &app.session, ThumbTarget::Stage { effect: *anchor, channel: *channel })
+            .texture_outside(ctx, &app.session, ThumbTarget::Stage { effect: *anchor, channel: *channel })
             .map_or(SlotThumbnail::Glyph(ic::ANCHOR), SlotThumbnail::Stack),
     }
 }

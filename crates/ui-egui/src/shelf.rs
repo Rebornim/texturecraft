@@ -571,7 +571,7 @@ fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry
     }
 }
 
-/// [`tile`] at `view`'s size: a grid tile with the name under the thumbnail, or a list row with it beside; `preview` runs on hover
+/// A resource tile at `view`'s size: a grid tile with the name under the thumbnail, or a list row with it beside; `preview` runs on hover
 fn tile_in_view(
     ui: &mut Ui,
     thumbs: &mut Thumbs,

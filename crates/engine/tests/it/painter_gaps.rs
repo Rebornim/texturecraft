@@ -198,7 +198,7 @@ fn decals_project_an_image_from_a_frame_placed_on_the_surface() {
     assert!(red(at(&mut s, Channel::BaseColor, 170.0, 180.0)));
     let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap().to_string();
     assert!(inspect.contains("Planar projection") && inspect.contains("\"decal\"") && inspect.contains("\"rotation\":45"), "inspect shows the decal");
-    // Not a decal; one undo step per edit.
+    // Not a decal; one undo step per edit
     let plain = id(execute(&mut s, "layer.add.fill", &Value::Null).unwrap(), "layer");
     assert!(execute(&mut s, "layer.decal.set", &json!({"layer": plain.0, "size": 1})).is_err());
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
@@ -211,6 +211,7 @@ fn effect_decal(s: &Session, effect: LayerId) -> Decal {
     let EffectKind::Fill { projection: Projection::Planar { placed: Some(decal), .. }, .. } = &s.doc.project.effect(effect).unwrap().1.kind else {
         panic!("a decal fill effect")
     };
+
     *decal
 }
 

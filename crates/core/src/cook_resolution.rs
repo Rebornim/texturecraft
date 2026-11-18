@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::layer::OutputResolution;
 use crate::{MAX_RESOLUTION, MIN_RESOLUTION};
 
 /// How big a source is cooked: relative to its texture set (following it when it changes) or a fixed size
@@ -18,8 +19,8 @@ impl CookResolution {
     /// The texture set's own resolution (Auto)
     pub const TEXTURE_SET: CookResolution = CookResolution::Relative(0);
 
-    /// Powers of two a relative size may scale the texture set's by
-    pub const FACTORS: std::ops::RangeInclusive<i8> = -3..=3;
+    /// Powers of two a relative size may scale the texture set's by, as a generator's output resolution does
+    pub const FACTORS: std::ops::RangeInclusive<i8> = OutputResolution::FACTORS;
 
     /// Pixels across for a texture set `set` pixels across: a power of two the engine can cook, else the texture set's size
     pub fn size(self, set: u32) -> u32 {

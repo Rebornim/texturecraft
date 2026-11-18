@@ -135,14 +135,14 @@ fn randomize_seeds(s: &mut Session, p: &Value) -> Result<Value> {
     }
 
     // One mixing key per folder: a seed maps to the same new seed wherever it is, so patterns that lined up still do
-    let key = mix(folder.0 as u32 ^ (folder.0 >> 32) as u32);
+    let key = next_seed(folder.0 as u32 ^ (folder.0 >> 32) as u32);
     s.edit("Randomize seeds", |s| {
         let mut randomized = randomized_mut(&mut s.doc.project, folder).map(std::mem::take).unwrap_or_default();
         let mut positions = randomized.iter().enumerate().map(|(position, record)| ((record.layer, record.index), position)).collect();
         for id in &inside {
             let Some(layer) = s.doc.project.layers.get_mut(id) else { continue };
             for (index, seed) in (0u32..).zip(layer_seeds(layer)) {
-                let after = mix(*seed ^ key);
+                let after = next_seed(*seed ^ key);
                 remember(&mut randomized, &mut positions, RandomizedSeed { layer: *id, index, before: *seed, after });
                 *seed = after;
             }
@@ -243,8 +243,8 @@ fn source_seed(source: &mut Source) -> Option<&mut u32> {
     }
 }
 
-/// A new seed that looks random but follows from `seed` (SplitMix32's mixing step), so replays get the same seeds
-fn mix(seed: u32) -> u32 {
+/// A new seed that looks random but follows from `seed` (SplitMix32's mixing step), so tests and replays get the same seeds
+pub fn next_seed(seed: u32) -> u32 {
     let mut z = seed.wrapping_add(0x9e37_79b9);
     z = (z ^ (z >> 16)).wrapping_mul(0x85eb_ca6b);
     z = (z ^ (z >> 13)).wrapping_mul(0xc2b2_ae35);

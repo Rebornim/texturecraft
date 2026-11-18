@@ -55,9 +55,6 @@ const HEIGHT_RELIEF: f32 = 1.0 / 32.0;
 /// The Height Intensity of Baked Lighting Environment that tilts the normals as Baked Lighting Stylized's Height to Normal Intensity 1 does (its default)
 const ENVIRONMENT_HEIGHT_UNIT: f32 = 4.0;
 
-/// The most Baked Lighting Environment's Exposure brightens or darkens, in stops
-const EXPOSURE_STOPS: f32 = 5.0;
-
 /// What a live stroke paints into.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaintTarget {
@@ -3141,7 +3138,6 @@ impl<'a, 'b> Texel<'a, 'b> {
                             }
                         }
                     }
-                    self.lit = None;
 
                     // Anchors inside the content stack read the stack cut at that point, lit by the same material
                     for (anchor, cut) in &node.anchors {
@@ -3434,7 +3430,7 @@ impl<'a, 'b> Texel<'a, 'b> {
                         let ao = self.baked(BakedMap::AmbientOcclusion).unwrap_or(1.0);
                         let nrm = Vec3::from(self.detail_normal(height_intensity / ENVIRONMENT_HEIGHT_UNIT));
                         let light = environment.irradiance(nrm, horizontal.to_radians(), vertical.to_radians())
-                            * exposure.clamp(-EXPOSURE_STOPS, EXPOSURE_STOPS).exp2();
+                            * exposure.clamp(-Filter::ENVIRONMENT_EXPOSURE_STOPS, Filter::ENVIRONMENT_EXPOSURE_STOPS).exp2();
                         let material = self.lit.unwrap_or_else(|| Channel::ALL.map(Channel::default_value));
                         let lit = EnvironmentSh::shade(value, light, ao, [*ambient_occlusion, *specular_occlusion], &material);
                         (mix3(value, lit, opacity), coverage)
@@ -5027,7 +5023,7 @@ mod tests {
     fn a_generator_input_image_reads_plain_bilinear_as_saved_projects_did() {
         // Every fourth column white: a texel centre reads between two black columns, a mip level a quarter gray
         const SIZE: u32 = 256;
-        let striped = (0..SIZE * SIZE).map(|i| if i % SIZE % 4 == 0 { [1.0; 4] } else { [0.0, 0.0, 0.0, 1.0] }).collect();
+        let striped = (0..SIZE * SIZE).map(|i| if (i % SIZE).is_multiple_of(4) { [1.0; 4] } else { [0.0, 0.0, 0.0, 1.0] }).collect();
         let images: ImageStore = [("ao".to_string(), Arc::new(crate::store::ImageRes::new(SIZE, SIZE, striped, false)))].into_iter().collect();
         let mut generator = Generator::new(GeneratorKind::Dirt);
         generator.inputs.insert(BakedMap::AmbientOcclusion, Source::image("ao"));

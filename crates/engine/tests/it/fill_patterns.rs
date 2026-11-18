@@ -30,11 +30,14 @@ fn roughness(session: &Session, layer: LayerId) -> Roughness {
     }
 }
 
+/// One parameter sent alone, its value, and what it changes in the stored pattern
+type PatternEdit = (&'static str, Value, fn(&mut Roughness));
+
 /// What the Scale, Contrast, Seed, Balance and Invert controls and the Low/High swatches send: one parameter each
 #[test]
 fn a_pattern_parameter_given_alone_keeps_every_other_one() {
     let (mut session, layer) = clouds_fill();
-    let edits: [(&str, Value, fn(&mut Roughness)); 7] = [
+    let edits: [PatternEdit; 7] = [
         ("scale", json!(3.0), |(pattern, ..)| pattern.scale = 3.0),
         ("contrast", json!(0.5), |(pattern, ..)| pattern.contrast = 0.5),
         ("seed", json!(42), |(pattern, ..)| pattern.seed = 42),

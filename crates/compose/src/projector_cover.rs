@@ -102,8 +102,7 @@ pub fn placed_cover(frame: &Decal, projector: &Projector, p: Vec3, nrm: Vec3) ->
     Some((flip_uv(placed_uv(local), frame.flip), cover))
 }
 
-/// [`placed_cover`] for a frame with a mirrored copy: whichever of the frame and its copy covers the point more. The copy is the frame
-/// reflected through the plane `offset` away from `center` (the mesh center) on the symmetry axis, its image flipped as asked
+/// [`placed_cover`] for a frame with a mirrored copy: whichever of the frame and its copy covers the point more. The copy is the frame reflected through the plane `offset` away from `center` (the mesh center) on the symmetry axis, its image flipped as asked
 pub fn placed_cover_symmetric(frame: &Decal, projector: &Projector, p: Vec3, nrm: Vec3, center: Vec3) -> Option<(Vec2, f32)> {
     let direct = placed_cover(frame, projector, p, nrm);
     let Some(symmetry) = frame.symmetry else { return direct };
@@ -131,9 +130,7 @@ fn flip_uv(uv: Vec2, flip: [bool; 2]) -> Vec2 {
     Vec2::new(if flip[0] { 1.0 - uv.x } else { uv.x }, if flip[1] { 1.0 - uv.y } else { uv.y })
 }
 
-/// A projection from a frame on the surface (a placed planar or a warp) at world point `p` with normal `nrm`, `center` the mesh center a
-/// placed planar's mirrored copy reflects across: its texture coordinates and how much it covers there (None for other projections, a
-/// degenerate frame or where nothing lands)
+/// A projection from a frame on the surface (a placed planar or a warp) at world point `p` with normal `nrm`, `center` the mesh center a placed planar's mirrored copy reflects across: its texture coordinates and how much it covers there (None for other projections, a degenerate frame or where nothing lands)
 pub fn framed_cover(proj: &Projection, p: Vec3, nrm: Vec3, center: Vec3) -> Option<(Vec2, f32)> {
     match proj {
         Projection::Planar { projector, placed: Some(frame), .. } => placed_cover_symmetric(frame, projector, p, nrm, center),

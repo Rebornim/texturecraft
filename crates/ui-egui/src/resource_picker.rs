@@ -364,15 +364,20 @@ fn tile_ui<K>(ui: &mut Ui, thumbs: &mut Thumbs, rect: Rect, (place, item): (usiz
 
     let picture = Rect::from_min_size(pos2(rect.center().x - PICTURE_SIZE / 2.0, rect.top() + PICTURE_TOP), vec2(PICTURE_SIZE, PICTURE_SIZE));
     let rounding = CornerRadius::same(PICTURE_ROUNDING);
-    match &item.picture {
-        TilePicture::Texture(Some(texture)) => {
+
+    // A project image's or a pattern's thumbnail is made only once its tile is drawn
+    let texture = match &item.picture {
+        TilePicture::Texture(texture) => texture.clone(),
+        TilePicture::Image(name, image) => Some(thumbs.image(ui.ctx(), name, image)),
+        TilePicture::Procedural(kind) => thumbs.procedural(ui.ctx(), *kind),
+        TilePicture::Swatch(_) | TilePicture::Glyph(_) | TilePicture::Import => None,
+    };
+
+    match (&item.picture, texture) {
+        (_, Some(texture)) => {
             egui::Image::from_texture((texture.id(), picture.size())).corner_radius(rounding).paint_at(ui, picture);
         }
-        TilePicture::Image(name, image) => {
-            let texture = thumbs.image(ui.ctx(), name, image);
-            egui::Image::from_texture((texture.id(), picture.size())).corner_radius(rounding).paint_at(ui, picture);
-        }
-        TilePicture::Texture(None) => {
+        (TilePicture::Texture(_) | TilePicture::Image(..) | TilePicture::Procedural(_), None) => {
             painter.text(
                 picture.center(),
                 Align2::CENTER_CENTER,
@@ -381,14 +386,14 @@ fn tile_ui<K>(ui: &mut Ui, thumbs: &mut Thumbs, rect: Rect, (place, item): (usiz
                 tokens.text_dim.gamma_multiply(LOADING_GLYPH_OPACITY),
             );
         }
-        TilePicture::Swatch(color) => {
+        (TilePicture::Swatch(color), None) => {
             painter.rect_filled(picture, rounding, *color);
         }
-        TilePicture::Glyph(glyph) => {
+        (TilePicture::Glyph(glyph), None) => {
             painter.rect(picture, rounding, tokens.field, Stroke::new(BORDER, tokens.field_border), StrokeKind::Inside);
             painter.text(picture.center(), Align2::CENTER_CENTER, *glyph, FontId::proportional(GLYPH_SIZE), tokens.text_dim);
         }
-        TilePicture::Import => {
+        (TilePicture::Import, None) => {
             painter.rect(picture, rounding, tokens.field, Stroke::new(BORDER, tokens.field_border), StrokeKind::Inside);
             let color = if hovered { tokens.text } else { tokens.text_dim };
             painter.text(picture.center(), Align2::CENTER_CENTER, ic::PLUS, FontId::proportional(IMPORT_GLYPH_SIZE), color);

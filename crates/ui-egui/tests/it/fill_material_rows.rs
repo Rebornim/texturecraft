@@ -1,9 +1,12 @@
 //! A fill's Material section: the channel strip turns channels on and off, each slot's row lists the sources, ⟲ and × restore and clear, the ramp inverts, a linked material maps its channels and picks its resolution
 
+use std::sync::Arc;
+
 use egui::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::json;
+use texturecraft_engine::compose::ImageRes;
 use texturecraft_engine::core::{Channel, CookResolution, LayerId, LayerKind, LinkParam, MaterialLink, Procedural, ProceduralKind, Source};
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::screen_pick::{PickOutcome, ScreenPick};
@@ -14,6 +17,9 @@ use crate::{SETTLE_FRAMES, TEXTURE_RESOLUTION};
 
 /// Tall enough that Properties shows the whole fill and an open source list without scrolling
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1600.0);
+
+/// Frames for the shelf's and the picker's thumbnails to render a few per frame, enough for every pattern were all of them asked for
+const THUMBNAIL_FRAMES: usize = 200;
 
 /// Frames for a scroll to bring a control into view
 const SCROLL_FRAMES: usize = 25;
@@ -105,6 +111,69 @@ fn a_slot_lists_its_sources_restores_a_procedural_and_clears_back_to_uniform() {
 
     click_in_slot(&mut harness, "Metallic", Role::Button, "Clear");
     assert_eq!(source(&harness, layer, Channel::Metallic), Source::uniform_of(Channel::Metallic), "× goes back to a uniform value");
+}
+
+/// A pattern's thumbnail is made only once its tile is drawn: a search renders the patterns it shows, not every pattern
+#[test]
+fn searching_the_source_picker_renders_only_the_shown_pattern_thumbnails() {
+    let (mut harness, layer) = app_with_fill(json!({}));
+    let pattern_thumbnails = |harness: &Harness<'_, TextureCraftApp>| {
+        harness.ctx.tex_manager().read().allocated().filter(|(_, texture)| texture.name.starts_with("thumb_proc:")).count()
+    };
+    click(&mut harness, Role::ComboBox, "Metallic");
+    harness.event(egui::Event::Text("Smooth fur".into()));
+    harness.run_steps(THUMBNAIL_FRAMES);
+
+    let after_search = pattern_thumbnails(&harness);
+    let rendered = |name: &str| harness.ctx.tex_manager().read().allocated().any(|(_, texture)| texture.name == name);
+    assert!(rendered("thumb_proc:SmoothFur"), "the pattern the search shows gets its thumbnail");
+    assert!(after_search < ProceduralKind::ALL.len(), "{after_search} of {} pattern thumbnails made", ProceduralKind::ALL.len());
+
+    click(&mut harness, Role::ListBoxOption, ProceduralKind::SmoothFur.label());
+    let Source::Procedural { pattern, .. } = source(&harness, layer, Channel::Metallic) else { panic!("a procedural") };
+    assert_eq!(pattern.kind, ProceduralKind::SmoothFur);
+    assert_eq!(pattern_thumbnails(&harness), after_search, "the pick reuses the thumbnail it showed");
+
+    let context = harness.ctx.clone();
+    drop(harness);
+    let left = context.tex_manager().read().allocated().filter(|(_, texture)| texture.name.starts_with("thumb_proc:")).count();
+    assert_eq!(left, 0, "closing the app releases the pattern thumbnails");
+}
+
+/// A project image's thumbnail is made once its tile scrolls into view, not when the picker opens, and goes with the image
+#[test]
+fn source_picker_images_render_on_scroll_and_release_on_removal() {
+    const IMAGE_COUNT: usize = 128;
+    const IMAGE_SIDE: u32 = 64;
+    let (mut harness, layer) = app_with_fill(json!({}));
+    let session = &mut harness.state_mut().session;
+    for index in 0..IMAGE_COUNT {
+        let name = format!("picker-image-{index:03}.png");
+        let texels = (IMAGE_SIDE * IMAGE_SIDE) as usize;
+        session.doc.resources.insert(name.clone(), Arc::new(vec![0]));
+        session.images.insert(name, Arc::new(ImageRes::new(IMAGE_SIDE, IMAGE_SIDE, vec![[0.5; 4]; texels], false)));
+    }
+    let image_thumbnails = |harness: &Harness<'_, TextureCraftApp>| {
+        harness.ctx.tex_manager().read().allocated().filter(|(_, texture)| texture.name.starts_with("res_picker-image-")).count()
+    };
+
+    click(&mut harness, Role::ComboBox, "Metallic");
+    harness.run_steps(THUMBNAIL_FRAMES);
+    let opened = image_thumbnails(&harness);
+    assert!(opened < IMAGE_COUNT, "opening the picker makes thumbnails only for the tiles in view: {opened}");
+
+    let last = format!("picker-image-{:03}.png", IMAGE_COUNT - 1);
+    harness.get_by_role_and_label(Role::ListBoxOption, &last).scroll_to_me();
+    harness.run_steps(THUMBNAIL_FRAMES);
+    let scrolled = image_thumbnails(&harness);
+    assert!(scrolled > opened, "a scroll makes the thumbnails of the tiles it brings into view: {opened} -> {scrolled}");
+    click(&mut harness, Role::ListBoxOption, &last);
+    assert_eq!(source(&harness, layer, Channel::Metallic), Source::image(last));
+
+    let app = harness.state_mut();
+    app.session.images.clear();
+    app.thumbs.sync_images(&app.session.images, app.session.revision + 1);
+    assert_eq!(image_thumbnails(&harness), 0, "removed images release their picker thumbnails");
 }
 
 /// Dragging the pattern's Contrast changes only the contrast: the pattern keeps its balance, invert, seed, scale and values

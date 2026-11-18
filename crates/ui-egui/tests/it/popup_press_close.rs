@@ -10,9 +10,7 @@ use texturecraft_ui_egui::docking::Dock;
 
 use crate::{BAKE_RESOLUTION, DRAG_STEP_FRAMES, PROPERTIES_WINDOW, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
 
-#[path = "../../src/ui_state_store/memory_storage.rs"]
-mod memory_storage;
-use memory_storage::MemoryStorage;
+use crate::memory_storage::MemoryStorage;
 
 /// Moves of a drag on the model, each a few points, so it is a drag well before its release
 const DRAG_MOVES: usize = 6;

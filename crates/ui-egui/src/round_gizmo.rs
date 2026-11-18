@@ -160,15 +160,10 @@ impl RoundGizmo {
     /// A box of half size `size`: its edges, a dot on the corner up and right on screen that scales it evenly, and a double arrow on each face turned towards the camera that stretches it along that direction
     fn box_handles(&mut self, at: impl Fn(Vec3) -> Option<Pos2>, size: Vec3, forward: Vec3, view: Rect) {
         let local = self.local;
-        let corner = |index: usize| local + size * Vec3::new(sign(index, 0), sign(index, 1), sign(index, 2));
-        for first_corner in 0..BOX_CORNERS {
-            for bit in BOX_AXIS_BITS {
-                let second_corner = first_corner | bit;
-                if second_corner != first_corner
-                    && let (Some(from), Some(to)) = (at(corner(first_corner)), at(corner(second_corner)))
-                {
-                    self.outline.push(vec![from, to]);
-                }
+        let corner = |index: usize| local + size * box_corner(index);
+        for (first_corner, second_corner) in box_edges() {
+            if let (Some(from), Some(to)) = (at(corner(first_corner)), at(corner(second_corner))) {
+                self.outline.push(vec![from, to]);
             }
         }
 
@@ -349,9 +344,15 @@ fn size_arrow(painter: &egui::Painter, at: Pos2, along: egui::Vec2, fill: Color3
     }
 }
 
-/// -1 or 1: bit `bit` of a box corner's index
-fn sign(index: usize, bit: usize) -> f32 {
-    if index >> bit & 1 == 1 { 1.0 } else { -1.0 }
+/// Corner `index` of a box from -1 to 1: the index's three low bits pick its low (0) or high (1) side along X, Y and Z
+pub(crate) fn box_corner(index: usize) -> Vec3 {
+    let side = |bit: usize| if index & bit == 0 { -1.0 } else { 1.0 };
+    Vec3::new(side(BOX_AXIS_BITS[0]), side(BOX_AXIS_BITS[1]), side(BOX_AXIS_BITS[2]))
+}
+
+/// A box's twelve edges as pairs of corner indices, each once: from a corner on an axis's low side to the corner across that axis
+pub(crate) fn box_edges() -> impl Iterator<Item = (usize, usize)> {
+    (0..BOX_CORNERS).flat_map(|corner| BOX_AXIS_BITS.into_iter().filter(move |bit| corner & bit == 0).map(move |bit| (corner, corner | bit)))
 }
 
 /// Which projector directions a handle along `axis` alone works on

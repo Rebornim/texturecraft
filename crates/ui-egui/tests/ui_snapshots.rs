@@ -873,35 +873,6 @@ fn panel_header_snapshots() {
     save(&mut harness, &output_dir, "panel-header-close-hovered");
 }
 
-#[test]
-#[ignore = "requires a GPU adapter and TC_UI_SNAPSHOTS"]
-fn tile_generator_gradient_map_snapshot() {
-    use serde_json::json;
-    use texturecraft_engine::execute;
-
-    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
-
-    std::fs::create_dir_all(&output_dir).unwrap();
-    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
-    execute(&mut session, "layer.add.fill", &json!({})).unwrap();
-    execute(
-        &mut session,
-        "layer.fill.set",
-        &json!({"channel": "baseColor", "procedural": "Tile Generator", "tile": {"amount": [5, 3]}, "colors": ["#1d1745", "#4e80a0", "#f0bb75"]}),
-    )
-    .unwrap();
-
-    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).wgpu().build_eframe(|context| TextureCraftApp::new(context, session));
-    harness.state_mut().ui.prefs.language = "en".into();
-    harness.state_mut().ui.dock.focus(Panel::Properties);
-    harness.run_steps(6);
-    harness.get_by_role_and_label(egui::Role::ComboBox, "Base color").scroll_to_me();
-    harness.run_steps(30);
-
-    assert!(harness.query_by_label_contains("Add color").is_some());
-    save(&mut harness, &output_dir, "tile-generator-gradient-map");
-}
-
 /// Edit > Settings: the three pages and a compact window at 150% scale
 #[test]
 #[ignore]

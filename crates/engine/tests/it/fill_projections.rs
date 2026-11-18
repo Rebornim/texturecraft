@@ -79,6 +79,20 @@ fn three_d_projection_settings_turn_stretch_and_move_every_3d_projection() {
     assert_eq!(row["fill"]["projectionSettings"]["Cylindrical"]["projector"]["scale"], json!([1.0, 1.0, 1.0]));
 }
 
+/// A negative projector scale mirrors that axis, as a project file's does: the command keeps its sign and limits only its size
+#[test]
+fn a_negative_projector_scale_keeps_its_mirror() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    set(&mut s, layer, json!({"projection": "spherical", "projectorScale": [-1.5, 0.0, 5000.0]}));
+    let Projection::Spherical { projector, .. } = projection(&s, layer) else { panic!("a spherical projection") };
+    assert_eq!(projector.scale, [-1.5, 0.001, 1000.0], "the mirror kept, each axis's size within the scale limits");
+
+    set(&mut s, layer, json!({"projectorScale": -0.0001}));
+    let Projection::Spherical { projector, .. } = projection(&s, layer) else { panic!("a spherical projection") };
+    assert_eq!(projector.scale, [-0.001; 3], "a tiny mirrored scale keeps the smallest size, still mirrored");
+}
+
 /// Fill (Match per UV Tile) shows the same pattern on both UDIM tiles, where UV runs on across them
 #[test]
 fn match_per_uv_tile_repeats_the_source_once_per_tile() {

@@ -98,8 +98,8 @@ pub struct StackKey {
     pixels: Vec<(LayerId, Option<Channel>, Shared)>,
     baked: (u32, Vec<(BakedMap, usize)>),
     images: Vec<(String, ImageIdentity)>,
-    /// The viewport environment and its rotation (bits), where Baked Lighting Environment lights with them
-    environment: Option<(String, u32)>,
+    /// The viewport environment, its rotation (bits) and its image when it is an imported one, where Baked Lighting Environment lights with them
+    environment: Option<(String, u32, Option<ImageIdentity>)>,
 }
 
 impl StackKey {
@@ -144,22 +144,23 @@ impl StackKey {
 
         let mut referenced_images = BTreeSet::new();
         if !images.is_empty() {
-            let mut record_image_reference = |source: &Source| {
-                if let Source::Image { name, .. } = source
-                    && let Some((name, _)) = images.get_key_value(name)
-                {
+            let mut record_image_name = |name: &str| {
+                if let Some((name, _)) = images.get_key_value(name) {
                     referenced_images.insert(name);
                 }
             };
             for layer in render_tree.iter().filter_map(|id| project.layers.get(id)) {
                 if let LayerKind::Fill(fill) = &layer.kind {
-                    fill.sources.values().for_each(&mut record_image_reference);
+                    fill.sources.values().filter_map(image_name).for_each(&mut record_image_name);
                 }
                 for effect in layer.mask.iter().flat_map(|mask| &mask.effects).chain(&layer.content_effects) {
+                    // A filter's image inputs, also one its mode leaves unread: that only empties the cache more often
+                    effect.inputs.values().filter_map(image_name).for_each(&mut record_image_name);
                     match &effect.kind {
-                        EffectKind::Fill { source, .. } => record_image_reference(source),
-                        EffectKind::Material(fill) => fill.sources.values().for_each(&mut record_image_reference),
-                        EffectKind::Generator(generator) => generator.inputs.values().for_each(&mut record_image_reference),
+                        EffectKind::Fill { source, .. } => image_name(source).into_iter().for_each(&mut record_image_name),
+                        EffectKind::Material(fill) => fill.sources.values().filter_map(image_name).for_each(&mut record_image_name),
+                        EffectKind::Generator(generator) => generator.inputs.values().filter_map(image_name).for_each(&mut record_image_name),
+                        EffectKind::ColorSelection(selection) => selection.id_map.iter().for_each(|name| record_image_name(name)),
                         _ => {}
                     }
                 }
@@ -174,7 +175,10 @@ impl StackKey {
             .filter_map(|id| project.layers.get(id))
             .flat_map(|layer| layer.content_effects.iter())
             .any(|effect| matches!(effect.kind, EffectKind::Filter(Filter::EnvironmentLighting { .. })));
-        let environment = lit.then(|| (project.display.environment.clone(), project.display.env_rotation.to_bits()));
+        let environment = lit.then(|| {
+            let image = project.display.environment_resource().and_then(|name| images.get(name)).map(ImageIdentity::new);
+            (project.display.environment.clone(), project.display.env_rotation.to_bits(), image)
+        });
 
         Some(StackKey {
             set,
@@ -193,7 +197,13 @@ impl StackKey {
     /// changed (same set, roots, layers, baked maps and images; the same images by id, channel
     /// and size). None when anything else differs: the caller recomposites everything.
     pub fn changed_tiles(&self, other: &StackKey) -> Option<BTreeSet<(u32, u32)>> {
-        if self.set != other.set || self.roots != other.roots || self.layers != other.layers || self.baked != other.baked || self.images != other.images {
+        if self.set != other.set
+            || self.roots != other.roots
+            || self.layers != other.layers
+            || self.baked != other.baked
+            || self.images != other.images
+            || self.environment != other.environment
+        {
             return None;
         }
         if self.pixels.len() != other.pixels.len() {
@@ -254,6 +264,14 @@ impl PartialEq for Shared {
                         _ => false,
                     })
                 }))
+    }
+}
+
+/// The image resource `source` reads, if any
+fn image_name(source: &Source) -> Option<&str> {
+    match source {
+        Source::Image { name, .. } => Some(name),
+        _ => None,
     }
 }
 

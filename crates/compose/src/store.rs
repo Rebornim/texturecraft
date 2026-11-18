@@ -2,6 +2,7 @@
 //! maps. Everything is copy-on-write, so cloning the store for undo is cheap.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use texturecraft_core::{Channel, ChannelKind, Filtering, LayerId, Sampling};
 use texturecraft_texel::{TileImage, from_u16, from_u16_signed};
@@ -69,7 +70,7 @@ pub struct ImageRes {
     /// 8/16-bit images are sRGB-encoded; color channels linearize them.
     pub srgb: bool,
     /// Halved copies of the image, built on first use by [`Filtering::BilinearHq`]
-    pub mips: std::sync::OnceLock<Vec<MipLevel>>,
+    pub mips: OnceLock<Vec<MipLevel>>,
 }
 
 /// Image resources by name.
@@ -111,7 +112,7 @@ fn bilinear(rgba: &[[f32; 4]], width: u32, height: u32, u: f32, v: f32, repeat: 
 
 impl ImageRes {
     pub fn new(width: u32, height: u32, rgba: Vec<[f32; 4]>, srgb: bool) -> ImageRes {
-        ImageRes { width, height, rgba, srgb, mips: std::sync::OnceLock::new() }
+        ImageRes { width, height, rgba, srgb, mips: OnceLock::new() }
     }
 
     fn texel(&self, x: i64, y: i64, repeat: (bool, bool)) -> [f32; 4] {
@@ -167,13 +168,12 @@ impl ImageRes {
                 let lod = if footprint.is_finite() && footprint > 1.0 { footprint.log2() } else { 0.0 };
 
                 // Level 0 is the full image, level n the nth mip (the smallest past the last)
+                let mips = self.mips();
                 let level = |index: usize| match index.checked_sub(1) {
                     None => full(u, v),
-                    Some(mip_index) => self
-                        .mips()
-                        .get(mip_index)
-                        .or(self.mips().last())
-                        .map_or_else(|| full(u, v), |mip| bilinear(&mip.rgba, mip.width, mip.height, u, v, repeat)),
+                    Some(mip_index) => {
+                        mips.get(mip_index).or(mips.last()).map_or_else(|| full(u, v), |mip| bilinear(&mip.rgba, mip.width, mip.height, u, v, repeat))
+                    }
                 };
                 let finer_level = lod.floor() as usize;
                 let toward_coarser = lod - lod.floor();

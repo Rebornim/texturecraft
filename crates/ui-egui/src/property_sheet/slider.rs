@@ -286,7 +286,7 @@ impl PropertySheet<'_> {
         let rect = Rect::from_min_max(pos2(right - width, center_y - ROW_HIT_HALF_HEIGHT), pos2(right, center_y + ROW_HIT_HALF_HEIGHT));
         let field_id = id.with("typed");
         let editing = self.ui.data(|data| data.get_temp::<String>(field_id));
-        let seeded = format!("{value:.decimals$}");
+        let seeded = || format!("{value:.decimals$}");
 
         let tokens = self.tokens;
         let Some(mut typed_text) = editing else {
@@ -298,7 +298,7 @@ impl PropertySheet<'_> {
                 self.value_line(rect.left(), right, center_y, tokens.field_border);
             }
             if response.clicked() {
-                self.start_typing(field_id, seeded);
+                self.start_typing(field_id, seeded());
             }
             return None;
         };
@@ -318,16 +318,17 @@ impl PropertySheet<'_> {
         }
 
         // Leaving the field as it opened changes nothing: no undo step, no rounding to the shown decimals
-        if typed_text.trim() == seeded {
+        if typed_text.trim() == seeded() {
             return None;
         }
 
         let typed: f32 = typed_text.trim().trim_end_matches(suffix).trim_start_matches(['×', 'x']).trim().parse().ok()?;
-        typed.is_finite().then(|| kept_in(typed, range))
+        // A typed value that lands on the current one (a clamp, "0.750" for 0.75) is no edit either
+        typed.is_finite().then(|| kept_in(typed, range)).filter(|kept| *kept != value)
     }
 }
 
 /// `value` kept in `range`; unlike `clamp`, a reversed or NaN range never panics
-fn kept_in(value: f32, range: &RangeInclusive<f32>) -> f32 {
+pub(super) fn kept_in(value: f32, range: &RangeInclusive<f32>) -> f32 {
     value.max(*range.start()).min(*range.end())
 }

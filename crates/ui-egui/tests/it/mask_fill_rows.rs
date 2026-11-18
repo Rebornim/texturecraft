@@ -8,7 +8,7 @@ use texturecraft_engine::core::{EffectKind, LayerId, ProceduralKind, Projection,
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::move_on_model::MoveOnModel;
 
-use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+use crate::{BAKE_RESOLUTION, DRAG_STEP_FRAMES, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
 
 /// Tall enough that Properties shows every section of a mask fill without scrolling
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1600.0);
@@ -99,14 +99,14 @@ fn mouse_drag_watching(harness: &mut Harness<'_, TextureCraftApp>, from: Pos2, t
     harness.event(Event::PointerMoved(from));
     harness.run_steps(1);
     harness.event(button(from, true));
-    harness.run_steps(2);
+    harness.run_steps(DRAG_STEP_FRAMES);
     for step in 1..=DRAG_MOVES {
         harness.event(Event::PointerMoved(from.lerp(to, step as f32 / DRAG_MOVES as f32)));
         harness.run_steps(1);
         watch(harness);
     }
     harness.event(button(to, false));
-    harness.run_steps(2);
+    harness.run_steps(DRAG_STEP_FRAMES);
 }
 
 #[test]

@@ -122,14 +122,16 @@ impl PropertySheet<'_> {
         self.hanging_groups(&response, current, || [(None, options())], &name, picture)
     }
 
-    /// A dropdown's row led by `lead`, its button showing `current`; returns the button's response
+    /// A dropdown's row led by `lead`, its button showing `current` and described by the row's name; returns the button's response
     fn dropdown_row<T: Copy>(&mut self, lead: RowLead<'_>, current: T, name: &impl Fn(T) -> String, picture: Option<ChoicePicture<'_, T>>) -> Response {
         let x0 = self.lead_with(lead);
         let row = self.take(super::ROW_HEIGHT);
         let center_y = row.center().y;
         self.drawn(center_y + CONTROL_HEIGHT / 2.0);
         let button = self.control_box(x0, center_y);
-        self.dropdown_button(button, &name(current), picture.map(|draw| move |painter: &Painter, rect: Rect| draw(painter, rect, current)))
+        let response = self.dropdown_button(button, &name(current), picture.map(|draw| move |painter: &Painter, rect: Rect| draw(painter, rect, current)));
+        self.ui.ctx().accesskit_node_builder(response.id, |node| node.set_description(lead.text()));
+        response
     }
 
     /// [`Self::dropdown`] whose list holds its options in groups, each under its caption, built only while the list is open; returns the picked option

@@ -77,7 +77,7 @@ fn scale_and_rotation_drags_are_one_undo_step_each_and_the_reset_drops_them() {
 fn randomize_seeds_is_one_undo_step_the_contents_reset_puts_them_back_and_an_empty_folder_has_no_properties() {
     let (mut harness, _, fill) = folder_harness(true);
     let seed = |harness: &Harness<'_, TextureCraftApp>| match &harness.state().session.doc.project.layer(fill).unwrap().kind {
-        LayerKind::Fill(f) => match f.sources.get(&Channel::BaseColor) {
+        LayerKind::Fill(fill_layer) => match fill_layer.sources.get(&Channel::BaseColor) {
             Some(Source::Procedural { pattern, .. }) => pattern.seed,
             other => panic!("not a pattern: {other:?}"),
         },

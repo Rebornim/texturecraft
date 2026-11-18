@@ -112,3 +112,31 @@ impl CurvePreset {
         y.clamp(0.0, 1.0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Samples across 0..1 that every curve is read at
+    const SAMPLES: usize = 64;
+
+    #[test]
+    fn every_preset_stays_in_range_and_reads_a_non_finite_t_as_0() {
+        for preset in CurvePreset::ALL {
+            let values: Vec<f32> = (0..=SAMPLES).map(|i| preset.at(i as f32 / SAMPLES as f32)).collect();
+            assert!(values.iter().all(|value| (0.0..=1.0).contains(value)), "{}", preset.id());
+            assert_eq!(preset.at(f32::NAN), preset.at(0.0), "{}", preset.id());
+            assert_eq!(preset.at(f32::INFINITY), preset.at(0.0), "{}", preset.id());
+        }
+    }
+
+    #[test]
+    fn stairs_has_four_levels_and_triangular_two_teeth() {
+        let mut levels: Vec<f32> = (0..=SAMPLES).map(|i| CurvePreset::Stairs.at(i as f32 / SAMPLES as f32)).collect();
+        levels.dedup();
+        assert_eq!(levels, [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]);
+
+        let triangular = |t: f32| CurvePreset::Triangular.at(t);
+        assert_eq!([triangular(0.0), triangular(0.25), triangular(0.5), triangular(0.75), triangular(1.0)], [0.0, 1.0, 0.0, 1.0, 0.0]);
+    }
+}

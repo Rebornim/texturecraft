@@ -64,6 +64,18 @@ fn a_refused_mask_image_leaves_the_mask_value_as_it_was() {
 }
 
 #[test]
+fn a_resource_that_is_no_image_is_refused_as_the_mask_image() {
+    let (mut session, _) = masked_layer();
+    session.doc.resources.insert("notes.png".to_string(), std::sync::Arc::new(b"not a picture".to_vec()));
+    session.sync_images();
+
+    let refused = execute(&mut session, "tool.material", &json!({"maskImage": "notes.png"}));
+
+    assert!(refused.is_err(), "the brush could not read it");
+    assert_eq!(execute(&mut session, "tool.material", &Value::Null).unwrap()["maskImage"], Value::Null);
+}
+
+#[test]
 fn a_mask_image_that_is_gone_paints_the_value() {
     let (mut session, layer) = masked_layer();
     let image = session.import_resource_bytes("halves.png", halves_png()).unwrap();

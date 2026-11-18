@@ -591,9 +591,9 @@ impl Session {
     }
 
     /// Keep the images decoded while validating maps instead of decoding them again.
-    fn cache_decoded(&mut self, names: Vec<String>, maps: Vec<(Channel, Vec<u8>, texturecraft_formats::DecodedImage)>) {
-        for (name, (_, _, img)) in names.into_iter().zip(maps) {
-            self.images.insert(name, crate::resource_cmds::decoded(img));
+    fn cache_decoded(&mut self, names: Vec<String>, maps: Vec<DecodedMap>) {
+        for (name, (_, _, image)) in names.into_iter().zip(maps) {
+            self.images.insert(name, crate::resource_cmds::decoded(image));
         }
     }
 }
@@ -604,27 +604,29 @@ fn unique(s: &Session, name: &str) -> String {
 }
 
 /// Store `maps` as new resources (names carry a fresh id, so the decoded-image cache never confuses two cooks), list them as the link's outputs and point `fill`'s channels at them: each channel at its mapped output, else at the output named like it. Returns the names, in map order
-fn put_maps(s: &mut Session, stem: &str, maps: &[(Channel, Vec<u8>, texturecraft_formats::DecodedImage)], fill: &mut Fill) -> Vec<String> {
+fn put_maps(s: &mut Session, stem: &str, maps: &[DecodedMap], fill: &mut Fill) -> Vec<String> {
     let cook = s.doc.project.alloc_id().0;
     let mut names = Vec::new();
     let mut outputs = BTreeMap::new();
-    for (c, bytes, _) in maps {
-        let name = unique(s, &format!("{stem}_{}_{cook}.png", c.id()));
+    for (channel, bytes, _) in maps {
+        let name = unique(s, &format!("{stem}_{}_{cook}.png", channel.id()));
         s.doc.resources.insert(name.clone(), Arc::new(bytes.clone()));
-        outputs.insert(c.id().to_string(), name.clone());
+        outputs.insert(channel.id().to_string(), name.clone());
         names.push(name);
     }
+
+    // Both callers cook a linked fill; one without a link only keeps the stored maps
     let Some(link) = fill.link.as_mut() else { return names };
-    let channels: BTreeSet<Channel> = maps.iter().map(|(c, _, _)| *c).chain(link.mapping.keys().copied()).collect();
-    for c in channels {
-        let Some(name) = outputs.get(link.output_of(c)) else { continue };
+    let channels: BTreeSet<Channel> = maps.iter().map(|(channel, _, _)| *channel).chain(link.mapping.keys().copied()).collect();
+    for channel in channels {
+        let Some(name) = outputs.get(link.output_of(channel)) else { continue };
 
         // A normal map the user marked DirectX stays marked through re-cooks
-        let normal_format = match fill.sources.get(&c) {
+        let normal_format = match fill.sources.get(&channel) {
             Some(Source::Image { normal_format, .. }) => *normal_format,
             _ => Default::default(),
         };
-        fill.sources.insert(c, Source::Image { name: name.clone(), normal_format });
+        fill.sources.insert(channel, Source::Image { name: name.clone(), normal_format });
     }
     link.outputs = outputs;
     names

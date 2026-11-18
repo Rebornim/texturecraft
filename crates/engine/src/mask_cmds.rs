@@ -11,6 +11,9 @@ use crate::layer_cmds::projection_from;
 use crate::session::StackTarget;
 use crate::{EngineError, Result, Session, cmd};
 
+/// The `filter` id of a filter effect with no filter picked
+pub const EMPTY_FILTER: &str = "none";
+
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!("mask.add.white", "Add white mask", ["Layers", "Mask"], None, "{layer?}", has_layer, |s, p| add_mask(s, p, MaskBackground::White)),
@@ -237,8 +240,7 @@ fn name_param(p: &Value) -> Option<&str> {
     strp(p, "name").filter(|n| !n.trim().is_empty() && n.chars().count() <= 256)
 }
 
-/// Add an effect to the selected layer's mask (creating a mask if there is none) or, with
-/// `target: "content"` or a content-only effect, to its content stack.
+/// Add an effect to the selected layer's mask (creating a mask if there is none) or, with `target: "content"` or a content-only effect, to its content stack
 fn push_effect(s: &mut Session, p: &Value, kind: EffectKind, blend: BlendMode) -> Result<Value> {
     let label = format!("Add {}", kind.name().to_ascii_lowercase());
     push_effect_as(s, p, kind, blend, &label)
@@ -638,7 +640,7 @@ pub(crate) fn new_compare() -> EffectKind {
 /// Apply the compare parameters of `p` to `kind` (a compare effect)
 fn compare_from(cmd: &str, p: &Value, kind: &mut EffectKind) -> Result<()> {
     let EffectKind::Compare { op, value, tolerance, left, right, channel, hardness } = kind else { return Ok(()) };
-    let source = |key: &str| -> Result<Option<CompareSource>> {
+    let named_source = |key: &str| -> Result<Option<CompareSource>> {
         match strp(p, key) {
             None => Ok(None),
             Some(id) => CompareSource::from_id(id)
@@ -649,10 +651,10 @@ fn compare_from(cmd: &str, p: &Value, kind: &mut EffectKind) -> Result<()> {
     if let Some(id) = strp(p, "op") {
         *op = CompareOp::from_id(id).ok_or_else(|| bad(cmd, format!("unknown op `{id}`")))?;
     }
-    if let Some(source) = source("left")? {
+    if let Some(source) = named_source("left")? {
         *left = source;
     }
-    if let Some(source) = source("right")? {
+    if let Some(source) = named_source("right")? {
         *right = source;
     }
     if let Some(compared) = channel_param(cmd, p, "compareChannel")? {
@@ -685,13 +687,13 @@ const HISTOGRAM_BINS_RANGE: (u64, u64) = (2, 256);
 fn histogram(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "effect.histogram";
     let effect = effect_id(s, p, CMD)?;
-    let (owner, _) = s.doc.project.effect(effect).ok_or_else(|| bad(CMD, format!("no effect {}", effect.0)))?;
-    let layer = s.doc.project.layer(owner)?;
-    let content = layer.content_effects.iter().any(|e| e.id == effect);
-    let remapped = match &s.doc.project.effect(effect) {
-        Some((_, Effect { kind: EffectKind::Levels(levels), .. })) => levels.affects,
+    let (owner, found) = s.doc.project.effect(effect).ok_or_else(|| bad(CMD, format!("no effect {}", effect.0)))?;
+    let remapped = match &found.kind {
+        EffectKind::Levels(levels) => levels.affects,
         _ => None,
     };
+    let layer = s.doc.project.layer(owner)?;
+    let content = layer.content_effects.iter().any(|candidate| candidate.id == effect);
     let channel = match channel_param(CMD, p, "channel")? {
         Some(channel) => channel,
         None => remapped.or_else(|| layer.channels.keys().next().copied()).unwrap_or(Channel::BaseColor),
@@ -788,7 +790,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
     let swaps_filter = swapped.is_some();
     let id_map = crate::color_selection_cmds::id_map_param(session, params)?;
 
-    let fitted = crate::warp_cmds::fitted_frame(&session.mesh);
+    let mesh = session.mesh.clone();
     session.edit("Edit effect", |session| {
         let edited = session.doc.project.effect_mut(effect).ok_or_else(|| bad(CMD, format!("no effect {}", effect.0)))?;
         if let Some((kind, label)) = swapped {
@@ -857,9 +859,9 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
                 }
 
                 // Preserve projection fields that the edit does not supply
-                *projection = projection_from(params, CMD, Some(&*projection), || fitted)?;
+                *projection = projection_from(params, CMD, Some(&*projection), || crate::warp_cmds::fitted_frame(&mesh))?;
             }
-            EffectKind::ColorSelection(selection) => crate::color_selection_cmds::apply_params(params, selection, id_map.clone())?,
+            EffectKind::ColorSelection(selection) => crate::color_selection_cmds::apply_params(params, selection, id_map)?,
             kind @ EffectKind::Compare { .. } => compare_from(CMD, params, kind)?,
             _ => {}
         }
@@ -884,9 +886,6 @@ fn switched_channels(params: &Value) -> Result<Vec<(Channel, bool)>> {
         })
         .collect()
 }
-
-/// The `filter` id of a filter effect with no filter picked
-pub const EMPTY_FILTER: &str = "none";
 
 /// An empty filter and its label, to replace filter effect `effect`'s
 fn emptied_filter(s: &Session, effect: LayerId) -> Result<(EffectKind, &'static str)> {

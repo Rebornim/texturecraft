@@ -13,9 +13,13 @@ use crate::commands::{
 };
 use crate::{EngineError, Result, Session, cmd, session::StackTarget};
 
-/// The smallest scale or tiling, and the largest scale, tiling or offset a fill's placement takes
+/// The smallest scale or tiling a fill's placement takes
 pub const MIN_SCALE: f32 = 0.001;
+/// The largest scale, tiling or offset a fill's placement takes
 pub const MAX_PLACEMENT: f32 = 1000.0;
+
+/// The `layer.fill.set` keys a one-source grayscale fill (a mask fill or a filter's image input) has no use for
+const GRAY_REFUSED_KEYS: [&str; 4] = ["channel", "enabled", "solo", "normalFormat"];
 
 /// The highest contrast a procedural pattern takes
 const MAX_PATTERN_CONTRAST: f32 = 20.0;
@@ -114,11 +118,8 @@ fn add_group(s: &mut Session, p: &Value) -> Result<Value> {
     let name = strp(p, "name").map(str::to_string).unwrap_or_else(|| s.doc.project.next_layer_name(ts, "Folder"));
     let id = s.edit("Add folder", |s| {
         let id = s.doc.project.alloc_id();
-        let mut l = Layer::new(id, name, LayerKind::folder(), &channels_of(s));
-        for b in l.channels.values_mut() {
-            b.mode = BlendMode::Passthrough;
-        }
-        insert_selected(s, l)
+        let channels = channels_of(s);
+        insert_selected(s, new_folder(id, name, &channels))
     })?;
     Ok(json!({ "layer": id.0 }))
 }
@@ -162,21 +163,26 @@ fn duplicate(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let id = layer_param(s, "layer.group", p)?;
-    let g = s.edit("Group layers", |s| {
+    let folder = s.edit("Group layers", |s| {
         let (ts, _, _) = s.doc.project.locate(id).ok_or(EngineError::Other("layer not in a stack".into()))?;
-        let gid = s.doc.project.alloc_id();
+        let folder = s.doc.project.alloc_id();
         let name = s.doc.project.next_layer_name(ts, "Folder");
         let channels = s.doc.project.texture_set(ts)?.channel_list();
-        let mut gl = Layer::new(gid, name, LayerKind::folder(), &channels);
-        for b in gl.channels.values_mut() {
-            b.mode = BlendMode::Passthrough;
-        }
-        s.doc.project.insert_layer(ts, gl, Some(id), false)?;
-        s.doc.project.move_above(id, Some(gid), true)?;
-        s.selected.insert(ts, gid);
-        Ok(gid)
+        s.doc.project.insert_layer(ts, new_folder(folder, name, &channels), Some(id), false)?;
+        s.doc.project.move_above(id, Some(folder), true)?;
+        s.selected.insert(ts, folder);
+        Ok(folder)
     })?;
-    Ok(json!({ "layer": g.0 }))
+    Ok(json!({ "layer": folder.0 }))
+}
+
+/// An empty folder `id` whose channels pass the blending of its contents through
+fn new_folder(id: LayerId, name: String, channels: &[Channel]) -> Layer {
+    let mut folder = Layer::new(id, name, LayerKind::folder(), channels);
+    for blend in folder.channels.values_mut() {
+        blend.mode = BlendMode::Passthrough;
+    }
+    folder
 }
 
 fn select(s: &mut Session, p: &Value) -> Result<Value> {
@@ -302,10 +308,10 @@ pub(crate) enum FillTarget {
 
 pub(crate) fn fill_target(s: &Session, p: &Value, cmd: &str) -> Result<FillTarget> {
     match u64p(p, "effect").map(LayerId) {
-        Some(e) => match s.doc.project.effect(e).map(|(_, x)| &x.kind) {
-            Some(EffectKind::Material(_)) => Ok(FillTarget::Effect(e)),
-            Some(EffectKind::Fill { .. }) => Ok(FillTarget::Mask(e)),
-            _ => Err(bad(cmd, format!("{} is not a fill effect", e.0))),
+        Some(effect) => match s.doc.project.effect(effect).map(|(_, found)| &found.kind) {
+            Some(EffectKind::Material(_)) => Ok(FillTarget::Effect(effect)),
+            Some(EffectKind::Fill { .. }) => Ok(FillTarget::Mask(effect)),
+            _ => Err(bad(cmd, format!("{} is not a fill effect", effect.0))),
         },
         None => Ok(FillTarget::Layer(content_param(s, cmd, p)?)),
     }
@@ -318,7 +324,7 @@ pub(crate) fn fill_mut(s: &mut Session, target: FillTarget) -> Result<&mut Fill>
             LayerKind::Fill(f) => Ok(f),
             _ => Err(EngineError::Other("not a fill layer".into())),
         },
-        FillTarget::Effect(e) => match s.doc.project.effect_mut(e).map(|x| &mut x.kind) {
+        FillTarget::Effect(effect) => match s.doc.project.effect_mut(effect).map(|found| &mut found.kind) {
             Some(EffectKind::Material(f)) => Ok(f),
             _ => Err(EngineError::Other("not a content fill effect".into())),
         },
@@ -328,8 +334,8 @@ pub(crate) fn fill_mut(s: &mut Session, target: FillTarget) -> Result<&mut Fill>
 
 /// How the fill at `target` is projected and sampled: every fill has both
 pub(crate) fn placement_mut(s: &mut Session, target: FillTarget) -> Result<(&mut Projection, &mut Sampling)> {
-    if let FillTarget::Mask(e) = target {
-        return match s.doc.project.effect_mut(e).map(|x| &mut x.kind) {
+    if let FillTarget::Mask(effect) = target {
+        return match s.doc.project.effect_mut(effect).map(|found| &mut found.kind) {
             Some(EffectKind::Fill { projection, sampling, .. }) => Ok((projection, sampling)),
             _ => Err(EngineError::Other("not a mask fill effect".into())),
         };
@@ -340,7 +346,7 @@ pub(crate) fn placement_mut(s: &mut Session, target: FillTarget) -> Result<(&mut
 
 /// The grayscale source of the mask fill effect `effect`
 fn mask_source_mut(s: &mut Session, effect: LayerId) -> Result<&mut Source> {
-    match s.doc.project.effect_mut(effect).map(|x| &mut x.kind) {
+    match s.doc.project.effect_mut(effect).map(|found| &mut found.kind) {
         Some(EffectKind::Fill { source, .. }) => Ok(source),
         _ => Err(EngineError::Other("not a mask fill effect".into())),
     }
@@ -374,8 +380,8 @@ fn fill_set(s: &mut Session, p: &Value) -> Result<Value> {
         let kind = ProceduralKind::parse(kind).ok_or_else(|| bad(FILL_SET, format!("unknown procedural `{kind}`")))?;
         let current = fill_mut(s, target)?.sources.get(&channel).cloned();
         Some(procedural_source(p, kind, current, low, high)?)
-    } else if let Some(c) = color.or(value) {
-        Some(Source::Uniform(c))
+    } else if let Some(uniform) = color.or(value) {
+        Some(Source::Uniform(uniform))
     } else if let Some(name) = strp(p, "image") {
         Some(Source::Image { name: name.to_string(), normal_format: normal_format.unwrap_or_default() })
     } else if let Some(name) = strp(p, "alpha") {
@@ -453,12 +459,16 @@ fn fill_set(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// `layer.fill.set` on mask fill effect `effect`: its one grayscale source (no `channel`, `enabled`, `solo` or `normalFormat`)
 fn mask_fill_set(s: &mut Session, p: &Value, effect: LayerId) -> Result<Value> {
-    if ["channel", "enabled", "solo", "normalFormat"].iter().any(|key| p.get(key).is_some()) {
-        return Err(bad(FILL_SET, "a mask fill has one grayscale source: leave out `channel`, `enabled`, `solo` and `normalFormat`"));
-    }
+    refuse_gray_keys(p, "a mask fill")?;
 
     let current = mask_source_mut(s, effect)?.clone();
-    let (source, library_alpha) = gray_source(s, p, effect, current)?;
+    let (source, library_alpha) = gray_source(s, p, effect, current.clone())?;
+
+    // Setting what the fill already reads adds no undo step
+    if source == current && library_alpha_present(s, library_alpha) {
+        return Ok(Value::Null);
+    }
+
     s.edit("Set fill", |s| {
         if let Some(alpha) = library_alpha {
             s.add_library_alpha(alpha)?;
@@ -475,9 +485,7 @@ fn input_set(s: &mut Session, p: &Value, id: &str) -> Result<Value> {
     let found = s.doc.project.effect(effect).map(|(_, found)| found).ok_or_else(|| bad(FILL_SET, format!("no effect {}", effect.0)))?;
     let EffectKind::Filter(filter) = &found.kind else { return Err(bad(FILL_SET, format!("{} is not a filter effect", effect.0))) };
     let input = ImageInput::named(filter, id).ok_or_else(|| bad(FILL_SET, format!("the {} filter has no image input `{id}`", filter.label())))?;
-    if ["channel", "enabled", "solo", "normalFormat"].iter().any(|key| p.get(key).is_some()) {
-        return Err(bad(FILL_SET, "an image input is one grayscale source: leave out `channel`, `enabled`, `solo` and `normalFormat`"));
-    }
+    refuse_gray_keys(p, "an image input")?;
 
     let (source, library_alpha) = if p.get("clear").and_then(Value::as_bool) == Some(true) {
         (None, None)
@@ -490,8 +498,7 @@ fn input_set(s: &mut Session, p: &Value, id: &str) -> Result<Value> {
     let stored = source.filter(|source| *source != input.default_source());
 
     // Setting what the input already reads adds no undo step
-    let alpha_present = library_alpha.is_none_or(|alpha| s.doc.resources.contains_key(&crate::fill_alpha::resource_name(alpha)));
-    if found.inputs.get(input.id) == stored.as_ref() && alpha_present {
+    if found.inputs.get(input.id) == stored.as_ref() && library_alpha_present(s, library_alpha) {
         return Ok(Value::Null);
     }
 
@@ -507,6 +514,21 @@ fn input_set(s: &mut Session, p: &Value, id: &str) -> Result<Value> {
         Ok(())
     })?;
     Ok(Value::Null)
+}
+
+/// Refuses the [`GRAY_REFUSED_KEYS`] for `subject`, a fill with one grayscale source
+fn refuse_gray_keys(p: &Value, subject: &str) -> Result<()> {
+    if GRAY_REFUSED_KEYS.iter().any(|key| p.get(key).is_some()) {
+        let keys = GRAY_REFUSED_KEYS.map(|key| format!("`{key}`")).join(", ");
+        return Err(bad(FILL_SET, format!("{subject} has one grayscale source: leave out {keys}")));
+    }
+
+    Ok(())
+}
+
+/// Whether the project already holds `library_alpha`'s image (true when there is none to add)
+fn library_alpha_present(s: &Session, library_alpha: Option<&LibraryAlpha>) -> bool {
+    library_alpha.is_none_or(|alpha| s.doc.resources.contains_key(&crate::fill_alpha::resource_name(alpha)))
 }
 
 /// The grayscale source `p` asks for in place of `current` (read by a mask or filter effect `effect`), and the library alpha it needs added
@@ -739,11 +761,7 @@ fn symmetry_from(p: &Value, cmd: &str, current: FillSymmetry) -> Result<FillSymm
             u8::try_from(axis).ok().filter(|axis| *axis <= FillSymmetry::LAST_AXIS).ok_or_else(|| bad(cmd, "symmetryAxis is 0 (X), 1 (Y) or 2 (Z)"))?;
     }
     if let Some(flips) = p.get("flipCopy") {
-        let [across, down] = flips.as_array().map(Vec::as_slice).unwrap_or_default() else {
-            return Err(bad(cmd, "flipCopy is [u, v], two booleans"));
-        };
-
-        let (Some(across), Some(down)) = (across.as_bool(), down.as_bool()) else {
+        let [Some(across), Some(down)] = flips.as_array().map(Vec::as_slice).unwrap_or_default().iter().map(Value::as_bool).collect::<Vec<_>>()[..] else {
             return Err(bad(cmd, "flipCopy is [u, v], two booleans"));
         };
 

@@ -1,5 +1,4 @@
-//! An effect's blending per channel: the Blending options of an effect row (one channel's blend mode or opacity on every
-//! channel, and copy and paste of every channel's blending between effects)
+//! An effect's blending per channel: the Blending options of an effect row (one channel's blending on every channel, copy and paste)
 
 use std::collections::BTreeMap;
 
@@ -104,11 +103,16 @@ pub fn on_mask(project: &Project, id: LayerId) -> bool {
 fn selected_blending_effect(s: &Session, content_only: bool) -> std::result::Result<(), String> {
     let StackTarget::Effect(id) = s.target else { return has_layer(s) };
     let Some((_, effect)) = s.doc.project.effect(id) else { return has_layer(s) };
+    blending_refusal(&s.doc.project, id, effect, content_only)
+}
+
+/// Why effect `id` (`effect`) can't take a Blending options command: it has no blending or, with `content_only`, it is a mask effect
+fn blending_refusal(project: &Project, id: LayerId, effect: &Effect, content_only: bool) -> std::result::Result<(), String> {
     if !effect.kind.blends() {
         return Err(format!("{} has no blending", effect.kind.name().to_ascii_lowercase()));
     }
 
-    if content_only && on_mask(&s.doc.project, id) {
+    if content_only && on_mask(project, id) {
         return Err("a mask effect blends one channel".into());
     }
 
@@ -135,25 +139,18 @@ fn can_paste(s: &Session) -> std::result::Result<(), String> {
 fn blending_effect(s: &Session, p: &Value, cmd: &str, content_only: bool) -> Result<LayerId> {
     let id = effect_id(s, p, cmd)?;
     let (_, effect) = s.doc.project.effect(id).ok_or_else(|| bad(cmd, format!("no effect {}", id.0)))?;
-    if !effect.kind.blends() {
-        return Err(bad(cmd, format!("{} has no blending", effect.kind.name().to_ascii_lowercase())));
-    }
-
-    if content_only && on_mask(&s.doc.project, id) {
-        return Err(bad(cmd, "a mask effect blends one channel"));
-    }
-
+    blending_refusal(&s.doc.project, id, effect, content_only).map_err(|refusal| bad(cmd, refusal))?;
     Ok(id)
 }
 
-/// Every channel of the content effect in `p` takes the blend mode (`mode`) and/or opacity (`opacity`) of the `channel` in `p`
-fn to_every_channel(s: &mut Session, p: &Value, cmd: &str, (mode, opacity): (bool, bool)) -> Result<Value> {
+/// Every channel of the content effect in `p` takes what `copied` picks (a blend mode, an opacity or both) from the `channel` in `p`
+fn to_every_channel(s: &mut Session, p: &Value, cmd: &str, copied: fn(ChannelBlend) -> (Option<BlendMode>, Option<f32>)) -> Result<Value> {
     let id = blending_effect(s, p, cmd, true)?;
     let channel = channel_param(cmd, p, "channel")?.unwrap_or(Channel::BaseColor);
     let (_, current) = s.doc.project.effect(id).ok_or_else(|| bad(cmd, format!("no effect {}", id.0)))?;
     let mut changed = current.clone();
-    let source = changed.blend_of(Some(channel));
-    set_blending(&mut changed, None, mode.then_some(source.mode), opacity.then_some(source.opacity));
+    let (mode, opacity) = copied(changed.blend_of(Some(channel)));
+    set_blending(&mut changed, None, mode, opacity);
     replace_blending(s, id, cmd, changed)
 }
 
@@ -173,15 +170,15 @@ fn replace_blending(s: &mut Session, id: LayerId, cmd: &str, changed: Effect) ->
 }
 
 fn mode_to_every_channel(s: &mut Session, p: &Value) -> Result<Value> {
-    to_every_channel(s, p, "effect.blending.modeToEveryChannel", (true, false))
+    to_every_channel(s, p, "effect.blending.modeToEveryChannel", |source| (Some(source.mode), None))
 }
 
 fn opacity_to_every_channel(s: &mut Session, p: &Value) -> Result<Value> {
-    to_every_channel(s, p, "effect.blending.opacityToEveryChannel", (false, true))
+    to_every_channel(s, p, "effect.blending.opacityToEveryChannel", |source| (None, Some(source.opacity)))
 }
 
 fn both_to_every_channel(s: &mut Session, p: &Value) -> Result<Value> {
-    to_every_channel(s, p, "effect.blending.bothToEveryChannel", (true, true))
+    to_every_channel(s, p, "effect.blending.bothToEveryChannel", |source| (Some(source.mode), Some(source.opacity)))
 }
 
 fn copy(s: &mut Session, p: &Value) -> Result<Value> {

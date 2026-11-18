@@ -39,10 +39,12 @@ fn layer_with_content_fill(s: &mut Session) -> (u64, u64) {
     (layer, effect)
 }
 
-fn channel_blends(s: &mut Session, layer: u64) -> Value {
+/// What inspect shows of content effect `effect`'s per-channel blending, in `layer`'s row
+fn channel_blends(s: &mut Session, layer: u64, effect: u64) -> Value {
     let inspect = execute(s, "project.inspect", &Value::Null).unwrap();
     let row = inspect["layers"].as_array().unwrap().iter().find(|row| row["id"] == layer).unwrap().clone();
-    row["contentEffects"][0]["channelBlends"].clone()
+    let shown = row["contentEffects"].as_array().unwrap().iter().find(|shown| shown["id"] == effect).unwrap().clone();
+    shown["channelBlends"].clone()
 }
 
 /// Setting one channel's blend mode or opacity leaves the others' as they are, and inspect shows it
@@ -60,7 +62,7 @@ fn a_content_effect_blends_each_channel_on_its_own() {
     execute(&mut s, "effect.set", &json!({"effect": effect, "channel": "roughness", "blend": "Multiply"})).unwrap();
     assert_close(center(&mut s, Channel::Roughness), [0.16; 3], "roughness multiplies");
     assert_close(center(&mut s, Channel::BaseColor), [0.75, 0.25, 0.25], "base color stays normal");
-    let blends = channel_blends(&mut s, layer);
+    let blends = channel_blends(&mut s, layer, effect);
     assert_eq!(blends["baseColor"]["opacity"], json!(0.5), "{blends}");
     assert_eq!(blends["roughness"]["blend"], json!("Multiply"), "{blends}");
 
@@ -68,7 +70,7 @@ fn a_content_effect_blends_each_channel_on_its_own() {
     execute(&mut s, "effect.set", &json!({"effect": effect, "opacity": 1.0, "blend": "Normal"})).unwrap();
     assert_close(center(&mut s, Channel::Roughness), [0.8; 3], "every channel back to normal at 100%");
     assert_close(center(&mut s, Channel::BaseColor), [0.5; 3], "every channel back to normal at 100%");
-    assert!(channel_blends(&mut s, layer).is_null(), "no channel blends apart any more");
+    assert!(channel_blends(&mut s, layer, effect).is_null(), "no channel blends apart any more");
 
     // Saved per channel, loaded as saved; an effect saved before has none
     execute(&mut s, "effect.set", &json!({"effect": effect, "channel": "roughness", "blend": "Multiply"})).unwrap();
@@ -98,7 +100,7 @@ fn one_channels_blending_goes_to_every_channel_in_one_undo_step() {
 
     execute(&mut s, "effect.blending.bothToEveryChannel", &json!({"channel": "roughness"})).unwrap();
     assert_close(center(&mut s, Channel::BaseColor), [0.5, 0.0, 0.0], "base color multiplies at full opacity");
-    assert!(channel_blends(&mut s, layer).is_null(), "every channel blends alike");
+    assert!(channel_blends(&mut s, layer, effect).is_null(), "every channel blends alike");
 
     // Nothing left to change: no empty undo step
     let steps = s.history_labels().len();

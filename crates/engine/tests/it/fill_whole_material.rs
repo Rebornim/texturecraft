@@ -1,5 +1,7 @@
+//! A fill holding one whole built-in material: set, saved, cleared back to its channels' defaults, on a fill layer or a content fill effect
+
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, LayerId, LayerKind, Source};
+use texturecraft_engine::core::{Channel, EffectKind, LayerId, LayerKind, Source};
 use texturecraft_engine::{Session, execute, geom::primitives};
 
 fn session() -> Session {
@@ -84,4 +86,49 @@ fn a_fill_in_another_texture_set_takes_the_channels_of_its_own_set() {
 
     assert!(!channels(&s, other).contains(&Channel::Metallic), "set 1 has no metallic channel: {:?}", channels(&s, other));
     assert!(channels(&s, other).contains(&Channel::BaseColor));
+}
+
+/// The fill of content fill effect `effect`
+fn effect_fill(s: &Session, effect: u64) -> texturecraft_engine::core::Fill {
+    match &s.doc.project.effect(LayerId(effect)).unwrap().1.kind {
+        EffectKind::Material(fill) => fill.clone(),
+        other => panic!("not a content fill: {other:?}"),
+    }
+}
+
+#[test]
+fn clearing_a_content_fill_effects_material_lays_its_channels_defaults() {
+    let mut s = crate::filter_support::facing_session();
+    execute(&mut s, "layer.add.fill", &json!({"roughness": 0.2})).unwrap();
+    let effect = execute(&mut s, "effect.add.fill", &json!({"target": "content", "roughness": 0.7})).unwrap()["effect"].as_u64().unwrap();
+    execute(&mut s, "layer.fill.material", &json!({"effect": effect, "material": "gold_polished"})).unwrap();
+    let material_channels: Vec<Channel> = effect_fill(&s, effect).sources.keys().copied().collect();
+
+    execute(&mut s, "layer.fill.material", &json!({"effect": effect, "material": null})).unwrap();
+
+    let cleared = effect_fill(&s, effect);
+    assert_eq!(cleared.material, None);
+    assert_eq!(cleared.sources.keys().copied().collect::<Vec<_>>(), material_channels, "the material's channels stay on");
+    assert!(cleared.sources.iter().all(|(channel, source)| *source == Source::uniform_of(*channel)), "at their defaults");
+    let roughness = crate::filter_support::center(&mut s, Channel::Roughness)[0];
+    assert!((roughness - Channel::Roughness.default_value()[0]).abs() < 0.01, "the effect still lays the default roughness: {roughness}");
+}
+
+#[test]
+fn setting_the_material_a_fill_already_holds_adds_no_undo_step() {
+    let mut s = session();
+    let id = layer(execute(&mut s, "layer.add.fill", &Value::Null).unwrap());
+    let effect = execute(&mut s, "effect.add.fill", &json!({"target": "content", "roughness": 0.7})).unwrap()["effect"].as_u64().unwrap();
+    let steps = s.history_labels().len();
+
+    for target in [json!({"layer": id}), json!({"effect": effect})] {
+        for material in [json!("gold_polished"), Value::Null] {
+            let mut params = target.clone();
+            params["material"] = material;
+            execute(&mut s, "layer.fill.material", &params).unwrap();
+            execute(&mut s, "layer.fill.material", &params).unwrap();
+        }
+    }
+
+    assert_eq!(s.history_labels().len(), steps + 4, "one step per change, none for a repeat");
 }

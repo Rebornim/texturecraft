@@ -69,44 +69,47 @@ fn over(img: &mut TileImage, b: &Blend, src: &CommitSource, mut staged: Option<S
     }
 }
 
-/// Blend the stroke's alpha tile `a` into tile `(tx, ty)` of an image (`dst`, `comps` per texel).
-fn blend_tile(dst: &mut [u16], comps: usize, a: &[u16], (tx, ty): (u32, u32), b: &Blend, src: &CommitSource, carried: Option<&[u16]>) {
-    let n = comps.saturating_sub(1);
-    let opacity = src.opacity.clamp(0.0, 1.0);
+/// Blend the stroke's alpha tile `stroke_alpha` into tile `(tx, ty)` of an image (`dst`, `components` per texel).
+fn blend_tile(dst: &mut [u16], components: usize, stroke_alpha: &[u16], (tx, ty): (u32, u32), blend: &Blend, source: &CommitSource, carried: Option<&[u16]>) {
+    // The last component is the coverage, the ones before it the value
+    let value_count = components.saturating_sub(1);
+    let opacity = source.opacity.clamp(0.0, 1.0);
     for i in 0..TILE_AREA {
-        let mut m = from_u16(a.get(i).copied().unwrap_or(0)) * opacity;
-        if m <= 0.0 {
+        let mut weight = from_u16(stroke_alpha.get(i).copied().unwrap_or(0)) * opacity;
+        if weight <= 0.0 {
             continue;
         }
-        let mut color = None;
+
+        let mut stencil = None;
         let (x, y) = (tx * TILE + i as u32 % TILE, ty * TILE + i as u32 / TILE);
-        if let Some(f) = src.per_texel {
-            match f(x, y) {
-                Some((c, af)) => {
-                    m *= af;
-                    color = Some(c);
+        if let Some(per_texel) = source.per_texel {
+            match per_texel(x, y) {
+                Some((color, alpha_factor)) => {
+                    weight *= alpha_factor;
+                    stencil = Some(color);
                 }
                 None => continue,
             }
-            if m <= 0.0 {
+            if weight <= 0.0 {
                 continue;
             }
         }
-        let Some(px) = dst.get_mut(i * comps..(i + 1) * comps) else { continue };
-        let gray = b.gray.map(|gray| gray.at(x, y, (src.alpha.width(), src.alpha.height())));
-        let cov = from_u16(px[n]);
-        for k in 0..n {
-            let p = dec(b.kind, px[k]);
-            let target = match (carried, color) {
-                (Some(t), _) => dec(b.kind, t.get(i * n + k).copied().unwrap_or(0)),
+
+        let Some((coverage_slot, values)) = dst.get_mut(i * components..(i + 1) * components).and_then(<[u16]>::split_last_mut) else { continue };
+        let gray = blend.gray.map(|gray| gray.at(x, y, (source.alpha.width(), source.alpha.height())));
+        let coverage = from_u16(*coverage_slot);
+        for (component, slot) in values.iter_mut().enumerate() {
+            let previous = dec(blend.kind, *slot);
+            let target = match (carried, stencil) {
+                (Some(carried_tile), _) => dec(blend.kind, carried_tile.get(i * value_count + component).copied().unwrap_or(0)),
                 (None, _) if let Some(gray) = gray => gray,
-                (None, Some(c)) if b.stencil_color => c.get(k).copied().unwrap_or(0.0),
-                _ => b.value.get(k).copied().unwrap_or(0.0),
+                (None, Some(color)) if blend.stencil_color => color.get(component).copied().unwrap_or(0.0),
+                _ => blend.value.get(component).copied().unwrap_or(0.0),
             };
-            let v = if src.erase { p * (1.0 - m) } else { target * m + p * (1.0 - m) };
-            px[k] = enc(b.kind, v);
+            let blended = if source.erase { previous * (1.0 - weight) } else { target * weight + previous * (1.0 - weight) };
+            *slot = enc(blend.kind, blended);
         }
-        px[n] = to_u16(if src.erase { cov * (1.0 - m) } else { m + cov * (1.0 - m) });
+        *coverage_slot = to_u16(if source.erase { coverage * (1.0 - weight) } else { weight + coverage * (1.0 - weight) });
     }
 }
 
@@ -243,8 +246,7 @@ impl Staging {
         }
     }
 
-    /// Prepare tiles `src.tiles` of the mask paint effect a [`commit_mask`] of `effect` with
-    /// the same arguments will write.
+    /// Prepare tiles `src.tiles` of the mask paint effect a [`commit_mask`] of `effect` with the same arguments will write
     pub fn stage_mask(&mut self, pixels: &PixelStore, effect: LayerId, gray: &MaskGray, src: &CommitSource) {
         let value = mask_value(gray);
         let b = mask_blend(gray, &value);
@@ -331,7 +333,7 @@ pub fn commit_mask(pixels: &mut PixelStore, effect: LayerId, size: (u32, u32), g
     over(img, &mask_blend(gray, &value), &src, staging.take(None));
 }
 
-/// Commit a stroke into a coverage-only image (1 component), e.g. the quick mask.
+/// Commit a stroke into a coverage-only image (1 component), e.g. the quick mask
 pub fn commit_coverage(img: &mut TileImage, src: CommitSource) {
     over(img, &Blend { kind: ChannelKind::Scalar, value: &[], stencil_color: false, carried: None, gray: None }, &src, None);
 }

@@ -2,6 +2,9 @@
 //! the dots per inch of the app's window, which size the eyedropper pointer as the system sizes its own pointers there
 
 #[cfg(any(windows, test))]
+use std::ffi::OsString;
+
+#[cfg(any(windows, test))]
 use super::cursor_image::SIZES;
 
 /// The argument that starts this program as the pointer keeper
@@ -54,6 +57,12 @@ impl KeeperArgs {
         Some(KeeperArgs { parent: parent.parse().ok()?, stop: usable_name.then_some(stop)?, dpi })
     }
 
+    /// The keeper's arguments after `KEEPER_ARG` as the system gives them; `None` also for one that is not Unicode (no panic)
+    pub fn parse_os(args: impl IntoIterator<Item = OsString>) -> Option<Self> {
+        let args = args.into_iter().map(|arg| arg.into_string().ok()).collect::<Option<Vec<String>>>()?;
+        Self::parse(&args)
+    }
+
     /// The name of the event the keeper sets once the eyedropper shows: from then on the app may change the pointer's picture
     pub fn shown_event(&self) -> String {
         format!("{}{SHOWN_SUFFIX}", self.stop)
@@ -94,6 +103,22 @@ mod tests {
         assert_eq!(KeeperArgs::parse(&args(&["12", "stop", "0"])), None, "no density");
         assert_eq!(KeeperArgs::parse(&args(&["12", "a b", "96"])), None, "an event name with a space");
         assert_eq!(KeeperArgs::parse(&args(&["12", "stop", "99999"])).map(|keeper| keeper.dpi), Some(MAX_DPI), "capped");
+    }
+
+    #[test]
+    fn a_command_line_argument_that_is_not_unicode_starts_no_keeper() {
+        #[cfg(unix)]
+        let not_unicode = std::os::unix::ffi::OsStringExt::from_vec(vec![0xFF]);
+        #[cfg(windows)]
+        let not_unicode = std::os::windows::ffi::OsStringExt::from_wide(&[0xD800]);
+        let line = |stop: OsString| [OsString::from("12"), stop, OsString::from("96")];
+
+        assert_eq!(KeeperArgs::parse_os(line(not_unicode)), None, "refused, not a panic");
+        assert_eq!(
+            KeeperArgs::parse_os(line(OsString::from("stop"))),
+            Some(KeeperArgs { parent: 12, stop: "stop".into(), dpi: 96 }),
+            "plain arguments read as they are"
+        );
     }
 
     #[test]

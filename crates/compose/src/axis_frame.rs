@@ -3,7 +3,7 @@
 use texturecraft_core::{Decal, Projection, Projector};
 use texturecraft_geom::glam::{EulerRot, Mat3, Vec3};
 
-use crate::pattern::{frame_uv_from_corner, mesh_frame, nonzero_stretch, projector_stretch};
+use crate::pattern::{DEPTH_FADE_START, frame_uv_from_corner, mesh_frame, nonzero_stretch, projector_stretch};
 
 /// The placed planar projection that reads images exactly as axis planar `proj` does on a mesh within `bounds` (None for other projections, placed ones included)
 pub fn placed_from_axis(proj: &Projection, bounds: (Vec3, Vec3)) -> Option<Projection> {
@@ -43,13 +43,10 @@ pub fn axis_frame(scale: f32, axis: u8, offset: Vec3, projector: &Projector, bou
     let out = turn * across.cross(up).normalize_or(out);
 
     // Deep enough never to crop the mesh by depth: the fade starts at three quarters of it
-    let reach = (radius + (origin - center).length()) / FADE_START * DEPTH_SPARE;
+    let reach = (radius + (origin - center).length()) / DEPTH_FADE_START * DEPTH_SPARE;
     let frame = Decal { center: origin.to_array(), normal: out.to_array(), up: (turn * up).to_array(), size, rotation: 0.0, offset: [0.0; 2], depth: reach };
     (origin.is_finite() && size.iter().all(|side| side.is_finite() && *side > 0.0) && reach.is_finite()).then_some(frame)
 }
-
-/// Where a frame's depth fade starts, as a share of its depth (see [`crate::pattern::depth_fade`])
-const FADE_START: f32 = 0.75;
 
 /// Extra reach past the farthest mesh point
 const DEPTH_SPARE: f32 = 1.01;
@@ -67,10 +64,10 @@ mod tests {
     fn points(lo: Vec3, hi: Vec3) -> Vec<(Vec3, Vec3)> {
         (0..64)
             .map(|i| {
-                let t = |k: u32| ((i * 37 + k * 11) % 64) as f32 / 63.0;
-                let p = lo + (hi - lo) * Vec3::new(t(1), t(2), t(3));
-                let n = Vec3::new(t(4) - 0.4, t(5) - 0.3, t(6) - 0.2).normalize_or(Vec3::Z);
-                (p, n)
+                let spread = |salt: u32| ((i * 37 + salt * 11) % 64) as f32 / 63.0;
+                let position = lo + (hi - lo) * Vec3::new(spread(1), spread(2), spread(3));
+                let normal = Vec3::new(spread(4) - 0.4, spread(5) - 0.3, spread(6) - 0.2).normalize_or(Vec3::Z);
+                (position, normal)
             })
             .collect()
     }
@@ -87,13 +84,13 @@ mod tests {
                     let uv = UvTransform { tiling: [2.0, 3.0], rotation: 30.0, offset: [0.1, -0.2] };
                     let axis_planar = Projection::Planar { scale: 1.7, axis, offset: [0.3, -0.4, 0.2], uv, projector, placed: None };
                     let placed = placed_from_axis(&axis_planar, (lo, hi)).expect("an axis planar has a frame");
-                    for (p, n) in points(lo, hi) {
-                        let c = Coords { uv: Vec2::ZERO, pos: (p - center) / radius, nrm: n };
-                        let (before, _) = image_samples(&axis_planar, &c)[0];
-                        let (uv_after, cover) = framed_cover(&placed, p, n).expect("a placed frame covers");
-                        let (after, _) = image_samples(&placed, &Coords { uv: uv_after, ..c })[0];
+                    for (position, normal) in points(lo, hi) {
+                        let coords = Coords { uv: Vec2::ZERO, pos: (position - center) / radius, nrm: normal };
+                        let (before, _) = image_samples(&axis_planar, &coords)[0];
+                        let (uv_after, cover) = framed_cover(&placed, position, normal).expect("a placed frame covers");
+                        let (after, _) = image_samples(&placed, &Coords { uv: uv_after, ..coords })[0];
                         assert!(before.distance(after) < 1e-3, "axis {axis} {rotation:?}: {before} became {after}");
-                        assert!((projector_cover(&axis_planar, &c) - cover).abs() < 1e-3, "axis {axis} {crop:?}: cover changed at {p}");
+                        assert!((projector_cover(&axis_planar, &coords) - cover).abs() < 1e-3, "axis {axis} {crop:?}: cover changed at {position}");
                     }
                 }
             }

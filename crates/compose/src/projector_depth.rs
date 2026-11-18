@@ -40,10 +40,9 @@ impl ProjectorDepth {
 
         // Built with the cache locked: the build runs no parallel work, and tiles asking for the same map wait for it instead of building it again
         let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(at) = cache.iter().position(|(v, m, _)| *v == view && *m == mesh_key) {
-            let entry = cache.remove(at);
-            let depth = entry.2.clone();
-            cache.insert(0, entry);
+        if let Some(at) = cache.iter().position(|(cached_view, cached_mesh, _)| *cached_view == view && *cached_mesh == mesh_key) {
+            let (cached_view, cached_mesh, depth) = cache.remove(at);
+            cache.insert(0, (cached_view, cached_mesh, depth.clone()));
             return Some(depth);
         }
 
@@ -60,8 +59,11 @@ impl ProjectorDepth {
 
     /// Rasterize every triangle of `mesh` in `view`, keeping the nearest per cell (None when no vertex lands in the view)
     pub fn build(view: ProjectorView, mesh: &Mesh) -> Option<ProjectorDepth> {
-        let local: Vec<Option<Vec3>> = mesh.positions.iter().map(|p| view.local(*p)).collect();
-        let (lo, hi) = local.iter().flatten().fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(lo, hi), l| (lo.min(l.truncate()), hi.max(l.truncate())));
+        let local: Vec<Option<Vec3>> = mesh.positions.iter().map(|position| view.local(*position)).collect();
+        let (lo, hi) = local
+            .iter()
+            .flatten()
+            .fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(lo, hi), view_point| (lo.min(view_point.truncate()), hi.max(view_point.truncate())));
         if lo.x > hi.x || lo.y > hi.y {
             return None;
         }
@@ -79,9 +81,9 @@ impl ProjectorDepth {
         Some(depth)
     }
 
-    /// Keep triangle `t` where it is nearer than what a cell holds; false once the cell budget runs out
-    fn raster(&mut self, t: [Vec3; 3], budget: &mut usize) -> bool {
-        let [a, b, c] = t;
+    /// Keep `triangle` where it is nearer than what a cell holds; false once the cell budget runs out
+    fn raster(&mut self, triangle: [Vec3; 3], budget: &mut usize) -> bool {
+        let [a, b, c] = triangle;
         let (d1, d2) = (b - a, c - a);
         let det = d1.x * d2.y - d1.y * d2.x;
         if !det.is_finite() || det.abs() < MIN_SCREEN_AREA {
@@ -92,7 +94,7 @@ impl ProjectorDepth {
         let slope = Vec2::new((d1.z * d2.y - d2.z * d1.y) / det, (d1.x * d2.z - d2.x * d1.z) / det).clamp(Vec2::splat(-MAX_SLOPE), Vec2::splat(MAX_SLOPE));
 
         // Corners in cells: cell (i, j) has its centre at (i + 0.5, j + 0.5)
-        let [pa, pb, pc] = t.map(|p| (p.truncate() - self.origin) / self.cell);
+        let [pa, pb, pc] = triangle.map(|corner| (corner.truncate() - self.origin) / self.cell);
         let (lo, hi) = (pa.min(pb).min(pc), pa.max(pb).max(pc));
         let first = |v: f32| (v - 0.5).ceil().clamp(0.0, SIZE as f32) as usize;
         let last = |v: f32| ((v - 0.5).floor() + 1.0).clamp(0.0, SIZE as f32) as usize;
@@ -104,13 +106,15 @@ impl ProjectorDepth {
         let area = edge(pa, pb, pc);
         for y in y0..y1 {
             for x in x0..x1 {
-                let q = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
-                let inside = [edge(pb, pc, q), edge(pc, pa, q), edge(pa, pb, q)].iter().all(|w| w * area.signum() >= -EDGE_TOLERANCE * area.abs());
+                let cell_centre = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
+                let inside = [edge(pb, pc, cell_centre), edge(pc, pa, cell_centre), edge(pa, pb, cell_centre)]
+                    .iter()
+                    .all(|weight| weight * area.signum() >= -EDGE_TOLERANCE * area.abs());
                 if !inside {
                     continue;
                 }
 
-                let near = a.z + slope.dot(self.origin + q * self.cell - a.truncate());
+                let near = a.z + slope.dot(self.origin + cell_centre * self.cell - a.truncate());
                 if let Some(cell) = self.front.get_mut(y * SIZE + x)
                     && near > cell[0]
                 {
@@ -123,8 +127,13 @@ impl ProjectorDepth {
 
     /// How much depth culling with `hardness` leaves of a projection at world point `p`: 0 behind the surface nearest the projector, 1 on it or where nothing is in front
     pub fn cover(&self, p: Vec3, hardness: f32) -> f32 {
-        let Some(l) = self.view.local(p) else { return 1.0 };
-        let at = (l.truncate() - self.origin) / self.cell;
+        // A hand-edited NaN hardness keeps the layer visible rather than making its texels NaN
+        if !hardness.is_finite() {
+            return 1.0;
+        }
+
+        let Some(view_point) = self.view.local(p) else { return 1.0 };
+        let at = (view_point.truncate() - self.origin) / self.cell;
         if !(at.x >= 0.0 && at.y >= 0.0 && at.x < SIZE as f32 && at.y < SIZE as f32) {
             return 1.0;
         }
@@ -135,7 +144,7 @@ impl ProjectorDepth {
         // The nearest surface's plane carried from the cell centre to the point, so a surface is never behind itself
         let centre = self.origin + (Vec2::new(x as f32, y as f32) + 0.5) * self.cell;
         let slope = Vec2::new(across, up);
-        let behind = near + slope.dot(l.truncate() - centre) - l.z;
+        let behind = near + slope.dot(view_point.truncate() - centre) - view_point.z;
         let unit = self.view.unit();
 
         // Neighbouring triangles of a curved surface part from the carried plane by about one cell of its slope
@@ -156,15 +165,15 @@ fn edge(a: Vec2, b: Vec2, q: Vec2) -> f32 {
 
 /// Which mesh a map was built for: its sizes and a spread of its vertices and indices
 fn fingerprint(mesh: &Mesh) -> u64 {
-    let mut h = DefaultHasher::new();
-    (mesh.positions.len(), mesh.indices.len()).hash(&mut h);
-    for p in mesh.positions.iter().step_by((mesh.positions.len() / FINGERPRINT_SAMPLES).max(1)) {
-        p.to_array().map(f32::to_bits).hash(&mut h);
+    let mut hasher = DefaultHasher::new();
+    (mesh.positions.len(), mesh.indices.len()).hash(&mut hasher);
+    for position in mesh.positions.iter().step_by((mesh.positions.len() / FINGERPRINT_SAMPLES).max(1)) {
+        position.to_array().map(f32::to_bits).hash(&mut hasher);
     }
-    for i in mesh.indices.iter().step_by((mesh.indices.len() / FINGERPRINT_SAMPLES).max(1)) {
-        i.hash(&mut h);
+    for index in mesh.indices.iter().step_by((mesh.indices.len() / FINGERPRINT_SAMPLES).max(1)) {
+        index.hash(&mut hasher);
     }
-    h.finish()
+    hasher.finish()
 }
 
 /// Cells across and up the grid

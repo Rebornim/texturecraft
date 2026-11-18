@@ -341,8 +341,8 @@ enum Op {
     Shadow { offset: [i32; 2] },
     /// Each UV tile's texels read from where `mirror` sends them in their tile (`block` texels across the set's atlas blocks)
     Mirror { mirror: Mirror, block: u32 },
-    /// Each UV tile's texels read from where `transform` sends them, repeating round the tile or empty past it
-    Transform { transform: TileTransform, block: u32 },
+    /// Each UV tile's texels read from where `transform` sends them (its `affine`, worked out once), repeating round the tile or empty past it
+    Transform { transform: TileTransform, affine: ([[f32; 2]; 2], [f32; 2]), block: u32 },
     /// A band along the edge of the shapes past a threshold, from the box blur of the shapes
     Outline(MaskOutline),
     /// Drawn from the distance to the shapes' edge (see [`distance_filter`])
@@ -418,7 +418,7 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
         EffectKind::Filter(Filter::Mirror(mirror)) => Some((index, res as f32, Op::Mirror { mirror: *mirror, block: res })),
         // A transform reads anywhere in its UV tile; one that changes nothing is skipped
         EffectKind::Filter(Filter::Transform(transform)) if !transform.is_identity() => {
-            Some((index, res as f32, Op::Transform { transform: *transform, block: res }))
+            Some((index, res as f32, Op::Transform { transform: *transform, affine: transform.affine(), block: res }))
         }
 
         // Three box passes reach the band's width
@@ -655,7 +655,7 @@ fn gather(
                 Op::Mirror { mirror, block } => {
                     mirror_texel(&mirror, (x, y), (block, res), comps, orig.get((row * width + col) * comps + comps - 1), &mut acc, &sample)
                 }
-                Op::Transform { transform, block } => transform_texel(&transform, (x, y), (block, res), &mut acc, &sample),
+                Op::Transform { transform, affine, block } => transform_texel(&transform, affine, (x, y), (block, res), &mut acc, &sample),
                 Op::SourceWarp(warp) => warp_texel(&warp, (x, y), (res, comps), &mut acc, (&sample, &input)),
                 Op::SourceSlopeBlur(slope) => slope_texel(&slope, (x, y), (res, comps), &mut acc, (&sample, &input)),
                 Op::HeightToNormal(filter) => {
@@ -1043,8 +1043,15 @@ fn mirror_texel(
     sample(at(origin_x, u), at(origin_y, v), acc);
 }
 
-/// Transform `transform` at texel `(x, y)` into `acc`: bilinear between the four texels round where it reads in its UV tile (`res` texels from its `block`'s top left), each wrapped round the tile; where it does not repeat, a read past the tile counts as empty
-fn transform_texel(transform: &TileTransform, (x, y): (f32, f32), (block, res): (u32, u32), acc: &mut [f32; 5], sample: &dyn Fn(f32, f32, &mut [f32; 5])) {
+/// Transform `transform` (whose read is `affine`) at texel `(x, y)` into `acc`: bilinear between the four texels round where it reads in its UV tile (`res` texels from its `block`'s top left), each wrapped round the tile; where it does not repeat, a read past the tile counts as empty
+fn transform_texel(
+    transform: &TileTransform,
+    (columns, shift): ([[f32; 2]; 2], [f32; 2]),
+    (x, y): (f32, f32),
+    (block, res): (u32, u32),
+    acc: &mut [f32; 5],
+    sample: &dyn Fn(f32, f32, &mut [f32; 5]),
+) {
     let (block, size) = (block.max(1) as f32, res.max(1) as f32);
     let (origin_x, origin_y) = ((x / block).floor() * block, (y / block).floor() * block);
     let (local_x, local_y) = (x - origin_x, y - origin_y);
@@ -1052,7 +1059,6 @@ fn transform_texel(transform: &TileTransform, (x, y): (f32, f32), (block, res): 
         return;
     }
 
-    let (columns, shift) = transform.affine();
     let uv = [(local_x + 0.5) / size, (local_y + 0.5) / size];
 
     // Texel space of the tile, centres at whole numbers

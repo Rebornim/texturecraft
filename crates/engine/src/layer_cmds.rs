@@ -21,7 +21,7 @@ pub const MAX_PLACEMENT: f32 = 1000.0;
 const MAX_PATTERN_CONTRAST: f32 = 20.0;
 
 /// One full turn, in degrees
-const FULL_TURN_DEGREES: f32 = 360.0;
+pub(crate) const FULL_TURN_DEGREES: f32 = 360.0;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -578,6 +578,9 @@ pub(crate) fn new_projection(id: &str, fit: impl FnOnce() -> Decal) -> Option<Pr
     }
 }
 
+/// The ids [`new_unframed_projection`] takes, one per kind
+pub(crate) const UNFRAMED_PROJECTION_IDS: [&str; 6] = ["uv", "uvTile", "triplanar", "planar", "spherical", "cylindrical"];
+
 /// A new fill's projection of kind `id`, any kind but a warp (which needs a frame)
 pub(crate) fn new_unframed_projection(id: &str) -> Option<Projection> {
     let projection = match id {
@@ -706,7 +709,7 @@ fn warp_corners(p: &Value, cmd: &str) -> Result<Option<[[f32; 2]; 4]>> {
 const MAX_CORNER_REACH: f32 = 100.0;
 
 /// The largest Projection Depth, in lengths of the frame's longer side
-const MAX_PROJECTION_DEPTH: f32 = 100.0;
+pub(crate) const MAX_PROJECTION_DEPTH: f32 = 100.0;
 
 /// `current` with the `filtering`, `wrap`, `scaleMode` and symmetry params applied
 pub(crate) fn sampling_from(p: &Value, cmd: &str, current: Sampling) -> Result<Sampling> {

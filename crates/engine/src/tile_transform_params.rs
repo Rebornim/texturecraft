@@ -5,6 +5,7 @@ use texturecraft_core::{FlipMode, RepeatMode, TileTransform};
 
 use crate::Result;
 use crate::commands::{bad, boolp, f32p, strp};
+use crate::layer_cmds::FULL_TURN_DEGREES;
 
 /// Set the Transform settings given in `p`; a value of the wrong kind is refused and changes nothing
 pub(crate) fn apply(p: &Value, transform: &mut TileTransform, cmd: &str) -> Result<()> {
@@ -33,7 +34,7 @@ pub(crate) fn apply(p: &Value, transform: &mut TileTransform, cmd: &str) -> Resu
     }
     if p.get("rotation").is_some() {
         let degrees = f32p(p, "rotation").ok_or_else(|| bad(cmd, "`rotation` must be a number of degrees"))?;
-        edited.rotation = degrees.rem_euclid(360.0);
+        edited.rotation = degrees.rem_euclid(FULL_TURN_DEGREES);
     }
     *transform = edited;
     Ok(())

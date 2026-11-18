@@ -289,18 +289,20 @@ fn panic_hunt_frames_and_transforms() {
     let transform = execute(&mut s, "effect.add.filter", &json!({"filter": "transform", "target": "content"})).unwrap()["effect"].as_u64().unwrap();
     s.update();
 
-    let numbers = [json!(1e30), json!(-1e30), json!(0), json!(null), json!("x"), json!([]), json!([1e30, -1e30]), json!([0, 0, 0]), json!([-1e30, 1e30, 0, 5])];
+    let hostile_values =
+        [json!(1e30), json!(-1e30), json!(0), json!(null), json!("x"), json!([]), json!([1e30, -1e30]), json!([0, 0, 0]), json!([-1e30, 1e30, 0, 5])];
     let targets = [json!({"layer": planar}), json!({"layer": warp}), json!({"effect": mask_effect})];
     let keys = ["frameOffset", "frameRotation", "frameScale", "size", "offset", "depth", "rotation", "up"];
     for target in &targets {
         for key in keys {
-            for value in &numbers {
+            for value in &hostile_values {
                 let mut params = target.clone();
                 params[key] = value.clone();
                 hunt_refused_changes_nothing(&mut s, "layer.decal.set", &params);
             }
         }
     }
+
     for target in &targets {
         for command in ["layer.fill.resetFrame", "layer.fill.resetProjection"] {
             let _ = execute(&mut s, command, target);
@@ -310,7 +312,7 @@ fn panic_hunt_frames_and_transforms() {
 
     let transform_keys = ["repeatMode", "flipMode", "scaling", "offset", "rotation", "tileSafeRotation"];
     for key in transform_keys {
-        for value in &numbers {
+        for value in &hostile_values {
             let mut params = json!({"effect": transform});
             params[key] = value.clone();
             hunt_refused_changes_nothing(&mut s, "effect.set", &params);

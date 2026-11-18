@@ -1912,6 +1912,7 @@ fn mask_outline(data: &mut [f32], cover: &[f32], comps: usize, (width, height, r
         _ => 0.0,
     };
     let inside: Vec<bool> = data.par_chunks(comps).zip(cover.par_iter()).map(|(pixel, covered)| *covered > 0.0 && outline.inside(value(pixel))).collect();
+    let fade_curve = outline.fade_curve();
     let mut weights = cover.to_vec();
     let mut sums: Vec<f32> = inside.par_iter().zip(cover.par_iter()).map(|(inside, covered)| if *inside { *covered } else { 0.0 }).collect();
     blur(&mut weights, width, height, radius);
@@ -1920,7 +1921,7 @@ fn mask_outline(data: &mut [f32], cover: &[f32], comps: usize, (width, height, r
         // The shapes' share around a texel is a half at their edge and none (outside) or all (inside) past the band
         let share = if *weight > MIN_READ_WEIGHT { (sum / weight).clamp(0.0, 1.0) } else { 0.0 };
         let closeness = if *inside { (1.0 - share) / OUTLINE_EDGE_SHARE } else { share / OUTLINE_EDGE_SHARE };
-        let band = outline.band(*inside, closeness);
+        let band = outline.band(fade_curve, *inside, closeness);
 
         // Content is premultiplied by its coverage, which stays
         let cov = if comps == 4 { pixel.get(3).copied().unwrap_or(0.0) } else { 1.0 };

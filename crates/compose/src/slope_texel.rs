@@ -17,7 +17,7 @@ pub(crate) fn slope_texel(
     acc: &mut [f32; 5],
     (sample, input): (Sample<'_>, Input<'_>),
 ) {
-    let source = WarpSourceSample { source: &slope.source, seed: slope.seed, res, comps, sample, input };
+    let source = WarpSourceSample::new(&slope.source, slope.seed, (res, comps), (sample, input));
     let probe = SourceWarp::probe_texels(res);
     let downhill = [source.at(x - probe, y) - source.at(x + probe, y), source.at(x, y - probe) - source.at(x, y + probe)];
     let steepness = downhill[0].hypot(downhill[1]);

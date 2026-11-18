@@ -1267,7 +1267,7 @@ impl Renderer {
         let img = match image.and_then(|i| ibl::EnvImage::from_rgba(i.width, i.height, &i.rgba, i.srgb)) {
             Some(img) => img,
             None if self.env_name == name => return,
-            None => ibl::environment(name, 512),
+            None => ibl::environment(name, texturecraft_compose::environment_sky::VIEWPORT_WIDTH),
         };
         let levels = ibl::prefilter(&img, ENV_LEVELS);
         if self.env.texture.width() != img.width || self.env.texture.height() != img.height {

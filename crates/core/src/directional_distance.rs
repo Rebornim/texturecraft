@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::finite_unit;
+
 /// A trail fading away from the shapes (values at or above [`DirectionalDistance::EDGE`]) towards `angle`
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,8 +30,7 @@ impl DirectionalDistance {
 
     /// How many texels the trail reaches at `res` texels across a UV tile
     pub fn reach(&self, res: u32) -> f32 {
-        let unit = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 };
-        unit(self.distance) * unit(self.multiplier) * res as f32
+        finite_unit(self.distance) * finite_unit(self.multiplier) * res as f32
     }
 
     /// The trail where the nearest shape behind a texel is `along` of the reach away (0 on a shape), or none is in reach

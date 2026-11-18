@@ -828,16 +828,19 @@ fn mask_fill_image_snapshot() {
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(6);
 
-    harness.get_by_value("Uniform value").click();
+    // The Grayscale slot opens the source picker; its search finds the image
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").click();
+    harness.run_steps(3);
+    harness.event(egui::Event::Text("checker".into()));
     harness.run_steps(3);
     save(&mut harness, &output_dir, "mask-fill-image-menu");
 
-    harness.get_by_role_and_label(egui::Role::Button, &name).click();
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, &name).click();
     harness.run_steps(4);
 
     let EffectKind::Fill { source, .. } = &harness.state().session.doc.project.effect(LayerId(effect)).unwrap().1.kind else { panic!("fill effect") };
     assert_eq!(*source, Source::image(name));
-    assert!(harness.query_by_label("Projection").is_some(), "image projection is editable");
+    assert!(harness.query_by_label("UV projection").is_some(), "image projection is editable");
     save(&mut harness, &output_dir, "mask-fill-image-selected");
 }
 
@@ -2406,8 +2409,7 @@ fn gradient_filter_snapshots() {
         params["target"] = json!("mask");
         LayerId(execute(&mut session, "effect.add.filter", &params).unwrap()["effect"].as_u64().unwrap())
     };
-    let stops =
-        json!([[0.009, 0.008, 0.013], [0.55, 0.105, 0.021], [0.87, 0.67, 0.35], [1, 1, 1], [1, 1, 1], [1, 1, 1], [1, 1, 1], [1, 1, 1], [1, 1, 1], [1, 1, 1]]);
+    let stops = json!([[0.009, 0.008, 0.013], [0.55, 0.105, 0.021], [0.87, 0.67, 0.35]]);
     let effects = [
         ("gradient", add(json!({"filter": "gradientMap", "colors": stops, "positions": [0.0, 0.45, 1.0]}))),
         ("gradient-curve", add(json!({"filter": "gradientCurve"}))),

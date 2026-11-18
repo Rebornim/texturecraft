@@ -480,18 +480,7 @@ mod tests {
 
     #[test]
     fn every_brightness_and_accent_reads() {
-        // Relative luminance (WCAG) and contrast ratio.
-        let lum = |c: Color32| {
-            let ch = |v: u8| {
-                let v = f32::from(v) / 255.0;
-                if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
-            };
-            0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
-        };
-        let contrast = |a: Color32, b: Color32| {
-            let (x, y) = (lum(a), lum(b));
-            (x.max(y) + 0.05) / (x.min(y) + 0.05)
-        };
+        let contrast = contrast_ratio;
         for b in Brightness::ALL {
             for a in Accent::ALL {
                 let t = Tokens::for_brightness(b).with_accent(a);

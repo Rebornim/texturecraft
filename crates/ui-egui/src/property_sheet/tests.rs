@@ -283,6 +283,18 @@ fn a_typed_value_equal_to_the_current_one_changes_nothing() {
     assert!(harness.state().hardness_merges.is_empty(), "the same number written another way reports no edit: {:?}", harness.state().hardness_merges);
 }
 
+/// A value just under zero opens to type as it reads, without a minus sign
+#[test]
+fn a_value_just_under_zero_opens_without_a_minus_sign() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut harness = gallery_harness(Brightness::MediumDark, Gallery { hardness: -0.001, ..Gallery::default() });
+    let hardness = harness.get_by_label("Hardness value").rect();
+    harness.drag_at(hardness.center());
+    harness.drop_at(hardness.center());
+    harness.run_steps(2);
+    assert_eq!(harness.get_by_role(egui::Role::TextInput).value().as_deref(), Some("0.00"));
+}
+
 #[test]
 fn a_drag_merges_after_its_first_step_and_a_click_does_not() {
     let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

@@ -3,6 +3,7 @@ use std::ops::RangeInclusive;
 use egui::{Align2, Color32, CornerRadius, FontId, Id, Rect, Response, Sense, Stroke, StrokeKind, WidgetInfo, pos2};
 use egui_phosphor::regular as ic;
 
+use super::number_field::shown_number;
 use super::track::Track;
 use super::value_text::ValueText;
 use super::{CONTROL_RADIUS, ICON_SIZE, PropertySheet, ROW_HIT_HALF_HEIGHT, RowLead, SMALL_TEXT_SIZE, TEXT_SIZE};
@@ -240,7 +241,7 @@ impl PropertySheet<'_> {
         decimals: usize,
         suffix: &str,
     ) -> Option<f32> {
-        let shown = format!("{value:.decimals$}{suffix}");
+        let shown = format!("{}{suffix}", shown_number(value, decimals));
         self.column_value_field(id, &label, center_y, &shown, suffix, value, range, decimals)
     }
 
@@ -276,7 +277,7 @@ impl PropertySheet<'_> {
         decimals: usize,
         suffix: &str,
     ) -> Option<f32> {
-        let shown = format!("{value:.decimals$}{suffix}");
+        let shown = format!("{}{suffix}", shown_number(value, decimals));
         self.value_text_field(id, ValueText { label: &label, right, width, center_y, shown: &shown, suffix }, value, range, decimals)
     }
 
@@ -286,7 +287,7 @@ impl PropertySheet<'_> {
         let rect = Rect::from_min_max(pos2(right - width, center_y - ROW_HIT_HALF_HEIGHT), pos2(right, center_y + ROW_HIT_HALF_HEIGHT));
         let field_id = id.with("typed");
         let editing = self.ui.data(|data| data.get_temp::<String>(field_id));
-        let seeded = || format!("{value:.decimals$}");
+        let seeded = || shown_number(value, decimals);
 
         let tokens = self.tokens;
         let Some(mut typed_text) = editing else {
@@ -323,6 +324,7 @@ impl PropertySheet<'_> {
         }
 
         let typed: f32 = typed_text.trim().trim_end_matches(suffix).trim_start_matches(['×', 'x']).trim().parse().ok()?;
+
         // A typed value that lands on the current one (a clamp, "0.750" for 0.75) is no edit either
         typed.is_finite().then(|| kept_in(typed, range)).filter(|kept| *kept != value)
     }

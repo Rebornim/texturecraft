@@ -137,6 +137,11 @@ pub enum LayerKind {
 }
 
 impl LayerKind {
+    /// A new folder: empty, open, with no Scale or Rotation laid on its contents
+    pub fn folder() -> LayerKind {
+        LayerKind::Group { children: Vec::new(), collapsed: false, contents: ContentsOffset::NONE, randomized: Vec::new() }
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             LayerKind::Paint => "paint",
@@ -394,9 +399,9 @@ pub struct Decal {
     pub normal: [f32; 3],
     /// Up direction of the unrotated frame.
     pub up: [f32; 3],
-    /// Width and height (world units)
+    /// Width and height (world units).
     pub size: [f32; 2],
-    /// Rotation around the normal (degrees)
+    /// Rotation around the normal (degrees).
     pub rotation: f32,
     /// Shift of the frame from `center` along the unrotated right and up directions (world units).
     pub offset: [f32; 2],
@@ -1425,19 +1430,22 @@ fn unit_divider() -> u16 {
     1
 }
 
-/// Whether a switch is off (not saved then)
+/// Serde default of a switch that was on in projects saved before it existed
 fn yes() -> bool {
     true
 }
 
+/// Whether a switch is on, its default where it defaults to [`yes`] (not saved then)
 fn is_true(on: &bool) -> bool {
     *on
 }
 
+/// Whether a high pass runs in the working color space, its default (not saved then)
 fn is_working_space(space: &HighpassSpace) -> bool {
     *space == HighpassSpace::Working
 }
 
+/// Whether a switch is off, its default (not saved then)
 fn is_false(on: &bool) -> bool {
     !*on
 }
@@ -1461,18 +1469,21 @@ pub fn posterize(x: f32, levels: f32) -> f32 {
     (x * steps).round() / steps
 }
 
+/// Bounds of a smoothstep closer than this are a step: easing over a narrower span would divide by almost nothing
+const MIN_SMOOTHSTEP_SPAN: f32 = 1e-6;
+
 /// 0 at or below `min`, 1 at or above `max`, eased between them (swapped bounds are read in order; equal bounds are a step)
 pub(crate) fn smoothstep(min: f32, max: f32, x: f32) -> f32 {
-    let (lo, hi) = (finite_or(min.min(max), 0.0), finite_or(min.max(max), 1.0));
+    let (low, high) = (finite_or(min.min(max), 0.0), finite_or(min.max(max), 1.0));
     if !x.is_finite() {
         return 0.0;
     }
 
-    if hi - lo <= 1e-6 {
-        return if x >= hi { 1.0 } else { 0.0 };
+    if high - low <= MIN_SMOOTHSTEP_SPAN {
+        return if x >= high { 1.0 } else { 0.0 };
     }
 
-    let t = ((x - lo) / (hi - lo)).clamp(0.0, 1.0);
+    let t = ((x - low) / (high - low)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
 
@@ -1571,13 +1582,26 @@ impl Filter {
     /// The choices of an intensity's divider
     pub const DIVIDERS: [u16; 4] = [1, 10, 100, 1000];
 
+    /// The most colors a gradient's Color Quantity uses
+    pub const MAX_GRADIENT_COLORS: u8 = 10;
+
+    /// Texels at 2K a Blur Intensity (Blur, Blur Directional) of 1 reaches
+    pub const BLUR_INTENSITY: f32 = 16.0;
+
+    /// Texels at 2K a halo glow's Width or a drop shadow's Size of 1 reaches
+    pub const HALO_REACH: f32 = 128.0;
+
+    /// A drop shadow is cast at most this share of a UV tile away, either way
+    pub const SHADOW_DISTANCE_MAX: f32 = 0.5;
+
+    /// The noise features per UV unit a noise-driven warp or slope blur reads, at least and at most
+    pub const NOISE_SCALE_MIN: f32 = 0.01;
+    pub const NOISE_SCALE_MAX: f32 = 1000.0;
+
     /// A gradient as projects saved before the Input Transformation read it: `colors` evenly spaced, luma, linear blending
     pub fn even_gradient(colors: Vec<[f32; 3]>) -> Filter {
         Filter::GradientMap { colors, positions: Vec::new(), quantity: None, input: GradientInput::default(), linear: true, debug: false }
     }
-
-    /// The most colors a gradient's Color Quantity uses
-    pub const MAX_GRADIENT_COLORS: u8 = 10;
 
     /// Histogram Shift's Position (0..1) for its `offset`: a shift back by 1 − position, so 1 shifts nothing (offsets above 0 saved before the Position read as themselves, the same shift but for white and black)
     pub fn shift_position(offset: f32) -> f32 {
@@ -1591,31 +1615,15 @@ impl Filter {
         position - 1.0
     }
 
-    /// Texels at 2K a Blur Intensity (Blur, Blur Directional) of 1 reaches
-    pub const BLUR_INTENSITY: f32 = 16.0;
-
-    /// Texels across a UV tile that a Pixelate cell size counts in
-    const PIXELATE_TILE: f32 = 2048.0;
-
     /// Pixelate's Pixels Amount (cells across a UV tile) for a cell `size` in texels at 2K
     pub fn pixels_amount(size: f32) -> f32 {
-        Filter::PIXELATE_TILE / if size.is_finite() { size.max(1.0) } else { Filter::PIXELATE_TILE }
+        SIZE_REFERENCE_RES / if size.is_finite() { size.max(1.0) } else { SIZE_REFERENCE_RES }
     }
 
     /// The cell size in texels at 2K that a Pixels Amount (cells across a UV tile) sets
     pub fn pixel_size(amount: f32) -> f32 {
-        Filter::PIXELATE_TILE / if amount.is_finite() { amount.clamp(1.0, Filter::PIXELATE_TILE) } else { 1.0 }
+        SIZE_REFERENCE_RES / if amount.is_finite() { amount.clamp(1.0, SIZE_REFERENCE_RES) } else { 1.0 }
     }
-
-    /// Texels at 2K a halo glow's Width or a drop shadow's Size of 1 reaches
-    pub const HALO_REACH: f32 = 128.0;
-
-    /// A drop shadow is cast at most this share of a UV tile away, either way
-    pub const SHADOW_DISTANCE_MAX: f32 = 0.5;
-
-    /// The noise features per UV unit a noise-driven warp or slope blur reads, at least and at most
-    pub const NOISE_SCALE_MIN: f32 = 0.01;
-    pub const NOISE_SCALE_MAX: f32 = 1000.0;
 
     /// The colors a gradient's ramp uses: the first Color Quantity of them (all of them where it has none)
     pub fn ramp_colors(&self) -> &[[f32; 3]] {
@@ -2010,6 +2018,7 @@ impl CompareOp {
 
     pub fn from_id(id: &str) -> Option<CompareOp> {
         match id {
+            // mask.add.compare took "less" as well as "lesser" before the ids were the op names
             "less" => Some(CompareOp::LesserThan),
             _ => CompareOp::ALL.into_iter().find(|op| op.id() == id),
         }
@@ -2116,7 +2125,7 @@ impl EffectKind {
         anchors
     }
 
-    /// The image resources this effect's sources read (a fill, its patterns, a material or a generator input)
+    /// The image resources this effect's sources read (a fill, its patterns, a material or a generator input, a colour selection's ID map)
     pub fn images_read(&self) -> impl Iterator<Item = &str> {
         let sources: Vec<&Source> = match self {
             EffectKind::Fill { source, .. } => vec![source],
@@ -2124,7 +2133,11 @@ impl EffectKind {
             EffectKind::Generator(generator) => generator.inputs.values().collect(),
             _ => Vec::new(),
         };
-        sources.into_iter().flat_map(Source::images)
+        let id_map = match self {
+            EffectKind::ColorSelection(selection) => selection.id_map.as_deref(),
+            _ => None,
+        };
+        sources.into_iter().flat_map(Source::images).chain(id_map)
     }
 
     /// Reads a channel of the layer or of the stack below it (a compare mask's layer sides)
@@ -2182,6 +2195,11 @@ impl Effect {
             off_channels: BTreeSet::new(),
             inputs: BTreeMap::new(),
         }
+    }
+
+    /// The image resources the effect reads: its kind's ([`EffectKind::images_read`]) and its filter image inputs'
+    pub fn images_read(&self) -> impl Iterator<Item = &str> {
+        self.kind.images_read().chain(self.inputs.values().flat_map(Source::images))
     }
 
     /// Whether a source of the effect, or one of its image inputs, reads anchor point `anchor` (any anchor point when None)
@@ -2242,6 +2260,16 @@ mod tests {
         let effect = EffectKind::Material(fill);
 
         assert_eq!(effect.images_read().collect::<Vec<_>>(), vec!["material.png"]);
+    }
+
+    #[test]
+    fn a_colour_selection_id_map_and_a_filter_image_input_are_reported_as_used() {
+        let mut selection = crate::ColorSelection::new(Vec::new(), 0.0);
+        selection.id_map = Some("id.png".into());
+        let mut effect = Effect::new(LayerId(1), EffectKind::ColorSelection(selection));
+        effect.inputs.insert("mask".into(), Source::image("input.png"));
+
+        assert_eq!(effect.images_read().collect::<Vec<_>>(), vec!["id.png", "input.png"]);
     }
 
     #[test]

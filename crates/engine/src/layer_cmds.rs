@@ -177,12 +177,7 @@ fn add_group(s: &mut Session, p: &Value) -> Result<Value> {
     let name = strp(p, "name").map(str::to_string).unwrap_or_else(|| s.doc.project.next_layer_name(ts, "Folder"));
     let id = s.edit("Add folder", |s| {
         let id = s.doc.project.alloc_id();
-        let mut l = Layer::new(
-            id,
-            name,
-            LayerKind::Group { children: Vec::new(), collapsed: false, contents: Default::default(), randomized: Vec::new() },
-            &channels_of(s),
-        );
+        let mut l = Layer::new(id, name, LayerKind::folder(), &channels_of(s));
         for b in l.channels.values_mut() {
             b.mode = BlendMode::Passthrough;
         }
@@ -256,8 +251,7 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
         let gid = s.doc.project.alloc_id();
         let name = s.doc.project.next_layer_name(ts, "Folder");
         let channels = s.doc.project.texture_set(ts)?.channel_list();
-        let mut gl =
-            Layer::new(gid, name, LayerKind::Group { children: Vec::new(), collapsed: false, contents: Default::default(), randomized: Vec::new() }, &channels);
+        let mut gl = Layer::new(gid, name, LayerKind::folder(), &channels);
         for b in gl.channels.values_mut() {
             b.mode = BlendMode::Passthrough;
         }

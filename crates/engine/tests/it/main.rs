@@ -45,6 +45,7 @@ mod pbr_import;
 mod perf;
 mod polygon_fill;
 mod project_recovery;
+mod resources_used;
 mod sample;
 mod solo;
 mod thumbs;

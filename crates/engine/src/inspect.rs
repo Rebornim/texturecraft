@@ -132,8 +132,12 @@ fn effect_json(session: &Session, effect: &Effect, content: bool) -> Value {
             }
         }
         EffectKind::Anchor => {
-            let readers =
-                session.doc.project.anchor_readers(effect.id).into_iter().map(|(layer, effect)| json!({ "layer": layer.0, "effect": effect.map(|e| e.0) }));
+            let readers = session
+                .doc
+                .project
+                .anchor_readers(effect.id)
+                .into_iter()
+                .map(|(layer, reader)| json!({ "layer": layer.0, "effect": reader.map(|reader| reader.0) }));
             out["references"] = Value::Array(readers.collect());
         }
     }

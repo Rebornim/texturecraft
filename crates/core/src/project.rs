@@ -784,12 +784,7 @@ mod tests {
         let b = paint(&mut p, "b");
         let b = p.insert_layer(0, b, None, false).unwrap();
         let gid = p.alloc_id();
-        let g = Layer::new(
-            gid,
-            "g",
-            LayerKind::Group { children: vec![], collapsed: false, contents: Default::default(), randomized: Vec::new() },
-            &Channel::DEFAULT_SET,
-        );
+        let g = Layer::new(gid, "g", LayerKind::folder(), &Channel::DEFAULT_SET);
         p.insert_layer(0, g, Some(a), false).unwrap();
         assert_eq!(p.texture_sets[0].stack, vec![a, gid, b]);
         p.move_above(b, Some(gid), true).unwrap();
@@ -897,13 +892,7 @@ mod tests {
         p.validate().unwrap();
         // A folder holding an instance of itself draws itself.
         let gid = p.alloc_id();
-        p.insert_layer(
-            1,
-            Layer::new(gid, "g", LayerKind::Group { children: vec![], collapsed: false, contents: Default::default(), randomized: Vec::new() }, &[]),
-            None,
-            false,
-        )
-        .unwrap();
+        p.insert_layer(1, Layer::new(gid, "g", LayerKind::folder(), &[]), None, false).unwrap();
         let loop_id = p.alloc_id();
         p.insert_layer(1, Layer::new(loop_id, "g", LayerKind::Instance { source: gid }, &[]), Some(gid), true).unwrap();
         assert_eq!(p.instance_cycle(), Some(loop_id));

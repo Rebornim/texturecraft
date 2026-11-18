@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use texturecraft_engine::core::{Channel, Filter, LayerId, SourceSlopeBlur, SourceWarp};
 use texturecraft_engine::{Session, execute};
 
-use crate::filter_support::{SIZE, add_filter, center, facing_session as session, filter_of};
+use crate::filter_support::{SIZE, add_filter, center, facing_session as session, filter_of, set};
 
 fn assert_close(actual: [f32; 3], expected: [f32; 3], what: &str) {
     assert!((0..3).all(|i| (actual[i] - expected[i]).abs() < 4e-3), "{what}: {actual:?}, expected {expected:?}");
@@ -21,15 +21,16 @@ fn filtered_layer(s: &mut Session, params: Value) -> (u64, LayerId) {
 fn an_empty_filter_renders_nothing_until_one_is_picked() {
     let mut s = session();
     let (_, effect) = filtered_layer(&mut s, json!({"filter": "none"}));
+
     assert_eq!(filter_of(&s, effect), Filter::Empty);
     assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Filter (empty)");
     assert_close(center(&mut s, Channel::BaseColor), [0.2; 3], "an empty filter leaves the color");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "filter": "invert"})).unwrap();
+    set(&mut s, effect, json!({"filter": "invert"}));
     assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Invert");
     assert_close(center(&mut s, Channel::BaseColor), [0.8; 3], "the picked filter works");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "filter": "none"})).unwrap();
+    set(&mut s, effect, json!({"filter": "none"}));
     assert_eq!(filter_of(&s, effect), Filter::Empty);
     assert_close(center(&mut s, Channel::BaseColor), [0.2; 3], "emptied again");
 }
@@ -39,9 +40,10 @@ fn an_empty_filter_renders_nothing_until_one_is_picked() {
 fn a_content_filter_leaves_the_channels_switched_off() {
     let mut s = session();
     let (layer, effect) = filtered_layer(&mut s, json!({"filter": "invert"}));
+
     assert_close(center(&mut s, Channel::Roughness), [0.7; 3], "every channel at first");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "channels": {"roughness": false}})).unwrap();
+    set(&mut s, effect, json!({"channels": {"roughness": false}}));
     assert_close(center(&mut s, Channel::Roughness), [0.3; 3], "roughness switched off");
     assert_close(center(&mut s, Channel::BaseColor), [0.8; 3], "the color still inverted");
 
@@ -52,13 +54,16 @@ fn a_content_filter_leaves_the_channels_switched_off() {
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
     assert_close(center(&mut s, Channel::Roughness), [0.7; 3], "one undo step");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "channels": {"roughness": false}})).unwrap();
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "channels": {"roughness": true}})).unwrap();
+    set(&mut s, effect, json!({"channels": {"roughness": false}}));
+    set(&mut s, effect, json!({"channels": {"roughness": true}}));
     assert!(s.doc.project.effect(effect).unwrap().1.off_channels.is_empty());
+
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "channels": {"nope": false}})).is_err());
+
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "channels": {"roughness": 1}})).is_err());
 
     let masked = execute(&mut s, "effect.add.filter", &json!({"filter": "invert", "target": "mask"})).unwrap()["effect"].as_u64().unwrap();
+
     assert!(execute(&mut s, "effect.set", &json!({"effect": masked, "channels": {"roughness": false}})).is_err());
 }
 
@@ -83,7 +88,7 @@ fn the_divider_divides_the_intensity() {
     let (_, effect) = filtered_layer(&mut s, json!({"filter": "slopeBlur"}));
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "divider": 7})).is_err());
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "divider": 100})).unwrap();
+    set(&mut s, effect, json!({"divider": 100}));
     assert!(matches!(filter_of(&s, effect), Filter::SourceSlopeBlur(SourceSlopeBlur { divider: 100, .. })));
 
     let saved = serde_json::to_value(Filter::Warp { intensity: 1.0, scale: 2.0, seed: 3, divider: 1 }).unwrap();
@@ -103,7 +108,7 @@ fn restore_defaults_puts_the_filters_parameters_back() {
     assert_eq!(execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap(), json!({"changed": false}));
     assert_eq!(s.history_labels().len(), steps, "no step at defaults");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "intensity": 0.5, "seed": 9, "divider": 100, "channels": {"height": false}})).unwrap();
+    set(&mut s, effect, json!({"intensity": 0.5, "seed": 9, "divider": 100, "channels": {"height": false}}));
     assert_eq!(execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap(), json!({"changed": true}));
     assert_eq!(filter_of(&s, effect), defaults);
 

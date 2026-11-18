@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use texturecraft_engine::core::{Bevel, Channel, Filter};
 use texturecraft_engine::execute;
 
-use crate::filter_support::{center, facing_session as session, filter_of, filtered};
+use crate::filter_support::{center, facing_session as session, filter_of, filtered, set};
 
 fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
     (0..3).map(|i| (a[i] - b[i]).abs()).fold(0.0, f32::max)
@@ -20,16 +20,14 @@ fn color_correct_changes_nothing_until_its_tones_move() {
     assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Color Correct");
     assert!(distance(center(&mut s, Channel::BaseColor), color) < 4e-3, "the defaults change nothing");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "shadows": [0.0, 0.0, 0.0], "midtones": [0.0, 0.0, 0.0], "highlights": [0.0, 0.0, 0.0]}))
-        .unwrap();
+    set(&mut s, effect, json!({"shadows": [0.0, 0.0, 0.0], "midtones": [0.0, 0.0, 0.0], "highlights": [0.0, 0.0, 0.0]}));
     let gray = center(&mut s, Channel::BaseColor);
     assert!((gray[0] - gray[1]).abs() < 4e-3 && (gray[1] - gray[2]).abs() < 4e-3, "saturation 0 everywhere is gray: {gray:?}");
 
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
     assert_eq!(filter_of(&s, effect), neutral, "one undo step takes back all three tones");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "midtones": [0.0, 0.3, 0.5], "shadows": [0.0, 0.3, 0.5], "highlights": [0.0, 0.3, 0.5]}))
-        .unwrap();
+    set(&mut s, effect, json!({"midtones": [0.0, 0.3, 0.5], "shadows": [0.0, 0.3, 0.5], "highlights": [0.0, 0.3, 0.5]}));
     let lighter = center(&mut s, Channel::BaseColor);
     assert!((0..3).all(|i| lighter[i] > color[i] + 0.1), "luminosity lifts every tone: {lighter:?}");
 
@@ -41,7 +39,7 @@ fn color_correct_changes_nothing_until_its_tones_move() {
     let Filter::ColorCorrect { midtones, .. } = filter_of(&s, effect) else { panic!() };
     assert_eq!(midtones, [0.0, 0.3, 0.5], "a refused edit changes nothing");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "midtones": [5.0, -5.0, 5.0]})).unwrap();
+    set(&mut s, effect, json!({"midtones": [5.0, -5.0, 5.0]}));
     let Filter::ColorCorrect { midtones, .. } = filter_of(&s, effect) else { panic!() };
     assert_eq!(midtones, [1.0, -1.0, 1.0], "clamped to the ranges");
 }
@@ -55,12 +53,15 @@ fn hsl_perceptive_turns_the_hue_at_the_same_lightness() {
     assert!(matches!(filter_of(&s, effect), Filter::Hsl { perceptive: true, .. }), "new filters are perceptive");
 
     let perceptive = center(&mut s, Channel::BaseColor);
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "mode": "regular"})).unwrap();
+    set(&mut s, effect, json!({"mode": "regular"}));
     assert!(matches!(filter_of(&s, effect), Filter::Hsl { perceptive: false, .. }));
 
     let regular = center(&mut s, Channel::BaseColor);
-    let lum = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-    assert!((lum(perceptive) - lum(yellow)).abs() < (lum(regular) - lum(yellow)).abs(), "perceptive {perceptive:?} regular {regular:?}");
+    // Rec. 709 luminance weights
+    let relative_luminance = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    let drift = |color: [f32; 3]| (relative_luminance(color) - relative_luminance(yellow)).abs();
+    assert!(drift(perceptive) < drift(regular), "perceptive {perceptive:?} regular {regular:?}");
+
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "mode": "vivid"})).is_err());
 
     // Saved before the mode: Regular, and saved again without the field
@@ -85,8 +86,9 @@ fn blur_and_bevel_take_the_edge_wrap() {
     let blur = filtered(&mut s, [0.2; 3], json!({"filter": "blur"}));
     assert!(matches!(filter_of(&s, blur), Filter::Blur { wrap: false, .. }));
 
-    execute(&mut s, "effect.set", &json!({"effect": blur.0, "wrap": true})).unwrap();
+    set(&mut s, blur, json!({"wrap": true}));
     assert!(matches!(filter_of(&s, blur), Filter::Blur { wrap: true, .. }));
+
     assert!(execute(&mut s, "effect.set", &json!({"effect": blur.0, "wrap": "yes"})).is_err());
 
     let bevel = filtered(&mut s, [0.2; 3], json!({"filter": "bevel", "wrap": true}));

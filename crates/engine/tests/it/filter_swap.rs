@@ -5,6 +5,8 @@ use texturecraft_engine::core::{BlendMode, Effect, EffectKind, Filter, LayerId, 
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, StackTarget, execute};
 
+use crate::filter_support::set;
+
 /// A sphere project with its default layer selected
 fn session() -> Session {
     Session::new_project("t", primitives::sphere(1.0, 16, 8), "builtin:sphere", None, 256).unwrap()
@@ -35,9 +37,9 @@ fn swapping_a_filter_keeps_its_place_blend_opacity_and_visibility() {
     let below = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "content"}));
     let swapped = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "content"}));
     let above = add(&mut s, "effect.add.filter", json!({"filter": "grayscale", "target": "content"}));
-    execute(&mut s, "effect.set", &json!({"effect": swapped.0, "blend": "Multiply", "opacity": 0.4, "visible": false})).unwrap();
+    set(&mut s, swapped, json!({"blend": "Multiply", "opacity": 0.4, "visible": false}));
 
-    execute(&mut s, "effect.set", &json!({"effect": swapped.0, "filter": "blur", "radius": 5.0})).unwrap();
+    set(&mut s, swapped, json!({"filter": "blur", "radius": 5.0}));
 
     let blur = effect(&s, swapped);
     assert!(matches!(blur.kind, EffectKind::Filter(Filter::Blur { radius, .. }) if radius == 5.0), "{:?}", blur.kind);
@@ -51,7 +53,7 @@ fn swapping_a_filter_keeps_a_name_the_user_chose() {
     let mut s = session();
     let id = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "content", "name": "Flip"}));
 
-    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "threshold"})).unwrap();
+    set(&mut s, id, json!({"filter": "threshold"}));
 
     assert_eq!(effect(&s, id).name, "Flip");
 }
@@ -61,7 +63,7 @@ fn swapping_to_the_former_directional_warp_id_sets_directional_mode() {
     let mut s = session();
     let id = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "content"}));
 
-    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "warpDirectional"})).unwrap();
+    set(&mut s, id, json!({"filter": "warpDirectional"}));
 
     let swapped = effect(&s, id).kind;
     assert!(matches!(swapped, EffectKind::Filter(Filter::SourceWarp(warp)) if warp.mode == WarpMode::Directional), "{swapped:?}");
@@ -72,7 +74,7 @@ fn naming_the_former_directional_warp_id_on_a_warp_sets_directional_mode() {
     let mut s = session();
     let id = add(&mut s, "effect.add.filter", json!({"filter": "warp", "target": "content", "seed": 7}));
 
-    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "warpDirectional"})).unwrap();
+    set(&mut s, id, json!({"filter": "warpDirectional"}));
 
     let edited = effect(&s, id).kind;
     assert!(matches!(edited, EffectKind::Filter(Filter::SourceWarp(warp)) if warp.mode == WarpMode::Directional && warp.seed == 7), "{edited:?}");
@@ -83,7 +85,7 @@ fn a_warp_mode_given_with_the_former_directional_warp_id_wins() {
     let mut s = session();
     let id = add(&mut s, "effect.add.filter", json!({"filter": "warp", "target": "content"}));
 
-    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "warpDirectional", "warpMode": "warp"})).unwrap();
+    set(&mut s, id, json!({"filter": "warpDirectional", "warpMode": "warp"}));
 
     let edited = effect(&s, id).kind;
     assert!(matches!(edited, EffectKind::Filter(Filter::SourceWarp(warp)) if warp.mode == WarpMode::Warp), "{edited:?}");
@@ -94,7 +96,7 @@ fn swapping_to_a_gradient_given_colors_ramps_evenly_through_them() {
     let mut s = session();
     let id = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "content"}));
 
-    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "gradientMap", "colors": [[0, 0, 0], [1, 1, 1]]})).unwrap();
+    set(&mut s, id, json!({"filter": "gradientMap", "colors": [[0, 0, 0], [1, 1, 1]]}));
 
     let EffectKind::Filter(gradient) = effect(&s, id).kind else { panic!("still a filter") };
     let halfway = gradient.ramp_at(0.5).unwrap();
@@ -108,7 +110,7 @@ fn swapping_to_a_gradient_given_colors_and_places_uses_every_color() {
     let id = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "content"}));
     let colors = [[0.0; 3], [0.25; 3], [0.5; 3], [0.75; 3], [1.0; 3]];
 
-    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "gradientMap", "colors": colors, "positions": [0.0, 0.1, 0.2, 0.3, 1.0]})).unwrap();
+    set(&mut s, id, json!({"filter": "gradientMap", "colors": colors, "positions": [0.0, 0.1, 0.2, 0.3, 1.0]}));
 
     let EffectKind::Filter(gradient) = effect(&s, id).kind else { panic!("still a filter") };
     assert_eq!(gradient.ramp_colors(), colors);
@@ -119,7 +121,7 @@ fn one_undo_restores_the_old_filter() {
     let mut s = session();
     let id = add(&mut s, "effect.add.filter", json!({"filter": "threshold", "target": "content", "level": 0.3}));
 
-    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "sharpen"})).unwrap();
+    set(&mut s, id, json!({"filter": "sharpen"}));
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
 
     let restored = effect(&s, id);
@@ -144,9 +146,9 @@ fn a_mask_filter_swaps_in_place_on_the_mask() {
     let below = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "mask"}));
     let swapped = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "mask"}));
     let above = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "mask"}));
-    execute(&mut s, "effect.set", &json!({"effect": swapped.0, "blend": "Multiply", "opacity": 0.4})).unwrap();
+    set(&mut s, swapped, json!({"blend": "Multiply", "opacity": 0.4}));
 
-    execute(&mut s, "effect.set", &json!({"effect": swapped.0, "filter": "blur"})).unwrap();
+    set(&mut s, swapped, json!({"filter": "blur"}));
 
     let blur = effect(&s, swapped);
     assert!(matches!(blur.kind, EffectKind::Filter(Filter::Blur { .. })), "{:?}", blur.kind);
@@ -161,8 +163,8 @@ fn naming_the_current_filter_edits_it_in_place() {
     let mut s = session();
     let id = add(&mut s, "effect.add.filter", json!({"filter": "blur", "target": "content", "radius": 5.0}));
 
-    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "blur", "radius": 9.0})).unwrap();
-    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "blur"})).unwrap();
+    set(&mut s, id, json!({"filter": "blur", "radius": 9.0}));
+    set(&mut s, id, json!({"filter": "blur"}));
 
     let blur = effect(&s, id);
     assert!(matches!(blur.kind, EffectKind::Filter(Filter::Blur { radius, .. }) if radius == 9.0), "the radius is kept, not reset: {:?}", blur.kind);
@@ -173,7 +175,7 @@ fn a_name_given_with_the_swap_wins() {
     let mut s = session();
     let id = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "content"}));
 
-    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "threshold", "name": "Edges"})).unwrap();
+    set(&mut s, id, json!({"filter": "threshold", "name": "Edges"}));
 
     let swapped = effect(&s, id);
     assert!(matches!(swapped.kind, EffectKind::Filter(Filter::Threshold { .. })), "{:?}", swapped.kind);
@@ -184,7 +186,7 @@ fn a_name_given_with_the_swap_wins() {
 fn a_refused_swap_changes_nothing_and_adds_no_undo_step() {
     let mut s = session();
     let id = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "mask"}));
-    execute(&mut s, "effect.set", &json!({"effect": id.0, "blend": "Multiply", "opacity": 0.4, "name": "Flip"})).unwrap();
+    set(&mut s, id, json!({"blend": "Multiply", "opacity": 0.4, "name": "Flip"}));
     let before = effect(&s, id);
 
     for refused in [
@@ -211,6 +213,7 @@ fn only_filter_effects_swap_and_only_to_filters() {
     assert!(execute(&mut s, "effect.set", &json!({"effect": levels.0, "filter": "blur"})).is_err(), "levels is not a filter effect");
     assert!(execute(&mut s, "effect.set", &json!({"effect": levels.0, "filter": "nope"})).is_err(), "an unknown filter on levels");
     assert!(execute(&mut s, "effect.set", &json!({"effect": filter.0, "filter": "matFinishGrind"})).is_err(), "a material finish is a fill");
+
     assert!(execute(&mut s, "effect.set", &json!({"effect": filter.0, "filter": "nope"})).is_err());
     assert!(matches!(effect(&s, filter).kind, EffectKind::Filter(Filter::Invert)));
 }
@@ -234,7 +237,7 @@ fn a_mask_takes_grayscale_conversion() {
     let mut s = session();
     let id = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "mask"}));
 
-    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "grayscale"})).unwrap();
+    set(&mut s, id, json!({"filter": "grayscale"}));
 
     let swapped = effect(&s, id);
     assert!(matches!(swapped.kind, EffectKind::Filter(Filter::GrayscaleConversion(_))), "{:?}", swapped.kind);
@@ -253,6 +256,6 @@ fn filters_carry_the_workflows_names_and_former_names_still_follow_a_swap() {
 
     // A project saved before the rename holds the former name: a swap still renames it, and the former name still finds the filter
     let old = add(&mut s, "effect.add.filter", json!({"filter": "Slope Blur", "target": "content", "name": "Slope Blur"}));
-    execute(&mut s, "effect.set", &json!({"effect": old.0, "filter": "blur"})).unwrap();
+    set(&mut s, old, json!({"filter": "blur"}));
     assert_eq!(effect(&s, old).name, "Blur");
 }

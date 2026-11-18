@@ -771,7 +771,7 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
             ] {
                 if p.get(key).is_some() {
                     let value = u64p(p, key).and_then(|value| u8::try_from(value).ok()).filter(|value| allowed.contains(value));
-                    *slot = value.ok_or_else(|| bad(cmd, format!("`{key}` must be {} or {}", allowed[0], allowed[1])))?;
+                    *slot = value.ok_or_else(|| bad(cmd, format!("`{key}` must be {}", one_of(&allowed))))?;
                 }
             }
         }

@@ -1,33 +1,19 @@
 //! Drags that hold the pointer (Move on model, number fields that scrub): hidden while held, its motion endless so no screen edge stops it, back where the press began when let go. egui sees a pointer that keeps going: the raw input is rewritten to that endless position, so every drag reads its usual positions and deltas
 
 mod hold;
+mod lock;
 #[cfg(test)]
 pub(crate) mod system_pointer;
 #[cfg(test)]
 mod tests;
 
-use egui::{Context, CursorIcon, Event, Id, Pos2, RawInput, ViewportCommand};
+use egui::{Context, CursorIcon, Event, Id, RawInput, ViewportCommand};
 
 pub(crate) use hold::Hold;
+use lock::Lock;
 
 /// Points from where the press began within which a pointer move is the put-back arriving (the system rounds it to whole pixels)
 const PUT_BACK_REACH: f32 = 1.0;
-
-/// A drag holding the pointer, kept in egui's memory between frames
-#[derive(Clone, Copy, Debug)]
-struct PointerLock {
-    hold: Hold,
-    /// Where the press began: the pointer is kept there and comes back there
-    anchor: Pos2,
-    /// Where the system's pointer is
-    seen: Pos2,
-    /// Where egui sees the pointer: the anchor plus every move since, as far as it goes
-    at: Pos2,
-    /// A put-back is on its way: the pointer move that brings it back is no motion
-    putting_back: bool,
-    /// The drag let go: the next frame shows egui the pointer back at the anchor and forgets the lock
-    let_go: bool,
-}
 
 fn lock_id() -> Id {
     Id::unique("tc_pointer_lock")
@@ -42,20 +28,20 @@ fn hold_override_id() -> Id {
 }
 
 /// A drag under way asks for the pointer this frame; it keeps it as long as it asks every frame
-pub(crate) fn hold(ctx: &Context) {
+pub(crate) fn ask_for_hold(ctx: &Context) {
     let pass = ctx.cumulative_pass_nr();
     ctx.data_mut(|data| data.insert_temp(asked_id(), pass));
 }
 
 /// The app's raw input hook: while a drag holds the pointer, its moves become moves of the endless pointer egui sees
 pub(crate) fn rewrite(ctx: &Context, raw: &mut RawInput) {
-    let Some(mut lock) = ctx.data(|data| data.get_temp::<PointerLock>(lock_id())) else {
+    let Some(mut lock) = ctx.data(|data| data.get_temp::<Lock>(lock_id())) else {
         return;
     };
 
     if lock.let_go {
         raw.events.insert(0, Event::PointerMoved(lock.anchor));
-        ctx.data_mut(|data| data.remove::<PointerLock>(lock_id()));
+        ctx.data_mut(|data| data.remove::<Lock>(lock_id()));
         return;
     }
 
@@ -91,7 +77,7 @@ pub(crate) fn rewrite(ctx: &Context, raw: &mut RawInput) {
 /// The end of the app's frame: a drag that asked this frame takes or keeps the pointer (hidden, put back), one that stopped asking lets it go
 pub(crate) fn settle(ctx: &Context) {
     let asked = ctx.data(|data| data.get_temp::<u64>(asked_id())) == Some(ctx.cumulative_pass_nr());
-    let held = ctx.data(|data| data.get_temp::<PointerLock>(lock_id())).filter(|lock| !lock.let_go);
+    let held = ctx.data(|data| data.get_temp::<Lock>(lock_id())).filter(|lock| !lock.let_go);
     let lock = match (asked, held) {
         (true, Some(lock)) => lock,
         (true, None) => {
@@ -104,7 +90,7 @@ pub(crate) fn settle(ctx: &Context) {
             if hold == Hold::Locked {
                 ctx.send_viewport_cmd(ViewportCommand::CursorGrab(egui::CursorGrab::Locked));
             }
-            PointerLock { hold, anchor: origin.unwrap_or(seen), seen, at: seen, putting_back: false, let_go: false }
+            Lock { hold, anchor: origin.unwrap_or(seen), seen, at: seen, putting_back: false, let_go: false }
         }
         (false, Some(mut lock)) => {
             // Put back before the grab ends: Wayland moves only a locked pointer

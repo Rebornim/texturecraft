@@ -104,6 +104,7 @@ pub mod profile;
 #[cfg(not(target_arch = "wasm32"))]
 mod project_config;
 pub mod project_form;
+mod projection_gizmo;
 mod projection_kind;
 mod projection_preview;
 mod projector_outline;

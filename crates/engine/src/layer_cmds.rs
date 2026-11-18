@@ -15,8 +15,8 @@ use crate::layer_selection::{batch_param, ids_json};
 use crate::{EngineError, Result, Session, cmd, session::StackTarget};
 
 /// The smallest scale or tiling, and the largest scale, tiling or offset a fill's placement takes
-const MIN_SCALE: f32 = 0.001;
-const MAX_PLACEMENT: f32 = 1000.0;
+pub const MIN_SCALE: f32 = 0.001;
+pub const MAX_PLACEMENT: f32 = 1000.0;
 
 /// One full turn, in degrees
 const FULL_TURN_DEGREES: f32 = 360.0;

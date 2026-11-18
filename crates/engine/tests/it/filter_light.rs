@@ -2,14 +2,15 @@
 
 use serde_json::json;
 use texturecraft_engine::core::{Channel, DirectionalLight, EffectKind, Filter, LayerId, LightingOutput};
-use texturecraft_engine::filter_lib::{LIBRARY_DROP_SHADOW, LIBRARY_ENVIRONMENT_LIGHTING, LIBRARY_GLOW};
+use texturecraft_engine::filter_lib::{LIBRARY_DROP_SHADOW, LIBRARY_ENVIRONMENT_LIGHTING, LIBRARY_GLOW, library_baked_lighting};
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute};
 
-use crate::filter_support::{filter_of, refused};
+use crate::filter_support::{SIZE, add_filter, filter_of, refused, set};
 
+/// A plane, so every texel faces the same way
 fn session() -> Session {
-    Session::new_project("t", primitives::plane(2.0, 2), "builtin:plane", None, 128).unwrap()
+    Session::new_project("t", primitives::plane(2.0, 2), "builtin:plane", None, SIZE).unwrap()
 }
 
 /// A fill layer with library filter `id` in its mask: the effect
@@ -39,12 +40,15 @@ fn a_glow_saved_before_stays_additive_and_a_new_glow_is_the_halo() {
 fn glow_settings_set_clamp_and_refuse() {
     let mut s = session();
     let effect = masked(&mut s, "glow");
-    let set = json!({"effect": effect.0, "usedOnMask": true, "mode": "precise", "width": -3.0, "spread": 0.4, "opacity": 0.6, "color": [0.2, 0.4, 0.6]});
-    execute(&mut s, "effect.set", &set).unwrap();
-    assert_eq!(filter_of(&s, effect), Filter::HaloGlow { on_mask: true, precise: true, width: -1.0, spread: 0.4, opacity: 0.6, color: [0.2, 0.4, 0.6] });
+
+    set(&mut s, effect, json!({"usedOnMask": true, "mode": "precise", "width": -3.0, "spread": 0.4, "opacity": 0.6, "color": [0.2, 0.4, 0.6]}));
+    let glow = Filter::HaloGlow { on_mask: true, precise: true, width: -1.0, spread: 0.4, opacity: 0.6, color: [0.2, 0.4, 0.6] };
+    assert_eq!(filter_of(&s, effect), glow);
 
     refused(&mut s, effect, &[json!({"mode": "hard"}), json!({"usedOnMask": 1}), json!({"color": "red"})]);
-    assert_eq!(filter_of(&s, effect), Filter::HaloGlow { on_mask: true, precise: true, width: -1.0, spread: 0.4, opacity: 0.6, color: [0.2, 0.4, 0.6] });
+
+    assert_eq!(filter_of(&s, effect), glow);
+
     assert_eq!(execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap()["changed"], json!(true));
     assert_eq!(filter_of(&s, effect), LIBRARY_GLOW);
 }
@@ -56,10 +60,10 @@ fn drop_shadow_defaults_and_settings() {
     let effect = masked(&mut s, "Drop Shadow");
     assert_eq!(filter_of(&s, effect), LIBRARY_DROP_SHADOW, "the workflow's defaults");
 
-    let set = json!({"effect": effect.0, "angle": 450.0, "distance": -0.9, "size": 2.0, "spread": 0.3, "opacity": 0.25, "color": "#ffffff"});
-    execute(&mut s, "effect.set", &set).unwrap();
+    set(&mut s, effect, json!({"angle": 450.0, "distance": -0.9, "size": 2.0, "spread": 0.3, "opacity": 0.25, "color": "#ffffff"}));
     assert_eq!(filter_of(&s, effect), Filter::DropShadow { angle: 90.0, distance: -0.5, size: 1.0, spread: 0.3, opacity: 0.25, color: [1.0; 3] });
-    assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "color": [1.0]})).is_err());
+
+    refused(&mut s, effect, &[json!({"color": [1.0]})]);
 
     let listed = execute(&mut s, "filter.list", &json!({})).unwrap();
     assert!(listed.as_array().unwrap().iter().any(|f| f["id"] == "dropShadow" && f["mask"] == true));
@@ -68,7 +72,7 @@ fn drop_shadow_defaults_and_settings() {
 /// A content fill layer with library filter `id` on its content: the effect
 fn on_content(s: &mut Session, id: &str) -> LayerId {
     execute(s, "layer.add.fill", &json!({})).unwrap();
-    LayerId(execute(s, "effect.add.filter", &json!({"target": "content", "filter": id})).unwrap()["effect"].as_u64().unwrap())
+    add_filter(s, json!({"filter": id}))
 }
 
 /// Projects saved before keep their Baked Lighting, read and saved as they were and named Baked Lighting Stylized; a new one takes the workflow's defaults
@@ -84,8 +88,7 @@ fn a_baked_lighting_saved_before_stays_and_a_new_one_is_stylized() {
     let mut s = session();
     let effect = on_content(&mut s, "Baked Lighting");
     let made = filter_of(&s, effect);
-    let Filter::BakedLighting { azimuth, elevation, light, ambient, occlusion, .. } = made.clone() else { panic!("{made:?}") };
-    assert_eq!((azimuth, elevation, light, ambient, occlusion), (0.0, 45.0, 1.0, 1.0, 0.0), "the workflow's sun and sky");
+    assert_eq!(made, library_baked_lighting(), "the workflow's sun, sky and lights");
 
     let (stylized, _) = made.stylized_lighting().unwrap();
     assert_eq!(
@@ -105,15 +108,20 @@ fn stylized_lighting_settings_set_clamp_and_refuse() {
     let effect = on_content(&mut s, "bakedLighting");
     let old = Filter::BakedLighting { azimuth: 45.0, elevation: 45.0, light: 0.8, ambient: 0.4, occlusion: 1.0, stylized: None };
     s.doc.project.effect_mut(effect).unwrap().kind = EffectKind::Filter(old);
-    let set = json!({
-        "effect": effect.0, "skyColor": [0.1, 0.2, 0.3], "light1": {"azimuth": 450.0, "elevation": -30.0, "intensity": 5.0, "color": "#ff0000"},
-        "diffuseCavity": 0.5, "cavitySmoothness": 9.0, "dielectricReflectance": 1.0, "heightToNormal": 2.0,
-        "input": "specularGlossiness", "output": "specular", "normalDetails": "meshHeightNormal"
-    });
-    execute(&mut s, "effect.set", &set).unwrap();
+
+    set(
+        &mut s,
+        effect,
+        json!({
+            "skyColor": [0.1, 0.2, 0.3], "light1": {"azimuth": 450.0, "elevation": -30.0, "intensity": 5.0, "color": "#ff0000"},
+            "diffuseCavity": 0.5, "cavitySmoothness": 9.0, "dielectricReflectance": 1.0, "heightToNormal": 2.0,
+            "input": "specularGlossiness", "output": "specular", "normalDetails": "meshHeightNormal"
+        }),
+    );
     let filter = filter_of(&s, effect);
     let (stylized, light) = filter.stylized_lighting().unwrap();
     assert_eq!((light.sun.intensity, light.sky_intensity, stylized.sun_color), (0.8, 0.4, [1.0; 3]), "the rest as it lit");
+
     assert_eq!(stylized.sky_color, [0.1, 0.2, 0.3]);
     assert_eq!(stylized.lights[0], DirectionalLight { azimuth: 90.0, elevation: 330.0, intensity: 2.0, color: [1.0, 0.0, 0.0] });
     assert_eq!((stylized.diffuse_cavity, stylized.cavity_smoothness, stylized.dielectric_reflectance, stylized.height_to_normal), (0.5, 4.0, 0.16, 2.0));
@@ -125,6 +133,7 @@ fn stylized_lighting_settings_set_clamp_and_refuse() {
         &[json!({"output": "both"}), json!({"input": 1}), json!({"normalDetails": "height"}), json!({"light2": 3}), json!({"groundColor": "dirt"})],
     );
     assert_eq!(filter_of(&s, effect), filter, "refusals change nothing");
+
     assert_eq!(execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap()["changed"], json!(true));
     assert_eq!(filter_of(&s, effect).stylized_lighting().unwrap().0.output, LightingOutput::DiffuseSpecular);
 }
@@ -147,8 +156,11 @@ fn environment_lighting_defaults_and_settings() {
     let blur = on_content(&mut s, "blur");
     assert!(s.doc.project.effect(blur).unwrap().1.off_channels.is_empty(), "other filters work on every channel");
 
-    let set = json!({"effect": effect.0, "horizontalRotation": 370.0, "verticalRotation": -90.0, "exposure": 9.0, "heightIntensity": -1.0, "ambientOcclusion": 0.5, "specularOcclusion": 2.0});
-    execute(&mut s, "effect.set", &set).unwrap();
+    set(
+        &mut s,
+        effect,
+        json!({"horizontalRotation": 370.0, "verticalRotation": -90.0, "exposure": 9.0, "heightIntensity": -1.0, "ambientOcclusion": 0.5, "specularOcclusion": 2.0}),
+    );
     assert_eq!(
         filter_of(&s, effect),
         Filter::EnvironmentLighting {
@@ -160,6 +172,7 @@ fn environment_lighting_defaults_and_settings() {
             specular_occlusion: 1.0
         }
     );
+
     assert_eq!(execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap()["changed"], json!(true));
     assert_eq!(filter_of(&s, effect), made);
 
@@ -174,11 +187,11 @@ fn environment_lighting_follows_the_viewport_environment() {
     execute(&mut s, "layer.add.fill", &json!({"color": [0.5, 0.5, 0.5]})).unwrap();
     let center = |s: &mut Session| {
         s.update();
-        s.caches[0].composite.value(Channel::BaseColor, 64, 64)
+        s.caches[0].composite.value(Channel::BaseColor, SIZE / 2, SIZE / 2)
     };
     let unlit = center(&mut s);
-    let effect =
-        LayerId(execute(&mut s, "effect.add.filter", &json!({"target": "content", "filter": "bakedLightingEnvironment"})).unwrap()["effect"].as_u64().unwrap());
+
+    let effect = add_filter(&mut s, json!({"filter": "bakedLightingEnvironment"}));
     let studio = center(&mut s);
     assert_ne!(studio, unlit, "the studio lights the base color");
 
@@ -186,6 +199,6 @@ fn environment_lighting_follows_the_viewport_environment() {
     let night = center(&mut s);
     assert!(night[0] < studio[0] * 0.5, "the night lights it less: {night:?} vs {studio:?}");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "exposure": 3.0})).unwrap();
+    set(&mut s, effect, json!({"exposure": 3.0}));
     assert!(center(&mut s)[0] > night[0], "exposure brightens it");
 }

@@ -6,15 +6,22 @@ use texturecraft_engine::geom::glam::Vec2;
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute};
 
+/// The texture set side the filter tests paint on
 pub(crate) const SIZE: u32 = 128;
 
 /// The viewport's side in pixels when a test reads the texel under its center
 const VIEWPORT_SIDE: f32 = 400.0;
 
+/// A sphere on a `SIZE` texture set, rendered once
 pub(crate) fn session() -> Session {
-    let mut s = Session::new_project("t", primitives::sphere(1.0, 48, 24), "builtin:sphere", None, SIZE).unwrap();
+    let mut s = sized_session(SIZE);
     s.update();
     s
+}
+
+/// A sphere on a texture set of side `size`, not yet rendered
+pub(crate) fn sized_session(size: u32) -> Session {
+    Session::new_project("t", primitives::sphere(1.0, 48, 24), "builtin:sphere", None, size).unwrap()
 }
 
 /// A session whose camera looks straight at the sphere, so the viewport center reads one texel (see [`center`])
@@ -58,6 +65,7 @@ pub(crate) fn filtered(s: &mut Session, color: [f32; 3], params: Value) -> Layer
     add_filter(s, params)
 }
 
+/// The filter `effect` holds
 pub(crate) fn filter_of(s: &Session, effect: LayerId) -> Filter {
     match &s.doc.project.effect(effect).unwrap().1.kind {
         EffectKind::Filter(filter) => filter.clone(),
@@ -65,6 +73,7 @@ pub(crate) fn filter_of(s: &Session, effect: LayerId) -> Filter {
     }
 }
 
+/// `effect.set` on `effect` with `params`, which must succeed
 pub(crate) fn set(s: &mut Session, effect: LayerId, params: Value) {
     let mut params = params;
     params["effect"] = json!(effect.0);

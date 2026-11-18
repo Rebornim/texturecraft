@@ -20,13 +20,14 @@ fn threshold_modes_compare_their_way() {
     let texel = (SIZE / 4, SIZE / 2);
     assert_eq!(roughness(&mut s, texel), 1.0);
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "level": 0.25})).unwrap();
+    set(&mut s, effect, json!({"level": 0.25}));
     assert_eq!(roughness(&mut s, texel), 0.0, "a value at the level is not greater");
 
     for (mode, white) in [("greaterOrEqual", 1.0), ("lower", 0.0), ("lowerOrEqual", 1.0)] {
-        execute(&mut s, "effect.set", &json!({"effect": effect.0, "mode": mode})).unwrap();
+        set(&mut s, effect, json!({"mode": mode}));
         assert_eq!(roughness(&mut s, texel), white, "{mode}");
     }
+
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "mode": "sideways"})).is_err());
     assert_eq!(filter_of(&s, effect), Filter::Threshold { level: 0.25, mode: ThresholdMode::LowerOrEqual }, "a refused mode changes nothing");
 
@@ -51,20 +52,21 @@ fn mirror_copies_one_side_over_the_other() {
     assert!((roughness(&mut s, left) - left_before).abs() < 2e-3, "the left side stays");
     assert!((roughness(&mut s, right) - left_before).abs() < 2e-3, "the right side reads the left");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "invertAxisX": true})).unwrap();
+    set(&mut s, effect, json!({"invertAxisX": true}));
     assert!((roughness(&mut s, left) - right_before).abs() < 2e-3, "inverted, the left side reads the right");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "mode": "corner", "cornerType": "topRight"})).unwrap();
+    set(&mut s, effect, json!({"mode": "corner", "cornerType": "topRight"}));
     assert!((roughness(&mut s, (20, 20)) - roughness(&mut s, (SIZE - 1 - 20, 20))).abs() < 2e-3, "a corner mirrors across too");
 
     let Filter::Mirror(mirror) = filter_of(&s, effect) else { panic!() };
     assert_eq!((mirror.mode, mirror.corner), (MirrorMode::Corner, MirrorCorner::TopRight));
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "mode": "axisX", "displayDebug": true})).unwrap();
+    set(&mut s, effect, json!({"mode": "axisX", "displayDebug": true}));
     assert_eq!(roughness(&mut s, (SIZE / 2, row)), 1.0, "Display Debug draws the axis white");
 
     refused(&mut s, effect, &[json!({"mode": "diagonal"}), json!({"cornerType": "middle"}), json!({"invertAxisY": "yes"})]);
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "axisYOffset": 3.0})).unwrap();
+
+    set(&mut s, effect, json!({"axisYOffset": 3.0}));
     let Filter::Mirror(mirror) = filter_of(&s, effect) else { panic!() };
     assert_eq!(mirror.offset, [0.5, 1.0], "offsets clamp to the tile");
 }
@@ -79,27 +81,28 @@ fn mask_outline_draws_a_band_along_the_threshold_edge() {
     assert_eq!(filter_of(&s, effect), Filter::MaskOutline(MaskOutline::LIBRARY), "the library defaults");
     assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Mask Outline");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "threshold": 0.5, "width": 0.03})).unwrap();
+    set(&mut s, effect, json!({"threshold": 0.5, "width": 0.03}));
     assert_eq!(roughness(&mut s, at(2)), 1.0, "outside, next to the edge");
     assert_eq!(roughness(&mut s, at(8)), 0.0, "past the band");
     assert_eq!(roughness(&mut s, at(-2)), 0.0, "inside the shapes");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "maskPosition": "inside"})).unwrap();
+    set(&mut s, effect, json!({"maskPosition": "inside"}));
     assert_eq!((roughness(&mut s, at(-2)), roughness(&mut s, at(2))), (1.0, 0.0), "inside");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "maskPosition": "both"})).unwrap();
+    set(&mut s, effect, json!({"maskPosition": "both"}));
     assert_eq!((roughness(&mut s, at(-2)), roughness(&mut s, at(2))), (1.0, 1.0), "both sides");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "startFromBlack": false})).unwrap();
+    set(&mut s, effect, json!({"startFromBlack": false}));
     let far = at(8);
     assert!((roughness(&mut s, far) - values[far.0 as usize]).abs() < 2e-3, "over the values");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "startFromBlack": true, "maskPosition": "outside", "blur": 1.0})).unwrap();
+    set(&mut s, effect, json!({"startFromBlack": true, "maskPosition": "outside", "blur": 1.0}));
     let (near, further) = (roughness(&mut s, at(1)), roughness(&mut s, at(2)));
     assert!(near > further && further > 0.0 && near < 1.0, "a blurred band fades out: {near} {further}");
 
     refused(&mut s, effect, &[json!({"maskPosition": "around"}), json!({"startFromBlack": 1})]);
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "width": 4.0, "curveShape": -3.0})).unwrap();
+
+    set(&mut s, effect, json!({"width": 4.0, "curveShape": -3.0}));
     let Filter::MaskOutline(outline) = filter_of(&s, effect) else { panic!() };
     assert_eq!((outline.position, outline.width, outline.curve), (OutlinePosition::Outside, 1.0, -1.0), "values clamp");
 
@@ -155,6 +158,7 @@ fn bevel_slopes_inwards_or_outwards() {
 
     set(&mut s, effect, json!({"cornerType": "angular", "wrap": true}));
     refused(&mut s, effect, &[json!({"cornerType": "square"}), json!({"blurMode": "even"}), json!({"wrap": 1})]);
+
     set(&mut s, effect, json!({"distance": -3.0, "smoothing": 9.0}));
     let expected = Bevel { wrap: true, distance: -1.0, corner: BevelCorner::Angular, smoothing: 5.0, blur: BevelBlur::Uniform };
     assert_eq!(filter_of(&s, effect), Filter::DistanceBevel(expected), "values clamp");
@@ -193,6 +197,7 @@ fn bevel_smooth_ramps_from_the_edge() {
     assert!(roughness(&mut s, at(0)) > edge_in, "the offset raises the ramp");
 
     refused(&mut s, effect, &[json!({"direction": "up"}), json!({"wrap": "yes"})]);
+
     set(&mut s, effect, json!({"distance": 2.0, "smoothing": 20.0, "maskThreshold": -1.0, "distanceMapMultiplier": 4.0, "curveShape": 5.0}));
     let Filter::BevelSmooth(smooth) = filter_of(&s, effect) else { panic!() };
     assert_eq!(
@@ -229,6 +234,9 @@ fn directional_distance_trails_one_way() {
     assert_eq!(filter_of(&s, effect), Filter::DirectionalDistance(expected), "values clamp, the angle wraps");
 }
 
+/// Texels either side of a texel that must all rise (or fall) for the warp and slope tests to read it as on a slope
+const SLOPE_WINDOW: usize = 8;
+
 /// Warp: library defaults, the former Directional Warp id, Previous Input moving texels by their values, blended directions, old saves
 #[test]
 fn warp_modes_move_texels_their_way() {
@@ -249,12 +257,12 @@ fn warp_modes_move_texels_their_way() {
     assert!(moved(&after(&mut s)) < 2e-3, "no intensity, no move");
 
     // Along the gradient where it rises: a texel above mid gray reads further up it, so it gets lighter
-    let rising = |x: usize| (x - 8..x + 8).all(|k| before[k + 1] > before[k]);
-    let falling = |x: usize| (x - 8..x + 8).all(|k| before[k + 1] < before[k]);
+    let rising = |x: usize| (x - SLOPE_WINDOW..x + SLOPE_WINDOW).all(|k| before[k + 1] > before[k]);
+    let falling = |x: usize| (x - SLOPE_WINDOW..x + SLOPE_WINDOW).all(|k| before[k + 1] < before[k]);
     let light = |x: &usize| (0.6..0.85).contains(&before[*x]);
-    let (texel, angle) = match (8..SIZE as usize - 8).find(|x| light(x) && rising(*x)) {
+    let (texel, angle) = match (SLOPE_WINDOW..SIZE as usize - SLOPE_WINDOW).find(|x| light(x) && rising(*x)) {
         Some(x) => (x, 0.0),
-        None => ((8..SIZE as usize - 8).find(|x| light(x) && falling(*x)).unwrap(), 180.0),
+        None => ((SLOPE_WINDOW..SIZE as usize - SLOPE_WINDOW).find(|x| light(x) && falling(*x)).unwrap(), 180.0),
     };
     set(&mut s, effect, json!({"intensity": 0.05, "warpMode": "directional", "angle": angle, "sourceMode": "previousInput"}));
     let directional = after(&mut s);
@@ -276,6 +284,7 @@ fn warp_modes_move_texels_their_way() {
     assert!(after(&mut s).iter().all(|v| v.is_finite()));
 
     refused(&mut s, effect, &[json!({"warpMode": "spiral"}), json!({"directions": 3}), json!({"blendingMode": "sum"}), json!({"sourceMode": "image"})]);
+
     set(&mut s, effect, json!({"intensity": 5.0, "angle": -90.0, "sourceTiling": 99.0, "sourceBlur": -1.0, "seed": 7}));
     let Filter::SourceWarp(warp) = filter_of(&s, effect) else { panic!() };
     assert_eq!((warp.intensity, warp.angle, warp.source.tiling, warp.source.blur, warp.seed), (1.0, 270.0, 16.0, 0.0, 7), "values clamp, the angle wraps");
@@ -326,7 +335,7 @@ fn slope_blur_reads_downhill_of_its_source() {
     // Read downhill of the gradient itself: every texel where it rises reads darker values
     set(&mut s, effect, json!({"blendingMode": "blur", "sourceMode": "previousInput"}));
     let downhill = after(&mut s);
-    let rising = (8..SIZE as usize - 8).find(|x| (x - 8..x + 8).all(|k| before[k + 1] > before[k] + 1e-4)).unwrap();
+    let rising = (SLOPE_WINDOW..SIZE as usize - SLOPE_WINDOW).find(|x| (x - SLOPE_WINDOW..x + SLOPE_WINDOW).all(|k| before[k + 1] > before[k] + 1e-4)).unwrap();
     assert!(downhill[rising] < before[rising] - 0.005, "{} -> {}", before[rising], downhill[rising]);
 
     set(&mut s, effect, json!({"quality": 0.0}));
@@ -337,6 +346,7 @@ fn slope_blur_reads_downhill_of_its_source() {
     assert!(moved(&after(&mut s)) < 2e-3, "an unlinked custom noise is flat: nothing smears");
 
     refused(&mut s, effect, &[json!({"blendingMode": "average"}), json!({"sourceMode": "image"}), json!({"divider": 7})]);
+
     set(&mut s, effect, json!({"intensity": 5.0, "quality": -1.0, "sourceTiling": 99.0, "sourceBlur": 2.0, "sourceBalance": 0.25, "seed": 7}));
     let Filter::SourceSlopeBlur(slope) = filter_of(&s, effect) else { panic!() };
     let source = WarpSource { mode: WarpSourceMode::CustomNoise, blur: 1.0, balance: 0.25, contrast: 0.0, tiling: 16.0 };

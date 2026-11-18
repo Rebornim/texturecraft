@@ -6,6 +6,7 @@ use texturecraft_core::{DirectionalLight, LightingOutput, StylizedLighting};
 use crate::Result;
 use crate::commands::{bad, f32p};
 use crate::filter_lib::{choice, set_color, two_way};
+use crate::layer_cmds::FULL_TURN_DEGREES;
 
 /// The keys that give a Baked Lighting saved before them its stylized settings
 pub(crate) const KEYS: [&str; 17] = [
@@ -86,10 +87,10 @@ fn set_light(p: &Value, light: &mut DirectionalLight, key: &str, cmd: &str) -> R
     }
 
     if let Some(degrees) = f32p(p, "azimuth") {
-        light.azimuth = degrees.rem_euclid(360.0);
+        light.azimuth = degrees.rem_euclid(FULL_TURN_DEGREES);
     }
     if let Some(degrees) = f32p(p, "elevation") {
-        light.elevation = degrees.rem_euclid(360.0);
+        light.elevation = degrees.rem_euclid(FULL_TURN_DEGREES);
     }
     if let Some(intensity) = f32p(p, "intensity") {
         light.intensity = intensity.clamp(0.0, MAX_LIGHT_INTENSITY);

@@ -101,6 +101,19 @@ fn swapping_to_a_gradient_given_colors_ramps_evenly_through_them() {
     assert!((halfway[0] - 0.5).abs() < 1e-3, "black to white is mid gray halfway: {halfway:?}");
 }
 
+/// A swap to a gradient given five colors and their places ramps through all five, not the library's three
+#[test]
+fn swapping_to_a_gradient_given_colors_and_places_uses_every_color() {
+    let mut s = session();
+    let id = add(&mut s, "effect.add.filter", json!({"filter": "invert", "target": "content"}));
+    let colors = [[0.0; 3], [0.25; 3], [0.5; 3], [0.75; 3], [1.0; 3]];
+
+    execute(&mut s, "effect.set", &json!({"effect": id.0, "filter": "gradientMap", "colors": colors, "positions": [0.0, 0.1, 0.2, 0.3, 1.0]})).unwrap();
+
+    let EffectKind::Filter(gradient) = effect(&s, id).kind else { panic!("still a filter") };
+    assert_eq!(gradient.ramp_colors(), colors);
+}
+
 #[test]
 fn one_undo_restores_the_old_filter() {
     let mut s = session();

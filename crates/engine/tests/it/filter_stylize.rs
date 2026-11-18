@@ -2,19 +2,12 @@
 
 use serde_json::json;
 use texturecraft_engine::core::{
-    AnisotropicKuwahara, Channel, ColorMatch, EffectKind, Filter, HeightToNormal, LayerId, PbrValidate, SourceColorMode, TargetColorMode, ValidationMode,
+    AnisotropicKuwahara, Channel, ColorMatch, Filter, HeightToNormal, PbrValidate, SourceColorMode, TargetColorMode, ValidationMode,
 };
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute};
 
-use crate::filter_shape::{SIZE, add_filter, session};
-
-fn filter_of(s: &Session, effect: LayerId) -> Filter {
-    match &s.doc.project.effect(effect).unwrap().1.kind {
-        EffectKind::Filter(filter) => filter.clone(),
-        other => panic!("not a filter: {other:?}"),
-    }
-}
+use crate::filter_support::{SIZE, add_filter, filter_of, refused, session};
 
 /// The composited base color at texel `(x, y)`
 fn base_color(s: &mut Session, (x, y): (u32, u32)) -> [f32; 3] {
@@ -22,21 +15,22 @@ fn base_color(s: &mut Session, (x, y): (u32, u32)) -> [f32; 3] {
     s.caches[0].composite.value(Channel::BaseColor, x, y)
 }
 
-/// Texels across the Kuwahara test's texture set: its radius is in texels at 2K, so it needs a few texels to show
-const KUWAHARA_SIZE: u32 = 512;
+/// Texels across a set fine enough for filters measured in texels at 2K (Kuwahara's radius, a height's slope)
+const FINE_SET_SIZE: u32 = 512;
 
 /// A new Anisotropic Kuwahara starts where the reference does, takes every setting (one undo step) and smooths a noisy fill
 #[test]
 fn anisotropic_kuwahara_takes_its_settings_and_smooths() {
-    let mut s = Session::new_project("t", primitives::sphere(1.0, 48, 24), "builtin:sphere", None, KUWAHARA_SIZE).unwrap();
+    let mut s = Session::new_project("t", primitives::sphere(1.0, 48, 24), "builtin:sphere", None, FINE_SET_SIZE).unwrap();
     let fill = execute(&mut s, "layer.add.fill", &json!({"color": [0.5, 0.5, 0.5]})).unwrap()["layer"].as_u64().unwrap();
     let pattern = json!({"layer": fill, "channel": "baseColor", "procedural": "Clouds", "scale": 64, "low": [0, 0, 0], "high": [1, 1, 1]});
     execute(&mut s, "layer.fill.set", &pattern).unwrap();
-    let texels: Vec<(u32, u32)> = (0..32).map(|k| (KUWAHARA_SIZE / 4 + k, KUWAHARA_SIZE / 2)).collect();
+    let texels: Vec<(u32, u32)> = (0..32).map(|k| (FINE_SET_SIZE / 4 + k, FINE_SET_SIZE / 2)).collect();
     let before: Vec<f32> = texels.iter().map(|t| base_color(&mut s, *t)[0]).collect();
 
     let effect = add_filter(&mut s, json!({"filter": "Anisotropic Kuwahara"}));
     assert_eq!(filter_of(&s, effect), Filter::AnisotropicKuwahara(AnisotropicKuwahara::LIBRARY));
+
     execute(&mut s, "effect.set", &json!({"effect": effect.0, "radius": AnisotropicKuwahara::MAX_RADIUS})).unwrap();
     let after: Vec<f32> = texels.iter().map(|t| base_color(&mut s, *t)[0]).collect();
     let steps = |v: &[f32]| v.windows(2).map(|w| (w[1] - w[0]).abs()).sum::<f32>();
@@ -56,11 +50,14 @@ fn anisotropic_kuwahara_takes_its_settings_and_smooths() {
     };
     assert_eq!(filter_of(&s, effect), Filter::AnisotropicKuwahara(expected), "clamped, the angle wrapped");
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "extractDirection": "luma"})).is_err());
+
     let read = base_color(&mut s, texels[0]);
     assert!(read.iter().all(|v| v.is_finite()), "a flat Custom Input reads no direction: {read:?}");
+
     execute(&mut s, "edit.undo", &json!({})).unwrap();
     let Filter::AnisotropicKuwahara(undone) = filter_of(&s, effect) else { panic!("still Kuwahara") };
     assert_eq!(undone, AnisotropicKuwahara { radius: AnisotropicKuwahara::MAX_RADIUS, ..AnisotropicKuwahara::LIBRARY }, "one undo step");
+
     let inspect = execute(&mut s, "project.inspect", &json!({})).unwrap().to_string();
     assert!(inspect.contains("Anisotropic Kuwahara"));
 }
@@ -76,6 +73,7 @@ fn pbr_validate_marks_implausible_base_colors() {
     execute(&mut s, "layer.add.fill", &json!({"color": [dark, dark, dark], "metallic": 0.0})).unwrap();
     let effect = add_filter(&mut s, json!({"filter": "pbrValidate"}));
     assert_eq!(filter_of(&s, effect), Filter::PbrValidate(PbrValidate::LIBRARY));
+
     let off = &s.doc.project.effect(effect).unwrap().1.off_channels;
     assert!(!off.contains(&Channel::BaseColor) && off.contains(&Channel::Metallic) && off.contains(&Channel::Roughness), "{off:?}");
     assert_eq!(base_color(&mut s, texel), PbrValidate::INVALID, "too dark");
@@ -106,29 +104,34 @@ fn tilt(s: &mut Session, texels: &[(u32, u32)]) -> f32 {
 /// Height To Normal starts with the Normal pill only, turns the layer's height into its normal, overwrites or overlays it, one undo step
 #[test]
 fn height_to_normal_turns_the_height_into_the_normal() {
-    let mut s = Session::new_project("t", primitives::sphere(1.0, 48, 24), "builtin:sphere", None, KUWAHARA_SIZE).unwrap();
+    let mut s = Session::new_project("t", primitives::sphere(1.0, 48, 24), "builtin:sphere", None, FINE_SET_SIZE).unwrap();
     let fill = execute(&mut s, "layer.add.fill", &json!({"color": [0.5, 0.5, 0.5]})).unwrap()["layer"].as_u64().unwrap();
     let bumps = json!({"layer": fill, "channel": "height", "procedural": "Clouds", "scale": 16, "low": [-0.05, -0.05, -0.05], "high": [0.05, 0.05, 0.05]});
     execute(&mut s, "layer.fill.set", &bumps).unwrap();
-    let texels: Vec<(u32, u32)> = (0..32).map(|k| (KUWAHARA_SIZE / 4 + k, KUWAHARA_SIZE / 2)).collect();
+    let texels: Vec<(u32, u32)> = (0..32).map(|k| (FINE_SET_SIZE / 4 + k, FINE_SET_SIZE / 2)).collect();
     assert!(tilt(&mut s, &texels) < 1e-3, "a fill's own normal is flat");
+
     let color = base_color(&mut s, texels[0]);
 
     let effect = add_filter(&mut s, json!({"filter": "heightToNormal"}));
     assert_eq!(filter_of(&s, effect), Filter::HeightToNormal(HeightToNormal::LIBRARY));
+
     let off = &s.doc.project.effect(effect).unwrap().1.off_channels;
     assert!(!off.contains(&Channel::Normal) && off.contains(&Channel::BaseColor) && off.contains(&Channel::Height), "{off:?}");
+
     let made = tilt(&mut s, &texels);
     assert!(made > 0.01, "the bumps tilt the normal: {made}");
     assert_eq!(base_color(&mut s, texels[0]), color, "the base color is left as it is");
 
     execute(&mut s, "effect.set", &json!({"effect": effect.0, "heightDepth": 64.0})).unwrap();
     assert!(tilt(&mut s, &texels) > made * 1.5, "deeper heights tilt more");
+
     execute(&mut s, "effect.set", &json!({"effect": effect.0, "useWorldUnits": false, "normalIntensity": 0.0})).unwrap();
     assert!(tilt(&mut s, &texels) < 1e-3, "no intensity: flat");
 
     execute(&mut s, "layer.fill.set", &json!({"layer": fill, "channel": "normal", "value": [0.7, 0.5, 0.95]})).unwrap();
     assert!(tilt(&mut s, &texels) < 1e-3, "Overwrite Existing Normal replaces the fill's normal");
+
     execute(&mut s, "effect.set", &json!({"effect": effect.0, "overwriteExistingNormal": false})).unwrap();
     assert!((normal(&mut s, texels[0])[0] - 0.7).abs() < 0.02, "laid over the fill's normal: {:?}", normal(&mut s, texels[0]));
 
@@ -143,10 +146,12 @@ fn height_to_normal_turns_the_height_into_the_normal() {
     };
     assert_eq!(filter_of(&s, effect), Filter::HeightToNormal(expected), "clamped");
     assert!(normal(&mut s, texels[0]).iter().all(|v| v.is_finite()));
+
     execute(&mut s, "edit.undo", &json!({})).unwrap();
     let Filter::HeightToNormal(undone) = filter_of(&s, effect) else { panic!("still Height To Normal") };
     assert!(!undone.overwrite && undone.surface_size == 300.0, "one undo step: {undone:?}");
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "useWorldUnits": "yes"})).is_err());
+
     let inspect = execute(&mut s, "project.inspect", &json!({})).unwrap().to_string();
     assert!(inspect.contains("Height To Normal"));
 }
@@ -166,10 +171,13 @@ fn color_match_moves_the_colors_to_the_target() {
 
     let effect = add_filter(&mut s, json!({"filter": "Color Match"}));
     assert_eq!(filter_of(&s, effect), Filter::ColorMatch(ColorMatch::LIBRARY));
+
     let off = &s.doc.project.effect(effect).unwrap().1.off_channels;
     assert!(!off.contains(&Channel::BaseColor) && off.contains(&Channel::Roughness), "{off:?}");
+
     let new: Vec<[f32; 3]> = texels.iter().map(|t| base_color(&mut s, *t)).collect();
     assert!(spread(&new) > 0.02, "a new Color Match keeps the pattern: {new:?}");
+
     let redness = new.iter().map(|c| c[0] - c[2]).sum::<f32>() / new.len() as f32;
     assert!(redness.abs() < 0.05, "around the gray target: {redness} {new:?}");
 
@@ -185,8 +193,10 @@ fn color_match_moves_the_colors_to_the_target() {
     execute(&mut s, "effect.set", &json!({"effect": effect.0, "customColorVariation": false})).unwrap();
     let kept: Vec<[f32; 3]> = texels.iter().map(|t| base_color(&mut s, *t)).collect();
     assert!(spread(&kept) > 0.02, "variation kept: {kept:?}");
+
     let redness = kept.iter().map(|c| c[0] - c[2]).sum::<f32>() / kept.len() as f32;
     assert!(redness.abs() < 0.05, "the reds are gray on average now: {redness} {kept:?}");
+
     let brighter = |colors: &[[f32; 3]], a: usize, b: usize| colors[a][0] + colors[a][1] > colors[b][0] + colors[b][1];
     let (lightest, darkest) =
         (0..texels.len()).fold((0, 0), |(hi, lo), k| (if before[k][0] > before[hi][0] { k } else { hi }, if before[k][0] < before[lo][0] { k } else { lo }));
@@ -214,6 +224,7 @@ fn color_match_moves_the_colors_to_the_target() {
         luma: 0.0,
     };
     assert_eq!(filter_of(&s, effect), Filter::ColorMatch(expected), "clamped");
+
     execute(&mut s, "effect.set", &json!({"effect": effect.0, "chroma": 0.0, "hue": 0.0})).unwrap();
     let image = base_color(&mut s, texels[0]);
     assert!(image.iter().all(|v| (v - 0.5).abs() < 2e-3), "the Image Input's mid gray: {image:?}");
@@ -221,11 +232,12 @@ fn color_match_moves_the_colors_to_the_target() {
     execute(&mut s, "edit.undo", &json!({})).unwrap();
     let Filter::ColorMatch(undone) = filter_of(&s, effect) else { panic!("still Color Match") };
     assert_eq!((undone.hue, undone.chroma), (360.0, 1.0), "one undo step: {undone:?}");
-    for bad in [json!({"sourceColorMode": "median"}), json!({"targetColorMode": "input"}), json!({"customColorVariation": 1}), json!({"targetColor": "red"})] {
-        let mut params = bad.clone();
-        params["effect"] = json!(effect.0);
-        assert!(execute(&mut s, "effect.set", &params).is_err(), "{bad} refused");
-    }
+
+    refused(
+        &mut s,
+        effect,
+        &[json!({"sourceColorMode": "median"}), json!({"targetColorMode": "input"}), json!({"customColorVariation": 1}), json!({"targetColor": "red"})],
+    );
     let inspect = execute(&mut s, "project.inspect", &json!({})).unwrap().to_string();
     assert!(inspect.contains("Color Match"));
 }

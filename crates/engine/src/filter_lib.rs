@@ -5,10 +5,10 @@
 use serde_json::{Value, json};
 use texturecraft_core::{
     AnisotropicKuwahara, Bevel, BevelBlur, BevelCorner, BevelDirection, BevelSmooth, Channel, ColorMatch, ConversionMode, CurvePreset, DirectionalDistance,
-    EffectKind, Fill, Filter, GradientInput, GrayscaleConversion, GrayscaleMode, HeightToNormal, HighpassSpace, Levels, MaskOutline, Mirror, MirrorCorner,
-    MirrorMode, OutlinePosition, POSTERIZE_LEVELS_MAX, POSTERIZE_LEVELS_MIN, PbrValidate, Procedural, ProceduralKind, Projection, SlopeBlending, Source,
-    SourceColorMode, SourceSlopeBlur, SourceWarp, StylizedLighting, TargetColorMode, ThresholdMode, TileTransform, ValidationMode, WarpBlending, WarpMode,
-    WarpSource, WarpSourceMode,
+    Effect, EffectKind, Fill, Filter, GradientInput, GrayscaleConversion, GrayscaleMode, HeightToNormal, HighpassSpace, LayerId, Levels, MaskOutline, Mirror,
+    MirrorCorner, MirrorMode, OutlinePosition, POSTERIZE_LEVELS_MAX, POSTERIZE_LEVELS_MIN, PbrValidate, Procedural, ProceduralKind, Projection, SlopeBlending,
+    Source, SourceColorMode, SourceSlopeBlur, SourceWarp, StylizedLighting, TargetColorMode, ThresholdMode, TileTransform, ValidationMode, WarpBlending,
+    WarpMode, WarpSource, WarpSourceMode,
 };
 
 use crate::commands::{CommandSpec, always, bad, boolp, color_of, color_param, f32p, has_layer, strp, u64p};
@@ -153,20 +153,17 @@ fn listed(def: &FilterDef) -> Value {
 }
 
 /// The filter `effect.filter.restoreDefaults` works on: its id and the library defaults of the filter it is (None: an empty filter)
-fn filter_defaults(s: &Session, p: &Value) -> Result<(texturecraft_core::LayerId, Option<Filter>)> {
+fn filter_defaults(s: &Session, p: &Value) -> Result<(LayerId, Option<Filter>)> {
     const CMD: &str = "effect.filter.restoreDefaults";
     let effect = crate::mask_cmds::effect_id(s, p, CMD)?;
     let filter = match s.doc.project.effect(effect) {
-        Some((_, texturecraft_core::Effect { kind: EffectKind::Filter(filter), .. })) => filter,
+        Some((_, Effect { kind: EffectKind::Filter(filter), .. })) => filter,
         Some(_) => return Err(bad(CMD, format!("effect {} is not a filter", effect.0))),
         None => return Err(bad(CMD, format!("no effect {}", effect.0))),
     };
-    let defaults = match find(filter.label()) {
-        Some(_) => match build(filter.label(), &Value::Null)? {
-            EffectKind::Filter(defaults) => Some(defaults),
-            _ => None,
-        },
-        None => None,
+    let defaults = match build(filter.label(), &Value::Null) {
+        Ok(EffectKind::Filter(defaults)) => Some(defaults),
+        _ => None,
     };
     Ok((effect, defaults))
 }
@@ -175,7 +172,7 @@ fn filter_defaults(s: &Session, p: &Value) -> Result<(texturecraft_core::LayerId
 fn restore_defaults(s: &mut Session, p: &Value) -> Result<Value> {
     let (effect, defaults) = filter_defaults(s, p)?;
     let current = s.doc.project.effect(effect).map(|(_, found)| &found.kind);
-    let Some(defaults) = defaults.filter(|defaults| current != Some(&EffectKind::Filter(defaults.clone()))) else {
+    let Some(defaults) = defaults.filter(|defaults| !matches!(current, Some(EffectKind::Filter(filter)) if filter == defaults)) else {
         return Ok(json!({"changed": false}));
     };
 
@@ -192,10 +189,30 @@ fn restore_defaults(s: &mut Session, p: &Value) -> Result<Value> {
 const NEUTRAL_TONE: [f32; 3] = [0.0, 0.0, 0.5];
 
 /// Mid gray as a color picker shows it (sRGB 0.5), in linear RGB
-const MID_GRAY: f32 = 0.214;
+pub const MID_GRAY: f32 = 0.214;
+
+/// The two Channel Input and Extract Direction choices: the channel the filter sits on, or its image input
+const CURRENT_CHANNEL: &str = "currentChannel";
+const CUSTOM_INPUT: &str = "customInput";
 
 /// A new glow's warm light, in linear RGB
 const GLOW_COLOR: [f32; 3] = [0.871, 0.578, 0.188];
+
+/// The Glow filter as the library adds it: a soft warm halo outside the shapes
+pub const LIBRARY_GLOW: Filter = Filter::HaloGlow { on_mask: false, precise: false, width: 0.15, spread: 0.0, opacity: 1.0, color: GLOW_COLOR };
+
+/// The Drop Shadow filter as the library adds it: a half-opaque black shadow cast downward
+pub const LIBRARY_DROP_SHADOW: Filter = Filter::DropShadow { angle: 90.0, distance: 0.1, size: 0.2, spread: 0.0, opacity: 0.5, color: [0.0; 3] };
+
+/// The Gradient Curve filter as the library adds it
+pub const LIBRARY_GRADIENT_CURVE: Filter = Filter::GradientCurve { preset: CurvePreset::Round, invert: false, balance: 0.5, contrast: 0.0 };
+
+/// The Gradient Dynamic filter as the library adds it: a horizontal ramp from a light gray
+pub const LIBRARY_GRADIENT_DYNAMIC: Filter = Filter::GradientDynamic { vertical: false, position: 0.0, color: [0.6; 3] };
+
+/// The Baked Lighting Environment filter as the library adds it: the environment as it stands, full ambient occlusion
+pub const LIBRARY_ENVIRONMENT_LIGHTING: Filter =
+    Filter::EnvironmentLighting { horizontal: 0.0, vertical: 0.0, exposure: 0.0, height_intensity: 4.0, ambient_occlusion: 1.0, specular_occlusion: 0.0 };
 
 pub use crate::stylized_lighting_params::{MAX_CAVITY_SMOOTHNESS, MAX_DIELECTRIC_REFLECTANCE, MAX_HEIGHT_TO_NORMAL, MAX_LIGHT_INTENSITY};
 
@@ -268,6 +285,11 @@ fn library_gradient() -> Filter {
     Filter::GradientMap { colors, positions, quantity: Some(quantity), input: GradientInput::LIBRARY, linear: true, debug: false }
 }
 
+/// The Baked Lighting Stylized filter as the library adds it: a sun 45° up in front, full sky light, no diffuse AO
+pub fn library_baked_lighting() -> Filter {
+    Filter::BakedLighting { azimuth: 0.0, elevation: 45.0, light: 1.0, ambient: 1.0, occlusion: 0.0, stylized: Some(Box::new(StylizedLighting::library())) }
+}
+
 /// The effect for library filter `id` with its defaults, then the parameters in `p`
 pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
     build_for("effect.add.filter", id, p)
@@ -286,8 +308,8 @@ pub(crate) fn build_for(cmd: &str, id: &str, p: &Value) -> Result<EffectKind> {
         "colorCorrect" => Filter::ColorCorrect { shadows: NEUTRAL_TONE, midtones: NEUTRAL_TONE, highlights: NEUTRAL_TONE },
         "colorBalance" => Filter::ColorBalance { shadows: [0.0; 3], midtones: [0.0; 3], highlights: [0.0; 3] },
         "gradientMap" => library_gradient(),
-        "gradientCurve" => Filter::GradientCurve { preset: CurvePreset::Round, invert: false, balance: 0.5, contrast: 0.0 },
-        "gradientDynamic" => Filter::GradientDynamic { vertical: false, position: 0.0, color: [0.6; 3] },
+        "gradientCurve" => LIBRARY_GRADIENT_CURVE,
+        "gradientDynamic" => LIBRARY_GRADIENT_DYNAMIC,
         "posterize" => Filter::Posterize { levels: 8.0, alpha: false },
         "clamp" => Filter::Clamp { min: 0.0, max: 1.0 },
         "smoothstep" => Filter::Smoothstep { min: 0.0, max: 1.0 },
@@ -314,25 +336,11 @@ pub(crate) fn build_for(cmd: &str, id: &str, p: &Value) -> Result<EffectKind> {
         "mirror" => Filter::Mirror(Mirror::LIBRARY),
         "transform" => Filter::Transform(TileTransform::LIBRARY),
         "maskOutline" => Filter::MaskOutline(MaskOutline::LIBRARY),
-        "glow" => Filter::HaloGlow { on_mask: false, precise: false, width: 0.15, spread: 0.0, opacity: 1.0, color: GLOW_COLOR },
-        "dropShadow" => Filter::DropShadow { angle: 90.0, distance: 0.1, size: 0.2, spread: 0.0, opacity: 0.5, color: [0.0; 3] },
+        "glow" => LIBRARY_GLOW,
+        "dropShadow" => LIBRARY_DROP_SHADOW,
         "replaceColor" => Filter::ReplaceColor { from: [0.5, 0.05, 0.05], to: [0.05, 0.15, 0.5], tolerance: 0.2, softness: 0.15 },
-        "bakedLighting" => Filter::BakedLighting {
-            azimuth: 0.0,
-            elevation: 45.0,
-            light: 1.0,
-            ambient: 1.0,
-            occlusion: 0.0,
-            stylized: Some(Box::new(StylizedLighting::library())),
-        },
-        "bakedLightingEnvironment" => Filter::EnvironmentLighting {
-            horizontal: 0.0,
-            vertical: 0.0,
-            exposure: 0.0,
-            height_intensity: 4.0,
-            ambient_occlusion: 1.0,
-            specular_occlusion: 0.0,
-        },
+        "bakedLighting" => library_baked_lighting(),
+        "bakedLightingEnvironment" => LIBRARY_ENVIRONMENT_LIGHTING,
         "levels" => {
             let mut levels = Levels::default();
             crate::mask_cmds::levels_from(cmd, p, &mut levels)?;
@@ -341,13 +349,14 @@ pub(crate) fn build_for(cmd: &str, id: &str, p: &Value) -> Result<EffectKind> {
         finish => return mat_finish(finish).map(EffectKind::Material).ok_or_else(|| bad(cmd, format!("unknown filter `{id}`"))),
     };
 
-    // A new gradient given its colors without places ramps evenly through them, or through the `quantity` given (`effect.set` keeps the places the color picker sends)
+    // A new gradient given its colors ramps through all of them, or the `quantity` given, evenly unless places are given too
     if let Filter::GradientMap { positions, quantity, .. } = &mut filter
         && p.get("colors").is_some()
-        && p.get("positions").is_none()
     {
-        positions.clear();
         *quantity = None;
+        if p.get("positions").is_none() {
+            positions.clear();
+        }
     }
 
     apply_named(Some(id), p, &mut filter, cmd)?;
@@ -417,7 +426,7 @@ pub fn scalar_params(filter: &Filter) -> Vec<(&'static str, &'static str, f32, f
         Filter::AnisotropicKuwahara(kuwahara) => vec![
             ("radius", "Radius", kuwahara.radius, 0.0, AnisotropicKuwahara::MAX_RADIUS),
             ("smoothness", "Smoothness", kuwahara.smoothness, 0.0, 1.0),
-            ("sharpness", "Sharpness", kuwahara.sharpness, AnisotropicKuwahara::LIBRARY.sharpness, 1.0),
+            ("sharpness", "Sharpness", kuwahara.sharpness, AnisotropicKuwahara::MIN_SHARPNESS, 1.0),
             ("tensorSmoothness", "Tensor Smoothness", kuwahara.tensor_smoothness, 0.0, 1.0),
             ("anisotropy", "Anisotropy", kuwahara.anisotropy, 0.0, 1.0),
             ("angle", "Anisotropy Angle", kuwahara.angle, 0.0, FULL_TURN_DEGREES),
@@ -563,16 +572,8 @@ const CONVERSION_KEYS: [&str; 9] = ["channelInput", "invert", "balance", "contra
 
 /// Set the Grayscale Conversion settings given in `p`: channelInput (currentChannel or customInput), invert, balance, contrast, mode and the red, green, blue and alpha weights
 fn apply_conversion(p: &Value, conversion: &mut GrayscaleConversion, cmd: &str) -> Result<()> {
-    if p.get("channelInput").is_some() {
-        conversion.custom_input = match strp(p, "channelInput").unwrap_or_default() {
-            "currentChannel" => false,
-            "customInput" => true,
-            _ => return Err(bad(cmd, "`channelInput` must be currentChannel or customInput")),
-        };
-    }
-    if p.get("invert").is_some() {
-        conversion.invert = boolp(p, "invert").ok_or_else(|| bad(cmd, "`invert` must be true or false"))?;
-    }
+    conversion.custom_input = two_way(p, "channelInput", CURRENT_CHANNEL, CUSTOM_INPUT, cmd)?.unwrap_or(conversion.custom_input);
+    set_bool(p, "invert", &mut conversion.invert, cmd)?;
     conversion.mode = choice(p, "mode", &ConversionMode::ALL, ConversionMode::id, cmd)?.unwrap_or(conversion.mode);
 
     let [red, green, blue, alpha] = &mut conversion.weights;
@@ -589,10 +590,13 @@ fn apply_conversion(p: &Value, conversion: &mut GrayscaleConversion, cmd: &str) 
 /// Make a gradient use its first `wanted` colors: an evenly spaced ramp keeps its places from now on, and each added color starts as the last one at 1
 fn set_quantity(colors: &mut Vec<[f32; 3]>, positions: &mut Vec<f32>, quantity: &mut Option<u8>, wanted: u8) {
     let used = quantity.map_or(colors.len(), usize::from).min(colors.len());
-    if positions.is_empty() {
-        let last = used.saturating_sub(1).max(1) as f32;
-        *positions = (0..used).map(|index| index as f32 / last).collect();
+
+    // The used colors without a place keep the even place the ramp gave them
+    let last = used.saturating_sub(1).max(1) as f32;
+    for index in positions.len()..used {
+        positions.push(index as f32 / last);
     }
+
     let wanted_len = usize::from(wanted);
     let fill = colors.get(used.saturating_sub(1)).copied().unwrap_or([1.0; 3]);
     if colors.len() < wanted_len {
@@ -606,17 +610,8 @@ fn set_quantity(colors: &mut Vec<[f32; 3]>, positions: &mut Vec<f32>, quantity: 
 
 /// Set the Mirror settings given in `p`: displayDebug, mode, axisXOffset, axisYOffset, invertAxisX, invertAxisY and cornerType
 fn apply_mirror(p: &Value, mirror: &mut Mirror, cmd: &str) -> Result<()> {
-    if p.get("mode").is_some() {
-        let id = strp(p, "mode").unwrap_or_default();
-        mirror.mode = MirrorMode::ALL.into_iter().find(|mode| mode.id() == id).ok_or_else(|| bad(cmd, "`mode` must be axisX, axisY or corner"))?;
-    }
-    if p.get("cornerType").is_some() {
-        let id = strp(p, "cornerType").unwrap_or_default();
-        mirror.corner = MirrorCorner::ALL
-            .into_iter()
-            .find(|corner| corner.id() == id)
-            .ok_or_else(|| bad(cmd, "`cornerType` must be topLeft, topRight, bottomLeft or bottomRight"))?;
-    }
+    mirror.mode = choice(p, "mode", &MirrorMode::ALL, MirrorMode::id, cmd)?.unwrap_or(mirror.mode);
+    mirror.corner = choice(p, "cornerType", &MirrorCorner::ALL, MirrorCorner::id, cmd)?.unwrap_or(mirror.corner);
 
     let [offset_x, offset_y] = &mut mirror.offset;
     for (key, slot) in [("axisXOffset", offset_x), ("axisYOffset", offset_y)] {
@@ -627,15 +622,13 @@ fn apply_mirror(p: &Value, mirror: &mut Mirror, cmd: &str) -> Result<()> {
 
     let [invert_x, invert_y] = &mut mirror.invert;
     for (key, slot) in [("displayDebug", &mut mirror.debug), ("invertAxisX", invert_x), ("invertAxisY", invert_y)] {
-        if p.get(key).is_some() {
-            *slot = boolp(p, key).ok_or_else(|| bad(cmd, format!("`{key}` must be true or false")))?;
-        }
+        set_bool(p, key, slot, cmd)?;
     }
     Ok(())
 }
 
 /// The choice among `all` whose id (`id`) `p` gives under `key`, if it gives one; an unknown id is refused
-fn choice<T: Copy>(p: &Value, key: &str, all: &[T], id: fn(T) -> &'static str, cmd: &str) -> Result<Option<T>> {
+pub(crate) fn choice<T: Copy>(p: &Value, key: &str, all: &[T], id: fn(T) -> &'static str, cmd: &str) -> Result<Option<T>> {
     if p.get(key).is_none() {
         return Ok(None);
     }
@@ -644,8 +637,54 @@ fn choice<T: Copy>(p: &Value, key: &str, all: &[T], id: fn(T) -> &'static str, c
     let found = all.iter().copied().find(|choice| id(*choice) == given);
     found.map(Some).ok_or_else(|| {
         let ids: Vec<&str> = all.iter().map(|choice| id(*choice)).collect();
-        bad(cmd, format!("`{key}` must be {}", ids.join(", ")))
+        bad(cmd, format!("`{key}` must be {}", one_of(&ids)))
     })
+}
+
+/// Which of two ids `p` gives under `key` (true: `on_id`), if it gives one; any other value is refused
+pub(crate) fn two_way(p: &Value, key: &str, off_id: &str, on_id: &str, cmd: &str) -> Result<Option<bool>> {
+    if p.get(key).is_none() {
+        return Ok(None);
+    }
+
+    match strp(p, key) {
+        Some(id) if id == off_id => Ok(Some(false)),
+        Some(id) if id == on_id => Ok(Some(true)),
+        _ => Err(bad(cmd, format!("`{key}` must be {off_id} or {on_id}"))),
+    }
+}
+
+/// Set `slot` to the true or false `p` gives under `key`, if it gives one; any other value is refused
+pub(crate) fn set_bool(p: &Value, key: &str, slot: &mut bool, cmd: &str) -> Result<()> {
+    if p.get(key).is_some() {
+        *slot = boolp(p, key).ok_or_else(|| bad(cmd, format!("`{key}` must be true or false")))?;
+    }
+    Ok(())
+}
+
+/// Set `slot` to the color `p` gives under `key` (clamped to 0..1), if it gives one; any other value, null too, is refused
+pub(crate) fn set_color(p: &Value, key: &str, slot: &mut [f32; 3], cmd: &str) -> Result<()> {
+    if p.get(key).is_some() {
+        let rgb = color_param(cmd, p, key)?.ok_or_else(|| bad(cmd, format!("`{key}` must be a color ([r, g, b] linear or \"#rrggbb\")")))?;
+        *slot = rgb.map(|x| x.clamp(0.0, 1.0));
+    }
+    Ok(())
+}
+
+/// An array of exactly three finite numbers
+fn three_numbers(given: &Value) -> Option<[f32; 3]> {
+    let [first, second, third] = given.as_array()?.as_slice() else { return None };
+    let number = |value: &Value| value.as_f64().map(|x| x as f32).filter(|x| x.is_finite());
+    Some([number(first)?, number(second)?, number(third)?])
+}
+
+/// The allowed values of a setting as its error message lists them: "a, b or c"
+fn one_of<T: std::fmt::Display>(allowed: &[T]) -> String {
+    let words: Vec<String> = allowed.iter().map(ToString::to_string).collect();
+    match words.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+        _ => words.concat(),
+    }
 }
 
 /// [`apply`] for the filter id `named`, if one is given: Directional Warp's former id turns a Warp to Directional mode unless `warpMode` is given
@@ -676,13 +715,7 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
     let divider = |slot: &mut u16| -> Result<()> {
         if p.get("divider").is_some() {
             let value = u64p(p, "divider").and_then(|value| u16::try_from(value).ok()).filter(|value| Filter::DIVIDERS.contains(value));
-            *slot = value.ok_or_else(|| bad(cmd, "`divider` must be 1, 10, 100 or 1000"))?;
-        }
-        Ok(())
-    };
-    let wrap = |slot: &mut bool| -> Result<()> {
-        if let Some(value) = p.get("wrap") {
-            *slot = value.as_bool().ok_or_else(|| bad(cmd, "`wrap` must be true or false"))?;
+            *slot = value.ok_or_else(|| bad(cmd, format!("`divider` must be {}", one_of(&Filter::DIVIDERS))))?;
         }
         Ok(())
     };
@@ -693,19 +726,8 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
             *radius = (intensity * Filter::BLUR_INTENSITY).clamp(0.0, TEXELS_MAX);
         }
     };
-    let switch = |slot: &mut bool, key: &str| -> Result<()> {
-        if p.get(key).is_some() {
-            *slot = boolp(p, key).ok_or_else(|| bad(cmd, format!("`{key}` must be true or false")))?;
-        }
-        Ok(())
-    };
-    let shade = |slot: &mut [f32; 3]| -> Result<()> {
-        if p.get("color").is_some() {
-            let rgb = color_param(cmd, p, "color")?.ok_or_else(|| bad(cmd, "`color` must be a color ([r, g, b] linear or \"#rrggbb\")"))?;
-            *slot = rgb.map(|x| x.clamp(0.0, 1.0));
-        }
-        Ok(())
-    };
+    let switch = |slot: &mut bool, key: &str| set_bool(p, key, slot, cmd);
+    let shade = |slot: &mut [f32; 3]| set_color(p, "color", slot, cmd);
     let angle = |slot: &mut f32| {
         if let Some(degrees) = f32p(p, "angle") {
             *slot = degrees.rem_euclid(FULL_TURN_DEGREES);
@@ -714,10 +736,9 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
 
     match filter {
         Filter::Invert | Filter::InvertOff => {
-            if p.get("invert").is_some() {
-                let on = boolp(p, "invert").ok_or_else(|| bad(cmd, "`invert` must be true or false"))?;
-                *filter = if on { Filter::Invert } else { Filter::InvertOff };
-            }
+            let mut on = matches!(filter, Filter::Invert);
+            switch(&mut on, "invert")?;
+            *filter = if on { Filter::Invert } else { Filter::InvertOff };
         }
         Filter::NormalInvert | Filter::Empty => {}
         // A Grayscale saved before the settings takes its luminance weights on its first edit, so it looks the same
@@ -730,16 +751,10 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
         }
         Filter::GrayscaleConversion(conversion) => apply_conversion(p, conversion, cmd)?,
         Filter::AnisotropicKuwahara(kuwahara) => {
-            if p.get("extractDirection").is_some() {
-                kuwahara.custom_input = match strp(p, "extractDirection").unwrap_or_default() {
-                    "currentChannel" => false,
-                    "customInput" => true,
-                    _ => return Err(bad(cmd, "`extractDirection` must be currentChannel or customInput")),
-                };
-            }
+            kuwahara.custom_input = two_way(p, "extractDirection", CURRENT_CHANNEL, CUSTOM_INPUT, cmd)?.unwrap_or(kuwahara.custom_input);
             set(&mut kuwahara.radius, "radius", 0.0, AnisotropicKuwahara::MAX_RADIUS);
             set(&mut kuwahara.smoothness, "smoothness", 0.0, 1.0);
-            set(&mut kuwahara.sharpness, "sharpness", AnisotropicKuwahara::LIBRARY.sharpness, 1.0);
+            set(&mut kuwahara.sharpness, "sharpness", AnisotropicKuwahara::MIN_SHARPNESS, 1.0);
             set(&mut kuwahara.tensor_smoothness, "tensorSmoothness", 0.0, 1.0);
             set(&mut kuwahara.anisotropy, "anisotropy", 0.0, 1.0);
             angle(&mut kuwahara.angle);
@@ -766,12 +781,8 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
         Filter::ColorMatch(matcher) => {
             matcher.source_mode = choice(p, "sourceColorMode", &SourceColorMode::ALL, SourceColorMode::id, cmd)?.unwrap_or(matcher.source_mode);
             matcher.target_mode = choice(p, "targetColorMode", &TargetColorMode::ALL, TargetColorMode::id, cmd)?.unwrap_or(matcher.target_mode);
-            for (key, slot) in [("sourceColor", &mut matcher.source_color), ("targetColor", &mut matcher.target_color)] {
-                if p.get(key).is_some() {
-                    let rgb = color_param(cmd, p, key)?.ok_or_else(|| bad(cmd, format!("`{key}` must be a color ([r, g, b] linear or \"#rrggbb\")")))?;
-                    *slot = rgb.map(|x| x.clamp(0.0, 1.0));
-                }
-            }
+            set_color(p, "sourceColor", &mut matcher.source_color, cmd)?;
+            set_color(p, "targetColor", &mut matcher.target_color, cmd)?;
             switch(&mut matcher.custom_variation, "customColorVariation")?;
             set(&mut matcher.hue, "hue", 0.0, FULL_TURN_DEGREES);
             set(&mut matcher.chroma, "chroma", 0.0, 1.0);
@@ -779,13 +790,7 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
         }
         Filter::Threshold { level, mode } => {
             set(level, "level", 0.0, 1.0);
-            if p.get("mode").is_some() {
-                let id = strp(p, "mode").unwrap_or_default();
-                *mode = ThresholdMode::ALL
-                    .into_iter()
-                    .find(|threshold_mode| threshold_mode.id() == id)
-                    .ok_or_else(|| bad(cmd, "`mode` must be greater, greaterOrEqual, lower or lowerOrEqual"))?;
-            }
+            *mode = choice(p, "mode", &ThresholdMode::ALL, ThresholdMode::id, cmd)?.unwrap_or(*mode);
         }
         Filter::Mirror(mirror) => apply_mirror(p, mirror, cmd)?,
         Filter::Transform(transform) => crate::tile_transform_params::apply(p, transform, cmd)?,
@@ -797,7 +802,7 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
             angle(&mut warp.angle);
             if p.get("directions").is_some() {
                 let count = u64p(p, "directions").and_then(|count| u8::try_from(count).ok()).filter(|count| SourceWarp::DIRECTIONS.contains(count));
-                warp.directions = count.ok_or_else(|| bad(cmd, "`directions` must be 1, 2 or 4"))?;
+                warp.directions = count.ok_or_else(|| bad(cmd, format!("`directions` must be {}", one_of(&SourceWarp::DIRECTIONS))))?;
             }
             warp.blending = choice(p, "blendingMode", &WarpBlending::ALL, WarpBlending::id, cmd)?.unwrap_or(warp.blending);
             warp.source.mode = choice(p, "sourceMode", &WarpSourceMode::ALL, WarpSourceMode::id, cmd)?.unwrap_or(warp.source.mode);
@@ -823,7 +828,7 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
             set(&mut bevel.smoothing, "smoothing", 0.0, DISTANCE_BEVEL_SMOOTHING_MAX);
             bevel.corner = choice(p, "cornerType", &BevelCorner::ALL, BevelCorner::id, cmd)?.unwrap_or(bevel.corner);
             bevel.blur = choice(p, "blurMode", &BevelBlur::ALL, BevelBlur::id, cmd)?.unwrap_or(bevel.blur);
-            wrap(&mut bevel.wrap)?;
+            switch(&mut bevel.wrap, "wrap")?;
         }
         Filter::BevelSmooth(smooth) => {
             smooth.direction = choice(p, "direction", &BevelDirection::ALL, BevelDirection::id, cmd)?.unwrap_or(smooth.direction);
@@ -833,7 +838,7 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
             set(&mut smooth.curve_shape, "curveShape", -1.0, 1.0);
             set(&mut smooth.threshold, "maskThreshold", 0.0, 1.0);
             set(&mut smooth.multiplier, "distanceMapMultiplier", 0.0, 1.0);
-            wrap(&mut smooth.wrap)?;
+            switch(&mut smooth.wrap, "wrap")?;
         }
         Filter::DirectionalDistance(trail) => {
             set(&mut trail.distance, "distance", 0.0, SMOOTH_DISTANCE_MAX);
@@ -842,16 +847,8 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
             set(&mut trail.multiplier, "distanceMapMultiplier", 0.0, 1.0);
         }
         Filter::MaskOutline(outline) => {
-            if p.get("maskPosition").is_some() {
-                let id = strp(p, "maskPosition").unwrap_or_default();
-                outline.position = OutlinePosition::ALL
-                    .into_iter()
-                    .find(|position| position.id() == id)
-                    .ok_or_else(|| bad(cmd, "`maskPosition` must be outside, inside or both"))?;
-            }
-            if p.get("startFromBlack").is_some() {
-                outline.from_black = boolp(p, "startFromBlack").ok_or_else(|| bad(cmd, "`startFromBlack` must be true or false"))?;
-            }
+            outline.position = choice(p, "maskPosition", &OutlinePosition::ALL, OutlinePosition::id, cmd)?.unwrap_or(outline.position);
+            switch(&mut outline.from_black, "startFromBlack")?;
             set(&mut outline.threshold, "threshold", 0.0, 1.0);
             set(&mut outline.width, "width", 0.0, 1.0);
             set(&mut outline.blur, "blur", 0.0, 1.0);
@@ -860,17 +857,11 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
         Filter::Blur { radius, wrap: wraps } => {
             set(radius, "radius", 0.0, TEXELS_MAX);
             blur_intensity(radius);
-            wrap(wraps)?;
+            switch(wraps, "wrap")?;
         }
         Filter::Sharpen { amount } => set(amount, "amount", 0.0, SHARPEN_AMOUNT_MAX),
         Filter::Hsl { hue, saturation, lightness, perceptive } => {
-            if let Some(mode) = p.get("mode") {
-                *perceptive = match mode.as_str() {
-                    Some("perceptive") => true,
-                    Some("regular") => false,
-                    _ => return Err(bad(cmd, "`mode` must be \"regular\" or \"perceptive\"")),
-                };
-            }
+            *perceptive = two_way(p, "mode", "regular", "perceptive", cmd)?.unwrap_or(*perceptive);
             set(hue, "hue", -1.0, 1.0);
             set(saturation, "saturation", -1.0, 1.0);
             set(lightness, "lightness", -1.0, 1.0);
@@ -881,9 +872,9 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
         }
         Filter::ColorCorrect { shadows, midtones, highlights } => {
             for (key, slot) in [("shadows", shadows), ("midtones", midtones), ("highlights", highlights)] {
-                if p.get(key).is_some() {
+                if let Some(given) = p.get(key) {
                     let [contrast, luminosity, saturation] =
-                        p.get(key).and_then(color_of).ok_or_else(|| bad(cmd, format!("`{key}` must be [contrast, luminosity, saturation]")))?;
+                        three_numbers(given).ok_or_else(|| bad(cmd, format!("`{key}` must be [contrast, luminosity, saturation]")))?;
                     *slot = [contrast.clamp(-1.0, 1.0), luminosity.clamp(-1.0, 1.0), saturation.clamp(0.0, 1.0)];
                 }
             }
@@ -921,41 +912,22 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
                     .ok_or_else(|| bad(cmd, format!("`quantity` must be a whole number from {GRADIENT_QUANTITY_MIN} to {}", Filter::MAX_GRADIENT_COLORS)))?;
                 set_quantity(colors, positions, quantity, wanted);
             }
-            if let Some(mode) = p.get("grayscaleMode") {
-                let id = mode.as_str().unwrap_or_default();
-                input.mode = GrayscaleMode::ALL
-                    .into_iter()
-                    .find(|gray_mode| gray_mode.id() == id)
-                    .ok_or_else(|| bad(cmd, "`grayscaleMode` must be desaturation, luma, average, max or min"))?;
-            }
+            input.mode = choice(p, "grayscaleMode", &GrayscaleMode::ALL, GrayscaleMode::id, cmd)?.unwrap_or(input.mode);
             set(&mut input.blur, "blur", 0.0, BLUR_INTENSITY_SLIDER_MAX);
             set(&mut input.balance, "balance", 0.0, 1.0);
             set(&mut input.contrast, "contrast", 0.0, 1.0);
             for (key, slot) in [("invert", &mut input.invert), ("linear", linear), ("debug", debug)] {
-                if p.get(key).is_some() {
-                    *slot = boolp(p, key).ok_or_else(|| bad(cmd, format!("`{key}` must be true or false")))?;
-                }
+                switch(slot, key)?;
             }
         }
         Filter::GradientCurve { preset, invert, balance, contrast } => {
-            if p.get("preset").is_some() {
-                let id = strp(p, "preset").unwrap_or_default();
-                *preset = CurvePreset::ALL.into_iter().find(|curve| curve.id() == id).ok_or_else(|| bad(cmd, format!("unknown `preset` `{id}`")))?;
-            }
-            if p.get("invert").is_some() {
-                *invert = boolp(p, "invert").ok_or_else(|| bad(cmd, "`invert` must be true or false"))?;
-            }
+            *preset = choice(p, "preset", &CurvePreset::ALL, CurvePreset::id, cmd)?.unwrap_or(*preset);
+            switch(invert, "invert")?;
             set(balance, "balance", 0.0, 1.0);
             set(contrast, "contrast", 0.0, 1.0);
         }
         Filter::GradientDynamic { vertical, position, color } => {
-            if p.get("orientation").is_some() {
-                *vertical = match strp(p, "orientation") {
-                    Some("horizontal") => false,
-                    Some("vertical") => true,
-                    _ => return Err(bad(cmd, "`orientation` must be \"horizontal\" or \"vertical\"")),
-                };
-            }
+            *vertical = two_way(p, "orientation", "horizontal", "vertical", cmd)?.unwrap_or(*vertical);
             set(position, "position", 0.0, 1.0);
             shade(color)?;
         }
@@ -1013,7 +985,7 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
         Filter::EdgeDetect { width } => set(width, "width", 0.0, TEXELS_MAX),
         Filter::Bevel { width, wrap: wraps } => {
             set(width, "width", 0.0, TEXELS_MAX);
-            wrap(wraps)?;
+            switch(wraps, "wrap")?;
         }
         Filter::Mosaic { size, alpha } => {
             set(size, "size", 1.0, MOSAIC_SIZE_MAX);
@@ -1028,16 +1000,8 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
             set(amount, "amount", 0.0, GLOW_AMOUNT_MAX);
         }
         Filter::HaloGlow { on_mask, precise, width, spread, opacity, color } => {
-            if p.get("usedOnMask").is_some() {
-                *on_mask = boolp(p, "usedOnMask").ok_or_else(|| bad(cmd, "`usedOnMask` must be true or false"))?;
-            }
-            if p.get("mode").is_some() {
-                *precise = match strp(p, "mode") {
-                    Some("soft") => false,
-                    Some("precise") => true,
-                    _ => return Err(bad(cmd, "`mode` must be \"soft\" or \"precise\"")),
-                };
-            }
+            switch(on_mask, "usedOnMask")?;
+            *precise = two_way(p, "mode", "soft", "precise", cmd)?.unwrap_or(*precise);
             set(width, "width", -1.0, 1.0);
             set(spread, "spread", 0.0, 1.0);
             set(opacity, "opacity", 0.0, 1.0);
@@ -1139,6 +1103,31 @@ mod tests {
             assert_eq!(positions, expected, "{params}");
             assert_eq!(used, Some(quantity));
         }
+    }
+
+    /// A gradient given its colors and their places ramps through all of them, not the library's three
+    #[test]
+    fn a_new_gradient_given_colors_and_places_uses_every_color() {
+        let five = [[0.0; 3], [0.25; 3], [0.5; 3], [0.75; 3], [1.0; 3]];
+        let places = [0.0, 0.1, 0.2, 0.3, 1.0];
+
+        let EffectKind::Filter(filter) = build("gradientMap", &json!({"colors": five, "positions": places})).unwrap() else { panic!() };
+
+        assert_eq!(filter.ramp_colors().len(), five.len());
+        assert!(matches!(&filter, Filter::GradientMap { positions, .. } if positions[..] == places));
+    }
+
+    /// Raising Color Quantity leaves the colors the gradient had where they were, placed or not
+    #[test]
+    fn raising_the_quantity_keeps_colors_without_a_place_where_they_were() {
+        let three = json!({"colors": [[0, 0, 0], [1, 0, 0], [1, 1, 1]], "positions": [0.0]});
+        let EffectKind::Filter(mut filter) = build("gradientMap", &three).unwrap() else { panic!() };
+        let middle = filter.ramp_at(0.5);
+
+        apply(&json!({"quantity": 4}), &mut filter, "effect.set").unwrap();
+
+        assert_eq!(filter.ramp_at(0.5), middle);
+        assert!(matches!(&filter, Filter::GradientMap { positions, .. } if positions[..] == [0.0, 0.5, 1.0, 1.0]), "{filter:?}");
     }
 
     #[test]

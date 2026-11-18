@@ -133,7 +133,12 @@ impl ImageRes {
             return [0.0; 4];
         }
 
-        self.texel((u * self.width as f32).floor() as i64, (v * self.height as f32).floor() as i64, (true, true))
+        self.nearest(u, v, (true, true))
+    }
+
+    /// The texel under (`u`, `v`), on the axes that do not `repeat` the edge texel past the edge
+    fn nearest(&self, u: f32, v: f32, repeat: (bool, bool)) -> [f32; 4] {
+        self.texel((u * self.width as f32).floor() as i64, (v * self.height as f32).floor() as i64, repeat)
     }
 
     /// The halved levels, built the first time they are asked for
@@ -162,7 +167,7 @@ impl ImageRes {
         let repeat = sampling.wrap.repeats();
         let full = |u: f32, v: f32| bilinear(&self.rgba, self.width, self.height, u, v, repeat);
         match sampling.filtering {
-            Filtering::Nearest => self.texel((u * self.width as f32).floor() as i64, (v * self.height as f32).floor() as i64, repeat),
+            Filtering::Nearest => self.nearest(u, v, repeat),
             Filtering::BilinearSharp => full(u, v),
             Filtering::BilinearHq => {
                 let lod = if footprint.is_finite() && footprint > 1.0 { footprint.log2() } else { 0.0 };
@@ -192,6 +197,7 @@ impl ImageRes {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use texturecraft_core::UvWrap;
 
     #[test]
     fn a_huge_texture_coordinate_samples_without_overflowing() {
@@ -200,5 +206,56 @@ mod tests {
         let sampled = image.sample(1e30, -1e30);
 
         assert_eq!(sampled, [0.5; 4]);
+    }
+
+    /// A 4 × 1 image of columns 0, 1, 2, 3
+    fn ramp() -> ImageRes {
+        ImageRes::new(4, 1, (0..4).map(|column| [column as f32; 4]).collect(), false)
+    }
+
+    fn sampling(filtering: Filtering, wrap: UvWrap) -> Sampling {
+        Sampling { filtering, wrap, ..Sampling::default() }
+    }
+
+    #[test]
+    fn nearest_reads_the_texel_under_the_point_and_wraps_or_stops_at_the_edge() {
+        let image = ramp();
+
+        let inside = image.sample_filtered(0.6, 0.5, sampling(Filtering::Nearest, UvWrap::Repeat), 1.0);
+        let wrapped = image.sample_filtered(1.1, 0.5, sampling(Filtering::Nearest, UvWrap::Repeat), 1.0);
+        let stopped = image.sample_filtered(1.1, 0.5, sampling(Filtering::Nearest, UvWrap::None), 1.0);
+
+        assert_eq!(inside, [2.0; 4]);
+        assert_eq!(wrapped, [0.0; 4], "past the right edge a repeating image starts again");
+        assert_eq!(stopped, [3.0; 4], "past the right edge a single image keeps its last column");
+    }
+
+    #[test]
+    fn a_bilinear_read_past_a_single_images_edge_blends_no_far_side_texel() {
+        let image = ramp();
+
+        let repeating = image.sample_filtered(0.99, 0.5, sampling(Filtering::BilinearSharp, UvWrap::Repeat), 1.0);
+        let single = image.sample_filtered(0.99, 0.5, sampling(Filtering::BilinearSharp, UvWrap::None), 1.0);
+
+        assert!(repeating[0] < 3.0, "the far side's 0 blends in: {repeating:?}");
+        assert_eq!(single, [3.0; 4]);
+    }
+
+    #[test]
+    fn high_quality_bilinear_reads_the_mip_the_footprint_asks_for() {
+        let image = ramp();
+        let hq = sampling(Filtering::BilinearHq, UvWrap::Repeat);
+
+        let full = image.sample_filtered(0.375, 0.5, hq, 1.0);
+        let halved = image.sample_filtered(0.25, 0.5, hq, 2.0);
+        let quartered = image.sample_filtered(0.375, 0.5, hq, 4.0);
+        let past_the_last = image.sample_filtered(0.375, 0.5, hq, 64.0);
+        let between = image.sample_filtered(0.875, 0.5, hq, 2.0_f32.sqrt());
+
+        assert_eq!(full, [1.0; 4], "a footprint of 1 reads the full image at column 1's centre");
+        assert_eq!(halved, [0.5; 4], "level 1's first texel averages columns 0 and 1");
+        assert_eq!(quartered, [1.5; 4], "a 1-texel level holds the mean");
+        assert_eq!(past_the_last, quartered, "a footprint past the last level reads the last one");
+        assert!(between[0] > 2.0 && between[0] < 3.0, "half a level blends the full image's 3 and level 1's 2: {between:?}");
     }
 }

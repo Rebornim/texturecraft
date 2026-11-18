@@ -13,6 +13,7 @@ pub enum SymmetryKind {
 }
 
 impl SymmetryKind {
+    /// Every kind, in the order the Type list shows them
     pub const ALL: [SymmetryKind; 2] = [SymmetryKind::Mirror, SymmetryKind::Radial];
 
     /// The id commands use
@@ -23,6 +24,7 @@ impl SymmetryKind {
         }
     }
 
+    /// The kind with command id `id`
     pub fn from_id(id: &str) -> Option<SymmetryKind> {
         SymmetryKind::ALL.into_iter().find(|kind| kind.id() == id)
     }

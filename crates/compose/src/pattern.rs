@@ -1,6 +1,6 @@
 //! Procedural patterns and projections.
 
-use texturecraft_core::{Decal, Procedural, ProceduralKind, Projection, Projector, UvTransform};
+use texturecraft_core::{Decal, FULL_TURN_DEGREES, Procedural, ProceduralKind, Projection, Projector, UvTransform};
 use texturecraft_geom::glam::{EulerRot, Mat3, Vec2, Vec3};
 use texturecraft_texel::noise;
 
@@ -182,7 +182,7 @@ const TRIPLANAR_SKIP: f32 = 1.0 / 131_072.0;
 /// to change a 0..1 value scaled by `gain` afterwards weigh 0 (see [`TRIPLANAR_SKIP`]).
 fn triplanar_weights(nrm: Vec3, sharpness: f32, gain: f32) -> Vec3 {
     let weights = sharpen(nrm.abs(), sharpness);
-    let weights = weights / (weights.x + weights.y + weights.z).max(1e-6);
+    let weights = weights / (weights.x + weights.y + weights.z).max(MIN_WEIGHT_SUM);
     let skip_threshold = TRIPLANAR_SKIP / gain.max(1.0);
     let retained = Vec3::select(weights.cmplt(Vec3::splat(skip_threshold)), Vec3::ZERO, weights);
 
@@ -200,23 +200,70 @@ fn shape(pr: &Procedural, v: f32) -> f32 {
     if pr.invert { 1.0 - v } else { v }
 }
 
-/// `q` turned by `rotation` degrees, scaled by `tiling` and moved by `offset`, as UV transformations place it
-fn place(q: Vec2, tiling: Vec2, rotation: f32, offset: Vec2) -> Vec2 {
-    let (sn, cs) = rotation.to_radians().sin_cos();
-    Vec2::new(q.x * cs - q.y * sn, q.x * sn + q.y * cs) * tiling + offset
+/// `point` turned by `rotation` degrees, scaled by `tiling` and moved by `offset`, as UV transformations place it
+fn place(point: Vec2, tiling: Vec2, rotation: f32, offset: Vec2) -> Vec2 {
+    placement(tiling, rotation, offset)(point)
 }
 
-/// 0..1 around a cylindrical projection's axis (`b` over `a`), over an arc of `angle` degrees centred on the front
-fn around(a: f32, b: f32, angle: f32) -> f32 {
-    let u = b.atan2(a) / std::f32::consts::TAU + 0.5;
-    if angle == 360.0 { u } else { (u - 0.5) * 360.0 / angle.max(MIN_CYLINDER_ANGLE) + 0.5 }
+/// [`place`] with its turn's sine and cosine worked out once, for a projection that places several points
+fn placement(tiling: Vec2, rotation: f32, offset: Vec2) -> impl Fn(Vec2) -> Vec2 {
+    let (sin, cos) = rotation.to_radians().sin_cos();
+    move |point| Vec2::new(point.x * cos - point.y * sin, point.x * sin + point.y * cos) * tiling + offset
+}
+
+/// `point` placed as a 3D projection's UV transformation `uv` lays its image
+fn place_uv(point: Vec2, uv: &UvTransform) -> Vec2 {
+    uv_placement(uv)(point)
+}
+
+/// [`place_uv`] worked out once for every point a projection places
+fn uv_placement(uv: &UvTransform) -> impl Fn(Vec2) -> Vec2 {
+    placement(Vec2::from(uv.tiling), uv.rotation, Vec2::from(uv.offset))
+}
+
+/// 0..1 around a cylindrical projection's axis (`depth` over `across`), over an arc of `angle` degrees centred on the front
+fn around(across: f32, depth: f32, angle: f32) -> f32 {
+    let turn = depth.atan2(across) / std::f32::consts::TAU + 0.5;
+
+    // A full turn reads the turn untouched, as projects saved before the angle existed did, bit for bit
+    if angle == FULL_TURN_DEGREES { turn } else { (turn - 0.5) * FULL_TURN_DEGREES / angle.max(MIN_CYLINDER_ANGLE) + 0.5 }
 }
 
 /// Narrowest arc in degrees a cylindrical projection wraps its image round, so a zero angle never divides by zero
 pub const MIN_CYLINDER_ANGLE: f32 = *Projection::CYLINDER_ANGLE_RANGE.start();
 
-fn place_uv(q: Vec2, uv: &UvTransform) -> Vec2 {
-    place(q, Vec2::from(uv.tiling), uv.rotation, Vec2::from(uv.offset))
+/// How many pattern tiles a procedural lays round and down a spherical projection, so its cells stay near square
+const SPHERE_PATTERN_TILES: Vec2 = Vec2::new(4.0, 2.0);
+
+/// How many pattern tiles a procedural lays round a cylindrical projection's axis
+const CYLINDER_PATTERN_TILES: f32 = 4.0;
+
+/// Smallest pattern scale, so a zero scale never collapses the pattern to one value
+const MIN_PATTERN_SCALE: f32 = 1e-4;
+
+/// Smallest sum of tri-planar blend weights, so a zero normal never divides by zero
+const MIN_WEIGHT_SUM: f32 = 1e-6;
+
+/// Smallest frame side or depth (world units), so a flat frame never divides by zero
+const MIN_FRAME_EXTENT: f32 = 1e-6;
+
+/// Where `coords` lies round a spherical projection: 0..1 round its pole axis and down from its top
+fn spherical_uv(projector: &Projector, offset: &[f32; 3], coords: &Coords) -> Vec2 {
+    let direction = (projector_local(projector, coords).pos + Vec3::from(*offset)).try_normalize().unwrap_or(Vec3::Y);
+    let u = direction.z.atan2(direction.x) / std::f32::consts::TAU + 0.5;
+    let v = direction.y.clamp(-1.0, 1.0).acos() / std::f32::consts::PI;
+    Vec2::new(u, v)
+}
+
+/// Where `coords` lies for a cylindrical projection round `axis`: 0..1 round the axis over `angle` degrees, and its height along the axis
+fn cylinder_coords(axis: u8, projector: &Projector, offset: &[f32; 3], angle: f32, coords: &Coords) -> (f32, f32) {
+    let point = projector_local(projector, coords).pos + Vec3::from(*offset);
+    let (across, height, depth) = match axis {
+        0 => (point.y, point.x, point.z),
+        2 => (point.x, point.z, point.y),
+        _ => (point.x, point.y, point.z),
+    };
+    (around(across, depth, angle), height)
 }
 
 /// Smallest mesh radius projections measure in, so a flat or empty mesh never divides by zero
@@ -243,10 +290,15 @@ pub fn projector_stretch(projector: &Projector) -> Vec3 {
 /// The middle of a frame's 0..1 texture coordinates: a frame's image turns round it
 pub const FRAME_UV_CENTER: Vec2 = Vec2::splat(0.5);
 
-/// `q` (0..1 across and down a frame) placed as `uv` lays a frame's image: turned round the frame's centre, then tiled and moved from its top left
-pub fn place_frame_uv(q: Vec2, uv: &UvTransform) -> Vec2 {
+/// `point` (0..1 across and down a frame) placed as `uv` lays a frame's image: turned round the frame's centre, then tiled and moved from its top left
+pub fn place_frame_uv(point: Vec2, uv: &UvTransform) -> Vec2 {
+    // An unplaced image reads `point` itself, bit for bit as decals saved before image placement did
+    if *uv == UvTransform::default() {
+        return point;
+    }
+
     let tiling = Vec2::from(uv.tiling);
-    place(q - FRAME_UV_CENTER, tiling, uv.rotation, Vec2::from(uv.offset)) + FRAME_UV_CENTER * tiling
+    place(point - FRAME_UV_CENTER, tiling, uv.rotation, Vec2::from(uv.offset)) + FRAME_UV_CENTER * tiling
 }
 
 /// The image placement a frame needs to lay images exactly as `uv` does from the top left (a frame turns its image round its centre)
@@ -278,62 +330,58 @@ pub fn procedural_sized(pattern: &Procedural, projection: &Projection, coords: &
     evaluate(pattern, projection, coords, pattern.resolution.map(|resolution| resolution.size(set().max(1))))
 }
 
-/// The 2D pattern at `q`, bilinear between the centres of a `grid` × `grid` sampling of each `scale` × `scale` cell of pattern space (one projection tile)
-fn flat_on_grid(kind: ProceduralKind, seed: u32, q: Vec2, scale: f32, grid: u32) -> f32 {
-    let n = grid as f32;
-    let g = q / scale * n - Vec2::splat(0.5);
-    let (i, f) = (g.floor(), g - g.floor());
-    let at = |dx: f32, dy: f32| raw(kind, ((i + Vec2::new(dx, dy) + Vec2::splat(0.5)) / n * scale).extend(0.0), seed);
-    let (top, bottom) = (at(0.0, 0.0) * (1.0 - f.x) + at(1.0, 0.0) * f.x, at(0.0, 1.0) * (1.0 - f.x) + at(1.0, 1.0) * f.x);
-    top * (1.0 - f.y) + bottom * f.y
+/// The 2D pattern at `point`, bilinear between the centres of a `grid` × `grid` sampling of each `scale` × `scale` cell of pattern space (one projection tile)
+fn flat_on_grid(kind: ProceduralKind, seed: u32, point: Vec2, scale: f32, grid: u32) -> f32 {
+    let cells = grid as f32;
+    let grid_place = point / scale * cells - Vec2::splat(0.5);
+    let (cell, fraction) = (grid_place.floor(), grid_place - grid_place.floor());
+
+    let at = |across: f32, down: f32| raw(kind, ((cell + Vec2::new(across, down) + Vec2::splat(0.5)) / cells * scale).extend(0.0), seed);
+    let top = at(0.0, 0.0) * (1.0 - fraction.x) + at(1.0, 0.0) * fraction.x;
+    let bottom = at(0.0, 1.0) * (1.0 - fraction.x) + at(1.0, 1.0) * fraction.x;
+
+    top * (1.0 - fraction.y) + bottom * fraction.y
 }
 
 fn evaluate(pattern: &Procedural, projection: &Projection, coords: &Coords, grid: Option<u32>) -> f32 {
-    let pattern_scale = pattern.scale.max(1e-4);
+    let pattern_scale = pattern.scale.max(MIN_PATTERN_SCALE);
 
     // Evaluate two-dimensional patterns on a slice of the volume
-    let flat = |q: Vec2| match grid {
-        Some(grid) if grid > 0 => flat_on_grid(pattern.kind, pattern.seed, q, pattern_scale, grid),
-        _ => raw(pattern.kind, q.extend(0.0), pattern.seed),
+    let flat = |point: Vec2| match grid {
+        Some(grid) if grid > 0 => flat_on_grid(pattern.kind, pattern.seed, point, pattern_scale, grid),
+        _ => raw(pattern.kind, point.extend(0.0), pattern.seed),
     };
     let value = match projection {
         Projection::UvTile => flat((coords.uv - coords.uv.floor()) * pattern_scale),
         Projection::Uv { scale, rotation, offset } => flat(place(coords.uv, Vec2::from(*scale), *rotation, Vec2::from(*offset)) * pattern_scale),
         Projection::Triplanar { scale, sharpness, offset, uv, projector } => {
             let coords = &projector_local(projector, coords);
-            let p = coords.pos * *scale * pattern_scale + Vec3::from(*offset);
+            let point = coords.pos * *scale * pattern_scale + Vec3::from(*offset);
+            let place_plane = uv_placement(uv);
 
             // Shape scales the blend by the contrast
-            let w = triplanar_weights(coords.nrm, *sharpness, pattern.contrast);
-            let planes = [(w.x, Vec2::new(p.z, p.y)), (w.y, Vec2::new(p.x, p.z)), (w.z, Vec2::new(p.x, p.y))];
-            planes.into_iter().filter(|(w, _)| *w > 0.0).map(|(w, q)| flat(place_uv(q, uv)) * w).sum()
+            let weights = triplanar_weights(coords.nrm, *sharpness, pattern.contrast);
+            let planes = [(weights.x, Vec2::new(point.z, point.y)), (weights.y, Vec2::new(point.x, point.z)), (weights.z, Vec2::new(point.x, point.y))];
+            planes.into_iter().filter(|(weight, _)| *weight > 0.0).map(|(weight, plane)| flat(place_plane(plane)) * weight).sum()
         }
         // The coordinates are already in the placed or warped frame (see [`placed_uv`] and [`crate::warp::warp_uv`])
         Projection::Planar { uv, placed: Some(_), .. } | Projection::Warp { uv, .. } => flat(place_frame_uv(coords.uv, uv) * pattern_scale),
         Projection::Planar { scale, axis, offset, uv, projector, .. } => {
-            let p = projector_local(projector, coords).pos * *scale * pattern_scale + Vec3::from(*offset);
-            let q = match axis {
-                0 => Vec2::new(p.z, p.y),
-                1 => Vec2::new(p.x, p.z),
-                _ => Vec2::new(p.x, p.y),
+            let point = projector_local(projector, coords).pos * *scale * pattern_scale + Vec3::from(*offset);
+            let plane = match axis {
+                0 => Vec2::new(point.z, point.y),
+                1 => Vec2::new(point.x, point.z),
+                _ => Vec2::new(point.x, point.y),
             };
-            flat(place_uv(q, uv))
+            flat(place_uv(plane, uv))
         }
         Projection::Spherical { scale, uv, offset, projector } => {
-            let d = (projector_local(projector, coords).pos + Vec3::from(*offset)).try_normalize().unwrap_or(Vec3::Y);
-            let u = d.z.atan2(d.x) / std::f32::consts::TAU + 0.5;
-            let v = d.y.clamp(-1.0, 1.0).acos() / std::f32::consts::PI;
-            flat(place_uv(Vec2::new(u * 4.0, v * 2.0) * *scale * pattern_scale, uv))
+            let sphere = spherical_uv(projector, offset, coords);
+            flat(place_uv(sphere * SPHERE_PATTERN_TILES * *scale * pattern_scale, uv))
         }
         Projection::Cylindrical { scale, axis, uv, offset, projector, angle } => {
-            let p = projector_local(projector, coords).pos + Vec3::from(*offset);
-            let (a, h, b) = match axis {
-                0 => (p.y, p.x, p.z),
-                2 => (p.x, p.z, p.y),
-                _ => (p.x, p.y, p.z),
-            };
-            let u = around(a, b, *angle);
-            flat(place_uv(Vec2::new(u * 4.0, h) * *scale * pattern_scale, uv))
+            let (around_axis, height) = cylinder_coords(*axis, projector, offset, *angle, coords);
+            flat(place_uv(Vec2::new(around_axis * CYLINDER_PATTERN_TILES, height) * *scale * pattern_scale, uv))
         }
     };
 
@@ -349,38 +397,32 @@ pub fn image_samples(projection: &Projection, coords: &Coords) -> [(Vec2, f32); 
         Projection::Uv { scale, rotation, offset } => one(place(coords.uv, Vec2::from(*scale), *rotation, Vec2::from(*offset))),
         Projection::Triplanar { scale, sharpness, offset, uv, projector } => {
             let coords = &projector_local(projector, coords);
-            let p = coords.pos * *scale + Vec3::from(*offset);
+            let point = coords.pos * *scale + Vec3::from(*offset);
+            let place_plane = uv_placement(uv);
 
             // Float images can exceed 1, so even a tiny plane weight can carry visible detail
             let weights = coords.nrm.abs().powf(sharpness.max(1.0));
-            let weights = weights / (weights.x + weights.y + weights.z).max(1e-6);
-            [(place_uv(Vec2::new(p.z, -p.y), uv), weights.x), (place_uv(Vec2::new(p.x, p.z), uv), weights.y), (place_uv(Vec2::new(p.x, -p.y), uv), weights.z)]
+            let weights = weights / (weights.x + weights.y + weights.z).max(MIN_WEIGHT_SUM);
+            [
+                (place_plane(Vec2::new(point.z, -point.y)), weights.x),
+                (place_plane(Vec2::new(point.x, point.z)), weights.y),
+                (place_plane(Vec2::new(point.x, -point.y)), weights.z),
+            ]
         }
         Projection::Planar { uv, placed: Some(_), .. } | Projection::Warp { uv, .. } => one(place_frame_uv(coords.uv, uv)),
         Projection::Planar { scale, axis, offset, uv, projector, .. } => {
-            let p = projector_local(projector, coords).pos * *scale + Vec3::from(*offset);
-            let q = match axis {
-                0 => Vec2::new(p.z, -p.y),
-                1 => Vec2::new(p.x, p.z),
-                _ => Vec2::new(p.x, -p.y),
+            let point = projector_local(projector, coords).pos * *scale + Vec3::from(*offset);
+            let plane = match axis {
+                0 => Vec2::new(point.z, -point.y),
+                1 => Vec2::new(point.x, point.z),
+                _ => Vec2::new(point.x, -point.y),
             };
-            one(place_uv(q * 0.5 + Vec2::splat(0.5), uv))
+            one(place_uv(plane * 0.5 + Vec2::splat(0.5), uv))
         }
-        Projection::Spherical { scale, uv, offset, projector } => {
-            let d = (projector_local(projector, coords).pos + Vec3::from(*offset)).try_normalize().unwrap_or(Vec3::Y);
-            let u = d.z.atan2(d.x) / std::f32::consts::TAU + 0.5;
-            let v = d.y.clamp(-1.0, 1.0).acos() / std::f32::consts::PI;
-            one(place_uv(Vec2::new(u, v) * *scale, uv))
-        }
+        Projection::Spherical { scale, uv, offset, projector } => one(place_uv(spherical_uv(projector, offset, coords) * *scale, uv)),
         Projection::Cylindrical { scale, axis, uv, offset, projector, angle } => {
-            let p = projector_local(projector, coords).pos + Vec3::from(*offset);
-            let (a, h, b) = match axis {
-                0 => (p.y, p.x, p.z),
-                2 => (p.x, p.z, p.y),
-                _ => (p.x, p.y, p.z),
-            };
-            let u = around(a, b, *angle);
-            one(place_uv(Vec2::new(u, 0.5 - h * 0.5) * *scale, uv))
+            let (around_axis, height) = cylinder_coords(*axis, projector, offset, *angle, coords);
+            one(place_uv(Vec2::new(around_axis, 0.5 - height * 0.5) * *scale, uv))
         }
     }
 }
@@ -407,15 +449,16 @@ pub fn decal_corners(d: &Decal) -> Option<[Vec3; 4]> {
     Some([o - r * hw + u * hh, o + r * hw + u * hh, o + r * hw - u * hh, o - r * hw - u * hh])
 }
 
-/// World point `p` in frame `d` turned and scaled by `projector`: across and up in frame sizes, out along its normal in world units
-pub fn frame_local(d: &Decal, projector: &Projector, p: Vec3) -> Option<Vec3> {
-    let (o, r, u, n) = decal_axes(d)?;
-    let q = p - o;
-    let mut local = Vec3::new(q.dot(r), q.dot(u), q.dot(n));
+/// World point `point` in frame `frame` turned and scaled by `projector`: across and up in frame sizes, out along its normal in world units
+pub fn frame_local(frame: &Decal, projector: &Projector, point: Vec3) -> Option<Vec3> {
+    let (origin, right, up, normal) = decal_axes(frame)?;
+    let from_origin = point - origin;
+    let mut local = Vec3::new(from_origin.dot(right), from_origin.dot(up), from_origin.dot(normal));
     if projector.turns() {
         local = projector_local(projector, &Coords { uv: Vec2::ZERO, pos: local, nrm: Vec3::Z }).pos;
     }
-    let local = Vec3::new(local.x / d.size[0].max(1e-6), local.y / d.size[1].max(1e-6), local.z);
+
+    let local = Vec3::new(local.x / frame.size[0].max(MIN_FRAME_EXTENT), local.y / frame.size[1].max(MIN_FRAME_EXTENT), local.z);
     local.is_finite().then_some(local)
 }
 
@@ -449,12 +492,12 @@ pub const DEPTH_FADE_START: f32 = 0.75;
 
 /// How much a frame reaching `depth` in front of and behind it covers a point `z` out from it: 0 past the depth, fading near it
 pub fn depth_fade(z: f32, depth: f32) -> f32 {
-    let (lz, depth) = (z.abs(), depth.max(1e-6));
-    if lz > depth {
+    let (distance, depth) = (z.abs(), depth.max(MIN_FRAME_EXTENT));
+    if distance > depth {
         return 0.0;
     }
 
-    1.0 - smoothstep(DEPTH_FADE_START * depth, depth, lz)
+    1.0 - smoothstep(DEPTH_FADE_START * depth, depth, distance)
 }
 
 /// World-space noise used by generators (seamless across UV islands).
@@ -465,6 +508,24 @@ pub fn world_noise(pos: Vec3, scale: f32, seed: u32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A decal saved before image placement reads its frame coordinates bit for bit as it did: its image at them, its procedural at them times the pattern scale
+    #[test]
+    fn an_unplaced_decal_reads_its_frame_coordinates_bit_for_bit() {
+        let frame = Decal { center: [0.0; 3], normal: [0.0, 0.0, 1.0], up: [0.0, 1.0, 0.0], size: [1.0; 2], rotation: 0.0, offset: [0.0; 2], depth: 0.5 };
+        let decal = Projection::decal(frame);
+        let pattern = Procedural { scale: 3.0, ..Procedural::new(ProceduralKind::Gradient) };
+        for across in 0..=1000 {
+            for down in [0.0, 0.1, 0.37, 1.0] {
+                let uv = Vec2::new(across as f32 / 1000.0, down);
+                let coords = Coords { uv, pos: Vec3::ZERO, nrm: Vec3::Z };
+                assert_eq!(image_samples(&decal, &coords)[0].0, uv, "image at {uv}");
+
+                let expected = shape(&pattern, raw(pattern.kind, (uv * pattern.scale).extend(0.0), pattern.seed));
+                assert_eq!(procedural(&pattern, &decal, &coords).to_bits(), expected.to_bits(), "procedural at {uv}");
+            }
+        }
+    }
 
     /// A frame's image turns round the frame's centre: the centre reads the same texel at any Rotation, and an unturned image reads exactly as before for any Tiling and Offset
     #[test]

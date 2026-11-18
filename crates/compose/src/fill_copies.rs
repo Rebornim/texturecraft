@@ -1,6 +1,6 @@
 //! The copies a symmetric fill makes of its projection, as mirrors and turns of the surface point each copy samples
 
-use texturecraft_core::{FillSymmetry, SymmetryKind};
+use texturecraft_core::{FULL_TURN_DEGREES, FillSymmetry, SymmetryKind};
 use texturecraft_geom::glam::{Mat3, Vec3};
 
 use crate::fill_copy::FillCopy;
@@ -9,53 +9,70 @@ use crate::fill_copy::FillCopy;
 pub struct FillCopies {
     symmetry: FillSymmetry,
     pivot: Vec3,
+    axis: usize,
+    step: f32,
     first: u32,
     count: u32,
     next: u32,
 }
 
 impl FillCopies {
-    /// The copies `symmetry` makes for a texel at world point `p`, on a mesh whose bounds have centre `center` and radius `radius`
-    pub fn new(symmetry: &FillSymmetry, p: Vec3, center: Vec3, radius: f32) -> FillCopies {
+    /// The copies `symmetry` makes for a texel at world point `point`, on a mesh whose bounds have centre `center` and radius `radius`
+    pub fn new(symmetry: &FillSymmetry, point: Vec3, center: Vec3, radius: f32) -> FillCopies {
         let reach = FillSymmetry::REACH;
         let position = Vec3::from(symmetry.position.map(|v| if v.is_finite() { v.clamp(-reach, reach) } else { 0.0 }));
         let pivot = center + position * radius;
-        let axis = usize::from(symmetry.axis.min(2));
+        let axis = symmetry.axis_index();
         let count = symmetry.copies();
-        let from_pivot = p - pivot;
+        let step = symmetry.step();
+
+        let from_pivot = point - pivot;
         let first = match symmetry.kind {
             // The original keeps the half on the axis's positive side
             SymmetryKind::Mirror => u32::from(from_pivot[axis] < 0.0),
             SymmetryKind::Radial => {
-                let turned = from_pivot[(axis + 2) % 3].atan2(from_pivot[(axis + 1) % 3]).to_degrees().rem_euclid(360.0);
-                let step = symmetry.step().max(f32::EPSILON);
-                let gap = |k: u32| {
-                    let past_copy = (turned - k as f32 * step).rem_euclid(360.0);
-                    past_copy.min(360.0 - past_copy)
-                };
-                (0..count).min_by(|a, b| gap(*a).total_cmp(&gap(*b))).unwrap_or(0)
+                let turned = from_pivot[(axis + 2) % 3].atan2(from_pivot[(axis + 1) % 3]).to_degrees().rem_euclid(FULL_TURN_DEGREES);
+                nearest_copy(turned, step, count, symmetry.span)
             }
         };
-        FillCopies { symmetry: *symmetry, pivot, first, count, next: 0 }
+
+        FillCopies { symmetry: *symmetry, pivot, axis, step, first, count, next: 0 }
     }
 
-    /// Copy `k`: the original at 0, then the mirror or the radial copies in turn
-    fn copy(&self, k: u32) -> FillCopy {
-        let axis = usize::from(self.symmetry.axis.min(2));
-        let flip = if k == 0 { [false; 2] } else { self.symmetry.flip };
+    /// Copy `index`: the original at 0, then the mirror or the radial copies in turn
+    fn copy(&self, index: u32) -> FillCopy {
+        let flip = if index == 0 { [false; 2] } else { self.symmetry.flip };
         let turn = match self.symmetry.kind {
-            _ if k == 0 => Mat3::IDENTITY,
+            _ if index == 0 => Mat3::IDENTITY,
             SymmetryKind::Mirror => {
                 let mut scale = Vec3::ONE;
-                scale[axis] = -1.0;
+                scale[self.axis] = -1.0;
                 Mat3::from_diagonal(scale)
             }
 
-            // Copy `k` is the original turned by `k` steps, so a texel samples the original turned back
-            SymmetryKind::Radial => Mat3::from_axis_angle(Vec3::AXES[axis], -(k as f32 * self.symmetry.step()).to_radians()),
+            // Copy `index` is the original turned by `index` steps, so a texel samples the original turned back
+            SymmetryKind::Radial => Mat3::from_axis_angle(Vec3::AXES[self.axis], -(index as f32 * self.step).to_radians()),
         };
         FillCopy::new(turn, self.pivot, flip)
     }
+}
+
+/// The radial copy nearest a texel `turned` degrees round the axis, of `count` copies `step` degrees apart over `span` degrees: copy 0 across the gap a span under a full turn leaves, else the nearest by its step
+fn nearest_copy(turned: f32, step: f32, count: u32, span: f32) -> u32 {
+    // A span of nothing stacks every copy on the original
+    if !(step > 0.0) {
+        return 0;
+    }
+
+    let by_step = (turned / step).round() as u32;
+    if span >= FULL_TURN_DEGREES || span.is_nan() {
+        return by_step % count;
+    }
+
+    let last = by_step.min(count - 1);
+    let past_last = (turned - last as f32 * step).abs();
+    let before_first = FULL_TURN_DEGREES - turned;
+    if before_first <= past_last { 0 } else { last }
 }
 
 impl Iterator for FillCopies {
@@ -116,12 +133,22 @@ mod tests {
     }
 
     #[test]
-    fn a_span_under_a_full_turn_puts_the_last_copy_at_its_end() {
-        let mut radial = symmetry(SymmetryKind::Radial, 1);
-        radial.count = 4;
-        radial.span = 180.0;
-        assert_eq!(radial.step(), 60.0);
-        radial.span = 360.0;
-        assert_eq!(radial.step(), 90.0);
+    fn the_nearest_copy_is_found_by_its_step_as_a_search_of_every_copy_finds_it() {
+        for (count, span) in [(6, 360.0), (5, 360.0), (4, 180.0), (3, 90.0), (64, 300.0), (2, 1.0)] {
+            let step = radial_step(count, span);
+            for tenth in 0..3600 {
+                let turned = tenth as f32 / 10.0 + 0.05;
+                let gap = |index: u32| {
+                    let past_copy = (turned - index as f32 * step).rem_euclid(FULL_TURN_DEGREES);
+                    past_copy.min(FULL_TURN_DEGREES - past_copy)
+                };
+                let searched = (0..count).min_by(|a, b| gap(*a).total_cmp(&gap(*b))).unwrap_or(0);
+                assert_eq!(nearest_copy(turned, step, count, span), searched, "{count} copies over {span} at {turned}");
+            }
+        }
+    }
+
+    fn radial_step(count: u32, span: f32) -> f32 {
+        FillSymmetry { count, span, ..symmetry(SymmetryKind::Radial, 2) }.step()
     }
 }

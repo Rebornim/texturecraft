@@ -395,7 +395,7 @@ pub struct Decal {
 
 /// Serde default of a cylindrical projection's angle: the whole way round
 fn full_turn() -> f32 {
-    360.0
+    crate::FULL_TURN_DEGREES
 }
 
 impl Default for Projection {
@@ -418,7 +418,7 @@ impl Projection {
     pub const TRIPLANAR_SHARPNESS_RANGE: std::ops::RangeInclusive<f32> = 1.0..=64.0;
 
     /// The arc in degrees a cylindrical projection wraps its image round; a zero arc would divide by zero
-    pub const CYLINDER_ANGLE_RANGE: std::ops::RangeInclusive<f32> = 1.0..=360.0;
+    pub const CYLINDER_ANGLE_RANGE: std::ops::RangeInclusive<f32> = 1.0..=crate::FULL_TURN_DEGREES;
 
     /// A tri-planar projection with a new fill's settings
     pub fn triplanar() -> Projection {
@@ -659,6 +659,11 @@ impl Source {
             Source::Anchor { anchor, .. } => Some(*anchor),
             _ => None,
         }
+    }
+
+    /// Whether this source reads anchor point `anchor` (any anchor point when None)
+    pub fn reads_anchor(&self, anchor: Option<LayerId>) -> bool {
+        self.anchor().is_some_and(|found| anchor.is_none_or(|wanted| wanted == found))
     }
 }
 
@@ -2037,7 +2042,7 @@ impl Effect {
 
     /// Whether a source of the effect, or one of its image inputs, reads anchor point `anchor` (any anchor point when None)
     pub fn reads(&self, anchor: Option<LayerId>) -> bool {
-        self.kind.reads(anchor) || self.inputs.values().any(|source| crate::ImageInput::reads(source, anchor))
+        self.kind.reads(anchor) || self.inputs.values().any(|source| source.reads_anchor(anchor))
     }
 
     /// The source image input `input` reads: the one set on the effect, else its default gray

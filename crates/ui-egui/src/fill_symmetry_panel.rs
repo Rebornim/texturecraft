@@ -50,7 +50,7 @@ pub(crate) fn symmetry_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
     if let Some(kind) = picked {
         run(app, json!({"symmetryType": kind.id()}));
     }
-    let axis = axis_index(&symmetry);
+    let axis = symmetry.axis_index();
     if let Some(picked) = sheet.switch_tinted(tr("Axis"), &AXIS_NAMES, axis, &AXIS_COLORS) {
         run(app, json!({"symmetryAxis": picked}));
     }
@@ -78,15 +78,10 @@ pub(crate) fn symmetry_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
     }
 }
 
-/// The axis `symmetry` copies round or mirrors across, as an index into [`AXIS_NAMES`] (a stored axis past Z reads as Z)
-fn axis_index(symmetry: &FillSymmetry) -> usize {
-    usize::from(symmetry.axis).min(AXIS_NAMES.len() - 1)
-}
-
 /// Count and Angle span beside the ring of copies, seen along the axis
 fn radial_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, symmetry: &FillSymmetry, base: &Value) {
     let tokens = Tokens::get(sheet.ui.ctx());
-    let axis_color = AXIS_COLORS[axis_index(symmetry)];
+    let axis_color = AXIS_COLORS[symmetry.axis_index()];
     let picture = |painter: &Painter, rect: Rect| ring_picture(painter, rect, symmetry, axis_color, &tokens);
     let count = symmetry.copies();
     let (mut count_value, mut span_value) = (count as f32, symmetry.span);

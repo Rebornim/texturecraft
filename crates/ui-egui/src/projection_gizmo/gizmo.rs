@@ -11,8 +11,8 @@ pub(crate) trait Gizmo: Clone + Send + Sync + 'static {
     /// Where a drag on it is kept in egui's memory
     fn drag_id() -> egui::Id;
 
-    /// The handle under screen point `p`
-    fn grab(&self, p: Pos2) -> Option<Self::Grab>;
+    /// The handle under screen point `at`
+    fn grab(&self, at: Pos2) -> Option<Self::Grab>;
 
     /// Whether `other` shows the same projection: a drag goes on only while the projection it began on shows
     fn same_projection(&self, other: &Self) -> bool;

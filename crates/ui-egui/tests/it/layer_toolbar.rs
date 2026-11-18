@@ -10,7 +10,7 @@ use texturecraft_engine::paint::alphas;
 use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 
-use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION, click_at};
+use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION, click_at, click_widget};
 
 /// Tall enough for the toolbar, the layer rows and their menus at once
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1200.0);
@@ -34,10 +34,8 @@ fn app() -> (Harness<'static, TextureCraftApp>, LayerId) {
 
 /// Opens the row's menu `menu` and clicks its item `item`
 fn pick(harness: &mut Harness<'_, TextureCraftApp>, menu: &str, item: &str) {
-    harness.get_by_role_and_label(Role::Button, menu).click();
-    harness.run_steps(SETTLE_FRAMES);
-    harness.get_by_role_and_label(Role::Button, item).click();
-    harness.run_steps(SETTLE_FRAMES);
+    click_widget(harness, Role::Button, menu);
+    click_widget(harness, Role::Button, item);
 }
 
 fn mask_kinds(harness: &Harness<'_, TextureCraftApp>, layer: LayerId) -> Vec<EffectKind> {
@@ -92,8 +90,8 @@ fn bitmap_opens_the_texture_picker_and_adds_the_mask_only_once_one_is_picked() {
 
     let alpha = alphas::find("round_soft").unwrap();
     pick(&mut harness, "Add mask", "Bitmap");
-    harness.get_by_label(&alpha.label).click();
-    harness.run_steps(SETTLE_FRAMES);
+    let tile = harness.get_by_label(&alpha.label).rect();
+    click_at(&mut harness, tile.center());
     let kinds = mask_kinds(&harness, layer);
     let name = texturecraft_engine::fill_alpha::resource_name(alpha);
     assert!(matches!(kinds.as_slice(), [EffectKind::Fill { source: Source::Image { name: read, .. }, .. }] if *read == name), "{kinds:?}");

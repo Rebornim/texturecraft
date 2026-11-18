@@ -9,7 +9,7 @@ use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::properties_popup::{self, PropertiesPopup};
 use texturecraft_ui_egui::state::{Mode, ViewLayout};
 
-use crate::{BAKE_RESOLUTION, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+use crate::{BAKE_RESOLUTION, DRAG_STEP_FRAMES, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
 
 /// A common laptop window
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 960.0);
@@ -25,6 +25,15 @@ const JUMP_FRAMES: usize = 4;
 
 /// Frames for a selection made through the engine to show
 const SELECT_FRAMES: usize = 3;
+
+/// Pointer moves a drag makes between its press and its release
+const DRAG_MOVES: usize = 4;
+
+/// Frames for a scroll to a popup row to finish its animation
+const SCROLL_FRAMES: usize = 25;
+
+/// How far left of the popup a click lands on the model
+const MODEL_LEFT_OF_POPUP: f32 = 60.0;
 
 fn harness() -> Harness<'static, TextureCraftApp> {
     harness_sized(WINDOW_SIZE)
@@ -55,7 +64,7 @@ fn click(harness: &mut Harness<'_, TextureCraftApp>, button: PointerButton, at: 
     harness.event(Event::PointerButton { pos: at, button, pressed: true, modifiers: Modifiers::NONE });
     harness.run_steps(1);
     harness.event(Event::PointerButton { pos: at, button, pressed: false, modifiers: Modifiers::NONE });
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
 }
 
 /// Drag with `button` from `from` by `by` in a few moves while `modifiers` are held
@@ -63,14 +72,14 @@ fn drag(harness: &mut Harness<'_, TextureCraftApp>, button: PointerButton, from:
     harness.event(Event::ModifiersChanged(modifiers));
     harness.hover_at(from);
     harness.event(Event::PointerButton { pos: from, button, pressed: true, modifiers });
-    harness.run_steps(2);
-    for step in 1..=4 {
-        harness.hover_at(from + by * (step as f32 / 4.0));
+    harness.run_steps(DRAG_STEP_FRAMES);
+    for step in 1..=DRAG_MOVES {
+        harness.hover_at(from + by * (step as f32 / DRAG_MOVES as f32));
         harness.run_steps(1);
     }
     harness.event(Event::PointerButton { pos: from + by, button, pressed: false, modifiers });
     harness.event(Event::ModifiersChanged(Modifiers::NONE));
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
 }
 
 #[test]
@@ -230,9 +239,8 @@ fn bake_and_render_modes_never_open_it() {
 #[test]
 fn the_colour_picker_opened_in_the_popup_takes_its_presses_and_the_first_escape() {
     let mut harness = harness();
-    harness.state_mut().ui.prefs.language = "en".into();
     texturecraft_engine::execute(&mut harness.state_mut().session, "layer.add.fill", &json!({"color": [0.2, 0.2, 0.2]})).unwrap();
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     let center = view_center(&harness);
     click(&mut harness, PointerButton::Secondary, center);
     assert!(is_open(&harness));
@@ -241,10 +249,9 @@ fn the_colour_picker_opened_in_the_popup_takes_its_presses_and_the_first_escape(
     let in_popup = |rect: egui::Rect| popup.x_range().contains(rect.center().x);
     harness.get_all_by_role_and_label(Role::Button, "Base color").find(|node| in_popup(node.rect())).unwrap().scroll_to_me();
 
-    // The scroll animates for about twenty frames
-    harness.run_steps(25);
-    harness.get_all_by_role_and_label(Role::Button, "Base color").find(|node| in_popup(node.rect())).unwrap().click();
-    harness.run_steps(3);
+    harness.run_steps(SCROLL_FRAMES);
+    let button = harness.get_all_by_role_and_label(Role::Button, "Base color").find(|node| in_popup(node.rect())).unwrap().rect();
+    click(&mut harness, PointerButton::Primary, button.center());
     let title = harness.get_by_role_and_label(Role::TitleBar, "Base color").rect();
 
     click(&mut harness, PointerButton::Primary, title.center());
@@ -252,34 +259,32 @@ fn the_colour_picker_opened_in_the_popup_takes_its_presses_and_the_first_escape(
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_some(), "and keeps the picker open");
 
     harness.key_press(Key::Escape);
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "the first Escape closes the picker");
     assert!(is_open(&harness), "and leaves the popup open");
     harness.key_press(Key::Escape);
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     assert!(!is_open(&harness), "the next Escape closes the popup");
 }
 
 #[test]
 fn an_eyedropper_pick_from_the_popup_keeps_the_popup_open_for_its_colour() {
     let mut harness = harness();
-    harness.state_mut().ui.prefs.language = "en".into();
     texturecraft_engine::execute(&mut harness.state_mut().session, "layer.add.fill", &json!({"color": [0.2, 0.2, 0.2]})).unwrap();
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     let center = view_center(&harness);
     click(&mut harness, PointerButton::Secondary, center);
     let popup = harness.ctx.memory(|memory| memory.area_rect(properties_popup::area_id())).unwrap();
     let in_popup = |rect: egui::Rect| popup.x_range().contains(rect.center().x);
     harness.get_all_by_role_and_label(Role::Button, "Pick color").find(|node| in_popup(node.rect())).unwrap().scroll_to_me();
 
-    // The scroll animates for about twenty frames
-    harness.run_steps(25);
-    harness.get_all_by_role_and_label(Role::Button, "Pick color").find(|node| in_popup(node.rect())).unwrap().click();
-    harness.run_steps(3);
+    harness.run_steps(SCROLL_FRAMES);
+    let button = harness.get_all_by_role_and_label(Role::Button, "Pick color").find(|node| in_popup(node.rect())).unwrap().rect();
+    click(&mut harness, PointerButton::Primary, button.center());
     assert!(harness.state().picking_color.is_some(), "the eyedropper waits for a click on the model");
 
     // The model's middle, left of the popup
-    let model = egui::pos2(popup.left() - 60.0, center.y);
+    let model = egui::pos2(popup.left() - MODEL_LEFT_OF_POPUP, center.y);
     click(&mut harness, PointerButton::Primary, model);
     assert!(harness.state().picking_color.is_none(), "the click on the model picks");
     assert!(is_open(&harness), "and leaves the popup open for the picked colour");

@@ -7,7 +7,7 @@ use serde_json::json;
 use texturecraft_engine::core::{Channel, LayerId, LayerKind, ProceduralKind, Source};
 use texturecraft_ui_egui::TextureCraftApp;
 
-use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION, click_at, click_widget};
+use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION, assert_list_leaves_the_wheel_and_closes, click_widget};
 
 /// Tall enough that Properties shows a fill's cards and an open picker without scrolling the panel
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1600.0);
@@ -19,14 +19,10 @@ const SLOT_LOW_IN_THE_CARD: &str = "Height";
 const FIRST_TILE: &str = "Clouds";
 /// A window with room for the picker under every slot
 const TALL_WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 3200.0);
-/// From a slot's top-left corner to a point clearly left of its open picker, over the viewport
-const OUTSIDE_THE_PICKER: egui::Vec2 = egui::vec2(-400.0, 0.0);
 /// A window too short for the picker under Roughness's slot, so the snapshot shows it opened above
 const SNAPSHOT_WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1000.0);
 /// Frames for the hovered tile's fill to show before the snapshot
 const HOVER_FRAMES: usize = 8;
-/// A wheel turn over the 3D view, enough to zoom it
-const VIEW_WHEEL: egui::Vec2 = egui::vec2(0.0, 60.0);
 /// A wheel turn down over the grid, enough to scroll it past its first row
 const GRID_WHEEL: egui::Vec2 = egui::vec2(0.0, -400.0);
 
@@ -154,30 +150,13 @@ fn the_anchor_points_tab_lists_mask_anchor_points_by_name() {
 #[test]
 fn escape_or_a_click_outside_closes_it_and_the_wheel_still_zooms_the_view() {
     let (mut harness, layer) = app_with_fill(|_, _| {});
-    click_slot(&mut harness, "Roughness");
-    let distance = harness.state().session.camera.distance;
-    let view = harness.state().viewport_rect.center();
-    harness.hover_at(view);
-    harness.event(egui::Event::MouseWheel {
-        unit: egui::MouseWheelUnit::Point,
-        delta: VIEW_WHEEL,
-        phase: egui::TouchPhase::Move,
-        source: egui::MouseWheelSource::Wheel,
-        modifiers: egui::Modifiers::NONE,
+    assert_list_leaves_the_wheel_and_closes(&mut harness, |harness| {
+        click_slot(harness, "Roughness");
+
+        // The search takes the focus, which would keep Escape from the list
+        harness.ctx.memory_mut(|memory| memory.stop_text_input());
+        harness.get_by_role_and_label(Role::ComboBox, "Roughness").rect()
     });
-    harness.run_steps(SETTLE_FRAMES);
-    assert_ne!(harness.state().session.camera.distance, distance, "the wheel over the view zooms with the picker open");
-
-    harness.ctx.memory_mut(|memory| memory.stop_text_input());
-    harness.key_press(egui::Key::Escape);
-    harness.run_steps(SETTLE_FRAMES);
-    assert!(!egui::Popup::is_any_open(&harness.ctx), "Escape closes the picker");
-
-    click_slot(&mut harness, "Roughness");
-    assert!(egui::Popup::is_any_open(&harness.ctx));
-    let slot = harness.get_by_role_and_label(Role::ComboBox, "Roughness").rect();
-    click_at(&mut harness, slot.min + OUTSIDE_THE_PICKER);
-    assert!(!egui::Popup::is_any_open(&harness.ctx), "a click outside closes the picker");
 
     // Opened again from Uniform after a scroll down, it starts at the top
     click_slot(&mut harness, "Roughness");

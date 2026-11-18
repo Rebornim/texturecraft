@@ -2,7 +2,7 @@
 
 use egui::{Color32, Pos2, Rect, Stroke, Ui};
 use serde_json::{Value, json};
-use texturecraft_engine::compose::pattern::{mesh_frame, nonzero_stretch, projector_stretch};
+use texturecraft_engine::compose::pattern::{cylinder_axis_index, mesh_frame, nonzero_stretch, projector_stretch};
 use texturecraft_engine::core::Projection;
 use texturecraft_engine::geom::glam::{EulerRot, Mat3, Quat, Vec2, Vec3};
 use texturecraft_engine::layer_cmds::signed_scale;
@@ -85,7 +85,7 @@ impl RoundGizmo {
         let (shape, offset, projector, offset_per_local) = match target.projection(app)? {
             Projection::Triplanar { scale, offset, projector, .. } => (Shape::Box, offset, projector, scale),
             Projection::Spherical { offset, projector, .. } => (Shape::Sphere, offset, projector, 1.0),
-            Projection::Cylindrical { axis, offset, projector, .. } => (Shape::Cylinder(usize::from(axis.min(2))), offset, projector, 1.0),
+            Projection::Cylindrical { axis, offset, projector, .. } => (Shape::Cylinder(cylinder_axis_index(axis)), offset, projector, 1.0),
             _ => return None,
         };
 
@@ -319,11 +319,11 @@ impl Gizmo for RoundGizmo {
     }
 
     /// The handle under screen point `p`: the nearest one within reach (where rings cross, the nearest ring)
-    fn grab(&self, p: Pos2) -> Option<RoundGrab> {
-        let mut handles = vec![(RoundGrab::Slide, center_distance(self.center, p))];
-        handles.extend((0..3).filter_map(|axis| Some((RoundGrab::Axis(axis), arrow_distance(p, self.center, self.arrows[axis]?)))));
-        handles.extend(self.sizes.iter().map(|size| (RoundGrab::Size(size.axes), size.distance(p))));
-        let distance = |ring: &Vec<Pos2>| ring.windows(2).map(|pair| distance_to_segment(p, pair[0], pair[1])).fold(f32::INFINITY, f32::min);
+    fn grab(&self, at: Pos2) -> Option<RoundGrab> {
+        let mut handles = vec![(RoundGrab::Slide, center_distance(self.center, at))];
+        handles.extend((0..3).filter_map(|axis| Some((RoundGrab::Axis(axis), arrow_distance(at, self.center, self.arrows[axis]?)))));
+        handles.extend(self.sizes.iter().map(|size| (RoundGrab::Size(size.axes), size.distance(at))));
+        let distance = |ring: &Vec<Pos2>| ring.windows(2).map(|pair| distance_to_segment(at, pair[0], pair[1])).fold(f32::INFINITY, f32::min);
         handles.extend((0..3).map(|axis| (RoundGrab::Ring(axis), distance(&self.rings[axis]))));
         nearest(handles)
     }
@@ -435,10 +435,10 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect, gizmo: &RoundG
 pub(crate) mod tests {
     use egui::{Modifiers, PointerButton, vec2};
     use egui_kittest::kittest::Queryable;
-    use texturecraft_engine::core::{LayerId, Projection, Projector};
+    use texturecraft_engine::core::{Fill, LayerId, LayerKind, Projection, Projector};
 
     use super::*;
-    use crate::frame_gizmo::tests::{ball_app, drag, drag_frames, fill_app, panel_xyz, press_and_move, projection};
+    use crate::frame_gizmo::tests::{ball_app, drag, drag_frames, fill_app, fill_app_with, panel_xyz, press_and_move, projection};
 
     fn gizmo(harness: &egui_kittest::Harness<'_, TextureCraftApp>) -> RoundGizmo {
         RoundGizmo::of(harness.state(), harness.state().viewport_rect).unwrap()
@@ -473,6 +473,19 @@ pub(crate) mod tests {
         }
         let (harness, _) = fill_app("planar");
         assert!(RoundGizmo::of(harness.state(), harness.state().viewport_rect).is_none(), "planar projections show their frame instead");
+    }
+
+    #[test]
+    fn a_cylinder_axis_past_z_shows_round_y_as_the_compositor_wraps_it() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app_with(json!({"projection": "cylindrical", "axis": 1}));
+        let round_y = gizmo(&harness).outline;
+
+        // A hand-edited project can store an axis past Z: no command writes one
+        let stored = &mut harness.state_mut().session.doc.project.layer_mut(layer).unwrap().kind;
+        let LayerKind::Fill(Fill { projection: Projection::Cylindrical { axis, .. }, .. }) = stored else { panic!("a cylindrical fill") };
+        *axis = 3;
+        assert_eq!(gizmo(&harness).outline, round_y);
     }
 
     #[test]

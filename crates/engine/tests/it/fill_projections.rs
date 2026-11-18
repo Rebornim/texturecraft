@@ -448,11 +448,16 @@ fn a_frame_takes_its_offset_rotation_and_scale_and_folds_its_projector_in_first(
     s.undo().unwrap();
     assert_eq!(snapshot(&mut s), turned, "undo puts the turned projector back");
 
-    for bad in [json!({"frameScale": [1, 2]}), json!({"frameOffset": "x"}), json!({"frameScale": [0, -1, f64::NAN]})] {
+    for bad in [json!({"frameScale": [1, 2]}), json!({"frameOffset": "x"}), json!({"frameScale": [0, -1, "deep"]})] {
         let mut params = bad.clone();
         params["layer"] = json!(layer.0);
         assert!(execute(&mut s, "layer.decal.set", &params).is_err(), "{bad}");
     }
+
+    // A collapsed or turned-over scale is clamped to the smallest frame, not refused
+    execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "frameScale": [0, -1, 0]})).unwrap();
+    let Projection::Planar { placed: Some(smallest), .. } = projection(&s, layer) else { panic!("still placed") };
+    assert!(smallest.size.iter().chain([&smallest.depth]).all(|side| *side > 0.0 && side.is_finite()), "{smallest:?}");
 
     // A warp's Scale Z is its reach: Projection Depth times the longer side
     set(&mut s, layer, json!({"projection": "warp"}));
@@ -461,6 +466,45 @@ fn a_frame_takes_its_offset_rotation_and_scale_and_folds_its_projector_in_first(
     execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "frameScale": [frame.size[0] / diagonal, frame.size[1] / diagonal, 0.1]})).unwrap();
     let Projection::Warp { frame, depth, .. } = projection(&s, layer) else { panic!("a warp") };
     assert!((depth * frame.size[0].max(frame.size[1]) - 0.1 * diagonal).abs() < 1e-4, "reach {depth}");
+}
+
+/// A decal edit that moves nothing and keeps its image adds no undo step and leaves the project unmodified; one that moves it adds one
+#[test]
+fn a_decal_edit_that_changes_nothing_adds_no_undo_step() {
+    let mut s = session();
+    let ramp = s.import_resource_bytes("ramp.png", ramp_png()).unwrap();
+    let added = execute(&mut s, "layer.add.decal", &json!({"image": ramp, "position": [0, 0, 1], "normal": [0, 0, 1], "rotation": 30})).unwrap();
+    let layer = added["layer"].as_u64().unwrap();
+    let mask = execute(&mut s, "layer.add.decal", &json!({"image": ramp, "channel": "mask", "position": [0, 0, 1], "normal": [0, 0, 1]})).unwrap();
+    let mask_effect = mask["maskEffect"].as_u64().unwrap();
+    let steps = s.history_labels().len();
+
+    for unchanged in [
+        json!({"layer": layer}),
+        json!({"layer": layer, "rotation": 30}),
+        json!({"layer": layer, "image": ramp}),
+        json!({"layer": layer, "offset": [0, 0]}),
+        json!({"effect": mask_effect}),
+        json!({"effect": mask_effect, "image": ramp}),
+    ] {
+        execute(&mut s, "layer.decal.set", &unchanged).unwrap();
+        assert_eq!(s.history_labels().len(), steps, "{unchanged} changes nothing");
+    }
+
+    execute(&mut s, "layer.decal.set", &json!({"layer": layer, "rotation": 45})).unwrap();
+    assert_eq!(s.history_labels().len(), steps + 1, "a turn is an edit");
+}
+
+/// `depth` on a warp sets how far it reaches: its Projection Depth becomes the depth over the frame's longer side
+#[test]
+fn a_warps_depth_sets_its_projection_depth() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    set(&mut s, layer, json!({"projection": "warp"}));
+
+    execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "depth": 0.5})).unwrap();
+    let Projection::Warp { frame, depth, .. } = projection(&s, layer) else { panic!("a warp") };
+    assert!((depth * frame.size[0].max(frame.size[1]) - 0.5).abs() < 1e-5, "reach {depth} × {:?}", frame.size);
 }
 
 /// A 64 × 8 PNG whose red climbs from left to right

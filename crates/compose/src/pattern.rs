@@ -661,6 +661,9 @@ pub fn frame_crop(d: &Decal, local: Vec3) -> f32 {
     depth_fade(local.z, d.depth)
 }
 
+/// Where a frame's depth fade starts, as a share of its depth
+pub const DEPTH_FADE_START: f32 = 0.75;
+
 /// How much a frame reaching `depth` in front of and behind it covers a point `z` out from it: 0 past the depth, fading near it
 pub fn depth_fade(z: f32, depth: f32) -> f32 {
     let (lz, depth) = (z.abs(), depth.max(1e-6));
@@ -668,7 +671,7 @@ pub fn depth_fade(z: f32, depth: f32) -> f32 {
         return 0.0;
     }
 
-    1.0 - smoothstep(0.75 * depth, depth, lz)
+    1.0 - smoothstep(DEPTH_FADE_START * depth, depth, lz)
 }
 
 /// World-space noise used by generators (seamless across UV islands).

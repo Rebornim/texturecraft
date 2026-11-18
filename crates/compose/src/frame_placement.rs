@@ -6,10 +6,20 @@ use texturecraft_geom::glam::{EulerRot, Mat3, Quat, Vec3};
 use crate::pattern::{decal_axes, mesh_frame, projector_stretch};
 
 /// The shortest frame side a depth is divided by, so a collapsed frame keeps a finite depth
-const MIN_FRAME_SIDE: f32 = 1e-6;
+pub const MIN_FRAME_SIDE: f32 = 1e-6;
 
 /// Below this the frame faces nearly straight up or down, so world up gives no upright direction
 const MIN_UP_CROSS_SQUARED: f32 = 1e-6;
+
+/// The longer side of a frame of `size`, at least [`MIN_FRAME_SIDE`]: a warp's Projection Depth counts in it
+pub fn longer_side(size: [f32; 2]) -> f32 {
+    size[0].max(size[1]).max(MIN_FRAME_SIDE)
+}
+
+/// How far a warp whose frame has `size` reaches in front of and behind it at Projection Depth `depth`, in world units
+pub fn warp_reach(size: [f32; 2], depth: f32) -> f32 {
+    depth * longer_side(size)
+}
 
 /// A frame's Offset (its centre in mesh radii from the mesh's centre), Rotation (degrees round X, Y and Z, as a projector turns) and Scale (its width and height, then how far it reaches in front of and behind it, in mesh diagonals)
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -59,8 +69,7 @@ pub fn folded(proj: &Projection) -> Option<Projection> {
         }
         Projection::Warp { frame: warp, projector, depth, .. } => {
             // Its depth counts in lengths of the frame's longer side
-            let longer = |size: [f32; 2]| size[0].max(size[1]).max(MIN_FRAME_SIDE);
-            *depth *= reach * longer(frame.size) / longer(size);
+            *depth *= reach * longer_side(frame.size) / longer_side(size);
             *warp = new_frame;
             *projector = unturned;
         }
@@ -74,7 +83,7 @@ pub fn folded(proj: &Projection) -> Option<Projection> {
 fn reach(proj: &Projection) -> Option<f32> {
     match proj {
         Projection::Planar { placed: Some(frame), .. } => Some(frame.depth),
-        Projection::Warp { frame, depth, .. } => Some(depth * frame.size[0].max(frame.size[1])),
+        Projection::Warp { frame, depth, .. } => Some(warp_reach(frame.size, *depth)),
         _ => None,
     }
 }
@@ -124,7 +133,7 @@ pub fn placed(proj: &Projection, placement: &FramePlacement, bounds: (Vec3, Vec3
     match &mut proj {
         Projection::Planar { placed: Some(placed), .. } => *placed = frame,
         Projection::Warp { frame: warp, depth, .. } => {
-            *depth = deep / width.max(height).max(MIN_FRAME_SIDE);
+            *depth = deep / longer_side([width, height]);
 
             // The warp's own depth is what reaches; the frame's is unused
             *warp = Decal { depth: warp.depth, ..frame };

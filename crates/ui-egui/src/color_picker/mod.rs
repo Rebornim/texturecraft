@@ -54,7 +54,12 @@ pub(crate) fn blocks_view_press(ctx: &egui::Context) -> bool {
 
 /// `rgb` (0..1 each) as 0..255 each, as the hex code and the copied values give it
 pub(crate) fn eight_bit(rgb: [f32; 3]) -> [u8; 3] {
-    rgb.map(|component| (component.clamp(0.0, 1.0) * 255.0).round() as u8)
+    rgb.map(component_byte)
+}
+
+/// One colour or coverage component (0..1, clamped) as 0..255
+pub(crate) fn component_byte(component: f32) -> u8 {
+    (component.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 /// `rgb` (0..1 each) as six hex digits, as the hex field shows it

@@ -3,7 +3,6 @@
 use egui::{Align2, CornerRadius, FontId, Painter, Rect, Sense, pos2, vec2};
 use egui_phosphor::regular as ic;
 
-use super::group::CARD_BLEED;
 use super::group::CARD_RADIUS;
 use super::slot::THUMB_SIZE;
 use super::{GROUP_GAP, PropertySheet, SMALL_TEXT_SIZE, TEXT_SIZE};
@@ -34,7 +33,7 @@ impl PropertySheet<'_> {
         self.close_card();
         let rect = self.take(CARD_HEIGHT);
         let center_y = rect.center().y;
-        let face = Rect::from_min_max(pos2(self.left - CARD_BLEED, rect.top()), pos2(self.right + CARD_BLEED, rect.bottom()));
+        let face = self.bled_row(rect);
         let id = self.next_id();
         let mut response = self.ui.interact(face, id, if missing { Sense::hover() } else { Sense::click() });
         if !missing {

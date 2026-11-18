@@ -1,9 +1,8 @@
 //! One row of a list of things to go to: a glyph, a name and its kind (dim); hovered, a face and an arrow show the click selects it
 
-use egui::{Align2, CornerRadius, FontId, Rect, Sense, pos2};
+use egui::{Align2, CornerRadius, FontId, Sense, pos2};
 use egui_phosphor::regular as ic;
 
-use super::group::CARD_BLEED;
 use super::{GLYPH_SIZE, PropertySheet, ROW_HEIGHT, ROW_RADIUS, TEXT_SIZE};
 
 /// From the left edge to the glyph's centre, and from there to the name
@@ -24,7 +23,7 @@ impl PropertySheet<'_> {
     pub(crate) fn reference_row(&mut self, glyph: &str, name: &str, kind: &str) -> bool {
         let rect = self.take(ROW_HEIGHT);
         let center_y = rect.center().y;
-        let face = Rect::from_min_max(pos2(self.left - CARD_BLEED, rect.top()), pos2(self.right + CARD_BLEED, rect.bottom()));
+        let face = self.bled_row(rect);
         let id = self.next_id();
         let response = self.ui.interact(face, id, Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, format!("{name} {kind}")));

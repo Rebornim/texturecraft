@@ -126,6 +126,11 @@ impl PropertySheet<'_> {
                 return None;
             }
 
+            // Leaving the field as it opened changes nothing: no undo step, no rounding to the shown decimals
+            if text.trim() == shown_number(field.value, decimals) {
+                return None;
+            }
+
             let typed: f32 = text.trim().trim_end_matches(field.suffix).trim().parse().ok()?;
             if !typed.is_finite() || typed == field.value {
                 return None;

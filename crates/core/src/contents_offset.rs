@@ -26,16 +26,20 @@ impl ContentsOffset {
     /// The smallest and largest Scale a folder takes
     pub const SCALE_RANGE: (f32, f32) = (0.01, 100.0);
 
+    /// The Rotation a folder takes, in degrees: a half turn each way
+    pub const ROTATION_RANGE: (f32, f32) = (-180.0, 180.0);
+
     /// Whether the offset changes nothing
     pub fn is_none(&self) -> bool {
         *self == ContentsOffset::NONE
     }
 
-    /// An offset with `scale` kept in [`ContentsOffset::SCALE_RANGE`] and `rotation` wrapped into −180..180 (non-finite values change nothing)
+    /// An offset with `scale` kept in [`ContentsOffset::SCALE_RANGE`] and `rotation` wrapped into [`ContentsOffset::ROTATION_RANGE`] (non-finite values change nothing)
     pub fn new(scale: f32, rotation: f32) -> ContentsOffset {
         let (low, high) = ContentsOffset::SCALE_RANGE;
         let scale = if scale.is_finite() { scale.clamp(low, high) } else { 1.0 };
-        let rotation = if rotation.is_finite() { (rotation + 180.0).rem_euclid(360.0) - 180.0 } else { 0.0 };
+        let (turn_start, turn_end) = ContentsOffset::ROTATION_RANGE;
+        let rotation = if rotation.is_finite() { (rotation - turn_start).rem_euclid(turn_end - turn_start) + turn_start } else { 0.0 };
         ContentsOffset { scale, rotation }
     }
 

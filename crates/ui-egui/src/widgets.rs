@@ -83,7 +83,7 @@ pub(crate) fn value_header(ui: &mut Ui, label: &str, value: &mut f32, range: std
                         .frame(egui::Frame::NONE),
                 );
                 if response.has_focus() {
-                    ui.data_mut(|data| data.insert_temp(id, text.clone()));
+                    ui.data_mut(|data| data.insert_temp(id, text));
                 } else {
                     ui.data_mut(|data| data.remove_temp::<String>(id));
 
@@ -505,7 +505,7 @@ fn color_picker(ui: &mut Ui, id: egui::Id, c: &mut Color32, width: f32) -> bool 
     changed
 }
 
-/// Fill `rect` with `rgb(x, y)` (sRGB 0..1 over 0..1 across and down), as a shaded mesh.
+/// Fill `rect` with `rgb(x, y)` (sRGB 0..1 over 0..1 across and down), as a shaded mesh
 pub(crate) fn gradient(painter: &egui::Painter, rect: egui::Rect, rgb: impl Fn(f32, f32) -> [f32; 3]) {
     /// Cells across and down: fine enough that a hue strip's six ramps read smooth
     const GRID_CELLS: u32 = 24;

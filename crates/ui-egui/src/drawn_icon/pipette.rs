@@ -1,7 +1,4 @@
-//! The eyedropper: a pipette lying from its tip at the bottom left to its rubber bulb at the top right. A thin glass tube drawn
-//! as an outline (hollow, so it reads as glass), a collar wider than everything else, then a round solid bulb: the collar and the
-//! slim tube under a fatter bulb are what tell a pipette from a baster. The panels draw it as a glyph; the pointer an armed pick
-//! shows fills the same outline white
+//! The eyedropper: a pipette lying from its tip at the bottom left to its rubber bulb at the top right
 
 use std::f32::consts::FRAC_1_SQRT_2;
 
@@ -9,21 +6,26 @@ use super::distance::{self, Point, dot, sub};
 
 /// The tip's point in the unit square
 const TIP: Point = [0.1, 0.9];
+
 /// From the tip toward the bulb, and across the pipette, as unit directions
 const ALONG: Point = [FRAC_1_SQRT_2, -FRAC_1_SQRT_2];
 const ACROSS: Point = [FRAC_1_SQRT_2, FRAC_1_SQRT_2];
+
 /// The width of the tube's outline
 pub(crate) const STROKE: f32 = 0.08;
+
 /// The tube's outline as `(along, across)` from the tip: a narrow tip widening into the straight tube, through the stroke's middle
 const TUBE: [Point; 6] = [[0.0, -0.03], [0.18, -0.07], [0.62, -0.07], [0.62, 0.07], [0.18, 0.07], [0.0, 0.03]];
+
 /// The collar between the tube and the bulb, wider than both
 const COLLAR: [Point; 2] = [[0.62, -0.24], [0.7, 0.24]];
+
 /// The bulb: straight from inside the collar (touching shapes leave a seam) to its round end's centre, as wide as that end
 const BULB_FROM: f32 = 0.66;
 const BULB_END: f32 = 0.93;
 const BULB_RADIUS: f32 = 0.19;
 
-/// The distance from `point` to the glyph's ink: the tube's outline, the collar and the bulb
+/// The distance from `point` to the glyph's ink: the tube's outline (hollow, so it reads as glass), the collar and the bulb; the collar and the slim tube under a fatter bulb tell a pipette from a baster
 pub(crate) fn glyph(point: Point) -> f32 {
     let local = local(point);
     let tube = distance::convex_polygon(local, &TUBE).abs() - STROKE / 2.0;

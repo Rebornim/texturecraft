@@ -1,11 +1,11 @@
 //! The gradient filters: Gradient (positions, quantity, input transformation, linear blending, debug), Gradient Curve and Gradient Dynamic
 
 use serde_json::json;
-use texturecraft_engine::core::{Channel, EffectKind, Filter, GrayscaleMode, LayerId, layer::gradient};
+use texturecraft_engine::core::{Channel, EffectKind, Filter, GrayscaleMode, layer::gradient};
 use texturecraft_engine::execute;
-use texturecraft_engine::filter_lib::MID_GRAY;
+use texturecraft_engine::filter_lib::{LIBRARY_GRADIENT_CURVE, LIBRARY_GRADIENT_DYNAMIC, MID_GRAY};
 
-use crate::filter_support::{center, center_uv, facing_session as session, filter_of, filtered, refused};
+use crate::filter_support::{add_filter, center, center_uv, facing_session as session, filter_of, filtered, refused, set};
 
 fn near(a: f32, b: f32) -> bool {
     (a - b).abs() < 6e-3
@@ -37,23 +37,22 @@ fn gradient_places_quantity_and_input_transformation() {
     let Filter::GradientMap { quantity, input, linear, .. } = filter_of(&s, effect) else { panic!() };
     assert_eq!((quantity, input.mode, linear), (Some(3), GrayscaleMode::Average, true));
 
-    let mid = MID_GRAY;
-    assert!(near(center(&mut s, Channel::BaseColor)[0], mid / 2.0), "halfway from black to mid gray");
+    assert!(near(center(&mut s, Channel::BaseColor)[0], MID_GRAY / 2.0), "halfway from black to mid gray");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "positions": [0.0, 0.25, 1.0]})).unwrap();
-    assert!(near(center(&mut s, Channel::BaseColor)[0], mid), "mid gray moved to 0.25");
+    set(&mut s, effect, json!({"positions": [0.0, 0.25, 1.0]}));
+    assert!(near(center(&mut s, Channel::BaseColor)[0], MID_GRAY), "mid gray moved to 0.25");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "invert": true})).unwrap();
-    assert!(near(center(&mut s, Channel::BaseColor)[0], mid + (1.0 - mid) * (0.5 / 0.75)), "inverted, it reads 0.75");
+    set(&mut s, effect, json!({"invert": true}));
+    assert!(near(center(&mut s, Channel::BaseColor)[0], MID_GRAY + (1.0 - MID_GRAY) * (0.5 / 0.75)), "inverted, it reads 0.75");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "invert": false, "balance": 0.75})).unwrap();
-    assert!(near(center(&mut s, Channel::BaseColor)[0], mid + (1.0 - mid) * (0.25 / 0.75)), "balance 0.75 lifts it to 0.5");
+    set(&mut s, effect, json!({"invert": false, "balance": 0.75}));
+    assert!(near(center(&mut s, Channel::BaseColor)[0], MID_GRAY + (1.0 - MID_GRAY) * (0.25 / 0.75)), "balance 0.75 lifts it to 0.5");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "balance": 0.5, "positions": [0.0, 0.5, 1.0], "linear": false})).unwrap();
+    set(&mut s, effect, json!({"balance": 0.5, "positions": [0.0, 0.5, 1.0], "linear": false}));
     let srgb = center(&mut s, Channel::BaseColor)[0];
     assert!(near(srgb, 0.0508), "blended in sRGB, halfway from black to mid gray is sRGB 0.25: {srgb}");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "quantity": 4})).unwrap();
+    set(&mut s, effect, json!({"quantity": 4}));
     assert_eq!(filter_of(&s, effect).ramp_colors().len(), 4);
 
     refused(
@@ -67,7 +66,8 @@ fn gradient_places_quantity_and_input_transformation() {
             json!({"debug": 3}),
         ],
     );
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "grayscaleMode": "max"})).unwrap();
+
+    set(&mut s, effect, json!({"grayscaleMode": "max"}));
     let Filter::GradientMap { input, .. } = filter_of(&s, effect) else { panic!() };
     assert_eq!(input.mode, GrayscaleMode::Max);
 }
@@ -82,8 +82,7 @@ fn a_gradient_given_colors_alone_ramps_evenly_through_all_of_them() {
     assert!(near(mid, 0.5), "black to white reads mid gray halfway: {mid}");
 
     execute(&mut s, "effect.remove", &json!({"effect": two.0})).unwrap();
-    let five = json!({"filter": "gradientMap", "target": "content", "colors": [[0, 0, 0], [0.25, 0.25, 0.25], [0.5, 0.5, 0.5], [0.75, 0.75, 0.75], [1, 1, 1]]});
-    let five = LayerId(execute(&mut s, "effect.add.filter", &five).unwrap()["effect"].as_u64().unwrap());
+    let five = add_filter(&mut s, json!({"filter": "gradientMap", "colors": [[0, 0, 0], [0.25, 0.25, 0.25], [0.5, 0.5, 0.5], [0.75, 0.75, 0.75], [1, 1, 1]]}));
     assert_eq!(filter_of(&s, five).ramp_colors().len(), 5, "every color is used");
 }
 
@@ -105,7 +104,7 @@ fn a_saved_gradient_keeps_its_places_when_it_gains_a_color() {
     if let Some(found) = s.doc.project.effect_mut(effect) {
         found.kind = EffectKind::Filter(Filter::even_gradient(vec![[0.0; 3], [1.0, 0.0, 0.0], [1.0; 3]]));
     }
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "quantity": 4})).unwrap();
+    set(&mut s, effect, json!({"quantity": 4}));
     let Filter::GradientMap { colors, positions, quantity, .. } = filter_of(&s, effect) else { panic!() };
     assert_eq!((positions, quantity), (vec![0.0, 0.5, 1.0, 1.0], Some(4)));
     assert_eq!(colors.last(), Some(&[1.0; 3]), "the new color starts as the last one");
@@ -117,15 +116,17 @@ fn gradient_curve_remaps_through_its_preset() {
     let mut s = session();
     let effect = filtered(&mut s, [0.25; 3], json!({"filter": "gradientCurve"}));
     assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Gradient Curve");
+    assert_eq!(filter_of(&s, effect), LIBRARY_GRADIENT_CURVE, "the workflow's defaults");
 
     let round = (1.0f32 - 0.75 * 0.75).sqrt();
     assert!(near(center(&mut s, Channel::BaseColor)[0], round), "Round at 0.25");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "preset": "easeIn"})).unwrap();
+    set(&mut s, effect, json!({"preset": "easeIn"}));
     assert!(near(center(&mut s, Channel::BaseColor)[0], 0.0625), "Ease In at 0.25");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "invert": true})).unwrap();
+    set(&mut s, effect, json!({"invert": true}));
     assert!(near(center(&mut s, Channel::BaseColor)[0], 0.5625), "Ease In at 0.75");
+
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "preset": "spiral"})).is_err());
 
     let Filter::GradientCurve { preset, .. } = filter_of(&s, effect) else { panic!() };
@@ -139,11 +140,15 @@ fn gradient_dynamic_reads_its_uniform_source() {
     let effect = filtered(&mut s, [0.9, 0.1, 0.1], json!({"filter": "gradientDynamic", "color": [0.2, 0.4, 0.6]}));
     assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Gradient Dynamic");
 
+    let Filter::GradientDynamic { vertical, position, .. } = LIBRARY_GRADIENT_DYNAMIC else { panic!() };
+    assert_eq!(filter_of(&s, effect), Filter::GradientDynamic { vertical, position, color: [0.2, 0.4, 0.6] }, "the workflow's defaults, the color given");
+
     let color = center(&mut s, Channel::BaseColor);
     assert!(near(color[0], 0.2) && near(color[1], 0.4) && near(color[2], 0.6), "{color:?}");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "orientation": "vertical", "position": 0.7})).unwrap();
+    set(&mut s, effect, json!({"orientation": "vertical", "position": 0.7}));
     let Filter::GradientDynamic { vertical, position, .. } = filter_of(&s, effect) else { panic!() };
     assert!(vertical && position == 0.7);
+
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "orientation": "diagonal"})).is_err());
 }

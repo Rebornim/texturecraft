@@ -4,7 +4,7 @@ use serde_json::json;
 use texturecraft_engine::core::{EffectKind, Filter, FlipMode, LayerId, RepeatMode, TileTransform};
 use texturecraft_engine::{Session, execute};
 
-use crate::filter_support::{SIZE, add_filter, refused, roughness, session};
+use crate::filter_support::{SIZE, add_filter, refused, roughness, session, set};
 
 fn transform_of(s: &Session, effect: LayerId) -> TileTransform {
     match &s.doc.project.effect(effect).unwrap().1.kind {
@@ -33,27 +33,27 @@ fn transform_moves_scales_and_flips_each_tile() {
     }
 
     // A quarter tile on: each texel reads 32 texels further right, the last ones round from the left
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "offset": [0.25, 0.0]})).unwrap();
+    set(&mut s, effect, json!({"offset": [0.25, 0.0]}));
     for x in [20, 50, 110] {
         assert!((roughness(&mut s, (x, row)) - was(x + SIZE / 4)).abs() < 2e-3, "offset at {x}");
     }
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "offset": 0.0, "flipMode": "horizontally"})).unwrap();
+    set(&mut s, effect, json!({"offset": 0.0, "flipMode": "horizontally"}));
     assert!((roughness(&mut s, (20, row)) - was(SIZE - 1 - 20)).abs() < 2e-3, "flipped, the left reads the right");
 
     // Twice across about the centre: the centre stays; without repeat the edges read empty (the layer's content is clear there)
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "flipMode": "none", "scaling": [2.0, 2.0], "repeatMode": "none"})).unwrap();
+    set(&mut s, effect, json!({"flipMode": "none", "scaling": [2.0, 2.0], "repeatMode": "none"}));
     assert!((roughness(&mut s, (SIZE / 2, row)) - was(SIZE / 2)).abs() < 2e-2, "the centre stays");
     assert!((roughness(&mut s, (8, row)) - empty).abs() < 1e-4, "past the content reads empty");
 
     // Repeating, texel 8 reads 2 · 8.5 / 128 − 0.5 of a tile on: between texels 80 and 81
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "repeatMode": "horizontallyAndVertically"})).unwrap();
+    set(&mut s, effect, json!({"repeatMode": "horizontallyAndVertically"}));
     assert!((roughness(&mut s, (8, row)) - (was(80) + was(81)) / 2.0).abs() < 2e-3, "the tile comes round again");
 
     let edited = transform_of(&s, effect);
     assert_eq!((edited.repeat, edited.flip, edited.scaling), (RepeatMode::HorizontallyAndVertically, FlipMode::None, [2.0, 2.0]));
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "rotation": -30.0, "tileSafeRotation": false})).unwrap();
+    set(&mut s, effect, json!({"rotation": -30.0, "tileSafeRotation": false}));
     let turned = transform_of(&s, effect);
     assert_eq!((turned.rotation, turned.tile_safe), (330.0, false), "a turn reads 0..360");
 
@@ -70,7 +70,7 @@ fn transform_moves_scales_and_flips_each_tile() {
     );
     assert_eq!(transform_of(&s, effect), turned, "a refused value changes nothing");
 
-    execute(&mut s, "effect.set", &json!({"effect": effect.0, "scaling": [1e9, -5.0]})).unwrap();
+    set(&mut s, effect, json!({"scaling": [1e9, -5.0]}));
     assert_eq!(transform_of(&s, effect).scaling, [TileTransform::SCALING.1, TileTransform::SCALING.0], "scaling clamps");
 
     execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap();

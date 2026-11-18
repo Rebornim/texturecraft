@@ -2596,7 +2596,6 @@ impl<'a, 'b> Texel<'a, 'b> {
     }
 
     /// A fill's value and coverage through `proj`, from `one` (which samples it once): with `sampling`'s symmetry on, every copy of the projection is sampled and the copies are laid over each other, the texel's own copy on top
-    #[inline(always)]
     fn symmetric(&mut self, proj: &Projection, sampling: Sampling, mut one: impl FnMut(&mut Self) -> ([f32; 3], f32)) -> ([f32; 3], f32) {
         // Most fills have no symmetry: they are sampled directly and never pay for the surface lookup
         if !takes_symmetry(proj, sampling) {
@@ -2607,7 +2606,6 @@ impl<'a, 'b> Texel<'a, 'b> {
     }
 
     /// [`Texel::symmetric`] with symmetry on: every copy sampled and laid over the others
-    #[inline(never)]
     fn symmetric_copies(&mut self, sampling: Sampling, mut one: impl FnMut(&mut Self) -> ([f32; 3], f32)) -> ([f32; 3], f32) {
         let Some(world) = self.inp.gbuf.surface(self.inp.mesh, (self.y * self.inp.gbuf.width + self.x) as usize).map(|surface| surface.pos) else {
             return one(self);
@@ -2709,7 +2707,12 @@ impl<'a, 'b> Texel<'a, 'b> {
     /// `place`'s fill at this texel in channel `ch`, every symmetric copy laid over each other when its symmetry is on
     #[inline(always)]
     fn fill_place_texel(&mut self, place: FillPlace, source: Option<&Source>, ch: Channel) -> ([f32; 3], f32) {
-        self.symmetric(&place.fill.projection, place.fill.sampling, |texel| texel.fill_texel(place, source, ch))
+        // Without symmetry the fill is sampled directly: through `symmetric`'s closure a plain fill composites about 8% slower
+        if takes_symmetry(&place.fill.projection, place.fill.sampling) {
+            self.symmetric(&place.fill.projection, place.fill.sampling, |texel| texel.fill_texel(place, source, ch))
+        } else {
+            self.fill_texel(place, source, ch)
+        }
     }
 
     /// `place`'s fill sampled once at this texel: its value in channel `ch` (`source`, else the channel's default) and its coverage
@@ -3031,7 +3034,8 @@ impl<'a, 'b> Texel<'a, 'b> {
                         let cover = if effect.covers_all { 1.0 } else { texel.cover(std::iter::once(source), projection, *sampling, effect.depth.as_deref()) };
                         (fill, cover)
                     };
-                    let ([fill, ..], cover) = self.symmetric(projection, *sampling, once);
+                    // Sampled directly without symmetry, as `Texel::fill_place_texel` is
+                    let ([fill, ..], cover) = if takes_symmetry(projection, *sampling) { self.symmetric(projection, *sampling, once) } else { once(self) };
                     value += (blend1(effect.blend, value, fill) - value) * opacity * cover;
                 }
                 EffectKind::Generator(generator) => {
@@ -3126,32 +3130,15 @@ impl<'a, 'b> Texel<'a, 'b> {
                 }
                 Content::Fill { .. } | Content::Paint { .. } if mask > 0.0 => {
                     let before = if node.anchors.iter().any(|(_, cut)| cut.is_some()) { Some(*acc) } else { None };
-                    self.lit = None;
-
-                    // Lit by the layer's material: its other channels go first, each evaluated once, and light the base colour
-                    let base = Channel::BaseColor.index();
-                    let mut others = [None; NCH];
+                    // A layer lit by its material evaluates its other channels first (see `Texel::lit_content`)
                     if node.lights {
-                        let mut material = *acc;
-                        for chan_plan in node.chans.iter().filter(|chan_plan| chan_plan.ch != base) {
-                            let content = self.tape_content(&node.content, chan_plan);
-                            if let Some((value, coverage)) = content {
-                                apply(&mut material, chan_plan, value, coverage, mask);
+                        self.lit_content(node, acc, mask);
+                    } else {
+                        self.lit = None;
+                        for chan_plan in &node.chans {
+                            if let Some((value, coverage)) = self.tape_content(&node.content, chan_plan) {
+                                apply(acc, chan_plan, value, coverage, mask);
                             }
-                            if let Some(slot) = others.get_mut(chan_plan.ch) {
-                                *slot = content;
-                            }
-                        }
-                        self.lit = Some(material);
-                    }
-
-                    for chan_plan in &node.chans {
-                        let content = match others.get(chan_plan.ch) {
-                            Some(other) if node.lights && chan_plan.ch != base => *other,
-                            _ => self.tape_content(&node.content, chan_plan),
-                        };
-                        if let Some((value, coverage)) = content {
-                            apply(acc, chan_plan, value, coverage, mask);
                         }
                     }
                     self.lit = None;
@@ -3181,6 +3168,34 @@ impl<'a, 'b> Texel<'a, 'b> {
             }
         }
         false
+    }
+
+    /// Lay a layer lit by its material over `acc` under `mask`: its other channels go first, each evaluated once, and `self.lit` holds them over the stack below for its base colour's lighting
+    #[inline(never)]
+    fn lit_content(&mut self, node: &Node, acc: &mut Acc, mask: f32) {
+        let base = Channel::BaseColor.index();
+        let mut others = [None; NCH];
+        let mut material = *acc;
+        for chan_plan in node.chans.iter().filter(|chan_plan| chan_plan.ch != base) {
+            let content = self.tape_content(&node.content, chan_plan);
+            if let Some((value, coverage)) = content {
+                apply(&mut material, chan_plan, value, coverage, mask);
+            }
+            if let Some(slot) = others.get_mut(chan_plan.ch) {
+                *slot = content;
+            }
+        }
+        self.lit = Some(material);
+
+        for chan_plan in &node.chans {
+            let content = match others.get(chan_plan.ch) {
+                Some(other) if chan_plan.ch != base => *other,
+                _ => self.tape_content(&node.content, chan_plan),
+            };
+            if let Some((value, coverage)) = content {
+                apply(acc, chan_plan, value, coverage, mask);
+            }
+        }
     }
 
     /// [`Texel::eval`] of the whole stack over `acc`, split along the path to the hot layer

@@ -13,6 +13,7 @@ use texturecraft_core::{
 
 use crate::commands::{CommandSpec, always, bad, boolp, color_of, color_param, f32p, has_layer, strp, u64p};
 use crate::filter_about::FilterAbout;
+use crate::layer_cmds::FULL_TURN_DEGREES;
 use crate::{Result, Session, cmd};
 
 /// A filter of the library.
@@ -399,7 +400,10 @@ pub fn scalar_params(filter: &Filter) -> Vec<(&'static str, &'static str, f32, f
             ]
         }
         Filter::DirectionalBlur { radius, angle } => {
-            vec![("intensity", "Intensity", *radius / Filter::BLUR_INTENSITY, 0.0, BLUR_INTENSITY_SLIDER_MAX), ("angle", "Angle", *angle, 0.0, 360.0)]
+            vec![
+                ("intensity", "Intensity", *radius / Filter::BLUR_INTENSITY, 0.0, BLUR_INTENSITY_SLIDER_MAX),
+                ("angle", "Angle", *angle, 0.0, FULL_TURN_DEGREES),
+            ]
         }
         Filter::SlopeBlur { radius, scale, seed, .. } => {
             vec![
@@ -416,7 +420,7 @@ pub fn scalar_params(filter: &Filter) -> Vec<(&'static str, &'static str, f32, f
             ("sharpness", "Sharpness", kuwahara.sharpness, AnisotropicKuwahara::LIBRARY.sharpness, 1.0),
             ("tensorSmoothness", "Tensor Smoothness", kuwahara.tensor_smoothness, 0.0, 1.0),
             ("anisotropy", "Anisotropy", kuwahara.anisotropy, 0.0, 1.0),
-            ("angle", "Anisotropy Angle", kuwahara.angle, 0.0, 360.0),
+            ("angle", "Anisotropy Angle", kuwahara.angle, 0.0, FULL_TURN_DEGREES),
         ],
         Filter::Grayscale => conversion_params(&GrayscaleConversion::of_luminance()),
         Filter::HeightToNormal(converter) if converter.world_units => vec![
@@ -425,13 +429,13 @@ pub fn scalar_params(filter: &Filter) -> Vec<(&'static str, &'static str, f32, f
         ],
         Filter::HeightToNormal(converter) => vec![("normalIntensity", "Normal Intensity", converter.intensity, 0.0, HeightToNormal::MAX_INTENSITY)],
         Filter::ColorMatch(matcher) => {
-            vec![("hue", "Hue", matcher.hue, 0.0, 360.0), ("chroma", "Chroma", matcher.chroma, 0.0, 1.0), ("luma", "Luma", matcher.luma, 0.0, 1.0)]
+            vec![("hue", "Hue", matcher.hue, 0.0, FULL_TURN_DEGREES), ("chroma", "Chroma", matcher.chroma, 0.0, 1.0), ("luma", "Luma", matcher.luma, 0.0, 1.0)]
         }
         Filter::EdgeDetect { width } => vec![("width", "Width", *width, 0.0, EDGE_WIDTH_SLIDER_MAX)],
         Filter::DirectionalWarp { intensity, angle, scale, seed, .. } => {
             vec![
                 ("intensity", "Intensity", *intensity, 0.0, TEXELS_SLIDER_MAX),
-                ("angle", "Angle", *angle, 0.0, 360.0),
+                ("angle", "Angle", *angle, 0.0, FULL_TURN_DEGREES),
                 ("scale", "Source Tiling", *scale, NOISE_TILING_MIN, NOISE_TILING_MAX),
                 ("seed", "Seed", *seed as f32, 0.0, SEED_SLIDER_MAX),
             ]
@@ -444,7 +448,7 @@ pub fn scalar_params(filter: &Filter) -> Vec<(&'static str, &'static str, f32, f
         Filter::SourceWarp(warp) => {
             let mut params = vec![("seed", "Seed", warp.seed as f32, 0.0, SEED_SLIDER_MAX), ("intensity", "Intensity", warp.intensity, 0.0, 1.0)];
             if warp.mode != WarpMode::Warp {
-                params.push(("angle", "Angle", warp.angle, 0.0, 360.0));
+                params.push(("angle", "Angle", warp.angle, 0.0, FULL_TURN_DEGREES));
             }
             params.extend([
                 ("sourceBlur", "Source Blur", warp.source.blur, 0.0, 1.0),
@@ -473,7 +477,7 @@ pub fn scalar_params(filter: &Filter) -> Vec<(&'static str, &'static str, f32, f
         ],
         Filter::DirectionalDistance(trail) => vec![
             ("distance", "Distance", trail.distance, 0.0, SMOOTH_DISTANCE_MAX),
-            ("angle", "Angle", trail.angle, 0.0, 360.0),
+            ("angle", "Angle", trail.angle, 0.0, FULL_TURN_DEGREES),
             ("contrast", "Contrast", trail.contrast, 0.0, 1.0),
             ("distanceMapMultiplier", "Distance Map Multiplier", trail.multiplier, 0.0, 1.0),
         ],
@@ -496,7 +500,7 @@ pub fn scalar_params(filter: &Filter) -> Vec<(&'static str, &'static str, f32, f
             vec![("width", "Width", *width, -1.0, 1.0), ("spread", "Spread", *spread, 0.0, 1.0), ("opacity", "Opacity", *opacity, 0.0, 1.0)]
         }
         Filter::DropShadow { angle, distance, size, spread, opacity, .. } => vec![
-            ("angle", "Angle", *angle, 0.0, 360.0),
+            ("angle", "Angle", *angle, 0.0, FULL_TURN_DEGREES),
             ("distance", "Distance", *distance, -Filter::SHADOW_DISTANCE_MAX, Filter::SHADOW_DISTANCE_MAX),
             ("size", "Size", *size, 0.0, 1.0),
             ("spread", "Spread", *spread, 0.0, 1.0),
@@ -504,14 +508,14 @@ pub fn scalar_params(filter: &Filter) -> Vec<(&'static str, &'static str, f32, f
         ],
         Filter::BakedLighting { azimuth, elevation, light, ambient, occlusion, .. } => vec![
             ("light", "Sun Intensity", *light, 0.0, SUN_INTENSITY_MAX),
-            ("azimuth", "Horizontal Angle", *azimuth, 0.0, 360.0),
-            ("elevation", "Vertical Angle", *elevation, 0.0, 360.0),
+            ("azimuth", "Horizontal Angle", *azimuth, 0.0, FULL_TURN_DEGREES),
+            ("elevation", "Vertical Angle", *elevation, 0.0, FULL_TURN_DEGREES),
             ("ambient", "Sky Intensity", *ambient, 0.0, SKY_INTENSITY_SLIDER_MAX),
             ("occlusion", "Diffuse AO", *occlusion, 0.0, 1.0),
         ],
         Filter::EnvironmentLighting { horizontal, vertical, exposure, height_intensity, ambient_occlusion, specular_occlusion } => vec![
-            ("horizontalRotation", "Horizontal Rotation", *horizontal, 0.0, 360.0),
-            ("verticalRotation", "Vertical Rotation", *vertical, 0.0, 360.0),
+            ("horizontalRotation", "Horizontal Rotation", *horizontal, 0.0, FULL_TURN_DEGREES),
+            ("verticalRotation", "Vertical Rotation", *vertical, 0.0, FULL_TURN_DEGREES),
             ("exposure", "Exposure", *exposure, -EXPOSURE_MAX_EV, EXPOSURE_MAX_EV),
             ("heightIntensity", "Height Intensity", *height_intensity, 0.0, HEIGHT_INTENSITY_MAX),
             ("ambientOcclusion", "Ambient Occlusion Intensity", *ambient_occlusion, 0.0, 1.0),
@@ -704,7 +708,7 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
     };
     let angle = |slot: &mut f32| {
         if let Some(degrees) = f32p(p, "angle") {
-            *slot = degrees.rem_euclid(360.0);
+            *slot = degrees.rem_euclid(FULL_TURN_DEGREES);
         }
     };
 
@@ -769,7 +773,7 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
                 }
             }
             switch(&mut matcher.custom_variation, "customColorVariation")?;
-            set(&mut matcher.hue, "hue", 0.0, 360.0);
+            set(&mut matcher.hue, "hue", 0.0, FULL_TURN_DEGREES);
             set(&mut matcher.chroma, "chroma", 0.0, 1.0);
             set(&mut matcher.luma, "luma", 0.0, 1.0);
         }
@@ -1058,12 +1062,12 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
         }
         Filter::BakedLighting { azimuth, elevation, light, ambient, occlusion, stylized } => {
             if let Some(degrees) = f32p(p, "azimuth") {
-                *azimuth = degrees.rem_euclid(360.0);
+                *azimuth = degrees.rem_euclid(FULL_TURN_DEGREES);
             }
 
             // A light past the zenith comes from the far side: the angle wraps like the horizontal one
             if let Some(degrees) = f32p(p, "elevation") {
-                *elevation = degrees.rem_euclid(360.0);
+                *elevation = degrees.rem_euclid(FULL_TURN_DEGREES);
             }
             set(light, "light", 0.0, SUN_INTENSITY_MAX);
             set(ambient, "ambient", 0.0, SKY_INTENSITY_MAX);
@@ -1077,7 +1081,7 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
         Filter::EnvironmentLighting { horizontal, vertical, exposure, height_intensity, ambient_occlusion, specular_occlusion } => {
             for (key, slot) in [("horizontalRotation", horizontal), ("verticalRotation", vertical)] {
                 if let Some(degrees) = f32p(p, key) {
-                    *slot = degrees.rem_euclid(360.0);
+                    *slot = degrees.rem_euclid(FULL_TURN_DEGREES);
                 }
             }
             set(exposure, "exposure", -EXPOSURE_MAX_EV, EXPOSURE_MAX_EV);

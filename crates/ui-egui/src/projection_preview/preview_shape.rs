@@ -1,3 +1,5 @@
+//! The shapes the projection preview wraps its checker around
+
 use texturecraft_engine::geom::glam::Vec3;
 
 use super::{CUBE_HALF, CYLINDER_HALF_HEIGHT, CYLINDER_RADIUS, SPHERE_RADIUS};

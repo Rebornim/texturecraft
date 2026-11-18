@@ -8,8 +8,8 @@ use texturecraft_engine::core::{Channel, CookResolution, LayerId, LayerKind, Lin
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::screen_pick::{PickOutcome, ScreenPick};
 
-use crate::fill_support::{click_node, fill_app};
-use crate::filter_support::{click_at, undo_depth};
+use crate::fill_support::{click_node, fill_app, fill_of};
+use crate::filter_support::{along, click_at, drag, undo_depth};
 use crate::{SETTLE_FRAMES, TEXTURE_RESOLUTION};
 
 /// Tall enough that Properties shows the whole fill and an open source list without scrolling
@@ -23,12 +23,9 @@ fn app_with_fill(settings: serde_json::Value) -> (Harness<'static, TextureCraftA
     fill_app(settings, None, Some("Material"), WINDOW_SIZE)
 }
 
+/// The source `channel` of the fill `layer` reads
 fn source(harness: &Harness<'_, TextureCraftApp>, layer: LayerId, channel: Channel) -> Source {
-    let layer = harness.state().session.doc.project.layer(layer).unwrap();
-    match &layer.kind {
-        texturecraft_engine::core::LayerKind::Fill(fill) => fill.source(channel),
-        other => panic!("not a fill: {other:?}"),
-    }
+    fill_of(harness, layer).source(channel)
 }
 
 fn click(harness: &mut Harness<'_, TextureCraftApp>, role: Role, label: &str) {
@@ -125,7 +122,8 @@ fn dragging_a_pattern_slider_changes_only_its_own_parameter() {
     harness.get_by_role_and_label(Role::Slider, "Contrast").scroll_to_me();
     harness.run_steps(SCROLL_FRAMES);
     let track = harness.get_by_role_and_label(Role::Slider, "Contrast").rect();
-    mouse_drag(&mut harness, track.center(), egui::vec2(track.width() / 4.0, 0.0));
+    let from = track.center();
+    drag(&mut harness, from, from + egui::vec2(track.width() / 4.0, 0.0));
 
     let Source::Procedural { pattern: after, low: after_low, high: after_high, .. } = source(&harness, layer, Channel::Metallic) else {
         panic!("still a procedural")
@@ -168,14 +166,37 @@ fn dragging_a_linked_material_input_adds_one_undo_step() {
     let (mut harness, layer) = app_with_fill(json!({}));
     let wear = float_param("wear", "Wear", 0.25);
     link_fill(&mut harness, layer, vec![wear], &[]);
-    let steps = harness.state().session.history_labels().len();
+    let steps = undo_depth(&harness);
 
     let track = harness.get_by_role_and_label(Role::Slider, "Wear").rect();
-    mouse_drag(&mut harness, track.center(), egui::vec2(track.width() / 4.0, 0.0));
+    let from = track.center();
+    drag(&mut harness, from, from + egui::vec2(track.width() / 4.0, 0.0));
 
-    let LayerKind::Fill(fill) = &harness.state().session.doc.project.layer(layer).unwrap().kind else { panic!("a fill") };
+    let fill = fill_of(&harness, layer);
     assert_ne!(fill.link.as_deref().unwrap().params[0].value, json!({"t": "float", "v": 0.25}), "the drag changes the input");
-    assert_eq!(harness.state().session.history_labels().len(), steps + 1, "every frame of the drag merges into one step");
+    assert_eq!(undo_depth(&harness), steps + 1, "every frame of the drag merges into one step");
+}
+
+/// A click inside a linked whole-number input's current band is no edit (no undo step, no re-cook); a drag across whole numbers is one step
+#[test]
+fn a_linked_whole_number_input_changes_only_on_a_new_whole_number() {
+    let (mut harness, layer) = app_with_fill(json!({}));
+    let rings = LinkParam { value: json!({"t": "int", "v": 3}), default: json!({"t": "int", "v": 3}), max: 10.0, ..float_param("rings", "Rings", 0.0) };
+    link_fill(&mut harness, layer, vec![rings], &[]);
+    harness.state_mut().toasts.clear();
+    let steps = undo_depth(&harness);
+    let track = harness.get_by_role_and_label(Role::Slider, "Rings").rect();
+
+    // A link without a package fails to re-cook with a toast: no toast, no cook
+    click_at(&mut harness, along(track, 0.32));
+    harness.run_steps(SETTLE_FRAMES);
+    assert_eq!(undo_depth(&harness), steps, "3.2 rounds to the 3 the input holds: no undo step");
+    assert!(harness.state().toasts.is_empty(), "and no re-cook");
+
+    drag(&mut harness, along(track, 0.3), along(track, 0.53));
+    harness.run_steps(SETTLE_FRAMES);
+    assert_eq!(fill_of(&harness, layer).link.unwrap().params[0].value, json!({"t": "int", "v": 5}), "the drag ends on 5");
+    assert_eq!(undo_depth(&harness), steps + 1, "the drag's whole numbers merge into one step");
 }
 
 /// A drag in a linked material's colour picker is one undo step, however many frames it spans
@@ -185,7 +206,7 @@ fn dragging_in_a_linked_colour_picker_adds_one_undo_step() {
     let gray = json!({"t": "color", "v": [0.5, 0.5, 0.5, 1.0]});
     let tint = LinkParam { value: gray.clone(), default: gray.clone(), ..float_param("tint", "Tint", 0.0) };
     link_fill(&mut harness, layer, vec![tint], &[]);
-    let steps = harness.state().session.history_labels().len();
+    let steps = undo_depth(&harness);
 
     // The swatch sits right of its label; its picker's saturation and value square lies under the R, G, B row
     let label = harness.get_by_label("Tint").rect();
@@ -200,11 +221,12 @@ fn dragging_in_a_linked_colour_picker_adds_one_undo_step() {
         .filter(|field| field.center().y < copy.bottom())
         .min_by(|a, b| a.left().total_cmp(&b.left()))
         .unwrap();
-    mouse_drag(&mut harness, egui::pos2(red.left() + SQUARE_REACH, copy.bottom() + SQUARE_REACH), egui::vec2(SQUARE_REACH / 2.0, SQUARE_REACH / 2.0));
+    let from = egui::pos2(red.left() + SQUARE_REACH, copy.bottom() + SQUARE_REACH);
+    drag(&mut harness, from, from + egui::vec2(SQUARE_REACH / 2.0, SQUARE_REACH / 2.0));
 
-    let LayerKind::Fill(fill) = &harness.state().session.doc.project.layer(layer).unwrap().kind else { panic!("a fill") };
+    let fill = fill_of(&harness, layer);
     assert_ne!(fill.link.as_deref().unwrap().params[0].value, gray, "the drag changes the colour");
-    assert_eq!(harness.state().session.history_labels().len(), steps + 1, "every frame of the drag merges into one step");
+    assert_eq!(undo_depth(&harness), steps + 1, "every frame of the drag merges into one step");
 }
 
 /// From a label's right edge into the colour swatch beside it
@@ -217,10 +239,7 @@ const SQUARE_REACH: f32 = 80.0;
 fn a_linked_material_maps_its_channels_and_picks_its_resolution() {
     let (mut harness, layer) = app_with_fill(json!({}));
     link_fill(&mut harness, layer, Vec::new(), &[("baseColor", "steel_base.png"), ("roughness", "steel_rough.png")]);
-    let link = |harness: &Harness<'_, TextureCraftApp>| match &harness.state().session.doc.project.layer(layer).unwrap().kind {
-        LayerKind::Fill(fill) => fill.link.as_deref().unwrap().clone(),
-        other => panic!("not a fill: {other:?}"),
-    };
+    let link = |harness: &Harness<'_, TextureCraftApp>| *fill_of(harness, layer).link.unwrap();
 
     // Channels mapping: the Roughness row lists the outputs; picking one makes Roughness read it
     click_below(&mut harness, Role::ComboBox, "roughness");
@@ -380,8 +399,9 @@ fn escape_ends_an_eyedropper_pick_before_the_picker_and_an_alt_orbit_keeps_the_p
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "the next Escape closes the picker");
 }
 
-/// A mouse press and release of `button` at `pos`, a frame apart, as a real click arrives
-fn mouse_click(harness: &mut Harness<'_, TextureCraftApp>, pos: egui::Pos2, button: egui::PointerButton) {
+/// A secondary-button press and release at `pos`, a frame apart, as a real right-click arrives
+fn right_click(harness: &mut Harness<'_, TextureCraftApp>, pos: egui::Pos2) {
+    let button = egui::PointerButton::Secondary;
     harness.hover_at(pos);
     harness.run_steps(1);
     for pressed in [true, false] {
@@ -402,12 +422,12 @@ fn the_swatches_row_keeps_the_picker_colour_in_the_project_applies_it_on_a_click
     let add = harness.get_by_role_and_label(Role::Button, "Add swatch").rect();
     let space = harness.get_by_role_and_label(Role::ComboBox, "sRGB").rect();
     assert!(add.top() > space.bottom() && (add.left() - space.left()).abs() < 1.0, "the row is under the picker, at its left edge: {add:?}");
-    mouse_click(&mut harness, add.center(), egui::PointerButton::Primary);
+    click_at(&mut harness, add.center());
     assert_eq!(harness.state().session.doc.project.swatches, vec![orange], "+ keeps the picker's colour in the project");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "the picker stays open");
     let depth = undo_depth(&harness);
     let kept = harness.get_by_role_and_label(Role::Button, "#FF8000").rect();
-    mouse_click(&mut harness, kept.center(), egui::PointerButton::Primary);
+    click_at(&mut harness, kept.center());
     assert_eq!(undo_depth(&harness), depth, "a swatch the picker already shows changes nothing");
 
     click(&mut harness, Role::Button, "Previous color");
@@ -415,13 +435,13 @@ fn the_swatches_row_keeps_the_picker_colour_in_the_project_applies_it_on_a_click
     let chip = harness.get_by_role_and_label(Role::Button, "#FF8000").rect();
     let moved_add = harness.get_by_role_and_label(Role::Button, "Add swatch").rect();
     assert!((chip.left() - add.left()).abs() < 1.0 && moved_add.left() > chip.right(), "the swatch takes the + chip's place, + moves right");
-    mouse_click(&mut harness, chip.center(), egui::PointerButton::Primary);
+    click_at(&mut harness, chip.center());
     assert_eq!(base_color(&harness, layer), orange, "a click on a swatch applies it");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "applying keeps the picker open");
 
-    mouse_click(&mut harness, chip.center(), egui::PointerButton::Secondary);
+    right_click(&mut harness, chip.center());
     let remove = harness.get_by_role_and_label(Role::Button, "Remove swatch").rect();
-    mouse_click(&mut harness, remove.center(), egui::PointerButton::Primary);
+    click_at(&mut harness, remove.center());
     assert!(harness.state().session.doc.project.swatches.is_empty(), "its right-click menu removes it");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "a pick in the menu keeps the picker open");
 }
@@ -447,7 +467,7 @@ fn a_hex_code_half_typed_when_a_press_closes_the_picker_is_gone_when_it_opens_ag
     harness.event(egui::Event::Text("FF8000".into()));
     harness.run_steps(1);
     let view = harness.state().viewport_rect.center();
-    mouse_click(&mut harness, view, egui::PointerButton::Primary);
+    click_at(&mut harness, view);
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "the press closes the picker");
     assert_eq!(base_color(&harness, layer), [0.2, 0.2, 0.2], "closing applies nothing");
 
@@ -458,20 +478,6 @@ fn a_hex_code_half_typed_when_a_press_closes_the_picker_is_gone_when_it_opens_ag
     harness.run_steps(SETTLE_FRAMES);
     assert_eq!(base_color(&harness, layer), [0.2, 0.2, 0.2], "the field shows the colour's own code, not the text typed before");
     assert_eq!(undo_depth(&harness), depth, "no undo step");
-}
-
-/// A primary-button drag from `from` by `by` in four moves, a frame apart, as a real drag arrives
-fn mouse_drag(harness: &mut Harness<'_, TextureCraftApp>, from: egui::Pos2, by: egui::Vec2) {
-    harness.hover_at(from);
-    harness.run_steps(1);
-    harness.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
-    harness.run_steps(1);
-    for step in 1..=4 {
-        harness.hover_at(from + by * (step as f32 / 4.0));
-        harness.run_steps(1);
-    }
-    harness.event(egui::Event::PointerButton { pos: from + by, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
-    harness.run_steps(SETTLE_FRAMES);
 }
 
 /// The open picker's frame: its title bar's top and sides, down to the air under the + chip
@@ -501,7 +507,8 @@ fn the_picker_is_titled_by_its_channel_resizes_from_its_edges_keeps_its_size_and
     let hue = harness.get_by_role_and_label(Role::Slider, "Hue").rect();
     let track = harness.get_by_role_and_label(Role::Slider, "S").rect();
     let by = egui::vec2(80.0, 60.0);
-    mouse_drag(&mut harness, face.right_bottom() - egui::vec2(2.0, 2.0), by);
+    let corner = face.right_bottom() - egui::vec2(2.0, 2.0);
+    drag(&mut harness, corner, corner + by);
     assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "a resize keeps the picker open");
     let grown = picker_face(&harness);
     assert!((grown.min - face.min).length() < 1.0, "the bottom right corner leaves the top left where it was: {grown:?} {face:?}");
@@ -513,14 +520,16 @@ fn the_picker_is_titled_by_its_channel_resizes_from_its_edges_keeps_its_size_and
     assert!((grown_hue.height() - (hue.height() + by.y)).abs() < 1.0 && (grown_hue.right() - hue.right() - by.x).abs() < 1.0, "the hue strip grows with it");
     assert!((grown_track.width() - (track.width() + by.x)).abs() < 1.0, "the sliders' tracks take the new width");
 
-    mouse_drag(&mut harness, egui::pos2(grown.left() + 2.0, grown.center().y), egui::vec2(-50.0, 0.0));
+    let left_edge = egui::pos2(grown.left() + 2.0, grown.center().y);
+    drag(&mut harness, left_edge, left_edge + egui::vec2(-50.0, 0.0));
     let wider = picker_face(&harness);
     assert!(
         (wider.left() - (grown.left() - 50.0)).abs() < 1.0 && (wider.right() - grown.right()).abs() < 1.0,
         "the left edge moves, the right stays: {wider:?}"
     );
 
-    mouse_drag(&mut harness, wider.right_bottom() - egui::vec2(2.0, 2.0), egui::vec2(-1000.0, -1000.0));
+    let wider_corner = wider.right_bottom() - egui::vec2(2.0, 2.0);
+    drag(&mut harness, wider_corner, wider_corner + egui::vec2(-1000.0, -1000.0));
     let least = picker_face(&harness);
     let least_field = harness.get_by_role_and_label(Role::Slider, "Saturation and value").rect();
     assert!(least.width() >= PICKER_MIN_WIDTH - 1.0 && least_field.height() >= FIELD_MIN_HEIGHT - 1.0, "it stops at a usable size: {least:?} {least_field:?}");
@@ -548,17 +557,9 @@ fn the_picker_is_titled_by_its_channel_resizes_from_its_edges_keeps_its_size_and
     assert!(harness.query_by_role_and_label(Role::Slider, "R").is_some(), "a click picks it");
 }
 
+/// The whole material the fill `layer` holds
 fn whole_material(harness: &Harness<'_, TextureCraftApp>, layer: LayerId) -> Option<String> {
-    match &harness.state().session.doc.project.layer(layer).unwrap().kind {
-        LayerKind::Fill(fill) => fill.material.clone(),
-        other => panic!("not a fill: {other:?}"),
-    }
-}
-
-/// A real click (press and release a frame apart) in the middle of the `role` named `label`
-fn mouse_click_on(harness: &mut Harness<'_, TextureCraftApp>, role: Role, label: &str) {
-    let at = harness.get_by_role_and_label(role, label).rect().center();
-    mouse_click(harness, at, egui::PointerButton::Primary);
+    fill_of(harness, layer).material
 }
 
 #[test]
@@ -566,25 +567,25 @@ fn a_plain_fill_switches_to_one_whole_material_picks_it_from_its_card_and_clears
     let (mut harness, layer) = app_with_fill(json!({}));
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Metallic").is_some(), "a plain fill opens on Channels: a card per channel");
 
-    mouse_click_on(&mut harness, Role::RadioButton, "Material");
+    click_node(&mut harness, Role::RadioButton, "Material");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Metallic").is_none(), "the Material side has no channel cards");
-    mouse_click_on(&mut harness, Role::ComboBox, "None");
+    click_node(&mut harness, Role::ComboBox, "None");
 
     // The card opens the material picker, not a list: its search keeps only the materials it names
     harness.event(egui::Event::Text("hammered".into()));
     harness.run_steps(SETTLE_FRAMES);
     assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Steel").is_none(), "searching hides what it doesn't name");
     assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Steel Painted Worn").is_none(), "smart materials are folders of layers: not offered");
-    mouse_click_on(&mut harness, Role::ListBoxOption, "Copper Hammered");
+    click_node(&mut harness, Role::ListBoxOption, "Copper Hammered");
     assert_eq!(whole_material(&harness, layer).as_deref(), Some("copper_hammered"), "the picker sets the whole material");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Copper Hammered").is_some(), "the card names it");
     assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Steel").is_none(), "the picker closed on the pick");
 
-    mouse_click_on(&mut harness, Role::RadioButton, "Channels");
+    click_node(&mut harness, Role::RadioButton, "Channels");
     assert!(matches!(source(&harness, layer, Channel::BaseColor), Source::Procedural { .. }), "the material set every channel");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Height").is_some(), "its channels show as cards");
 
-    mouse_click_on(&mut harness, Role::RadioButton, "Material");
+    click_node(&mut harness, Role::RadioButton, "Material");
     click_in_slot(&mut harness, "Copper Hammered", Role::Button, "Clear");
     assert_eq!(whole_material(&harness, layer), None, "× drops the material");
     assert_eq!(source(&harness, layer, Channel::BaseColor), Source::uniform_of(Channel::BaseColor), "and returns the channels to their defaults");
@@ -617,13 +618,13 @@ fn a_click_outside_the_app_hands_its_screen_colour_to_the_bar_and_a_cancelled_or
     assert!(harness.state().picking_color.is_none(), "dismissing the desktop's picker ends the pick");
     assert_eq!(base_color(&harness, layer), before, "a cancelled pick changes nothing");
 
-    let undo_before = harness.state().session.history_labels().len();
+    let undo_before = undo_depth(&harness);
     pick_outside(&mut harness, PickOutcome::Picked([255, 128, 0]));
     let picked = base_color(&harness, layer);
     let expected = [1.0, texturecraft_engine::texel::srgb_to_linear(128.0 / 255.0), 0.0];
     assert!(picked.iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-3), "the screen's sRGB pixel is stored linear: {picked:?}");
     assert!(harness.state().picking_color.is_none() && harness.state().screen_pick.is_none(), "the click ends the pick");
-    assert_eq!(harness.state().session.history_labels().len(), undo_before + 1, "one undo step");
+    assert_eq!(undo_depth(&harness), undo_before + 1, "one undo step");
 }
 
 #[test]

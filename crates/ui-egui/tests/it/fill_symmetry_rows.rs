@@ -30,17 +30,17 @@ fn app_with_radial() -> (Harness<'static, TextureCraftApp>, u64) {
     (harness, layer)
 }
 
+/// The Count track's start: the fewest copies
+const COUNT_TRACK_FEWEST: f32 = *FillSymmetry::COUNTS.start() as f32;
+
+/// The Count track's end; a typed count reaches further
+const COUNT_TRACK_MOST: f32 = 16.0;
+
 /// Where the Count track shows `count` copies
 fn count_at(harness: &Harness<'_, TextureCraftApp>, count: f32) -> egui::Pos2 {
     let track = harness.get_by_role_and_label(Role::Slider, "Count").rect();
     along(track, (count - COUNT_TRACK_FEWEST) / (COUNT_TRACK_MOST - COUNT_TRACK_FEWEST))
 }
-
-/// The Count track's start: the fewest copies
-const COUNT_TRACK_FEWEST: f32 = 2.0;
-
-/// The Count track's end; a typed count reaches further
-const COUNT_TRACK_MOST: f32 = 16.0;
 
 #[test]
 fn the_symmetry_switch_shows_its_rows_and_each_row_changes_the_symmetry() {

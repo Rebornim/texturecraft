@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use texturecraft_engine::compose::frame_placement;
 use texturecraft_engine::compose::tile_length::{MeshSize, tile_length, tiling_for_length};
 use texturecraft_engine::core::{Backface, Channel, Fill, Filtering, LayerId, Projection, Projector, ScaleMode, ShapeCrop, UvWrap};
+use texturecraft_engine::paint::FULL_TURN_DEGREES;
 
 use crate::TextureCraftApp;
 use crate::dock::with;
@@ -25,20 +26,26 @@ use crate::theme::{AXIS_COLORS, AXIS_NAMES, Tokens};
 /// Centimetres in one mesh unit: meshes are read in metres
 const CM_PER_UNIT: f32 = 100.0;
 
-/// What the Tiling track spans, and what a typed tiling may be (the command's own limits)
+/// What the Tiling track spans
 const TILING_TRACK: RangeInclusive<f32> = 0.01..=5.0;
+
+/// What a typed tiling may be: the command's own limits
 const TILING_TYPED: RangeInclusive<f32> = 0.001..=1000.0;
 
-/// What the Size (cm) track spans, and what a typed size may be
+/// What the Size (cm) track spans
 const SIZE_CM_TRACK: RangeInclusive<f32> = 1.0..=500.0;
+
+/// What a typed size (cm) may be
 const SIZE_CM_TYPED: RangeInclusive<f32> = 0.1..=100_000.0;
 
-/// What an Offset track spans (tiles, centred on zero), and what a typed offset may be
+/// What an Offset track spans (tiles, centred on zero)
 const OFFSET_TRACK: RangeInclusive<f32> = -2.0..=2.0;
+
+/// What a typed offset may be (tiles)
 const OFFSET_TYPED: RangeInclusive<f32> = -1000.0..=1000.0;
 
 /// Range of a fill's rotation, a full turn
-const ROTATION_RANGE: RangeInclusive<f32> = 0.0..=360.0;
+const ROTATION_RANGE: RangeInclusive<f32> = 0.0..=FULL_TURN_DEGREES;
 
 /// Tri-planar blend's largest exponent: Hardness 1 (0 = exponent 1, 0.5 = 8)
 const TRIPLANAR_SHARPNESS_MAX: f32 = *Projection::TRIPLANAR_SHARPNESS_RANGE.end();

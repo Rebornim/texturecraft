@@ -4,17 +4,30 @@ use egui::{Painter, Pos2, Stroke};
 
 use crate::theme::Tokens;
 
-/// The ring's radius, its line and the line under it that keeps it readable on the checker (points)
+/// The ring's radius (points)
 const RING_RADIUS: f32 = 5.5;
+
+/// The ring's line width (points)
 const RING_LINE: f32 = 1.6;
+
+/// The width of the line under the ring that keeps it readable on the checker (points)
 const RING_UNDER: f32 = 3.6;
-/// The filled dot's radius and the rim under it (points)
+
+/// The filled dot's radius (points)
 const DOT_RADIUS: f32 = 3.3;
+
+/// The width of the rim under the filled dot (points)
 const DOT_RIM: f32 = 1.0;
-/// The dotted line: air between its dots, their radius and the rim under them (points)
+
+/// The dotted line's air between its dots (points)
 const LINE_SPACING: f32 = 3.5;
+
+/// The radius of the dotted line's dots (points)
 const LINE_DOT: f32 = 0.9;
+
+/// The width of the rim under the dotted line's dots (points)
 const LINE_RIM: f32 = 0.6;
+
 /// Most dots the line draws: more than any preview square holds, the rest would be cut off anyway
 const MAX_LINE_DOTS: usize = 256;
 

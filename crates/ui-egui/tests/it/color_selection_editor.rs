@@ -9,12 +9,21 @@ use texturecraft_engine::core::{BakedMap, EffectKind, LayerId, SelectionBackgrou
 use texturecraft_engine::{StackTarget, ViewMode, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 
+use crate::{BAKE_RESOLUTION, PROPERTIES_WINDOW, REDRAW_FRAMES, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+
 const FIRST: [f32; 3] = [200.0 / 255.0, 0.0, 0.0];
 const SECOND: [f32; 3] = [10.0 / 255.0, 1.0, 0.0];
 const THIRD: [f32; 3] = [30.0 / 255.0, 0.0, 1.0];
 const ID_PART: [u8; 3] = [90, 160, 220];
+
 /// Most air between a control and the text of its tooltip above it: the tooltip's gap plus its frame's margin
 const TIP_GAP: f32 = 16.0;
+
+/// Frames past the tooltip delay
+const TOOLTIP_WAIT_FRAMES: usize = 60;
+
+/// The Colors band's button that starts a pick
+const PICK_COLOR: &str = "Pick color";
 
 /// An ID map of one color, as a PNG
 fn id_map_png() -> Vec<u8> {
@@ -27,7 +36,7 @@ fn id_map_png() -> Vec<u8> {
 
 /// A selected color selection of three colors on a fill layer's mask
 fn color_selection_session(with_id_map: bool) -> (texturecraft_engine::Session, LayerId) {
-    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let mut session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();
     if with_id_map {
         let image = session.import_resource_bytes("id.png", id_map_png()).unwrap();
         execute(&mut session, "textureSet.meshMap.set", &json!({"map": "id", "image": image})).unwrap();
@@ -46,8 +55,8 @@ fn color_selection_session(with_id_map: bool) -> (texturecraft_engine::Session, 
 
 fn app_with_color_selection(with_id_map: bool) -> (Harness<'static, TextureCraftApp>, LayerId) {
     let (session, effect) = color_selection_session(with_id_map);
-    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).build_eframe(|cc| TextureCraftApp::new(cc, session));
-    harness.run_steps(4);
+    let mut harness = Harness::builder().with_size(PROPERTIES_WINDOW).build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.run_steps(STARTUP_FRAMES);
     (harness, effect)
 }
 
@@ -64,7 +73,7 @@ fn click_at(harness: &mut Harness<'_, TextureCraftApp>, position: Pos2) {
     harness.event(Event::PointerButton { pos: position, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
     harness.run_steps(1);
     harness.event(Event::PointerButton { pos: position, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
 }
 
 /// Whether the pointer at `pointer` is the drawn eyedropper: the system pointer hidden and a picture painted under it
@@ -75,10 +84,6 @@ fn eyedropper_at(harness: &Harness<'_, TextureCraftApp>, pointer: Pos2) -> bool 
             egui::Shape::Mesh(mesh) => mesh.texture_id != egui::TextureId::default() && mesh.calc_bounds().expand(1.0).contains(pointer),
             _ => false,
         })
-}
-
-fn pick_color_label() -> String {
-    "Pick color".to_owned()
 }
 
 /// The accessible name of `color`'s row button `action` ("Pick color" on the swatch, "Remove" on the ×)
@@ -103,8 +108,8 @@ fn each_color_gets_a_row_and_remove_sends_the_list_without_it() {
 #[test]
 fn pick_mode_shows_the_id_map_and_a_click_on_the_mesh_adds_its_color() {
     let (mut harness, effect) = app_with_color_selection(true);
-    harness.get_by_label(&pick_color_label()).click();
-    harness.run_steps(3);
+    harness.get_by_label(PICK_COLOR).click();
+    harness.run_steps(SETTLE_FRAMES);
     assert!(harness.state().picking_id_color.is_some_and(|pick| pick.effect == effect && pick.index.is_none()));
     assert_eq!(harness.state().session.view, ViewMode::MeshMap(BakedMap::Id));
 
@@ -125,8 +130,8 @@ fn pick_mode_shows_the_id_map_and_a_click_on_the_mesh_adds_its_color() {
 #[test]
 fn without_an_id_map_picking_is_off() {
     let (mut harness, effect) = app_with_color_selection(false);
-    harness.get_by_label(&pick_color_label()).click();
-    harness.run_steps(3);
+    harness.get_by_label(PICK_COLOR).click();
+    harness.run_steps(SETTLE_FRAMES);
     let repick = row_button(&harness, FIRST, "Pick color");
     click_at(&mut harness, repick);
     assert!(harness.state().picking_id_color.is_none());
@@ -156,12 +161,12 @@ fn removing_a_row_cancels_a_pending_replacement() {
 #[test]
 fn escape_cancels_the_pick_without_editing_colors() {
     let (mut harness, effect) = app_with_color_selection(true);
-    harness.get_by_label(&pick_color_label()).click();
-    harness.run_steps(3);
+    harness.get_by_label(PICK_COLOR).click();
+    harness.run_steps(SETTLE_FRAMES);
     let history = harness.state().session.history_labels();
 
     harness.key_press(egui::Key::Escape);
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
 
     assert!(harness.state().picking_id_color.is_none());
     assert_eq!(harness.state().session.view, ViewMode::Material);
@@ -172,21 +177,21 @@ fn escape_cancels_the_pick_without_editing_colors() {
 #[test]
 fn escape_cancels_id_picking_with_a_hidden_rail_popup() {
     let (mut harness, effect) = app_with_color_selection(true);
-    harness.get_by_label(&pick_color_label()).click();
-    harness.run_steps(3);
+    harness.get_by_label(PICK_COLOR).click();
+    harness.run_steps(SETTLE_FRAMES);
     let context = harness.ctx.clone();
     texturecraft_ui_egui::menus::invoke(harness.state_mut(), &context, "ui.view.log");
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     harness.get_by_role_and_label(egui::Role::Button, "Close");
     harness.key_press(egui::Key::Tab);
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     assert!(harness.state().ui.hide_ui);
     assert!(harness.query_by_role_and_label(egui::Role::Button, "Close").is_none());
     assert!(harness.state().picking_id_color.is_some());
     let history = harness.state().session.history_labels();
 
     harness.key_press(egui::Key::Escape);
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
 
     assert!(harness.state().picking_id_color.is_none(), "one Escape cancels ID picking despite the hidden popup");
     assert_eq!(harness.state().session.view, ViewMode::Material);
@@ -201,9 +206,9 @@ fn picking_from_the_popup_closes_it_before_the_viewport_click() {
     let (mut harness, effect) = app_with_color_selection(true);
     let bounds = harness.state().viewport_rect;
     harness.state_mut().properties_popup = Some(PropertiesPopup::Open { at: bounds.center() - egui::vec2(100.0, 100.0), bounds });
-    harness.run_steps(4);
+    harness.run_steps(REDRAW_FRAMES);
     let popup = harness.ctx.memory(|memory| memory.area_rect(properties_popup::area_id())).unwrap();
-    let pick = harness.query_all_by_label(&pick_color_label()).find(|button| popup.contains_rect(button.rect())).unwrap().rect().center();
+    let pick = harness.query_all_by_label(PICK_COLOR).find(|button| popup.contains_rect(button.rect())).unwrap().rect().center();
     click_at(&mut harness, pick);
 
     assert!(harness.state().picking_id_color.is_some());
@@ -220,10 +225,10 @@ fn a_2d_pick_replaces_the_chosen_row_and_undo_restores_it() {
 
     let (mut harness, effect) = app_with_color_selection(true);
     harness.state_mut().ui.layout = ViewLayout::Only3D;
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     let center = harness.state().viewport_rect.center();
     harness.state_mut().ui.layout = ViewLayout::Only2D;
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     let repick = row_button(&harness, SECOND, "Pick color");
     click_at(&mut harness, repick);
     click_at(&mut harness, center);
@@ -238,11 +243,11 @@ fn a_2d_pick_replaces_the_chosen_row_and_undo_restores_it() {
 #[test]
 fn deselection_cancels_picking_and_preserves_a_view_chosen_meanwhile() {
     let (mut harness, effect) = app_with_color_selection(true);
-    harness.get_by_label(&pick_color_label()).click();
-    harness.run_steps(3);
+    harness.get_by_label(PICK_COLOR).click();
+    harness.run_steps(SETTLE_FRAMES);
     execute(&mut harness.state_mut().session, "viewport.view", &json!({"mode": "uvChecker"})).unwrap();
     harness.state_mut().session.target = StackTarget::Content;
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
 
     assert!(harness.state().picking_id_color.is_none());
     assert_eq!(harness.state().session.view, ViewMode::UvChecker);
@@ -273,7 +278,7 @@ fn color_selection_snapshots_and_quick_mask_pick() {
     };
 
     save(&mut harness, "color-selection-editor");
-    harness.get_by_label(&pick_color_label()).click();
+    harness.get_by_label(PICK_COLOR).click();
     let center = harness.state().viewport_rect.center();
     harness.hover_at(center + egui::vec2(80.0, 0.0));
     let expected = save(&mut harness, "color-selection-picking");
@@ -295,7 +300,7 @@ fn color_selection_snapshots_and_quick_mask_pick() {
 
     execute(&mut harness.state_mut().session, "viewport.quickMask.edit", &json!({"editing": false})).unwrap();
     harness.state_mut().ui.layout = texturecraft_ui_egui::state::ViewLayout::Only2D;
-    harness.get_by_label(&pick_color_label()).click();
+    harness.get_by_label(PICK_COLOR).click();
     save(&mut harness, "color-selection-picking-2d");
     click_at(&mut harness, center);
 
@@ -321,9 +326,9 @@ fn the_background_list_and_the_output_invert_edit_one_undo_step_each() {
     let steps = harness.state().session.history_labels().len();
 
     harness.get_by_role_and_label(Role::ComboBox, "Black").click();
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     harness.get_by_role_and_label(Role::ListBoxOption, "White").click();
-    harness.run_steps(4);
+    harness.run_steps(REDRAW_FRAMES);
     assert_eq!(selection(&harness, effect).background, SelectionBackground::White);
     assert_eq!(harness.state().session.history_labels().len(), steps + 1);
 
@@ -334,27 +339,13 @@ fn the_background_list_and_the_output_invert_edit_one_undo_step_each() {
 }
 
 #[test]
-fn the_background_list_leaves_the_view_its_wheel_and_closes_on_escape() {
+fn the_background_list_leaves_the_view_its_wheel_and_closes_on_escape_or_a_click_outside() {
     let (mut harness, effect) = app_with_color_selection(true);
-    harness.get_by_role_and_label(Role::ComboBox, "Black").click();
-    harness.run_steps(3);
-    assert!(egui::Popup::is_any_open(&harness.ctx), "the list opens");
-
-    let distance = harness.state().session.camera.distance;
-    harness.hover_at(harness.state().viewport_rect.center());
-    harness.event(Event::MouseWheel {
-        unit: egui::MouseWheelUnit::Point,
-        delta: egui::vec2(0.0, 60.0),
-        phase: egui::TouchPhase::Move,
-        source: egui::MouseWheelSource::Wheel,
-        modifiers: Modifiers::NONE,
+    crate::assert_list_leaves_the_wheel_and_closes(&mut harness, |harness| {
+        harness.get_by_role_and_label(Role::ComboBox, "Black").click();
+        harness.run_steps(SETTLE_FRAMES);
+        harness.get_by_role_and_label(Role::ComboBox, "Black").rect()
     });
-    harness.run_steps(4);
-    assert_ne!(harness.state().session.camera.distance, distance, "the wheel over the view zooms with the list open");
-
-    harness.key_press(egui::Key::Escape);
-    harness.run_steps(3);
-    assert!(!egui::Popup::is_any_open(&harness.ctx), "Escape closes the list");
     assert_eq!(selection(&harness, effect).background, SelectionBackground::Black, "nothing changed");
 }
 
@@ -362,13 +353,13 @@ fn the_background_list_leaves_the_view_its_wheel_and_closes_on_escape() {
 fn the_id_mask_slot_picks_a_texture_and_its_x_goes_back_to_the_mesh_map() {
     let (mut session, effect) = color_selection_session(true);
     let texture = session.import_resource_bytes("parts.png", id_map_png()).unwrap();
-    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).build_eframe(|cc| TextureCraftApp::new(cc, session));
-    harness.run_steps(4);
+    let mut harness = Harness::builder().with_size(PROPERTIES_WINDOW).build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.run_steps(STARTUP_FRAMES);
 
     harness.get_by_role_and_label(Role::ComboBox, "ID Mask").click();
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     harness.get_by_role_and_label(Role::ListBoxOption, &texture).click();
-    harness.run_steps(4);
+    harness.run_steps(REDRAW_FRAMES);
     assert_eq!(selection(&harness, effect).id_map.as_deref(), Some(texture.as_str()));
 
     let clear = harness.get_by_role_and_label(Role::Button, "Clear").rect().center();
@@ -377,14 +368,39 @@ fn the_id_mask_slot_picks_a_texture_and_its_x_goes_back_to_the_mesh_map() {
     assert!(harness.query_by_role_and_label(Role::Button, "Clear").is_none(), "the mesh map has no ×");
 }
 
+/// Whether the ID Mask picker's tile `label` shows as the current one (egui reports a selected tile as toggled)
+fn tile_is_current(harness: &Harness<'_, TextureCraftApp>, label: &str) -> bool {
+    harness.get_by_role_and_label(Role::ListBoxOption, label).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+}
+
+#[test]
+fn reading_the_mesh_map_shows_no_tile_as_the_current_id_mask() {
+    let (mut session, effect) = color_selection_session(true);
+    let texture = session.import_resource_bytes("parts.png", id_map_png()).unwrap();
+    let mut harness = Harness::builder().with_size(PROPERTIES_WINDOW).build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.run_steps(STARTUP_FRAMES);
+    assert_eq!(selection(&harness, effect).id_map, None, "the selection reads the ID mesh map");
+
+    harness.get_by_role_and_label(Role::ComboBox, "ID Mask").click();
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(!tile_is_current(&harness, "Import..."), "Import... is an action, not the map read");
+    assert!(!tile_is_current(&harness, &texture));
+
+    harness.get_by_role_and_label(Role::ListBoxOption, &texture).click();
+    harness.run_steps(REDRAW_FRAMES);
+    harness.get_by_role_and_label(Role::ComboBox, "ID Mask").click();
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(tile_is_current(&harness, &texture), "a chosen texture is the current tile");
+    assert!(!tile_is_current(&harness, "Import..."));
+}
+
 #[test]
 fn the_invert_tooltip_shows_right_above_its_button() {
     let (mut harness, _) = app_with_color_selection(true);
     let invert = harness.get_by_role_and_label(Role::Button, "Invert").rect();
     harness.hover_at(invert.center());
 
-    // Past the tooltip delay
-    harness.run_steps(60);
+    harness.run_steps(TOOLTIP_WAIT_FRAMES);
     let tip =
         harness.get_all_by_label("Invert").find(|node| node.accesskit_node().role() == Role::Label).map(|node| node.rect()).expect("the button's tooltip");
     assert!(tip.bottom() <= invert.top() && invert.top() - tip.bottom() <= TIP_GAP, "the tooltip sits right above the button: {tip:?} {invert:?}");
@@ -397,10 +413,10 @@ fn invert_tooltip_snapshot() {
     let (session, _) = color_selection_session(true);
     let mut harness =
         Harness::builder().with_size(egui::vec2(1600.0, 960.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
-    harness.run_steps(4);
+    harness.run_steps(STARTUP_FRAMES);
     let invert = harness.get_by_role_and_label(Role::Button, "Invert").rect();
     harness.hover_at(invert.center());
-    harness.run_steps(60);
+    harness.run_steps(TOOLTIP_WAIT_FRAMES);
     let image = harness.render().unwrap();
     if let Some(directory) = std::env::var_os("TC_UI_SNAPSHOTS") {
         image.save(std::path::Path::new(&directory).join("invert-tooltip.png")).unwrap();
@@ -413,11 +429,11 @@ fn a_hand_picked_id_mask_picks_without_a_bake() {
     session.doc.baked.clear();
     let texture = session.import_resource_bytes("parts.png", id_map_png()).unwrap();
     execute(&mut session, "effect.set", &json!({"effect": effect.0, "idMap": texture})).unwrap();
-    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).build_eframe(|cc| TextureCraftApp::new(cc, session));
-    harness.run_steps(4);
+    let mut harness = Harness::builder().with_size(PROPERTIES_WINDOW).build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.run_steps(STARTUP_FRAMES);
 
-    harness.get_by_label(&pick_color_label()).click();
-    harness.run_steps(3);
+    harness.get_by_label(PICK_COLOR).click();
+    harness.run_steps(SETTLE_FRAMES);
     assert!(harness.state().picking_id_color.is_some_and(|pick| pick.effect == effect), "Pick color starts picking with no bake");
 
     let center = harness.state().viewport_rect.center();

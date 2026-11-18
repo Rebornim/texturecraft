@@ -8,15 +8,11 @@ use texturecraft_engine::core::{CompareOp, CompareSource, Layer, LayerId};
 
 use crate::TextureCraftApp;
 use crate::compare_settings::CompareSettings;
+use crate::histogram_cache::{HISTOGRAM_BUCKETS, cached_histogram};
 use crate::i18n::{n_, tr};
+use crate::levels_editor::{GRID_FRACTIONS, HISTOGRAM_HEIGHT};
 use crate::property_sheet::PropertySheet;
 use crate::theme::{AXIS_COLORS, Tokens};
-
-/// Buckets of each source's histogram, over 0..1
-const HISTOGRAM_BUCKETS: usize = 64;
-
-/// Height of the histogram well
-const HISTOGRAM_HEIGHT: f32 = 70.0;
 
 /// Air the tallest bucket keeps under the well's top
 const HISTOGRAM_HEADROOM: f32 = 4.0;
@@ -28,8 +24,11 @@ const AXIS_LABEL_ROOM: f32 = 22.0;
 /// Size of the value labels under the well
 const AXIS_LABEL_SIZE: f32 = 10.0;
 
-/// How much of a source's colour shows over the well (the other source shows through)
+/// How much of a source's colour shows over the well; half, so where both sources overlap the one under shows through (levels' single histogram mixes more of its colour)
 const HISTOGRAM_TINT: f32 = 0.5;
+
+/// The value labels under the well, at its edges and quarter lines
+const AXIS_LABELS: [&str; 5] = ["0", "0.25", "0.5", "0.75", "1"];
 
 /// Width of the constant's line in the well
 const CONSTANT_LINE_WIDTH: f32 = 2.0;
@@ -111,36 +110,17 @@ fn source_histograms(ui: &mut Ui, counts: Option<&[Vec<u32>; 2]>, constants: [Op
     let painter = ui.painter_at(rect.expand2(vec2(AXIS_LABEL_SIZE, 0.0)));
     painter.rect_filled(well, 0.0, tokens.field);
     let at = |share: f32| well.left() + well.width() * share;
-    for quarter in [0.25, 0.5, 0.75] {
+    for quarter in GRID_FRACTIONS {
         painter.line_segment([pos2(at(quarter), well.top()), pos2(at(quarter), well.bottom())], Stroke::new(1.0, tokens.separator));
     }
 
-    // The right source first, the left over it, each mixed half with what is under it; a constant side draws no spread
+    // The right source first, the left over it; a constant side draws no spread
     let shown = |side: usize| counts.and_then(|both| both.get(side)).filter(|bins| !bins.is_empty() && constants.get(side).copied().flatten().is_none());
     let tallest = [0, 1].into_iter().filter_map(shown).flatten().copied().max().unwrap_or(0).max(1) as f32;
     for side in [1, 0] {
-        let (Some(tag), Some(bins)) = (SOURCE_TAGS.get(side), shown(side)) else { continue };
-
-        // One mesh from bucket centre to bucket centre (separate strips would leave seams between them)
-        let step = well.width() / bins.len() as f32;
-        let tops = bins.iter().enumerate().map(|(index, count)| {
-            (well.left() + (index as f32 + 0.5) * step, well.bottom() - (*count as f32 / tallest) * (HISTOGRAM_HEIGHT - HISTOGRAM_HEADROOM))
-        });
-        let outline: Vec<(f32, f32)> =
-            std::iter::once((well.left(), well.bottom())).chain(tops).chain(std::iter::once((well.right(), well.bottom()))).collect();
-        let mut mesh = Mesh::default();
-        let tint = tag.gamma_multiply(HISTOGRAM_TINT);
-        for (index, (x, top)) in outline.iter().enumerate() {
-            mesh.colored_vertex(pos2(*x, *top), tint);
-            mesh.colored_vertex(pos2(*x, well.bottom()), tint);
-            if let Ok(next) = u32::try_from(index * 2)
-                && index > 0
-            {
-                mesh.add_triangle(next - 2, next - 1, next);
-                mesh.add_triangle(next - 1, next + 1, next);
-            }
+        if let (Some(tag), Some(bins)) = (SOURCE_TAGS.get(side), shown(side)) {
+            painter.add(Shape::mesh(spread_mesh(well, bins, tallest, tag.gamma_multiply(HISTOGRAM_TINT))));
         }
-        painter.add(Shape::mesh(mesh));
     }
     for (side, constant) in constants.iter().enumerate() {
         if let (Some(value), Some(tag)) = (constant, SOURCE_TAGS.get(side)) {
@@ -149,23 +129,37 @@ fn source_histograms(ui: &mut Ui, counts: Option<&[Vec<u32>; 2]>, constants: [Op
         }
     }
 
-    let labels = ["0", "0.25", "0.5", "0.75", "1"];
-    for (index, label) in labels.iter().enumerate() {
-        let x = at(index as f32 / (labels.len() - 1) as f32);
+    for (index, label) in AXIS_LABELS.iter().enumerate() {
+        let x = at(index as f32 / (AXIS_LABELS.len() - 1) as f32);
         painter.text(pos2(x, well.bottom() + AXIS_LABEL_OFFSET), Align2::CENTER_CENTER, *label, FontId::proportional(AXIS_LABEL_SIZE), tokens.text_dim);
     }
 }
 
-/// What the two sides of compare mask `effect_id` read, recomputed after a change once no pointer button is held
+/// One source's spread in `well`: a single `tint` mesh from bucket centre to bucket centre (separate strips would leave seams between them), `tallest` reaching the well's top less its headroom
+fn spread_mesh(well: Rect, bins: &[u32], tallest: f32, tint: Color32) -> Mesh {
+    let step = well.width() / bins.len() as f32;
+    let tops = bins
+        .iter()
+        .enumerate()
+        .map(|(index, count)| (well.left() + (index as f32 + 0.5) * step, well.bottom() - (*count as f32 / tallest) * (HISTOGRAM_HEIGHT - HISTOGRAM_HEADROOM)));
+    let outline = std::iter::once((well.left(), well.bottom())).chain(tops).chain(std::iter::once((well.right(), well.bottom())));
+
+    let mut mesh = Mesh::default();
+    for (index, (x, top)) in outline.enumerate() {
+        mesh.colored_vertex(pos2(x, top), tint);
+        mesh.colored_vertex(pos2(x, well.bottom()), tint);
+        if let Ok(next) = u32::try_from(index * 2)
+            && index > 0
+        {
+            mesh.add_triangle(next - 2, next - 1, next);
+            mesh.add_triangle(next - 1, next + 1, next);
+        }
+    }
+    mesh
+}
+
+/// What the two sides of compare mask `effect_id` read
 fn histogram_counts(app: &TextureCraftApp, ui: &Ui, effect_id: LayerId) -> Option<Arc<[Vec<u32>; 2]>> {
     let key = egui::Id::unique(("compare_histograms", effect_id.0));
-    let revision = app.session.revision;
-    match ui.data(|data| data.get_temp::<(u64, Arc<[Vec<u32>; 2]>)>(key)) {
-        Some((cached, counts)) if cached == revision || ui.input(|input| input.pointer.any_down()) => Some(counts),
-        _ => app.session.compare_histograms(effect_id, HISTOGRAM_BUCKETS).map(|counts| {
-            let counts = Arc::new(counts);
-            ui.data_mut(|data| data.insert_temp(key, (revision, counts.clone())));
-            counts
-        }),
-    }
+    cached_histogram(ui, "compare_histograms_owner", key, app.session.revision, || app.session.compare_histograms(effect_id, HISTOGRAM_BUCKETS))
 }

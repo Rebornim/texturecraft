@@ -284,16 +284,7 @@ fn source_tabs(thumbs: &mut Thumbs, ctx: &egui::Context, images: &ImageStore, an
         .into_iter()
         .map(|kind| tile(SourceChoice::Procedural(kind), tr(kind.label()), None, TilePicture::Texture(thumbs.procedural(ctx, kind))))
         .collect();
-    let mut textures = vec![tile(SourceChoice::Import, tr("Import..."), None, TilePicture::Import)];
-    let mut names: Vec<&String> = images.keys().filter(|name| library_alpha_of(name).is_none()).collect();
-    names.sort();
-    // A project image's thumbnail is made only once its tile is drawn, so opening the picker does not resample every image
-    textures.extend(
-        names
-            .into_iter()
-            .filter_map(|name| images.get(name).map(|image| (name, image)))
-            .map(|(name, image)| tile(SourceChoice::Image(name.clone()), name, None, TilePicture::Image(name.clone(), image.clone()))),
-    );
+    let textures = ResourcePickerItem::textures(images, SourceChoice::Import, |name| SourceChoice::Image(name.to_owned()));
     let alphas = alphas::library()
         .iter()
         .map(|alpha| {

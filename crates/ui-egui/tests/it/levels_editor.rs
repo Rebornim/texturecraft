@@ -8,6 +8,8 @@ use texturecraft_engine::core::{Channel, EffectKind, LayerId, Levels};
 use texturecraft_engine::{Session, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 
+use crate::{BAKE_RESOLUTION, FRAME_SECONDS, PROPERTIES_WINDOW, REDRAW_FRAMES, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+
 /// Histogram buckets and Auto's share, as in levels_properties.rs
 const HISTOGRAM_BUCKETS: usize = 64;
 const AUTO_MIN_SHARE: f64 = 0.001;
@@ -20,7 +22,7 @@ const HANDLE_POINTER_CORNERS: usize = 5;
 
 /// A clouds mask under a levels effect added by `command` with `params`, selected, and its id
 fn levels_harness(command: &str, params: Value) -> (Harness<'static, TextureCraftApp>, LayerId) {
-    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let mut session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();
     for (id, params) in [
         ("layer.add.fill", json!({"color": [0.8, 0.3, 0.1]})),
         ("mask.add.black", Value::Null),
@@ -38,8 +40,8 @@ fn open(mut session: Session, effect: LayerId) -> (Harness<'static, TextureCraft
     execute(&mut session, "layer.select", &json!({"layer": layer.0, "target": effect.0})).unwrap();
 
     // Frames of a 60 Hz screen: kittest's default quarter second spreads a double-click past egui's delay
-    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).with_step_dt(1.0 / 60.0).build_eframe(|cc| TextureCraftApp::new(cc, session));
-    harness.run_steps(4);
+    let mut harness = Harness::builder().with_size(PROPERTIES_WINDOW).with_step_dt(FRAME_SECONDS).build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.run_steps(STARTUP_FRAMES);
     (harness, effect)
 }
 
@@ -453,7 +455,7 @@ fn replacing_effects_releases_old_histograms() {
 }
 
 /// Whether `text` was painted this frame (section captions are painted, not widgets)
-fn painted_text(harness: &Harness<'_, TextureCraftApp>, text: &str) -> bool {
+pub(crate) fn painted_text(harness: &Harness<'_, TextureCraftApp>, text: &str) -> bool {
     harness.output().shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Text(painted) if painted.galley.text() == text))
 }
 
@@ -468,7 +470,7 @@ pub(crate) fn affects_list<'a>(harness: &'a Harness<'_, TextureCraftApp>) -> Opt
 
 /// A fill layer with a content levels, selected
 fn content_levels_harness() -> (Harness<'static, TextureCraftApp>, LayerId) {
-    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let mut session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();
     execute(&mut session, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1]})).unwrap();
     execute(&mut session, "effect.add.levels", &json!({"target": "content"})).unwrap();
     let effect = levels_effect(&session);
@@ -488,7 +490,7 @@ fn a_content_levels_picks_the_channel_it_affects() {
     // The display switch only changes the view
     let steps = undo_steps(&harness);
     harness.get_by(|node| node.role() == Role::RadioButton && node.label().as_deref() == Some("R")).click();
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     assert_eq!(undo_steps(&harness), steps);
     assert!(
         harness.get_by(|node| node.role() == Role::RadioButton && node.label().as_deref() == Some("R")).accesskit_node().toggled()
@@ -498,13 +500,13 @@ fn a_content_levels_picks_the_channel_it_affects() {
 
     assert_eq!(affects_list(&harness).and_then(|list| list.accesskit_node().label()).as_deref(), Some("Base color"));
     affects_list(&harness).unwrap().click();
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     assert!(
         harness.query_by(|node| node.role() == Role::ListBoxOption && node.label().as_deref() == Some("Normal")).is_none(),
         "levels pass normal maps through"
     );
     harness.get_by(|node| node.role() == Role::ListBoxOption && node.label().as_deref() == Some("Roughness")).click();
-    harness.run_steps(4);
+    harness.run_steps(REDRAW_FRAMES);
     assert_eq!(levels(&harness, effect).affects, Some(Channel::Roughness));
     assert_eq!(undo_steps(&harness), steps + 1);
     assert!(painted_text(&harness, "LEVELS - ROUGHNESS"));
@@ -527,37 +529,12 @@ fn clamp_is_one_undo_step() {
 #[test]
 fn the_affects_list_leaves_the_view_its_wheel_and_closes_on_escape_or_a_click_outside() {
     let (mut harness, effect) = content_levels_harness();
-    let open_list = |harness: &mut Harness<'_, TextureCraftApp>| {
-        affects_list(harness).unwrap().click();
-        harness.run_steps(3);
-        assert!(egui::Popup::is_any_open(&harness.ctx), "the Affects list opens");
-    };
-    open_list(&mut harness);
-
-    let distance = harness.state().session.camera.distance;
-    harness.hover_at(harness.state().viewport_rect.center());
-    harness.event(egui::Event::MouseWheel {
-        unit: egui::MouseWheelUnit::Point,
-        delta: egui::vec2(0.0, 60.0),
-        phase: egui::TouchPhase::Move,
-        source: egui::MouseWheelSource::Wheel,
-        modifiers: egui::Modifiers::NONE,
+    crate::assert_list_leaves_the_wheel_and_closes(&mut harness, |harness| {
+        let list = affects_list(harness).unwrap();
+        let button = list.rect();
+        list.click();
+        harness.run_steps(SETTLE_FRAMES);
+        button
     });
-    harness.run_steps(4);
-    assert_ne!(harness.state().session.camera.distance, distance, "the wheel over the view zooms with the list open");
-
-    harness.key_press(egui::Key::Escape);
-    harness.run_steps(3);
-    assert!(!egui::Popup::is_any_open(&harness.ctx), "Escape closes the list");
-
-    open_list(&mut harness);
-    let combo = affects_list(&harness).unwrap().rect();
-    let outside = egui::pos2(combo.min.x - 400.0, combo.min.y);
-    harness.hover_at(outside);
-    for pressed in [true, false] {
-        harness.event(egui::Event::PointerButton { pos: outside, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
-        harness.run_steps(2);
-    }
-    assert!(!egui::Popup::is_any_open(&harness.ctx), "a click outside closes the list");
     assert_eq!(levels(&harness, effect).affects, Some(Channel::BaseColor), "nothing changed");
 }

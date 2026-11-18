@@ -405,11 +405,13 @@ pub(crate) fn lerp_color(from: Color32, to: Color32, amount: f32) -> Color32 {
 /// Least contrast a tinted color name keeps against its background (the WCAG ratio for large or bold text and UI parts)
 const TINT_MIN_CONTRAST: f32 = 3.0;
 
+/// How finely [`legible_tint`] walks from the tint to the text colour: a tenth of the way at a time keeps as much of the tint as reads
+const TINT_STEPS: u8 = 10;
+
 /// `tint` moved toward `text` just enough to read on `background` (Color Balance's yellow and cyan names on a light card); a tint that already reads stays as it is
 pub fn legible_tint(tint: Color32, background: Color32, text: Color32) -> Color32 {
-    let steps = 10;
-    (0..=steps)
-        .map(|step| tint.lerp_to_gamma(text, step as f32 / steps as f32))
+    (0..=TINT_STEPS)
+        .map(|step| tint.lerp_to_gamma(text, f32::from(step) / f32::from(TINT_STEPS)))
         .find(|color| contrast_ratio(*color, background) >= TINT_MIN_CONTRAST)
         .unwrap_or(text)
 }
@@ -425,7 +427,8 @@ fn contrast_ratio(a: Color32, b: Color32) -> f32 {
         // Rec. 709 luminance
         0.2126 * linear.r() + 0.7152 * linear.g() + 0.0722 * linear.b()
     };
-    let (high, low) = (luminance(a).max(luminance(b)), luminance(a).min(luminance(b)));
+    let (first, second) = (luminance(a), luminance(b));
+    let (high, low) = (first.max(second), first.min(second));
     (high + WCAG_FLARE) / (low + WCAG_FLARE)
 }
 
@@ -450,6 +453,7 @@ mod tests {
                 }
             }
         }
+
         let light = Tokens::for_brightness(Brightness::Light);
         assert_ne!(legible_tint(OPPOSITE_COLORS[2], light.row, light.text), OPPOSITE_COLORS[2], "yellow darkens on a light card");
     }

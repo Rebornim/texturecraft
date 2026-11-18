@@ -1,13 +1,14 @@
-//! The invert icon: a square, its left half clear and its right half solid, an arrow pointing out of each half (the left one ink
-//! on the clear half, the right one cut out of the solid half): black becomes white and white becomes black
+//! The invert icon: a square, its left half clear and its right half solid, an arrow pointing out of each half
 
 use super::distance::{self, Point};
 
 /// The frame's outline width and where its stroke's middle runs
 const STROKE: f32 = 0.08;
 const FRAME: [Point; 2] = [[0.13, 0.13], [0.87, 0.87]];
+
 /// Where the halves meet, and the arrows' middle line
 const MIDDLE: f32 = 0.5;
+
 /// An arrow's shaft (half thickness, length from the middle), its head (half height, from the middle to its base and to its point)
 const SHAFT_HALF: f32 = 0.06;
 const SHAFT_LENGTH: f32 = 0.16;
@@ -15,7 +16,7 @@ const HEAD_HALF: f32 = 0.17;
 const HEAD_BASE: f32 = 0.12;
 const HEAD_POINT: f32 = 0.29;
 
-/// The distance from `point` to the icon's ink
+/// The distance from `point` to the icon's ink: the left arrow inked on the clear half, the right one cut out of the solid half (black becomes white and white becomes black)
 pub(crate) fn glyph(point: Point) -> f32 {
     let frame = distance::rectangle(point, FRAME[0], FRAME[1]).abs() - STROKE / 2.0;
     let solid_half = distance::rectangle(point, [MIDDLE, FRAME[0][1]], FRAME[1]);

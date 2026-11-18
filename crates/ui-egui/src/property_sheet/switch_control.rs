@@ -69,12 +69,9 @@ impl PropertySheet<'_> {
     /// [`Self::switch`] whose chosen word takes its colour from `tints` (axis colours)
     pub(crate) fn switch_tinted(&mut self, label: &str, options: &[&str], selected: usize, tints: &[Color32]) -> Option<usize> {
         let stacks = self.text_width(label, FontId::proportional(TEXT_SIZE)) > self.column() - self.left - super::LABEL_MIN_AIR;
-        let x0 = if stacks { self.left } else { self.column() };
-        let segment = (self.right - x0) / options.len().max(1) as f32;
-        let fits = options.iter().all(|option| self.text_width(option, semibold(SMALL_TEXT_SIZE)) + SEGMENT_AIR <= segment);
-        if !fits {
-            let name = |index: usize| options.get(index).copied().unwrap_or_default().to_owned();
-            return self.dropdown_built(label, selected, || 0..options.len(), name, None).0;
+        let left = if stacks { self.left } else { self.column() };
+        if !self.switch_fits(options, left) {
+            return self.switch_dropdown(label, options, selected);
         }
 
         let (control, _) = self.row(label);
@@ -84,14 +81,24 @@ impl PropertySheet<'_> {
 
     /// [`Self::switch`] with its label always above it, the switch across the whole panel (long choices in a set of such switches); returns the picked index
     pub(crate) fn stacked_switch(&mut self, label: &str, options: &[&str], selected: usize) -> Option<usize> {
-        let segment = (self.right - self.left) / options.len().max(1) as f32;
-        if !options.iter().all(|option| self.text_width(option, semibold(SMALL_TEXT_SIZE)) + SEGMENT_AIR <= segment) {
-            let name = |index: usize| options.get(index).copied().unwrap_or_default().to_owned();
-            return self.dropdown_built(label, selected, || 0..options.len(), name, None).0;
+        if !self.switch_fits(options, self.left) {
+            return self.switch_dropdown(label, options, selected);
         }
 
         let (control, _) = self.row_with(RowLead::Label { text: label, stack: true });
         self.segments(control, options, selected, untinted, None)
+    }
+
+    /// Whether every option's word fits its share of a switch from `left` to the panel's right edge
+    fn switch_fits(&self, options: &[&str], left: f32) -> bool {
+        let segment = (self.right - left) / options.len().max(1) as f32;
+        options.iter().all(|option| self.text_width(option, semibold(SMALL_TEXT_SIZE)) + SEGMENT_AIR <= segment)
+    }
+
+    /// The dropdown a switch whose words don't fit becomes; returns the picked index
+    fn switch_dropdown(&mut self, label: &str, options: &[&str], selected: usize) -> Option<usize> {
+        let name = |index: usize| options.get(index).copied().unwrap_or_default().to_owned();
+        self.dropdown_built(label, selected, || 0..options.len(), name, None).0
     }
 
     /// A boxed switch across the whole panel; the chosen word takes its colours from `tints` (several colours split the word between them)
@@ -100,7 +107,7 @@ impl PropertySheet<'_> {
         self.segments(control, options, selected, |index| tints.get(index).copied().unwrap_or_default(), None)
     }
 
-    /// A row's 24 px control box from the left padding to the right one
+    /// A row's control box, `CONTROL_HEIGHT` tall, from the left padding to the right one
     pub(super) fn wide_row(&mut self) -> Rect {
         let row = self.take(ROW_HEIGHT);
         let center_y = row.center().y;

@@ -1,7 +1,7 @@
 use egui::{Align2, CornerRadius, FontId, Rect, Sense, Shape, Stroke, pos2, vec2};
 use egui_phosphor::regular as ic;
 
-use super::row::{EDGE_GLYPH_INSET, RESET_AT_DEFAULT_OPACITY, RESET_ICON_SIZE};
+use super::row::{EDGE_GLYPH_INSET, RESET_ICON_SIZE};
 use super::{BandResponse, GROUP_GAP, OpenCard, PropertySheet, ROW_HEIGHT, TEXT_SIZE};
 use crate::theme::semibold;
 
@@ -76,15 +76,16 @@ impl PropertySheet<'_> {
         }
 
         // A band is top-level: it ends a held card too
-        self.held = false;
-        self.close_card();
+        self.release_card();
 
         self.scope = self.id;
         let id = self.named_id("band", title);
         self.band_scope = id;
         self.scope = id;
+
         let rect = self.take(BAND_HEIGHT);
         let band = Rect::from_x_y_ranges(self.ui.max_rect().x_range(), rect.y_range());
+
         let mut open = self.ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
         let response = self.ui.interact(band, id, Sense::click());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, title));
@@ -120,11 +121,7 @@ impl PropertySheet<'_> {
         painter.text(pos2(self.left, center_y), Align2::LEFT_CENTER, title, semibold(TEXT_SIZE), tokens.text);
         if let Some(changed) = reset {
             // The round section reset, as on a section caption: faint where it does nothing
-            let color = match (changed, reset_hovered) {
-                (false, _) => tokens.text_dim.gamma_multiply(RESET_AT_DEFAULT_OPACITY),
-                (true, true) => tokens.text_strong,
-                (true, false) => tokens.text_dim,
-            };
+            let color = self.reset_glyph_color(changed, reset_hovered, tokens.text_strong);
             painter.text(reset_rect.center(), Align2::CENTER_CENTER, ic::CLOCK_COUNTER_CLOCKWISE, FontId::proportional(RESET_ICON_SIZE), color);
         }
         if let Some(value) = value {
@@ -154,17 +151,10 @@ impl PropertySheet<'_> {
         self.scope = id;
         let rect = self.take(CARD_NAME_CENTER + ROW_HEIGHT / 2.0);
         let center_y = rect.top() + CARD_NAME_CENTER;
-        let mut open = true;
-        if let Some(default_open) = foldable {
-            open = self.ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
+        let open = foldable.is_none_or(|default_open| {
             let hit = Rect::from_x_y_ranges(self.left..=self.right, (center_y - CARD_HIT_HALF_HEIGHT)..=(center_y + CARD_HIT_HALF_HEIGHT));
-            let response = self.ui.interact(hit, id, Sense::click());
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, title));
-            if response.clicked() {
-                open = !open;
-                self.ui.data_mut(|data| data.insert_temp(id, open));
-            }
-        }
+            self.fold_toggle(id, hit, title, default_open)
+        });
 
         let tokens = self.tokens;
         self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, title, semibold(TEXT_SIZE), tokens.text);
@@ -181,17 +171,7 @@ impl PropertySheet<'_> {
         let id = self.named_id("caption", title);
         let rect = self.take(INNER_CAPTION_ROW);
         let center_y = rect.top() + INNER_CAPTION_CENTER;
-        let mut open = true;
-        if let Some(default_open) = foldable {
-            open = self.ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
-            let hit = Rect::from_x_y_ranges(self.left..=self.right, rect.y_range());
-            let response = self.ui.interact(hit, id, Sense::click());
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, title));
-            if response.clicked() {
-                open = !open;
-                self.ui.data_mut(|data| data.insert_temp(id, open));
-            }
-        }
+        let open = foldable.is_none_or(|default_open| self.fold_toggle(id, Rect::from_x_y_ranges(self.left..=self.right, rect.y_range()), title, default_open));
 
         let tokens = self.tokens;
         let painter = self.ui.painter();
@@ -205,6 +185,23 @@ impl PropertySheet<'_> {
         }
         self.drawn(center_y + TITLE_HALF_LINE);
         open
+    }
+
+    /// A group's fold state kept under `id`, flipped by a click on `hit` (answering as `title`); returns whether it is open
+    fn fold_toggle(&mut self, id: egui::Id, hit: Rect, title: &str, default_open: bool) -> bool {
+        let mut open = self.ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
+        let response = self.ui.interact(hit, id, Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, title));
+        if response.clicked() {
+            open = !open;
+            self.ui.data_mut(|data| data.insert_temp(id, open));
+        }
+        open
+    }
+
+    /// A row of `rect`'s height across the open card, out to its bled edges
+    pub(super) fn bled_row(&self, rect: Rect) -> Rect {
+        Rect::from_min_max(pos2(self.left - CARD_BLEED, rect.top()), pos2(self.right + CARD_BLEED, rect.bottom()))
     }
 
     /// Keeps the card open now open through what follows: groups inside it become inner captions, and slots and cards join it, until [`Self::release_card`]
@@ -245,14 +242,7 @@ impl PropertySheet<'_> {
     pub(crate) fn fold(&mut self, title: &str, value: Option<&str>, default_open: bool) -> bool {
         let id = self.named_id("fold", title);
         let rect = self.take(ROW_HEIGHT);
-        let mut open = self.ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
-        let hit = Rect::from_x_y_ranges(self.left..=self.right, rect.y_range());
-        let response = self.ui.interact(hit, id, Sense::click());
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, title));
-        if response.clicked() {
-            open = !open;
-            self.ui.data_mut(|data| data.insert_temp(id, open));
-        }
+        let open = self.fold_toggle(id, Rect::from_x_y_ranges(self.left..=self.right, rect.y_range()), title, default_open);
 
         let tokens = self.tokens;
         let center_y = rect.center().y;

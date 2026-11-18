@@ -49,6 +49,9 @@ const HEX_RIGHT_INSET: f32 = 26.0;
 const HASH_INSET: f32 = 8.0;
 const DIGITS_INSET: f32 = 20.0;
 
+/// Passes after the hex field last had focus that a typed code still applies (egui reports a lost focus up to two passes late)
+const FOCUS_LOOKBACK_PASSES: u64 = 2;
+
 /// From the right edge to the centre of the eyedropper and of the ⋯ menu
 const EYEDROPPER_INSET: f32 = 7.0;
 const MENU_INSET: f32 = 6.0;
@@ -255,7 +258,13 @@ impl PropertySheet<'_> {
         let editing = self.ui.data(|data| data.get_temp::<String>(text_id));
 
         // Text left by a picker that closed mid-edit (its field no longer drawn, so never told it lost focus) is not shown again
-        let focused = self.ui.memory(|memory| memory.has_focus(text_id) || memory.had_focus_last_frame(text_id));
+        let focused_pass_id = text_id.with("focused pass");
+        let pass = self.ui.ctx().cumulative_pass_nr();
+        if self.ui.memory(|memory| memory.has_focus(text_id)) {
+            self.ui.data_mut(|data| data.insert_temp(focused_pass_id, pass));
+        }
+        let focused_pass = self.ui.data(|data| data.get_temp::<u64>(focused_pass_id));
+        let focused = focused_pass.is_some_and(|focused_pass| pass.saturating_sub(focused_pass) <= FOCUS_LOOKBACK_PASSES);
         if editing.is_some() && !focused {
             self.ui.data_mut(|data| data.remove::<String>(text_id));
         }

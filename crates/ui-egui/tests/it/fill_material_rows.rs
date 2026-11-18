@@ -459,6 +459,24 @@ fn a_hex_code_left_as_it_opened_is_no_edit() {
 }
 
 #[test]
+fn a_hex_code_typed_is_applied_when_another_widget_takes_the_focus() {
+    let (mut harness, layer) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
+    click(&mut harness, Role::Button, "Base color");
+    let depth = undo_depth(&harness);
+    click(&mut harness, Role::TextInput, "Hex color");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.event(egui::Event::Text("FF8000".into()));
+    harness.run_steps(1);
+
+    // As a shortcut focusing another field would: the field hears it lost the focus only a pass later
+    harness.ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("another field")));
+    harness.run_steps(SETTLE_FRAMES);
+    let [red, green, blue] = base_color(&harness, layer);
+    assert!(red > green && green > blue, "the code typed is the colour: {:?}", [red, green, blue]);
+    assert_eq!(undo_depth(&harness), depth + 1, "one undo step");
+}
+
+#[test]
 fn a_hex_code_half_typed_when_a_press_closes_the_picker_is_gone_when_it_opens_again() {
     let (mut harness, layer) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
     click(&mut harness, Role::Button, "Base color");

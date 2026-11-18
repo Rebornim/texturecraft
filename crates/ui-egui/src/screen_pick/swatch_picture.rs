@@ -3,6 +3,7 @@
 //! picture, so the disc moves with the pointer itself and never lags or flickers
 
 use super::CursorImage;
+use crate::color_picker::component_byte;
 
 /// The pointer cell the disc's sizes are given for (a system pointer at 100 %), in pixels
 const NOMINAL_CELL_PX: f32 = 32.0;
@@ -51,9 +52,9 @@ pub(super) fn disc_pixel(distance: f32, unit: f32, color: [u8; 3]) -> [u8; 4] {
     // Each edge's coverage over the pixel's width, for smooth edges
     let coverage = |radius: f32| (radius - distance + 0.5).clamp(0.0, 1.0);
 
-    let ring = [0, 0, 0, to_byte(RING_ALPHA * coverage(ring_radius))];
-    let outline = over([u8::MAX, u8::MAX, u8::MAX, to_byte(coverage(outline_radius))], ring);
-    over([color[0], color[1], color[2], to_byte(coverage(fill_radius))], outline)
+    let ring = [0, 0, 0, component_byte(RING_ALPHA * coverage(ring_radius))];
+    let outline = over([u8::MAX, u8::MAX, u8::MAX, component_byte(coverage(outline_radius))], ring);
+    over([color[0], color[1], color[2], component_byte(coverage(fill_radius))], outline)
 }
 
 /// `top` over `bottom`, both straight-alpha RGBA
@@ -65,12 +66,8 @@ pub(super) fn over(top: [u8; 4], bottom: [u8; 4]) -> [u8; 4] {
         return [0; 4];
     }
 
-    let mix = |channel: usize| to_byte((f32::from(top[channel]) * top_alpha + f32::from(bottom[channel]) * bottom_alpha) / alpha / 255.0);
-    [mix(0), mix(1), mix(2), to_byte(alpha)]
-}
-
-fn to_byte(share: f32) -> u8 {
-    (share.clamp(0.0, 1.0) * 255.0).round() as u8
+    let mix = |channel: usize| component_byte((f32::from(top[channel]) * top_alpha + f32::from(bottom[channel]) * bottom_alpha) / alpha / 255.0);
+    [mix(0), mix(1), mix(2), component_byte(alpha)]
 }
 
 #[cfg(test)]

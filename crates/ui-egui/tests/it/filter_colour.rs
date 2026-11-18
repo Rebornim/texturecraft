@@ -26,8 +26,9 @@ fn hsl_mode_switches_and_its_sliders_sit_at_the_middle() {
     assert!(matches!(filter_of(&harness, effect), Filter::Hsl { saturation, .. } if saturation > 0.95), "{:?}", filter_of(&harness, effect));
 }
 
+/// Color Balance's tone cards fold one at a time, and a row edits only its own card's tone
 #[test]
-fn tone_cards_fold_and_edit_their_own_tone() {
+fn color_balance_tone_cards_fold_and_edit_their_own_tone() {
     let (mut harness, effect) = app_with("colorBalance", "content", WINDOW_HEIGHT);
     assert_eq!(harness.query_all_by_role_and_label(Role::Slider, "Cyan").count(), 3, "a Cyan row per tone");
 
@@ -42,8 +43,11 @@ fn tone_cards_fold_and_edit_their_own_tone() {
 
     let Filter::ColorBalance { highlights, shadows, midtones } = filter_of(&harness, effect) else { panic!() };
     assert!(highlights[2] < -0.9 && shadows == [0.0; 3] && midtones == [0.0; 3], "{highlights:?} {midtones:?} {shadows:?}");
+}
 
-    // Color Correct's Midtones card sits between its header and the Highlights card's
+/// Color Correct's Midtones card sits between its header and the Highlights card's, and its Saturation row edits the midtones only
+#[test]
+fn color_correct_midtones_card_edits_its_own_tone() {
     let (mut harness, effect) = app_with("colorCorrect", "content", WINDOW_HEIGHT);
     let midtones = harness.get_by_role_and_label(Role::Button, "Midtones").rect();
     let highlights = harness.get_by_role_and_label(Role::Button, "Highlights").rect();

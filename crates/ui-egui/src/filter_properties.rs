@@ -1,5 +1,7 @@
 //! The Filter effect's properties: FILTER over the channel pills (content), the filter card holding its parameters and Attributes, then its image inputs' cards
 
+use std::ops::RangeInclusive;
+
 use egui::{Painter, Rect, Stroke, StrokeKind, Ui};
 use serde_json::{Value, json};
 use texturecraft_engine::core::{
@@ -22,6 +24,12 @@ use crate::theme::{AXIS_COLORS, OPPOSITE_COLORS, Tokens};
 
 /// Where TextureCraft's filters come from: the repository, without its scheme
 const AUTHOR_URL: &str = "github.com/storytold/texturecraft";
+
+/// One full turn, in degrees: an angle row's dial wraps on it
+const FULL_TURN_DEGREES: f32 = 360.0;
+
+/// What a filter's angle rows span, in degrees: one full turn of their dial
+pub(crate) const DIAL_DEGREES: RangeInclusive<f32> = 0.0..=FULL_TURN_DEGREES;
 
 /// The widest Divider chip text: the chip keeps one width whatever it shows
 const WIDEST_DIVIDER: &str = "÷1000";
@@ -117,6 +125,12 @@ const THUMBNAIL_POLL: std::time::Duration = std::time::Duration::from_millis(100
 /// The hourglass size on a slot whose picture is still rendering
 const WAITING_GLYPH_SIZE: f32 = 12.0;
 
+/// How round a filter card's picture and a swatch's corners are, in points
+const SWATCH_CORNER_RADIUS: u8 = 3;
+
+/// The width of a picture's outline, in points
+const OUTLINE_WIDTH: f32 = 1.0;
+
 /// The card naming the filter (or None; `def` its library entry): a click opens the filter picker under it, × empties it; returns whether its ⟲ (live while `changed`) was clicked
 fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect: LayerId, filter: &Filter, def: Option<&FilterDef>, changed: bool) -> bool {
     let ctx = sheet.ui.ctx().clone();
@@ -130,7 +144,7 @@ fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect:
 
         // A picked filter whose picture is still rendering: a filled square, so it never reads as the empty card's outline
         None if !empty => {
-            painter.rect_filled(rect.shrink(1.0), 3, tokens.button);
+            painter.rect_filled(rect.shrink(OUTLINE_WIDTH), SWATCH_CORNER_RADIUS, tokens.button);
             painter.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
@@ -141,7 +155,7 @@ fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect:
             ctx.request_repaint_after(THUMBNAIL_POLL);
         }
         None => {
-            painter.rect_stroke(rect.shrink(1.0), 3, Stroke::new(1.0, tokens.text_dim), StrokeKind::Inside);
+            painter.rect_stroke(rect.shrink(OUTLINE_WIDTH), SWATCH_CORNER_RADIUS, Stroke::new(OUTLINE_WIDTH, tokens.text_dim), StrokeKind::Inside);
         }
     };
     let (name, source) = if empty { (tr("Filter"), tr("None")) } else { (tr(filter.label()), tr("Filter")) };
@@ -298,7 +312,7 @@ fn anisotropic_kuwahara(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>
     ];
     slider_rows(app, sheet, id, &rows);
     let mut angle = kuwahara.angle;
-    if let Some(merge) = sheet.angle(tr("Anisotropy Angle"), &mut angle, 0.0..=360.0) {
+    if let Some(merge) = sheet.angle(tr("Anisotropy Angle"), &mut angle, DIAL_DEGREES) {
         app.run("effect.set", json!({"effect": id, "angle": angle, "merge": merge}));
     }
 }
@@ -338,10 +352,20 @@ fn height_to_normal(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id
     } else {
         vec![("normalIntensity", tr("Normal Intensity"), filter.intensity, 0.0..=HeightToNormal::MAX_INTENSITY, 2)]
     };
-    for (key, label, value, range, decimals) in rows {
-        let mut value = value;
-        if let Some(merge) = sheet.slider(label, &mut value, range, decimals) {
-            let value = if decimals == 0 { value.round() } else { value };
+    for (key, label, stored, range, decimals) in rows {
+        let mut value = stored;
+        let slid = sheet.slider(label, &mut value, range, decimals);
+        if decimals > 0 {
+            if let Some(merge) = slid {
+                app.run("effect.set", json!({"effect": id, key: value, "merge": merge}));
+            }
+            continue;
+        }
+
+        // Whole centimetres: a press's first whole-number change starts its undo step, changes that round to the stored value apply nothing
+        let value = value.round();
+        let press = sheet.ui.make_persistent_id(("height_to_normal_press", id, key));
+        if let Some(merge) = crate::widgets::press_edit(sheet.ui, press, slid.is_some() && value != stored) {
             app.run("effect.set", json!({"effect": id, key: value, "merge": merge}));
         }
     }
@@ -382,7 +406,7 @@ fn color_match(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64
 
     if sheet.card(tr("Color Variation"), Some(true)) {
         let mut hue = matcher.hue;
-        if let Some(merge) = sheet.angle(tr("Hue"), &mut hue, 0.0..=360.0) {
+        if let Some(merge) = sheet.angle(tr("Hue"), &mut hue, DIAL_DEGREES) {
             app.run("effect.set", json!({"effect": id, "hue": hue, "merge": merge}));
         }
         slider_rows(app, sheet, id, &[("chroma", tr("Chroma"), matcher.chroma, 0.0..=1.0), ("luma", tr("Luma"), matcher.luma, 0.0..=1.0)]);
@@ -473,8 +497,8 @@ fn choice_switch<T: Copy + PartialEq>(
     (name, id_of): ChoiceNames<T>,
 ) {
     let names: Vec<&str> = all.iter().map(|choice| tr(name(*choice))).collect();
-    let at = all.iter().position(|choice| *choice == current).unwrap_or_default();
-    if let Some(picked) = sheet.switch(label, &names, at).and_then(|index| all.get(index)) {
+    let current_index = all.iter().position(|choice| *choice == current).unwrap_or_default();
+    if let Some(picked) = sheet.switch(label, &names, current_index).and_then(|index| all.get(index)) {
         app.run("effect.set", json!({"effect": id, key: id_of(*picked)}));
     }
 }
@@ -548,15 +572,15 @@ fn source_warp(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64
     }
     if warp.mode != WarpMode::Warp {
         let mut angle = warp.angle;
-        if let Some(merge) = sheet.angle(tr("Angle"), &mut angle, 0.0..=360.0) {
+        if let Some(merge) = sheet.angle(tr("Angle"), &mut angle, DIAL_DEGREES) {
             set(app, "angle", json!(angle), merge);
         }
     }
     if warp.mode == WarpMode::MultiDirectional {
         let counts = SourceWarp::DIRECTIONS.map(|count| count.to_string());
         let names: Vec<&str> = counts.iter().map(String::as_str).collect();
-        let at = SourceWarp::DIRECTIONS.iter().position(|count| *count == warp.directions).unwrap_or_default();
-        if let Some(picked) = sheet.switch(tr("Directions"), &names, at).and_then(|index| SourceWarp::DIRECTIONS.get(index)) {
+        let current_index = SourceWarp::DIRECTIONS.iter().position(|count| *count == warp.directions).unwrap_or_default();
+        if let Some(picked) = sheet.switch(tr("Directions"), &names, current_index).and_then(|index| SourceWarp::DIRECTIONS.get(index)) {
             set(app, "directions", json!(picked), false);
         }
         let name = |blending: WarpBlending| tr(blending.label()).to_owned();
@@ -650,7 +674,11 @@ fn slope_blending_picture(painter: &Painter, rect: Rect, blending: SlopeBlending
             for (step, spread) in SLOPE_BLUR_SPREADS.iter().enumerate() {
                 let share = (step + 1) as f32 / SLOPE_BLUR_SPREADS.len() as f32;
                 let tint = tokens.text.gamma_multiply(share * SLOPE_BLUR_LAYER_ALPHA);
-                painter.rect_filled(bar(BLUR_BAR.0 - spread, BLUR_BAR.1 + spread).expand2(egui::vec2(0.0, spread * rect.height() * 0.5)), 1, tint);
+                painter.rect_filled(
+                    bar(BLUR_BAR.0 - spread, BLUR_BAR.1 + spread).expand2(egui::vec2(0.0, spread * rect.height() * SLOPE_BLUR_VERTICAL_SHARE)),
+                    SLOPE_BLUR_LAYER_ROUNDING,
+                    tint,
+                );
             }
         }
         SlopeBlending::Min => {
@@ -660,15 +688,23 @@ fn slope_blending_picture(painter: &Painter, rect: Rect, blending: SlopeBlending
             painter.rect_filled(bar(MAX_BAR.0, MAX_BAR.1), 0, tokens.text);
         }
     }
-    painter.rect_stroke(rect, 0, Stroke::new(1.0, tokens.field_border), StrokeKind::Inside);
+    painter.rect_stroke(rect, 0, Stroke::new(OUTLINE_WIDTH, tokens.field_border), StrokeKind::Inside);
 }
 
 /// Where a blending picture's bar starts down its square (and ends as far from the bottom)
 const SLOPE_BAR_TOP: f32 = 0.25;
 
-/// How far each soft layer of the Blur picture's bar spreads past the bar (shares of the square), widest first, and how opaque the layers stack up to
+/// How far each soft layer of the Blur picture's bar spreads past the bar (shares of the square), widest first
 const SLOPE_BLUR_SPREADS: [f32; 4] = [0.12, 0.08, 0.04, 0.0];
+
+/// How opaque the Blur picture's soft layers stack up to
 const SLOPE_BLUR_LAYER_ALPHA: f32 = 0.45;
+
+/// How much of a Blur layer's sideways spread it also grows up and down: half, so the smear reads wider than tall
+const SLOPE_BLUR_VERTICAL_SHARE: f32 = 0.5;
+
+/// How round a Blur layer's corners are, in points: soft, where the Min and Max bars are square
+const SLOPE_BLUR_LAYER_ROUNDING: u8 = 1;
 
 /// The left and right ends of each slope blur mode's bar, as shares of the pictogram's width
 const BLUR_BAR: (f32, f32) = (0.3, 0.62);
@@ -847,7 +883,7 @@ fn gradient_curve(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: 
 
 /// A curve preset's shape over a dark square
 fn curve_picture(painter: &Painter, rect: Rect, preset: CurvePreset, tokens: &Tokens) {
-    painter.rect_filled(rect, 2, tokens.field);
+    painter.rect_filled(rect, CURVE_PICTURE_ROUNDING, tokens.field);
     let inner = rect.shrink(CURVE_PICTURE_INSET);
     let points: Vec<egui::Pos2> = (0..=CURVE_PICTURE_STEPS)
         .map(|step| {
@@ -858,9 +894,16 @@ fn curve_picture(painter: &Painter, rect: Rect, preset: CurvePreset, tokens: &To
     painter.add(egui::Shape::line(points, Stroke::new(CURVE_PICTURE_STROKE, tokens.accent)));
 }
 
-/// A curve picture's inset in its square, the points it is drawn through and its line's width
+/// A curve picture's inset in its square, in points
 const CURVE_PICTURE_INSET: f32 = 2.0;
+
+/// How round a curve picture's square is, in points
+const CURVE_PICTURE_ROUNDING: u8 = 2;
+
+/// How many straight pieces a curve picture's line is drawn with
 const CURVE_PICTURE_STEPS: usize = 30;
+
+/// The width of a curve picture's line, in points
 const CURVE_PICTURE_STROKE: f32 = 1.5;
 
 /// Gradient Dynamic: Gradient Orientation and Gradient Input Position (its Gradient Source is a card after the filter's)
@@ -877,7 +920,7 @@ fn gradient_dynamic(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id
 /// Gradient Dynamic's Gradient Source: its own slot card after the filter's, a uniform color whose bar opens the picker
 fn gradient_source(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, color: [f32; 3]) {
     let swatch = |painter: &Painter, rect: Rect| {
-        painter.rect_filled(rect, 3, crate::fill_material_panel::shown_color(color));
+        painter.rect_filled(rect, SWATCH_CORNER_RADIUS, crate::fill_material_panel::shown_color(color));
     };
 
     // The card's row opens the picker of the colour bar under it: its source is a uniform color only
@@ -935,11 +978,11 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
         if let Some(merge) = sheet.slider(tr("Sun Intensity"), &mut value, 0.0..=SUN_INTENSITY_MAX, 2) {
             set(app, json!({"light": value, "merge": merge}));
         }
-        for (key, label, value, range) in
-            [("azimuth", tr("Sun Horizontal Angle"), *azimuth, 0.0..=360.0), ("elevation", tr("Sun Vertical Angle"), elevation.rem_euclid(360.0), 0.0..=360.0)]
+        for (key, label, value) in
+            [("azimuth", tr("Sun Horizontal Angle"), *azimuth), ("elevation", tr("Sun Vertical Angle"), elevation.rem_euclid(FULL_TURN_DEGREES))]
         {
             let mut value = value;
-            if let Some(merge) = sheet.angle(label, &mut value, range) {
+            if let Some(merge) = sheet.angle(label, &mut value, DIAL_DEGREES) {
                 set(app, json!({key: value, "merge": merge}));
             }
         }
@@ -1025,25 +1068,24 @@ fn baked_lighting_stylized(app: &mut TextureCraftApp, sheet: &mut PropertySheet<
 
 /// Light 1 or 2's rows (`key` names it to `effect.set`): Horizontal and Vertical Angle with their dials, Intensity and Color
 fn extra_light(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, key: &str, light: DirectionalLight) {
-    let mut edits: Vec<(Value, bool)> = Vec::new();
-    for (part, label, value, range) in
-        [("azimuth", tr("Horizontal Angle"), light.azimuth, 0.0..=360.0), ("elevation", tr("Vertical Angle"), light.elevation.rem_euclid(360.0), 0.0..=360.0)]
+    let set = |app: &mut TextureCraftApp, part: Value, merge: bool| {
+        app.run("effect.set", json!({"effect": id, key: part, "merge": merge}));
+    };
+    for (part, label, value) in
+        [("azimuth", tr("Horizontal Angle"), light.azimuth), ("elevation", tr("Vertical Angle"), light.elevation.rem_euclid(FULL_TURN_DEGREES))]
     {
         let mut value = value;
-        if let Some(merge) = sheet.angle(label, &mut value, range) {
-            edits.push((json!({part: value}), merge));
+        if let Some(merge) = sheet.angle(label, &mut value, DIAL_DEGREES) {
+            set(app, json!({part: value}), merge);
         }
     }
     let mut intensity = light.intensity;
     if let Some(merge) = sheet.slider(tr("Intensity"), &mut intensity, 0.0..=MAX_LIGHT_INTENSITY, 2) {
-        edits.push((json!({"intensity": intensity}), merge));
+        set(app, json!({"intensity": intensity}), merge);
     }
     let pick = sheet.color_bar_led(tr("Color"), light.color, app.picking_color, &app.session.doc.project.swatches);
     if let Some(picked) = crate::fill_material_panel::take_color_pick(app, pick) {
-        edits.push((json!({"color": picked}), pick.merge));
-    }
-    for (part, merge) in edits {
-        app.run("effect.set", json!({"effect": id, key: part, "merge": merge}));
+        set(app, json!({"color": picked}), pick.merge);
     }
 }
 

@@ -602,24 +602,27 @@ impl Session {
         // Removed or replaced resources may change any set's rendered content
         let removed_or_replaced_resource =
             previous_document.resources.iter().any(|(name, previous)| !self.doc.resources.get(name).is_some_and(|current| Arc::ptr_eq(previous, current)));
-        let added_resource_names: BTreeSet<_> = self.doc.resources.keys().filter(|name| !previous_document.resources.contains_key(*name)).collect();
+        let added_resource_names: BTreeSet<&str> =
+            self.doc.resources.keys().filter(|name| !previous_document.resources.contains_key(*name)).map(String::as_str).collect();
         let uses_added_resource = |texture_set_index: usize| {
             use texturecraft_core::{EffectKind, Fill, Source};
 
-            let uses_source = |source: &Source| matches!(source, Source::Image { name, .. } if added_resource_names.contains(name));
-            let uses_fill =
-                |fill: &Fill| fill.sources.values().any(uses_source) || fill.link.as_ref().is_some_and(|link| added_resource_names.contains(&link.package));
+            let is_added = |name: &str| added_resource_names.contains(name);
+            let uses_fill = |fill: &Fill| {
+                fill.sources.values().any(|source| matches!(source, Source::Image { name, .. } if is_added(name)))
+                    || fill.link.as_ref().is_some_and(|link| is_added(&link.package))
+            };
             let project = &self.doc.project;
             !added_resource_names.is_empty()
                 && project.texture_sets.get(texture_set_index).is_some_and(|set| {
                     project.render_tree(&set.stack).iter().filter_map(|id| project.layers.get(id)).any(|layer| {
                         matches!(&layer.kind, LayerKind::Fill(fill) if uses_fill(fill))
-                            || layer.mask.iter().flat_map(|mask| &mask.effects).chain(&layer.content_effects).any(|effect| match &effect.kind {
-                                EffectKind::Fill { source, .. } => uses_source(source),
-                                EffectKind::Material(fill) => uses_fill(fill),
-                                EffectKind::Generator(generator) => generator.inputs.values().any(uses_source),
-                                _ => false,
-                            })
+                            || layer
+                                .mask
+                                .iter()
+                                .flat_map(|mask| &mask.effects)
+                                .chain(&layer.content_effects)
+                                .any(|effect| effect.images_read().any(is_added) || matches!(&effect.kind, EffectKind::Material(fill) if uses_fill(fill)))
                     })
                 })
         };

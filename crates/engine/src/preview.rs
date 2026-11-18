@@ -3,7 +3,8 @@
 use rayon::prelude::*;
 use texturecraft_compose::pattern::{Coords, procedural};
 use texturecraft_core::{
-    Channel, Effect, EffectKind, Fill, Filter, Layer, LayerKind, Procedural, ProceduralKind, Project, Projection, Source, TextureSet, TileTransform,
+    Channel, Effect, EffectKind, Fill, Filter, Layer, LayerKind, Procedural, ProceduralKind, Project, Projection, SIZE_REFERENCE_RES, Source, TextureSet,
+    TileTransform,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 
@@ -109,7 +110,7 @@ pub fn filter(id: &str, size: usize) -> Option<Vec<Option<Sample>>> {
         EffectKind::Filter(Filter::Transform(transform)) => {
             EffectKind::Filter(Filter::Transform(TileTransform { scaling: [2.0, 2.0], rotation: 30.0, ..transform }))
         }
-        EffectKind::Filter(f) => EffectKind::Filter(magnified(f, 2048.0 / res as f32)),
+        EffectKind::Filter(f) => EffectKind::Filter(magnified(f, SIZE_REFERENCE_RES / res as f32)),
         k => k,
     };
 

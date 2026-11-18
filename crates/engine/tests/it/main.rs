@@ -35,6 +35,7 @@ mod path_tool;
 mod pbr_import;
 mod perf;
 mod polygon_fill;
+mod resources_used;
 mod project_recovery;
 mod sample;
 mod thumbs;

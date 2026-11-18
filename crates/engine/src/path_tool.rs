@@ -282,6 +282,12 @@ fn read_paint(shape: &PathShape) -> Result<PathPaint> {
     Ok(paint)
 }
 
+/// The image resources a path sublayer's paths paint their mask with (none for any other effect)
+pub(crate) fn path_images(kind: &EffectKind) -> Vec<String> {
+    let EffectKind::Path(shapes) = kind else { return Vec::new() };
+    shapes.iter().filter_map(|shape| read_paint(shape).ok()?.mask_image).collect()
+}
+
 /// The Path tool state showing a stored path (finite points only, at most [`MAX_PATH_POINTS`])
 fn state_of(shape: &PathShape) -> PathState {
     let points = shape.points.iter().filter(|p| p.iter().all(|v| v.is_finite())).take(MAX_PATH_POINTS).map(|p| Vec3::from_array(*p)).collect();

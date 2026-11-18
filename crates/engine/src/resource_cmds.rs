@@ -156,8 +156,7 @@ fn remove(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(Value::Null)
 }
 
-/// Drop resources no layer, mask effect, the projection stencil or the environment uses (one undo
-/// step).
+/// Drop resources no layer, mask effect, the projection stencil, the mask brush or the environment uses (one undo step)
 fn remove_unused(s: &mut Session, _: &Value) -> Result<Value> {
     let mut used = Vec::new();
     for set in &s.doc.project.texture_sets {
@@ -166,6 +165,7 @@ fn remove_unused(s: &mut Session, _: &Value) -> Result<Value> {
         }
     }
     used.extend(s.tool.stencil.as_ref().map(|st| st.image.clone()));
+    used.extend(s.tool.mask_image.clone());
     used.extend(s.doc.project.display.environment_resource().map(str::to_string));
     let unused: Vec<String> = s.doc.resources.keys().filter(|k| !used.contains(k)).cloned().collect();
     if !unused.is_empty() {

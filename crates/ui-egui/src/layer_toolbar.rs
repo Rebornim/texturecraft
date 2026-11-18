@@ -82,8 +82,8 @@ const SHADOW_OFFSET: [i8; 2] = [3, 4];
 const WHITE_SWATCH: u8 = 235;
 const BLACK_SWATCH: u8 = 10;
 
-/// The filter Add filter adds: at its defaults it changes nothing, and its slot opens the picker to swap it
-pub(crate) const NEW_FILTER: &str = "none";
+/// The filter Add filter adds: an empty one, which changes nothing until its slot's picker swaps a filter into it
+pub(crate) const NEW_FILTER: &str = texturecraft_engine::mask_cmds::EMPTY_FILTER;
 
 /// The Layers panel's top row and what its menus open
 pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui) {

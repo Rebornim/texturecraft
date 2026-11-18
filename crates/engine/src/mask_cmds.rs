@@ -886,7 +886,7 @@ fn switched_channels(params: &Value) -> Result<Vec<(Channel, bool)>> {
 }
 
 /// The `filter` id of a filter effect with no filter picked
-const EMPTY_FILTER: &str = "none";
+pub const EMPTY_FILTER: &str = "none";
 
 /// An empty filter and its label, to replace filter effect `effect`'s
 fn emptied_filter(s: &Session, effect: LayerId) -> Result<(EffectKind, &'static str)> {

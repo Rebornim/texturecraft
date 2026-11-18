@@ -42,3 +42,35 @@ fn starts_with_lowercase(text: &str, query: &str) -> bool {
     let mut lowered = text.chars().flat_map(char::to_lowercase);
     query.chars().all(|wanted| lowered.next() == Some(wanted))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An item labelled `label`
+    fn item(label: &str) -> ResourcePickerItem<()> {
+        ResourcePickerItem { id: (), label: label.to_owned(), caption: None, picture: TilePicture::Import }
+    }
+
+    #[test]
+    fn a_search_finds_a_label_by_any_part_of_it_whatever_its_case() {
+        assert!(item("Fine Cracks").matches("crack"), "mid-label, an uppercase label found by a lowercase query");
+        assert!(item("Fine Cracks").matches("fine c"), "across a space");
+        assert!(!item("Fine Cracks").matches("cracked"), "past the label's end");
+        assert!(!item("Rust").matches("dust"));
+    }
+
+    #[test]
+    fn an_empty_search_keeps_every_item() {
+        assert!(item("Rust").matches(""));
+        assert!(item("").matches(""));
+    }
+
+    #[test]
+    fn a_search_lowercases_a_label_beyond_ascii() {
+        assert!(item("ÜBERZUG Grün").matches("überzug"));
+        assert!(item("ÜBERZUG Grün").matches("grün"));
+        assert!(item("Ποτάμι").matches("ποτ"));
+        assert!(!item("Grün").matches("grun"), "an accent is part of the letter");
+    }
+}

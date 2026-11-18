@@ -29,6 +29,9 @@ const DEFAULT_POINTER_PX: u32 = 24;
 const MAX_POINTER_PX: u32 = 64;
 /// The colour depth of a pointer picture with alpha
 const ARGB_DEPTH: u8 = 32;
+/// That format's alpha, red, green and blue shifts (8 bits each, alpha highest) and each one's mask
+const ARGB_SHIFTS: [u16; 4] = [24, 16, 8, 0];
+const CHANNEL_MASK: u16 = 0xff;
 /// The RENDER extension version that brought coloured pointers (`CreateCursor`), as major and minor
 const RENDER_CURSOR_VERSION: (u32, u32) = (0, 5);
 
@@ -141,8 +144,8 @@ fn argb_format(connection: &RustConnection) -> Option<Pictformat> {
         let direct = format.direct;
         format.type_ == PictType::DIRECT
             && format.depth == ARGB_DEPTH
-            && [direct.alpha_shift, direct.red_shift, direct.green_shift, direct.blue_shift] == [24, 16, 8, 0]
-            && [direct.alpha_mask, direct.red_mask, direct.green_mask, direct.blue_mask] == [0xff; 4]
+            && [direct.alpha_shift, direct.red_shift, direct.green_shift, direct.blue_shift] == ARGB_SHIFTS
+            && [direct.alpha_mask, direct.red_mask, direct.green_mask, direct.blue_mask] == [CHANNEL_MASK; 4]
     })?;
     Some(argb.id)
 }

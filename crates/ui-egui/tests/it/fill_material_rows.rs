@@ -8,6 +8,7 @@ use texturecraft_engine::core::{Channel, CookResolution, LayerId, LayerKind, Lin
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::screen_pick::{PickOutcome, ScreenPick};
 
+use crate::filter_support::undo_depth;
 use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
 
 /// Tall enough that Properties shows the whole fill and an open source list without scrolling
@@ -474,6 +475,10 @@ fn the_swatches_row_keeps_the_picker_colour_in_the_project_applies_it_on_a_click
     mouse_click(&mut harness, add.center(), egui::PointerButton::Primary);
     assert_eq!(harness.state().session.doc.project.swatches, vec![orange], "+ keeps the picker's colour in the project");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "the picker stays open");
+    let depth = undo_depth(&harness);
+    let kept = harness.get_by_role_and_label(Role::Button, "#FF8000").rect();
+    mouse_click(&mut harness, kept.center(), egui::PointerButton::Primary);
+    assert_eq!(undo_depth(&harness), depth, "a swatch the picker already shows changes nothing");
 
     click(&mut harness, Role::Button, "Previous color");
     assert_eq!(base_color(&harness, layer), before);
@@ -489,6 +494,40 @@ fn the_swatches_row_keeps_the_picker_colour_in_the_project_applies_it_on_a_click
     mouse_click(&mut harness, remove.center(), egui::PointerButton::Primary);
     assert!(harness.state().session.doc.project.swatches.is_empty(), "its right-click menu removes it");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "a pick in the menu keeps the picker open");
+}
+
+#[test]
+fn a_hex_code_left_as_it_opened_is_no_edit() {
+    let (mut harness, layer) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
+    click(&mut harness, Role::Button, "Base color");
+    let depth = undo_depth(&harness);
+    click(&mut harness, Role::TextInput, "Hex color");
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(SETTLE_FRAMES);
+    assert_eq!(base_color(&harness, layer), [0.2, 0.2, 0.2], "the colour is not rounded to the code it shows");
+    assert_eq!(undo_depth(&harness), depth, "no undo step");
+}
+
+#[test]
+fn a_hex_code_half_typed_when_a_press_closes_the_picker_is_gone_when_it_opens_again() {
+    let (mut harness, layer) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
+    click(&mut harness, Role::Button, "Base color");
+    click(&mut harness, Role::TextInput, "Hex color");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.event(egui::Event::Text("FF8000".into()));
+    harness.run_steps(1);
+    let view = harness.state().viewport_rect.center();
+    mouse_click(&mut harness, view, egui::PointerButton::Primary);
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "the press closes the picker");
+    assert_eq!(base_color(&harness, layer), [0.2, 0.2, 0.2], "closing applies nothing");
+
+    let depth = undo_depth(&harness);
+    click(&mut harness, Role::Button, "Base color");
+    click(&mut harness, Role::TextInput, "Hex color");
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(SETTLE_FRAMES);
+    assert_eq!(base_color(&harness, layer), [0.2, 0.2, 0.2], "the field shows the colour's own code, not the text typed before");
+    assert_eq!(undo_depth(&harness), depth, "no undo step");
 }
 
 /// A primary-button drag from `from` by `by` in four moves, a frame apart, as a real drag arrives

@@ -29,6 +29,9 @@ const CUR_BITS_PER_PIXEL: u16 = 32;
 /// A bitmap's mask rows are padded to whole 32-bit words
 #[cfg(any(windows, test))]
 const MASK_WORD_BITS: u32 = 32;
+/// A mask byte's first pixel is its high bit
+#[cfg(any(windows, test))]
+const MASK_FIRST_BIT: u8 = 0x80;
 /// The part of the pointer's cell the pipette's square takes (the system's arrow is about 20 pixels tall in its 32-pixel cell)
 const GLYPH_SHARE: f32 = 0.625;
 /// The smallest and largest pointer drawn, in pixels
@@ -109,7 +112,7 @@ impl CursorImage {
     #[cfg(any(windows, test))]
     pub fn cur_file(&self) -> Vec<u8> {
         let side = self.size;
-        let mask_row = side.div_ceil(MASK_WORD_BITS) * (MASK_WORD_BITS / 8);
+        let mask_row = side.div_ceil(MASK_WORD_BITS) * (MASK_WORD_BITS / u8::BITS);
         let pixel_bytes = side * side * 4;
         let image_bytes = BITMAP_HEADER_BYTES + pixel_bytes + mask_row * side;
         let mut file = Vec::with_capacity((CUR_HEADER_BYTES + image_bytes) as usize);
@@ -147,9 +150,9 @@ impl CursorImage {
             let mut bits = vec![0_u8; mask_row as usize];
             for (x, &[.., alpha]) in row.as_chunks::<4>().0.iter().enumerate() {
                 if alpha == 0
-                    && let Some(byte) = bits.get_mut(x / 8)
+                    && let Some(byte) = bits.get_mut(x / u8::BITS as usize)
                 {
-                    *byte |= 0x80 >> (x % 8);
+                    *byte |= MASK_FIRST_BIT >> (x % u8::BITS as usize);
                 }
             }
             file.extend_from_slice(&bits);
@@ -256,10 +259,10 @@ mod tests {
 
         assert_eq!([word(2), word(4)], [Some(CUR_TYPE), Some(1)], "one cursor picture");
         assert_eq!([word(10), word(12)], [Some(image.hotspot[0] as u16), Some(image.hotspot[1] as u16)], "the hotspot is the tip");
-        assert_eq!(file.len(), 22 + 40 + 32 * 32 * 4 + 4 * 32, "header, bitmap header, colour rows and mask rows");
+        assert_eq!(file.len(), (CUR_HEADER_BYTES + BITMAP_HEADER_BYTES) as usize + 32 * 32 * 4 + 4 * 32, "header, bitmap header, colour rows and mask rows");
         let [hx, hy] = image.hotspot;
         let bottom_up_row = (31 - hy) as usize;
-        let alpha = file.get(22 + 40 + (bottom_up_row * 32 + hx as usize) * 4 + 3).copied();
+        let alpha = file.get((CUR_HEADER_BYTES + BITMAP_HEADER_BYTES) as usize + (bottom_up_row * 32 + hx as usize) * 4 + 3).copied();
         assert!(alpha.is_some_and(|alpha| alpha >= INK_ALPHA), "the file's hotspot pixel is the tip's ink: {alpha:?}");
     }
 }

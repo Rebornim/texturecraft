@@ -194,7 +194,7 @@ impl PropertySheet<'_> {
             let close = Rect::from_center_size(pos2(title_bar.right() - TITLE_INSET, title_bar.center().y), vec2(CLOSE_TARGET, CLOSE_TARGET));
             let drag = ui.interact(Rect::from_min_max(title_bar.min, pos2(close.left(), title_bar.bottom())), id.with("picker_title"), Sense::drag());
             drag.widget_info(|| WidgetInfo::labeled(Role::TitleBar, true, label));
-            let drag = drag.on_hover_cursor(egui::CursorIcon::Grab);
+            let drag = drag.on_hover_cursor(CursorIcon::Grab);
             let closed = ui.interact(close, id.with("picker_close"), Sense::click());
             closed.widget_info(|| WidgetInfo::labeled(Role::Button, true, tr("Close")));
             let painter = ui.painter();

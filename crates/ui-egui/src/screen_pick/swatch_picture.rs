@@ -12,6 +12,8 @@ const FILL_RADIUS_PX: f32 = 18.0;
 const OUTLINE_PX: f32 = 2.0;
 /// The dark outer ring's width at the nominal cell
 const RING_PX: f32 = 1.0;
+/// The least the ring is wide in pixels, so a small pointer's disc still has its edge on white
+const MIN_RING_PX: f32 = 1.0;
 /// How dark the outer ring is: faint, only enough to edge the white outline on a white ground
 const RING_ALPHA: f32 = 0.45;
 
@@ -44,7 +46,7 @@ pub(super) fn pipette_pixel(pipette: &CursorImage, x: f32, y: f32) -> [u8; 4] {
 pub(super) fn disc_pixel(distance: f32, unit: f32, color: [u8; 3]) -> [u8; 4] {
     let fill_radius = FILL_RADIUS_PX * unit;
     let outline_radius = fill_radius + OUTLINE_PX * unit;
-    let ring_radius = outline_radius + (RING_PX * unit).max(1.0);
+    let ring_radius = outline_radius + (RING_PX * unit).max(MIN_RING_PX);
 
     // Each edge's coverage over the pixel's width, for smooth edges
     let coverage = |radius: f32| (radius - distance + 0.5).clamp(0.0, 1.0);
@@ -76,8 +78,6 @@ mod tests {
     use super::*;
     use crate::screen_pick::SwatchSide;
     use crate::screen_pick::cursor_image::MAX_PICTURE_PX;
-
-    const SIDES: [SwatchSide; 4] = [SwatchSide::BelowRight, SwatchSide::BelowLeft, SwatchSide::AboveLeft, SwatchSide::AboveRight];
 
     fn pixel(image: &CursorImage, x: u32, y: u32) -> [u8; 4] {
         pipette_pixel(image, x as f32, y as f32)
@@ -124,7 +124,7 @@ mod tests {
         for cell in [24, 32, 48, 64] {
             let plain = CursorImage::eyedropper(cell);
             let unit = swatch_unit(cell);
-            for side in SIDES {
+            for side in SwatchSide::ALL {
                 let image = CursorImage::eyedropper_with_swatch(cell, [255, 0, 255], side);
                 let shift = [image.hotspot[0] - plain.hotspot[0], image.hotspot[1] - plain.hotspot[1]];
                 let [cx, cy] = disc_center(&image, side, unit);

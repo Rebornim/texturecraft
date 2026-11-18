@@ -8,15 +8,15 @@ pub enum SwatchSide {
     AboveRight,
 }
 
-/// The sides tried in turn: the pipette points up right from its tip, so the disc moves round it the other way
-const PREFERRED: [SwatchSide; 4] = [SwatchSide::BelowRight, SwatchSide::BelowLeft, SwatchSide::AboveLeft, SwatchSide::AboveRight];
-
 /// The distance from the tip to the disc's centre at a 32-pixel pointer, in pixels: clear of the picked pixel and the pipette
 const DISC_OFFSET_PX: f32 = 22.0;
 /// How far right of the tip the disc's centre sits above the pipette, clear of its bulb
 const PAST_BULB_PX: f32 = 44.0;
 
 impl SwatchSide {
+    /// Every side, in the order tried: the pipette points up right from its tip, so the disc moves round it the other way
+    pub(crate) const ALL: [SwatchSide; 4] = [SwatchSide::BelowRight, SwatchSide::BelowLeft, SwatchSide::AboveLeft, SwatchSide::AboveRight];
+
     /// The disc's centre from the tip's pixel centre at a 32-pixel pointer, in pixels (y down)
     pub fn offset(self) -> [f32; 2] {
         match self {
@@ -35,7 +35,7 @@ impl SwatchSide {
             let [x, y] = [tip[0] + dx * unit, tip[1] + dy * unit];
             x - reach >= left && x + reach <= right && y - reach >= top && y + reach <= bottom
         };
-        PREFERRED.into_iter().find(fits).unwrap_or(SwatchSide::BelowRight)
+        Self::ALL.into_iter().find(fits).unwrap_or(SwatchSide::BelowRight)
     }
 }
 

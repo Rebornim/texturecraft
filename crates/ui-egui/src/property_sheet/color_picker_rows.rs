@@ -8,7 +8,7 @@ use texturecraft_engine::core::MAX_SWATCHES;
 
 use super::slider::KNOB_RADIUS;
 use super::{CONTROL_HEIGHT, CONTROL_RADIUS, GLYPH_SIZE, GLYPH_TARGET, PAD, PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE, TEXT_SIZE};
-use crate::color_picker::{ColorModel, ColorPick, ColorSpace, PickerState, SwatchEdit, hex, parse_hex};
+use crate::color_picker::{ColorModel, ColorPick, ColorSpace, PickerState, SwatchEdit, eight_bit, hex, parse_hex};
 use crate::drawn_icon::DrawnIcon;
 use crate::fill_material_panel::shown_color as screen_color;
 use crate::i18n::tr;
@@ -69,8 +69,9 @@ const TRACK_RIGHT_INSET: f32 = 44.0;
 /// Height of a slider's colour track
 const TRACK_HEIGHT: f32 = 6.0;
 
-/// Width of a slider's typed value
+/// Width of a slider's typed value, and the decimals it shows
 const VALUE_WIDTH: f32 = 40.0;
+const SLIDER_DECIMALS: usize = 2;
 
 /// Height of the working-space line (the stack rhythm's label line)
 const WORKING_LINE: f32 = 18.0;
@@ -119,7 +120,7 @@ impl PropertySheet<'_> {
         edited = edited.or(self.model_sliders(state));
         self.working_line(state);
         let (applied, swatch) = self.swatch_rows(state, swatches);
-        if let Some(color) = applied {
+        if let Some(color) = applied.filter(|color| *color != state.linear) {
             state.set_linear(color);
             edited = Some(false);
         }
@@ -242,7 +243,7 @@ impl PropertySheet<'_> {
         response.clicked()
     }
 
-    /// The hex code of `shown` in a field; the values typed, once Enter or a click elsewhere ends the edit
+    /// The hex code of `shown` in a field; the values typed, once Enter or a click elsewhere ends an edit that changed the code
     fn hex_field(&mut self, field: Rect, shown: [f32; 3]) -> Option<[f32; 3]> {
         let id = self.next_id();
         let tokens = self.tokens;
@@ -252,6 +253,13 @@ impl PropertySheet<'_> {
         let digits = Rect::from_min_max(pos2(field.left() + DIGITS_INSET, field.top()), field.right_bottom());
         let text_id = id.with("typed");
         let editing = self.ui.data(|data| data.get_temp::<String>(text_id));
+
+        // Text left by a picker that closed mid-edit (its field no longer drawn, so never told it lost focus) is not shown again
+        let focused = self.ui.memory(|memory| memory.has_focus(text_id) || memory.had_focus_last_frame(text_id));
+        if editing.is_some() && !focused {
+            self.ui.data_mut(|data| data.remove::<String>(text_id));
+        }
+        let editing = editing.filter(|_| focused);
 
         let Some(mut text) = editing else {
             let response = self.ui.interact(digits, id, Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
@@ -281,7 +289,9 @@ impl PropertySheet<'_> {
             return None;
         }
 
-        parse_hex(&text)
+        // Left as it opened, the code is no edit: reading it back would round the colour to what the code shows
+        let typed = parse_hex(&text)?;
+        (hex(typed) != hex(shown)).then_some(typed)
     }
 
     /// The model dropdown, sized to its value, and the ⋯ menu at the right edge; a click in its list picks, a hover changes nothing
@@ -307,8 +317,8 @@ impl PropertySheet<'_> {
         let shown = state.shown();
         egui::Popup::menu(&response).show(|ui| {
             if ui.button(tr("Copy RGB values")).clicked() {
-                let [r, g, b] = shown.map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8);
-                ui.copy_text(format!("{r}, {g}, {b}"));
+                let [red, green, blue] = eight_bit(shown);
+                ui.copy_text(format!("{red}, {green}, {blue}"));
             }
             if ui.button(tr("Copy hex color")).clicked() {
                 ui.copy_text(format!("#{}", hex(shown)));
@@ -346,7 +356,7 @@ impl PropertySheet<'_> {
                 part = ((at.x - track.left()) / track.width()).clamp(0.0, 1.0);
                 changed = Some(continues(&response));
             }
-            if let Some(typed) = self.value_field_at(id, letter, self.right, VALUE_WIDTH, center_y, part, &(0.0..=1.0), 2, "") {
+            if let Some(typed) = self.value_field_at(id, letter, self.right, VALUE_WIDTH, center_y, part, &(0.0..=1.0), SLIDER_DECIMALS, "") {
                 part = typed;
                 changed = Some(false);
             }
@@ -368,8 +378,8 @@ impl PropertySheet<'_> {
         let font = FontId::proportional(SMALL_TEXT_SIZE);
         let painter = self.ui.painter();
         let label = painter.text(pos2(self.left, center_y), Align2::LEFT_CENTER, tr("Working color space"), font.clone(), tokens.text_dim);
-        let [r, g, b] = state.linear;
-        painter.text(pos2(self.right, center_y), Align2::RIGHT_CENTER, format!("{r:.2}  {g:.2}  {b:.2}"), font, tokens.text_dim);
+        let [red, green, blue] = state.linear;
+        painter.text(pos2(self.right, center_y), Align2::RIGHT_CENTER, format!("{red:.2}  {green:.2}  {blue:.2}"), font, tokens.text_dim);
         self.drawn(label.bottom());
     }
 

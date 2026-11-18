@@ -99,7 +99,8 @@ pub(super) fn swap_in(image: &CursorImage) -> bool {
 
 /// The keeper process's work and exit code: the eyedropper as the system pointer until the pick ends or the app is gone
 pub fn keep_pointer() -> i32 {
-    let args: Vec<String> = std::env::args().skip(2).collect();
+    // An argument that is not Unicode is no keeper's: refused instead of panicking as args() would
+    let Some(args) = std::env::args_os().skip(2).map(|arg| arg.into_string().ok()).collect::<Option<Vec<String>>>() else { return EXIT_BAD_ARGS };
     let Some(keeper) = KeeperArgs::parse(&args) else { return EXIT_BAD_ARGS };
     let Ok(app) = HPROCESS::OpenProcess(co::PROCESS::SYNCHRONIZE, false, keeper.parent) else { return EXIT_UNAVAILABLE };
     let Ok(stop) = HEVENT::NULL.OpenEvent(co::EVENT_RIGHTS::SYNCHRONIZE, false, &keeper.stop) else { return EXIT_UNAVAILABLE };

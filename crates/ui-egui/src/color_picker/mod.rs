@@ -52,9 +52,14 @@ pub(crate) fn blocks_view_press(ctx: &egui::Context) -> bool {
     open_window(ctx).is_some() || ctx.data(|data| data.get_temp::<bool>(closing_id())).unwrap_or(false)
 }
 
+/// `rgb` (0..1 each) as 0..255 each, as the hex code and the copied values give it
+pub(crate) fn eight_bit(rgb: [f32; 3]) -> [u8; 3] {
+    rgb.map(|component| (component.clamp(0.0, 1.0) * 255.0).round() as u8)
+}
+
 /// `rgb` (0..1 each) as six hex digits, as the hex field shows it
 pub(crate) fn hex(rgb: [f32; 3]) -> String {
-    let [red, green, blue] = rgb.map(|component| (component.clamp(0.0, 1.0) * 255.0).round() as u8);
+    let [red, green, blue] = eight_bit(rgb);
     format!("{red:02X}{green:02X}{blue:02X}")
 }
 
@@ -62,7 +67,7 @@ pub(crate) fn hex(rgb: [f32; 3]) -> String {
 pub(crate) fn parse_hex(text: &str) -> Option<[f32; 3]> {
     let digits = text.trim().trim_start_matches('#');
     let full: String = match digits.len() {
-        3 => digits.chars().flat_map(|c| [c, c]).collect(),
+        3 => digits.chars().flat_map(|digit| [digit, digit]).collect(),
         6 => digits.to_owned(),
         _ => return None,
     };

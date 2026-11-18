@@ -49,7 +49,7 @@ fn a_mask_fill_takes_a_procedural_an_image_an_alpha_or_a_value_as_its_one_graysc
     let Source::Procedural { pattern, low, high, .. } = source(&s, effect) else { panic!("not a procedural: {:?}", source(&s, effect)) };
     assert_eq!((pattern.kind, pattern.scale, low, high), (kind, 4.0, [0.0; 3], [1.0; 3]));
     let line = mask_line(&s, layer);
-    assert!(line.iter().any(|v| (v - line[0]).abs() > 1e-3), "the mask follows the pattern: {line:?}");
+    assert!(line.iter().any(|value| (value - line[0]).abs() > 1e-3), "the mask follows the pattern: {line:?}");
 
     // A parameter alone keeps the rest of the pattern
     execute(&mut s, "layer.fill.set", &json!({"effect": effect.0, "procedural": kind.label(), "contrast": 1.5})).unwrap();
@@ -63,7 +63,7 @@ fn a_mask_fill_takes_a_procedural_an_image_an_alpha_or_a_value_as_its_one_graysc
 
     execute(&mut s, "layer.fill.set", &json!({"effect": effect.0, "value": 0.25})).unwrap();
     assert_eq!(source(&s, effect), Source::Uniform([0.25; 3]));
-    assert!(mask_line(&s, layer).iter().all(|v| (v - 0.25).abs() < 1e-3));
+    assert!(mask_line(&s, layer).iter().all(|value| (value - 0.25).abs() < 1e-3));
     execute(&mut s, "layer.fill.set", &json!({"effect": effect.0, "value": 7.0})).unwrap();
     assert_eq!(source(&s, effect), Source::Uniform([1.0; 3]), "a mask value stays in 0..1");
 
@@ -128,7 +128,7 @@ fn a_procedural_source_is_made_at_its_resolution() {
     execute(&mut s, "layer.fill.set", &json!({"effect": effect.0, "procedural": "Clouds", "resolutionFactor": -2})).unwrap();
     assert_eq!(resolution(&s, effect).factor, -2);
     let coarse = mask_line(&s, layer);
-    assert!(coarse.iter().zip(&every_texel).any(|(a, b)| (a - b).abs() > 1e-3), "{coarse:?} vs {every_texel:?}");
+    assert!(coarse.iter().zip(&every_texel).any(|(sampled, exact)| (sampled - exact).abs() > 1e-3), "{coarse:?} vs {every_texel:?}");
     assert!(execute(&mut s, "project.inspect", &Value::Null).unwrap().to_string().contains("\"resolution\""), "inspect shows it");
 
     // Another parameter keeps it; a bad size is refused and changes nothing

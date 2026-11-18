@@ -76,7 +76,7 @@ fn color_selections_go_in_the_mask_and_are_selected() {
     // Add effect's item adds another to the same mask, whatever target it is given
     let (second, kind) = added(&mut s, "effect.add.colorSelection", json!({"layer": layer.0, "target": "content"}));
     assert!(matches!(kind, EffectKind::ColorSelection(_)));
-    let mask: Vec<LayerId> = s.doc.project.layer(layer).unwrap().mask.as_ref().unwrap().effects.iter().map(|e| e.id).collect();
+    let mask: Vec<LayerId> = s.doc.project.layer(layer).unwrap().mask.as_ref().unwrap().effects.iter().map(|effect| effect.id).collect();
     assert_eq!(mask, vec![first, second]);
     assert!(s.doc.project.layer(layer).unwrap().content_effects.is_empty());
 }

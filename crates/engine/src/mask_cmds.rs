@@ -649,7 +649,7 @@ fn compare_from(cmd: &str, p: &Value, kind: &mut EffectKind) -> Result<()> {
     Ok(())
 }
 
-/// The `effect` param, or the selected effect.
+/// The `effect` param, or the selected effect
 pub(crate) fn effect_id(s: &Session, p: &Value, cmd: &str) -> Result<LayerId> {
     match (u64p(p, "effect"), s.target) {
         (Some(e), _) => Ok(LayerId(e)),

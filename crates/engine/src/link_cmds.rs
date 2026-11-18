@@ -1,7 +1,7 @@
 //! MaterialCraft materials as fill layers. A `.mcmat` portable material becomes a fill whose
 //! channel sources are its cooked maps (image resources) and whose [`MaterialLink`] keeps the
 //! graph's exposed parameters. Changing one re-cooks the maps through `materialcraft-cli` at the
-//! texture set's resolution, with the set's baked mesh maps feeding graph inputs of the same name.
+//! layer's picked resolution (default: the texture set's), with the set's baked mesh maps feeding graph inputs of the same name.
 //! Both apps use the shared craft-mcmat container and the public CLI.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -62,7 +62,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Re-cook MaterialCraft material",
             [],
             None,
-            "{layer?} — re-cooks a MaterialCraft material layer at its texture set's resolution with the set's baked mesh maps",
+            "{layer?} — re-cooks a MaterialCraft material layer at its picked resolution (default: the texture set's) with the set's baked mesh maps",
             has_layer,
             |s, p| {
                 let id = layer_param(s, "material.link.cook", p)?;

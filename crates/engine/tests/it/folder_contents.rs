@@ -114,15 +114,15 @@ fn randomize_seeds_gives_every_pattern_inside_a_new_seed_in_one_undo_step() {
     assert_eq!(s.history_labels().len(), steps);
 }
 
-/// The seeds of `fill`'s base color and roughness patterns and of its mask's warp filter
-fn fill_seeds(s: &Session, fill: LayerId) -> (u32, u32, u32) {
-    let layer = s.doc.project.layer(fill).unwrap();
-    let LayerKind::Fill(f) = &layer.kind else { panic!("not a fill") };
-    let pattern = |c| match f.sources.get(&c) {
+/// The seeds of fill layer `id`'s base color and roughness patterns and of its mask's warp filter
+fn fill_seeds(s: &Session, id: LayerId) -> (u32, u32, u32) {
+    let layer = s.doc.project.layer(id).unwrap();
+    let LayerKind::Fill(fill) = &layer.kind else { panic!("not a fill") };
+    let pattern = |channel| match fill.sources.get(&channel) {
         Some(Source::Procedural { pattern, .. }) => pattern.seed,
         other => panic!("not a pattern: {other:?}"),
     };
-    let warp = layer.mask.as_ref().unwrap().effects.iter().find_map(|e| match e.kind {
+    let warp = layer.mask.as_ref().unwrap().effects.iter().find_map(|effect| match effect.kind {
         EffectKind::Filter(Filter::SourceWarp(warp)) => Some(warp.seed),
         _ => None,
     });

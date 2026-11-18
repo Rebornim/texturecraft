@@ -9,7 +9,7 @@ use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 
 /// The test window's width: the dock at its usual size beside the views
-const WINDOW_WIDTH: f32 = 1600.0;
+pub(crate) const WINDOW_WIDTH: f32 = 1600.0;
 
 /// A window tall enough for a filter's rows and its Attributes in the docked Properties panel
 pub(crate) const WINDOW_HEIGHT: f32 = 1400.0;

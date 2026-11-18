@@ -39,9 +39,9 @@ fn height_adjust_rows() {
     assert!(invert && offset == 0.0 && multiply > 9.5, "{invert} {offset} {multiply}");
 }
 
-/// Histogram Scan's Invert Position sits under Position and Contrast; Posterize's Apply to Alpha under Colors Amount
+/// Histogram Scan's Invert Position sits under Position and Contrast
 #[test]
-fn switches_under_the_sliders() {
+fn histogram_scan_switch_under_its_sliders() {
     let (mut harness, effect) = app_with("histogramScan", "mask", WINDOW_HEIGHT);
     let contrast = harness.get_by_role_and_label(Role::Slider, "Contrast").rect();
     let invert = harness.get_by_role_and_label(Role::CheckBox, "Invert Position").rect();
@@ -50,7 +50,11 @@ fn switches_under_the_sliders() {
     click_at(&mut harness, invert.center());
 
     assert!(matches!(filter_of(&harness, effect), Filter::HistogramScan { invert_position: true, .. }));
+}
 
+/// Posterize's Apply to Alpha sits under Colors Amount
+#[test]
+fn posterize_switch_under_its_slider() {
     let (mut harness, effect) = app_with("posterize", "mask", WINDOW_HEIGHT);
     let amount = harness.get_by_role_and_label(Role::Slider, "Colors Amount").rect();
     let alpha = harness.get_by_role_and_label(Role::CheckBox, "Apply to Alpha").rect();
@@ -61,7 +65,7 @@ fn switches_under_the_sliders() {
     assert_eq!(filter_of(&harness, effect), Filter::Posterize { levels: 8.0, alpha: true });
 }
 
-/// Clamp's Min and Max, Smoothstep's Minimum and Maximum, Histogram Shift's Position (its left end shifts by a whole turn back) and Sharpen Intensity
+/// Clamp's Min and Max, Smoothstep's Minimum and Maximum, Histogram Shift's Position (its middle shifts by a half turn back) and Sharpen Intensity
 #[test]
 fn reference_names_on_the_sliders() {
     for (filter, labels) in [("clamp", &["Min", "Max"][..]), ("smoothstep", &["Minimum", "Maximum"]), ("sharpen", &["Sharpen Intensity"])] {
@@ -135,9 +139,9 @@ fn a_slider_drag_is_one_undo_step() {
     assert_eq!(filter_of(&harness, effect), Filter::Sharpen { amount: 1.0 });
 }
 
-/// Pixelate: Pixels Amount (32) with Apply To Alpha under it; FXAA (Anti-aliasing): only its Affect Alpha Channel switch
+/// Pixelate: Pixels Amount (32) with Apply To Alpha under it
 #[test]
-fn pixelate_and_fxaa_rows() {
+fn pixelate_rows() {
     let (mut harness, effect) = app_with("pixelate", "mask", WINDOW_HEIGHT);
     let amount = harness.get_by_role_and_label(Role::Slider, "Pixels Amount");
     assert_eq!(amount.accesskit_node().numeric_value().map(f64::round), Some(32.0));
@@ -151,7 +155,11 @@ fn pixelate_and_fxaa_rows() {
     click_at(&mut harness, along(amount, 1.0));
     let Filter::Mosaic { size, .. } = filter_of(&harness, effect) else { panic!() };
     assert!((Filter::pixels_amount(size) - 128.0).abs() < 0.5, "the right end is 128 across: {size}");
+}
 
+/// FXAA (Anti-aliasing): only its Affect Alpha Channel switch
+#[test]
+fn fxaa_rows() {
     let (mut harness, effect) = app_with("fxaa", "mask", WINDOW_HEIGHT);
     let affect = harness.get_by_role_and_label(Role::CheckBox, "Affect Alpha Channel").rect();
 
@@ -160,13 +168,17 @@ fn pixelate_and_fxaa_rows() {
     assert_eq!(filter_of(&harness, effect), Filter::Fxaa { alpha: true });
 }
 
-/// Blur Intensity and Blur Directional's Intensity and Angle (its dial) take the reference's names
+/// Blur's Blur Intensity takes the reference's name and starts at 0.30
 #[test]
-fn blur_rows_take_the_reference_names() {
+fn blur_intensity_takes_the_reference_name() {
     let (harness, _) = app_with("blur", "mask", WINDOW_HEIGHT);
     let intensity = harness.get_by_role_and_label(Role::Slider, "Blur Intensity");
-    assert_eq!(intensity.accesskit_node().numeric_value().map(|v| (v * 100.0).round()), Some(30.0));
+    assert_eq!(intensity.accesskit_node().numeric_value().map(|value| (value * 100.0).round()), Some(30.0));
+}
 
+/// Blur Directional's Intensity and Angle take the reference's names, and Intensity's right end is the widest blur
+#[test]
+fn blur_directional_rows_take_the_reference_names() {
     let (mut harness, effect) = app_with("blurDirectional", "mask", WINDOW_HEIGHT);
     let intensity = harness.get_by_role_and_label(Role::Slider, "Intensity").rect();
     assert!(harness.query_by_role_and_label(Role::Slider, "Angle").is_some());
@@ -181,7 +193,7 @@ fn blur_rows_take_the_reference_names() {
 fn highpass_rows() {
     let (mut harness, effect) = app_with("highPass", "mask", WINDOW_HEIGHT);
     let radius = harness.get_by_role_and_label(Role::Slider, "Radius");
-    assert_eq!(radius.accesskit_node().numeric_value().map(|v| (v * 100.0).round()), Some(300.0));
+    assert_eq!(radius.accesskit_node().numeric_value().map(|value| (value * 100.0).round()), Some(300.0));
     let radius = radius.rect();
     let space = harness.get_by_role_and_label(Role::ComboBox, "Working space / Mask").rect();
     let alpha = harness.get_by_role_and_label(Role::CheckBox, "Apply To Alpha").rect();

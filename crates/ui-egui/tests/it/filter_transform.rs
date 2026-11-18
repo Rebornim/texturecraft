@@ -6,7 +6,7 @@ use egui_kittest::kittest::Queryable;
 use texturecraft_engine::core::{Filter, FlipMode, RepeatMode, TileTransform};
 use texturecraft_ui_egui::TextureCraftApp;
 
-use crate::filter_support::{WINDOW_HEIGHT, along, app_with, click_at, filter_of};
+use crate::filter_support::{WINDOW_HEIGHT, along, app_with, click_at, drag, filter_of, undo, undo_depth};
 
 /// Every row sets its own setting through the pointer, in the reference's order
 #[test]
@@ -66,4 +66,21 @@ fn transform_rows_set_the_transform() {
     click_at(&mut harness, none.center());
 
     assert_eq!(transform(&harness).repeat, RepeatMode::None);
+}
+
+/// A Rotation drag is one undo step, and undo turns the tile back
+#[test]
+fn rotation_drag_is_one_undo_step() {
+    let (mut harness, effect) = app_with("transform", "mask", WINDOW_HEIGHT);
+    let depth = undo_depth(&harness);
+    let rotation = harness.get_by_role_and_label(Role::Slider, "Rotation").rect();
+
+    drag(&mut harness, along(rotation, 0.0), along(rotation, 0.5));
+
+    let Filter::Transform(turned) = filter_of(&harness, effect) else { panic!() };
+    assert!((150.0..210.0).contains(&turned.rotation), "{turned:?}");
+    assert_eq!(undo_depth(&harness), depth + 1, "one undo step for the drag");
+
+    undo(&mut harness);
+    assert_eq!(filter_of(&harness, effect), Filter::Transform(TileTransform::LIBRARY));
 }

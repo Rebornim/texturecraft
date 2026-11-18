@@ -1,6 +1,6 @@
 //! The shape filters in Properties: Threshold's Mode switch, Mirror's mode-dependent rows, Mask Outline's, Bevel's, Bevel Smooth's, Directional Distance's, Warp's (its Directional mode and Angle) and Blur Slope's rows (its ÷ chip, Seed and Source Parameters' Blur)
 
-use crate::filter_support::{WINDOW_HEIGHT, along, app_with, click_at, filter_of, lowest, pick, topmost, undo, undo_depth};
+use crate::filter_support::{WINDOW_HEIGHT, along, app_with, click_at, drag, filter_of, lowest, pick, topmost, undo, undo_depth};
 use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
@@ -57,6 +57,23 @@ fn mirror_rows_follow_the_mode() {
     assert!(harness.query_by_label("Axis Y Offset").is_none());
 }
 
+/// Mirror's mode list pick is one undo step, and undo puts Axis X back
+#[test]
+fn mirror_mode_pick_is_one_undo_step() {
+    let (mut harness, effect) = app_with("mirror", "mask", WINDOW_HEIGHT);
+    let depth = undo_depth(&harness);
+
+    pick(&mut harness, "Mirror Axis X", "Mirror Axis Y");
+
+    let Filter::Mirror(mirror) = filter_of(&harness, effect) else { panic!() };
+    assert_eq!(mirror.mode, MirrorMode::AxisY);
+    assert_eq!(undo_depth(&harness), depth + 1, "one undo step for the pick");
+
+    undo(&mut harness);
+    let Filter::Mirror(mirror) = filter_of(&harness, effect) else { panic!() };
+    assert_eq!(mirror.mode, MirrorMode::AxisX);
+}
+
 /// Mask Outline's Both segment, Start From Black toggle, Width and the signed Curve Shape each set their own setting
 #[test]
 fn mask_outline_rows_set_the_band() {
@@ -95,9 +112,27 @@ fn bevel_rows_set_the_slope() {
     assert!(bevel.distance > 0.95 && bevel.smoothing > 4.9, "{bevel:?}");
 }
 
-/// Bevel Smooth's Direction, Curve Offset and Bevel Wrap set their own setting; Directional Distance's Angle turns
+/// Bevel's Distance drag is one undo step, and undo puts the distance back
 #[test]
-fn bevel_smooth_and_directional_distance_rows() {
+fn bevel_distance_drag_is_one_undo_step() {
+    let (mut harness, effect) = app_with("bevel", "mask", WINDOW_HEIGHT);
+    let Filter::DistanceBevel(before) = filter_of(&harness, effect) else { panic!() };
+    let depth = undo_depth(&harness);
+    let distance = harness.get_by_role_and_label(Role::Slider, "Distance").rect();
+
+    drag(&mut harness, along(distance, 0.5), along(distance, 1.0));
+
+    let Filter::DistanceBevel(bevel) = filter_of(&harness, effect) else { panic!() };
+    assert!(bevel.distance > 0.95, "{bevel:?}");
+    assert_eq!(undo_depth(&harness), depth + 1, "one undo step for the drag");
+
+    undo(&mut harness);
+    assert_eq!(filter_of(&harness, effect), Filter::DistanceBevel(before));
+}
+
+/// Bevel Smooth's Direction, Curve Offset and Bevel Wrap set their own setting
+#[test]
+fn bevel_smooth_rows() {
     let (mut harness, effect) = app_with("bevelSmooth", "mask", WINDOW_HEIGHT);
 
     pick(&mut harness, "Out", "In/Out");
@@ -109,7 +144,11 @@ fn bevel_smooth_and_directional_distance_rows() {
     let Filter::BevelSmooth(smooth) = filter_of(&harness, effect) else { panic!() };
     assert_eq!((smooth.direction, smooth.wrap), (BevelDirection::InOut, true));
     assert!(smooth.curve_offset < -0.95 && smooth.distance == 0.1, "{smooth:?}");
+}
 
+/// Directional Distance's Angle row turns its trail and leaves the distance alone
+#[test]
+fn directional_distance_angle_row() {
     let (mut harness, effect) = app_with("directionalDistance", "mask", WINDOW_HEIGHT);
     let angle = harness.get_by_role_and_label(Role::Slider, "Angle").rect();
 

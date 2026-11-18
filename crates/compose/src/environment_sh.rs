@@ -35,17 +35,17 @@ impl EnvironmentSh {
         };
         let rotation = display.env_rotation.to_radians();
 
-        // Worked out with the cache locked: tiles asking for the same light wait for it instead of working it out again
-        let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(entry) = cache.as_ref().filter(|entry| same(entry)) {
-            return EnvironmentSh { coefficients: *entry.2, rotation };
+        let cached = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().filter(|entry| same(entry)).map(|entry| entry.2.clone());
+        if let Some(coefficients) = cached {
+            return EnvironmentSh { coefficients: *coefficients, rotation };
         }
 
+        // Worked out with the cache unlocked: the averaging runs on the thread pool, where a worker holding the lock could take another tile's task that waits for it
         let coefficients = match &image {
             Some(image) => image_sh(image),
             None => built_in_sh(&display.environment),
         };
-        *cache = Some((display.environment.clone(), image, Arc::new(coefficients)));
+        *CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((display.environment.clone(), image, Arc::new(coefficients)));
         EnvironmentSh { coefficients, rotation }
     }
 

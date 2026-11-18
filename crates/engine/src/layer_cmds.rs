@@ -13,6 +13,9 @@ use crate::commands::{
 };
 use crate::{EngineError, Result, Session, cmd, session::StackTarget};
 
+/// One full turn, in degrees (the brush's, so every angle wraps on the same turn)
+pub(crate) use texturecraft_paint::FULL_TURN_DEGREES;
+
 /// The smallest scale or tiling a fill's placement takes
 pub const MIN_SCALE: f32 = 0.001;
 /// The largest scale, tiling or offset a fill's placement takes
@@ -32,14 +35,6 @@ const MAX_PATTERN_CONTRAST: f32 = 20.0;
 
 /// The `layer.fill.set` keys a one-source grayscale fill (a mask fill or a filter's image input) has no use for
 const GRAY_REFUSED_KEYS: [&str; 4] = ["channel", "enabled", "solo", "normalFormat"];
-
-/// `value` as one axis of a projector's scale: its size kept within [`MIN_SCALE`]..[`MAX_PLACEMENT`] on its own side, so a mirrored axis stays mirrored
-pub fn signed_scale(value: f32) -> f32 {
-    value.signum() * value.abs().clamp(MIN_SCALE, MAX_PLACEMENT)
-}
-
-/// One full turn, in degrees (the brush's, so every angle wraps on the same turn)
-pub(crate) use texturecraft_paint::FULL_TURN_DEGREES;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -780,6 +775,11 @@ fn symmetry_from(p: &Value, cmd: &str, current: FillSymmetry) -> Result<FillSymm
     }
     symmetry.span = f32p(p, "angleSpan").map_or(symmetry.span, |span| span.clamp(*FillSymmetry::SPANS.start(), *FillSymmetry::SPANS.end()));
     Ok(symmetry)
+}
+
+/// `value` as one axis of a projector's scale: its size kept within [`MIN_SCALE`]..[`MAX_PLACEMENT`] on its own side, so a mirrored axis stays mirrored
+pub fn signed_scale(value: f32) -> f32 {
+    value.signum() * value.abs().clamp(MIN_SCALE, MAX_PLACEMENT)
 }
 
 /// `key` as `N` finite numbers clamped to `lo..=hi`: an array of `N`, or one number for all

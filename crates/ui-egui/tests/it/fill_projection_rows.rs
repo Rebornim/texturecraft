@@ -68,9 +68,14 @@ fn culling_toggles_change_the_projection() {
     assert!(projector.backface.on);
 }
 
-/// What the culling rows' i says on hover
+/// What the Depth culling row's i says on hover
 const DEPTH_CULLING_TIP: &str = "Paints only the surface the projector sees first; parts hidden behind it stay unpainted.";
+
+/// What the Backface culling row's i says on hover
 const BACKFACE_CULLING_TIP: &str = "Leaves out faces turned away from the projector, so the fill doesn't run onto their back.";
+
+/// A point away from the Properties panel, where the pointer leaves no tooltip
+const AWAY_FROM_PANEL: egui::Pos2 = egui::pos2(800.0, 500.0);
 
 /// Frames for the pointer to rest long enough for a tooltip
 const TOOLTIP_FRAMES: usize = 60;
@@ -98,7 +103,7 @@ fn the_culling_rows_i_explains_the_row_on_hover_without_covering_its_values() {
         assert!(shown.top() >= info.bottom() - 2.0, "{row}: the tooltip hangs under the row");
         assert!(shown.right() <= panel_right - TIP_VALUE_ROOM, "{row}: the tooltip ends before the value column");
 
-        harness.hover_at(egui::pos2(800.0, 500.0));
+        harness.hover_at(AWAY_FROM_PANEL);
         harness.run_steps(SETTLE_FRAMES);
     }
 

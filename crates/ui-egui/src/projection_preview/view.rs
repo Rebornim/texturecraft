@@ -1,3 +1,5 @@
+//! The projection preview's fixed camera
+
 use texturecraft_engine::geom::glam::Vec3;
 
 use super::{CAMERA_PITCH, CAMERA_YAW};
@@ -12,6 +14,7 @@ pub(super) struct View {
 }
 
 impl View {
+    /// The fixed preview camera, turned CAMERA_YAW round and CAMERA_PITCH down
     pub(super) fn new() -> View {
         let (yaw, pitch) = (CAMERA_YAW.to_radians(), CAMERA_PITCH.to_radians());
         let eye = Vec3::new(pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos());

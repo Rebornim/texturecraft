@@ -759,9 +759,8 @@ impl Session {
             use texturecraft_core::{EffectKind, Fill};
 
             let is_added = |name: &str| added_resource_names.contains(name);
-            let uses_fill = |fill: &Fill| {
-                fill.sources.values().any(|source| source.images().into_iter().any(is_added)) || fill.link.as_ref().is_some_and(|link| is_added(&link.package))
-            };
+            let uses_link = |fill: &Fill| fill.link.as_ref().is_some_and(|link| is_added(&link.package));
+            let uses_fill = |fill: &Fill| fill.sources.values().any(|source| source.images().into_iter().any(is_added)) || uses_link(fill);
             let project = &self.doc.project;
             !added_resource_names.is_empty()
                 && project.texture_sets.get(texture_set_index).is_some_and(|set| {
@@ -772,7 +771,7 @@ impl Session {
                                 .iter()
                                 .flat_map(|mask| &mask.effects)
                                 .chain(&layer.content_effects)
-                                .any(|effect| effect.images_read().any(is_added) || matches!(&effect.kind, EffectKind::Material(fill) if uses_fill(fill)))
+                                .any(|effect| effect.images_read().any(is_added) || matches!(&effect.kind, EffectKind::Material(fill) if uses_link(fill)))
                     })
                 })
         };

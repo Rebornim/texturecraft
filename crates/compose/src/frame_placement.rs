@@ -173,12 +173,12 @@ mod tests {
     /// The projection's texture coordinates and cover at points through the frame's neighbourhood with varied normals
     fn samples(proj: &Projection) -> Vec<Option<(Vec2, f32)>> {
         let mut out = Vec::new();
-        for i in 0..7 {
-            for j in 0..7 {
-                for k in 0..3 {
-                    let pos = Vec3::new(-0.5 + i as f32 * 0.25, -0.8 + j as f32 * 0.2, 0.7 + k as f32 * 0.3);
-                    let nrm = Vec3::new(0.1 * i as f32 - 0.3, 0.2, 1.0).normalize();
-                    out.push(framed_cover(proj, pos, nrm));
+        for across in 0..7 {
+            for up in 0..7 {
+                for out_of in 0..3 {
+                    let position = Vec3::new(-0.5 + across as f32 * 0.25, -0.8 + up as f32 * 0.2, 0.7 + out_of as f32 * 0.3);
+                    let normal = Vec3::new(0.1 * across as f32 - 0.3, 0.2, 1.0).normalize();
+                    out.push(framed_cover(proj, position, normal));
                 }
             }
         }
@@ -195,9 +195,9 @@ mod tests {
     fn close(a: &[Option<(Vec2, f32)>], b: &[Option<(Vec2, f32)>]) {
         assert_eq!(a.iter().filter(|x| x.is_some()).count(), b.iter().filter(|x| x.is_some()).count());
         for (index, (a, b)) in a.iter().zip(b).enumerate() {
-            if let (Some((ua, ca)), Some((ub, cb))) = (a, b) {
-                assert!((ca - cb).abs() < 1e-3, "{index}: cover {ca} vs {cb}");
-                assert!(ua.distance(*ub) < 1e-3, "{index}: {ua} vs {ub}");
+            if let (Some((uv_a, cover_a)), Some((uv_b, cover_b))) = (a, b) {
+                assert!((cover_a - cover_b).abs() < 1e-3, "{index}: cover {cover_a} vs {cover_b}");
+                assert!(uv_a.distance(*uv_b) < 1e-3, "{index}: {uv_a} vs {uv_b}");
             }
         }
     }

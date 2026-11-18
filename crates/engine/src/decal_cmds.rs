@@ -276,6 +276,11 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
     if let Some(moved) = placed_as_shown(session, command, params, &projection)? {
         projection = moved;
         decal = projection.frame().copied().ok_or_else(|| bad(command, "the projection lost its frame"))?;
+
+        // A reach from frameScale keeps the Projection Depth in the range every other path keeps
+        if let Projection::Warp { depth: warp_depth, .. } = &mut projection {
+            *warp_depth = warp_depth.clamp(0.0, MAX_PROJECTION_DEPTH);
+        }
     }
     if let Some((center, normal, hit_set)) = placement(session, command, params, texture_set, true)? {
         // Selecting another set must not let this decal leave its layer's stack
@@ -301,7 +306,11 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         decal.offset = [right.clamp(-mesh_diagonal, mesh_diagonal), up.clamp(-mesh_diagonal, mesh_diagonal)];
     }
     let depth = f32p(params, "depth").map(|depth| depth.clamp(mesh_diagonal * MIN_SIZE, mesh_diagonal * MAX_SIZE));
-    if let Some(depth) = depth {
+
+    // A warp reaches by its Projection Depth (set below); its frame's own depth is unused, so it stays
+    if let Some(depth) = depth
+        && !matches!(projection, Projection::Warp { .. })
+    {
         decal.depth = depth;
     }
 

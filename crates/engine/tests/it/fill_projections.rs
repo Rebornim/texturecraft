@@ -487,6 +487,36 @@ fn a_warps_depth_sets_its_projection_depth() {
     assert!((depth * frame.size[0].max(frame.size[1]) - 0.5).abs() < 1e-5, "reach {depth} × {:?}", frame.size);
 }
 
+/// `depth` at a warp's current reach changes nothing, so it adds no undo step (its frame's unused depth is left alone)
+#[test]
+fn a_warps_current_reach_as_depth_adds_no_undo_step() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    set(&mut s, layer, json!({"projection": "warp", "projectionDepth": 0.5}));
+    let Projection::Warp { frame, depth, .. } = projection(&s, layer) else { panic!("a warp") };
+    let steps = s.history_labels().len();
+
+    let reach = depth * frame.size[0].max(frame.size[1]);
+    execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "depth": reach})).unwrap();
+    assert_eq!(s.history_labels().len(), steps, "reach {reach} is the one it has");
+}
+
+/// A frameScale reach on a warp keeps its Projection Depth within the range `projectionDepth` allows
+#[test]
+fn a_warps_frame_scale_keeps_its_projection_depth_in_range() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    set(&mut s, layer, json!({"projection": "warp"}));
+
+    let deepest = checker_fill(&mut s);
+    set(&mut s, deepest, json!({"projection": "warp", "projectionDepth": 1e9}));
+    let Projection::Warp { depth: max_depth, .. } = projection(&s, deepest) else { panic!("a warp") };
+
+    execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "frameScale": [0.0001, 0.0001, 10]})).unwrap();
+    let Projection::Warp { depth, .. } = projection(&s, layer) else { panic!("a warp") };
+    assert!(depth <= max_depth, "Projection Depth {depth} past {max_depth}");
+}
+
 /// A 64 × 8 PNG whose red climbs from left to right
 fn ramp_png() -> Vec<u8> {
     let mut out = Vec::new();

@@ -1,14 +1,14 @@
 //! The Transform filter: each UV tile's content scaled, turned, moved and flipped, repeating round the tile or empty past it
 
 use serde_json::json;
-use texturecraft_engine::core::{Filter, FlipMode, RepeatMode, TileTransform};
-use texturecraft_engine::execute;
+use texturecraft_engine::core::{EffectKind, Filter, FlipMode, LayerId, RepeatMode, TileTransform};
+use texturecraft_engine::{Session, execute};
 
-use crate::filter_shape::{SIZE, add_filter, roughness, session};
+use crate::filter_support::{SIZE, add_filter, refused, roughness, session};
 
-fn transform_of(s: &texturecraft_engine::Session, effect: texturecraft_engine::core::LayerId) -> TileTransform {
+fn transform_of(s: &Session, effect: LayerId) -> TileTransform {
     match &s.doc.project.effect(effect).unwrap().1.kind {
-        texturecraft_engine::core::EffectKind::Filter(Filter::Transform(transform)) => *transform,
+        EffectKind::Filter(Filter::Transform(transform)) => *transform,
         other => panic!("not a transform: {other:?}"),
     }
 }
@@ -27,6 +27,7 @@ fn transform_moves_scales_and_flips_each_tile() {
     let effect = add_filter(&mut s, json!({"filter": "transform"}));
     assert_eq!(transform_of(&s, effect), TileTransform::LIBRARY);
     assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Transform");
+
     for x in [20, 64, 100] {
         assert!((roughness(&mut s, (x, row)) - was(x)).abs() < 1e-4, "a new Transform changes nothing at {x}");
     }
@@ -51,22 +52,24 @@ fn transform_moves_scales_and_flips_each_tile() {
 
     let edited = transform_of(&s, effect);
     assert_eq!((edited.repeat, edited.flip, edited.scaling), (RepeatMode::HorizontallyAndVertically, FlipMode::None, [2.0, 2.0]));
+
     execute(&mut s, "effect.set", &json!({"effect": effect.0, "rotation": -30.0, "tileSafeRotation": false})).unwrap();
     let turned = transform_of(&s, effect);
     assert_eq!((turned.rotation, turned.tile_safe), (330.0, false), "a turn reads 0..360");
 
-    for bad in [
-        json!({"repeatMode": "sideways"}),
-        json!({"flipMode": "diagonal"}),
-        json!({"scaling": [1.0]}),
-        json!({"offset": "far"}),
-        json!({"tileSafeRotation": 1}),
-    ] {
-        let mut params = bad.clone();
-        params["effect"] = json!(effect.0);
-        assert!(execute(&mut s, "effect.set", &params).is_err(), "{bad}");
-    }
+    refused(
+        &mut s,
+        effect,
+        &[
+            json!({"repeatMode": "sideways"}),
+            json!({"flipMode": "diagonal"}),
+            json!({"scaling": [1.0]}),
+            json!({"offset": "far"}),
+            json!({"tileSafeRotation": 1}),
+        ],
+    );
     assert_eq!(transform_of(&s, effect), turned, "a refused value changes nothing");
+
     execute(&mut s, "effect.set", &json!({"effect": effect.0, "scaling": [1e9, -5.0]})).unwrap();
     assert_eq!(transform_of(&s, effect).scaling, [TileTransform::SCALING.1, TileTransform::SCALING.0], "scaling clamps");
 

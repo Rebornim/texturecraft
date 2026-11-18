@@ -4,7 +4,8 @@ use serde_json::Value;
 use texturecraft_core::{DirectionalLight, LightingOutput, StylizedLighting};
 
 use crate::Result;
-use crate::commands::{bad, color_param, f32p, strp};
+use crate::commands::{bad, f32p};
+use crate::filter_lib::{choice, set_color, two_way};
 
 /// The keys that give a Baked Lighting saved before them its stylized settings
 pub(crate) const KEYS: [&str; 17] = [
@@ -54,7 +55,7 @@ pub(crate) fn apply(p: &Value, lighting: &mut StylizedLighting, cmd: &str) -> Re
         ("horizonColor", &mut lighting.horizon_color),
         ("groundColor", &mut lighting.ground_color),
     ] {
-        color(p, key, slot, cmd)?;
+        set_color(p, key, slot, cmd)?;
     }
 
     for (key, light) in ["light1", "light2"].into_iter().zip(lighting.lights.iter_mut()) {
@@ -72,27 +73,9 @@ pub(crate) fn apply(p: &Value, lighting: &mut StylizedLighting, cmd: &str) -> Re
     set(&mut lighting.dielectric_reflectance, "dielectricReflectance", MAX_DIELECTRIC_REFLECTANCE);
     set(&mut lighting.height_to_normal, "heightToNormal", MAX_HEIGHT_TO_NORMAL);
 
-    if p.get("input").is_some() {
-        lighting.specular_glossiness = match strp(p, "input") {
-            Some("metalRoughness") => false,
-            Some("specularGlossiness") => true,
-            _ => return Err(bad(cmd, "`input` must be \"metalRoughness\" or \"specularGlossiness\"")),
-        };
-    }
-    if p.get("output").is_some() {
-        let id = strp(p, "output");
-        lighting.output = LightingOutput::ALL
-            .into_iter()
-            .find(|output| Some(output.id()) == id)
-            .ok_or_else(|| bad(cmd, "`output` must be \"diffuseSpecular\", \"diffuse\" or \"specular\""))?;
-    }
-    if p.get("normalDetails").is_some() {
-        lighting.mesh_only = match strp(p, "normalDetails") {
-            Some("mesh") => true,
-            Some("meshHeightNormal") => false,
-            _ => return Err(bad(cmd, "`normalDetails` must be \"mesh\" or \"meshHeightNormal\"")),
-        };
-    }
+    lighting.specular_glossiness = two_way(p, "input", "metalRoughness", "specularGlossiness", cmd)?.unwrap_or(lighting.specular_glossiness);
+    lighting.output = choice(p, "output", &LightingOutput::ALL, LightingOutput::id, cmd)?.unwrap_or(lighting.output);
+    lighting.mesh_only = two_way(p, "normalDetails", "meshHeightNormal", "mesh", cmd)?.unwrap_or(lighting.mesh_only);
     Ok(())
 }
 
@@ -111,14 +94,5 @@ fn set_light(p: &Value, light: &mut DirectionalLight, key: &str, cmd: &str) -> R
     if let Some(intensity) = f32p(p, "intensity") {
         light.intensity = intensity.clamp(0.0, MAX_LIGHT_INTENSITY);
     }
-    color(p, "color", &mut light.color, cmd)
-}
-
-/// A color key, refused unless it reads as a color
-fn color(p: &Value, key: &str, slot: &mut [f32; 3], cmd: &str) -> Result<()> {
-    if p.get(key).is_some() {
-        let rgb = color_param(cmd, p, key)?.ok_or_else(|| bad(cmd, format!("`{key}` must be a color ([r, g, b] linear or \"#rrggbb\")")))?;
-        *slot = rgb.map(|x| x.clamp(0.0, 1.0));
-    }
-    Ok(())
+    set_color(p, "color", &mut light.color, cmd)
 }

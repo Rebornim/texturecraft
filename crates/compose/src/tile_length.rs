@@ -2,12 +2,9 @@
 
 use std::f32::consts::TAU;
 
-use texturecraft_core::Projection;
+use texturecraft_core::{FULL_TURN_DEGREES, Projection};
 
 use crate::pattern::MIN_CYLINDER_ANGLE;
-
-/// Degrees in one turn of a cylindrical projection
-const FULL_TURN_DEGREES: f32 = 360.0;
 
 /// The mesh's size as the projections see it: the bounds radius (3D projections) and the mesh units one UV unit covers (UV)
 #[derive(Clone, Copy, Debug, PartialEq)]

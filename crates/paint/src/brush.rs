@@ -181,8 +181,8 @@ fn full_turn() -> f32 {
     FULL_TURN_DEGREES
 }
 
-/// [`Symmetry::angle_span`] of a full turn
-pub const FULL_TURN_DEGREES: f32 = 360.0;
+// A full turn is the angle span every crate measures turns against
+pub use texturecraft_core::FULL_TURN_DEGREES;
 
 /// Most radial copies a brush paints
 pub const MAX_RADIAL_COPIES: u8 = 32;

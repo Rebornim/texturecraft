@@ -1,6 +1,6 @@
 //! An image a filter reads besides the stack it filters (its image inputs), as a source on the filter's effect
 
-use crate::{Filter, LayerId, Source, SourceColorMode, TargetColorMode, WarpSourceMode};
+use crate::{Filter, Source, SourceColorMode, TargetColorMode, WarpSourceMode};
 
 /// One image input of a filter: the key its source is stored under on the effect, its name and the gray it reads until a source is set
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,43 +31,41 @@ impl ImageInput {
 
     /// The image inputs `filter` reads now (a mode's input only while that mode is on)
     pub fn of(filter: &Filter) -> Vec<ImageInput> {
-        match filter {
-            Filter::BevelSmooth(_) | Filter::DirectionalDistance(_) => vec![Self::DISTANCE_MAP],
-            Filter::SourceWarp(warp) if warp.source.mode == WarpSourceMode::CustomNoise => vec![Self::CUSTOM_NOISE],
-            Filter::SourceSlopeBlur(slope) if slope.source.mode == WarpSourceMode::CustomNoise => vec![Self::CUSTOM_NOISE],
-            Filter::GrayscaleConversion(conversion) if conversion.custom_input => vec![Self::CUSTOM_INPUT],
-            Filter::AnisotropicKuwahara(kuwahara) if kuwahara.custom_input => vec![Self::CUSTOM_INPUT],
-            Filter::ColorMatch(matcher) => [
-                (matcher.source_mode == SourceColorMode::Input).then_some(Self::SOURCE_INPUT),
-                (matcher.target_mode == TargetColorMode::ImageInput).then_some(Self::TARGET_INPUT),
-            ]
-            .into_iter()
-            .flatten()
-            .collect(),
-            _ => Vec::new(),
-        }
+        Self::all(filter).iter().copied().filter(|input| input.is_on(filter)).collect()
     }
 
     /// The input of `filter` stored under `id`, also while its mode is off
     pub fn named(filter: &Filter, id: &str) -> Option<ImageInput> {
-        let inputs = match filter {
-            Filter::BevelSmooth(_) | Filter::DirectionalDistance(_) => &[Self::DISTANCE_MAP][..],
-            Filter::SourceWarp(_) | Filter::SourceSlopeBlur(_) => &[Self::CUSTOM_NOISE][..],
-            Filter::GrayscaleConversion(_) | Filter::AnisotropicKuwahara(_) => &[Self::CUSTOM_INPUT][..],
-            Filter::ColorMatch(_) => &[Self::SOURCE_INPUT, Self::TARGET_INPUT][..],
+        Self::all(filter).iter().find(|input| input.id == id).copied()
+    }
+
+    /// Every image input `filter` has, its modes' inputs also while those modes are off
+    fn all(filter: &Filter) -> &'static [ImageInput] {
+        match filter {
+            Filter::BevelSmooth(_) | Filter::DirectionalDistance(_) => &[Self::DISTANCE_MAP],
+            Filter::SourceWarp(_) | Filter::SourceSlopeBlur(_) => &[Self::CUSTOM_NOISE],
+            Filter::GrayscaleConversion(_) | Filter::AnisotropicKuwahara(_) => &[Self::CUSTOM_INPUT],
+            Filter::ColorMatch(_) => &[Self::SOURCE_INPUT, Self::TARGET_INPUT],
             _ => &[],
-        };
-        inputs.iter().find(|input| input.id == id).copied()
+        }
+    }
+
+    /// Whether `filter` reads this input now: an input a mode adds only while that mode is on
+    fn is_on(&self, filter: &Filter) -> bool {
+        match filter {
+            Filter::SourceWarp(warp) => warp.source.mode == WarpSourceMode::CustomNoise,
+            Filter::SourceSlopeBlur(slope) => slope.source.mode == WarpSourceMode::CustomNoise,
+            Filter::GrayscaleConversion(conversion) => conversion.custom_input,
+            Filter::AnisotropicKuwahara(kuwahara) => kuwahara.custom_input,
+            Filter::ColorMatch(matcher) if *self == Self::SOURCE_INPUT => matcher.source_mode == SourceColorMode::Input,
+            Filter::ColorMatch(matcher) => matcher.target_mode == TargetColorMode::ImageInput,
+            _ => true,
+        }
     }
 
     /// The source the input reads while none is set
     pub fn default_source(&self) -> Source {
         Source::Uniform([self.default; 3])
-    }
-
-    /// Whether a source set on the input reads anchor point `anchor` (any anchor point when None)
-    pub fn reads(source: &Source, anchor: Option<LayerId>) -> bool {
-        source.anchor().is_some_and(|found| anchor.is_none_or(|wanted| wanted == found))
     }
 }
 

@@ -12,6 +12,7 @@ use crate::fill_pictures::ring_picture;
 use crate::i18n::{n_, tr};
 use crate::property_sheet::{PropertySheet, StackSlider};
 use crate::theme::{AXIS_COLORS, AXIS_NAMES, Tokens};
+use crate::widgets::press_edit;
 
 /// What the Axis position track spans, in mesh radii from the mesh's centre
 const POSITION_RANGE: RangeInclusive<f32> = -FillSymmetry::REACH..=FillSymmetry::REACH;
@@ -98,7 +99,7 @@ fn radial_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, symmetr
     // Whole counts: a press's first whole-number change starts its undo step, changes that round to the count it has apply nothing
     let counted = count_value.round();
     let press = sheet.ui.make_persistent_id("symmetry_count_press");
-    if let Some(merge) = crate::widgets::press_edit(sheet.ui, press, edited.is_some() && counted as u32 != count) {
+    if let Some(merge) = press_edit(sheet.ui, press, edited.is_some() && counted as u32 != count) {
         run_projection(app, base, json!({"symmetryCount": counted, "merge": merge}));
     }
 }

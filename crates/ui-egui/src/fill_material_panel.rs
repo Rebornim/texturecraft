@@ -36,11 +36,19 @@ use crate::state::UiState;
 use crate::theme::Tokens;
 use crate::thumbs::Thumbs;
 use crate::tile_picture::TilePicture;
+use crate::widgets::press_edit;
 
 /// The switch's two sides: the fill's whole material, or one source per channel
 const MODES: [&str; 2] = [n_("Material"), n_("Channels")];
+
+/// The switch's side that shows the fill's whole material
 const MATERIAL_MODE: usize = 0;
+
+/// The switch's side that shows one source per channel
 const CHANNELS_MODE: usize = 1;
+
+/// Decimals a linked material's number input shows
+const FLOAT_DECIMALS: usize = 2;
 
 /// Pattern scale a procedural's slider runs over (typed values stay inside it too)
 const PATTERN_SCALE: std::ops::RangeInclusive<f32> = 0.1..=32.0;
@@ -143,7 +151,7 @@ pub(crate) fn pill_name(channel: Channel) -> &'static str {
 
 /// A linear colour as the sRGB colour the screen shows
 pub(crate) fn shown_color(linear: [f32; 3]) -> Color32 {
-    let [r, g, b] = linear.map(|c| (linear_to_srgb(c.clamp(0.0, 1.0)) * 255.0).round() as u8);
+    let [r, g, b] = linear.map(|channel_value| (linear_to_srgb(channel_value.clamp(0.0, 1.0)) * 255.0).round() as u8);
     Color32::from_rgb(r, g, b)
 }
 
@@ -245,6 +253,7 @@ pub(crate) fn source_card(
     sheet.close_card();
 }
 
+/// Runs the fill command `choice` asks for on the slot (Import opens the import dialog)
 fn pick_source(app: &mut TextureCraftApp, ctx: &egui::Context, slot_of: SourceSlot, choice: SourceChoice, set: &impl Fn(Value) -> Value) {
     match choice {
         SourceChoice::Uniform => {
@@ -547,10 +556,18 @@ fn link_input(sheet: &mut PropertySheet<'_>, layer: LayerId, param: &LinkParam, 
             let name = |index: usize| param.options.get(index).cloned().unwrap_or_default();
             sheet.dropdown(&param.label, number.max(0.0) as usize, &options, name, None).0.map(|index| (json!(index), false))
         }
-        "float" | "int" | "enum" => {
+        "float" => {
             let mut edited = number;
-            let decimals = if kind == "float" { 2 } else { 0 };
-            sheet.slider(&param.label, &mut edited, low.min(number)..=high.max(number), decimals).map(|merge| (json!(edited), merge))
+            sheet.slider(&param.label, &mut edited, low.min(number)..=high.max(number), FLOAT_DECIMALS).map(|merge| (json!(edited), merge))
+        }
+        "int" | "enum" => {
+            let mut edited = number;
+            let moved = sheet.slider(&param.label, &mut edited, low.min(number)..=high.max(number), 0).is_some();
+
+            // Whole numbers: a press's first whole-number change starts its undo step, moves that round to the value it has send nothing (no step, no cook)
+            let whole = edited.round();
+            let press = sheet.ui.make_persistent_id(("link_input_press", layer.0, &param.id));
+            press_edit(sheet.ui, press, moved && whole != number).map(|merge| (json!(whole), merge))
         }
 
         // Colours and vectors keep their egui editors until the sheet draws them

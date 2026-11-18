@@ -378,7 +378,11 @@ fn display(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Whether a layer's content has a Baked Lighting Environment
 fn lit_by_environment(project: &Project) -> bool {
-    project.layers.values().flat_map(|l| l.content_effects.iter()).any(|e| matches!(e.kind, EffectKind::Filter(Filter::EnvironmentLighting { .. })))
+    project
+        .layers
+        .values()
+        .flat_map(|layer| layer.content_effects.iter())
+        .any(|effect| matches!(effect.kind, EffectKind::Filter(Filter::EnvironmentLighting { .. })))
 }
 
 #[cfg(test)]

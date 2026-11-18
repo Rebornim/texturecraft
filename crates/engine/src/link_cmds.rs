@@ -654,6 +654,8 @@ fn put_maps(s: &mut Session, stem: &str, maps: &[CookedMap], fill: &mut Fill) ->
         outputs.insert(channel.id().to_string(), name.clone());
         names.push(name);
     }
+
+    // Both callers cook a linked fill; one without a link only keeps the stored maps
     let Some(link) = fill.link.as_mut() else { return names };
     let channels: BTreeSet<Channel> = maps.iter().map(|map| map.channel).chain(link.mapping.keys().copied()).collect();
     for channel in channels {

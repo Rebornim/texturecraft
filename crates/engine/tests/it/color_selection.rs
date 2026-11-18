@@ -51,8 +51,8 @@ fn masked_layer(session: &mut Session, with_id_map: bool) -> (LayerId, LayerId) 
     }
 
     let layer = LayerId(execute(session, "layer.add.fill", &json!({"color": [0.9, 0.1, 0.1]})).unwrap()["layer"].as_u64().unwrap());
-    execute(session, "mask.add.colorSelection", &json!({"color": NO_PART, "tolerance": 0.05})).unwrap();
-    let effect = session.doc.project.layer(layer).unwrap().mask.as_ref().unwrap().effects[0].id;
+    let added = execute(session, "mask.add.colorSelection", &json!({"color": NO_PART, "tolerance": 0.05})).unwrap();
+    let effect = LayerId(added["effect"].as_u64().unwrap());
     (layer, effect)
 }
 
@@ -88,7 +88,8 @@ fn a_uv_pick_adds_the_color_there_or_replaces_one() {
     let (_, effect) = masked_layer(&mut session, true);
 
     execute(&mut session, "effect.colorSelection.pick", &json!({"effect": effect.0, "uv": [0.25, 0.25]})).unwrap();
-    assert_close(colors(&session, effect)[1], stored(TOP_LEFT_ID));
+    let [_, picked] = colors(&session, effect)[..] else { panic!("the pick adds one color to the first") };
+    assert_close(picked, stored(TOP_LEFT_ID));
 
     let replaced = execute(&mut session, "effect.colorSelection.pick", &json!({"effect": effect.0, "uv": [0.75, 0.75], "index": 0})).unwrap();
     assert_eq!(replaced["index"], json!(0));
@@ -311,9 +312,9 @@ fn benchmark_color_selection_edits() {
 #[test]
 fn a_new_color_selection_selects_nothing_until_a_color_is_picked() {
     let mut session = session();
-    let layer = LayerId(execute(&mut session, "layer.add.fill", &json!({"color": [0.9, 0.1, 0.1]})).unwrap()["layer"].as_u64().unwrap());
-    execute(&mut session, "mask.add.colorSelection", &Value::Null).unwrap();
-    let effect = session.doc.project.layer(layer).unwrap().mask.as_ref().unwrap().effects[0].id;
+    execute(&mut session, "layer.add.fill", &json!({"color": [0.9, 0.1, 0.1]})).unwrap();
+    let added = execute(&mut session, "mask.add.colorSelection", &Value::Null).unwrap();
+    let effect = LayerId(added["effect"].as_u64().unwrap());
     assert_eq!(colors(&session, effect), Vec::<[f32; 3]>::new());
 
     execute(&mut session, "effect.set", &json!({"effect": effect.0, "colors": [[1.0, 0.0, 0.0]]})).unwrap();
@@ -332,7 +333,8 @@ fn an_image_resource_can_be_the_id_map_without_a_mesh_map() {
 
     execute(&mut session, "effect.set", &json!({"effect": effect.0, "idMap": image})).unwrap();
     execute(&mut session, "effect.colorSelection.pick", &pick).unwrap();
-    assert_close(colors(&session, effect)[1], stored(TOP_RIGHT_ID));
+    let [_, picked] = colors(&session, effect)[..] else { panic!("the pick adds one color to the first") };
+    assert_close(picked, stored(TOP_RIGHT_ID));
     let (width, height) = session.caches[0].size;
     let top_right = ((width as f32 * 0.75) as u32, (height as f32 * 0.25) as u32);
     let bottom = ((width as f32 * 0.25) as u32, (height as f32 * 0.75) as u32);

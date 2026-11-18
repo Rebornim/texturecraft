@@ -1,12 +1,15 @@
 //! A fill's whole material: set every channel of a fill layer or content fill effect from one built-in material at once
 
 use serde_json::Value;
-use texturecraft_core::{Fill, LayerKind};
+use texturecraft_core::{Channel, EffectKind, Fill, LayerKind, Source};
 
 use crate::commands::{CommandSpec, bad, has_layer, strp};
 use crate::layer_cmds::{FillTarget, fill_mut, fill_target};
 use crate::materials::{Builder, MATERIALS, SmartMaterial, build, find};
 use crate::{EngineError, Result, Session, cmd};
+
+/// The command [`set_material`] runs as
+const CMD: &str = "layer.fill.material";
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![cmd!(
@@ -25,44 +28,35 @@ pub fn whole_materials() -> impl Iterator<Item = &'static SmartMaterial> {
     MATERIALS.iter().filter(|material| !material.smart)
 }
 
-const CMD: &str = "layer.fill.material";
-
 fn set_material(s: &mut Session, p: &Value) -> Result<Value> {
     let target = fill_target(s, p, CMD)?;
-    let material = match p.get("material") {
-        Some(Value::Null) => None,
-        Some(_) => {
-            let id = strp(p, "material").ok_or_else(|| bad(CMD, "`material` is a material id or null"))?;
-            let found = find(id).ok_or_else(|| bad(CMD, format!("unknown material `{id}`")))?;
-            if found.smart {
-                return Err(bad(CMD, format!("`{}` is a smart material (a folder of layers): add it from the shelf with material.apply", found.id)));
-            }
-
-            Some(found)
-        }
-        None => return Err(bad(CMD, "`material` is required: a material id or null")),
-    };
-    let label = material.map_or_else(|| "Clear fill material".to_string(), |found| format!("Set fill material {}", found.label));
+    let material = material_param(p)?;
     let set = target_set(s, target)?;
-    s.edit(&label, |s| {
+    if holds(s, target, material)? {
+        return Ok(Value::Null);
+    }
+
+    let Some(found) = material else {
+        s.edit("Clear fill material", |s| {
+            let edited = fill_mut(s, target)?;
+            edited.material = None;
+            match target {
+                // A fill effect changes a channel while it has a source: its channels stay on, at their defaults
+                FillTarget::Effect(_) => edited.sources.iter_mut().for_each(|(channel, source)| *source = Source::uniform_of(*channel)),
+                FillTarget::Layer(_) | FillTarget::Mask(_) => edited.sources.clear(),
+            }
+            Ok(())
+        })?;
+        return Ok(Value::Null);
+    };
+
+    s.edit(&format!("Set fill material {}", found.label), |s| {
         let channels = s.doc.project.texture_set(set)?.channel_list();
-        let whole = match material {
-            Some(found) => Some((found.id, whole_fill(s, found, &channels)?)),
-            None => None,
-        };
+        let fill = whole_fill(s, found, &channels)?;
         let edited = fill_mut(s, target)?;
-        let written: Vec<_> = match whole {
-            Some((id, fill)) => {
-                edited.sources = fill.sources.into_iter().filter(|(channel, _)| channels.contains(channel)).collect();
-                edited.material = Some(id.to_string());
-                edited.sources.keys().copied().collect()
-            }
-            None => {
-                edited.sources.clear();
-                edited.material = None;
-                return Ok(());
-            }
-        };
+        edited.sources = fill.sources.into_iter().filter(|(channel, _)| channels.contains(channel)).collect();
+        edited.material = Some(found.id.to_string());
+        let written: Vec<Channel> = edited.sources.keys().copied().collect();
         if let FillTarget::Layer(id) = target {
             let layer = s.doc.project.layer_mut(id)?;
             layer.channels.retain(|channel, _| written.contains(channel));
@@ -73,6 +67,50 @@ fn set_material(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     Ok(Value::Null)
+}
+
+/// The `material` param: a plain built-in material, or `None` for null
+fn material_param(p: &Value) -> Result<Option<&'static SmartMaterial>> {
+    match p.get("material") {
+        Some(Value::Null) => Ok(None),
+        Some(_) => {
+            let id = strp(p, "material").ok_or_else(|| bad(CMD, "`material` is a material id or null"))?;
+            let found = find(id).ok_or_else(|| bad(CMD, format!("unknown material `{id}`")))?;
+            if found.smart {
+                return Err(bad(CMD, format!("`{}` is a smart material (a folder of layers): add it from the shelf with material.apply", found.id)));
+            }
+
+            Ok(Some(found))
+        }
+        None => Err(bad(CMD, "`material` is required: a material id or null")),
+    }
+}
+
+/// Whether the fill at `target` already holds `material` whole (or, for `None`, no material and its channels' defaults), so setting it changes nothing
+fn holds(s: &Session, target: FillTarget, material: Option<&SmartMaterial>) -> Result<bool> {
+    let (fill, layer_channels) = match target {
+        FillTarget::Layer(id) => {
+            let layer = s.doc.project.layer(id)?;
+            let LayerKind::Fill(fill) = &layer.kind else { return Err(bad(CMD, "not a fill layer")) };
+            (fill, Some(&layer.channels))
+        }
+        FillTarget::Effect(id) => match s.doc.project.effect(id).map(|(_, found)| &found.kind) {
+            Some(EffectKind::Material(fill)) => (fill, None),
+            _ => return Err(bad(CMD, "not a content fill effect")),
+        },
+        FillTarget::Mask(_) => return Err(bad(CMD, "a mask fill has one grayscale source and no channels or material")),
+    };
+    if fill.material.as_deref() != material.map(|found| found.id) {
+        return Ok(false);
+    }
+
+    // Any channel edit clears the material, so a fill still holding it has the material's sources
+    Ok(match (material, layer_channels) {
+        (Some(_), Some(channels)) => channels.len() == fill.sources.len() && fill.sources.keys().all(|channel| channels.contains_key(channel)),
+        (Some(_), None) => true,
+        (None, Some(_)) => fill.sources.is_empty(),
+        (None, None) => fill.sources.iter().all(|(channel, source)| *source == Source::uniform_of(*channel)),
+    })
 }
 
 /// The texture set the fill `target` paints in, whichever set is selected
@@ -87,7 +125,7 @@ fn target_set(s: &Session, target: FillTarget) -> Result<usize> {
 }
 
 /// The one unmasked fill a plain material is made of
-fn whole_fill(s: &mut Session, material: &SmartMaterial, channels: &[texturecraft_core::Channel]) -> Result<Fill> {
+fn whole_fill(s: &mut Session, material: &SmartMaterial, channels: &[Channel]) -> Result<Fill> {
     let layers = build(&mut Builder { p: &mut s.doc.project, channels: channels.to_vec() }, material.id)?;
     match <[_; 1]>::try_from(layers) {
         Ok([layer]) if layer.mask.is_none() => match layer.kind {

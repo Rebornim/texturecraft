@@ -15,8 +15,12 @@ use crate::tile_picture::TilePicture;
 const COLUMNS: usize = 4;
 /// One row of tiles: the picture, two lines of name and air
 const ROW_HEIGHT: f32 = 86.0;
+/// Rows of tiles the grid shows at once
+const GRID_ROWS: f32 = 4.0;
 /// The grid's height, fixed so the popup keeps its place and size while searching or switching tabs; less only in a window too short for it
-const GRID_HEIGHT: f32 = 4.0 * ROW_HEIGHT;
+const GRID_HEIGHT: f32 = GRID_ROWS * ROW_HEIGHT;
+/// Air between the slot and the popup hanging from it
+const POPUP_GAP: f32 = 1.0;
 /// Room kept between the popup's shadow and the window's top or bottom edge
 const WINDOW_MARGIN: f32 = 8.0;
 /// Where the popup goes when it doesn't fit under its slot: above it, then flush with the slot's right edge below or above
@@ -120,7 +124,7 @@ pub(crate) fn show<K: Clone + PartialEq>(
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .align(egui::RectAlign::BOTTOM_START)
         .align_alternatives(&HANG_FALLBACKS)
-        .gap(1.0)
+        .gap(POPUP_GAP)
         .width(width)
         .frame(frame)
         .show(|ui| {
@@ -412,12 +416,15 @@ fn name_lines(ui: &Ui, rect: Rect, label: &str, bright: bool, bold: bool) {
         .filter(|(at, character)| character.is_whitespace() && !prefix(*at).ends_with(char::is_whitespace))
         .map(|(at, _)| at)
         .chain(std::iter::once(trimmed.len()));
-    let first_line_end = word_ends.take_while(|end| fits(prefix(*end))).last();
+
+    // Most names fit whole: one measure, and the words are only measured for a name that wraps
+    let first_line_end = if fits(trimmed) { None } else { word_ends.take_while(|end| fits(prefix(*end))).last() };
 
     let (first, second) = match first_line_end {
         Some(end) if end < trimmed.len() => (prefix(end), trimmed.get(end..).map(str::trim_start)),
         _ => (label, None),
     };
+
     for (index, line) in std::iter::once(first).chain(second).enumerate() {
         let mut job = egui::text::LayoutJob::simple_singleline(line.to_owned(), font.clone(), color);
         job.wrap = egui::text::TextWrapping::truncate_at_width(room);

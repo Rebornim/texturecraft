@@ -154,8 +154,8 @@ pub(crate) fn layers(app: &mut TextureCraftApp, ui: &mut Ui) {
         // Empty space keeps the selection and drops below the rows
         let free = ui.available_height();
         let drop_height = if free.is_finite() { free.max(BOTTOM_DROP_MIN_HEIGHT) } else { BOTTOM_DROP_MIN_HEIGHT };
-        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), drop_height), Sense::hover());
-        if let Some(dragged) = dnd_release::<u64>(&resp) {
+        let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), drop_height), Sense::hover());
+        if let Some(dragged) = dnd_release::<u64>(&response) {
             let bottom = app.session.doc.project.texture_sets.get(set).and_then(|texture_set| texture_set.stack.first().copied());
             if let Some(layers) = selection_with(app, LayerId(*dragged)) {
                 app.run("layer.move", json!({"layers": layers, "index": 0}));
@@ -163,7 +163,7 @@ pub(crate) fn layers(app: &mut TextureCraftApp, ui: &mut Ui) {
                 app.run("layer.move", json!({"layer": *dragged, "index": 0}));
             }
         }
-        match dnd_release::<ShelfDrag>(&resp).map(|drag| drag.asset.clone()) {
+        match dnd_release::<ShelfDrag>(&response).map(|drag| drag.asset.clone()) {
             Some(Asset::Material(material)) => {
                 app.run("material.apply", json!({"material": material, "index": 0}));
             }
@@ -172,8 +172,8 @@ pub(crate) fn layers(app: &mut TextureCraftApp, ui: &mut Ui) {
             }
             _ => {}
         }
-        let material = resp.dnd_hover_payload::<ShelfDrag>().is_some_and(|drag| drag.asset.is_material());
-        if resp.dnd_hover_payload::<u64>().is_some() || material {
+        let material = response.dnd_hover_payload::<ShelfDrag>().is_some_and(|drag| drag.asset.is_material());
+        if response.dnd_hover_payload::<u64>().is_some() || material {
             ui.painter().line_segment([rect.left_top(), rect.right_top()], Stroke::new(DROP_STROKE, tokens.accent));
         }
     });
@@ -1740,8 +1740,8 @@ pub(crate) fn properties(app: &mut TextureCraftApp, ui: &mut Ui) {
 
 /// What the docked Properties list keeps its own scroll place for: the selected layer and the part of it edited, none for the tool
 fn properties_place(app: &TextureCraftApp) -> Option<(LayerId, StackTarget)> {
-    // A short panel in between would clamp a shared place back to the top
-    if app.session.tool.tool == Tool::PolygonFill {
+    // A short panel in between would clamp a shared place back to the top; a greyed tool shows the layer's own sheet
+    if app.session.tool.tool == Tool::PolygonFill && app.session.tool_usable(Tool::PolygonFill) {
         return None;
     }
 
@@ -1782,7 +1782,7 @@ pub(crate) fn properties_fill_tabs(app: &TextureCraftApp) -> Option<[(&'static s
 }
 
 /// Effect `effect`'s source, projection and sampling when it is a mask fill the Properties panel lays out like a fill (a decal's placed fill keeps its own rows)
-fn mask_fill_of(project: &texturecraft_engine::core::Project, effect: LayerId) -> Option<(&Source, &texturecraft_engine::core::Projection, Sampling)> {
+fn mask_fill_of(project: &texturecraft_engine::core::Project, effect: LayerId) -> Option<(&Source, &Projection, Sampling)> {
     match &project.effect(effect)?.1.kind {
         EffectKind::Fill { source, projection, sampling } if projection.placed().is_none() => Some((source, projection, *sampling)),
         _ => None,
@@ -2766,6 +2766,9 @@ const FILL_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.01..=20.0;
 /// Slider range of a UV fill's rotation, a full turn
 const FILL_ROTATION_DEGREES_RANGE: std::ops::RangeInclusive<f32> = 0.0..=360.0;
 
+/// Slider range of a fill's UV offset and world offset, one texture or mesh width either way
+const FILL_OFFSET_RANGE: std::ops::RangeInclusive<f32> = -1.0..=1.0;
+
 /// Tri-planar hardness, the exponent weighting the three projections; `layer.fill.projection` clamps to the same range
 const TRIPLANAR_HARDNESS_RANGE: std::ops::RangeInclusive<f32> = 1.0..=64.0;
 
@@ -2811,6 +2814,12 @@ fn projection_editor(app: &mut TextureCraftApp, ui: &mut Ui, projection: &Projec
 /// Width of the lock button between a pair of sliders
 const PAIR_LOCK_WIDTH: f32 = 22.0;
 
+/// Height of the lock button, which sits level with the sliders' tracks at the bottom of the pair
+const PAIR_LOCK_HEIGHT: f32 = 18.0;
+
+/// Size of the lock button's icon
+const PAIR_LOCK_ICON_SIZE: f32 = 14.0;
+
 /// Height of one slider: its value row over its track
 const PAIR_SLIDER_HEIGHT: f32 = 34.0;
 
@@ -2818,13 +2827,14 @@ const PAIR_SLIDER_HEIGHT: f32 = 34.0;
 fn pair_sliders(
     ui: &mut Ui,
     label: &str,
-    mut v: [f32; 2],
+    mut values: [f32; 2],
     range: std::ops::RangeInclusive<f32>,
     decimals: usize,
     lock: Option<&mut bool>,
 ) -> Option<([f32; 2], bool)> {
     let mut edited = None;
     ui.label(label);
+
     let locked = lock.as_deref().copied().unwrap_or(false);
     let lock_width = if lock.is_some() { PAIR_LOCK_WIDTH } else { ui.spacing().item_spacing.x };
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), PAIR_SLIDER_HEIGHT), Sense::hover());
@@ -2833,31 +2843,35 @@ fn pair_sliders(
     let right = egui::Rect::from_min_size(egui::pos2(rect.right() - half, rect.top()), egui::vec2(half, rect.height()));
     let slot = |ui: &mut Ui, area: egui::Rect| ui.new_child(egui::UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
 
-    if let Some(merge) = slider_edit(&mut slot(ui, left), "", &mut v[0], range.clone(), decimals) {
+    if let Some(merge) = slider_edit(&mut slot(ui, left), "", &mut values[0], range.clone(), decimals) {
         if locked {
-            v[1] = v[0];
+            values[1] = values[0];
         }
         edited = Some(merge);
     }
+
     if let Some(lock) = lock {
-        let middle = egui::Rect::from_center_size(egui::pos2(rect.center().x, rect.bottom() - 9.0), egui::vec2(PAIR_LOCK_WIDTH, 18.0));
+        let middle =
+            egui::Rect::from_center_size(egui::pos2(rect.center().x, rect.bottom() - PAIR_LOCK_HEIGHT / 2.0), egui::vec2(PAIR_LOCK_WIDTH, PAIR_LOCK_HEIGHT));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(middle).layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight)));
         let icon = if *lock { ic::LOCK_SIMPLE } else { ic::LOCK_SIMPLE_OPEN };
-        if icon_button(&mut child, icon, tr("Lock the two values together"), *lock, 14.0).clicked() {
+        if icon_button(&mut child, icon, tr("Lock the two values together"), *lock, PAIR_LOCK_ICON_SIZE).clicked() {
             *lock = !*lock;
-            if *lock && v[1] != v[0] {
-                v[1] = v[0];
+            if *lock && values[1] != values[0] {
+                values[1] = values[0];
                 edited = Some(false);
             }
         }
     }
+
     let mut second = slot(ui, right);
     second.add_enabled_ui(!locked, |ui| {
-        if let Some(merge) = slider_edit(ui, "", &mut v[1], range.clone(), decimals) {
+        if let Some(merge) = slider_edit(ui, "", &mut values[1], range.clone(), decimals) {
             edited = Some(merge);
         }
     });
-    edited.map(|merge| (v, merge))
+
+    edited.map(|merge| (values, merge))
 }
 
 /// A projection's UV transformations: tiling across and down (locked together until unlocked), rotation and offset; a 3D projection's scale and world offset too
@@ -2871,6 +2885,7 @@ fn projection_transform(ui: &mut Ui, projection: &Projection, salt: &str, edit: 
         | Projection::Warp { uv, .. } => (uv.tiling, uv.rotation, uv.offset, "uvOffset"),
         Projection::UvTile => return,
     };
+
     let lock_id = ui.make_persistent_id(("fill_tiling_lock", salt));
     let mut locked = ui.data(|data| data.get_temp::<bool>(lock_id)).unwrap_or(tiling[0] == tiling[1]);
     let was_locked = locked;
@@ -2880,11 +2895,13 @@ fn projection_transform(ui: &mut Ui, projection: &Projection, salt: &str, edit: 
     if locked != was_locked {
         ui.data_mut(|data| data.insert_temp(lock_id, locked));
     }
+
     let mut rotation_degrees = rotation;
     if let Some(merge) = slider_edit(ui, tr("Rotation"), &mut rotation_degrees, FILL_ROTATION_DEGREES_RANGE, 0) {
         edit(json!({"rotation": rotation_degrees, "merge": merge}));
     }
-    if let Some((edited, merge)) = pair_sliders(ui, tr("Offset"), offset, -1.0..=1.0, 2, None) {
+
+    if let Some((edited, merge)) = pair_sliders(ui, tr("Offset"), offset, FILL_OFFSET_RANGE, 2, None) {
         edit(json!({offset_key: edited, "merge": merge}));
     }
 
@@ -2910,12 +2927,13 @@ fn world_scale(ui: &mut Ui, scale: f32, edit: &mut impl FnMut(Value)) {
 
 /// A slider per offset component ("Offset U", …): the whole offset once one is edited, with
 /// [`slider_edit`]'s `merge`.
-fn offset_sliders<const N: usize>(ui: &mut Ui, axes: [&str; N], mut v: [f32; N]) -> Option<([f32; N], bool)> {
+fn offset_sliders<const N: usize>(ui: &mut Ui, axes: [&str; N], mut values: [f32; N]) -> Option<([f32; N], bool)> {
     let mut edit = None;
-    for (axis, x) in axes.iter().zip(v.iter_mut()) {
-        edit = edit.or(slider_edit(ui, &trf("Offset {axis}", &[("axis", axis)]), x, -1.0..=1.0, 2));
+    for (axis, value) in axes.iter().zip(values.iter_mut()) {
+        edit = edit.or(slider_edit(ui, &trf("Offset {axis}", &[("axis", axis)]), value, FILL_OFFSET_RANGE, 2));
     }
-    edit.map(|merge| (v, merge))
+
+    edit.map(|merge| (values, merge))
 }
 
 /// The axis a planar or cylindrical projection runs along: the one picked, if any.

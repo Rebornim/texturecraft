@@ -51,11 +51,10 @@ impl OrbPreviews {
         previews.take_results(ctx);
         let pass = ctx.cumulative_pass_nr();
         if let Entry::Vacant(slot) = previews.pictures.entry(key) {
-            slot.insert(Picture { texture: None, full: false, drawn: pass });
-            #[cfg(not(target_arch = "wasm32"))]
-            let job = OrbJob { place, ..job() };
-            #[cfg(target_arch = "wasm32")]
             let job = job();
+            slot.insert(Picture { texture: None, full: false, drawn: pass, _images: job.material.image_handles() });
+            #[cfg(not(target_arch = "wasm32"))]
+            let job = OrbJob { place, ..job };
             previews.start(ctx, job);
         }
         let ready = previews.pictures.get_mut(&key).and_then(|picture| {
@@ -187,9 +186,12 @@ fn newest_per_place(waiting: &mut Vec<OrbJob>) -> Vec<u64> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::time::{Duration, Instant};
 
     use egui::Color32;
+    use texturecraft_engine::compose::ImageRes;
+    use texturecraft_engine::core::{Channel, Fill, Source};
 
     use super::*;
     use crate::orb_material::OrbMaterial;
@@ -239,8 +241,10 @@ mod tests {
         run(&ctx, |ctx| first = OrbPreviews::texture(ctx, place, job.key, || job.clone()));
         assert!(first.is_none(), "the first pass does not wait for the render");
         let sizes = draw_until_settled(&ctx, place, &job);
-        assert_eq!(sizes.last(), Some(&[200, 200]), "the full picture arrives: {sizes:?}");
-        assert!(sizes.contains(&[50, 50]) || sizes.len() == 1, "a quick picture may show first: {sizes:?}");
+
+        // A fast render can bring both pictures between two frames, so only the full one is sure to show; the quick one never comes after it
+        let quick_then_full: &[[usize; 2]] = &[[50, 50], [200, 200]];
+        assert!(sizes == quick_then_full || sizes == quick_then_full[1..], "the quick picture, if shown, then the full one: {sizes:?}");
         assert!(OrbPreviews::settled(&ctx));
 
         // The same look again: drawn at once from the cache, nothing new to render
@@ -284,6 +288,30 @@ mod tests {
         assert_eq!(previews.shown.len(), MAX_SHOWN_PLACES, "the cap holds for places too");
         assert!(!previews.shown.contains_key(&Id::unique(("orb", 0_u64))), "the least recently drawn place goes first");
         assert!(previews.shown.contains_key(&Id::unique(("orb", places - 1))), "the latest drawn place stays");
+    }
+
+    /// An orb of a fill whose base colour reads `image` under one name, the name a re-import keeps
+    fn image_orb(image: Arc<ImageRes>) -> OrbJob {
+        let fill = Fill { sources: BTreeMap::from([(Channel::BaseColor, Source::image(REIMPORTED))]), ..Fill::default() };
+        let images = HashMap::from([(REIMPORTED.to_owned(), image)]);
+        OrbJob::new(OrbMaterial::of_fill(&fill, &[Channel::BaseColor], &images), 64, Color32::BLACK)
+    }
+
+    /// An image name imported twice
+    const REIMPORTED: &str = "grain";
+
+    #[test]
+    fn a_new_image_under_a_cached_ones_name_and_size_gets_its_own_picture() {
+        let ctx = Context::default();
+        let place = Id::unique("orb");
+        let first = image_orb(Arc::new(ImageRes::new(2, 2, vec![[0.1; 4]; 4], false)));
+        draw_until_settled(&ctx, place, &first);
+        let first_key = first.key;
+        drop(first);
+
+        // Same name and size: the freed image's address must not come back to the cached picture's key
+        let second = image_orb(Arc::new(ImageRes::new(2, 2, vec![[0.9; 4]; 4], false)));
+        assert_ne!(second.key, first_key, "the new image's orb is drawn anew");
     }
 
     #[test]

@@ -429,11 +429,9 @@ pub fn paint_alpha(p: &Painter, rect: Rect, a: BrushAlpha, hardness: f32) {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use texturecraft_engine::compose::BakedMaps;
-    use texturecraft_engine::core::BakedMap;
-
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::orb_shape::OrbShape;
 

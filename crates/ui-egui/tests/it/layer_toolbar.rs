@@ -10,7 +10,7 @@ use texturecraft_engine::paint::alphas;
 use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 
-use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION, click_at};
 
 /// Tall enough for the toolbar, the layer rows and their menus at once
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1200.0);
@@ -120,23 +120,13 @@ fn channel_list(harness: &Harness<'_, TextureCraftApp>, current: &str) -> Option
 /// Opens the Layers panel's channel list showing `current` and picks `item` in it (the nearest `item` under the list)
 fn pick_channel(harness: &mut Harness<'_, TextureCraftApp>, current: &str, item: &str) {
     let list = channel_list(harness, current).unwrap();
-    harness.hover_at(list.center());
-    for pressed in [true, false] {
-        harness.event(egui::Event::PointerButton { pos: list.center(), button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
-        harness.run_steps(1);
-    }
-    harness.run_steps(SETTLE_FRAMES);
+    click_at(harness, list.center());
+
     let below = |rect: egui::Rect| rect.top() >= list.bottom() - EDGE_TOLERANCE && rect.left() < list.right() && rect.right() > list.left();
     let row = harness.query_all_by_label(item).map(|node| node.rect()).filter(|rect| below(*rect)).min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
 
     // A real press and release on the row, as a mouse would
-    let at = row.center();
-    harness.hover_at(at);
-    for pressed in [true, false] {
-        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
-        harness.run_steps(1);
-    }
-    harness.run_steps(SETTLE_FRAMES);
+    click_at(harness, row.center());
 }
 
 #[test]

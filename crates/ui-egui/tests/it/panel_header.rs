@@ -1,12 +1,12 @@
 //! Every docked panel group sits under one header bar: its name at the left, a close × at the right
 
-use egui::{Event, Modifiers, PointerButton, Pos2, Role};
+use egui::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::docking::Panel;
 
-use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION, click_at, panel_close_button};
 
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 960.0);
 
@@ -30,32 +30,13 @@ fn tab_rect(harness: &Harness<'_, TextureCraftApp>, name: &str) -> egui::Rect {
         .unwrap_or_else(|| panic!("a {name} tab"))
 }
 
-/// The first close button right of `tab` on its header bar
-fn header_close(harness: &Harness<'_, TextureCraftApp>, tab: egui::Rect) -> egui::Rect {
-    harness
-        .get_all_by_role(Role::Button)
-        .filter(|button| button.accesskit_node().label().as_deref() == Some("Close Panel"))
-        .map(|button| button.rect())
-        .filter(|close| close.min.x > tab.max.x && tab.y_range().contains(close.center().y))
-        .min_by(|a, b| a.min.x.total_cmp(&b.min.x))
-        .expect("a close button right of the tab")
-}
-
-fn click_at(harness: &mut Harness<'_, TextureCraftApp>, position: Pos2) {
-    harness.hover_at(position);
-    harness.event(Event::PointerButton { pos: position, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
-    harness.run_steps(1);
-    harness.event(Event::PointerButton { pos: position, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
-    harness.run_steps(SETTLE_FRAMES);
-}
-
 #[test]
 fn every_docked_panel_header_ends_in_its_own_close_button() {
     let harness = app();
     let names = ["Assets", "Texture Sets", "Layers", "Properties - "];
     let tabs: Vec<egui::Rect> = names.iter().map(|name| tab_rect(&harness, name)).collect();
     for (name, tab) in names.iter().zip(&tabs) {
-        let close = header_close(&harness, *tab);
+        let close = panel_close_button(&harness, *tab);
 
         // No other group's tab between a tab and its close button: the button is on its own bar
         let between = tabs.iter().any(|other| other.y_range().contains(close.center().y) && other.min.x > tab.max.x && other.max.x < close.min.x);
@@ -67,7 +48,7 @@ fn every_docked_panel_header_ends_in_its_own_close_button() {
 fn the_header_close_button_closes_its_panel() {
     let mut harness = app();
     assert!(harness.state().ui.dock.is_visible(Panel::Properties));
-    let close = header_close(&harness, tab_rect(&harness, "Properties - "));
+    let close = panel_close_button(&harness, tab_rect(&harness, "Properties - "));
     click_at(&mut harness, close.center());
 
     assert!(!harness.state().ui.dock.is_open(Panel::Properties));
@@ -89,6 +70,7 @@ fn the_properties_header_names_the_selected_effects_type() {
     harness.run_steps(SETTLE_FRAMES);
 
     tab_rect(&harness, "Properties - Filter");
+
     let level = texturecraft_engine::execute(&mut harness.state_mut().session, "effect.add.levels", &serde_json::json!({"layer": layer, "target": "content"}))
         .unwrap()["effect"]
         .as_u64()

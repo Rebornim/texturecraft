@@ -410,7 +410,7 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
         input.events.extend(aliases);
     });
 
-    // Escape closes a dropdown before an eyedropper pick, the colour picker window, Properties, the rail popup, color picking or the stroke
+    // Escape closes a dropdown before an eyedropper pick, the colour picker window, Properties, the rail popup, the ID colour pick or the stroke
     let popup_open = egui::Popup::is_any_open(ctx);
     let picker_open = crate::color_picker::open_window(ctx).is_some();
 

@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use texturecraft_engine::compose::ImageRes;
 use texturecraft_engine::compose::pattern::{Coords, image_samples, procedural};
@@ -80,6 +80,11 @@ impl OrbMaterial {
     /// The channel the orb shows on its own, if any
     pub(crate) fn alone(&self) -> Option<Channel> {
         self.alone
+    }
+
+    /// The images it reads, held weakly: while a cached picture holds them, a new image can't take a freed one's address, which [`OrbMaterial::key`] hashes
+    pub(crate) fn image_handles(&self) -> Vec<Weak<ImageRes>> {
+        self.images.values().map(Arc::downgrade).collect()
     }
 
     /// A key that changes whenever the orb would look different

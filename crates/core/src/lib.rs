@@ -71,6 +71,9 @@ pub mod warp_mode;
 pub mod warp_source;
 pub mod warp_source_mode;
 
+/// A full turn, in degrees
+pub const FULL_TURN_DEGREES: f32 = 360.0;
+
 pub use anisotropic_kuwahara::AnisotropicKuwahara;
 pub use backface::Backface;
 pub use bake::{

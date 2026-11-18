@@ -1,7 +1,7 @@
 //! Filters drawn from the distance to the shapes' edge: Bevel, Bevel Smooth and Directional Distance
 
 use rayon::prelude::*;
-use texturecraft_core::{BevelBlur, BevelCorner, Filter, lum};
+use texturecraft_core::{Bevel, BevelBlur, BevelCorner, DirectionalDistance, Filter, lum};
 
 use crate::distance_envelope::DistanceEnvelope;
 use crate::eval::{MIN_ALPHA, blur};
@@ -12,17 +12,26 @@ const TRAIL_SAMPLES: i32 = 64;
 /// From a texel's centre to the edge between it and the nearest texel across: half a texel short of their centres' distance
 const EDGE_OFFSET: f32 = 0.5;
 
+/// Components of a texel with color and coverage (red, green, blue, alpha)
+const RGBA_COMPONENTS: usize = 4;
+
+/// Color components of a texel, before its alpha
+const COLOR_COMPONENTS: usize = 3;
+
+/// Where a texel's alpha sits among its components
+const ALPHA_INDEX: usize = 3;
+
 /// What a texel becomes from its index, whether it is inside the shapes and its own value
 type TexelResult<'a> = dyn Fn(usize, bool, f32) -> f32 + Sync + 'a;
 
-/// Lay distance filter `filter` over premultiplied `data` (`width` × `height` texels of `comps`; content's shapes from its luminance), `res` texels across a UV tile, mixed in by `opacity`; its Distance Map `grays` (0..1 a texel) scales the distance texel by texel
+/// Lay distance filter `filter` over premultiplied `data` (`width` × `height` texels of `components`; content's shapes from its luminance), `tile_resolution` texels across a UV tile, mixed in by `opacity`; its Distance Map `grays` (0..1 a texel) scales the distance texel by texel
 pub(crate) fn distance_filter(
     data: &mut [f32],
     (cover, grays): (&[f32], &[f32]),
-    comps: usize,
+    components: usize,
     (width, height): (usize, usize),
     filter: &Filter,
-    res: u32,
+    tile_resolution: u32,
     opacity: f32,
 ) {
     let map = |texel: usize| grays.get(texel).copied().unwrap_or(1.0);
@@ -31,11 +40,11 @@ pub(crate) fn distance_filter(
         [value] => *value,
         _ => 0.0,
     };
-    let values: Vec<f32> = data.par_chunks(comps).map(value).collect();
+    let values: Vec<f32> = data.par_chunks(components).map(value).collect();
     let shapes = |inside: &(dyn Fn(f32) -> bool + Sync)| -> Vec<bool> {
         values.par_iter().zip(cover.par_iter()).map(|(value, covered)| *covered > 0.0 && inside(*value)).collect()
     };
-    let smoothed = |field: &mut Vec<f32>, texels: f32| {
+    let smoothed = |field: &mut [f32], texels: f32| {
         let radius = texels.round() as usize;
         if radius > 0 {
             blur(field, width, height, radius);
@@ -45,12 +54,12 @@ pub(crate) fn distance_filter(
     // Per texel: whether it is inside the shapes, and what it becomes from its own value
     let (inside, result): (Vec<bool>, Box<TexelResult<'_>>) = match filter {
         Filter::DistanceBevel(bevel) => {
-            let inside = shapes(&|value| value >= texturecraft_core::Bevel::EDGE);
+            let inside = shapes(&|value| value >= Bevel::EDGE);
             let edge = edge_distances(&inside, (width, height), bevel.corner == BevelCorner::Angular);
-            let reach = bevel.reach(res);
+            let reach = bevel.reach(tile_resolution);
             let mut slope: Vec<f32> = inside.par_iter().zip(edge.par_iter()).map(|(inside, edge)| bevel.slope(*inside, *edge, reach)).collect();
             let mut blurred = slope.clone();
-            smoothed(&mut blurred, bevel.smoothing_texels(res));
+            smoothed(&mut blurred, bevel.smoothing_texels(tile_resolution));
             slope.par_iter_mut().zip(blurred.par_iter()).for_each(|(sharp, blurred)| {
                 *sharp = match bevel.blur {
                     BevelBlur::Uniform => *blurred,
@@ -64,19 +73,19 @@ pub(crate) fn distance_filter(
         Filter::BevelSmooth(smooth) => {
             let inside = shapes(&|value| smooth.inside(value));
             let edge = edge_distances(&inside, (width, height), false);
-            let (reach, curve) = (smooth.reach(res), smooth.curve());
+            let (reach, curve) = (smooth.reach(tile_resolution), smooth.curve());
             let mut ramp: Vec<f32> = inside
                 .par_iter()
                 .zip(edge.par_iter())
                 .enumerate()
                 .map(|(texel, (inside, edge))| smooth.value(curve, *inside, *edge, reach * map(texel)))
                 .collect();
-            smoothed(&mut ramp, smooth.smoothing_texels(res));
+            smoothed(&mut ramp, smooth.smoothing_texels(tile_resolution));
             (inside, Box::new(move |texel, _, value| ramp.get(texel).copied().unwrap_or(value)))
         }
         Filter::DirectionalDistance(trail) => {
-            let inside = shapes(&|value| value >= texturecraft_core::DirectionalDistance::EDGE);
-            let along = trail_distances(&inside, (width, height), crate::eval::direction(trail.angle), trail.reach(res));
+            let inside = shapes(&|value| value >= DirectionalDistance::EDGE);
+            let along = trail_distances(&inside, (width, height), crate::eval::direction(trail.angle), trail.reach(tile_resolution));
             let trail = *trail;
 
             // A share of the full reach is a larger share of a texel's shorter one; no trail where the map is black, the shapes stay
@@ -92,17 +101,18 @@ pub(crate) fn distance_filter(
         _ => return,
     };
 
-    data.par_chunks_mut(comps).zip(inside.par_iter()).zip(cover.par_iter()).enumerate().for_each(|(texel, ((pixel, inside), covered))| {
+    let has_alpha = components == RGBA_COMPONENTS;
+    data.par_chunks_mut(components).zip(inside.par_iter()).zip(cover.par_iter()).enumerate().for_each(|(texel, ((pixel, inside), covered))| {
         if *covered <= 0.0 {
             return;
         }
 
         // Content is premultiplied by its coverage, which stays
-        let cov = if comps == 4 { pixel.get(3).copied().unwrap_or(0.0) } else { 1.0 };
-        for slot in pixel.iter_mut().take(comps.min(3)) {
-            let before = if comps == 4 { if cov > MIN_ALPHA { *slot / cov } else { 0.0 } } else { *slot };
+        let coverage = if has_alpha { pixel.get(ALPHA_INDEX).copied().unwrap_or(0.0) } else { 1.0 };
+        for slot in pixel.iter_mut().take(components.min(COLOR_COMPONENTS)) {
+            let before = if has_alpha { if coverage > MIN_ALPHA { *slot / coverage } else { 0.0 } } else { *slot };
             let after = result(texel, *inside, before);
-            *slot = (before + (after - before) * opacity) * cov;
+            *slot = (before + (after - before) * opacity) * coverage;
         }
     });
 }
@@ -139,12 +149,12 @@ fn chessboard_distances(feature: &[bool], (width, height): (usize, usize)) -> Ve
     let mut distances: Vec<f32> = feature.iter().map(|feature| if *feature { 0.0 } else { far }).collect();
 
     // One pass down from the texels above and left, one up from those below and right
-    let step = |distances: &mut Vec<f32>, (x, y): (usize, usize), neighbours: [(isize, isize); 4]| {
+    let step = |distances: &mut [f32], (x, y): (usize, usize), neighbours: [(isize, isize); 4]| {
         let nearest = neighbours
             .iter()
             .filter_map(|(dx, dy)| {
-                let (nx, ny) = (x.checked_add_signed(*dx)?, y.checked_add_signed(*dy)?);
-                (nx < width && ny < height).then(|| distances.get(ny * width + nx).copied()).flatten()
+                let (neighbour_x, neighbour_y) = (x.checked_add_signed(*dx)?, y.checked_add_signed(*dy)?);
+                (neighbour_x < width && neighbour_y < height).then(|| distances.get(neighbour_y * width + neighbour_x).copied()).flatten()
             })
             .fold(f32::MAX, f32::min);
         if let Some(slot) = distances.get_mut(y * width + x) {
@@ -174,12 +184,12 @@ fn trail_distances(inside: &[bool], (width, height): (usize, usize), direction: 
             let (x, y) = ((texel % width.max(1)) as f32, (texel / width.max(1)) as f32);
             (0..=samples).find_map(|sample| {
                 let back = sample as f32 * step;
-                let (sx, sy) = ((x - direction[0] * back).round(), (y - direction[1] * back).round());
-                let hit = sx >= 0.0
-                    && sy >= 0.0
-                    && (sx as usize) < width
-                    && (sy as usize) < height
-                    && inside.get(sy as usize * width + sx as usize).copied().unwrap_or(false);
+                let (sample_x, sample_y) = ((x - direction[0] * back).round(), (y - direction[1] * back).round());
+                let hit = sample_x >= 0.0
+                    && sample_y >= 0.0
+                    && (sample_x as usize) < width
+                    && (sample_y as usize) < height
+                    && inside.get(sample_y as usize * width + sample_x as usize).copied().unwrap_or(false);
                 hit.then(|| if reach > 0.0 { back / reach } else { 0.0 })
             })
         })
@@ -202,5 +212,32 @@ mod tests {
         assert_eq!(chessboard[0], 2.0, "a corner is as far as its larger axis");
         let none = straight_distances(&[false; 4], (2, 2));
         assert!(none.iter().all(|distance| *distance >= 4.0), "no feature is beyond the region");
+    }
+
+    #[test]
+    fn distances_keep_rows_and_columns_apart_in_a_region_wider_than_tall() {
+        // One feature texel at column 1, row 0 of a 7 × 3 region
+        let (width, height) = (7, 3);
+        let mut feature = vec![false; width * height];
+        feature[1] = true;
+        let straight = straight_distances(&feature, (width, height));
+        let chessboard = chessboard_distances(&feature, (width, height));
+
+        let at = |x: usize, y: usize| y * width + x;
+        assert_eq!((straight[at(1, 0)], straight[at(6, 0)], straight[at(1, 2)]), (0.0, 5.0, 2.0));
+        assert!((straight[at(6, 2)] - 29f32.sqrt()).abs() < 1e-5, "{}", straight[at(6, 2)]);
+        assert_eq!((chessboard[at(6, 0)], chessboard[at(0, 2)], chessboard[at(6, 2)]), (5.0, 2.0, 5.0));
+    }
+
+    #[test]
+    fn a_trail_finds_the_nearest_shape_behind_a_texel_as_a_share_of_its_reach() {
+        // A shape at column 0 of a 5 × 2 region; the trail runs towards +x, so a texel looks back towards -x
+        let (width, height) = (5, 2);
+        let inside: Vec<bool> = (0..width * height).map(|texel| texel % width == 0).collect();
+        let trail = trail_distances(&inside, (width, height), [1.0, 0.0], 4.0);
+
+        assert_eq!(trail[0], Some(0.0), "on the shape");
+        assert_eq!(trail[2], Some(0.5), "two texels behind, half the reach");
+        assert_eq!(trail[width + 4], Some(1.0), "at the reach's end");
     }
 }

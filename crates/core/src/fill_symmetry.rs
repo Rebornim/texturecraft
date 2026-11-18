@@ -2,10 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::SymmetryKind;
-
-/// A full turn, in degrees
-const FULL_TURN_DEGREES: f32 = 360.0;
+use crate::{FULL_TURN_DEGREES, SymmetryKind};
 
 /// Copies of a fill's projection: off for every fill saved before symmetry existed
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -35,20 +32,32 @@ impl FillSymmetry {
     pub const SPANS: std::ops::RangeInclusive<f32> = 1.0..=FULL_TURN_DEGREES;
     /// How far the axis position reaches from the mesh's centre, in mesh radii
     pub const REACH: f32 = 1.0;
+    /// [`FillSymmetry::axis`] of the last axis, Z
+    pub const LAST_AXIS: u8 = 2;
 
-    /// The degrees between radial copies: a full turn spaces `count` copies evenly, a smaller span puts the first and last at its ends
+    /// The degrees between radial copies: a full turn spaces `count` copies evenly, a smaller span puts the first and last at its ends (a span that is not a number is a full turn)
     pub fn step(&self) -> f32 {
-        let count = self.count.clamp(*Self::COUNTS.start(), *Self::COUNTS.end()) as f32;
-        let span = self.span.clamp(0.0, FULL_TURN_DEGREES);
+        let count = self.radial_count() as f32;
+        let span = if self.span.is_nan() { FULL_TURN_DEGREES } else { self.span.clamp(0.0, FULL_TURN_DEGREES) };
         if span >= FULL_TURN_DEGREES { span / count } else { span / (count - 1.0) }
     }
 
-    /// The radial copies there are, the original included
+    /// The copies there are, the original included: two for a mirror
     pub fn copies(&self) -> u32 {
         match self.kind {
             SymmetryKind::Mirror => 2,
-            SymmetryKind::Radial => self.count.clamp(*Self::COUNTS.start(), *Self::COUNTS.end()),
+            SymmetryKind::Radial => self.radial_count(),
         }
+    }
+
+    /// The axis the copies mirror across or turn round, the last one for an axis past it
+    pub fn axis_index(&self) -> usize {
+        usize::from(self.axis.min(Self::LAST_AXIS))
+    }
+
+    /// How many radial copies, kept within [`FillSymmetry::COUNTS`]
+    fn radial_count(&self) -> u32 {
+        self.count.clamp(*Self::COUNTS.start(), *Self::COUNTS.end())
     }
 
     /// Whether this is the symmetry a new fill starts with, so saves leave it out
@@ -60,5 +69,25 @@ impl FillSymmetry {
 impl Default for FillSymmetry {
     fn default() -> Self {
         FillSymmetry::OFF
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn radial(count: u32, span: f32) -> FillSymmetry {
+        FillSymmetry { on: true, kind: SymmetryKind::Radial, count, span, ..FillSymmetry::OFF }
+    }
+
+    #[test]
+    fn a_span_under_a_full_turn_puts_the_last_copy_at_its_end() {
+        assert_eq!(radial(4, 180.0).step(), 60.0);
+        assert_eq!(radial(4, 360.0).step(), 90.0);
+    }
+
+    #[test]
+    fn a_span_that_is_not_a_number_spaces_the_copies_round_a_full_turn() {
+        assert_eq!(radial(4, f32::NAN).step(), 90.0);
     }
 }

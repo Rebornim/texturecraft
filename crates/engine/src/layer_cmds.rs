@@ -1065,7 +1065,8 @@ fn symmetry_from(p: &Value, cmd: &str, current: FillSymmetry) -> Result<FillSymm
         symmetry.kind = SymmetryKind::from_id(id).ok_or_else(|| bad(cmd, format!("unknown symmetryType `{id}`: mirror or radial")))?;
     }
     if let Some(axis) = u64p(p, "symmetryAxis") {
-        symmetry.axis = u8::try_from(axis).ok().filter(|axis| *axis <= 2).ok_or_else(|| bad(cmd, "symmetryAxis is 0 (X), 1 (Y) or 2 (Z)"))?;
+        symmetry.axis =
+            u8::try_from(axis).ok().filter(|axis| *axis <= FillSymmetry::LAST_AXIS).ok_or_else(|| bad(cmd, "symmetryAxis is 0 (X), 1 (Y) or 2 (Z)"))?;
     }
     if let Some(flips) = p.get("flipCopy") {
         let [across, down] = flips.as_array().map(Vec::as_slice).unwrap_or_default() else {

@@ -255,10 +255,19 @@ fn spherical_uv(projector: &Projector, offset: &[f32; 3], coords: &Coords) -> Ve
     Vec2::new(u, v)
 }
 
+/// The axis index (0 X, 1 Y, 2 Z) a cylindrical projection's stored `axis` wraps round: any value but X or Z reads as Y
+pub fn cylinder_axis_index(axis: u8) -> usize {
+    match axis {
+        0 => 0,
+        2 => 2,
+        _ => 1,
+    }
+}
+
 /// Where `coords` lies for a cylindrical projection round `axis`: 0..1 round the axis over `angle` degrees, and its height along the axis
 fn cylinder_coords(axis: u8, projector: &Projector, offset: &[f32; 3], angle: f32, coords: &Coords) -> (f32, f32) {
     let point = projector_local(projector, coords).pos + Vec3::from(*offset);
-    let (across, height, depth) = match axis {
+    let (across, height, depth) = match cylinder_axis_index(axis) {
         0 => (point.y, point.x, point.z),
         2 => (point.x, point.z, point.y),
         _ => (point.x, point.y, point.z),
@@ -509,6 +518,12 @@ pub fn world_noise(pos: Vec3, scale: f32, seed: u32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stored cylinder axis past Z (only a hand-edited project holds one) wraps round Y
+    #[test]
+    fn a_cylinder_axis_past_z_reads_as_y() {
+        assert_eq!([0, 1, 2, 3, u8::MAX].map(cylinder_axis_index), [0, 1, 2, 1, 1]);
+    }
 
     /// A decal saved before image placement reads its frame coordinates bit for bit as it did: its image at them, its procedural at them times the pattern scale
     #[test]

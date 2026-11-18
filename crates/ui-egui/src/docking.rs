@@ -622,8 +622,8 @@ mod tests {
 
     #[test]
     fn the_default_right_column_gives_properties_about_two_thirds_under_the_texture_sets() {
-        let w = default_workspace();
-        let Some(Node::Split { second: right, .. }) = w.layout.root.as_ref() else { panic!("assets | rest") };
+        let workspace = default_workspace();
+        let Some(Node::Split { second: right, .. }) = workspace.layout.root.as_ref() else { panic!("assets | rest") };
         let Node::Split { second: column, .. } = right.as_ref() else { panic!("viewport | right column") };
         let Node::Split { second: below_sets, .. } = column.as_ref() else { panic!("texture sets | rest") };
         let Node::Split { size: SplitSize::Ratio(layers), first, second, .. } = below_sets.as_ref() else { panic!("layers | properties") };
@@ -635,14 +635,14 @@ mod tests {
 
     #[test]
     fn a_saved_split_keeps_its_own_share() {
-        let mut w = default_workspace();
-        let Some(Node::Split { second: right, .. }) = w.layout.root.as_mut() else { panic!("assets | rest") };
+        let mut workspace = default_workspace();
+        let Some(Node::Split { second: right, .. }) = workspace.layout.root.as_mut() else { panic!("assets | rest") };
         let Node::Split { second: column, .. } = right.as_mut() else { panic!("viewport | right column") };
         let Node::Split { second: below_sets, .. } = column.as_mut() else { panic!("texture sets | rest") };
         let Node::Split { size, .. } = below_sets.as_mut() else { panic!("layers | properties") };
         *size = SplitSize::Ratio(0.57);
-        let back = Dock::from_value(serde_json::to_value(&w).unwrap());
-        assert_eq!(back.workspace(), &w, "a layout saved with the old split opens unchanged");
+        let back = Dock::from_value(serde_json::to_value(&workspace).unwrap());
+        assert_eq!(back.workspace(), &workspace, "a layout saved with the old split opens unchanged");
     }
 
     #[test]

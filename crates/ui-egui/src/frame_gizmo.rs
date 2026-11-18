@@ -237,10 +237,10 @@ impl Gizmo for FrameGizmo {
     }
 
     /// The handle under screen point `p`: the nearest one within reach, so a small frame's corners stay grabbable beside its arrows
-    fn grab(&self, p: Pos2) -> Option<FrameGrab> {
-        let mut handles = vec![(FrameGrab::Slide, center_distance(self.center, p))];
-        handles.extend((0..3).filter_map(|axis| Some((FrameGrab::Axis(axis), arrow_distance(p, self.center, self.arrows[axis]?)))));
-        let near = |points: [Pos2; 4], grab: fn(usize) -> FrameGrab| (0..4).map(move |index| (grab(index), points[index].distance(p)));
+    fn grab(&self, at: Pos2) -> Option<FrameGrab> {
+        let mut handles = vec![(FrameGrab::Slide, center_distance(self.center, at))];
+        handles.extend((0..3).filter_map(|axis| Some((FrameGrab::Axis(axis), arrow_distance(at, self.center, self.arrows[axis]?)))));
+        let near = |points: [Pos2; 4], grab: fn(usize) -> FrameGrab| (0..4).map(move |index| (grab(index), points[index].distance(at)));
         match self.warp {
             // A mask effect's warp corners have no command to pull them
             Some(_) if self.effect.is_none() => handles.extend(near(self.corners, FrameGrab::Corner)),
@@ -249,7 +249,7 @@ impl Gizmo for FrameGizmo {
         }
         handles.extend(near(self.sides, FrameGrab::Side));
         if let Some(ring) = &self.ring {
-            handles.push((FrameGrab::Turn, ring.windows(2).map(|pair| distance_to_segment(p, pair[0], pair[1])).fold(f32::INFINITY, f32::min)));
+            handles.push((FrameGrab::Turn, ring.windows(2).map(|pair| distance_to_segment(at, pair[0], pair[1])).fold(f32::INFINITY, f32::min)));
         }
         nearest(handles)
     }

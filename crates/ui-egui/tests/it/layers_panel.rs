@@ -9,6 +9,8 @@ use texturecraft_engine::core::{Channel, LayerId};
 use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 
+use crate::SETTLE_FRAMES;
+
 fn id(v: Value, key: &str) -> u64 {
     v[key].as_u64().unwrap()
 }
@@ -129,6 +131,12 @@ fn deeply_nested_effect_visibility_is_reachable_in_a_narrow_panel() {
     assert!(!content.iter().find(|effect| effect.name == "Effect A").unwrap().visible, "the compact eye toggles the effect instead of missing the panel");
 }
 
+/// Pointer moves of the opacity cell drag, one per frame
+const OPACITY_DRAG_MOVES: usize = 4;
+
+/// How far left each move of the opacity cell drag goes, in points
+const OPACITY_DRAG_STEP: f32 = 10.0;
+
 /// A drag on a row's opacity cell is one undo step, however many frames it spans
 #[test]
 fn dragging_a_row_opacity_adds_one_undo_step() {
@@ -144,17 +152,18 @@ fn dragging_a_row_opacity_adds_one_undo_step() {
     h.run_steps(1);
     h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
     h.run_steps(1);
-    for step in 1..=4 {
-        h.hover_at(from - egui::vec2(10.0 * step as f32, 0.0));
+    let step_left = |step: usize| from - egui::vec2(OPACITY_DRAG_STEP * step as f32, 0.0);
+    for step in 1..=OPACITY_DRAG_MOVES {
+        h.hover_at(step_left(step));
         h.run_steps(1);
     }
     h.event(egui::Event::PointerButton {
-        pos: from - egui::vec2(40.0, 0.0),
+        pos: step_left(OPACITY_DRAG_MOVES),
         button: egui::PointerButton::Primary,
         pressed: false,
         modifiers: egui::Modifiers::NONE,
     });
-    h.run_steps(3);
+    h.run_steps(SETTLE_FRAMES);
 
     assert!(opacity(&h) < before, "the drag lowers the opacity: {}", opacity(&h));
     assert_eq!(h.state().session.history_labels().len(), steps + 1, "every frame of the drag merges into one step");

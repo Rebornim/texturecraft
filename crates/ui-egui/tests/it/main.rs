@@ -104,10 +104,7 @@ const WHEEL_NOTCH: f32 = 60.0;
 const OUTSIDE_OFFSET: f32 = 400.0;
 
 /// A Properties list that `open` opens (returning its button's rect) leaves the view its wheel, and closes on Escape and on a click outside
-fn assert_list_leaves_the_wheel_and_closes(
-    harness: &mut egui_kittest::Harness<'_, texturecraft_ui_egui::TextureCraftApp>,
-    open: impl Fn(&mut egui_kittest::Harness<'_, texturecraft_ui_egui::TextureCraftApp>) -> egui::Rect,
-) {
+fn assert_list_leaves_the_wheel_and_closes(harness: &mut Harness<'_, TextureCraftApp>, open: impl Fn(&mut Harness<'_, TextureCraftApp>) -> egui::Rect) {
     open(harness);
     assert!(egui::Popup::is_any_open(&harness.ctx), "the list opens");
     let distance = harness.state().session.camera.distance;
@@ -127,12 +124,7 @@ fn assert_list_leaves_the_wheel_and_closes(
     assert!(!egui::Popup::is_any_open(&harness.ctx), "Escape closes the list");
 
     let button = open(harness);
-    let outside = egui::pos2(button.min.x - OUTSIDE_OFFSET, button.min.y);
-    harness.hover_at(outside);
-    for pressed in [true, false] {
-        harness.event(egui::Event::PointerButton { pos: outside, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
-        harness.run_steps(DRAG_STEP_FRAMES);
-    }
+    click_at(harness, egui::pos2(button.min.x - OUTSIDE_OFFSET, button.min.y));
     assert!(!egui::Popup::is_any_open(&harness.ctx), "a click outside closes the list");
 }
 

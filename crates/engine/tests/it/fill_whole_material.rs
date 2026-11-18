@@ -132,3 +132,24 @@ fn setting_the_material_a_fill_already_holds_adds_no_undo_step() {
 
     assert_eq!(s.history_labels().len(), steps + 4, "one step per change, none for a repeat");
 }
+
+#[test]
+fn setting_the_material_again_brings_back_a_content_fill_effects_channel_turned_off() {
+    let mut s = session();
+    layer(execute(&mut s, "layer.add.fill", &Value::Null).unwrap());
+    let effect = execute(&mut s, "effect.add.fill", &json!({"target": "content", "roughness": 0.7})).unwrap()["effect"].as_u64().unwrap();
+    let gold = json!({"effect": effect, "material": "gold_polished"});
+    execute(&mut s, "layer.fill.material", &gold).unwrap();
+    let whole = effect_fill(&s, effect).sources;
+
+    for off_and_on in [vec![false], vec![false, true]] {
+        for enabled in off_and_on {
+            execute(&mut s, "layer.fill.set", &json!({"effect": effect, "channel": "roughness", "enabled": enabled})).unwrap();
+        }
+        assert_ne!(effect_fill(&s, effect).sources, whole, "roughness is off or back at its default");
+
+        execute(&mut s, "layer.fill.material", &gold).unwrap();
+
+        assert_eq!(effect_fill(&s, effect).sources, whole, "the material's roughness is back");
+    }
+}

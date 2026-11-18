@@ -295,6 +295,7 @@ fn material(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Null) => Some(None),
         Some(name) => {
             let name = name.as_str().ok_or_else(|| bad("tool.material", "maskImage must be an image resource name or null"))?;
+
             // The brush reads the decoded image: a resource that is not one (an environment, a linked package) is refused
             if !s.images.contains_key(name) {
                 return Err(bad("tool.material", format!("no image resource '{name}'")));
@@ -312,7 +313,8 @@ fn material(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let Some(channel) = channel {
         if let Some(picked) = color.or(value) {
-            let picked = if channel == Channel::Height { picked.map(|x| x.clamp(-1.0, 1.0)) } else { picked.map(|x| x.clamp(0.0, 1.0)) };
+            let picked =
+                if channel == Channel::Height { picked.map(|component| component.clamp(-1.0, 1.0)) } else { picked.map(|component| component.clamp(0.0, 1.0)) };
             s.tool.values.insert(channel, picked);
             s.tool.enabled.insert(channel);
         }
@@ -331,8 +333,8 @@ fn material(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.revision = s.revision.wrapping_add(1);
     Ok(json!({
-        "values": s.tool.values.iter().map(|(c, v)| (c.id().to_string(), json!(v))).collect::<serde_json::Map<_, _>>(),
-        "enabled": s.tool.enabled.iter().map(|c| c.id()).collect::<Vec<_>>(),
+        "values": s.tool.values.iter().map(|(channel, value)| (channel.id().to_string(), json!(value))).collect::<serde_json::Map<_, _>>(),
+        "enabled": s.tool.enabled.iter().map(|channel| channel.id()).collect::<Vec<_>>(),
         "maskValue": s.tool.mask_value,
         "maskImage": s.tool.mask_image,
     }))

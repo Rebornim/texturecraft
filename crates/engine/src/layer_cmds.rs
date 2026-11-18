@@ -18,6 +18,18 @@ pub const MIN_SCALE: f32 = 0.001;
 /// The largest scale, tiling or offset a fill's placement takes
 pub const MAX_PLACEMENT: f32 = 1000.0;
 
+/// The command [`fill_set`] runs as
+const FILL_SET: &str = "layer.fill.set";
+
+/// How far a warp's corner may be pulled from the frame's centre, in frame sizes
+const MAX_CORNER_REACH: f32 = 100.0;
+
+/// The largest Projection Depth, in lengths of the frame's longer side
+pub(crate) const MAX_PROJECTION_DEPTH: f32 = 100.0;
+
+/// The highest contrast a procedural pattern takes
+const MAX_PATTERN_CONTRAST: f32 = 20.0;
+
 /// The `layer.fill.set` keys a one-source grayscale fill (a mask fill or a filter's image input) has no use for
 const GRAY_REFUSED_KEYS: [&str; 4] = ["channel", "enabled", "solo", "normalFormat"];
 
@@ -25,9 +37,6 @@ const GRAY_REFUSED_KEYS: [&str; 4] = ["channel", "enabled", "solo", "normalForma
 pub fn signed_scale(value: f32) -> f32 {
     value.signum() * value.abs().clamp(MIN_SCALE, MAX_PLACEMENT)
 }
-
-/// The highest contrast a procedural pattern takes
-const MAX_PATTERN_CONTRAST: f32 = 20.0;
 
 /// One full turn, in degrees (the brush's, so every angle wraps on the same turn)
 pub(crate) use texturecraft_paint::FULL_TURN_DEGREES;
@@ -356,9 +365,6 @@ fn mask_source_mut(s: &mut Session, effect: LayerId) -> Result<&mut Source> {
         _ => Err(EngineError::Other("not a mask fill effect".into())),
     }
 }
-
-/// The command [`fill_set`] runs as
-const FILL_SET: &str = "layer.fill.set";
 
 fn fill_set(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(input) = strp(p, "input") {
@@ -732,12 +738,6 @@ fn warp_corners(p: &Value, cmd: &str) -> Result<Option<[[f32; 2]; 4]>> {
     Ok(Some(corners))
 }
 
-/// How far a warp's corner may be pulled from the frame's centre, in frame sizes
-const MAX_CORNER_REACH: f32 = 100.0;
-
-/// The largest Projection Depth, in lengths of the frame's longer side
-pub(crate) const MAX_PROJECTION_DEPTH: f32 = 100.0;
-
 /// `current` with the `filtering`, `wrap`, `scaleMode` and symmetry params applied
 pub(crate) fn sampling_from(p: &Value, cmd: &str, current: Sampling) -> Result<Sampling> {
     let mut sampling = current;
@@ -784,16 +784,16 @@ fn symmetry_from(p: &Value, cmd: &str, current: FillSymmetry) -> Result<FillSymm
 
 /// `key` as `N` finite numbers clamped to `lo..=hi`: an array of `N`, or one number for all
 fn floats<const N: usize>(p: &Value, key: &str, lo: f32, hi: f32) -> Option<[f32; N]> {
-    let one = |x: &Value| x.as_f64().map(|f| f as f32).filter(|f| f.is_finite()).map(|f| f.clamp(lo, hi));
+    let number = |value: &Value| value.as_f64().map(|given| given as f32).filter(|given| given.is_finite()).map(|given| given.clamp(lo, hi));
     match p.get(key)? {
-        Value::Array(a) if a.len() == N => {
+        Value::Array(list) if list.len() == N => {
             let mut out = [0.0; N];
-            for (o, x) in out.iter_mut().zip(a) {
-                *o = one(x)?;
+            for (slot, value) in out.iter_mut().zip(list) {
+                *slot = number(value)?;
             }
             Some(out)
         }
-        v => one(v).map(|f| [f; N]),
+        value => number(value).map(|given| [given; N]),
     }
 }
 

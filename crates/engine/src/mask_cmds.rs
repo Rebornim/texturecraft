@@ -334,8 +334,6 @@ fn image_source(session: &Session, command: &str, name: &str) -> Result<Source> 
 
 fn add_fill(session: &mut Session, params: &Value) -> Result<Value> {
     const CMD: &str = "effect.add.fill";
-    const MIN_PATTERN_SCALE: f32 = 0.001;
-    const MAX_PATTERN_SCALE: f32 = 1000.0;
 
     let projection = projection_from(params, CMD, None, || crate::warp_cmds::fitted_frame(&session.mesh))?;
     let sampling = crate::layer_cmds::sampling_from(params, CMD, Sampling::default())?;
@@ -370,7 +368,7 @@ fn add_fill(session: &mut Session, params: &Value) -> Result<Value> {
             let kind = ProceduralKind::parse(name).ok_or_else(|| bad(CMD, format!("unknown procedural `{name}`")))?;
             let mut pattern = Procedural::new(kind);
             if let Some(scale) = f32p(params, "scale") {
-                pattern.scale = scale.clamp(MIN_PATTERN_SCALE, MAX_PATTERN_SCALE);
+                pattern.scale = scale.clamp(crate::layer_cmds::MIN_SCALE, crate::layer_cmds::MAX_PLACEMENT);
             }
             if let Some(seed) = u64p(params, "seed") {
                 pattern.seed = seed as u32;
@@ -668,7 +666,7 @@ fn compare_from(cmd: &str, p: &Value, kind: &mut EffectKind) -> Result<()> {
     Ok(())
 }
 
-/// The `effect` param, or the selected effect.
+/// The `effect` param, or the selected effect
 pub(crate) fn effect_id(s: &Session, p: &Value, cmd: &str) -> Result<LayerId> {
     match (u64p(p, "effect"), s.target) {
         (Some(e), _) => Ok(LayerId(e)),

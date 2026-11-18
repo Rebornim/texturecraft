@@ -441,7 +441,7 @@ MaterialCraft cannot reopen, so its cooked maps remain usable but re-cooking nee
 | `material.link.preset` | `{layer?, name, cook?: true}` |
 | `material.link.map` | `{layer?, channel, output}`: the channel reads another output of the material |
 | `material.link.resolution` | `{layer?, relative: -3..3 \| fixed: 128..8192, cook?: true}`: the size the material cooks at |
-| `material.link.cook` | `{layer?}`: re-cook at the texture set's resolution with its baked mesh maps (after a bake or a resize) |
+| `material.link.cook` | `{layer?}`: re-cook at its picked resolution (default: the texture set's) with its baked mesh maps (after a bake or a resize) |
 | `material.link.saveSource` | `{layer?, path}`: the `.mcraft` or `.sbs` source, to open in MaterialCraft |
 
 Re-cooks use `materialcraft-cli batch` to open the saved graph by name and run `file.exportMaterial` with its size, values and inputs:

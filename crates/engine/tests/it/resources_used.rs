@@ -22,9 +22,8 @@ fn white_png() -> Vec<u8> {
 /// A red fill layer whose mask selects white on `id_map`
 fn selecting_layer(session: &mut Session, id_map: &str) -> LayerId {
     let layer = LayerId(execute(session, "layer.add.fill", &json!({"color": [1.0, 0.0, 0.0]})).unwrap()["layer"].as_u64().unwrap());
-    execute(session, "mask.add.colorSelection", &Value::Null).unwrap();
-    let selection = session.doc.project.layer(layer).unwrap().mask.as_ref().unwrap().effects[0].id;
-    execute(session, "effect.set", &json!({"effect": selection.0, "idMap": id_map, "colors": [[1.0, 1.0, 1.0]], "tolerance": 0.05})).unwrap();
+    let selection = execute(session, "mask.add.colorSelection", &Value::Null).unwrap()["effect"].as_u64().unwrap();
+    execute(session, "effect.set", &json!({"effect": selection, "idMap": id_map, "colors": [[1.0, 1.0, 1.0]], "tolerance": 0.05})).unwrap();
     layer
 }
 

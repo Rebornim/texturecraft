@@ -885,7 +885,7 @@ fn flat_image(value: f32) -> std::sync::Arc<texturecraft_compose::ImageRes> {
 }
 
 #[test]
-fn filter_inputs_and_id_map_images_changes_invalidate_stack_key() {
+fn filter_input_and_id_map_image_changes_invalidate_stack_key() {
     let mut fixture = fixture();
     heavy_stack(&mut fixture);
     let bottom_layer = fixture.project.texture_sets[0].stack[0];

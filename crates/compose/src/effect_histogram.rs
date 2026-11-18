@@ -70,12 +70,13 @@ mod tests {
     #[test]
     fn a_colour_counts_each_component_pooled_and_alone_and_its_luminance() {
         let mut histogram = EffectHistogram::new(4, true);
+
         histogram.add_color([1.0, 0.0, 0.3]);
+        let merged = histogram.clone().merged(&histogram);
+
         assert_eq!(histogram.all, vec![1, 1, 0, 1]);
         assert_eq!(histogram.components, vec![vec![0, 0, 0, 1], vec![1, 0, 0, 0], vec![0, 1, 0, 0]]);
-        assert_eq!(histogram.luminance, vec![0, 1, 0, 0], "0.3 + 0.033");
-
-        let merged = histogram.clone().merged(&histogram);
+        assert_eq!(histogram.luminance, vec![0, 1, 0, 0], "luminance 0.33 lands in the second bucket");
         assert_eq!(merged.all, vec![2, 2, 0, 2]);
         assert_eq!(merged.components.first(), Some(&vec![0, 0, 0, 2]));
     }
@@ -83,8 +84,10 @@ mod tests {
     #[test]
     fn a_value_has_no_components() {
         let mut histogram = EffectHistogram::new(2, false);
+
         histogram.add_value(f32::NAN);
         histogram.add_value(0.9);
+
         assert_eq!(histogram.all, vec![1, 1]);
         assert_eq!(histogram.luminance, histogram.all);
         assert!(histogram.components.is_empty());

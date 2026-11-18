@@ -135,4 +135,17 @@ mod tests {
         assert_eq!(past_one_stop, Some(gray), "before the first stop, its color");
         assert_eq!(ramp(&[], &[], true, 0.5), None);
     }
+
+    #[test]
+    fn an_untouched_input_passes_every_gray_on_bit_for_bit() {
+        const SAMPLES: u16 = 1000;
+        let untouched = [GradientInput::default(), GradientInput::LIBRARY];
+        let grays = (0..=SAMPLES).map(|step| f32::from(step) / f32::from(SAMPLES)).chain([-0.25, 1.5]);
+
+        for input in untouched {
+            for gray in grays.clone() {
+                assert_eq!(input.shape(gray).to_bits(), gray.to_bits(), "{input:?} at {gray}");
+            }
+        }
+    }
 }

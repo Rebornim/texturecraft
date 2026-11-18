@@ -220,6 +220,7 @@ fn every_list_opens_leaves_the_view_its_camera_and_closes_on_escape_a_click_and_
                 problems.push(format!("{screen}: list {index} of {count} is gone"));
                 continue;
             };
+
             problems.extend(check_list(&mut harness, button, &format!("{screen}: {shown}")));
             for _ in 0..ESCAPES_TO_CLEAR {
                 harness.key_press(egui::Key::Escape);

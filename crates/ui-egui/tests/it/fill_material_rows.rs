@@ -469,7 +469,7 @@ fn a_hex_code_typed_is_applied_when_another_widget_takes_the_focus() {
     harness.run_steps(1);
 
     // As a shortcut focusing another field would: the field hears it lost the focus only a pass later
-    harness.ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("another field")));
+    harness.ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("another field")));
     harness.run_steps(SETTLE_FRAMES);
     let [red, green, blue] = base_color(&harness, layer);
     assert!(red > green && green > blue, "the code typed is the colour: {:?}", [red, green, blue]);

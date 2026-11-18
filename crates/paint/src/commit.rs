@@ -69,7 +69,7 @@ fn over(img: &mut TileImage, b: &Blend, src: &CommitSource, mut staged: Option<S
     }
 }
 
-/// Blend the stroke's alpha tile `stroke_alpha` into tile `(tx, ty)` of an image (`dst`, `components` per texel).
+/// Blend the stroke's alpha tile `stroke_alpha` into tile `(tx, ty)` of an image (`dst`, `components` per texel)
 fn blend_tile(dst: &mut [u16], components: usize, stroke_alpha: &[u16], (tx, ty): (u32, u32), blend: &Blend, source: &CommitSource, carried: Option<&[u16]>) {
     // The last component is the coverage, the ones before it the value
     let value_count = components.saturating_sub(1);

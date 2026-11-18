@@ -2043,8 +2043,8 @@ fn color_selection_snapshots() {
             execute(&mut session, "textureSet.meshMap.clear", &json!({"map": "id"})).unwrap();
         }
         let layer = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
-        execute(&mut session, "mask.add.colorSelection", &json!({"layer": layer})).unwrap();
-        let effect = session.doc.project.layer(texturecraft_engine::core::LayerId(layer.as_u64().unwrap())).unwrap().mask.as_ref().unwrap().effects[0].id;
+        let added = execute(&mut session, "mask.add.colorSelection", &json!({"layer": layer})).unwrap();
+        let effect = texturecraft_engine::core::LayerId(added["effect"].as_u64().unwrap());
         if with_id_map {
             let colors = json!([[214.0 / 255.0, 1.0, 0.0], [1.0, 49.0 / 255.0, 0.0], [1.0, 0.0, 247.0 / 255.0]]);
             execute(&mut session, "effect.set", &json!({"effect": effect.0, "colors": colors})).unwrap();

@@ -65,7 +65,7 @@ fn posterize_switch_under_its_slider() {
     assert_eq!(filter_of(&harness, effect), Filter::Posterize { levels: 8.0, alpha: true });
 }
 
-/// Clamp's Min and Max, Smoothstep's Minimum and Maximum, Histogram Shift's Position (its middle shifts by a half turn back) and Sharpen Intensity
+/// Clamp's Min and Max, Smoothstep's Minimum and Maximum and Sharpen Intensity
 #[test]
 fn reference_names_on_the_sliders() {
     for (filter, labels) in [("clamp", &["Min", "Max"][..]), ("smoothstep", &["Minimum", "Maximum"]), ("sharpen", &["Sharpen Intensity"])] {
@@ -74,7 +74,11 @@ fn reference_names_on_the_sliders() {
             assert!(harness.query_by_role_and_label(Role::Slider, label).is_some(), "{filter}: {label}");
         }
     }
+}
 
+/// Histogram Shift's Position: a click on its middle shifts by a half turn back
+#[test]
+fn histogram_shift_position_middle_is_a_half_turn_back() {
     let (mut harness, effect) = app_with("histogramShift", "mask", WINDOW_HEIGHT);
     let position = harness.get_by_role_and_label(Role::Slider, "Position").rect();
 

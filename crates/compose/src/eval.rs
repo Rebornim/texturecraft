@@ -2365,7 +2365,6 @@ fn covers_every_texel(proj: &Projection, sampling: Sampling, depth: Option<&Proj
     !framed && !depth_culled && repeats_everywhere(proj, sampling) && projector_covers_all(proj)
 }
 
-/// Whether a fill placed by `proj` is sampled once per copy of `sampling`'s symmetry
 /// A fill's projector depth (None: not culled by depth) and whether it covers every texel
 fn fill_coverage(inp: &Inputs, projection: &Projection, sampling: Sampling) -> (Option<Arc<ProjectorDepth>>, bool) {
     let depth = ProjectorDepth::of(inp.mesh, inp.bounds, projection);
@@ -2373,6 +2372,7 @@ fn fill_coverage(inp: &Inputs, projection: &Projection, sampling: Sampling) -> (
     (depth, covers_all)
 }
 
+/// Whether a fill placed by `proj` is sampled once per copy of `sampling`'s symmetry
 fn takes_symmetry(proj: &Projection, sampling: Sampling) -> bool {
     sampling.symmetry.on && proj.takes_symmetry()
 }

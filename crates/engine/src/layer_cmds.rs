@@ -20,8 +20,8 @@ pub const MAX_PLACEMENT: f32 = 1000.0;
 /// The highest contrast a procedural pattern takes
 const MAX_PATTERN_CONTRAST: f32 = 20.0;
 
-/// One full turn, in degrees
-pub(crate) const FULL_TURN_DEGREES: f32 = 360.0;
+/// One full turn, in degrees (the brush's, so every angle wraps on the same turn)
+pub(crate) use texturecraft_paint::FULL_TURN_DEGREES;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![

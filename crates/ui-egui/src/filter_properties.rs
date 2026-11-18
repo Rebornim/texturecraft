@@ -15,6 +15,7 @@ use texturecraft_engine::filter_lib::{
     MAX_DIELECTRIC_REFLECTANCE, MAX_HEIGHT_TO_NORMAL, MAX_LIGHT_INTENSITY, SKY_INTENSITY_SLIDER_MAX, SMOOTH_DISTANCE_MAX, SOURCE_TILING_MAX, SOURCE_TILING_MIN,
     SUN_INTENSITY_MAX, build, find, scalar_params,
 };
+use texturecraft_engine::paint::FULL_TURN_DEGREES;
 
 use crate::TextureCraftApp;
 use crate::fill_material_panel::pill_name;
@@ -25,11 +26,11 @@ use crate::theme::{AXIS_COLORS, OPPOSITE_COLORS, Tokens};
 /// Where TextureCraft's filters come from: the repository, without its scheme
 const AUTHOR_URL: &str = "github.com/storytold/texturecraft";
 
-/// One full turn, in degrees: an angle row's dial wraps on it
-const FULL_TURN_DEGREES: f32 = 360.0;
-
 /// What a filter's angle rows span, in degrees: one full turn of their dial
 pub(crate) const DIAL_DEGREES: RangeInclusive<f32> = 0.0..=FULL_TURN_DEGREES;
+
+/// The decimals Height To Normal's Normal Intensity shows
+const INTENSITY_DECIMALS: usize = 2;
 
 /// The widest Divider chip text: the chip keeps one width whatever it shows
 const WIDEST_DIVIDER: &str = "÷1000";
@@ -346,16 +347,17 @@ fn height_to_normal(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id
     }
     let rows = if filter.world_units {
         vec![
-            ("surfaceSize", tr("Surface Size (cm)"), filter.surface_size, HeightToNormal::MIN_SURFACE_SIZE..=HeightToNormal::MAX_SURFACE_SIZE, 0),
-            ("heightDepth", tr("Height Depth (cm)"), filter.height_depth, 0.0..=HeightToNormal::MAX_HEIGHT_DEPTH, 0),
+            ("surfaceSize", tr("Surface Size (cm)"), filter.surface_size, HeightToNormal::MIN_SURFACE_SIZE..=HeightToNormal::MAX_SURFACE_SIZE, true),
+            ("heightDepth", tr("Height Depth (cm)"), filter.height_depth, 0.0..=HeightToNormal::MAX_HEIGHT_DEPTH, true),
         ]
     } else {
-        vec![("normalIntensity", tr("Normal Intensity"), filter.intensity, 0.0..=HeightToNormal::MAX_INTENSITY, 2)]
+        vec![("normalIntensity", tr("Normal Intensity"), filter.intensity, 0.0..=HeightToNormal::MAX_INTENSITY, false)]
     };
-    for (key, label, stored, range, decimals) in rows {
+    for (key, label, stored, range, whole_centimetres) in rows {
         let mut value = stored;
+        let decimals = if whole_centimetres { 0 } else { INTENSITY_DECIMALS };
         let slid = sheet.slider(label, &mut value, range, decimals);
-        if decimals > 0 {
+        if !whole_centimetres {
             if let Some(merge) = slid {
                 app.run("effect.set", json!({"effect": id, key: value, "merge": merge}));
             }
@@ -439,9 +441,10 @@ fn mirror_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64
     if let (Some(picked), _) = sheet.dropdown(tr("Mode"), mirror.mode, &MirrorMode::ALL, |mode| tr(mode.label()).to_owned(), None) {
         set(app, "mode", json!(picked.id()), false);
     }
-    let (offset_key, offset_label, invert_key, invert_label, axis) = match mirror.mode {
-        MirrorMode::AxisX => ("axisXOffset", tr("Axis X Offset"), "invertAxisX", tr("Invert Axis X"), 0),
-        MirrorMode::AxisY => ("axisYOffset", tr("Axis Y Offset"), "invertAxisY", tr("Invert Axis Y"), 1),
+    let ([x_offset, y_offset], [x_invert, y_invert]) = (mirror.offset, mirror.invert);
+    let (offset_key, offset_label, mut offset, invert_key, invert_label, mut invert) = match mirror.mode {
+        MirrorMode::AxisX => ("axisXOffset", tr("Axis X Offset"), x_offset, "invertAxisX", tr("Invert Axis X"), x_invert),
+        MirrorMode::AxisY => ("axisYOffset", tr("Axis Y Offset"), y_offset, "invertAxisY", tr("Invert Axis Y"), y_invert),
         MirrorMode::Corner => {
             let name = |corner: MirrorCorner| tr(corner.label()).to_owned();
             if let (Some(picked), _) = sheet.dropdown(tr("Corner Type"), mirror.corner, &MirrorCorner::ALL, name, None) {
@@ -450,11 +453,9 @@ fn mirror_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64
             return;
         }
     };
-    let mut offset = mirror.offset.get(axis).copied().unwrap_or(0.5);
     if let Some(merge) = sheet.slider(offset_label, &mut offset, 0.0..=1.0, 2) {
         set(app, offset_key, json!(offset), merge);
     }
-    let mut invert = mirror.invert.get(axis).copied().unwrap_or_default();
     if sheet.toggle(invert_label, &mut invert) {
         set(app, invert_key, json!(invert), false);
     }

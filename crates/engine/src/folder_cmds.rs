@@ -1,5 +1,7 @@
 //! A folder's actions on everything inside it: the Scale and Rotation laid on its fills, and new seeds for its patterns
 
+use std::collections::{HashMap, HashSet};
+
 use serde_json::{Value, json};
 use texturecraft_core::project::MAX_DEPTH;
 use texturecraft_core::{ContentsOffset, EffectKind, Fill, Filter, Layer, LayerId, LayerKind, Project, RandomizedSeed, Source};
@@ -82,9 +84,9 @@ fn set_contents(s: &mut Session, p: &Value) -> Result<Value> {
 
     let current = s.doc.project.contents_offset(id);
     let offset = ContentsOffset::new(scale.unwrap_or(current.scale), rotation.unwrap_or(current.rotation));
-    let unchanged = json!({ "scale": offset.scale, "rotation": offset.rotation });
+    let reply = json!({ "scale": offset.scale, "rotation": offset.rotation });
     if offset == current {
-        return Ok(unchanged);
+        return Ok(reply);
     }
 
     s.edit("Folder contents", |s| {
@@ -92,7 +94,7 @@ fn set_contents(s: &mut Session, p: &Value) -> Result<Value> {
         *contents = offset;
         Ok(())
     })?;
-    Ok(unchanged)
+    Ok(reply)
 }
 
 fn reset_contents(s: &mut Session, p: &Value) -> Result<Value> {
@@ -102,8 +104,9 @@ fn reset_contents(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(Value::Null);
     }
 
-    let mut inside = Vec::new();
-    descendants(&s.doc.project, id, 0, &mut inside);
+    let mut descended = Vec::new();
+    descendants(&s.doc.project, id, 0, &mut descended);
+    let inside: HashSet<LayerId> = descended.into_iter().collect();
     s.edit("Reset folder contents", |s| {
         let contents = contents_mut(&mut s.doc.project, id).ok_or_else(|| bad(CMD, format!("layer {} is not a folder", id.0)))?;
         *contents = ContentsOffset::NONE;
@@ -135,11 +138,12 @@ fn randomize_seeds(s: &mut Session, p: &Value) -> Result<Value> {
     let key = mix(folder.0 as u32 ^ (folder.0 >> 32) as u32);
     s.edit("Randomize seeds", |s| {
         let mut randomized = randomized_mut(&mut s.doc.project, folder).map(std::mem::take).unwrap_or_default();
+        let mut positions = randomized.iter().enumerate().map(|(position, record)| ((record.layer, record.index), position)).collect();
         for id in &inside {
             let Some(layer) = s.doc.project.layers.get_mut(id) else { continue };
             for (index, seed) in (0u32..).zip(layer_seeds(layer)) {
                 let after = mix(*seed ^ key);
-                remember(&mut randomized, RandomizedSeed { layer: *id, index, before: *seed, after });
+                remember(&mut randomized, &mut positions, RandomizedSeed { layer: *id, index, before: *seed, after });
                 *seed = after;
             }
         }
@@ -149,12 +153,15 @@ fn randomize_seeds(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "seeds": seeds }))
 }
 
-/// Adds `change` to the folder's randomized seeds; a seed randomized again keeps its first `before` (what the reset puts back), unless it was changed by hand in between
-fn remember(randomized: &mut Vec<RandomizedSeed>, change: RandomizedSeed) {
-    match randomized.iter_mut().find(|record| record.layer == change.layer && record.index == change.index) {
+/// Adds `change` to the folder's randomized seeds, found by (layer, seed index) in `positions`; a seed randomized again keeps its first `before` (what the reset puts back), unless it was changed by hand in between
+fn remember(randomized: &mut Vec<RandomizedSeed>, positions: &mut HashMap<(LayerId, u32), usize>, change: RandomizedSeed) {
+    match positions.get(&(change.layer, change.index)).and_then(|position| randomized.get_mut(*position)) {
         Some(record) if record.after == change.before => record.after = change.after,
         Some(record) => *record = change,
-        None => randomized.push(change),
+        None => {
+            positions.insert((change.layer, change.index), randomized.len());
+            randomized.push(change);
+        }
     }
 }
 
@@ -167,8 +174,8 @@ pub fn has_contents(project: &Project, id: LayerId) -> bool {
             || layer
                 .content_effects
                 .iter()
-                .chain(layer.mask.iter().flat_map(|m| m.effects.iter()))
-                .any(|e| matches!(e.kind, EffectKind::Fill { .. } | EffectKind::Material(_)));
+                .chain(layer.mask.iter().flat_map(|mask| mask.effects.iter()))
+                .any(|effect| matches!(effect.kind, EffectKind::Fill { .. } | EffectKind::Material(_)));
         fills || seed_count(layer) > 0
     })
 }
@@ -179,7 +186,7 @@ fn descendants(project: &Project, id: LayerId, depth: usize, out: &mut Vec<Layer
         return;
     }
 
-    for child in project.layers.get(&id).map(|l| l.children().to_vec()).unwrap_or_default() {
+    for child in project.layers.get(&id).map(|folder| folder.children().to_vec()).unwrap_or_default() {
         out.push(child);
         descendants(project, child, depth + 1, out);
     }
@@ -192,7 +199,7 @@ fn layer_seeds(layer: &mut Layer) -> Vec<&mut u32> {
     if let LayerKind::Fill(fill) = kind {
         seeds.extend(fill.sources.values_mut().filter_map(source_seed));
     }
-    let effects = content_effects.iter_mut().chain(mask.iter_mut().flat_map(|m| m.effects.iter_mut()));
+    let effects = content_effects.iter_mut().chain(mask.iter_mut().flat_map(|mask| mask.effects.iter_mut()));
     for effect in effects {
         match &mut effect.kind {
             EffectKind::Fill { source, .. } => seeds.extend(source_seed(source)),

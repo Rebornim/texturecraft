@@ -150,3 +150,15 @@ fn a_pattern_saved_before_resolutions_existed_reads_and_saves_unchanged() {
     assert_eq!(pattern, Procedural::new(ProceduralKind::Clouds));
     assert_eq!(serde_json::to_string(&pattern).unwrap(), old, "no resolution, no new field in the file");
 }
+
+#[test]
+fn setting_the_source_a_mask_fill_already_reads_adds_no_undo_step() {
+    let (mut s, _, effect) = mask_fill();
+    execute(&mut s, "layer.fill.set", &json!({"effect": effect.0, "value": 0.25})).unwrap();
+    let steps = s.history_labels().len();
+
+    execute(&mut s, "layer.fill.set", &json!({"effect": effect.0, "value": 0.25})).unwrap();
+
+    assert_eq!(s.history_labels().len(), steps);
+    assert_eq!(source(&s, effect), Source::Uniform([0.25; 3]));
+}

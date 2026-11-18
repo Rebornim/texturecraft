@@ -547,10 +547,27 @@ ordinary colour edit (`layer.fill.set {color}`).
 A fill layer or content fill effect can hold one built-in plain material whole (the Material side of
 its Material section). `layer.fill.material {layer? | effect?, material}` sets every channel the
 material writes from it, turns those channels on and the others off, and keeps the fill's projection;
-`material: null` returns the channels to their defaults. Smart materials (folders of layers) are added
+`material: null` returns the channels to their defaults (a content fill effect keeps the channels it
+changes, at their defaults); setting what the fill already holds adds no undo step. Smart materials (folders of layers) are added
 with `material.apply` instead. The fill remembers the material (`Fill.material`, saved only when set;
 `project.inspect` shows it as `material`) until a channel's source is set on its own with
 `layer.fill.set`. A plain material added from the shelf names its fill the same way.
+
+## Folders, effect blending and masks
+
+- `folder.contents.set {layer?, scale?, rotation?}` lays a Scale (multiplying every fill's tiling inside)
+  and a Rotation (degrees added to every fill's angle) on a folder's contents, never written into the fills;
+  `folder.contents.reset {layer?}` drops them and puts back the seeds `folder.randomizeSeeds {layer?}` changed.
+  `folder.randomizeSeeds` gives every pattern, generator and noise filter inside a new seed (seeds that were
+  equal stay equal) and returns `{seeds}`, how many changed.
+- `effect.blending.modeToEveryChannel`, `opacityToEveryChannel` and `bothToEveryChannel {effect?, channel?}`
+  give every channel of a content effect one channel's blend mode, opacity or both; `effect.blending.copy`
+  and `effect.blending.paste {effect?}` carry every channel's blending between effects (a mask effect takes
+  the shared one). `effect.set {effect, channel, blend?, opacity?}` sets one channel's blending and
+  `effect.set {effect, channels: {roughness: false}}` switches a content effect's channels on or off.
+- `mask.add.bitmap {layer?, image | alpha, projection?}` adds a mask fill reading an image's gray;
+  `effect.set {effect, idMap: image resource | null}` gives a colour selection its own ID map in place of
+  the baked one; `tool.material {maskImage: image resource | null}` paints an image's gray into masks.
 
 ## MaterialCraft materials
 
@@ -565,6 +582,8 @@ operation returns a busy error and can be retried.
 | `material.load` | `{path, above?, inside?, index?}`: `.tcmat`, `.mcmat` or `.mcraft` (cooked first) |
 | `material.link.set` | `{layer?, id, value, cook?: true}`: a number, `[..]`, a bool, `"#rrggbb"` or a typed `{"t", "v"}`; re-cooks unless `cook: false` |
 | `material.link.preset` | `{layer?, name, cook?: true}` |
+| `material.link.map` | `{layer?, channel, output}`: the channel reads another output of the material |
+| `material.link.resolution` | `{layer?, relative: -3..3 \| fixed: 128..8192, cook?: true}`: the size the material cooks at |
 | `material.link.cook` | `{layer?}`: re-cook at the texture set's resolution with its baked mesh maps (after a bake or a resize) |
 | `material.link.saveSource` | `{layer?, path}`: the original linked source with its `.mcmat`, `.mcraft` or `.sbs` extension |
 

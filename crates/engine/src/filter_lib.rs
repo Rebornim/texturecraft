@@ -438,7 +438,11 @@ pub fn scalar_params(filter: &Filter) -> Vec<(&'static str, &'static str, f32, f
         ],
         Filter::HeightToNormal(converter) => vec![("normalIntensity", "Normal Intensity", converter.intensity, 0.0, HeightToNormal::MAX_INTENSITY)],
         Filter::ColorMatch(matcher) => {
-            vec![("hue", "Hue", matcher.hue, 0.0, FULL_TURN_DEGREES), ("chroma", "Chroma", matcher.chroma, 0.0, 1.0), ("luma", "Luma", matcher.luma, 0.0, 1.0)]
+            vec![
+                ("hue", "Hue", matcher.hue, 0.0, FULL_TURN_DEGREES),
+                ("chroma", "Chroma", matcher.chroma, 0.0, ColorMatch::MAX_CHROMA),
+                ("luma", "Luma", matcher.luma, 0.0, ColorMatch::MAX_LUMA),
+            ]
         }
         Filter::EdgeDetect { width } => vec![("width", "Width", *width, 0.0, EDGE_WIDTH_SLIDER_MAX)],
         Filter::DirectionalWarp { intensity, angle, scale, seed, .. } => {
@@ -785,8 +789,8 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
             set_color(p, "targetColor", &mut matcher.target_color, cmd)?;
             switch(&mut matcher.custom_variation, "customColorVariation")?;
             set(&mut matcher.hue, "hue", 0.0, FULL_TURN_DEGREES);
-            set(&mut matcher.chroma, "chroma", 0.0, 1.0);
-            set(&mut matcher.luma, "luma", 0.0, 1.0);
+            set(&mut matcher.chroma, "chroma", 0.0, ColorMatch::MAX_CHROMA);
+            set(&mut matcher.luma, "luma", 0.0, ColorMatch::MAX_LUMA);
         }
         Filter::Threshold { level, mode } => {
             set(level, "level", 0.0, 1.0);

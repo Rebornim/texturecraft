@@ -531,20 +531,25 @@ impl Session {
     /// After stamps were rasterized: prepare the tiles the commit will write (so it only swaps
     /// them in) and mark the touched tiles for the live preview.
     fn stroke_painted(&mut self) {
-        let mask_gray = self.mask_gray();
+        // Only a mask stroke reads the mask gray: a layer stroke skips the image lookup on every stamp batch
+        let mask_gray = match self.stroke.as_ref().and_then(|stroke| stroke.target) {
+            Some(PaintTarget::Mask(_)) => self.mask_gray(),
+            _ => MaskGray::Value(self.tool.mask_value),
+        };
         let Some(st) = self.stroke.as_mut() else { return };
         let recent = std::mem::take(&mut st.canvas.recent);
         let (ts, target) = (st.ts, st.target);
-        let Some(t) = target else {
+        let Some(paint_target) = target else {
             self.quick_mask.revision = self.quick_mask.revision.wrapping_add(1);
             return;
         };
+
         let gbuf = self.caches.get(ts).map(|c| c.gbuf.clone());
         let pixels = &self.doc.pixels;
         let mut staging = std::mem::take(&mut st.staging);
-        with_commit_source(st, gbuf.as_deref(), &self.mesh, &recent, |src| match t {
+        with_commit_source(st, gbuf.as_deref(), &self.mesh, &recent, |src| match paint_target {
             PaintTarget::Layer(id) => staging.stage_layer(pixels, id, &st.values, &src),
-            PaintTarget::Mask(eid) => staging.stage_mask(pixels, eid, &mask_gray, &src),
+            PaintTarget::Mask(effect) => staging.stage_mask(pixels, effect, &mask_gray, &src),
         });
         st.staging = staging;
         self.mark_painted(ts, target, recent);

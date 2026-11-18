@@ -321,7 +321,8 @@ fn material(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Null) => Some(None),
         Some(name) => {
             let name = name.as_str().ok_or_else(|| bad("tool.material", "maskImage must be an image resource name or null"))?;
-            if !s.doc.resources.contains_key(name) {
+            // The brush reads the decoded image: a resource that is not one (an environment, a linked package) is refused
+            if !s.images.contains_key(name) {
                 return Err(bad("tool.material", format!("no image resource '{name}'")));
             }
 

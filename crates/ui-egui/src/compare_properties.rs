@@ -17,8 +17,10 @@ use crate::theme::{AXIS_COLORS, Tokens};
 /// Air the tallest bucket keeps under the well's top
 const HISTOGRAM_HEADROOM: f32 = 4.0;
 
-/// From the well's bottom to its value labels' centres, and the room they take
+/// From the well's bottom to its value labels' centres
 const AXIS_LABEL_OFFSET: f32 = 10.0;
+
+/// The room the value labels take under the well
 const AXIS_LABEL_ROOM: f32 = 22.0;
 
 /// Size of the value labels under the well

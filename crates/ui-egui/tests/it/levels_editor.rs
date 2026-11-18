@@ -10,7 +10,7 @@ use texturecraft_ui_egui::TextureCraftApp;
 
 use crate::{BAKE_RESOLUTION, FRAME_SECONDS, PROPERTIES_WINDOW, REDRAW_FRAMES, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
 
-/// Histogram buckets and Auto's share, as in levels_properties.rs
+/// Histogram buckets (histogram_cache.rs) and Auto's share (levels_properties.rs)
 const HISTOGRAM_BUCKETS: usize = 64;
 const AUTO_MIN_SHARE: f64 = 0.001;
 
@@ -205,9 +205,9 @@ fn open_fields(harness: &Harness<'_, TextureCraftApp>) -> usize {
 /// Opens the number fields from `label`'s handle with the keyboard (focus, Enter)
 fn open_exact_entry(harness: &mut Harness<'_, TextureCraftApp>, label: &str) {
     harness.get_by_role_and_label(Role::Slider, label).focus();
-    harness.run_steps(2);
+    harness.run_steps(SETTLE_FRAMES);
     harness.key_press(egui::Key::Enter);
-    harness.run_steps(2);
+    harness.run_steps(SETTLE_FRAMES);
 }
 
 /// Double-clicks `label`'s handle, then types `text` into its number field with the value selected
@@ -250,7 +250,7 @@ fn exact_entry_opens_on_a_double_click_and_closes_with_typing() {
     assert_eq!(open_fields(&harness), HANDLE_LABELS.len());
 
     harness.key_press(egui::Key::Escape);
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     assert_eq!(open_fields(&harness), 0, "Escape closes the fields");
     assert_eq!(buttons(&harness), before, "the buttons go back where they were");
 }
@@ -459,13 +459,9 @@ pub(crate) fn painted_text(harness: &Harness<'_, TextureCraftApp>, text: &str) -
     harness.output().shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Text(painted) if painted.galley.text() == text))
 }
 
-/// The Affects list: the combo box on the row of the painted "Affects" label, not the Layers channel list
+/// The Affects list: the combo box its row describes as "Affects", not the Layers channel list
 pub(crate) fn affects_list<'a>(harness: &'a Harness<'_, TextureCraftApp>) -> Option<egui_kittest::Node<'a>> {
-    let row = harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
-        egui::Shape::Text(painted) if painted.galley.text() == "Affects" => Some(painted.pos.y + painted.galley.size().y / 2.0),
-        _ => None,
-    })?;
-    harness.get_all(by().role(Role::ComboBox)).find(|node| (node.rect().center().y - row).abs() < 4.0)
+    harness.query_by(|node| node.role() == Role::ComboBox && node.description().as_deref() == Some("Affects"))
 }
 
 /// A fill layer with a content levels, selected
@@ -521,7 +517,7 @@ fn clamp_is_one_undo_step() {
     assert!(!levels(&harness, effect).clamp, "new levels carry on past their handles");
     let steps = undo_steps(&harness);
     harness.get_by_role_and_label(Role::CheckBox, "Clamp").click();
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     assert!(levels(&harness, effect).clamp);
     assert_eq!(undo_steps(&harness), steps + 1);
 }

@@ -78,13 +78,9 @@ pub(crate) fn grayscale_sheet(app: &mut TextureCraftApp, ui: &mut Ui) {
 /// The picker's one Resources tab: Textures (Import... first, then the project's images) and Uniform
 fn source_tabs(thumbs: &mut Thumbs, ctx: &egui::Context, images: &ImageStore, uniform: egui::Color32) -> Vec<PickerTab<MaskSourceChoice>> {
     let textures = ResourcePickerItem::textures(thumbs, ctx, images, MaskSourceChoice::Import, |name| MaskSourceChoice::Image(name.to_owned()));
-    let uniform = vec![tile(MaskSourceChoice::Uniform, tr("Uniform value"), TilePicture::Swatch(uniform))];
+    let uniform =
+        vec![ResourcePickerItem { id: MaskSourceChoice::Uniform, label: tr("Uniform value").to_owned(), caption: None, picture: TilePicture::Swatch(uniform) }];
     let groups =
         [(n_("Textures"), textures), (n_("Uniform"), uniform)].into_iter().map(|(header, items)| PickerGroup { header: Some(tr(header)), items }).collect();
     vec![PickerTab { icon: ic::SQUARES_FOUR, name: tr("Resources"), groups }]
-}
-
-/// One tile of the picker
-fn tile(id: MaskSourceChoice, label: &str, picture: TilePicture) -> ResourcePickerItem<MaskSourceChoice> {
-    ResourcePickerItem { id, label: label.to_owned(), caption: None, picture }
 }

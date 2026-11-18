@@ -67,6 +67,7 @@ mod pen_pressure;
 mod polygon_fill;
 mod popup_press_close;
 mod project_config;
+mod properties_lists;
 mod properties_min_width;
 mod properties_popup;
 mod properties_scroll;

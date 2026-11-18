@@ -8,7 +8,7 @@ use texturecraft_engine::core::{
 };
 use texturecraft_ui_egui::TextureCraftApp;
 
-use crate::filter_support::{TALL_WINDOW_HEIGHT, WINDOW_HEIGHT, along, app_with, click_at, filter_of, lowest, pick};
+use crate::filter_support::{TALL_WINDOW_HEIGHT, WINDOW_HEIGHT, along, app_with, click_at, filter_of, lowest, pick, undo_depth};
 
 /// Anisotropic Kuwahara: Extract Direction (its Custom Input slot right under it), then Radius … Anisotropy and the Anisotropy Angle dial, in the reference's order
 #[test]
@@ -61,6 +61,20 @@ fn pbr_validate_rows() {
 
 /// Where along Surface Size's track the click lands: away from the default and between whole centimetres, so rounding shows
 const OFF_DEFAULT_SHARE: f32 = 0.37;
+
+/// A click on Surface Size that rounds to the centimetres it holds changes nothing, so it adds no undo step
+#[test]
+fn height_to_normal_click_rounding_to_the_stored_size_adds_no_step() {
+    let (mut harness, effect) = app_with("heightToNormal", "mask", WINDOW_HEIGHT);
+    let size = harness.get_by_role_and_label(Role::Slider, "Surface Size (cm)").rect();
+    click_at(&mut harness, along(size, OFF_DEFAULT_SHARE));
+    let (depth, after_first) = (undo_depth(&harness), filter_of(&harness, effect));
+
+    click_at(&mut harness, along(size, OFF_DEFAULT_SHARE));
+
+    assert_eq!(filter_of(&harness, effect), after_first);
+    assert_eq!(undo_depth(&harness), depth, "the same whole centimetres again: no new step");
+}
 
 /// Height To Normal: its two switches, then whole Surface Size (cm) and Height Depth (cm), or Normal Intensity without world units
 #[test]

@@ -8,15 +8,16 @@ use texturecraft_engine::core::{FlipMode, RepeatMode, TileTransform, UvWrap};
 
 use crate::TextureCraftApp;
 use crate::fill_pictures::{lattice_preview, wrap_picture};
+use crate::filter_properties::DIAL_DEGREES;
 use crate::i18n::tr;
 use crate::property_sheet::{PreviewLower, PreviewSize, PropertySheet};
 use crate::theme::Tokens;
 
 /// What the Scaling track spans (a fill's Tiling track); typing reaches the filter's whole range
 const SCALING_TRACK: RangeInclusive<f32> = 0.01..=5.0;
+
 /// What the Offset track spans, in tiles: one tile either way covers every position of a repeating tile
 const OFFSET_TRACK: RangeInclusive<f32> = -1.0..=1.0;
-const ROTATION_RANGE: RangeInclusive<f32> = 0.0..=360.0;
 
 /// The rows in the reference's order: Scaling (linked) and Offset beside the preview, Tile Safe Rotation, Rotation, Repeat mode, Flip mode
 pub(crate) fn transform_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, transform: &TileTransform) {
@@ -56,7 +57,7 @@ pub(crate) fn transform_rows(app: &mut TextureCraftApp, sheet: &mut PropertyShee
         set(app, "tileSafeRotation", json!(tile_safe), false);
     }
     let mut degrees = transform.rotation;
-    if let Some(merge) = sheet.angle(tr("Rotation"), &mut degrees, ROTATION_RANGE) {
+    if let Some(merge) = sheet.angle(tr("Rotation"), &mut degrees, DIAL_DEGREES) {
         set(app, "rotation", json!(degrees), merge);
     }
 

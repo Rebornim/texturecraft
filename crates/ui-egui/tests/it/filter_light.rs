@@ -33,8 +33,15 @@ fn drop_shadow_distance_goes_both_ways() {
     let Filter::DropShadow { distance, angle, .. } = filter_of(&harness, effect) else { panic!() };
     assert!(distance < -0.45, "towards the light: {distance}");
     assert_eq!(angle, 90.0);
-    assert!(harness.query_all_by_label("Angle").next().is_some());
+
+    // The dial sits between the Angle track and its value, so the track ends short of Distance's
+    let angle_track = harness.get_by_role_and_label(Role::Slider, "Angle").rect();
+    let distance_track = harness.get_by_role_and_label(Role::Slider, "Distance").rect();
+    assert!(angle_track.right() < distance_track.right() - DIAL_ROOM, "{angle_track:?} {distance_track:?}");
 }
+
+/// How much shorter than a plain slider's track an angle row's track is at least: room for its dial
+const DIAL_ROOM: f32 = 10.0;
 
 /// Drop Shadow's Angle dial row: a drag turns it in one undo step, undo turns it back
 #[test]

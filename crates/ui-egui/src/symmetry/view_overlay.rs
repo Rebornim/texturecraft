@@ -11,7 +11,7 @@ use super::symmetry_intersection::SymmetryIntersection;
 use super::symmetry_manipulator::SymmetryManipulator;
 use super::symmetry_manipulator_arrow::SymmetryManipulatorArrow;
 use crate::TextureCraftApp;
-use crate::theme::AXIS_COLORS;
+use crate::theme::{AXIS_COLORS, SHAFT_HALO, SHAFT_HALO_EXTRA_WIDTH, SHAFT_WIDTH};
 
 /// The plane reaches this far past the mesh, as a fraction of its size
 const PLANE_MARGIN: f32 = 0.05;
@@ -30,11 +30,6 @@ const VISIBILITY_TOLERANCE: f32 = 2e-3;
 /// Width of the cut line and radius of the radial axis points (points)
 const INTERSECTION_WIDTH: f32 = 1.5;
 const INTERSECTION_POINT_RADIUS: f32 = 3.0;
-
-/// Arrow shaft width, its dark halo and the halo's extra width (points at the default size)
-const SHAFT_WIDTH: f32 = 2.2;
-const SHAFT_HALO: Color32 = Color32::from_black_alpha(128);
-const SHAFT_HALO_EXTRA_WIDTH: f32 = 3.0;
 
 /// Faces around a cone
 const CONE_SEGMENTS: usize = 20;

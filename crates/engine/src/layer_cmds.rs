@@ -22,6 +22,11 @@ pub const MAX_PLACEMENT: f32 = 1000.0;
 /// The `layer.fill.set` keys a one-source grayscale fill (a mask fill or a filter's image input) has no use for
 const GRAY_REFUSED_KEYS: [&str; 4] = ["channel", "enabled", "solo", "normalFormat"];
 
+/// `value` as one axis of a projector's scale: its size kept within [`MIN_SCALE`]..[`MAX_PLACEMENT`] on its own side, so a mirrored axis stays mirrored
+pub fn signed_scale(value: f32) -> f32 {
+    value.signum() * value.abs().clamp(MIN_SCALE, MAX_PLACEMENT)
+}
+
 /// One full turn, in degrees (the brush's, so every angle wraps on the same turn)
 pub(crate) use texturecraft_paint::FULL_TURN_DEGREES;
 
@@ -117,7 +122,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill projection",
             [],
             None,
-            "{layer? | effect?: content or mask fill effect id, projection?: uvTile (Fill (Match per UV Tile))|uv|triplanar|planar|spherical|cylindrical|warp (default: the current one; a new warp's frame sits around the mesh, seen from the front), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections: one number), offset?: [u, v] (uv) | [x, y, z] (3D projections), projectorRotation?: [x, y, z] degrees, projectorScale?: number | [x, y, z] (3D projection settings), shapeCrop?: cropped|extendsOutside (3D projections), backfaceCulling?: bool, backfaceAngle?: degrees, backfaceHardness?: 0..1 (planar, cylindrical), depthCulling?: bool, depthCullingHardness?: 0..1 (planar, warp; surfaces hidden from the projector behind others get none of it; new planar and warp projections start with it on at 0.75), sharpness?: 1..64 (triplanar), warpCorners?: [[x, y] × 4] (warp: top left, top right, bottom right, bottom left, across and up in frame sizes from its centre; unpulled = ±0.5), projectionDepth?: lengths of the frame's longer side it reaches in front of and behind it when cropped (warp), angle?: 1..360 degrees one repeat spans (cylindrical), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar), symmetry?: bool (copies of a 3D projection; UV projections have none), symmetryType?: mirror|radial, symmetryAxis?: 0|1|2 (the mirror plane's normal or the turning axis), flipCopy?: [u, v] (turn the copies' images over), axisPosition?: number | [x, y, z] (where the plane or axis passes, -1..1 mesh radii from the mesh's centre), symmetryCount?: 2..64 (radial copies, the original included), angleSpan?: 1..360 degrees (radial copies spread over it; 360 spaces them evenly)} — what is not given keeps its value",
+            "{layer? | effect?: content or mask fill effect id, projection?: uvTile (Fill (Match per UV Tile))|uv|triplanar|planar|spherical|cylindrical|warp (default: the current one; a new warp's frame sits around the mesh, seen from the front), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections: one number), offset?: [u, v] (uv) | [x, y, z] (3D projections), projectorRotation?: [x, y, z] degrees, projectorScale?: number | [x, y, z] (3D projection settings; a negative axis mirrors it), shapeCrop?: cropped|extendsOutside (3D projections), backfaceCulling?: bool, backfaceAngle?: degrees, backfaceHardness?: 0..1 (planar, cylindrical), depthCulling?: bool, depthCullingHardness?: 0..1 (planar, warp; surfaces hidden from the projector behind others get none of it; new planar and warp projections start with it on at 0.75), sharpness?: 1..64 (triplanar), warpCorners?: [[x, y] × 4] (warp: top left, top right, bottom right, bottom left, across and up in frame sizes from its centre; unpulled = ±0.5), projectionDepth?: lengths of the frame's longer side it reaches in front of and behind it when cropped (warp), angle?: 1..360 degrees one repeat spans (cylindrical), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar), symmetry?: bool (copies of a 3D projection; UV projections have none), symmetryType?: mirror|radial, symmetryAxis?: 0|1|2 (the mirror plane's normal or the turning axis), flipCopy?: [u, v] (turn the copies' images over), axisPosition?: number | [x, y, z] (where the plane or axis passes, -1..1 mesh radii from the mesh's centre), symmetryCount?: 2..64 (radial copies, the original included), angleSpan?: 1..360 degrees (radial copies spread over it; 360 spaces them evenly)} — what is not given keeps its value",
             has_layer,
             fill_projection
         ),
@@ -966,7 +971,7 @@ pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>
     };
     let turn = |projector: &mut Projector| {
         projector.rotation = floats(p, "projectorRotation", -FULL_TURN_DEGREES, FULL_TURN_DEGREES).unwrap_or(projector.rotation);
-        projector.scale = floats(p, "projectorScale", MIN_SCALE, MAX_PLACEMENT).unwrap_or(projector.scale);
+        projector.scale = floats(p, "projectorScale", -MAX_PLACEMENT, MAX_PLACEMENT).map_or(projector.scale, |scale| scale.map(signed_scale));
         projector.crop = crop.unwrap_or(projector.crop);
         projector.backface.on = p.get("backfaceCulling").and_then(Value::as_bool).unwrap_or(projector.backface.on);
         projector.backface.angle = f32p(p, "backfaceAngle").map_or(projector.backface.angle, |angle| clamp_to(angle, &Backface::ANGLE_RANGE));

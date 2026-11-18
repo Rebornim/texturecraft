@@ -390,6 +390,11 @@ pub fn apply(ctx: &egui::Context, b: Brightness, accent: Accent) {
 /// X, Y and Z as the view corner, the symmetry manipulator and the 3D fields show them
 pub const AXIS_COLORS: [Color32; 3] = [Color32::from_rgb(0xd8, 0x60, 0x4f), Color32::from_rgb(0x6c, 0xbc, 0x5a), Color32::from_rgb(0x5a, 0x8c, 0xe0)];
 
+/// An axis arrow's shaft as the symmetry manipulator and the projection gizmos draw it: its width, the dark halo under it and the halo's extra width (points at the default size)
+pub const SHAFT_WIDTH: f32 = 2.2;
+pub const SHAFT_HALO: Color32 = Color32::from_black_alpha(128);
+pub const SHAFT_HALO_EXTRA_WIDTH: f32 = 3.0;
+
 /// The axes' letters, as the Axis switches and the 3D fields' tags show them
 pub const AXIS_NAMES: [&str; 3] = ["X", "Y", "Z"];
 

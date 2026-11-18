@@ -5,16 +5,16 @@ use serde_json::{Value, json};
 use texturecraft_engine::compose::pattern::{mesh_frame, nonzero_stretch, projector_stretch};
 use texturecraft_engine::core::Projection;
 use texturecraft_engine::geom::glam::{EulerRot, Mat3, Quat, Vec2, Vec3};
-use texturecraft_engine::layer_cmds::{MAX_PLACEMENT, MIN_SCALE};
+use texturecraft_engine::layer_cmds::signed_scale;
 
 use crate::TextureCraftApp;
 use crate::frame_gizmo::{
-    ARROW, EDGE_ON_FACING, HALO, HALO_EXTRA_WIDTH, HANDLE_EDGE, MIN_HANDLE_REACH, MIN_SCREEN_SPAN, SHAFT_WIDTH, TURN_RING, arrow_distance, center_distance,
-    dashed_outline, distance_to_segment, handle_dot, move_handles, nearest, ring_open,
+    ARROW, EDGE_ON_FACING, HANDLE_EDGE, MIN_HANDLE_REACH, MIN_SCREEN_SPAN, TURN_RING, arrow_distance, center_distance, dashed_outline, distance_to_segment,
+    handle_dot, move_handles, nearest, ring_open,
 };
 use crate::move_on_model::MoveOnModel;
 use crate::projection_gizmo::{Gizmo, dragging};
-use crate::theme::{AXIS_COLORS, Tokens};
+use crate::theme::{AXIS_COLORS, SHAFT_HALO, SHAFT_HALO_EXTRA_WIDTH, SHAFT_WIDTH, Tokens};
 use crate::viewport::{project, view_ray};
 
 mod round_grab;
@@ -68,10 +68,6 @@ const BOX_CORNERS: usize = 8;
 const BOX_AXIS_BITS: [usize; 3] = [1, 2, 4];
 /// How far along each direction its screen step is measured, in mesh radii: half way out, inside the model, where perspective bends it little
 const STEP_PROBE_RADII: f32 = 0.5;
-
-fn drag_id() -> egui::Id {
-    egui::Id::unique("tc_round_drag")
-}
 
 impl RoundGizmo {
     /// The projector as the 3D view shows it: none while the Projection row's eye hides the projection gizmos
@@ -181,7 +177,9 @@ impl RoundGizmo {
             self.sizes.push(SizeHandle { at: kept_in(view, top_right), axes: [true; 3], along: None });
         }
         for (axis, direction) in self.directions().iter().enumerate() {
-            let toward = if direction.dot(forward) > 0.0 { -1.0 } else { 1.0 };
+            // The face toward the camera, on the other side in the projector's units when a mirrored axis flips it
+            let facing_side = if direction.dot(forward) > 0.0 { -1.0 } else { 1.0 };
+            let toward = facing_side * self.stretch[axis].signum();
             let Some(face) = at(local + Vec3::AXES[axis] * size * toward) else { continue };
             let out = face - self.center;
             if out.length() >= FACE_CLEARANCE {
@@ -256,16 +254,6 @@ impl RoundGizmo {
         }
     }
 
-    /// The handle under screen point `p`: the nearest one within reach (where rings cross, the nearest ring)
-    pub(crate) fn grab(&self, p: Pos2) -> Option<RoundGrab> {
-        let mut handles = vec![(RoundGrab::Slide, center_distance(self.center, p))];
-        handles.extend((0..3).filter_map(|axis| Some((RoundGrab::Axis(axis), arrow_distance(p, self.center, self.arrows[axis]?)))));
-        handles.extend(self.sizes.iter().map(|size| (RoundGrab::Size(size.axes), size.distance(p))));
-        let distance = |ring: &Vec<Pos2>| ring.windows(2).map(|pair| distance_to_segment(p, pair[0], pair[1])).fold(f32::INFINITY, f32::min);
-        handles.extend((0..3).map(|axis| (RoundGrab::Ring(axis), distance(&self.rings[axis]))));
-        nearest(handles)
-    }
-
     /// The `layer.fill.projection` params that slide the projector across the view from `from` to `to`, as its centre square does
     pub(crate) fn slid(&self, app: &TextureCraftApp, rect: Rect, from: Pos2, to: Pos2) -> Option<Value> {
         self.params(app, rect, RoundGrab::Slide, from, to)
@@ -295,11 +283,11 @@ impl RoundGizmo {
                 (turn, self.stretch, origin)
             }
             RoundGrab::Size(axes) => {
-                // How far the pointer went along the line from the centre through where the handle was grabbed; the command keeps the scale in its limits, so does the offset worked out here
+                // How far the pointer went along the line from the centre through where the handle was grabbed (past the centre, none: a drag never flips it); the command keeps each axis's size in its limits on its own side, so does the offset worked out here
                 let reach = from - self.center;
-                let scale = (to - self.center).dot(reach) / reach.length_sq().max(MIN_HANDLE_REACH);
-                let stretch = Vec3::from(axes.map(|on| if on { scale } else { 1.0 })) * self.stretch;
-                (self.turn, stretch.clamp(Vec3::splat(MIN_SCALE), Vec3::splat(MAX_PLACEMENT)), origin)
+                let factor = ((to - self.center).dot(reach) / reach.length().max(MIN_HANDLE_REACH).powi(2)).max(0.0);
+                let stretch = Vec3::from(axes.map(|on| if on { factor } else { 1.0 })) * self.stretch;
+                (self.turn, stretch.map(signed_scale), origin)
             }
         };
 
@@ -327,11 +315,17 @@ impl Gizmo for RoundGizmo {
     type Grab = RoundGrab;
 
     fn drag_id() -> egui::Id {
-        drag_id()
+        egui::Id::unique("tc_round_drag")
     }
 
+    /// The handle under screen point `p`: the nearest one within reach (where rings cross, the nearest ring)
     fn grab(&self, p: Pos2) -> Option<RoundGrab> {
-        RoundGizmo::grab(self, p)
+        let mut handles = vec![(RoundGrab::Slide, center_distance(self.center, p))];
+        handles.extend((0..3).filter_map(|axis| Some((RoundGrab::Axis(axis), arrow_distance(p, self.center, self.arrows[axis]?)))));
+        handles.extend(self.sizes.iter().map(|size| (RoundGrab::Size(size.axes), size.distance(p))));
+        let distance = |ring: &Vec<Pos2>| ring.windows(2).map(|pair| distance_to_segment(p, pair[0], pair[1])).fold(f32::INFINITY, f32::min);
+        handles.extend((0..3).map(|axis| (RoundGrab::Ring(axis), distance(&self.rings[axis]))));
+        nearest(handles)
     }
 
     fn same_projection(&self, other: &RoundGizmo) -> bool {
@@ -347,7 +341,7 @@ impl Gizmo for RoundGizmo {
 fn size_arrow(painter: &egui::Painter, at: Pos2, along: egui::Vec2, fill: Color32) {
     let side = along.rot90() * SIZE_ARROW_HEAD_HALF_WIDTH;
     let shaft = [at - along * (SIZE_ARROW - SIZE_ARROW_HEAD), at + along * (SIZE_ARROW - SIZE_ARROW_HEAD)];
-    painter.line_segment(shaft, Stroke::new(SHAFT_WIDTH + HALO_EXTRA_WIDTH, HALO));
+    painter.line_segment(shaft, Stroke::new(SHAFT_WIDTH + SHAFT_HALO_EXTRA_WIDTH, SHAFT_HALO));
     painter.line_segment(shaft, Stroke::new(SHAFT_WIDTH, fill));
     for direction in [along, -along] {
         let base = at + direction * (SIZE_ARROW - SIZE_ARROW_HEAD);
@@ -395,17 +389,28 @@ fn on_view_plane(app: &TextureCraftApp, rect: Rect, origin: Vec3, forward: Vec3,
     hit.is_finite().then_some(hit)
 }
 
-/// The projector over the 3D view: dashed shape, rings, arrows, centre square and dots; the cursor shows what the handle under it does
+/// Drags on the projector's handles; returns whether a drag owns the pointer. The cursor shows what the handle under it, or the one dragged, does (only while the gizmo takes input: an Alt orbit or a held Move on model keeps its own)
+pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response, rect: Rect, gizmo: Option<&RoundGizmo>) -> bool {
+    let ctx = ui.ctx();
+    let owned = crate::projection_gizmo::input(app, ctx, response, rect, gizmo);
+    let cursor = gizmo.and_then(|gizmo| match dragging::<RoundGizmo>(ctx) {
+        Some(drag) => Some(gizmo.cursor(drag.grab, true)),
+        None => response.hover_pos().and_then(|hover| gizmo.grab(hover)).map(|grab| gizmo.cursor(grab, false)),
+    });
+    if let Some(cursor) = cursor {
+        ctx.set_cursor_icon(cursor);
+    }
+    owned
+}
+
+/// The projector over the 3D view: dashed shape, rings, arrows, centre square and dots, the handle under the pointer lit
 pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect, gizmo: &RoundGizmo) {
     let tokens = Tokens::get(ui.ctx());
     let painter = ui.painter_at(rect);
     let active = dragging::<RoundGizmo>(ui.ctx()).map(|drag| drag.grab);
 
-    // A held Move on model button owns the cursor
+    // A held Move on model button lights none
     let hovered = ui.ctx().pointer_hover_pos().filter(|hover| rect.contains(*hover) && app.moving_on_model.is_none()).and_then(|hover| gizmo.grab(hover));
-    if let Some(grab) = active.or(hovered) {
-        ui.ctx().set_cursor_icon(gizmo.cursor(grab, active.is_some()));
-    }
     let lit = |grab: RoundGrab| active == Some(grab) || (active.is_none() && hovered == Some(grab));
     let fill = |grab: RoundGrab| if lit(grab) { tokens.viewport_accent } else { Color32::WHITE };
     let axis_color = |axis: usize, grab: RoundGrab| if lit(grab) { tokens.viewport_accent } else { AXIS_COLORS[axis] };
@@ -413,7 +418,7 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect, gizmo: &RoundG
         dashed_outline(&painter, line);
     }
     for (axis, ring) in gizmo.rings.iter().enumerate() {
-        painter.add(egui::Shape::line(ring.clone(), Stroke::new(SHAFT_WIDTH + HALO_EXTRA_WIDTH, HALO)));
+        painter.add(egui::Shape::line(ring.clone(), Stroke::new(SHAFT_WIDTH + SHAFT_HALO_EXTRA_WIDTH, SHAFT_HALO)));
         painter.add(egui::Shape::line(ring.clone(), Stroke::new(SHAFT_WIDTH, axis_color(axis, RoundGrab::Ring(axis)))));
     }
     for size in &gizmo.sizes {
@@ -746,9 +751,9 @@ pub(crate) mod tests {
         );
     }
 
-    /// A projector a project file mirrors along X (a negative scale, as the projection reads it) stays mirrored through a slide and a turn, and the gizmo draws it mirrored
+    /// A projector a project file mirrors along X (a negative scale, as the projection reads it) reads mirrored in the gizmo and stays mirrored through a slide, a move along an arrow, a turn and a resize
     #[test]
-    fn a_mirrored_projector_keeps_its_mirror_through_a_slide_and_a_turn() {
+    fn a_mirrored_projector_keeps_its_mirror_through_every_handle() {
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (mut harness, layer) = fill_app("spherical");
         let mirrored = [-1.0, 1.0, 1.0];
@@ -772,6 +777,38 @@ pub(crate) mod tests {
         let center = gizmo(&harness).center;
         drag(&mut harness, tip, tip + (tip - center).normalized() * 20.0, Modifiers::NONE);
         assert_eq!(projector_and_offset(&projection(&harness, layer)).0.scale, mirrored, "so does a move along an arrow");
+
+        let before_turn = projector_and_offset(&projection(&harness, layer)).0;
+        let ring = gizmo(&harness).rings[2].clone();
+        drag(&mut harness, ring[CIRCLE_POINTS / 8], ring[CIRCLE_POINTS / 8 + 3], Modifiers::NONE);
+        let turned = projector_and_offset(&projection(&harness, layer)).0;
+        assert_ne!(turned.rotation, before_turn.rotation, "the ring turns it");
+        assert_eq!(turned.scale, mirrored, "and keeps the mirror");
+
+        let resized = gizmo(&harness);
+        let dot = resized.sizes.iter().find(|size| size.axes == [true; 3]).expect("the even-scale dot").at;
+        drag(&mut harness, dot, resized.center + (dot - resized.center) * 1.5, Modifiers::NONE);
+        let scale = projector_and_offset(&projection(&harness, layer)).0.scale;
+        let expected = [-1.5, 1.5, 1.5];
+        assert!(scale.iter().zip(expected).all(|(axis, wanted)| (axis - wanted).abs() < 1e-3), "a resize scales it evenly, still mirrored: {scale:?}");
+    }
+
+    /// The pointer over a handle shows what it does only while the gizmo takes input: with Alt held the camera orbits, and the handle's cursor is not shown
+    #[test]
+    fn alt_over_a_handle_shows_no_handle_cursor() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, _) = fill_app("triplanar");
+        let center = gizmo(&harness).center;
+        harness.hover_at(center);
+        harness.run_steps(2);
+        assert_eq!(harness.output().platform_output.cursor_icon, egui::CursorIcon::Grab, "the centre square shows it slides");
+
+        harness.event(egui::Event::ModifiersChanged(Modifiers::ALT));
+        harness.event(egui::Event::PointerMoved(center + vec2(1.0, 0.0)));
+        harness.run_steps(2);
+        assert_ne!(harness.output().platform_output.cursor_icon, egui::CursorIcon::Grab, "with Alt held it does not");
+        harness.event(egui::Event::ModifiersChanged(Modifiers::NONE));
+        harness.run_steps(2);
     }
 
     /// A plain left press on the projector's handle while a colour picker is open only closes the picker: no stroke, no slide, and the press after it works again

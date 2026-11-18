@@ -10,16 +10,12 @@ use texturecraft_engine::geom::glam::Vec3;
 
 use crate::TextureCraftApp;
 use crate::projection_gizmo::{Gizmo, dragging};
-use crate::theme::{AXIS_COLORS, Tokens};
+use crate::theme::{AXIS_COLORS, SHAFT_HALO, SHAFT_HALO_EXTRA_WIDTH, SHAFT_WIDTH, Tokens};
 use crate::viewport::{project, view_ray};
 
 mod frame_grab;
 
 pub(crate) use frame_grab::FrameGrab;
-
-fn drag_id() -> egui::Id {
-    egui::Id::unique("tc_frame_drag")
-}
 
 /// The selected fill's frame as the 3D view shows it
 #[derive(Clone, Copy, Debug)]
@@ -49,10 +45,6 @@ pub(crate) struct FrameGizmo {
 /// Screen length of the axis arrows, and their heads (points): long enough to grab each one apart from the others
 pub(crate) const ARROW: f32 = 56.0;
 const ARROW_HEAD: f32 = 14.0;
-/// The shafts as the symmetry axis manipulator draws them: a coloured line over a dark halo
-pub(crate) const SHAFT_WIDTH: f32 = 2.2;
-pub(crate) const HALO: Color32 = Color32::from_black_alpha(128);
-pub(crate) const HALO_EXTRA_WIDTH: f32 = 3.0;
 /// The centre square's side, the corner and edge dot radii, a warp corner's radius (points)
 pub(crate) const CENTER_SQUARE: f32 = 16.0;
 const CORNER_DOT: f32 = 6.5;
@@ -118,10 +110,10 @@ impl FrameGizmo {
         // The corners on screen: a warp's pulled ones, or the frame's own
         let at = |[x, y]: [f32; 2]| project(app, rect, origin + across * x * decal.size[0] + up * y * decal.size[1]);
         let corners = match warp {
-            Some([a, b, c, d]) => [at(a)?, at(b)?, at(c)?, at(d)?],
+            Some([top_left, top_right, bottom_right, bottom_left]) => [at(top_left)?, at(top_right)?, at(bottom_right)?, at(bottom_left)?],
             None => {
-                let [a, b, c, d] = decal_corners(&decal)?.map(|corner| project(app, rect, corner));
-                [a?, b?, c?, d?]
+                let [top_left, top_right, bottom_right, bottom_left] = decal_corners(&decal)?.map(|corner| project(app, rect, corner));
+                [top_left?, top_right?, bottom_right?, bottom_left?]
             }
         };
 
@@ -137,7 +129,9 @@ impl FrameGizmo {
         // The turn ring, unless the frame is seen too near edge on to grab it
         let ring = steps[0]
             .zip(steps[1])
-            .filter(|(a, b)| a.length() > f32::EPSILON && solve(*a, *b, egui::Vec2::X).is_some() && ring_open(app, rect, center, out))
+            .filter(|(across_step, up_step)| {
+                across_step.length() > f32::EPSILON && solve(*across_step, *up_step, egui::Vec2::X).is_some() && ring_open(app, rect, center, out)
+            })
             .and_then(|(step, _)| {
                 let radius = TURN_RING / step.length();
                 let last = (TURN_RING_POINTS - 1) as f32;
@@ -149,24 +143,6 @@ impl FrameGizmo {
             });
 
         Some(FrameGizmo { layer, effect, decal, warp, corners, sides, center, arrows, ring, origin, axes, steps })
-    }
-
-    /// The handle under screen point `p`: the nearest one within reach, so a small frame's corners stay grabbable beside its arrows
-    pub(crate) fn grab(&self, p: Pos2) -> Option<FrameGrab> {
-        let mut handles = vec![(FrameGrab::Slide, center_distance(self.center, p))];
-        handles.extend((0..3).filter_map(|axis| Some((FrameGrab::Axis(axis), arrow_distance(p, self.center, self.arrows[axis]?)))));
-        let near = |points: [Pos2; 4], grab: fn(usize) -> FrameGrab| (0..4).map(move |index| (grab(index), points[index].distance(p)));
-        match self.warp {
-            // A mask effect's warp corners have no command to pull them
-            Some(_) if self.effect.is_none() => handles.extend(near(self.corners, FrameGrab::Corner)),
-            Some(_) => {}
-            None => handles.extend(near(self.corners, |_| FrameGrab::Scale)),
-        }
-        handles.extend(near(self.sides, FrameGrab::Side));
-        if let Some(ring) = &self.ring {
-            handles.push((FrameGrab::Turn, ring.windows(2).map(|pair| distance_to_segment(p, pair[0], pair[1])).fold(f32::INFINITY, f32::min)));
-        }
-        nearest(handles)
     }
 
     /// The frame's offset after sliding it across its plane by screen movement `delta` (None when the frame is edge-on)
@@ -194,52 +170,6 @@ impl FrameGizmo {
         let (sin, cos) = self.decal.rotation.to_radians().sin_cos();
         [self.decal.offset[0] + across * cos - up * sin, self.decal.offset[1] + across * sin + up * cos]
     }
-
-    /// The command and params a drag of `grab` from `from` to `to` runs
-    fn edit(&self, app: &TextureCraftApp, rect: Rect, grab: FrameGrab, from: Pos2, to: Pos2) -> Option<(&'static str, Value)> {
-        let delta = to - from;
-        let center = self.center;
-        let mut params = match grab {
-            FrameGrab::Slide => json!({"offset": self.slid_on_screen(delta)?}),
-            FrameGrab::Axis(axis) => {
-                let step = (*self.steps.get(axis)?)?;
-                let distance = delta.dot(step) / step.length_sq().max(f32::MIN_POSITIVE);
-                match axis {
-                    0 => json!({"offset": self.slid(distance, 0.0)}),
-                    1 => json!({"offset": self.slid(0.0, distance)}),
-                    _ => json!({"position": (self.origin + self.axes[2] * distance).to_array(), "normal": self.axes[2].to_array()}),
-                }
-            }
-            FrameGrab::Scale => {
-                let scale = (to - center).length() / (from - center).length().max(MIN_HANDLE_REACH);
-                json!({"size": [self.decal.size[0] * scale, self.decal.size[1] * scale]})
-            }
-            FrameGrab::Side(side) => {
-                let direction = *self.sides.get(side)? - center;
-                let stretch = ((to - center).dot(direction) / (from - center).dot(direction).max(MIN_HANDLE_REACH)).max(MIN_SIDE_STRETCH);
-                let mut size = self.decal.size;
-                size[1 - side % 2] *= stretch;
-                json!({"size": size})
-            }
-            FrameGrab::Turn => {
-                // The sweep round the centre on the frame's own plane (across turning towards up is a positive turn), so a tilted or off-centre frame follows the pointer too
-                let angle = |p: Pos2| self.on_plane(app, rect, p).map(|[across, up]| (up * self.decal.size[1]).atan2(across * self.decal.size[0]).to_degrees());
-                let swept = angle(to)? - angle(from)?;
-                let swept = (swept + HALF_TURN).rem_euclid(2.0 * HALF_TURN) - HALF_TURN;
-                json!({"rotation": self.decal.rotation + swept})
-            }
-            FrameGrab::Corner(corner) => {
-                let mut corners = self.warp?;
-                *corners.get_mut(corner)? = self.on_plane(app, rect, to)?;
-                return Some(("layer.fill.projection", json!({"layer": self.layer.0, "warpCorners": corners})));
-            }
-        };
-        params["layer"] = json!(self.layer.0);
-        if let Some(effect) = self.effect {
-            params["effect"] = json!(effect.0);
-        }
-        Some(("layer.decal.set", params))
-    }
 }
 
 /// Half a turn in degrees: a ring drag's sweep is kept within one either way
@@ -255,21 +185,21 @@ pub(crate) const EDGE_ON_FACING: f32 = 1e-4;
 pub(crate) const MIN_SCREEN_SPAN: f32 = 1.0;
 
 /// The smallest cosine between the view ray and a turn ring's axis for the ring to show: flatter, its half height on screen is under its drawn line's width, it reads as a line and a drag along it turns half a turn at once across the centre
-const MIN_RING_FACING: f32 = (SHAFT_WIDTH + HALO_EXTRA_WIDTH) / TURN_RING;
+const MIN_RING_FACING: f32 = (SHAFT_WIDTH + SHAFT_HALO_EXTRA_WIDTH) / TURN_RING;
 
 /// Whether a turn ring round `axis`, centred on screen at `center`, is seen open enough to show and grab
 pub(crate) fn ring_open(app: &TextureCraftApp, rect: Rect, center: Pos2, axis: Vec3) -> bool {
     view_ray(app, rect, center).dir.dot(axis).abs() >= MIN_RING_FACING
 }
 
-/// `delta` as a mix of screen steps `a` and `b` (None when they are parallel on screen)
-fn solve(a: egui::Vec2, b: egui::Vec2, delta: egui::Vec2) -> Option<[f32; 2]> {
-    let det = a.x * b.y - a.y * b.x;
-    if det.abs() < PARALLEL_DETERMINANT {
+/// `delta` as a mix of screen steps `across_step` and `up_step` (None when they are parallel on screen)
+fn solve(across_step: egui::Vec2, up_step: egui::Vec2, delta: egui::Vec2) -> Option<[f32; 2]> {
+    let determinant = across_step.x * up_step.y - across_step.y * up_step.x;
+    if determinant.abs() < PARALLEL_DETERMINANT {
         return None;
     }
 
-    Some([(delta.x * b.y - delta.y * b.x) / det, (a.x * delta.y - a.y * delta.x) / det])
+    Some([(delta.x * up_step.y - delta.y * up_step.x) / determinant, (across_step.x * delta.y - across_step.y * delta.x) / determinant])
 }
 
 /// How far `p` is from the centre square (0 inside it)
@@ -303,19 +233,75 @@ impl Gizmo for FrameGizmo {
     type Grab = FrameGrab;
 
     fn drag_id() -> egui::Id {
-        drag_id()
+        egui::Id::unique("tc_frame_drag")
     }
 
+    /// The handle under screen point `p`: the nearest one within reach, so a small frame's corners stay grabbable beside its arrows
     fn grab(&self, p: Pos2) -> Option<FrameGrab> {
-        FrameGizmo::grab(self, p)
+        let mut handles = vec![(FrameGrab::Slide, center_distance(self.center, p))];
+        handles.extend((0..3).filter_map(|axis| Some((FrameGrab::Axis(axis), arrow_distance(p, self.center, self.arrows[axis]?)))));
+        let near = |points: [Pos2; 4], grab: fn(usize) -> FrameGrab| (0..4).map(move |index| (grab(index), points[index].distance(p)));
+        match self.warp {
+            // A mask effect's warp corners have no command to pull them
+            Some(_) if self.effect.is_none() => handles.extend(near(self.corners, FrameGrab::Corner)),
+            Some(_) => {}
+            None => handles.extend(near(self.corners, |_| FrameGrab::Scale)),
+        }
+        handles.extend(near(self.sides, FrameGrab::Side));
+        if let Some(ring) = &self.ring {
+            handles.push((FrameGrab::Turn, ring.windows(2).map(|pair| distance_to_segment(p, pair[0], pair[1])).fold(f32::INFINITY, f32::min)));
+        }
+        nearest(handles)
     }
 
     fn same_projection(&self, other: &FrameGizmo) -> bool {
         self.layer == other.layer && self.effect == other.effect
     }
 
+    /// The command and params a drag of `grab` from `from` to `to` runs
     fn edit(&self, app: &TextureCraftApp, rect: Rect, grab: FrameGrab, from: Pos2, to: Pos2) -> Option<(&'static str, Value)> {
-        FrameGizmo::edit(self, app, rect, grab, from, to)
+        let delta = to - from;
+        let center = self.center;
+        let mut params = match grab {
+            FrameGrab::Slide => json!({"offset": self.slid_on_screen(delta)?}),
+            FrameGrab::Axis(axis) => {
+                let step = (*self.steps.get(axis)?)?;
+                let distance = delta.dot(step) / step.length_sq().max(f32::MIN_POSITIVE);
+                match axis {
+                    0 => json!({"offset": self.slid(distance, 0.0)}),
+                    1 => json!({"offset": self.slid(0.0, distance)}),
+                    _ => json!({"position": (self.origin + self.axes[2] * distance).to_array(), "normal": self.axes[2].to_array()}),
+                }
+            }
+            FrameGrab::Scale => {
+                let scale = (to - center).length() / (from - center).length().max(MIN_HANDLE_REACH);
+                json!({"size": [self.decal.size[0] * scale, self.decal.size[1] * scale]})
+            }
+            FrameGrab::Side(side) => {
+                let direction = (*self.sides.get(side)? - center).normalized();
+                let stretch = ((to - center).dot(direction) / (from - center).dot(direction).max(MIN_HANDLE_REACH)).max(MIN_SIDE_STRETCH);
+                let mut size = self.decal.size;
+                size[1 - side % 2] *= stretch;
+                json!({"size": size})
+            }
+            FrameGrab::Turn => {
+                // The sweep round the centre on the frame's own plane (across turning towards up is a positive turn), so a tilted or off-centre frame follows the pointer too
+                let angle = |p: Pos2| self.on_plane(app, rect, p).map(|[across, up]| (up * self.decal.size[1]).atan2(across * self.decal.size[0]).to_degrees());
+                let swept = angle(to)? - angle(from)?;
+                let swept = (swept + HALF_TURN).rem_euclid(2.0 * HALF_TURN) - HALF_TURN;
+                json!({"rotation": self.decal.rotation + swept})
+            }
+            FrameGrab::Corner(corner) => {
+                let mut corners = self.warp?;
+                *corners.get_mut(corner)? = self.on_plane(app, rect, to)?;
+                return Some(("layer.fill.projection", json!({"layer": self.layer.0, "warpCorners": corners})));
+            }
+        };
+        params["layer"] = json!(self.layer.0);
+        if let Some(effect) = self.effect {
+            params["effect"] = json!(effect.0);
+        }
+        Some(("layer.decal.set", params))
     }
 }
 
@@ -347,7 +333,7 @@ pub(crate) fn overlay(ui: &Ui, rect: Rect, gizmo: &FrameGizmo) {
     dashed_outline(&painter, &outline);
     if let Some(ring) = &gizmo.ring {
         let color = if lit(FrameGrab::Turn) { tokens.viewport_accent } else { AXIS_COLORS[2] };
-        painter.add(egui::Shape::line(ring.to_vec(), Stroke::new(SHAFT_WIDTH + HALO_EXTRA_WIDTH, HALO)));
+        painter.add(egui::Shape::line(ring.to_vec(), Stroke::new(SHAFT_WIDTH + SHAFT_HALO_EXTRA_WIDTH, SHAFT_HALO)));
         painter.add(egui::Shape::line(ring.to_vec(), Stroke::new(SHAFT_WIDTH, color)));
     }
     match gizmo.warp {
@@ -379,7 +365,7 @@ pub(crate) fn move_handles(painter: &egui::Painter, center: Pos2, arrows: [Optio
         let direction = (tip - center).normalized();
         let side = direction.rot90() * ARROW_HEAD * ARROW_HEAD_HALF_WIDTH;
         let start = center + direction * CENTER_SQUARE * 0.5;
-        painter.line_segment([start, tip], Stroke::new(SHAFT_WIDTH + HALO_EXTRA_WIDTH, HALO));
+        painter.line_segment([start, tip], Stroke::new(SHAFT_WIDTH + SHAFT_HALO_EXTRA_WIDTH, SHAFT_HALO));
         painter.line_segment([start, tip], Stroke::new(SHAFT_WIDTH, color));
         painter.add(egui::Shape::convex_polygon(vec![tip + direction * ARROW_HEAD, tip + side, tip - side], color, HANDLE_EDGE));
     }
@@ -387,15 +373,17 @@ pub(crate) fn move_handles(painter: &egui::Painter, center: Pos2, arrows: [Optio
     painter.rect(square_rect, CENTER_SQUARE_CORNER_RADIUS, square, HANDLE_EDGE, egui::StrokeKind::Middle);
 }
 
-/// The dashed outline's dark shadow under its light dashes, and the dash and gap lengths
+/// The dashed outline: the dark shadow's width and colour, the light dashes' width and colour over it (white at 230 alpha, premultiplied), the dash and gap lengths
 const OUTLINE_SHADOW_WIDTH: f32 = 3.0;
+const OUTLINE_SHADOW: Color32 = Color32::from_black_alpha(140);
 const OUTLINE_WIDTH: f32 = 1.2;
+const OUTLINE_COLOR: Color32 = Color32::from_rgba_premultiplied(230, 230, 230, 230);
 const OUTLINE_DASH: f32 = 6.0;
 const OUTLINE_GAP: f32 = 4.0;
 
 /// A gizmo's dashed outline through `points`, light over a dark shadow so it reads on any model
 pub(crate) fn dashed_outline(painter: &egui::Painter, points: &[Pos2]) {
-    for stroke in [Stroke::new(OUTLINE_SHADOW_WIDTH, Color32::from_black_alpha(140)), Stroke::new(OUTLINE_WIDTH, Color32::from_white_alpha(230))] {
+    for stroke in [Stroke::new(OUTLINE_SHADOW_WIDTH, OUTLINE_SHADOW), Stroke::new(OUTLINE_WIDTH, OUTLINE_COLOR)] {
         painter.add(egui::Shape::dashed_line(points, stroke, OUTLINE_DASH, OUTLINE_GAP));
     }
 }
@@ -412,7 +400,7 @@ const CENTER_SQUARE_CORNER_RADIUS: f32 = 2.0;
 
 /// A handle dot of `radius`: `fill` over a dark rim, so it reads on a light or dark model
 pub(crate) fn handle_dot(painter: &egui::Painter, at: Pos2, radius: f32, fill: Color32) {
-    painter.circle_filled(at, radius + DOT_RIM, HALO);
+    painter.circle_filled(at, radius + DOT_RIM, SHAFT_HALO);
     painter.circle(at, radius, fill, HANDLE_EDGE);
 }
 
@@ -824,7 +812,7 @@ pub(crate) mod tests {
         checker(&mut harness, layer);
         harness.run_steps(4);
         let round = crate::round_gizmo::RoundGizmo::of(harness.state(), harness.state().viewport_rect).unwrap();
-        let dot = round.sizes[0].at;
+        let dot = round.sizes.iter().find(|size| size.axes == [true; 3]).expect("the even-scale dot").at;
         let to = round.center + (dot - round.center) * 0.6;
         harness.event(egui::Event::PointerMoved(dot));
         harness.event(egui::Event::PointerButton { pos: dot, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
@@ -842,7 +830,12 @@ pub(crate) mod tests {
             checker(&mut harness, layer);
             harness.run_steps(4);
             let round = crate::round_gizmo::RoundGizmo::of(harness.state(), harness.state().viewport_rect).unwrap();
-            let hover = if kind == "triplanar" { round.rings[2][crate::round_gizmo::CIRCLE_POINTS / 8] } else { round.sizes[0].at };
+            let size_at = |axes: [bool; 3]| round.sizes.iter().find(|size| size.axes == axes).expect("the size handle").at;
+            let hover = match kind {
+                "triplanar" => round.rings[2][crate::round_gizmo::CIRCLE_POINTS / 8],
+                "spherical" => size_at([true; 3]),
+                _ => size_at([false, true, false]),
+            };
             harness.hover_at(hover);
             harness.run_steps(4);
             harness.render().unwrap().save(directory.join(format!("move-{kind}.png"))).unwrap();

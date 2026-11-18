@@ -3023,9 +3023,9 @@ impl<'a, 'b> Texel<'a, 'b> {
                     }
                 }
                 EffectKind::Fill { source, projection, sampling } => {
-                    let once = |t: &mut Self| {
-                        let fill = t.source(source, projection, *sampling, ChannelKind::Scalar);
-                        let cover = if effect.covers_all { 1.0 } else { t.cover(std::iter::once(source), projection, *sampling, effect.depth.as_deref()) };
+                    let once = |texel: &mut Self| {
+                        let fill = texel.source(source, projection, *sampling, ChannelKind::Scalar);
+                        let cover = if effect.covers_all { 1.0 } else { texel.cover(std::iter::once(source), projection, *sampling, effect.depth.as_deref()) };
                         (fill, cover)
                     };
                     let ([fill, ..], cover) = self.symmetric(projection, *sampling, once);
@@ -3082,13 +3082,13 @@ impl<'a, 'b> Texel<'a, 'b> {
             CompareSource::LayersBelow => below(),
             CompareSource::ThisLayer => {
                 let own = plan.layer.as_ref().and_then(|(content, chans)| {
-                    let chan = chans.iter().find(|c| c.ch == channel.index())?;
-                    self.content(content, chan)
+                    let chan_plan = chans.iter().find(|chan_plan| chan_plan.ch == channel.index())?;
+                    self.content(content, chan_plan)
                 });
 
                 // Where the layer is empty (or thin) it shows the stack below it
                 let below = below();
-                own.map_or(below, |(v, cov)| mix3(below, v, cov))
+                own.map_or(below, |(value, coverage)| mix3(below, value, coverage))
             }
         };
         match channel.kind() {
@@ -4135,8 +4135,8 @@ pub fn effect_histogram(inp: &Inputs, effect: LayerId, channel: Channel, bins: u
             }
 
             let full = anchor_plan(&cut_inp, owner, &channels, tx, ty, Some(fields));
-            for (x, y, o) in tile_texels(inp.gbuf, tx, ty) {
-                let mut texel = Texel::new(&cut_inp, x, y, o, 0.0);
+            for (x, y, offset) in tile_texels(inp.gbuf, tx, ty) {
+                let mut texel = Texel::new(&cut_inp, x, y, offset, 0.0);
                 if !full.is_empty() {
                     texel.anchors_below(&full, owner);
                 }
@@ -4242,8 +4242,8 @@ pub fn compare_histograms(inp: &Inputs, effect: LayerId, bins: usize) -> Option<
                 full = plan(&cut_inp, &set.stack, &channels, tx, ty, 0, Some(fields));
             }
 
-            for (x, y, o) in tile_texels(inp.gbuf, tx, ty) {
-                let mut texel = Texel::new(&cut_inp, x, y, o, 0.0);
+            for (x, y, offset) in tile_texels(inp.gbuf, tx, ty) {
+                let mut texel = Texel::new(&cut_inp, x, y, offset, 0.0);
                 if !full.is_empty() {
                     texel.anchors_below(&full, owner);
                 }

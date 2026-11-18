@@ -2,7 +2,7 @@
 
 use crate::store::texel_of;
 
-/// One halved copy of an image (box-filtered, wrapping at the edges)
+/// One halved copy of an image (box-filtered; see `halve` for its edges)
 #[derive(Clone, Debug, PartialEq)]
 pub struct MipLevel {
     pub width: u32,

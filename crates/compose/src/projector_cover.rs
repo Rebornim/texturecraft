@@ -160,18 +160,18 @@ mod tests {
     use super::*;
 
     /// The decal formula from before decals were placed planar projections, kept to check they still look the same
-    fn decal_before(d: &Decal, p: Vec3, nrm: Vec3) -> Option<(Vec2, f32)> {
-        let (o, r, u, n) = crate::pattern::decal_axes(d)?;
-        let facing = nrm.dot(n);
-        let q = p - o;
-        let (lx, ly, lz) = (q.dot(r) / d.size[0].max(1e-6), q.dot(u) / d.size[1].max(1e-6), q.dot(n).abs());
-        let depth = d.depth.max(1e-6);
-        if facing <= 0.0 || lx.abs() > 0.5 || ly.abs() > 0.5 || lz > depth || !(lx.is_finite() && ly.is_finite()) {
+    fn decal_before(frame: &Decal, point: Vec3, surface_normal: Vec3) -> Option<(Vec2, f32)> {
+        let (origin, right, up, normal) = crate::pattern::decal_axes(frame)?;
+        let facing = surface_normal.dot(normal);
+        let offset = point - origin;
+        let (local_x, local_y, local_z) = (offset.dot(right) / frame.size[0].max(1e-6), offset.dot(up) / frame.size[1].max(1e-6), offset.dot(normal).abs());
+        let depth = frame.depth.max(1e-6);
+        if facing <= 0.0 || local_x.abs() > 0.5 || local_y.abs() > 0.5 || local_z > depth || !(local_x.is_finite() && local_y.is_finite()) {
             return None;
         }
 
-        let w = smoothstep(0.0, 0.3, facing) * (1.0 - smoothstep(0.75 * depth, depth, lz));
-        Some((Vec2::new(lx + 0.5, 0.5 - ly), w))
+        let cover = smoothstep(0.0, 0.3, facing) * (1.0 - smoothstep(0.75 * depth, depth, local_z));
+        Some((Vec2::new(local_x + 0.5, 0.5 - local_y), cover))
     }
 
     #[test]
@@ -209,15 +209,15 @@ mod tests {
         ];
         for frame in frames {
             let Projection::Planar { projector, placed: Some(placed), .. } = Projection::decal(frame) else { panic!("a placed planar projection") };
-            for i in 0..4000 {
-                let t = i as f32 * 0.137;
-                let p = Vec3::new(t.sin() * 1.3, (t * 0.71).cos() * 1.1, (t * 0.33).sin() * 0.8);
-                let nrm = Vec3::new((t * 1.7).cos(), (t * 0.9).sin(), (t * 0.4).cos()).normalize();
-                let now = placed_cover(&placed, &projector, p, nrm).filter(|(_, cover)| *cover > 0.0);
-                match (decal_before(&frame, p, nrm), now) {
-                    (Some(before), Some(now)) => assert_eq!(before, now, "{p} {nrm}"),
+            for sample in 0..4000 {
+                let phase = sample as f32 * 0.137;
+                let point = Vec3::new(phase.sin() * 1.3, (phase * 0.71).cos() * 1.1, (phase * 0.33).sin() * 0.8);
+                let normal = Vec3::new((phase * 1.7).cos(), (phase * 0.9).sin(), (phase * 0.4).cos()).normalize();
+                let now = placed_cover(&placed, &projector, point, normal).filter(|(_, cover)| *cover > 0.0);
+                match (decal_before(&frame, point, normal), now) {
+                    (Some(before), Some(now)) => assert_eq!(before, now, "{point} {normal}"),
                     (None, None) => {}
-                    (before, now) => panic!("{p} {nrm}: {before:?} became {now:?}"),
+                    (before, now) => panic!("{point} {normal}: {before:?} became {now:?}"),
                 }
             }
         }

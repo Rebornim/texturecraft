@@ -28,21 +28,21 @@ impl ProjectorView {
         }
     }
 
-    /// World point `p` in the view: across, up and how near the projector (None where the view is degenerate)
-    pub fn local(&self, p: Vec3) -> Option<Vec3> {
+    /// World point `point` in the view: across, up and how near the projector (None where the view is degenerate)
+    pub fn local(&self, point: Vec3) -> Option<Vec3> {
         let local = match self {
             ProjectorView::Axis { axis, projector, center, radius } => {
-                let at = Coords { uv: Vec2::ZERO, pos: (p - *center) / *radius, nrm: Vec3::Z };
-                let l = projector_local(projector, &at).pos;
+                let at = Coords { uv: Vec2::ZERO, pos: (point - *center) / *radius, nrm: Vec3::Z };
+                let projected = projector_local(projector, &at).pos;
 
                 // The side each axis projects from, as its backface culling reads it
                 match axis {
-                    0 => Vec3::new(l.z, l.y, -l.x),
-                    1 => Vec3::new(l.x, l.z, l.y),
-                    _ => l,
+                    0 => Vec3::new(projected.z, projected.y, -projected.x),
+                    1 => Vec3::new(projected.x, projected.z, projected.y),
+                    _ => projected,
                 }
             }
-            ProjectorView::Frame { frame, projector, .. } => frame_local(frame, projector, p)?,
+            ProjectorView::Frame { frame, projector, .. } => frame_local(frame, projector, point)?,
         };
         local.is_finite().then_some(local)
     }

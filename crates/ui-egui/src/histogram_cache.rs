@@ -7,8 +7,7 @@ use egui::{Id, Ui};
 /// Buckets of a properties screen's histogram, over 0..1
 pub(crate) const HISTOGRAM_BUCKETS: usize = 64;
 
-/// The histogram cached under `key` for `revision`, recomputed by `count` after a change once no pointer button is held (a drag keeps the old one).
-/// One entry per `owner`: showing another key drops the previous one, so the histograms of effects no longer shown are not kept
+/// The histogram cached under `key` for `revision`, recomputed by `count` once no button is held; one entry per `owner`, so a hidden effect's is dropped
 pub(crate) fn cached_histogram<T: Send + Sync + 'static>(ui: &Ui, owner: &str, key: Id, revision: u64, count: impl FnOnce() -> Option<T>) -> Option<Arc<T>> {
     let owner = ui.make_persistent_id(owner);
     ui.data_mut(|data| {

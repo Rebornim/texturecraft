@@ -1,6 +1,6 @@
 //! A mask fill effect's Properties: Fill | Symmetry | Grayscale tabs, the fill's projection rows, and one Grayscale slot whose picker sets its source
 
-use egui::{Event, Modifiers, PointerButton, Pos2, Role, vec2};
+use egui::{Event, Modifiers, PointerButton, Pos2, Role};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
@@ -8,12 +8,16 @@ use texturecraft_engine::core::{CookResolution, EffectKind, LayerId, ProceduralK
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::move_on_model::MoveOnModel;
 
+use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+
 /// Tall enough that Properties shows every section of a mask fill without scrolling
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1600.0);
-const TEXTURE_RESOLUTION: u32 = 256;
-const BAKE_RESOLUTION: u32 = 64;
-const STARTUP_FRAMES: usize = 4;
-const SETTLE_FRAMES: usize = 3;
+
+/// Moves of a mouse drag, one per frame
+const DRAG_MOVES: usize = 40;
+
+/// How far left a drag moves the projection on the model
+const MOVE_DRAG: egui::Vec2 = egui::vec2(-60.0, 0.0);
 
 /// The app with a paint layer whose mask holds one fill effect, that effect selected; the layer's and the effect's ids
 fn app_with_mask_fill(projection: &str) -> (Harness<'static, TextureCraftApp>, LayerId, LayerId) {
@@ -96,9 +100,8 @@ fn mouse_drag_watching(harness: &mut Harness<'_, TextureCraftApp>, from: Pos2, t
     harness.run_steps(1);
     harness.event(button(from, true));
     harness.run_steps(2);
-    const STEPS: usize = 40;
-    for step in 1..=STEPS {
-        harness.event(Event::PointerMoved(from.lerp(to, step as f32 / STEPS as f32)));
+    for step in 1..=DRAG_MOVES {
+        harness.event(Event::PointerMoved(from.lerp(to, step as f32 / DRAG_MOVES as f32)));
         harness.run_steps(1);
         watch(harness);
     }
@@ -113,7 +116,7 @@ fn a_mask_fills_projection_moves_on_the_model_and_resets_with_its_section() {
     // A real drag that starts on the held button slides the mask fill's image
     let button = harness.get_by_role_and_label(Role::Button, "Move on model").rect().center();
     let mut held = None;
-    mouse_drag_watching(&mut harness, button, button + vec2(-60.0, 0.0), |harness| held = held.or(harness.state().moving_on_model));
+    mouse_drag_watching(&mut harness, button, button + MOVE_DRAG, |harness| held = held.or(harness.state().moving_on_model));
     assert_eq!(held, Some(MoveOnModel { layer, effect: Some(effect) }));
     assert_eq!(harness.state().moving_on_model, None, "letting go ends it");
     let Projection::Uv { offset, .. } = mask_fill(&harness, effect).1 else { panic!("still UV") };

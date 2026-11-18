@@ -5,7 +5,6 @@ use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::compose::ImageStore;
 use texturecraft_engine::core::{Layer, LayerId};
-use texturecraft_engine::fill_alpha::library_alpha_of;
 use texturecraft_engine::paint::alphas;
 
 use crate::TextureCraftApp;
@@ -439,15 +438,7 @@ pub(crate) fn bitmap_picker(app: &mut TextureCraftApp, anchor: &Response, popup:
 /// The bitmap picker's one tab: Textures (Import... first) and the Alphas in their shelf groups
 fn bitmap_tabs(thumbs: &mut Thumbs, ctx: &egui::Context, images: &ImageStore) -> Vec<PickerTab<BitmapChoice>> {
     let tile = |id, label: &str, caption, picture| ResourcePickerItem { id, label: label.to_owned(), caption, picture };
-    let mut textures = vec![tile(BitmapChoice::Import, tr("Import..."), None, TilePicture::Import)];
-    let mut names: Vec<&String> = images.keys().filter(|name| library_alpha_of(name).is_none()).collect();
-    names.sort();
-    textures.extend(
-        names
-            .into_iter()
-            .filter_map(|name| images.get(name).map(|image| (name, image)))
-            .map(|(name, image)| tile(BitmapChoice::Image(name.clone()), name, None, TilePicture::Texture(Some(thumbs.image(ctx, name, image))))),
-    );
+    let textures = ResourcePickerItem::textures(thumbs, ctx, images, BitmapChoice::Import, |name| BitmapChoice::Image(name.to_owned()));
     let alphas = alphas::library()
         .iter()
         .map(|alpha| tile(BitmapChoice::Alpha(alpha.id.as_str()), tr(&alpha.label), Some(tr(alpha.category)), TilePicture::Texture(thumbs.alpha(ctx, alpha))))

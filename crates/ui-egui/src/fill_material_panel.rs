@@ -283,13 +283,7 @@ fn source_tabs(thumbs: &mut Thumbs, ctx: &egui::Context, images: &ImageStore, an
         .into_iter()
         .map(|kind| tile(SourceChoice::Procedural(kind), tr(kind.label()), None, TilePicture::Texture(thumbs.procedural(ctx, kind))))
         .collect();
-    let mut textures = vec![tile(SourceChoice::Import, tr("Import..."), None, TilePicture::Import)];
-    let mut names: Vec<&String> = images.keys().filter(|name| library_alpha_of(name).is_none()).collect();
-    names.sort();
-    textures.extend(names.into_iter().filter_map(|name| images.get(name).map(|image| (name, image))).map(|(name, image)| {
-        let picture = TilePicture::Texture(Some(thumbs.image(ctx, name, image)));
-        tile(SourceChoice::Image(name.clone()), name, None, picture)
-    }));
+    let textures = ResourcePickerItem::textures(thumbs, ctx, images, SourceChoice::Import, |name| SourceChoice::Image(name.to_owned()));
     let alphas = alphas::library()
         .iter()
         .map(|alpha| {

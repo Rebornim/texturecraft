@@ -54,10 +54,12 @@ fn a_source_that_is_gone_shows_a_missing_layer_that_takes_no_click() {
     assert!(missing.accesskit_node().is_disabled(), "a missing source can't be gone to");
 
     // A real press and release on the card
+    let steps = harness.state().session.history_labels().len();
     let at = missing.rect().center();
     harness.drag_at(at);
     harness.run_steps(1);
     harness.drop_at(at);
     harness.run_steps(SETTLE_FRAMES);
     assert_eq!(harness.state().session.selected_layer(), Some(instance));
+    assert_eq!(harness.state().session.history_labels().len(), steps, "the click ran nothing");
 }

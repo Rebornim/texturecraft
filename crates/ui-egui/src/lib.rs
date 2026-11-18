@@ -37,6 +37,7 @@ mod frame_gizmo;
 mod generator_panel;
 pub mod gpu;
 mod grid_tile;
+mod histogram_cache;
 pub mod i18n;
 pub mod id_color_pick;
 mod instance_properties;

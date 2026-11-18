@@ -8,7 +8,9 @@ use crate::i18n::tr;
 use crate::levels_handle::LevelsHandle;
 use crate::theme::{Tokens, lerp_color};
 
-const HISTOGRAM_HEIGHT: f32 = 70.0;
+/// Height of a histogram well; the compare mask's well matches it
+pub(crate) const HISTOGRAM_HEIGHT: f32 = 70.0;
+
 const HANDLE_HEIGHT: f32 = 11.0;
 const HANDLE_HALF_WIDTH: f32 = 5.0;
 
@@ -37,7 +39,7 @@ const WELL_CLIP_MARGIN: f32 = 1.0;
 const GAMMA_HANDLE_GRAY: u8 = 128;
 
 /// Grid lines across the histogram, at these fractions of its width
-const GRID_FRACTIONS: [f32; 3] = [0.25, 0.5, 0.75];
+pub(crate) const GRID_FRACTIONS: [f32; 3] = [0.25, 0.5, 0.75];
 
 /// Decimals printed beside a handle; exact entry keeps the stored precision
 const VALUE_DECIMALS: usize = 3;

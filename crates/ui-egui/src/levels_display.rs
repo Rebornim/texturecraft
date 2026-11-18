@@ -51,7 +51,7 @@ impl LevelsDisplay {
         let component =
             |index: usize| histogram.components.get(index).map(|counts| (counts.as_slice(), AXIS_COLORS.get(index).copied().unwrap_or(tokens.text)));
         match self {
-            LevelsDisplay::Colors => (0..3).filter_map(component).collect(),
+            LevelsDisplay::Colors => (0..AXIS_COLORS.len()).filter_map(component).collect(),
             LevelsDisplay::Red => component(0).into_iter().collect(),
             LevelsDisplay::Green => component(1).into_iter().collect(),
             LevelsDisplay::Blue => component(2).into_iter().collect(),

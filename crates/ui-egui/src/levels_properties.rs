@@ -8,14 +8,12 @@ use texturecraft_engine::compose::EffectHistogram;
 use texturecraft_engine::core::{Channel, ChannelKind, Layer, LayerId, Levels};
 
 use crate::TextureCraftApp;
+use crate::histogram_cache::{HISTOGRAM_BUCKETS, cached_histogram};
 use crate::i18n::{tr, trf};
 use crate::levels_display::LevelsDisplay;
 use crate::levels_editor::levels_editor;
 use crate::property_sheet::PropertySheet;
 use crate::theme::Tokens;
-
-/// Buckets of the histogram, over 0..1
-const HISTOGRAM_BUCKETS: usize = 64;
 
 /// Share of the counted texels a bucket needs to hold for Auto to keep it in the input range
 const AUTO_MIN_SHARE: f64 = 0.001;
@@ -102,28 +100,10 @@ fn affects_name(affects: Option<Channel>) -> String {
     affects.map_or_else(|| tr("All channels").to_string(), |channel| tr(channel.label()).to_string())
 }
 
-/// The histograms levels effect `effect_id` remaps, recomputed after a change once no pointer button is held
+/// The histograms levels effect `effect_id` remaps for `channel`
 fn histogram_counts(app: &TextureCraftApp, ui: &Ui, effect_id: LayerId, channel: Channel) -> Option<Arc<EffectHistogram>> {
     let key = egui::Id::unique(("levels_histogram", effect_id.0, channel));
-    let owner = ui.make_persistent_id("levels_histogram_owner");
-
-    // Selection changes the revision, so old effects' histograms cannot be reused
-    ui.data_mut(|data| {
-        let previous = std::mem::replace(data.get_temp_mut_or(owner, key), key);
-        if previous != key {
-            data.remove::<(u64, Arc<EffectHistogram>)>(previous);
-        }
-    });
-
-    let revision = app.session.revision;
-    match ui.data(|data| data.get_temp::<(u64, Arc<EffectHistogram>)>(key)) {
-        Some((cached, histogram)) if cached == revision || ui.input(|input| input.pointer.any_down()) => Some(histogram),
-        _ => app.session.effect_histogram(effect_id, channel, HISTOGRAM_BUCKETS).map(|histogram| {
-            let histogram = Arc::new(histogram);
-            ui.data_mut(|data| data.insert_temp(key, (revision, histogram.clone())));
-            histogram
-        }),
-    }
+    cached_histogram(ui, "levels_histogram_owner", key, app.session.revision, || app.session.effect_histogram(effect_id, channel, HISTOGRAM_BUCKETS))
 }
 
 /// The input range Auto picks: the first to the last bucket holding more than [`AUTO_MIN_SHARE`] of the texels
@@ -138,7 +118,8 @@ fn auto_input_range(counts: &[u32]) -> Option<(f32, f32)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{HISTOGRAM_BUCKETS, auto_input_range};
+    use super::auto_input_range;
+    use crate::histogram_cache::HISTOGRAM_BUCKETS;
 
     #[test]
     fn auto_skips_buckets_under_the_share() {

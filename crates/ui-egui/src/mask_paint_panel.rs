@@ -5,7 +5,6 @@ use egui_phosphor::regular as ic;
 use serde_json::json;
 use texturecraft_engine::compose::ImageStore;
 use texturecraft_engine::core::{NormalFormat, Source};
-use texturecraft_engine::fill_alpha::library_alpha_of;
 
 use crate::TextureCraftApp;
 use crate::fill_material_panel::{shown_color, source_line};
@@ -48,7 +47,7 @@ pub(crate) fn grayscale_sheet(app: &mut TextureCraftApp, ui: &mut Ui) {
         let tabs = |thumbs: &mut Thumbs| source_tabs(thumbs, &ctx, &app.session.images, shown_color([gray; 3]));
         match resource_picker::show(&slot.pick, popup, &mut app.thumbs, Some(&current), image, tabs) {
             Some(MaskSourceChoice::Import) => crate::menus::invoke(app, &ctx, "resource.import"),
-            Some(MaskSourceChoice::Image(name)) if current != MaskSourceChoice::Image(name.clone()) => {
+            Some(MaskSourceChoice::Image(name)) if app.session.tool.mask_image.as_deref() != Some(name.as_str()) => {
                 app.run("tool.material", json!({"maskImage": name}));
             }
             Some(MaskSourceChoice::Uniform) if image => {
@@ -78,13 +77,7 @@ pub(crate) fn grayscale_sheet(app: &mut TextureCraftApp, ui: &mut Ui) {
 
 /// The picker's one Resources tab: Textures (Import... first, then the project's images) and Uniform
 fn source_tabs(thumbs: &mut Thumbs, ctx: &egui::Context, images: &ImageStore, uniform: egui::Color32) -> Vec<PickerTab<MaskSourceChoice>> {
-    let mut textures = vec![tile(MaskSourceChoice::Import, tr("Import..."), TilePicture::Import)];
-    let mut names: Vec<&String> = images.keys().filter(|name| library_alpha_of(name).is_none()).collect();
-    names.sort();
-    textures.extend(names.into_iter().filter_map(|name| images.get(name).map(|image| (name, image))).map(|(name, image)| {
-        let picture = TilePicture::Texture(Some(thumbs.image(ctx, name, image)));
-        tile(MaskSourceChoice::Image(name.clone()), name, picture)
-    }));
+    let textures = ResourcePickerItem::textures(thumbs, ctx, images, MaskSourceChoice::Import, |name| MaskSourceChoice::Image(name.to_owned()));
     let uniform = vec![tile(MaskSourceChoice::Uniform, tr("Uniform value"), TilePicture::Swatch(uniform))];
     let groups =
         [(n_("Textures"), textures), (n_("Uniform"), uniform)].into_iter().map(|(header, items)| PickerGroup { header: Some(tr(header)), items }).collect();

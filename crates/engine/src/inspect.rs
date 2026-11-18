@@ -7,18 +7,18 @@ use texturecraft_core::{Effect, EffectKind, Fill, Filter, Generator, Layer, Laye
 use crate::Session;
 use crate::session::StackTarget;
 
-fn source_json(s: &Source) -> Value {
-    match s {
-        Source::Uniform(v) => json!({ "uniform": v }),
+fn source_json(source: &Source) -> Value {
+    match source {
+        Source::Uniform(value) => json!({ "uniform": value }),
         Source::Procedural { pattern, low, high } => {
-            let mut v = json!({
+            let mut out = json!({
                 "procedural": pattern.kind.label(), "scale": pattern.scale, "seed": pattern.seed, "contrast": pattern.contrast,
                 "balance": pattern.balance, "invert": pattern.invert, "low": low, "high": high
             });
             if let Some(resolution) = pattern.resolution {
-                v["resolution"] = json!(resolution);
+                out["resolution"] = json!(resolution);
             }
-            v
+            out
         }
         Source::Image { name, normal_format: NormalFormat::OpenGl } => json!({ "image": name }),
         Source::Image { name, normal_format: NormalFormat::DirectX } => json!({ "image": name, "normalFormat": "directX" }),
@@ -26,21 +26,20 @@ fn source_json(s: &Source) -> Value {
     }
 }
 
-fn fill_json(f: &Fill) -> Value {
-    let mut v = json!({
-        "sources": f.sources.iter().map(|(c, s)| (c.id().to_string(), source_json(s))).collect::<serde_json::Map<_, _>>(),
-    });
-    placement_json(&f.projection, &f.sampling, &mut v);
-    if let Some(link) = &f.link {
-        v["link"] = json!(link);
+fn fill_json(fill: &Fill) -> Value {
+    let sources = fill.sources.iter().map(|(channel, source)| (channel.id().to_string(), source_json(source)));
+    let mut out = json!({ "sources": sources.collect::<serde_json::Map<_, _>>() });
+    placement_json(&fill.projection, &fill.sampling, &mut out);
+    if let Some(link) = &fill.link {
+        out["link"] = json!(link);
     }
-    if let Some(material) = &f.material {
-        v["material"] = json!(material);
+    if let Some(material) = &fill.material {
+        out["material"] = json!(material);
     }
-    v
+    out
 }
 
-/// Where a fill lands and how it reads its sources: the projection, its frame when placed on the surface, and the sampling.
+/// Where a fill lands and how it reads its sources: the projection, its frame when placed on the surface, and the sampling
 fn placement_json(projection: &Projection, sampling: &Sampling, out: &mut Value) {
     out["projection"] = json!(projection.label());
     out["projectionSettings"] = json!(projection);
@@ -130,7 +129,7 @@ fn effect_json(session: &Session, effect: &Effect, content: bool) -> Value {
     out
 }
 
-/// A generator's settings: global adjustments, then its resolution, replaced inputs and curvature detail when it has them.
+/// A generator's settings: global adjustments, then its resolution, replaced inputs and curvature detail when it has them
 fn generator_json(generator: &Generator) -> Value {
     let mut out = json!({ "type": format!("{:?}", generator.kind), "level": generator.level, "softness": generator.softness, "noise": generator.noise_amount, "offset": generator.offset, "invert": generator.invert, "blur": generator.global.blur, "balance": generator.global.balance, "contrast": generator.global.contrast });
     if !generator.resolution.is_default() {
@@ -206,7 +205,7 @@ fn layer_json(s: &Session, l: &Layer, depth: usize) -> Value {
     v
 }
 
-/// The layer stack of texture set `ts`, top → bottom (as displayed).
+/// The layer stack of texture set `ts`, top → bottom (as displayed)
 pub fn stack(s: &Session, ts: usize) -> Value {
     let Some(set) = s.doc.project.texture_sets.get(ts) else { return Value::Null };
     json!(set.stack.iter().rev().filter_map(|id| s.doc.project.layers.get(id)).map(|l| layer_json(s, l, 0)).collect::<Vec<_>>())
@@ -247,7 +246,7 @@ pub fn texture_set(session: &Session, index: usize) -> Value {
     })
 }
 
-/// The whole session.
+/// The whole session
 pub fn session(s: &Session) -> Value {
     let ts = s.ts();
     json!({

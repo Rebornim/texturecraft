@@ -1929,12 +1929,12 @@ impl EffectKind {
 
     /// Whether a source of this effect reads anchor point `anchor` (any anchor point when None)
     pub fn reads(&self, anchor: Option<LayerId>) -> bool {
-        let hit = |s: &Source| s.anchor().is_some_and(|a| anchor.is_none_or(|wanted| wanted == a));
         match self {
-            EffectKind::Fill { source, .. } => hit(source),
-            EffectKind::Material(fill) => fill.sources.values().any(hit),
+            EffectKind::Fill { source, .. } => source.reads_anchor(anchor),
+            EffectKind::Material(fill) => fill.sources.values().any(|source| source.reads_anchor(anchor)),
             EffectKind::Generator(generator) => {
-                generator.micro.is_some_and(|micro| anchor.is_none_or(|wanted| wanted == micro.anchor)) || generator.inputs.values().any(hit)
+                generator.micro.is_some_and(|micro| anchor.is_none_or(|wanted| wanted == micro.anchor))
+                    || generator.inputs.values().any(|source| source.reads_anchor(anchor))
             }
             _ => false,
         }
@@ -1988,15 +1988,15 @@ impl Layer {
     /// Whether any source of the layer (fill, mask or content effects) reads an anchor point.
     pub fn reads_anchor(&self) -> bool {
         let fill = match &self.kind {
-            LayerKind::Fill(f) => f.sources.values().any(|s| s.anchor().is_some()),
+            LayerKind::Fill(fill) => fill.sources.values().any(|source| source.reads_anchor(None)),
             _ => false,
         };
-        fill || self.mask.iter().flat_map(|m| m.effects.iter()).chain(self.content_effects.iter()).any(|e| e.reads(None))
+        fill || self.mask.iter().flat_map(|mask| mask.effects.iter()).chain(self.content_effects.iter()).any(|effect| effect.reads(None))
     }
 
     /// Whether the layer's result depends on the stack below it: it reads an anchor point, or its mask compares channels of the stack
     pub fn reads_stack(&self) -> bool {
-        self.reads_anchor() || self.mask.iter().flat_map(|m| m.effects.iter()).any(|e| e.visible && e.kind.reads_stack())
+        self.reads_anchor() || self.mask.iter().flat_map(|mask| mask.effects.iter()).any(|effect| effect.visible && effect.kind.reads_stack())
     }
 }
 

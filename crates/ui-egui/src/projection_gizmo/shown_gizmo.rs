@@ -33,8 +33,8 @@ impl ShownGizmo {
 
     /// Drags on `gizmo`'s handles; returns whether a drag owns the pointer
     pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response, rect: Rect, gizmo: Option<&ShownGizmo>) -> bool {
-        crate::frame_gizmo::input(app, ui, response, rect, ShownGizmo::frame(gizmo))
-            || crate::round_gizmo::input(app, ui, response, rect, ShownGizmo::round(gizmo))
+        let ctx = ui.ctx();
+        super::input(app, ctx, response, rect, ShownGizmo::frame(gizmo)) || super::input(app, ctx, response, rect, ShownGizmo::round(gizmo))
     }
 
     /// Ends a drag under way on either gizmo where it is

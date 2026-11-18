@@ -303,20 +303,10 @@ impl Gizmo for FrameGizmo {
         }
         Some(("layer.decal.set", params))
     }
-}
 
-/// Drags on the selected frame's handles; returns whether a frame drag owns the pointer. The cursor shows what the handle under it, or the one dragged, does
-pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response, rect: Rect, gizmo: Option<&FrameGizmo>) -> bool {
-    let ctx = ui.ctx();
-    let owned = crate::projection_gizmo::input(app, ctx, response, rect, gizmo);
-    let cursor = match dragging::<FrameGizmo>(ctx) {
-        Some(drag) => Some(drag.grab.cursor(true)),
-        None => gizmo.zip(response.hover_pos()).and_then(|(gizmo, hover)| gizmo.grab(hover)).map(|grab| grab.cursor(false)),
-    };
-    if let Some(cursor) = cursor {
-        ctx.set_cursor_icon(cursor);
+    fn cursor(&self, grab: FrameGrab, dragging: bool) -> egui::CursorIcon {
+        grab.cursor(dragging)
     }
-    owned
 }
 
 /// The selected frame over the 3D view: dashed outline, corner and edge dots, and the centre square with its axis arrows

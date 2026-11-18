@@ -16,6 +16,12 @@ const TEXTURE_SET_SIDE: f32 = 0.42;
 /// The smallest fixed size the list offers
 const SMALLEST_FIXED: u32 = 256;
 
+/// The Relative side of the Relative | Fixed switch
+const RELATIVE_MODE: usize = 0;
+
+/// The Fixed side of the Relative | Fixed switch
+const FIXED_MODE: usize = 1;
+
 /// The Resolution band (folded: picture and size); returns the resolution picked
 pub(crate) fn resolution_band(sheet: &mut PropertySheet<'_>, current: CookResolution, texture_set: u32) -> Option<CookResolution> {
     let tokens = Tokens::get(sheet.ui.ctx());
@@ -27,9 +33,9 @@ pub(crate) fn resolution_band(sheet: &mut PropertySheet<'_>, current: CookResolu
     }
 
     let modes = [tr("Relative"), tr("Fixed")];
-    let mode_picture = |painter: &Painter, rect: Rect, index: usize| ratio_picture(painter, rect, 0, index == 0, &tokens);
-    let switched = sheet.picture_switch(&modes, usize::from(!relative), &mode_picture).map(|mode| {
-        if mode == 0 {
+    let mode_picture = |painter: &Painter, rect: Rect, index: usize| ratio_picture(painter, rect, 0, index == RELATIVE_MODE, &tokens);
+    let switched = sheet.picture_switch(&modes, if relative { RELATIVE_MODE } else { FIXED_MODE }, &mode_picture).map(|mode| {
+        if mode == RELATIVE_MODE {
             // Fixed → Relative keeps the nearest factor the texture set can cook at
             let factor = factor_of(size, texture_set);
             if fits(texture_set, factor) { CookResolution::Relative(factor) } else { CookResolution::TEXTURE_SET }

@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use texturecraft_engine::core::{FillSymmetry, Projection, Sampling, SymmetryKind};
 
 use crate::TextureCraftApp;
-use crate::dock::with;
+use crate::fill_panel::run_projection;
 use crate::fill_pictures::ring_picture;
 use crate::i18n::{n_, tr};
 use crate::property_sheet::{PropertySheet, StackSlider};
@@ -16,16 +16,19 @@ use crate::theme::{AXIS_COLORS, AXIS_NAMES, Tokens};
 /// What the Axis position track spans, in mesh radii from the mesh's centre
 const POSITION_RANGE: RangeInclusive<f32> = -FillSymmetry::REACH..=FillSymmetry::REACH;
 
-/// What the Count track spans; a typed count may reach the engine's most
-const COUNT_TRACK: RangeInclusive<f32> = 2.0..=16.0;
+/// What the Count track spans; a typed count reaches the engine's fewest and most copies, as the symmetry popup's Count does
+const COUNT_TRACK: RangeInclusive<f32> = *FillSymmetry::COUNTS.start() as f32..=16.0;
 
-/// What the Angle span track spans, in degrees
-const SPAN_RANGE: RangeInclusive<f32> = 1.0..=360.0;
+/// What a typed Count may reach
+const COUNT_TYPED: RangeInclusive<f32> = *FillSymmetry::COUNTS.start() as f32..=*FillSymmetry::COUNTS.end() as f32;
+
+/// The Angle span slider's place in the stack beside the ring, under Count
+const SPAN_SLIDER: usize = 1;
 
 /// The Symmetry section under the Fill section: its switch on the caption, then Type, Axis, the radial copies beside their picture, Flip copy and Axis position
 pub(crate) fn symmetry_section(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, projection: &Projection, sampling: Sampling, base: &Value) {
     let symmetry = sampling.symmetry;
-    let run = |app: &mut TextureCraftApp, fields: Value| app.run("layer.fill.projection", with(base, fields));
+    let run = |app: &mut TextureCraftApp, fields: Value| run_projection(app, base, fields);
     if !projection.takes_symmetry() {
         let reason = match projection {
             Projection::UvTile => tr("Not available with Fill (Match per UV Tile)"),
@@ -65,8 +68,7 @@ pub(crate) fn symmetry_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
         SymmetryKind::Mirror => vec![axis],
         SymmetryKind::Radial => (0..AXIS_NAMES.len()).filter(|other| *other != axis).collect(),
     };
-    let mut parts: Vec<(&str, egui::Color32, f32)> =
-        moving.iter().map(|&axis_index| (AXIS_NAMES[axis_index], AXIS_COLORS[axis_index], symmetry.position[axis_index])).collect();
+    let mut parts: Vec<(&str, egui::Color32, f32)> = moving.iter().map(|&moved| (AXIS_NAMES[moved], AXIS_COLORS[moved], symmetry.position[moved])).collect();
     if let Some((index, merge)) = sheet.lettered_sliders(tr("Axis position"), &mut parts, POSITION_RANGE, 2)
         && let (Some(&moved), Some((_, _, value))) = (moving.get(index), parts.get(index))
     {
@@ -85,19 +87,25 @@ fn axis_index(symmetry: &FillSymmetry) -> usize {
 fn radial_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, symmetry: &FillSymmetry, base: &Value) {
     let tokens = Tokens::get(sheet.ui.ctx());
     let axis_color = AXIS_COLORS[axis_index(symmetry)];
-    let (count, span) = (symmetry.copies(), symmetry.span);
-    let picture = |painter: &Painter, rect: Rect| ring_picture(painter, rect, count, span, axis_color, &tokens);
-    let (mut count_value, mut span_value) = (count as f32, span);
+    let picture = |painter: &Painter, rect: Rect| ring_picture(painter, rect, symmetry, axis_color, &tokens);
+    let count = symmetry.copies();
+    let (mut count_value, mut span_value) = (count as f32, symmetry.span);
     let mut sliders = [
-        StackSlider { label: tr("Count"), value: &mut count_value, range: COUNT_TRACK, decimals: 0, suffix: "" },
-        StackSlider { label: tr("Angle span"), value: &mut span_value, range: SPAN_RANGE, decimals: 0, suffix: "°" },
+        StackSlider { label: tr("Count"), value: &mut count_value, range: COUNT_TRACK, typed: COUNT_TYPED, decimals: 0, suffix: "" },
+        StackSlider { label: tr("Angle span"), value: &mut span_value, range: FillSymmetry::SPANS, typed: FillSymmetry::SPANS, decimals: 0, suffix: "°" },
     ];
-    let fields = match sheet.picture_sliders(&picture, &mut sliders) {
-        Some((0, merge)) => json!({"symmetryCount": count_value.round(), "merge": merge}),
-        Some((_, merge)) => json!({"angleSpan": span_value, "merge": merge}),
-        None => return,
-    };
-    app.run("layer.fill.projection", with(base, fields));
+    let edited = sheet.picture_sliders(&picture, &mut sliders);
+    if let Some((SPAN_SLIDER, merge)) = edited {
+        run_projection(app, base, json!({"angleSpan": span_value, "merge": merge}));
+        return;
+    }
+
+    // Whole counts: a press's first whole-number change starts its undo step, changes that round to the count it has apply nothing
+    let counted = count_value.round();
+    let press = sheet.ui.make_persistent_id("symmetry_count_press");
+    if let Some(merge) = crate::widgets::press_edit(sheet.ui, press, edited.is_some() && counted as u32 != count) {
+        run_projection(app, base, json!({"symmetryCount": counted, "merge": merge}));
+    }
 }
 
 /// The Type dropdown's name for `kind`

@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::SymmetryKind;
 
+/// A full turn, in degrees
+const FULL_TURN_DEGREES: f32 = 360.0;
+
 /// Copies of a fill's projection: off for every fill saved before symmetry existed
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -24,17 +27,20 @@ pub struct FillSymmetry {
 
 impl FillSymmetry {
     /// Off; switched on, a mirror across X through the mesh's centre, or six radial copies over a full turn
-    pub const OFF: FillSymmetry = FillSymmetry { on: false, kind: SymmetryKind::Mirror, axis: 0, flip: [false; 2], position: [0.0; 3], count: 6, span: 360.0 };
+    pub const OFF: FillSymmetry =
+        FillSymmetry { on: false, kind: SymmetryKind::Mirror, axis: 0, flip: [false; 2], position: [0.0; 3], count: 6, span: FULL_TURN_DEGREES };
     /// The fewest and most radial copies
     pub const COUNTS: std::ops::RangeInclusive<u32> = 2..=64;
+    /// The degrees an Angle span may be set to: at least one, at most a full turn
+    pub const SPANS: std::ops::RangeInclusive<f32> = 1.0..=FULL_TURN_DEGREES;
     /// How far the axis position reaches from the mesh's centre, in mesh radii
     pub const REACH: f32 = 1.0;
 
     /// The degrees between radial copies: a full turn spaces `count` copies evenly, a smaller span puts the first and last at its ends
     pub fn step(&self) -> f32 {
         let count = self.count.clamp(*Self::COUNTS.start(), *Self::COUNTS.end()) as f32;
-        let span = self.span.clamp(0.0, 360.0);
-        if span >= 360.0 { span / count } else { span / (count - 1.0) }
+        let span = self.span.clamp(0.0, FULL_TURN_DEGREES);
+        if span >= FULL_TURN_DEGREES { span / count } else { span / (count - 1.0) }
     }
 
     /// The radial copies there are, the original included

@@ -11,9 +11,20 @@ mod place;
 
 use place::Place;
 
-/// How far in front of the object a planar's frame stands, and how far its direction line reaches back from the frame (preview units)
+/// How far in front of the object a planar's frame stands (preview units)
 const FRAME_GAP: f32 = 0.15;
+
+/// How far a planar's direction line reaches back from its frame (preview units)
 const DIRECTION_LENGTH: f32 = 0.35;
+
+/// A box's corners: each index's three low bits pick its low (0) or high (1) side along X, Y and Z
+const BOX_CORNERS: usize = 8;
+
+/// The bit of a box corner's index for each axis: flipping one walks along an edge
+const AXIS_BITS: [usize; 3] = [1, 2, 4];
+
+/// The last axis index, Z: a stored axis past it reads as Z
+const LAST_AXIS: u8 = 2;
 
 /// The projector's outline in the preview's coordinates (the compositor's: the mesh's centre at the origin, its half diagonal 1)
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -31,7 +42,7 @@ impl ProjectorOutline {
     pub(crate) fn of(projection: &Projection, object: Vec3) -> Option<ProjectorOutline> {
         let outline = match projection {
             Projection::Planar { scale, axis, offset, projector, placed: None, .. } => {
-                // The compositor's coordinates as a mesh: centred, half diagonal 1
+                // The compositor's coordinates as a mesh: centred, half diagonal 1, so each corner sits 1/√3 out along every axis
                 let corner = Vec3::splat(1.0 / 3f32.sqrt());
                 let frame = axis_frame(*scale, *axis, Vec3::from(*offset), projector, (-corner, corner))?;
                 planar(frame.size, decal_axes(&frame)?, object)
@@ -39,15 +50,18 @@ impl ProjectorOutline {
             Projection::Triplanar { scale, offset, projector, .. } => {
                 let place = Place::new(projector.rotation, projector.scale, Vec3::from(*offset), *scale);
                 let size = object * BOX_REACH;
-                let corner = |index: usize| place.local + size * Vec3::new(sign(index, 0), sign(index, 1), sign(index, 2));
+                let corner = |corner_index: usize| place.local + size * Vec3::new(sign(corner_index, 0), sign(corner_index, 1), sign(corner_index, 2));
+
+                // Each edge once: from a corner on an axis's low side to the corner across that axis
                 let mut lines = Vec::new();
-                for a in 0..8 {
-                    for bit in [1, 2, 4] {
-                        if a & bit == 0 {
-                            lines.push(vec![place.world(corner(a)), place.world(corner(a | bit))]);
+                for corner_index in 0..BOX_CORNERS {
+                    for bit in AXIS_BITS {
+                        if corner_index & bit == 0 {
+                            lines.push(vec![place.world(corner(corner_index)), place.world(corner(corner_index | bit))]);
                         }
                     }
                 }
+
                 ProjectorOutline { lines, tip: None, center: place.world(place.local) }
             }
             Projection::Spherical { offset, projector, .. } => {
@@ -59,9 +73,9 @@ impl ProjectorOutline {
             }
             Projection::Cylindrical { axis, offset, projector, .. } => {
                 let place = Place::new(projector.rotation, projector.scale, Vec3::from(*offset), 1.0);
-                let axis = usize::from((*axis).min(2));
+                let axis = usize::from((*axis).min(LAST_AXIS));
                 let along = Vec3::AXES[axis];
-                let (u, v) = (Vec3::AXES[(axis + 1) % 3], Vec3::AXES[(axis + 2) % 3]);
+                let (u, v) = (Vec3::AXES[(axis + 1) % Vec3::AXES.len()], Vec3::AXES[(axis + 2) % Vec3::AXES.len()]);
                 let radius = (object * (Vec3::ONE - along)).max_element() * CYLINDER_REACH;
                 let half_height = object[axis] * CYLINDER_HEIGHT;
                 let cap = |height: f32| circle(|t| place.world(place.local + along * height + (u * t.x + v * t.y) * radius));
@@ -94,7 +108,7 @@ impl ProjectorOutline {
 /// A planar's frame, `size` across and up on the frame `axes` (origin, across, up, out), stood just in front of the object on the side its image reads from, and the line its image travels along into the object
 fn planar(size: [f32; 2], (origin, across, up, out): (Vec3, Vec3, Vec3, Vec3), object: Vec3) -> ProjectorOutline {
     let center = origin + out * (object.max_element() + FRAME_GAP - origin.dot(out));
-    let (across, up) = (across * size[0] * 0.5, up * size[1] * 0.5);
+    let (across, up) = (across * size[0] / 2.0, up * size[1] / 2.0);
     let corners = [center - across - up, center + across - up, center + across + up, center - across + up, center - across - up];
     let tip = center - out * DIRECTION_LENGTH;
     ProjectorOutline { lines: vec![corners.to_vec(), vec![center, tip]], tip: Some(tip), center }

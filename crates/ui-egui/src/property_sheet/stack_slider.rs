@@ -7,7 +7,11 @@ pub(crate) struct StackSlider<'a> {
 
     pub(crate) value: &'a mut f32,
 
+    /// What the track spans
     pub(crate) range: RangeInclusive<f32>,
+
+    /// What a typed value may reach, at least the track's span (a radial Count types past its track's most)
+    pub(crate) typed: RangeInclusive<f32>,
 
     pub(crate) decimals: usize,
 

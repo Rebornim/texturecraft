@@ -121,7 +121,7 @@ impl PropertySheet<'_> {
             let id = self.next_id();
             let track = Track { start: x0 + KNOB_RADIUS, end: self.track_end(), center_y, zero: None, ramp: false };
             let dragged = self.track(id, slider.label, &track, slider.value, &slider.range);
-            let typed = self.value_field(id, slider.label, center_y, *slider.value, &slider.range, slider.decimals, slider.suffix);
+            let typed = self.value_field(id, slider.label, center_y, *slider.value, &slider.typed, slider.decimals, slider.suffix);
             if let Some(merge) = Self::apply_typed(slider.value, typed, dragged) {
                 edit = Some((index, merge));
             }

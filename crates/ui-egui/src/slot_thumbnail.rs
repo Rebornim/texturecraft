@@ -44,6 +44,9 @@ pub(crate) const THUMB_RADIUS: u8 = 3;
 /// How far the empty square's outline sits inside the slot's square
 const EMPTY_SLOT_INSET: f32 = 1.0;
 
+/// The whole of a texture, as the part of it a picture shows
+pub(crate) const FULL_UV: Rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+
 /// Paints `thumbnail` into a slot's square
 pub(crate) fn paint_thumbnail(painter: &Painter, rect: Rect, thumbnail: &SlotThumbnail, tokens: &Tokens) {
     match thumbnail {
@@ -51,11 +54,11 @@ pub(crate) fn paint_thumbnail(painter: &Painter, rect: Rect, thumbnail: &SlotThu
             painter.rect_filled(rect, CornerRadius::ZERO, *color);
         }
         SlotThumbnail::Texture(texture) => {
-            painter.image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+            painter.image(texture.id(), rect, FULL_UV, Color32::WHITE);
         }
         SlotThumbnail::Stack(texture) => {
             painter.rect_filled(rect, CornerRadius::ZERO, tokens.field);
-            painter.image(*texture, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+            painter.image(*texture, rect, FULL_UV, Color32::WHITE);
         }
         SlotThumbnail::Glyph(glyph) => {
             painter.rect_filled(rect, CornerRadius::ZERO, tokens.field);

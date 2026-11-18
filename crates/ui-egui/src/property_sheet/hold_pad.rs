@@ -1,6 +1,6 @@
 //! A picture that is also a press-and-hold surface: a badge in its corner says so, and the edge and badge light while hovered or held
 
-use egui::{Align2, CornerRadius, FontId, Rect, RectAlign, Response, Role, Sense, Stroke, StrokeKind, WidgetInfo, vec2};
+use egui::{Align2, CornerRadius, FontId, Rect, Response, Role, Sense, Stroke, StrokeKind, WidgetInfo, vec2};
 
 use super::PropertySheet;
 
@@ -29,14 +29,6 @@ impl PropertySheet<'_> {
         if lit {
             painter.rect_stroke(picture, 0, Stroke::new(1.0, tokens.accent), StrokeKind::Inside);
         }
-        response
-    }
-
-    /// A tooltip for a pad, outside the panel beside it, where it covers no value of the panel; under it when the panel has no room on its left
-    pub(crate) fn tip_beside(&self, response: Response, text: &str) -> Response {
-        let mut tooltip = egui::Tooltip::for_enabled(&response);
-        tooltip.popup = tooltip.popup.anchor(response.rect).align(RectAlign::LEFT_START).align_alternatives(&[RectAlign::BOTTOM_START]);
-        tooltip.show(|ui| ui.label(text));
         response
     }
 }

@@ -68,12 +68,7 @@ impl PropertySheet<'_> {
 
     /// A signed range: fills from zero and marks it with a tick
     pub(crate) fn signed_slider(&mut self, label: &str, value: &mut f32, range: RangeInclusive<f32>, decimals: usize) -> Option<bool> {
-        let (control, center_y) = self.row(label);
-        let id = self.next_id();
-        let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, zero: Some(0.0), ramp: false };
-        let dragged = self.track(id, label, &track, value, &range);
-        let typed = self.value_field(id, label, center_y, *value, &range, decimals, "");
-        Self::apply_typed(value, typed, dragged)
+        self.centered_slider(label, value, range, 0.0, decimals)
     }
 
     /// A range whose middle `centre` leaves things as they are: fills from it and marks it with a tick, like a signed range
@@ -112,9 +107,9 @@ impl PropertySheet<'_> {
         self.angle_shown(lead, degrees, range, false)
     }
 
-    /// An angle added to others: a signed track from −180 to 180 with its zero tick, the dial, and the value with its sign ("+30°")
-    pub(crate) fn relative_angle(&mut self, label: &str, degrees: &mut f32) -> Option<bool> {
-        self.angle_shown(RowLead::label(label), degrees, -180.0..=180.0, true)
+    /// An angle added to others: a signed track over `range` with its zero tick, the dial, and the value with its sign ("+30°")
+    pub(crate) fn relative_angle(&mut self, label: &str, degrees: &mut f32, range: RangeInclusive<f32>) -> Option<bool> {
+        self.angle_shown(RowLead::label(label), degrees, range, true)
     }
 
     /// [`Self::angle_led`], the value shown with its sign when `plus`
@@ -129,7 +124,8 @@ impl PropertySheet<'_> {
             zero: (*range.start() < 0.0).then_some(0.0),
             ramp: false,
         };
-        let dragged = self.track(id, lead.text(), &track, degrees, &range);
+        let name = lead.text();
+        let dragged = self.track(id, name, &track, degrees, &range);
 
         let tokens = self.tokens;
         let painter = self.ui.painter();
@@ -138,14 +134,8 @@ impl PropertySheet<'_> {
         let hand = pos2(dial_x + DIAL_RADIUS * turn.cos(), center_y + DIAL_RADIUS * turn.sin());
         painter.line_segment([pos2(dial_x, center_y), hand], Stroke::new(TRACK_WIDTH, tokens.text));
 
-        let typed = if plus {
-            let shown = format!("{:+.0}°", *degrees);
-            self.measure_value(&shown);
-            let width = self.used.value_width.max(super::VALUE_MIN_WIDTH);
-            self.value_text_field(id, ValueText { label: &lead.text(), right: self.right, width, center_y, shown: &shown, suffix: "°" }, *degrees, &range, 0)
-        } else {
-            self.value_field(id, lead.text(), center_y, *degrees, &range, 0, "°")
-        };
+        let shown = if plus { format!("{:+.0}°", *degrees) } else { format!("{:.0}°", *degrees) };
+        let typed = self.column_value_field(id, &name, center_y, &shown, "°", *degrees, &range, 0);
         Self::apply_typed(degrees, typed, dragged)
     }
 
@@ -210,7 +200,7 @@ impl PropertySheet<'_> {
         if (response.dragged() || response.clicked())
             && let Some(pointer) = response.interact_pointer_pos()
         {
-            let picked = (minimum + (pointer.x - track.start) / length * span).clamp(minimum, maximum);
+            let picked = kept_in(minimum + (pointer.x - track.start) / length * span, range);
             if picked != *value {
                 *value = picked;
                 moved = true;
@@ -223,7 +213,7 @@ impl PropertySheet<'_> {
         let tokens = self.tokens;
         let at = |v: f32| track.start + ((v - minimum) / span).clamp(0.0, 1.0) * length;
         let knob_x = at(*value);
-        let zero_x = track.zero.map_or(track.start, |zero| at(zero.clamp(minimum, maximum)));
+        let zero_x = track.zero.map_or(track.start, |zero| at(kept_in(zero, range)));
         let painter = self.ui.painter();
         if !track.ramp {
             painter.line_segment([pos2(track.start, track.center_y), pos2(track.end, track.center_y)], Stroke::new(TRACK_WIDTH, tokens.button_border));
@@ -251,9 +241,25 @@ impl PropertySheet<'_> {
         suffix: &str,
     ) -> Option<f32> {
         let shown = format!("{value:.decimals$}{suffix}");
-        self.measure_value(&shown);
+        self.column_value_field(id, &label, center_y, &shown, suffix, value, range, decimals)
+    }
+
+    /// [`Self::value_field`] reading `shown`: the panel's value column grows to fit it
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn column_value_field(
+        &mut self,
+        id: Id,
+        label: &dyn std::fmt::Display,
+        center_y: f32,
+        shown: &str,
+        suffix: &str,
+        value: f32,
+        range: &RangeInclusive<f32>,
+        decimals: usize,
+    ) -> Option<f32> {
+        self.measure_value(shown);
         let width = self.used.value_width.max(super::VALUE_MIN_WIDTH);
-        self.value_text_field(id, ValueText { label: &label, right: self.right, width, center_y, shown: &shown, suffix }, value, range, decimals)
+        self.value_text_field(id, ValueText { label, right: self.right, width, center_y, shown, suffix }, value, range, decimals)
     }
 
     /// [`Self::value_field`] ending at `right`, `width` wide, outside the panel's value column
@@ -275,32 +281,34 @@ impl PropertySheet<'_> {
     }
 
     /// A value drawn as `text.shown` that turns into a field when clicked; returns the typed value (its `text.suffix` and a leading "×" or "x" allowed), kept in `range`
-    pub(super) fn value_text_field(&mut self, id: Id, text: ValueText<'_>, value: f32, range: &RangeInclusive<f32>, decimals: usize) -> Option<f32> {
-        let ValueText { label, right, width, center_y, shown, suffix } = text;
+    pub(super) fn value_text_field(&mut self, id: Id, value_text: ValueText<'_>, value: f32, range: &RangeInclusive<f32>, decimals: usize) -> Option<f32> {
+        let ValueText { label, right, width, center_y, shown, suffix } = value_text;
         let rect = Rect::from_min_max(pos2(right - width, center_y - ROW_HIT_HALF_HEIGHT), pos2(right, center_y + ROW_HIT_HALF_HEIGHT));
         let field_id = id.with("typed");
         let editing = self.ui.data(|data| data.get_temp::<String>(field_id));
+        let seeded = format!("{value:.decimals$}");
 
         let tokens = self.tokens;
-        let Some(mut text) = editing else {
+        let Some(mut typed_text) = editing else {
             let response = self.ui.interact(rect, id.with("value"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
             response.widget_info(|| WidgetInfo::labeled(egui::Role::Label, true, crate::i18n::trf("{label} value", &[("label", label)])));
             self.ui.painter().text(pos2(right, center_y), Align2::RIGHT_CENTER, shown, semibold(TEXT_SIZE), tokens.text);
+
             if response.hovered() {
                 self.value_line(rect.left(), right, center_y, tokens.field_border);
             }
             if response.clicked() {
-                self.start_typing(field_id, format!("{value:.decimals$}"));
+                self.start_typing(field_id, seeded);
             }
             return None;
         };
 
         // Typing happens on the value's own line: no box, the line under it goes accent
-        let edit = egui::TextEdit::singleline(&mut text).id(field_id).font(semibold(TEXT_SIZE)).align(egui::Align2::RIGHT_CENTER);
+        let edit = egui::TextEdit::singleline(&mut typed_text).id(field_id).font(semibold(TEXT_SIZE)).align(egui::Align2::RIGHT_CENTER);
         let response = self.typing_edit(rect.left(), right, center_y, edit);
         self.value_line(rect.left(), right, center_y, tokens.accent);
         if !response.lost_focus() {
-            self.ui.data_mut(|data| data.insert_temp(field_id, text));
+            self.ui.data_mut(|data| data.insert_temp(field_id, typed_text));
             return None;
         }
 
@@ -309,7 +317,17 @@ impl PropertySheet<'_> {
             return None;
         }
 
-        let typed: f32 = text.trim().trim_end_matches(suffix).trim_start_matches(['×', 'x']).trim().parse().ok()?;
-        typed.is_finite().then(|| typed.clamp(*range.start(), *range.end()))
+        // Leaving the field as it opened changes nothing: no undo step, no rounding to the shown decimals
+        if typed_text.trim() == seeded {
+            return None;
+        }
+
+        let typed: f32 = typed_text.trim().trim_end_matches(suffix).trim_start_matches(['×', 'x']).trim().parse().ok()?;
+        typed.is_finite().then(|| kept_in(typed, range))
     }
+}
+
+/// `value` kept in `range`; unlike `clamp`, a reversed or NaN range never panics
+fn kept_in(value: f32, range: &RangeInclusive<f32>) -> f32 {
+    value.max(*range.start()).min(*range.end())
 }

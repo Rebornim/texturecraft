@@ -1,8 +1,6 @@
 use egui::{Align2, CornerRadius, FontId, Painter, Rect, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};
 use egui_phosphor::regular as ic;
 
-use super::group::CARD_BLEED;
-use super::row::RESET_AT_DEFAULT_OPACITY;
 use super::switch_control::PILL_SIZE;
 use super::{ButtonIcon, CONTROL_RADIUS, PropertySheet, ROW_HEIGHT, SlotResponse, TEXT_SIZE};
 use crate::theme::semibold;
@@ -108,7 +106,7 @@ impl PropertySheet<'_> {
         let reset_x = if clear { clear_x - RESET_STEP } else { clear_x };
 
         // The whole row across the card picks the source, so its list hangs at the card's width; the glyphs on the right take their clicks first
-        let row = Rect::from_min_max(pos2(self.left - CARD_BLEED, rect.top()), pos2(self.right + CARD_BLEED, rect.bottom()));
+        let row = self.bled_row(rect);
         let pick_id = self.next_id();
         let pick = self.ui.interact(row, pick_id, Sense::click());
         pick.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, name));
@@ -147,11 +145,7 @@ impl PropertySheet<'_> {
             };
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, live, crate::i18n::tr(tip)));
             *slot = live && response.clicked();
-            let color = match (live, response.hovered()) {
-                (false, _) => tokens.text_dim.gamma_multiply(RESET_AT_DEFAULT_OPACITY),
-                (true, true) => tokens.text,
-                (true, false) => tokens.text_dim,
-            };
+            let color = self.reset_glyph_color(live, response.hovered(), tokens.text);
             painter.text(glyph_rect.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(SLOT_ICON_SIZE), color);
         }
 
@@ -234,6 +228,7 @@ impl PropertySheet<'_> {
         let (control, center_y) = self.row(label);
         let field = Rect::from_min_max(control.min, pos2(self.right - DICE_ROOM, control.bottom()));
         let dice = Rect::from_min_max(pos2(self.right - DICE_WIDTH, control.top()), control.max);
+
         let id = self.next_id();
         let typing_id = id.with("typed");
         let tokens = self.tokens;
@@ -246,6 +241,7 @@ impl PropertySheet<'_> {
             let edit = egui::TextEdit::singleline(&mut text).id(typing_id).font(semibold(TEXT_SIZE)).align(egui::Align2::RIGHT_CENTER);
             let response = self.typing_edit(field.left() + SEED_VALUE_INSET, field.right() - SEED_VALUE_INSET, center_y, edit);
             painter.rect_stroke(field, CornerRadius::same(CONTROL_RADIUS), Stroke::new(1.0, tokens.accent), StrokeKind::Inside);
+
             if response.lost_focus() {
                 self.ui.data_mut(|data| data.remove::<String>(typing_id));
                 if let Ok(typed) = text.trim().parse::<u32>()
@@ -262,6 +258,7 @@ impl PropertySheet<'_> {
             let response = self.ui.interact(field, id, Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, crate::i18n::trf("{label} value", &[("label", &label)])));
             painter.text(pos2(field.right() - SEED_VALUE_INSET, center_y), Align2::RIGHT_CENTER, seed.to_string(), semibold(TEXT_SIZE), tokens.text);
+
             if response.hovered() {
                 painter.rect_stroke(field, CornerRadius::same(CONTROL_RADIUS), Stroke::new(1.0, tokens.button_border), StrokeKind::Inside);
             }
@@ -270,6 +267,7 @@ impl PropertySheet<'_> {
             }
         }
 
+        // The dice picks the next seed
         let dice_id = self.next_id();
         let dice_response = self.tip(self.ui.interact(dice, dice_id, Sense::click()), crate::i18n::tr("Random"));
         painter.rect(
@@ -281,6 +279,7 @@ impl PropertySheet<'_> {
         );
         painter.text(dice.center(), Align2::CENTER_CENTER, ic::DICE_FIVE, FontId::proportional(DICE_ICON_SIZE), tokens.text);
         dice_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr("Random")));
+
         if dice_response.clicked() {
             *seed = next_seed(*seed);
             changed = true;

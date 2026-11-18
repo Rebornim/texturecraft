@@ -71,6 +71,7 @@ fn slider_inner(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::Rang
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let id = ui.next_auto_id();
                 let shown = format!("{value:.decimals$}");
+
                 // Keep unfinished input while the document value is re-read each frame
                 let mut text = ui.data(|data| data.get_temp::<String>(id)).unwrap_or_else(|| shown.clone());
                 let response = ui.add(
@@ -82,7 +83,7 @@ fn slider_inner(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::Rang
                         .frame(egui::Frame::NONE),
                 );
                 if response.has_focus() {
-                    ui.data_mut(|data| data.insert_temp(id, text.clone()));
+                    ui.data_mut(|data| data.insert_temp(id, text));
                 } else {
                     ui.data_mut(|data| data.remove_temp::<String>(id));
                     // Escape can lose focus before the app consumes the key
@@ -496,7 +497,7 @@ fn color_picker(ui: &mut Ui, id: egui::Id, c: &mut Color32, width: f32) -> bool 
     changed
 }
 
-/// Fill `rect` with `rgb(x, y)` (sRGB 0..1 over 0..1 across and down), as a shaded mesh.
+/// Fill `rect` with `rgb(x, y)` (sRGB 0..1 over 0..1 across and down), as a shaded mesh
 pub(crate) fn gradient(painter: &egui::Painter, rect: egui::Rect, rgb: impl Fn(f32, f32) -> [f32; 3]) {
     /// Cells across and down: fine enough that a hue strip's six ramps read smooth
     const GRID_CELLS: u32 = 24;

@@ -148,6 +148,19 @@ impl PropertySheet<'_> {
 
     /// Paints a dropdown's button in `rect` and returns its response
     pub(super) fn dropdown_button(&mut self, rect: Rect, value: &str, picture: Option<impl Fn(&Painter, Rect)>) -> Response {
+        self.dropdown_button_led(rect, value, |painter| match picture {
+            Some(draw) => {
+                let picture_rect =
+                    Rect::from_min_size(pos2(rect.left() + PICTURE_INSET, rect.center().y - PICTURE_SIZE / 2.0), vec2(PICTURE_SIZE, PICTURE_SIZE));
+                draw(painter, picture_rect);
+                picture_rect.right() + PICTURE_TO_TEXT
+            }
+            None => rect.left() + VALUE_INSET,
+        })
+    }
+
+    /// [`Self::dropdown_button`] whose left end `lead` paints on the button's face, returning where the value starts
+    pub(super) fn dropdown_button_led(&mut self, rect: Rect, value: &str, lead: impl FnOnce(&Painter) -> f32) -> Response {
         let id = self.next_id();
         let response = self.ui.interact(rect, id, Sense::click());
         response.widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, value));
@@ -155,12 +168,7 @@ impl PropertySheet<'_> {
         let painter = self.ui.painter();
         painter.rect_filled(rect, CornerRadius::same(CONTROL_RADIUS), if response.hovered() { tokens.row_hover } else { tokens.button });
 
-        let mut text_x = rect.left() + VALUE_INSET;
-        if let Some(draw) = picture {
-            let picture_rect = Rect::from_min_size(pos2(rect.left() + PICTURE_INSET, rect.center().y - PICTURE_SIZE / 2.0), vec2(PICTURE_SIZE, PICTURE_SIZE));
-            draw(painter, picture_rect);
-            text_x = picture_rect.right() + PICTURE_TO_TEXT;
-        }
+        let text_x = lead(painter);
         let galley = truncated(painter, value, rect.right() - CARET_ROOM - text_x, tokens.text);
         painter.galley(pos2(text_x, rect.center().y - galley.size().y / 2.0), galley, tokens.text);
         painter.text(pos2(rect.right() - CARET_INSET, rect.center().y), Align2::CENTER_CENTER, ic::CARET_DOWN, FontId::proportional(ICON_SIZE), tokens.text);

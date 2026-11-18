@@ -3,7 +3,6 @@
 use egui::{Align2, Color32, CornerRadius, FontId, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use egui_phosphor::regular as ic;
 
-use super::group::CARD_BLEED;
 use super::{GLYPH_SIZE, GLYPH_TARGET, IdColorRowResponse, PropertySheet, ROW_HEIGHT, ROW_RADIUS, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::drawn_icon::DrawnIcon;
 
@@ -43,7 +42,7 @@ impl PropertySheet<'_> {
     pub(crate) fn id_color_row(&mut self, rgb: [u8; 3], repicking: bool, enabled: bool) -> IdColorRowResponse {
         let rect = self.take(ROW_HEIGHT);
         let center_y = rect.center().y;
-        let face = Rect::from_min_max(pos2(self.left - CARD_BLEED, rect.top()), pos2(self.right + CARD_BLEED, rect.bottom()));
+        let face = self.bled_row(rect);
         let hovered = self.ui.rect_contains_pointer(face);
         let swatch =
             Rect::from_min_max(pos2(self.left, center_y - SWATCH_HEIGHT / 2.0), pos2(self.column() - SWATCH_TO_COLUMN, center_y + SWATCH_HEIGHT / 2.0));

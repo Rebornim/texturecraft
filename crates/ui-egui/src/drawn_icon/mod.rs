@@ -1,6 +1,4 @@
-//! Icons the icon font has no fitting glyph for, drawn in code from signed distances: the pipette (every eyedropper, and the
-//! pointer an armed pick shows) and the invert square. Each is rendered once per pixel size into a white texture and tinted
-//! where it is drawn, so it is as sharp as a font glyph at any scale
+//! Icons the icon font has no fitting glyph for, drawn in code from signed distances
 
 mod distance;
 mod invert;
@@ -11,7 +9,7 @@ pub(crate) use distance::Point;
 /// The largest side an icon is rendered at, in pixels
 const MAX_SIDE: u32 = 256;
 
-/// An icon drawn in code
+/// An icon drawn in code: rendered once per pixel size into a white texture and tinted where it is drawn, so it is as sharp as a font glyph at any scale
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum DrawnIcon {
     /// The eyedropper: a pipette, tip at the bottom left

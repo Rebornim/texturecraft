@@ -21,4 +21,11 @@ impl PropertySheet<'_> {
         tooltip.show(|ui| ui.label(text));
         response
     }
+    /// A tooltip for a pad, outside the panel beside it, where it covers no value of the panel; under it when the panel has no room on its left
+    pub(crate) fn tip_beside(&self, response: Response, text: &str) -> Response {
+        let mut tooltip = egui::Tooltip::for_enabled(&response);
+        tooltip.popup = tooltip.popup.anchor(response.rect).align(RectAlign::LEFT_START).align_alternatives(&[RectAlign::BOTTOM_START]);
+        tooltip.show(|ui| ui.label(text));
+        response
+    }
 }

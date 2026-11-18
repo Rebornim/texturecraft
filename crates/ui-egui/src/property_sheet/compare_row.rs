@@ -1,11 +1,8 @@
-//! A comparison across two rows: the left source's dropdown with the operator switch beside it, then the right source's dropdown,
-//! each source tagged by its colour on its left edge
+//! A comparison across two rows: two colour-tagged source dropdowns and the operator switch
 
-use egui::{Align2, Color32, CornerRadius, FontId, Rect, Role, Sense, WidgetInfo, pos2};
-use egui_phosphor::regular as ic;
+use egui::{Color32, CornerRadius, Rect};
 
-use super::choice::{CARET_INSET, CARET_ROOM, truncated};
-use super::{CONTROL_RADIUS, CompareRowResponse, ICON_SIZE, PropertySheet};
+use super::{CompareRowResponse, PropertySheet};
 
 /// Width of the operator switch at the right end of the first row
 const OPERATOR_SWITCH_WIDTH: f32 = 66.0;
@@ -47,17 +44,9 @@ impl PropertySheet<'_> {
 
     /// A dropdown button in `rect` tagged by `tag` along its left edge
     fn tagged_button(&mut self, rect: Rect, value: &str, tag: Color32) -> egui::Response {
-        let id = self.next_id();
-        let response = self.ui.interact(rect, id, Sense::click());
-        response.widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, value));
-        let tokens = self.tokens;
-        let painter = self.ui.painter();
-        painter.rect_filled(rect, CornerRadius::same(CONTROL_RADIUS), if response.hovered() { tokens.row_hover } else { tokens.button });
-        painter.rect_filled(Rect::from_x_y_ranges(rect.left()..=(rect.left() + TAG_WIDTH), rect.y_range()), CornerRadius::same(TAG_RADIUS), tag);
-        let text_x = rect.left() + TAGGED_VALUE_INSET;
-        let galley = truncated(painter, value, rect.right() - CARET_ROOM - text_x, tokens.text);
-        painter.galley(pos2(text_x, rect.center().y - galley.size().y / 2.0), galley, tokens.text);
-        painter.text(pos2(rect.right() - CARET_INSET, rect.center().y), Align2::CENTER_CENTER, ic::CARET_DOWN, FontId::proportional(ICON_SIZE), tokens.text);
-        response
+        self.dropdown_button_led(rect, value, |painter| {
+            painter.rect_filled(Rect::from_x_y_ranges(rect.left()..=(rect.left() + TAG_WIDTH), rect.y_range()), CornerRadius::same(TAG_RADIUS), tag);
+            rect.left() + TAGGED_VALUE_INSET
+        })
     }
 }

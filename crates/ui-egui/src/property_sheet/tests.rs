@@ -20,7 +20,7 @@ const PANEL_WIDTH: f32 = 300.0;
 /// The harness window: the panel plus room on its right for popups and tips, tall enough for the whole gallery unscrolled
 const HARNESS_SIZE: egui::Vec2 = egui::vec2(PANEL_WIDTH + 260.0, 1000.0);
 
-/// The i of the gallery'sheet Depth Culling row
+/// The i of the gallery's Depth Culling row
 const DEPTH_CULLING_TIP: &str = "Paints only the surface the projector sees first";
 
 fn swatch(color: Color32) -> impl Fn(&Painter, Rect) {
@@ -67,7 +67,7 @@ fn gallery(ui: &mut egui::Ui, state: &mut Gallery) {
             let names = ["Projection Extends Outside Shape", "Projection Is Cropped To Shape"];
             if let Some(picked) = sheet
                 .dropdown(
-                    "A label wider than the column'sheet cap",
+                    "A label wider than the column's cap",
                     state.long_choice,
                     &[0, 1],
                     |index| names.get(index).copied().unwrap_or_default().to_owned(),
@@ -136,7 +136,7 @@ fn gallery(ui: &mut egui::Ui, state: &mut Gallery) {
     });
 }
 
-/// A harness in `brightness`, with the app'sheet fonts from the first frame
+/// A harness in `brightness`, with the app's fonts from the first frame
 fn builder<State>(brightness: Brightness) -> egui_kittest::HarnessBuilder<State> {
     Harness::builder().with_size(HARNESS_SIZE).with_context_setup(move |ctx| {
         crate::theme::install(ctx);
@@ -167,7 +167,7 @@ fn toggles_switches_and_pills_change_their_state() {
     assert_eq!(harness.state().channels, [true, true, true, true, true]);
 }
 
-/// A culling row sits on the panel'sheet grid like a plain toggle: its name on the label column, its picture and switch where the controls start, its i at the row'sheet end
+/// A culling row sits on the panel's grid like a plain toggle: its name on the label column, its picture and switch where the controls start, its i at the row's end
 #[test]
 fn a_culling_row_reads_name_then_picture_and_switch_with_its_i_at_the_end() {
     let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -175,8 +175,8 @@ fn a_culling_row_reads_name_then_picture_and_switch_with_its_i_at_the_end() {
     let culling = harness.get_by_label("Depth Culling").rect();
     let plain = harness.get_by_label("Wrap").rect();
     let info = harness.get_by_label(DEPTH_CULLING_TIP).rect();
-    assert_eq!(culling.left(), plain.left(), "the name starts where a plain toggle'sheet does: {culling:?} vs {plain:?}");
-    assert!(info.left() > culling.right(), "the i sits after the switch, at the row'sheet end: {info:?} vs {culling:?}");
+    assert_eq!(culling.left(), plain.left(), "the name starts where a plain toggle's does: {culling:?} vs {plain:?}");
+    assert!(info.left() > culling.right(), "the i sits after the switch, at the row's end: {info:?} vs {culling:?}");
 
     let was = harness.state().depth_culling;
     let at = harness.get_by_label("Depth Culling").rect().center();
@@ -196,8 +196,8 @@ fn dropdown_list_hangs_from_its_button_at_its_width_and_picks() {
 
     let option = harness.get_by_label("Nearest").rect();
     let list = option.expand(super::choice::LIST_BORDER);
-    assert_eq!(list.left(), button.left(), "the list starts at the button'sheet left edge");
-    assert_eq!(list.width(), button.width(), "the list is the button'sheet width");
+    assert_eq!(list.left(), button.left(), "the list starts at the button's left edge");
+    assert_eq!(list.width(), button.width(), "the list is the button's width");
     assert!(option.top() > button.bottom(), "the list hangs below the button");
 
     let at = harness.get_by_label("Nearest").rect().center();
@@ -233,7 +233,7 @@ fn a_click_on_a_value_or_the_seed_selects_it_so_typing_replaces_it() {
     let mut harness = gallery_harness(Brightness::MediumDark, Gallery::default());
     let value = harness.get_by_label("Hardness value").rect();
     type_at(&mut harness, value.center(), "0.4");
-    assert_eq!(harness.state().hardness, 0.4, "the slider'sheet value is replaced, not appended to");
+    assert_eq!(harness.state().hardness, 0.4, "the slider's value is replaced, not appended to");
 
     let seed = harness.get_by_label("Seed value").rect();
     type_at(&mut harness, seed.center(), "77");
@@ -266,6 +266,23 @@ fn a_value_opened_and_left_untyped_changes_nothing() {
     assert!(harness.state().position_merges.is_empty(), "the number field reports no edit: {:?}", harness.state().position_merges);
 }
 
+/// A typed value that lands on the current one is no edit: one past the end kept at the end, or the same number written another way
+#[test]
+fn a_typed_value_equal_to_the_current_one_changes_nothing() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut harness = gallery_harness(Brightness::MediumDark, Gallery { hardness: 1.0, ..Gallery::default() });
+    let hardness = harness.get_by_label("Hardness value").rect();
+    type_at(&mut harness, hardness.center(), "5");
+    assert_eq!(harness.state().hardness, 1.0, "a value past the end is kept at the end");
+    assert!(harness.state().hardness_merges.is_empty(), "kept at the value it had, it reports no edit: {:?}", harness.state().hardness_merges);
+
+    harness.state_mut().hardness = 0.75;
+    harness.run_steps(1);
+    type_at(&mut harness, hardness.center(), ".750");
+    assert_eq!(harness.state().hardness, 0.75);
+    assert!(harness.state().hardness_merges.is_empty(), "the same number written another way reports no edit: {:?}", harness.state().hardness_merges);
+}
+
 #[test]
 fn a_drag_merges_after_its_first_step_and_a_click_does_not() {
     let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -286,7 +303,7 @@ fn a_drag_merges_after_its_first_step_and_a_click_does_not() {
     harness.drop_at(click);
     harness.run();
 
-    assert_eq!(drag_merges.first(), Some(&false), "the drag'sheet first change starts an undo step: {drag_merges:?}");
+    assert_eq!(drag_merges.first(), Some(&false), "the drag's first change starts an undo step: {drag_merges:?}");
     assert!(drag_merges.iter().skip(1).all(|merge| *merge), "later changes continue it: {drag_merges:?}");
     let merges = &harness.state().hardness_merges;
     assert_eq!(merges.len(), drag_merges.len() + 1, "the click changes the value once: {merges:?}");
@@ -324,7 +341,7 @@ fn a_number_field_held_still_then_dragged_starts_an_undo_step_with_its_first_cha
     let field = harness.get_by_label("Position X").rect();
     harness.drag_at(field.center());
 
-    // Past egui'sheet longest click, the press becomes a drag that has not moved
+    // Past egui's longest click, the press becomes a drag that has not moved
     harness.run_steps(5);
     harness.hover_at(field.center() + egui::vec2(10.0, 0.0));
     harness.run();
@@ -338,7 +355,7 @@ fn a_number_field_held_still_then_dragged_starts_an_undo_step_with_its_first_cha
     assert!(merges.iter().skip(1).all(|merge| *merge), "later moves continue it: {merges:?}");
 }
 
-/// A ramp with one marker at `state.0`, recording each marker drag'sheet merge in `state.1`
+/// A ramp with one marker at `state.0`, recording each marker drag's merge in `state.1`
 fn one_marker_ramp(ui: &mut egui::Ui, state: &mut (f32, Vec<bool>)) {
     ui.set_width(PANEL_WIDTH);
     PropertySheet::show(ui, "ramp", |sheet| {
@@ -349,7 +366,7 @@ fn one_marker_ramp(ui: &mut egui::Ui, state: &mut (f32, Vec<bool>)) {
     });
 }
 
-/// A marker pressed past the ramp'sheet end changes nothing at first; its first move inward still starts its own undo step
+/// A marker pressed past the ramp's end changes nothing at first; its first move inward still starts its own undo step
 #[test]
 fn a_gradient_marker_pressed_past_the_ramps_end_starts_an_undo_step_with_its_first_change() {
     let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -425,7 +442,7 @@ fn property_sheet_gallery_snapshots() {
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
 
-        // A value: the grey line on hover, then typing on that line in accent; the seed'sheet box lights the same way
+        // A value: the grey line on hover, then typing on that line in accent; the seed's box lights the same way
         let value = harness.get_by_label("Hardness value").rect().center();
         harness.hover_at(value);
         harness.run_steps(2);
@@ -459,7 +476,7 @@ fn a_number_field_reads_zero_without_a_minus_sign() {
     assert_eq!(shown_number(2.5, 1), "2.5");
 }
 
-/// Folds keep their own open state when a fold above them comes and goes (the state follows the name, not the row'sheet place)
+/// Folds keep their own open state when a fold above them comes and goes (the state follows the name, not the row's place)
 #[test]
 fn a_fold_keeps_its_state_when_rows_above_it_come_and_go() {
     let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -513,7 +530,7 @@ fn the_next_picker_opens_in_the_colour_space_last_picked() {
     let at = harness.get_by_role_and_label(egui::Role::ListBoxOption, "Linear").rect().center();
     click_at(&mut harness, at);
     harness.run_steps(2);
-    assert!(harness.query_by_role_and_label(egui::Role::ComboBox, "Linear").is_some(), "Bar B'sheet picker shows Linear");
+    assert!(harness.query_by_role_and_label(egui::Role::ComboBox, "Linear").is_some(), "Bar B's picker shows Linear");
 
     let at = harness.get_by_role_and_label(egui::Role::Button, "Close").rect().center();
     click_at(&mut harness, at);
@@ -522,11 +539,11 @@ fn the_next_picker_opens_in_the_colour_space_last_picked() {
     click_at(&mut harness, at);
     harness.run_steps(2);
 
-    assert!(harness.query_by_role_and_label(egui::Role::TitleBar, "Bar A").is_some(), "Bar A'sheet picker is open");
-    assert!(harness.query_by_role_and_label(egui::Role::ComboBox, "Linear").is_some(), "Bar A'sheet picker opens in Linear");
+    assert!(harness.query_by_role_and_label(egui::Role::TitleBar, "Bar A").is_some(), "Bar A's picker is open");
+    assert!(harness.query_by_role_and_label(egui::Role::ComboBox, "Linear").is_some(), "Bar A's picker opens in Linear");
 }
 
-/// A colour bar'sheet picker stays open when a colour bar above it comes and goes (its state follows its name, not its place)
+/// A colour bar's picker stays open when a colour bar above it comes and goes (its state follows its name, not its place)
 #[test]
 fn a_color_bars_picker_stays_open_when_a_row_above_it_goes_away() {
     let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -551,7 +568,7 @@ fn a_color_bars_picker_stays_open_when_a_row_above_it_goes_away() {
     assert!(harness.query_by_role_and_label(egui::Role::TitleBar, "Tint").is_some(), "the picker stays open");
 }
 
-/// A fold under a later section, before that section'sheet first band, keeps its state when a band of the section above comes and goes
+/// A fold under a later section, before that section's first band, keeps its state when a band of the section above comes and goes
 #[test]
 fn a_fold_before_a_sections_first_band_keeps_its_state_when_the_band_above_goes_away() {
     let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

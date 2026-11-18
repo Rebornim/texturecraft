@@ -3,7 +3,7 @@
 use std::ops::RangeInclusive;
 
 use super::PropertySheet;
-use super::slider::KNOB_RADIUS;
+use super::slider::{KNOB_RADIUS, kept_in};
 use super::track::Track;
 
 impl PropertySheet<'_> {
@@ -12,8 +12,9 @@ impl PropertySheet<'_> {
         let (control, center_y) = self.row(label);
         let id = self.next_id();
         let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, zero: Some(0.0), ramp: false };
-        let mut along = factor.max(f32::MIN_POSITIVE).log2().clamp(-doublings, doublings);
-        let dragged = self.track(id, label, &track, &mut along, &(-doublings..=doublings));
+        let track_range = -doublings..=doublings;
+        let mut along = kept_in(factor.max(f32::MIN_POSITIVE).log2(), &track_range);
+        let dragged = self.track(id, label, &track, &mut along, &track_range);
         if dragged.is_some() {
             *factor = along.exp2();
         }

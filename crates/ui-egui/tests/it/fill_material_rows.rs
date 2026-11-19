@@ -576,8 +576,8 @@ fn picker_face(harness: &Harness<'_, TextureCraftApp>) -> egui::Rect {
     egui::Rect::from_min_max(title.min, egui::pos2(title.right() + CLOSE_ROOM, add.bottom() + PICKER_BOTTOM))
 }
 
-/// The title bar stops at the × (color_bar.rs: from the right edge to the close target's left edge)
-const CLOSE_ROOM: f32 = 22.0;
+/// The title bar stops at the × (color_bar.rs: from the right edge to the close target's left edge: PAD + CLOSE_INK_HALF_WIDTH + half of CLOSE_TARGET)
+const CLOSE_ROOM: f32 = 25.0;
 
 /// The narrowest the picker resizes to and the shortest its colour field gets (color_bar.rs PICKER_MIN_WIDTH, color_picker_rows.rs FIELD_MIN_HEIGHT)
 const PICKER_MIN_WIDTH: f32 = 240.0;

@@ -35,8 +35,8 @@ const TOGGLE_KNOB_TRAVEL: f32 = 4.5;
 /// Air after a toggle's label, before the column the panel's toggles line up on
 const TOGGLE_LABEL_AIR: f32 = 10.0;
 
-/// From that column to the pill's centre
-const TOGGLE_CENTER_OFFSET: f32 = 14.0;
+/// From that column to the pill's centre: the pill starts on the column
+const TOGGLE_CENTER_OFFSET: f32 = PILL_SIZE.x / 2.0;
 
 /// From one of a pair's toggles to the next, and from its name to its pill's centre
 const PAIR_PITCH: f32 = 76.0;
@@ -202,8 +202,10 @@ impl PropertySheet<'_> {
         self.paint_info_at_end(center_y);
         let font = FontId::proportional(TEXT_SIZE);
 
-        // A name too long for the label column pushes the picture right instead of running under it
-        let picture_x = self.column().max(self.left + self.text_width(label, font.clone()) + super::LABEL_MIN_AIR);
+        // A name too long for the label column pushes every picture row's picture right instead of running under it
+        let label_end = self.text_width(label, font.clone()) + super::LABEL_MIN_AIR;
+        self.seen.picture_label_end = self.seen.picture_label_end.max(label_end);
+        let picture_x = self.left + (self.column() - self.left).max(self.used.picture_label_end).max(label_end);
         let square = Rect::from_min_size(pos2(picture_x, center_y - ROW_PICTURE_SIZE / 2.0), vec2(ROW_PICTURE_SIZE, ROW_PICTURE_SIZE));
         let pill = Rect::from_min_size(pos2(square.right() + ROW_PICTURE_AIR, center_y - PILL_SIZE.y / 2.0), PILL_SIZE);
         let clicked = self.toggle_hit(Rect::from_min_max(pos2(self.left, rect.top()), pos2(pill.right(), rect.bottom())), label, on);

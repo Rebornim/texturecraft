@@ -25,10 +25,12 @@ const EYEDROPPER_TARGET: f32 = 18.0;
 /// Air between the panel and the picker standing beside it
 const WINDOW_GAP: f32 = 6.0;
 
-/// Height of the picker's title bar, size of its title, and from its right edge to the close glyph's centre
+/// Height of the picker's title bar and size of its title
 const TITLE_HEIGHT: f32 = 26.0;
 const TITLE_TEXT_SIZE: f32 = 11.0;
-const TITLE_INSET: f32 = 13.0;
+
+/// Half the close glyph's ink width: its centre sits this far in from the right padding, so the ink ends where the content does
+const CLOSE_INK_HALF_WIDTH: f32 = 4.0;
 
 /// Size of the close glyph and of its click target
 const CLOSE_GLYPH_SIZE: f32 = 12.0;
@@ -191,7 +193,7 @@ impl PropertySheet<'_> {
         let shown = egui::Area::new(id.with("picker_area")).order(Order::Foreground).fixed_pos(corner).show(&ctx, |ui| {
             let background = ui.painter().add(egui::Shape::Noop);
             let title_bar = Rect::from_min_size(corner, vec2(width, TITLE_HEIGHT));
-            let close = Rect::from_center_size(pos2(title_bar.right() - TITLE_INSET, title_bar.center().y), vec2(CLOSE_TARGET, CLOSE_TARGET));
+            let close = Rect::from_center_size(pos2(title_bar.right() - PAD - CLOSE_INK_HALF_WIDTH, title_bar.center().y), vec2(CLOSE_TARGET, CLOSE_TARGET));
             let drag = ui.interact(Rect::from_min_max(title_bar.min, pos2(close.left(), title_bar.bottom())), id.with("picker_title"), Sense::drag());
             drag.widget_info(|| WidgetInfo::labeled(Role::TitleBar, true, label));
             let drag = drag.on_hover_cursor(CursorIcon::Grab);

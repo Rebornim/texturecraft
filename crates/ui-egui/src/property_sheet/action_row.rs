@@ -2,6 +2,7 @@
 
 use egui::{Align2, CornerRadius, FontId, Rect, Role, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
 
+use super::switch_control::PILL_SIZE;
 use super::{ActionRowResponse, CONTROL_HEIGHT, CONTROL_RADIUS, PropertySheet, ROW_HEIGHT, TEXT_SIZE};
 
 /// Air on each side of a button's word
@@ -10,9 +11,9 @@ const BUTTON_WORD_AIR: f32 = 9.0;
 /// Air between two buttons
 const BUTTON_GAP: f32 = 6.0;
 
-/// From the right edge to the toggle's centre, and to its label's end
-const TOGGLE_CENTER_INSET: f32 = 14.0;
-const TOGGLE_LABEL_INSET: f32 = 34.0;
+/// From the right edge to the toggle's centre (the pill ends on the edge), and to its label's end
+const TOGGLE_CENTER_INSET: f32 = PILL_SIZE.x / 2.0;
+const TOGGLE_LABEL_INSET: f32 = 31.0;
 
 impl PropertySheet<'_> {
     /// `buttons` (word, enabled) from the left edge, then `toggle_label` and its toggle at the right end

@@ -43,7 +43,7 @@ const SWATCH_WIDTH: f32 = 30.0;
 
 /// From the left edge to the hex field, and from the hex field to the right edge (the eyedropper's room)
 const HEX_LEFT: f32 = 68.0;
-const HEX_RIGHT_INSET: f32 = 26.0;
+const HEX_RIGHT_INSET: f32 = 22.0;
 
 /// From the hex field's left edge to its `#`, and to its digits
 const HASH_INSET: f32 = 8.0;

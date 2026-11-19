@@ -6,12 +6,13 @@ use egui::{Align2, Color32, FontId, Painter, Rect, Response, Role, Sense, Stroke
 
 use super::row::SECTION_CAPTION_CENTER;
 use super::slider::KNOB_RADIUS;
+use super::switch_control::PILL_SIZE;
 use super::track::Track;
 use super::{BLOCK_MARGIN, PropertySheet, SMALL_TEXT_SIZE, StackSlider, TEXT_SIZE};
 use crate::theme::semibold;
 
-/// From the right edge to the centre of a caption's switch
-const CAPTION_SWITCH_INSET: f32 = 14.0;
+/// From the right edge to the centre of a caption's switch: the pill ends on the edge
+const CAPTION_SWITCH_INSET: f32 = PILL_SIZE.x / 2.0;
 
 /// The click area around a caption's switch
 const CAPTION_SWITCH_HIT: egui::Vec2 = vec2(30.0, 20.0);

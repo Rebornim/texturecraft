@@ -7,6 +7,9 @@ pub(super) struct SheetMeasure {
     /// Where the widest toggle label ends, from the panel's left padding
     pub(super) toggle_label_end: f32,
 
+    /// Where the widest picture row's name ends, from the panel's left padding
+    pub(super) picture_label_end: f32,
+
     /// The widest value at a slider's right end
     pub(super) value_width: f32,
 }

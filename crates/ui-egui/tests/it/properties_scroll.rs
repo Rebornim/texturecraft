@@ -32,6 +32,9 @@ const ROW_AND_AIR: f32 = 40.0;
 /// From the tab strip down into the list, where the wheel is turned
 const INTO_LIST: f32 = 100.0;
 
+/// How far a hairline may sit from the list's top: it snaps to whole pixels, the list's top need not (the old jump was 4 px low)
+const HAIRLINE_SNAP: f32 = 1.0;
+
 /// The app with two UV fills ("Fill A", "Fill B") and a folder ("Folder", a short panel), Fill A selected
 fn harness() -> Harness<'static, TextureCraftApp> {
     harness_sized(WINDOW_SIZE)
@@ -159,4 +162,32 @@ fn a_last_section_taller_than_the_list_scrolls_to_its_real_end() {
     assert!(tab_lit(&harness, "Material"));
     assert!(last_bottom <= list_bottom, "the last row came into view");
     assert!(list_bottom - last_bottom < ROW_AND_AIR, "no blank space past a section taller than the list");
+}
+
+/// A jump tab lands its section's hairline on the list's top (egui's top-aligned scroll stopped one item spacing short, 4 px low)
+#[test]
+fn a_jump_lands_the_sections_hairline_on_the_lists_top() {
+    let mut harness = harness();
+    select_row(&mut harness, "Fill A");
+
+    click_widget(&mut harness, Role::Tab, "Material");
+    harness.run_steps(WHEEL_SETTLE_FRAMES);
+
+    // The caption's clip is the list's view; its hairline is the last line drawn above it in that view
+    let shapes = &harness.output().shapes;
+    let caption = shapes.iter().find_map(|clipped| match &clipped.shape {
+        egui::Shape::Text(text) if text.galley.text() == "MATERIAL" => Some((clipped.clip_rect, text.pos.y)),
+        _ => None,
+    });
+    let Some((list, caption_y)) = caption else { panic!("a MATERIAL caption") };
+    let hairline = shapes
+        .iter()
+        .filter(|clipped| clipped.clip_rect == list)
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::LineSegment { points, .. } if points[0].y == points[1].y && points[0].y < caption_y => Some(points[0].y),
+            _ => None,
+        })
+        .reduce(f32::max);
+
+    assert!(hairline.is_some_and(|y| (y - list.top()).abs() < HAIRLINE_SNAP), "the hairline at {hairline:?}, the list's top at {}", list.top());
 }

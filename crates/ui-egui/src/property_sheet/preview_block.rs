@@ -29,7 +29,7 @@ const GLYPH_CENTER: f32 = 5.0;
 const GLYPH_TRACK: f32 = 18.0;
 
 /// Room kept at the right edge for the link, on every line, so the tracks end together
-const LINK_ROOM: f32 = 24.0;
+pub(super) const LINK_ROOM: f32 = 24.0;
 
 /// The value column's width beside the square: every track ends this far left of the value's end
 const SIDE_VALUE_WIDTH: f32 = 46.0;

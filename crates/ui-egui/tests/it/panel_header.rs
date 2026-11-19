@@ -82,6 +82,7 @@ fn the_properties_header_names_the_selected_effects_type() {
 
 /// Rounded boxes painted this frame whose top sits `TAB_TOP` under the top of `tab`: the raised box of a shown tab
 fn tab_boxes(harness: &Harness<'_, TextureCraftApp>, tab: egui::Rect) -> usize {
+    // the section tabs' TAB_TOP (property_sheet/section_tabs.rs), private to the crate
     const TAB_TOP: f32 = 4.0;
 
     harness
@@ -113,4 +114,29 @@ fn a_groups_shown_tab_rises_as_a_box_and_the_others_and_a_lone_panels_do_not() {
 
     assert_eq!(tab_boxes(&harness, tab_rect(&harness, "Texture Set Settings")), 1, "the box goes with the shown tab");
     assert_eq!(tab_boxes(&harness, tab_rect(&harness, "Layers")), 0);
+}
+
+/// Where the label on `name`'s row and to its right ends, for each label named `name`
+fn row_ends(harness: &Harness<'_, TextureCraftApp>, name: &str) -> Vec<f32> {
+    let names = harness.get_all_by_role_and_label(Role::Label, name).map(|node| node.rect());
+    names
+        .filter_map(|name| {
+            let on_row = harness.get_all_by_role(Role::Label).map(|node| node.rect());
+            on_row.filter(|rect| rect.left() > name.right() && (rect.center().y - name.center().y).abs() < 1.0).map(|rect| rect.right()).reduce(f32::max)
+        })
+        .collect()
+}
+
+/// Texture Set Settings keeps Base color's remove room, so its format ends where the other channels' formats do (it ended 24 px right)
+#[test]
+fn every_channels_format_ends_on_one_column() {
+    let mut harness = app();
+    let settings = tab_rect(&harness, "Texture Set Settings");
+    click_at(&mut harness, settings.center());
+    harness.run_steps(SETTLE_FRAMES);
+
+    let base_color = row_ends(&harness, "Base color");
+    let roughness = row_ends(&harness, "Roughness");
+
+    assert!(base_color.len() == 1 && base_color == roughness, "Base color's format ends at {base_color:?}, Roughness's at {roughness:?}");
 }

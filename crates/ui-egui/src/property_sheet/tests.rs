@@ -167,6 +167,18 @@ fn toggles_switches_and_pills_change_their_state() {
     assert_eq!(harness.state().channels, [true, true, true, true, true]);
 }
 
+/// A toggle's pill starts on the controls column, where a dropdown's button starts (it sat 3 px in)
+#[test]
+fn a_toggles_pill_starts_where_a_dropdown_starts() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let harness = gallery_harness(Brightness::MediumDark, Gallery::default());
+    let dropdown = harness.get_by_label("Bilinear | HQ").rect();
+
+    // The toggle's hit area ends with its pill
+    let pill_left = harness.get_by_label("Shape Crop").rect().right() - super::switch_control::PILL_SIZE.x;
+    assert_eq!(pill_left, dropdown.left(), "the pill starts at {pill_left}, the dropdown at {}", dropdown.left());
+}
+
 /// A culling row sits on the panel's grid like a plain toggle: its name on the label column, its picture and switch where the controls start, its i at the row's end
 #[test]
 fn a_culling_row_reads_name_then_picture_and_switch_with_its_i_at_the_end() {
@@ -197,13 +209,49 @@ fn culling_rows(ui: &mut egui::Ui, on: &mut [bool; 2]) {
     });
 }
 
+/// A section caption's switch and an action row's toggle over a dropdown
+fn right_end_switches(ui: &mut egui::Ui, mirror: &mut bool) {
+    let panel = Tokens::get(ui.ctx()).panel;
+    egui::Frame::NONE.fill(panel).show(ui, |ui| {
+        ui.set_width(PANEL_WIDTH);
+        PropertySheet::show(ui, "right end", |sheet| {
+            sheet.section_switch("Symmetry", true);
+            sheet.action_row(&[("Reset", true)], "Mirror", mirror);
+            sheet.dropdown("Filtering", Filtering::Nearest, &[Filtering::Nearest], Filtering::name, None);
+        });
+    });
+}
+
+/// A switch at a caption's or a row's right end ends on the right padding, where a dropdown ends (they sat 3 px in)
+#[test]
+fn right_end_switches_end_where_a_dropdown_ends() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut harness = builder(Brightness::MediumDark).build_ui_state(right_end_switches, false);
+    harness.run_steps(3);
+
+    let dropdown_right = harness.get_by_label("Nearest").rect().right();
+    let pill_rights: Vec<f32> = harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Rect(rect) if rect.rect.size() == super::switch_control::PILL_SIZE => Some(rect.rect.right()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(pill_rights, [dropdown_right; 2], "the pills end at {pill_rights:?}, the dropdown at {dropdown_right}");
+}
+
 /// A culling name too long for the label column moves every culling row's picture and switch, so the switches stay one column
 #[test]
 fn culling_rows_keep_their_switches_in_one_column_when_a_name_is_long() {
     let mut harness = builder(Brightness::MediumDark).build_ui_state(culling_rows, [false; 2]);
     harness.run_steps(3);
+
     let short = harness.get_by_label("Depth").rect();
     let long = harness.get_by_label("Backface culling past the column").rect();
+
     assert_eq!(short.right(), long.right(), "both switches end at one x: {short:?} vs {long:?}");
 }
 
@@ -237,6 +285,7 @@ fn thumbnail_under_caption(instance: bool) -> Rect {
 fn an_instance_card_sits_under_its_caption_as_a_slot_card_does() {
     let slot = thumbnail_under_caption(false);
     let instance = thumbnail_under_caption(true);
+
     assert_eq!(instance.top(), slot.top(), "the thumbnails start at one y: {instance:?} vs {slot:?}");
 }
 
@@ -253,9 +302,37 @@ fn a_gray_sliders_invert_button_ends_on_its_columns_right_edge() {
     // the slider's typed value field (upstream's) carries no accessible name
     let mut harness = builder(Brightness::MediumDark).with_accessibility_check(false).build_ui_state(gray_row, (0.5, 0.0));
     harness.run_steps(3);
+
     let invert = harness.get_by_role(egui::accesskit::Role::Button).rect();
     let right = harness.state().1;
     assert!(invert.right() <= right + 0.5, "the button ends at {} past the column's {right}", invert.right());
+}
+
+/// Where `wanted` is painted, first to last
+fn painted_at<State>(harness: &Harness<'_, State>, wanted: &str) -> Vec<egui::Pos2> {
+    let shapes = harness.output().shapes.iter();
+    shapes
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.text() == wanted => Some(text.pos),
+            _ => None,
+        })
+        .collect()
+}
+
+/// An open dropdown's options start their words at the button's own word x (they started 1 px in, inside the list's border)
+#[test]
+fn an_open_dropdowns_options_start_at_the_buttons_word() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut harness = gallery_harness(Brightness::MediumDark, Gallery::default());
+    let button = harness.get_by_label("Bilinear | HQ").rect();
+
+    let at = button.center();
+    click_at(&mut harness, at);
+    harness.run_steps(2);
+
+    let button_word = painted_at(&harness, "Bilinear | HQ").into_iter().find(|at| button.contains(*at)).map(|at| at.x);
+    let option_word = painted_at(&harness, "Nearest").first().map(|at| at.x);
+    assert!(button_word.is_some() && option_word == button_word, "the option's word at {option_word:?}, the button's at {button_word:?}");
 }
 
 #[test]
@@ -680,4 +757,76 @@ fn a_fold_before_a_sections_first_band_keeps_its_state_when_the_band_above_goes_
     harness.run_steps(2);
 
     assert!(harness.query_by_label("Edge rows").is_none(), "Edges stays folded");
+}
+
+/// The colour picker's hex field ends where the colour field above it ends (it ended 4 px short)
+#[test]
+fn the_pickers_hex_field_ends_on_the_colour_fields_right_edge() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut harness = builder(Brightness::MediumDark).build_ui(two_color_bars);
+    harness.run_steps(2);
+    let at = harness.get_by_role_and_label(egui::Role::Button, "Bar A").rect().center();
+
+    click_at(&mut harness, at);
+    harness.run_steps(2);
+
+    let field = harness.get_by_role_and_label(egui::Role::Slider, "Saturation and value").rect();
+    let hex = harness.get_by_role_and_label(egui::Role::TextInput, "Hex color").rect();
+    assert_eq!(hex.right(), field.right(), "the hex field ends at {}, the colour field at {}", hex.right(), field.right());
+}
+
+/// A comparison's two sources, its operators beside the first
+fn compare_rows(ui: &mut egui::Ui) {
+    let panel = Tokens::get(ui.ctx()).panel;
+    egui::Frame::NONE.fill(panel).show(ui, |ui| {
+        ui.set_width(PANEL_WIDTH);
+        PropertySheet::show(ui, "compare", |sheet| {
+            let names = ["Left source", "Right source", "Other source"];
+            let name = |index: usize| names.get(index).copied().unwrap_or_default().to_owned();
+            sheet.compare_rows((0, 1), &[0, 1, 2], name, [Color32::RED, Color32::BLUE], (&["Min", "Max"], 0));
+        });
+    });
+}
+
+/// A compare source's tagged button shows its value where its open list's options start, a dropdown's value x (it sat 2 px right)
+#[test]
+fn a_compare_sources_value_starts_where_its_lists_options_do() {
+    let mut harness = builder(Brightness::MediumDark).build_ui(compare_rows);
+    harness.run_steps(3);
+    let button = harness.get_by_role_and_label(egui::Role::ComboBox, "Left source").rect();
+
+    click_at(&mut harness, button.center());
+    harness.run_steps(2);
+
+    let button_word = painted_at(&harness, "Left source").into_iter().find(|at| button.contains(*at)).map(|at| at.x);
+    let option_word = painted_at(&harness, "Other source").first().map(|at| at.x);
+    assert!(button_word.is_some() && option_word == button_word, "the option's word at {option_word:?}, the button's at {button_word:?}");
+}
+
+/// A linked Tiling and Offset block over a ramp
+fn ramp_under_tiling(ui: &mut egui::Ui, state: &mut ([f32; 2], [f32; 2], bool, f32)) {
+    let (tiling, offset, linked, gray) = state;
+    let panel = Tokens::get(ui.ctx()).panel;
+    egui::Frame::NONE.fill(panel).show(ui, |ui| {
+        ui.set_width(PANEL_WIDTH);
+        PropertySheet::show(ui, "ramp", |sheet| {
+            let size = super::PreviewSize { label: "Tiling", values: tiling, range: 0.0..=10.0, typed: 0.0..=100.0, decimals: 2, linked };
+            let lower = super::PreviewLower::Offset { values: offset, range: 0.0..=1.0, typed: -10.0..=10.0 };
+            sheet.preview_block(&swatch(Color32::from_gray(128)), size, lower);
+            sheet.ramp("Grayscale", gray, 0.0..=1.0);
+        });
+    });
+}
+
+/// A ramp's value ends on the linked Tiling and Offset values above it (it ended 2 px right of them)
+#[test]
+fn a_ramps_value_ends_on_the_linked_tiling_value() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut harness = builder(Brightness::MediumDark).build_ui_state(ramp_under_tiling, ([1.0; 2], [0.0; 2], true, 0.5));
+
+    harness.run_steps(3);
+
+    let tiling = harness.get_by_label("Tiling value").rect();
+    let ramp = harness.get_by_label("Grayscale value").rect();
+    assert_eq!(ramp.right(), tiling.right(), "the ramp's value ends at {}, Tiling's at {}", ramp.right(), tiling.right());
 }

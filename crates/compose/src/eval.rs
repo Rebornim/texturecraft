@@ -3063,7 +3063,8 @@ impl<'a, 'b> Texel<'a, 'b> {
                 EffectKind::Compare { op, value: constant, tolerance, left, right, channel, hardness } => {
                     let left = self.compare_side(*left, *channel, plan, value, *constant);
                     let right = self.compare_side(*right, *channel, plan, value, *constant);
-                    value += (op.mask(left, right, *tolerance, *hardness) - value) * opacity;
+                    let compared = op.mask(left, right, *tolerance, *hardness);
+                    value += (blend1(effect.blend, value, compared) - value) * opacity;
                 }
 
                 // Every channel of a mask anchor reads the mask's gray
@@ -5600,6 +5601,34 @@ soft {soft:?}"
         // The roughness below (0.8) passes the first compare everywhere: the mask so far is white
         let white = *mask_so_far.last().unwrap();
         assert!(white > 0 && mask_so_far.iter().sum::<u32>() == white, "{mask_so_far:?}");
+    }
+
+    #[test]
+    fn a_compare_mask_blends_onto_the_mask_with_its_blend_mode() {
+        let mut f = fixture();
+        fill_layer(&mut f.project, [0.5; 3], 0.8);
+        let top = fill_layer(&mut f.project, [1.0; 3], 0.2);
+
+        // The roughness below (0.8) passes everywhere, but a white compare multiplied onto a black mask stays black
+        let mut compare = Effect::new(
+            f.project.alloc_id(),
+            EffectKind::Compare {
+                op: CompareOp::GreaterThan,
+                value: 0.5,
+                tolerance: 0.0,
+                left: CompareSource::LayersBelow,
+                right: CompareSource::Constant,
+                channel: Channel::Roughness,
+                hardness: 1.0,
+            },
+        );
+        compare.blend = BlendMode::Multiply;
+        let mut mask = Mask::new(MaskBackground::Black);
+        mask.effects.push(compare);
+        f.project.layer_mut(top).unwrap().mask = Some(mask);
+
+        let color = run(&f, None).value(Channel::BaseColor, 30, 30);
+        assert!(close(color, [0.5; 3]), "the layer under shows: {color:?}");
     }
 
     #[test]

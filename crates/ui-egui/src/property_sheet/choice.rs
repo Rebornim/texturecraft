@@ -241,7 +241,7 @@ impl PropertySheet<'_> {
                         painter.rect_filled(bar, CornerRadius::same(CHOSEN_BAR_RADIUS), tokens.accent);
                     }
 
-                    // the rows sit inside the list's border: measured from the button's edge, text and picture keep the button's x
+                    // The rows sit inside the list's border: measured from the button's edge, text and picture keep the button's x
                     let button_left = rect.left() - LIST_BORDER;
                     let center_y = rect.top() + OPTION_HEIGHT / 2.0 - OPTION_TEXT_LIFT;
                     let mut text_x = button_left + VALUE_INSET;

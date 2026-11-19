@@ -48,10 +48,11 @@ impl Panels<'_> {
     /// Over the tab the dock drew for `panel`, the panel shown in its group, paints the section tabs' raised box and the name again; a panel alone keeps its plain header. `ui` is the panel's body, right under the strip
     pub(super) fn paint_shown_group_tab(&self, ui: &Ui, panel: Panel) {
         let Some((panels, floating)) = group_of(&self.app.ui.dock.workspace.layout, panel) else { return };
-        let Some(shown) = panels.iter().position(|member| *member == panel) else { return };
         if panels.len() < 2 {
             return;
         }
+
+        let Some(shown) = panels.iter().position(|member| *member == panel) else { return };
 
         // The dock's own tab layout: names at their natural width, shrunk or moved to "…" when the strip is short
         let body = ui.max_rect();

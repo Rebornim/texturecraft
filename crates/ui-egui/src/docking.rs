@@ -20,6 +20,7 @@ use crate::TextureCraftApp;
 use crate::i18n::tr;
 use crate::theme::Tokens;
 
+mod header_band;
 mod shown_group_tab;
 
 pub(crate) use shown_group_tab::HEADER_TITLE_LEFT;
@@ -579,9 +580,17 @@ impl DockContent<Panel> for Panels<'_> {
         }
     }
 
-    fn label(&mut self, _ui: &Ui, _panel: &Panel, logical: &str, _font: &egui::FontId, color: egui::Color32) -> egui::WidgetText {
+    fn label(&mut self, ui: &Ui, panel: &Panel, logical: &str, _font: &egui::FontId, color: egui::Color32) -> egui::WidgetText {
         // Capitals on the bar only: menus and screen readers keep the logical name
-        RichText::new(logical.to_uppercase()).font(crate::theme::semibold(HEADER_TITLE_SIZE)).color(color).into()
+        let name = logical.to_uppercase();
+        let font = crate::theme::semibold(HEADER_TITLE_SIZE);
+
+        // Menus list the panels by these names too, in popups above the dock; only the bar's names centre on its band
+        if ui.layer_id().order != egui::Order::Background {
+            return RichText::new(name).font(font).color(color).into();
+        }
+
+        header_band::header_name(ui, &name, font, color, self.header_lift(*panel)).into()
     }
 
     fn group_header_width(&self, panels: &[Panel], active: &Panel, floating: bool, _strip_width: f32) -> f32 {
@@ -608,9 +617,10 @@ impl DockContent<Panel> for Panels<'_> {
             return;
         }
 
+        // On the names' line: the middle of the header band
         let rect = ui.max_rect();
         let button = egui::Rect::from_center_size(
-            egui::pos2(rect.right() - HEADER_CLOSE_RIGHT_MARGIN - HEADER_CLOSE_SIZE / 2.0, rect.center().y),
+            egui::pos2(rect.right() - HEADER_CLOSE_RIGHT_MARGIN - HEADER_CLOSE_SIZE / 2.0, rect.center().y - self.header_lift(*active)),
             vec2(HEADER_CLOSE_SIZE, HEADER_CLOSE_SIZE),
         );
         let clicked = ui

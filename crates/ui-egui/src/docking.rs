@@ -585,8 +585,8 @@ impl DockContent<Panel> for Panels<'_> {
         let name = logical.to_uppercase();
         let font = crate::theme::semibold(HEADER_TITLE_SIZE);
 
-        // Menus list the panels by these names too, in popups above the dock; only the bar's names centre on its band
-        if ui.layer_id().order != egui::Order::Background {
+        // Menus list the panels by these names too, in popups; only a header bar's names, docked or floating, centre on its band
+        if matches!(ui.layer_id().order, egui::Order::Foreground | egui::Order::Tooltip) {
             return RichText::new(name).font(font).color(color).into();
         }
 
@@ -613,6 +613,7 @@ impl DockContent<Panel> for Panels<'_> {
             });
             return;
         }
+
         if !header_closes(active, floating) {
             return;
         }

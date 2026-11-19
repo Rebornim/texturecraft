@@ -38,7 +38,7 @@ pub(super) fn under_a_panel(layout: &Layout<Panel>, panel: Panel) -> bool {
     false
 }
 
-/// `name` laid out so that, centred as the dock centres every name, its capitals' middle sits `lift` above the strip's (a galley's counts descenders)
+/// `name` laid out so that, centred as the dock centres every name, its capitals' middle sits `lift` above the strip's (a galley's height counts descenders)
 pub(super) fn header_name(ui: &Ui, name: &str, font: FontId, color: Color32, lift: f32) -> LayoutJob {
     let format = TextFormat { font_id: font, color, valign: Align::TOP, ..Default::default() };
     let mut job = LayoutJob::single_section(name.to_owned(), format);
@@ -50,10 +50,10 @@ pub(super) fn header_name(ui: &Ui, name: &str, font: FontId, color: Color32, lif
 
     // Room below the name raises it when centred, room above lowers it
     let shift = ink_middle - galley.size().y / 2.0 + lift;
-    if shift < 0.0 {
-        if let Some(section) = job.sections.first_mut() {
-            section.format.valign = Align::BOTTOM;
-        }
+    if shift < 0.0
+        && let Some(section) = job.sections.first_mut()
+    {
+        section.format.valign = Align::BOTTOM;
     }
     job.first_row_min_height = galley.size().y + 2.0 * shift.abs();
     job

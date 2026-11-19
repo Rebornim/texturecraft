@@ -1,14 +1,18 @@
 //! Every docked panel group sits under one header bar: its names at the left, the shown one raised as a box when the group has several, a close × at the right
 
+use craft_ui::docking::{Action, Placement};
 use egui::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use texturecraft_ui_egui::TextureCraftApp;
-use texturecraft_ui_egui::docking::Panel;
+use texturecraft_ui_egui::docking::{Dock, Panel, permissions};
 
 use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION, click_at, panel_close_button};
 
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 960.0);
+
+/// A floating window over the viewport, `[x, y, width, height]`
+const FLOATING_RECT: [f32; 4] = [600.0, 200.0, 320.0, 400.0];
 
 fn app() -> Harness<'static, TextureCraftApp> {
     let session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();
@@ -129,8 +133,10 @@ fn the_first_tabs_box_starts_on_the_panels_edge_and_a_later_tabs_box_keeps_its_i
     assert!(boxes.iter().all(|shown| (shown.left() - layers.left()).abs() < 0.5), "{boxes:?} starts on the panel's left edge {}", layers.left());
 
     let settings = tab_rect(&harness, "Texture Set Settings");
+
     click_at(&mut harness, settings.center());
     harness.run_steps(SETTLE_FRAMES);
+
     let boxes = tab_boxes(&harness, settings, HEADER_RISE);
     assert!(!boxes.is_empty(), "the shown Texture Set Settings tab has its box");
     assert!(boxes.iter().all(|shown| (shown.left() - (settings.left() + BOX_INSET)).abs() < 0.5), "{boxes:?} keeps its air from the Layers tab");
@@ -175,6 +181,57 @@ fn header_names_capitals_and_close_buttons_sit_on_the_header_bands_middle() {
     let close = panel_close_button(&harness, properties);
     let middle = (properties.top() - HEADER_RISE + properties.bottom()) / 2.0;
     assert!((close.center().y - middle).abs() < 0.5, "the close × at {}, the band's middle at {middle}", close.center().y);
+}
+
+/// A floating group's names sit on one line: the shown name, painted again over its tab, and the dimmed one beside it (the dimmed one kept its galley's middle)
+#[test]
+fn a_floating_groups_names_share_one_line() {
+    let mut harness = app();
+    let mut workspace = harness.state().ui.dock.workspace().clone();
+    let actions = [
+        Action::Float { panel: Panel::Properties, rect: FLOATING_RECT },
+        Action::Move { panel: Panel::TextureSetSettings, anchor: Panel::Properties, placement: Placement::Tab { before: None } },
+        Action::Activate { panel: Panel::Properties },
+    ];
+    workspace.apply_all(actions, permissions).unwrap();
+    harness.state_mut().ui.dock = Dock::from_value(serde_json::to_value(workspace).unwrap());
+    harness.run_steps(SETTLE_FRAMES);
+
+    let shown = capital_middles(&harness, "PROPERTIES - PAINT");
+    let dimmed = capital_middles(&harness, "TEXTURE SET SETTINGS");
+    assert!(!shown.is_empty() && !dimmed.is_empty(), "both names are painted");
+    assert!(shown.iter().chain(&dimmed).all(|capital| (capital - shown[0]).abs() < 0.5), "the shown name's capitals at {shown:?}, the other's at {dimmed:?}");
+}
+
+/// The tab menu's panel names keep their plain layout: only the header bar pads a name to centre its capitals on the band
+#[test]
+fn a_tab_menus_panel_names_keep_their_plain_layout() {
+    let mut harness = app();
+    let properties = tab_rect(&harness, "Properties - ");
+    let button = egui::PointerButton::Secondary;
+    harness.hover_at(properties.center());
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: properties.center(), button, pressed, modifiers: egui::Modifiers::NONE });
+        harness.run_steps(1);
+    }
+    harness.run_steps(SETTLE_FRAMES);
+
+    let move_to = harness.get_by_role_and_label(Role::Button, "Move Panel to Group").rect();
+    harness.hover_at(move_to.center());
+    harness.run_steps(SETTLE_FRAMES);
+
+    let entry = harness.get_by_role_and_label(Role::Button, "Layers").rect();
+    let padded: Vec<f32> = harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == "LAYERS" && entry.contains(text.pos) => Some(text.galley.job.first_row_min_height),
+            _ => None,
+        })
+        .collect();
+    assert!(!padded.is_empty(), "the menu paints the Layers entry");
+    assert!(padded.iter().all(|height| *height == 0.0), "the Layers entry is padded to {padded:?}");
 }
 
 /// Where the label on `name`'s row and to its right ends, for each label named `name`

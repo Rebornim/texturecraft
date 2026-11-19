@@ -20,6 +20,10 @@ use crate::TextureCraftApp;
 use crate::i18n::tr;
 use crate::theme::Tokens;
 
+mod shown_group_tab;
+
+pub(crate) use shown_group_tab::HEADER_TITLE_LEFT;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Panel {
     Viewport,
@@ -472,7 +476,7 @@ pub fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     if let Some(panel) = app.ui.dock.raise.take() {
         area = area.raise_panel(panel);
     }
-    let output = area.show_content(ui, &layout, &style, &mut Panels { app, tokens });
+    let output = area.show_content(ui, &layout, &style, &mut Panels { app, tokens, style: style.clone() });
     crate::rail_popup::hand_drag_to_dock(&context, area_id());
 
     // After the dock, which records the viewport the popup reaches into, and before a changed layout returns early
@@ -513,6 +517,7 @@ fn header_closes(active: &Panel, floating: bool) -> bool {
 struct Panels<'a> {
     app: &'a mut TextureCraftApp,
     tokens: Tokens,
+    style: DockStyle,
 }
 
 /// Room between a panel's edges and its contents
@@ -573,15 +578,16 @@ pub(crate) fn panel_body(app: &mut TextureCraftApp, ui: &mut Ui, panel: Panel) {
 
 impl DockContent<Panel> for Panels<'_> {
     fn body(&mut self, ui: &mut Ui, panel: &Panel) {
-        let app = &mut *self.app;
         if *panel == Panel::Viewport {
             crate::rail_popup::remember_viewport(ui.ctx(), ui.max_rect());
             ui.painter().rect_filled(ui.max_rect(), 0.0, self.tokens.viewport);
-            crate::viewport::central(app, ui);
+            crate::viewport::central(self.app, ui);
             return;
         }
 
-        panel_body(app, ui, *panel);
+        // Before the rows, which draw over the foot of the shown tab's box
+        self.paint_shown_group_tab(ui, *panel);
+        panel_body(self.app, ui, *panel);
     }
 
     fn logical_label(&self, panel: &Panel) -> String {

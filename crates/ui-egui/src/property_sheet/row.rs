@@ -19,9 +19,8 @@ const STACK_LABEL_CENTER: f32 = 8.0;
 /// A caption line's height
 pub(super) const CAPTION_LINE: f32 = 18.0;
 
-/// How far small and regular text reach below their centre line
+/// How far small text reaches below its centre line
 const SMALL_TEXT_HALF_LINE: f32 = 6.0;
-const TEXT_HALF_LINE: f32 = 7.0;
 
 /// The square a row-end glyph answers the pointer in
 const GLYPH_BOX: f32 = 20.0;
@@ -219,16 +218,6 @@ impl PropertySheet<'_> {
         let dim = self.tokens.text_dim;
         self.ui.painter().text(pos2(self.left, rect.top() + CAPTION_LINE / 2.0), Align2::LEFT_CENTER, text, FontId::proportional(SMALL_TEXT_SIZE), dim);
         self.drawn(rect.bottom());
-    }
-
-    /// A dim line that says why a group is empty
-    pub(crate) fn empty_note(&mut self, text: &str) {
-        let rect = self.take(ROW_HEIGHT);
-        let response = self.ui.interact(rect, self.id.with(("empty_note", text)), egui::Sense::hover());
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, text));
-        let dim = self.tokens.text_dim;
-        self.ui.painter().text(rect.center(), Align2::CENTER_CENTER, text, FontId::proportional(TEXT_SIZE), dim);
-        self.drawn(rect.center().y + TEXT_HALF_LINE);
     }
 
     /// A caret pointing down (open) or right (folded), centred on `center`

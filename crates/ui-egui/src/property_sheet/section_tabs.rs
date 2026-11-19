@@ -1,4 +1,4 @@
-use egui::{Align2, Color32, CornerRadius, FontId, Id, Rect, Role, Sense, Ui, WidgetInfo, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, FontId, Id, Painter, Rect, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 
 use super::row::SECTION_RULE_TO_CAPTION;
 use super::{PAD, SMALL_TEXT_SIZE};
@@ -104,6 +104,16 @@ pub(super) fn take_jump(ui: &Ui, title: &str) -> bool {
     wanted
 }
 
+/// A tab from `left` to `right` on `strip`: from just under the strip's top down into the panel the strip sits on
+pub(crate) fn tab_rect(strip: Rect, left: f32, right: f32) -> Rect {
+    Rect::from_min_max(pos2(left, strip.top() + TAB_TOP), pos2(right, strip.bottom() + TAB_BELOW))
+}
+
+/// The shown tab's box over `tab`: the panel's colour, rounded, so it rises from the panel below the strip
+pub(crate) fn shown_tab_box(painter: &Painter, tokens: &Tokens, tab: Rect) {
+    painter.rect_filled(tab, CornerRadius::same(TAB_ROUNDING), tokens.panel);
+}
+
 /// The tab strip on the `scope` panel's top edge, top corners rounded by `top_corner`: one tab per section; a click scrolls to it
 pub(crate) fn section_tabs(ui: &mut Ui, scope: SectionScope, top_corner: u8, tabs: &[(&str, &str)]) {
     let tokens = Tokens::get(ui.ctx());
@@ -117,7 +127,7 @@ pub(crate) fn section_tabs(ui: &mut Ui, scope: SectionScope, top_corner: u8, tab
     for (index, (icon, title)) in tabs.iter().enumerate() {
         let on = lit.map_or(index == 0, |lit| lit == *title);
         let width = ui.painter().layout_no_wrap((*title).to_owned(), semibold(TAB_TEXT_SIZE), Color32::WHITE).size().x + TAB_PADDING;
-        let tab = Rect::from_min_max(pos2(x, strip.top() + TAB_TOP), pos2(x + width, strip.bottom() + TAB_BELOW));
+        let tab = tab_rect(strip, x, x + width);
         let response = ui.interact(tab, ui.scope_id().with(("section_tab", index)), Sense::click());
         response.widget_info(|| WidgetInfo::selected(Role::Tab, true, on, *title));
         if response.clicked() {
@@ -127,7 +137,7 @@ pub(crate) fn section_tabs(ui: &mut Ui, scope: SectionScope, top_corner: u8, tab
         let color = if on || response.hovered() { tokens.text } else { tokens.text_dim };
         let painter = ui.painter();
         if on {
-            painter.rect_filled(tab, CornerRadius::same(TAB_ROUNDING), tokens.panel);
+            shown_tab_box(painter, &tokens, tab);
         }
         let center_y = strip.center().y + TAB_TOP / 2.0;
         painter.text(pos2(x + TAB_ICON_CENTER, center_y), Align2::CENTER_CENTER, *icon, FontId::proportional(TAB_ICON_SIZE), color);

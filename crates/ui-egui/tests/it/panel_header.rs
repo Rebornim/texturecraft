@@ -1,4 +1,4 @@
-//! Every docked panel group sits under one header bar: its name at the left, a close × at the right
+//! Every docked panel group sits under one header bar: its names at the left, the shown one raised as a box when the group has several, a close × at the right
 
 use egui::Role;
 use egui_kittest::Harness;
@@ -78,4 +78,39 @@ fn the_properties_header_names_the_selected_effects_type() {
     texturecraft_engine::execute(&mut harness.state_mut().session, "layer.select", &serde_json::json!({"layer": layer, "target": level})).unwrap();
     harness.run_steps(SETTLE_FRAMES);
     tab_rect(&harness, "Properties - Levels");
+}
+
+/// Rounded boxes painted this frame whose top sits `TAB_TOP` under the top of `tab`: the raised box of a shown tab
+fn tab_boxes(harness: &Harness<'_, TextureCraftApp>, tab: egui::Rect) -> usize {
+    const TAB_TOP: f32 = 4.0;
+
+    harness
+        .output()
+        .shapes
+        .iter()
+        .filter(|shape| match &shape.shape {
+            egui::Shape::Rect(rect) => {
+                let rises = (rect.rect.top() - (tab.top() + TAB_TOP)).abs() < 0.5;
+                rises && rect.corner_radius != egui::CornerRadius::ZERO && tab.x_range().contains(rect.rect.center().x)
+            }
+            _ => false,
+        })
+        .count()
+}
+
+#[test]
+fn a_groups_shown_tab_rises_as_a_box_and_the_others_and_a_lone_panels_do_not() {
+    let mut harness = app();
+    let layers = tab_rect(&harness, "Layers");
+    let settings = tab_rect(&harness, "Texture Set Settings");
+
+    assert_eq!(tab_boxes(&harness, layers), 1, "the shown Layers tab has its box");
+    assert_eq!(tab_boxes(&harness, settings), 0, "the hidden tab is its name only");
+    assert_eq!(tab_boxes(&harness, tab_rect(&harness, "Properties - ")), 0, "a panel alone keeps its plain header");
+
+    click_at(&mut harness, settings.center());
+    harness.run_steps(SETTLE_FRAMES);
+
+    assert_eq!(tab_boxes(&harness, tab_rect(&harness, "Texture Set Settings")), 1, "the box goes with the shown tab");
+    assert_eq!(tab_boxes(&harness, tab_rect(&harness, "Layers")), 0);
 }

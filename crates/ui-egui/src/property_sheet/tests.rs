@@ -125,7 +125,7 @@ fn gallery(ui: &mut egui::Ui, state: &mut Gallery) {
                 sheet.caption("Offset");
                 sheet.signed_slider("Horizontal", &mut state.offset, -1.0..=1.0, 2);
                 if sheet.fold("Attributes", Some("Default"), false) {
-                    sheet.empty_note("No attributes");
+                    sheet.button(ic::DOT, "No attributes");
                 }
                 sheet.seed("Seed", &mut state.seed);
                 if sheet.button(ic::DICE_FIVE, "Randomize seeds").clicked() {
@@ -495,13 +495,13 @@ fn a_fold_keeps_its_state_when_rows_above_it_come_and_go() {
     let folds = |ui: &mut egui::Ui, extra_shown: &mut bool| {
         PropertySheet::show(ui, "folds", |sheet| {
             if *extra_shown && sheet.fold("Extra", None, true) {
-                sheet.empty_note("Extra rows");
+                sheet.button(ic::DOT, "Extra rows");
             }
             if sheet.fold("Edges", None, true) {
-                sheet.empty_note("Edge rows");
+                sheet.button(ic::DOT, "Edge rows");
             }
             if sheet.fold("Parameters", None, false) {
-                sheet.empty_note("Parameter rows");
+                sheet.button(ic::DOT, "Parameter rows");
             }
         });
     };
@@ -588,11 +588,11 @@ fn a_fold_before_a_sections_first_band_keeps_its_state_when_the_band_above_goes_
         PropertySheet::show(ui, "sections", |sheet| {
             sheet.section("First", false);
             if *band_shown && sheet.band("Band", true, None, None).open {
-                sheet.empty_note("Band rows");
+                sheet.button(ic::DOT, "Band rows");
             }
             sheet.section("Second", false);
             if sheet.fold("Edges", None, true) {
-                sheet.empty_note("Edge rows");
+                sheet.button(ic::DOT, "Edge rows");
             }
         });
     };

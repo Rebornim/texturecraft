@@ -16,15 +16,15 @@ const SCALE_DOUBLINGS: f32 = 2.0;
 /// The properties of folder `folder`; every change goes through the `folder.*` commands
 pub(crate) fn folder_properties(app: &mut TextureCraftApp, ui: &mut Ui, folder: LayerId) {
     let project = &app.session.doc.project;
-    let has_contents = has_contents(project, folder);
+    if !has_contents(project, folder) {
+        crate::widgets::empty_note(ui, tr("No properties found"));
+        return;
+    }
+
     let offset = project.contents_offset(folder);
     let changed = contents_changed(project, folder);
-    PropertySheet::show(ui, ("folder_sheet", folder.0), |sheet| {
-        if !has_contents {
-            sheet.empty_note(tr("No properties found"));
-            return;
-        }
 
+    PropertySheet::show(ui, ("folder_sheet", folder.0), |sheet| {
         if sheet.section_reset(tr("Contents"), changed) {
             app.run("folder.contents.reset", json!({"layer": folder.0}));
         }

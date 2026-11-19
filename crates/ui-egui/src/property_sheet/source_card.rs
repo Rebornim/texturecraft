@@ -8,8 +8,11 @@ use super::slot::THUMB_SIZE;
 use super::{GROUP_GAP, PropertySheet, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
 
-/// Height of the card
-const CARD_HEIGHT: f32 = 44.0;
+/// Height of the card: 11 px of air above and below the thumbnail, as a slot card has
+const CARD_HEIGHT: f32 = 48.0;
+
+/// Air between the section caption and the card, as above a slot card
+const CARD_TOP_AIR: f32 = 6.0;
 
 /// From the left edge to the name, to the link glyph's centre and to the texture set
 const NAME_LEFT: f32 = 36.0;
@@ -31,6 +34,7 @@ impl PropertySheet<'_> {
     /// The card of `name` in texture set `set`, right under its section caption; a `missing` one is dim, shows a broken link and takes no click. Returns true when it was clicked
     pub(crate) fn source_card(&mut self, thumbnail: &dyn Fn(&Painter, Rect), name: &str, set: &str, missing: bool) -> bool {
         self.close_card();
+        self.space(CARD_TOP_AIR);
         let rect = self.take(CARD_HEIGHT);
         let center_y = rect.center().y;
         let face = self.bled_row(rect);

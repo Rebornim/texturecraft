@@ -134,7 +134,10 @@ impl PropertySheet<'_> {
         let rect = self.take(SECTION_CAPTION_LINE);
         self.sections.push((title.to_owned(), rect.top()));
         if super::section_tabs::take_jump(self.ui, title) {
-            self.ui.scroll_to_rect(rect.expand2(egui::vec2(0.0, SECTION_RULE_TO_CAPTION)), Some(egui::Align::TOP));
+            // a top-aligned scroll stops one item spacing above its target: aim that much lower so the hairline meets the view's top
+            let spacing = self.ui.spacing().item_spacing.y;
+            let target = rect.expand2(egui::vec2(0.0, SECTION_RULE_TO_CAPTION)).translate(egui::vec2(0.0, spacing));
+            self.ui.scroll_to_rect(target, Some(egui::Align::TOP));
         }
         let center_y = rect.top() + SECTION_CAPTION_CENTER;
         self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, title.to_uppercase(), semibold(SMALL_TEXT_SIZE), color);

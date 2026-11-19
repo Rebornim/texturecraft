@@ -1428,6 +1428,9 @@ fn layer_context_menu(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer) {
 // ---------------------------------------------------------------------------------------------
 // Texture set settings
 
+/// Size of a channel's remove button, and of the room Base color keeps for one
+const CHANNEL_REMOVE_SIZE: f32 = 18.0;
+
 pub(crate) fn texture_set_settings(app: &mut TextureCraftApp, ui: &mut Ui) {
     let tk = Tokens::get(ui.ctx());
     let ts = app.session.ts();
@@ -1488,7 +1491,10 @@ pub(crate) fn texture_set_settings(app: &mut TextureCraftApp, ui: &mut Ui) {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(tr(c.label())).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if *c != Channel::BaseColor && icon_button(ui, ic::X, tr("Remove channel"), false, 18.0).clicked() {
+                    // Base color can't be removed: its × room stays, so every format ends on one column
+                    if *c == Channel::BaseColor {
+                        ui.allocate_exact_size(vec2(CHANNEL_REMOVE_SIZE, CHANNEL_REMOVE_SIZE), Sense::hover());
+                    } else if icon_button(ui, ic::X, tr("Remove channel"), false, CHANNEL_REMOVE_SIZE).clicked() {
                         app.run("textureSet.channel.remove", json!({"ts": ts, "channel": c.id()}));
                     }
                     ui.label(RichText::new(f.label()).color(tk.text_dim));
@@ -1820,8 +1826,8 @@ fn mask_fill_of(project: &texturecraft_engine::core::Project, effect: LayerId) -
     }
 }
 
-/// Room around the Properties rows not yet laid out by the property sheet, as every other panel has
-const LEGACY_BODY_MARGIN: egui::Margin = egui::Margin::symmetric(8, 4);
+/// Room around the Properties rows not yet laid out by the property sheet: the sheet's side padding, so both start under the panel's name
+const LEGACY_BODY_MARGIN: egui::Margin = egui::Margin::symmetric(crate::property_sheet::PAD as i8, 4);
 
 /// Lays out `body` with the other panels' margin
 fn legacy_body(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {

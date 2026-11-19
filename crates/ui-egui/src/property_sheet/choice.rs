@@ -215,7 +215,7 @@ impl PropertySheet<'_> {
                     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, caption));
                     let center_y = rect.top() + OPTION_HEIGHT / 2.0 - OPTION_TEXT_LIFT;
                     ui.painter().text(
-                        pos2(rect.left() + VALUE_INSET, center_y),
+                        pos2(rect.left() - LIST_BORDER + VALUE_INSET, center_y),
                         Align2::LEFT_CENTER,
                         caption,
                         FontId::proportional(SMALL_TEXT_SIZE),
@@ -241,15 +241,17 @@ impl PropertySheet<'_> {
                         painter.rect_filled(bar, CornerRadius::same(CHOSEN_BAR_RADIUS), tokens.accent);
                     }
 
+                    // the rows sit inside the list's border: measured from the button's edge, text and picture keep the button's x
+                    let button_left = rect.left() - LIST_BORDER;
                     let center_y = rect.top() + OPTION_HEIGHT / 2.0 - OPTION_TEXT_LIFT;
-                    let mut text_x = rect.left() + VALUE_INSET;
+                    let mut text_x = button_left + VALUE_INSET;
                     if let Some(draw) = picture {
                         draw(
                             painter,
-                            Rect::from_min_size(pos2(rect.left() + PICTURE_INSET, center_y - PICTURE_SIZE / 2.0), vec2(PICTURE_SIZE, PICTURE_SIZE)),
+                            Rect::from_min_size(pos2(button_left + PICTURE_INSET, center_y - PICTURE_SIZE / 2.0), vec2(PICTURE_SIZE, PICTURE_SIZE)),
                             option,
                         );
-                        text_x = rect.left() + PICTURE_INSET + PICTURE_SIZE + PICTURE_TO_TEXT;
+                        text_x = button_left + PICTURE_INSET + PICTURE_SIZE + PICTURE_TO_TEXT;
                     }
                     let font = if chosen { semibold(TEXT_SIZE) } else { FontId::proportional(TEXT_SIZE) };
                     painter.text(pos2(text_x, center_y), Align2::LEFT_CENTER, name(option), font, tokens.text);

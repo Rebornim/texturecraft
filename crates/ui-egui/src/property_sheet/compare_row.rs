@@ -2,6 +2,7 @@
 
 use egui::{Color32, CornerRadius, Rect};
 
+use super::choice::VALUE_INSET;
 use super::{CompareRowResponse, PropertySheet};
 
 /// Width of the operator switch at the right end of the first row
@@ -15,9 +16,6 @@ const TAG_WIDTH: f32 = 3.0;
 
 /// Corner radius of a source's colour tag: softens its ends without rounding a 3 px bar into a pill
 const TAG_RADIUS: u8 = 1;
-
-/// From a tagged dropdown's left edge to its value
-const TAGGED_VALUE_INSET: f32 = 10.0;
 
 impl PropertySheet<'_> {
     /// The two sources of a comparison, `left` tagged `tags[0]` with `operators` beside it, `right` tagged `tags[1]` under it; every list hangs from its own button
@@ -46,7 +44,7 @@ impl PropertySheet<'_> {
     fn tagged_button(&mut self, rect: Rect, value: &str, tag: Color32) -> egui::Response {
         self.dropdown_button_led(rect, value, |painter| {
             painter.rect_filled(Rect::from_x_y_ranges(rect.left()..=(rect.left() + TAG_WIDTH), rect.y_range()), CornerRadius::same(TAG_RADIUS), tag);
-            rect.left() + TAGGED_VALUE_INSET
+            rect.left() + VALUE_INSET
         })
     }
 }

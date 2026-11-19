@@ -185,6 +185,79 @@ fn a_culling_row_reads_name_then_picture_and_switch_with_its_i_at_the_end() {
     assert_ne!(harness.state().depth_culling, was, "a click on the row flips it");
 }
 
+/// Two culling rows, the second named past the label column
+fn culling_rows(ui: &mut egui::Ui, on: &mut [bool; 2]) {
+    let panel = Tokens::get(ui.ctx()).panel;
+    egui::Frame::NONE.fill(panel).show(ui, |ui| {
+        ui.set_width(PANEL_WIDTH);
+        PropertySheet::show(ui, "culling", |sheet| {
+            sheet.picture_toggle(&swatch(Color32::from_gray(160)), "Depth", &mut on[0]);
+            sheet.picture_toggle(&swatch(Color32::from_gray(100)), "Backface culling past the column", &mut on[1]);
+        });
+    });
+}
+
+/// A culling name too long for the label column moves every culling row's picture and switch, so the switches stay one column
+#[test]
+fn culling_rows_keep_their_switches_in_one_column_when_a_name_is_long() {
+    let mut harness = builder(Brightness::MediumDark).build_ui_state(culling_rows, [false; 2]);
+    harness.run_steps(3);
+    let short = harness.get_by_label("Depth").rect();
+    let long = harness.get_by_label("Backface culling past the column").rect();
+    assert_eq!(short.right(), long.right(), "both switches end at one x: {short:?} vs {long:?}");
+}
+
+/// Under a section caption, an instance card (`instance` true) or a slot card; records where its thumbnail was painted
+fn card_under_caption(ui: &mut egui::Ui, state: &mut (bool, std::cell::Cell<Option<Rect>>)) {
+    let (instance, thumbnail) = state;
+    let record = |_: &Painter, rect: Rect| thumbnail.set(Some(rect));
+    let panel = Tokens::get(ui.ctx()).panel;
+    egui::Frame::NONE.fill(panel).show(ui, |ui| {
+        ui.set_width(PANEL_WIDTH);
+        PropertySheet::show(ui, "card", |sheet| {
+            sheet.section("Caption", false);
+            if *instance {
+                sheet.source_card(&record, "Layer", "Set", false);
+            } else {
+                sheet.slot_restorable(&record, "Layer", "Set", false);
+            }
+        });
+    });
+}
+
+/// Where the card under a caption paints its thumbnail
+fn thumbnail_under_caption(instance: bool) -> Rect {
+    let mut harness = builder(Brightness::MediumDark).build_ui_state(card_under_caption, (instance, std::cell::Cell::new(None)));
+    harness.run_steps(3);
+    harness.state().1.get().unwrap_or(Rect::NOTHING)
+}
+
+/// The instance card keeps a card's air under its caption and above its thumbnail, as a slot card does (it sat 6 px higher)
+#[test]
+fn an_instance_card_sits_under_its_caption_as_a_slot_card_does() {
+    let slot = thumbnail_under_caption(false);
+    let instance = thumbnail_under_caption(true);
+    assert_eq!(instance.top(), slot.top(), "the thumbnails start at one y: {instance:?} vs {slot:?}");
+}
+
+/// A gray slider in a panel-wide column; records the column's right edge
+fn gray_row(ui: &mut egui::Ui, state: &mut (f32, f32)) {
+    ui.set_width(PANEL_WIDTH);
+    state.1 = ui.max_rect().right();
+    crate::gray_slider::gray_slider(ui, "Color", &mut state.0);
+}
+
+/// A gray slider's invert button ends on the column's right edge (a plain button was wider than the room kept for it)
+#[test]
+fn a_gray_sliders_invert_button_ends_on_its_columns_right_edge() {
+    // the slider's typed value field (upstream's) carries no accessible name
+    let mut harness = builder(Brightness::MediumDark).with_accessibility_check(false).build_ui_state(gray_row, (0.5, 0.0));
+    harness.run_steps(3);
+    let invert = harness.get_by_role(egui::accesskit::Role::Button).rect();
+    let right = harness.state().1;
+    assert!(invert.right() <= right + 0.5, "the button ends at {} past the column's {right}", invert.right());
+}
+
 #[test]
 fn dropdown_list_hangs_from_its_button_at_its_width_and_picks() {
     let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

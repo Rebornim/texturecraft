@@ -46,9 +46,14 @@ fn group_of(layout: &Layout<Panel>, panel: Panel) -> Option<(&[Panel], bool)> {
 }
 
 impl Panels<'_> {
-    /// How far `panel`'s header name sits above its tab strip's middle: on its header band's middle, which takes in the gutter above it
+    /// How far `panel`'s header band reaches above its tab strip: the gutter above it, under another panel
+    fn header_rise(&self, panel: Panel) -> f32 {
+        if under_a_panel(&self.app.ui.dock.workspace.layout, panel) { HEADER_RISE } else { 0.0 }
+    }
+
+    /// How far `panel`'s header name sits above its tab strip's middle: on its header band's middle
     pub(super) fn header_lift(&self, panel: Panel) -> f32 {
-        if under_a_panel(&self.app.ui.dock.workspace.layout, panel) { HEADER_RISE / 2.0 } else { 0.0 }
+        self.header_rise(panel) / 2.0
     }
 
     /// Over the tab the dock drew for `panel`, the panel shown in its group, paints the section tabs' raised box and the name again; a panel alone keeps its plain header. `ui` is the panel's body, right under the strip
@@ -63,8 +68,7 @@ impl Panels<'_> {
         // The dock's own tab layout: names at their natural width, shrunk or moved to "…" when the strip is short
         let body = ui.max_rect();
         let strip = Rect::from_min_max(pos2(body.left(), body.top() - self.style.tab_height), pos2(body.right(), body.top()));
-        let lift = if floating { 0.0 } else { self.header_lift(panel) };
-        let band = Rect::from_x_y_ranges(strip.x_range(), strip.top() - 2.0 * lift..=strip.bottom());
+        let band = Rect::from_x_y_ranges(strip.x_range(), strip.top() - self.header_rise(panel)..=strip.bottom());
         let font = semibold(HEADER_TITLE_SIZE);
         let names: Vec<String> = panels.iter().map(|member| self.logical_label(member).to_uppercase()).collect();
         let natural: Vec<f32> =
@@ -87,7 +91,7 @@ impl Panels<'_> {
             shown_tab_box(&painter, &self.tokens, full_height_tab_rect(band, box_left, left + width - BOX_INSET));
 
             let Some(name) = names.get(index) else { return };
-            let mut job = header_name(ui, name, font, self.style.text, lift);
+            let mut job = header_name(ui, name, font, self.style.text, self.header_lift(panel));
             job.wrap = TextWrapping::truncate_at_width((width - DOCK_TAB_PADDING).max(0.0));
             let galley = painter.layout_job(job);
             let at = pos2(left + HEADER_TITLE_LEFT, strip.center().y - galley.size().y / 2.0);

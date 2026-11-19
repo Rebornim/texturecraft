@@ -393,3 +393,12 @@ fn close_releases_the_layer_thumbnail_snapshot() {
         );
     }
 }
+
+#[test]
+fn the_empty_properties_note_starts_at_its_header_names_left_edge() {
+    let harness = empty();
+    let texts = painted(&harness);
+    let left_of = |wanted: &str| texts.iter().find(|(text, _)| text == wanted).map(|(_, left)| *left).unwrap_or_else(|| panic!("{wanted} is painted"));
+
+    assert_eq!(left_of("No properties found"), left_of("PROPERTIES"));
+}

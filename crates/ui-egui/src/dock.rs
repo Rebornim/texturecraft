@@ -1831,8 +1831,7 @@ fn legacy_body(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
 /// What the Properties panel edits: polygon fill's own settings, the selected effect, fill, folder, instance or mask, else the tool (or a hint to select a layer when it can't act)
 pub(crate) fn properties_contents(app: &mut TextureCraftApp, ui: &mut Ui) {
     if !app.session.project_open {
-        let tokens = Tokens::get(ui.ctx());
-        ui.label(RichText::new(tr("No properties found")).color(tokens.text_dim));
+        crate::widgets::empty_note(ui, tr("No properties found"));
         return;
     }
 

@@ -1431,93 +1431,123 @@ fn layer_context_menu(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer) {
 /// Size of a channel's remove button, and of the room Base color keeps for one
 const CHANNEL_REMOVE_SIZE: f32 = 18.0;
 
+/// The sizes a texture set and each of its UV tiles can take
+const TEXTURE_SET_RESOLUTIONS: [u32; 6] = [256, 512, 1024, 2048, 4096, 8192];
+
+/// Air between the General properties grid's columns and rows
+const GENERAL_GRID_SPACING: egui::Vec2 = vec2(8.0, 6.0);
+
+/// Air above the Channels and Mesh maps captions
+const SECTION_GAP: f32 = 8.0;
+
+/// Air between the channel list and the height and normal settings
+const CHANNEL_SETTINGS_GAP: f32 = 6.0;
+
+/// Range of the Height to normal strength slider
+const HEIGHT_STRENGTH_RANGE: std::ops::RangeInclusive<f32> = 0.0..=10.0;
+
+/// A mesh map row's colour square, its corner radius, the size of its file name and of its menu's dots
+const MESH_MAP_SWATCH_SIZE: f32 = 26.0;
+const MESH_MAP_SWATCH_RADIUS: f32 = 2.0;
+const MESH_MAP_FILE_TEXT_SIZE: f32 = 10.5;
+const MESH_MAP_MENU_ICON_SIZE: f32 = 13.0;
+
 pub(crate) fn texture_set_settings(app: &mut TextureCraftApp, ui: &mut Ui) {
-    let tk = Tokens::get(ui.ctx());
-    let ts = app.session.ts();
-    let Some(set) = app.session.doc.project.texture_sets.get(ts).cloned() else { return };
+    let tokens = Tokens::get(ui.ctx());
+    let set_index = app.session.ts();
+    let Some(set) = app.session.doc.project.texture_sets.get(set_index).cloned() else { return };
     egui::ScrollArea::vertical().id_salt("tss").show(ui, |ui| {
         ui.label(caption(tr("General properties")));
-        egui::Grid::new("tss_grid").num_columns(2).spacing(vec2(8.0, 6.0)).show(ui, |ui| {
+        egui::Grid::new("tss_grid").num_columns(2).spacing(GENERAL_GRID_SPACING).show(ui, |ui| {
             ui.label(tr("Name"));
-            ui.label(RichText::new(&set.name).color(tk.text_strong));
+            ui.label(RichText::new(&set.name).color(tokens.text_strong));
             ui.end_row();
+
             ui.label(tr("Size"));
             egui::ComboBox::from_id_salt("ts_size").selected_text(format!("{}", set.resolution)).show_ui(ui, |ui| {
-                for r in [256u32, 512, 1024, 2048, 4096, 8192] {
-                    if ui.selectable_label(r == set.resolution, format!("{r}")).clicked() {
-                        app.start_resize(ts, r);
+                for resolution in TEXTURE_SET_RESOLUTIONS {
+                    if ui.selectable_label(resolution == set.resolution, format!("{resolution}")).clicked() {
+                        app.start_resize(set_index, resolution);
                     }
                 }
             });
             ui.end_row();
+
             ui.label(tr("UV tiles (UDIM)"));
             let mut tiled = !set.uv_tiles.is_empty();
             if ui.checkbox(&mut tiled, "").changed() {
-                app.run("textureSet.uvTiles", json!({"ts": ts, "enabled": tiled}));
+                app.run("textureSet.uvTiles", json!({"ts": set_index, "enabled": tiled}));
             }
             ui.end_row();
-            // Each tile's own size (per-tile resolution).
+
+            // Each tile's own size
             for &udim in &set.uv_tiles {
-                let r = set.tile_resolution(udim);
-                ui.label(RichText::new(format!("   {udim}")).color(tk.text_dim));
-                egui::ComboBox::from_id_salt(("ts_tile", udim)).selected_text(format!("{r}")).show_ui(ui, |ui| {
-                    for v in [256u32, 512, 1024, 2048, 4096, 8192] {
-                        if ui.selectable_label(v == r, format!("{v}")).clicked() {
-                            app.run("textureSet.tile.resolution", json!({"ts": ts, "tile": udim, "resolution": v}));
+                let tile_resolution = set.tile_resolution(udim);
+                ui.label(RichText::new(format!("   {udim}")).color(tokens.text_dim));
+                egui::ComboBox::from_id_salt(("ts_tile", udim)).selected_text(format!("{tile_resolution}")).show_ui(ui, |ui| {
+                    for resolution in TEXTURE_SET_RESOLUTIONS {
+                        if ui.selectable_label(resolution == tile_resolution, format!("{resolution}")).clicked() {
+                            app.run("textureSet.tile.resolution", json!({"ts": set_index, "tile": udim, "resolution": resolution}));
                         }
                     }
                 });
                 ui.end_row();
             }
+
             ui.label(tr("Shader instance"));
             ui.label(tr("Main shader"));
             ui.end_row();
         });
-        ui.add_space(8.0);
+
+        ui.add_space(SECTION_GAP);
         ui.horizontal(|ui| {
             ui.label(caption(tr("Channels")));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.menu_button(tr("Add channel"), |ui| {
-                    for c in Channel::ALL {
-                        if !set.has_channel(c) && ui.button(tr(c.label())).clicked() {
-                            app.run("textureSet.channel.add", json!({"ts": ts, "channel": c.id()}));
+                    for channel in Channel::ALL {
+                        if !set.has_channel(channel) && ui.button(tr(channel.label())).clicked() {
+                            app.run("textureSet.channel.add", json!({"ts": set_index, "channel": channel.id()}));
                             ui.close();
                         }
                     }
                 });
             });
         });
-        for (c, f) in &set.channels {
+
+        for (channel, format) in &set.channels {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(tr(c.label())).strong());
+                ui.label(RichText::new(tr(channel.label())).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // Base color can't be removed: its × room stays, so every format ends on one column
-                    if *c == Channel::BaseColor {
+                    if *channel == Channel::BaseColor {
                         ui.allocate_exact_size(vec2(CHANNEL_REMOVE_SIZE, CHANNEL_REMOVE_SIZE), Sense::hover());
                     } else if icon_button(ui, ic::X, tr("Remove channel"), false, CHANNEL_REMOVE_SIZE).clicked() {
-                        app.run("textureSet.channel.remove", json!({"ts": ts, "channel": c.id()}));
+                        app.run("textureSet.channel.remove", json!({"ts": set_index, "channel": channel.id()}));
                     }
-                    ui.label(RichText::new(f.label()).color(tk.text_dim));
+                    ui.label(RichText::new(format.label()).color(tokens.text_dim));
                 });
             });
         }
-        ui.add_space(6.0);
-        let mut hs = set.height_strength;
-        if let Some(merge) = slider_edit(ui, tr("Height to normal strength"), &mut hs, 0.0..=10.0, 2) {
-            app.run("textureSet.settings", json!({"ts": ts, "heightStrength": hs, "merge": merge}));
+
+        ui.add_space(CHANNEL_SETTINGS_GAP);
+        let mut height_strength = set.height_strength;
+        if let Some(merge) = slider_edit(ui, tr("Height to normal strength"), &mut height_strength, HEIGHT_STRENGTH_RANGE, 2) {
+            app.run("textureSet.settings", json!({"ts": set_index, "heightStrength": height_strength, "merge": merge}));
         }
+
         let directx = app.session.doc.project.normal_format == texturecraft_engine::core::NormalFormat::DirectX;
         combo(ui, tr("Normal map format"), if directx { "DirectX" } else { "OpenGL" }, |ui| {
             for (id, label, on) in [("openGl", "OpenGL", !directx), ("directX", "DirectX", directx)] {
                 if ui.selectable_label(on, label).clicked() && !on {
-                    app.run("textureSet.settings", json!({"ts": ts, "normalFormat": id}));
+                    app.run("textureSet.settings", json!({"ts": set_index, "normalFormat": id}));
                 }
             }
         })
         .on_hover_text(tr(
             "For the whole project: how normal map images set as mesh maps are read (set them again after a change), and the default for export",
         ));
-        ui.add_space(8.0);
+
+        ui.add_space(SECTION_GAP);
         ui.horizontal(|ui| {
             ui.label(caption(tr("Mesh maps")));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1526,37 +1556,39 @@ pub(crate) fn texture_set_settings(app: &mut TextureCraftApp, ui: &mut Ui) {
                 }
             });
         });
-        for m in BakedMap::ALL {
-            let present = app.session.doc.baked.get(&ts).is_some_and(|b| b.maps.contains_key(&m));
+        for map in BakedMap::ALL {
+            let present = app.session.doc.baked.get(&set_index).is_some_and(|baked| baked.maps.contains_key(&map));
             let row = ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
-                ui.painter().rect_filled(r, 2.0, if present { mesh_map_color(m) } else { tk.button });
+                let (swatch, _) = ui.allocate_exact_size(vec2(MESH_MAP_SWATCH_SIZE, MESH_MAP_SWATCH_SIZE), Sense::hover());
+                ui.painter().rect_filled(swatch, MESH_MAP_SWATCH_RADIUS, if present { mesh_map_color(map) } else { tokens.button });
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(tr(crate::i18n::baked_map_label(m))).strong());
+                    ui.label(RichText::new(tr(crate::i18n::baked_map_label(map))).strong());
                     ui.label(
-                        RichText::new(if present { format!("{}_{}", set.name, m.id()) } else { tr("Missing (bake to create)").into() })
-                            .size(10.5)
-                            .color(tk.text_dim),
+                        RichText::new(if present { format!("{}_{}", set.name, map.id()) } else { tr("Missing (bake to create)").into() })
+                            .size(MESH_MAP_FILE_TEXT_SIZE)
+                            .color(tokens.text_dim),
                     );
                 });
-                // An image resource instead of a bake, or no map.
+
+                // An image resource instead of a bake, or no map
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.menu_button(RichText::new(ic::DOTS_THREE).size(13.0), |ui| {
+                    ui.menu_button(RichText::new(ic::DOTS_THREE).size(MESH_MAP_MENU_ICON_SIZE), |ui| {
                         if let Some(name) = image_menu(app, ui) {
-                            app.run("textureSet.meshMap.set", json!({"ts": ts, "map": m.id(), "image": name}));
+                            app.run("textureSet.meshMap.set", json!({"ts": set_index, "map": map.id(), "image": name}));
                         }
                         ui.separator();
                         if ui.add_enabled(present, egui::Button::new(tr("Clear"))).clicked() {
-                            app.run("textureSet.meshMap.clear", json!({"ts": ts, "map": m.id()}));
+                            app.run("textureSet.meshMap.clear", json!({"ts": set_index, "map": map.id()}));
                             ui.close();
                         }
                     });
                 });
             });
-            // A shelf image dropped on the row becomes this mesh map.
-            let resp = row.response.interact(Sense::hover()).on_hover_text(tr("Drop an image from the Assets panel here to use it as this mesh map"));
-            if let Some(name) = image_drop(ui, &resp) {
-                app.run("textureSet.meshMap.set", json!({"ts": ts, "map": m.id(), "image": name}));
+
+            // A shelf image dropped on the row becomes this mesh map
+            let response = row.response.interact(Sense::hover()).on_hover_text(tr("Drop an image from the Assets panel here to use it as this mesh map"));
+            if let Some(name) = image_drop(ui, &response) {
+                app.run("textureSet.meshMap.set", json!({"ts": set_index, "map": map.id(), "image": name}));
             }
         }
     });
@@ -1700,8 +1732,7 @@ mod image_menu_tests {
     }
 }
 
-/// An image from the Assets panel dropped on `resp`, outlined while one hovers it. Other assets
-/// are left for the drop targets around it.
+/// An image from the Assets panel dropped on `resp`, outlined while one hovers it; other assets are left for the drop targets around it
 pub(crate) fn image_drop(ui: &Ui, resp: &egui::Response) -> Option<String> {
     if !resp.dnd_hover_payload::<ShelfDrag>().is_some_and(|drag| matches!(drag.asset, Asset::Texture(_))) {
         return None;

@@ -11,9 +11,12 @@ const BUTTON_WORD_AIR: f32 = 9.0;
 /// Air between two buttons
 const BUTTON_GAP: f32 = 6.0;
 
+/// Air between the toggle's label and its pill
+const TOGGLE_LABEL_AIR: f32 = 9.0;
+
 /// From the right edge to the toggle's centre (the pill ends on the edge), and to its label's end
 const TOGGLE_CENTER_INSET: f32 = PILL_SIZE.x / 2.0;
-const TOGGLE_LABEL_INSET: f32 = 31.0;
+const TOGGLE_LABEL_INSET: f32 = PILL_SIZE.x + TOGGLE_LABEL_AIR;
 
 impl PropertySheet<'_> {
     /// `buttons` (word, enabled) from the left edge, then `toggle_label` and its toggle at the right end

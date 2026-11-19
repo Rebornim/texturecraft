@@ -22,8 +22,10 @@ const ORB_AIR: f32 = 14.0;
 /// From the right edge to the end of a ramp's track, where its value and invert glyph sit
 const RAMP_END_INSET: f32 = 56.0;
 
-/// From the right edge to a ramp's value (on the linked Tiling and Offset values), and to its invert glyph's centre
-const RAMP_VALUE_INSET: f32 = 24.0;
+/// From the right edge to a ramp's value: where the linked Tiling and Offset values end
+const RAMP_VALUE_INSET: f32 = super::preview_block::LINK_ROOM;
+
+/// From the right edge to a ramp's invert glyph's centre
 const INVERT_INSET: f32 = 8.0;
 
 /// Width of a ramp's typed value

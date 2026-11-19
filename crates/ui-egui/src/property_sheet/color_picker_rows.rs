@@ -41,9 +41,11 @@ const HUE_MARKER_RADIUS: u8 = 2;
 /// Width of the before and of the after swatch
 const SWATCH_WIDTH: f32 = 30.0;
 
-/// From the left edge to the hex field, and from the hex field to the right edge (the eyedropper's room)
+/// From the left edge to the hex field
 const HEX_LEFT: f32 = 68.0;
-const HEX_RIGHT_INSET: f32 = 22.0;
+
+/// From the hex field to the right edge (the eyedropper's room): the hex field ends where the colour field above it does
+const HEX_RIGHT_INSET: f32 = HUE_STRIP_WIDTH + FIELD_TO_STRIP;
 
 /// From the hex field's left edge to its `#`, and to its digits
 const HASH_INSET: f32 = 8.0;

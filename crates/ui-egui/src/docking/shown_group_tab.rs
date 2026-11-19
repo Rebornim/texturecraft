@@ -1,11 +1,12 @@
 //! The shown tab of a docked panel group, drawn as the Properties section tabs draw theirs: a raised box joined to the panel's body
 
 use craft_ui::docking::{DockContent, Layout, Node};
-use egui::text::{LayoutJob, TextWrapping};
+use egui::text::TextWrapping;
 use egui::{Rect, Ui, pos2};
 
+use super::header_band::{HEADER_RISE, header_name, under_a_panel};
 use super::{HEADER_TITLE_SIZE, Panel, Panels};
-use crate::property_sheet::{shown_tab_box, tab_rect};
+use crate::property_sheet::{full_height_tab_rect, shown_tab_box};
 use crate::theme::semibold;
 
 /// Room the dock leaves around a tab's name, half on each side (craft-ui's dock renderer keeps its own copy private)
@@ -17,7 +18,7 @@ pub(crate) const HEADER_TITLE_LEFT: f32 = DOCK_TAB_PADDING / 2.0;
 /// Width of the dock's "…" button for the tabs that do not fit (private in craft-ui's dock renderer as well)
 const OVERFLOW_WIDTH: f32 = 22.0;
 
-/// Room between a tab's edges and its box, so neighbouring boxes never touch
+/// Room between a tab's box and its neighbouring tabs; the first tab's box starts on the panel's left edge
 const BOX_INSET: f32 = 4.0;
 
 /// The panels of the group holding `panel` and whether that group floats; a collapsed stack has no tabs
@@ -45,6 +46,11 @@ fn group_of(layout: &Layout<Panel>, panel: Panel) -> Option<(&[Panel], bool)> {
 }
 
 impl Panels<'_> {
+    /// How far `panel`'s header name sits above its tab strip's middle: on its header band's middle, which takes in the gutter above it
+    pub(super) fn header_lift(&self, panel: Panel) -> f32 {
+        if under_a_panel(&self.app.ui.dock.workspace.layout, panel) { HEADER_RISE / 2.0 } else { 0.0 }
+    }
+
     /// Over the tab the dock drew for `panel`, the panel shown in its group, paints the section tabs' raised box and the name again; a panel alone keeps its plain header. `ui` is the panel's body, right under the strip
     pub(super) fn paint_shown_group_tab(&self, ui: &Ui, panel: Panel) {
         let Some((panels, floating)) = group_of(&self.app.ui.dock.workspace.layout, panel) else { return };
@@ -57,6 +63,8 @@ impl Panels<'_> {
         // The dock's own tab layout: names at their natural width, shrunk or moved to "…" when the strip is short
         let body = ui.max_rect();
         let strip = Rect::from_min_max(pos2(body.left(), body.top() - self.style.tab_height), pos2(body.right(), body.top()));
+        let lift = if floating { 0.0 } else { self.header_lift(panel) };
+        let band = Rect::from_x_y_ranges(strip.x_range(), strip.top() - 2.0 * lift..=strip.bottom());
         let font = semibold(HEADER_TITLE_SIZE);
         let names: Vec<String> = panels.iter().map(|member| self.logical_label(member).to_uppercase()).collect();
         let natural: Vec<f32> =
@@ -71,14 +79,15 @@ impl Panels<'_> {
                 continue;
             }
 
-            // The body's clip stops at the strip, which the box rises into
+            // The body's clip stops at the strip, which the box rises into up to the band's top
             let clip = ui.clip_rect();
             let mut painter = ui.painter().clone();
-            painter.set_clip_rect(Rect::from_x_y_ranges(clip.x_range(), strip.top()..=clip.bottom()));
-            shown_tab_box(&painter, &self.tokens, tab_rect(strip, left + BOX_INSET, left + width - BOX_INSET));
+            painter.set_clip_rect(Rect::from_x_y_ranges(clip.x_range(), band.top()..=clip.bottom()));
+            let box_left = if left > strip.left() { left + BOX_INSET } else { left };
+            shown_tab_box(&painter, &self.tokens, full_height_tab_rect(band, box_left, left + width - BOX_INSET));
 
             let Some(name) = names.get(index) else { return };
-            let mut job = LayoutJob::simple_singleline(name.clone(), font, self.style.text);
+            let mut job = header_name(ui, name, font, self.style.text, lift);
             job.wrap = TextWrapping::truncate_at_width((width - DOCK_TAB_PADDING).max(0.0));
             let galley = painter.layout_job(job);
             let at = pos2(left + HEADER_TITLE_LEFT, strip.center().y - galley.size().y / 2.0);

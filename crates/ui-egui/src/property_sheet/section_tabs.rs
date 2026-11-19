@@ -105,8 +105,13 @@ pub(super) fn take_jump(ui: &Ui, title: &str) -> bool {
 }
 
 /// A tab from `left` to `right` on `strip`: from just under the strip's top down into the panel the strip sits on
-pub(crate) fn tab_rect(strip: Rect, left: f32, right: f32) -> Rect {
+fn tab_rect(strip: Rect, left: f32, right: f32) -> Rect {
     Rect::from_min_max(pos2(left, strip.top() + TAB_TOP), pos2(right, strip.bottom() + TAB_BELOW))
+}
+
+/// A tab from `left` to `right` filling `strip`'s whole height and reaching as far into the panel as a section tab: a docked group's shown tab
+pub(crate) fn full_height_tab_rect(strip: Rect, left: f32, right: f32) -> Rect {
+    Rect::from_min_max(pos2(left, strip.top()), pos2(right, strip.bottom() + TAB_BELOW))
 }
 
 /// The shown tab's box over `tab`: the panel's colour, rounded, so it rises from the panel below the strip

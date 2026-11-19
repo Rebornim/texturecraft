@@ -80,23 +80,27 @@ fn the_properties_header_names_the_selected_effects_type() {
     tab_rect(&harness, "Properties - Levels");
 }
 
-/// Rounded boxes painted this frame whose top sits `TAB_TOP` under the top of `tab`: the raised box of a shown tab
-fn tab_boxes(harness: &Harness<'_, TextureCraftApp>, tab: egui::Rect) -> usize {
-    // the section tabs' TAB_TOP (property_sheet/section_tabs.rs), private to the crate
-    const TAB_TOP: f32 = 4.0;
+/// How far a header under another panel reaches above its tab strip: the 6 px gutter less a 2 px separation (docking/header_band.rs)
+const HEADER_RISE: f32 = 4.0;
 
+/// Room between a later tab's box and its tab's left edge (docking/shown_group_tab.rs, private to the crate)
+const BOX_INSET: f32 = 4.0;
+
+/// Rounded boxes painted this frame over `tab` whose top is `rise` above it: the raised box of a shown tab
+fn tab_boxes(harness: &Harness<'_, TextureCraftApp>, tab: egui::Rect, rise: f32) -> Vec<egui::Rect> {
     harness
         .output()
         .shapes
         .iter()
-        .filter(|shape| match &shape.shape {
+        .filter_map(|shape| match &shape.shape {
             egui::Shape::Rect(rect) => {
-                let rises = (rect.rect.top() - (tab.top() + TAB_TOP)).abs() < 0.5;
-                rises && rect.corner_radius != egui::CornerRadius::ZERO && tab.x_range().contains(rect.rect.center().x)
+                let rises = (rect.rect.top() - (tab.top() - rise)).abs() < 0.5;
+                let raised = rises && rect.corner_radius != egui::CornerRadius::ZERO && tab.x_range().contains(rect.rect.center().x);
+                raised.then_some(rect.rect)
             }
-            _ => false,
+            _ => None,
         })
-        .count()
+        .collect()
 }
 
 #[test]
@@ -105,15 +109,72 @@ fn a_groups_shown_tab_rises_as_a_box_and_the_others_and_a_lone_panels_do_not() {
     let layers = tab_rect(&harness, "Layers");
     let settings = tab_rect(&harness, "Texture Set Settings");
 
-    assert_eq!(tab_boxes(&harness, layers), 1, "the shown Layers tab has its box");
-    assert_eq!(tab_boxes(&harness, settings), 0, "the hidden tab is its name only");
-    assert_eq!(tab_boxes(&harness, tab_rect(&harness, "Properties - ")), 0, "a panel alone keeps its plain header");
+    assert_eq!(tab_boxes(&harness, layers, HEADER_RISE).len(), 1, "the shown Layers tab has its box, from the top of its header band");
+    assert_eq!(tab_boxes(&harness, settings, HEADER_RISE).len(), 0, "the hidden tab is its name only");
+    assert_eq!(tab_boxes(&harness, tab_rect(&harness, "Properties - "), HEADER_RISE).len(), 0, "a panel alone keeps its plain header");
 
     click_at(&mut harness, settings.center());
     harness.run_steps(SETTLE_FRAMES);
 
-    assert_eq!(tab_boxes(&harness, tab_rect(&harness, "Texture Set Settings")), 1, "the box goes with the shown tab");
-    assert_eq!(tab_boxes(&harness, tab_rect(&harness, "Layers")), 0);
+    assert_eq!(tab_boxes(&harness, tab_rect(&harness, "Texture Set Settings"), HEADER_RISE).len(), 1, "the box goes with the shown tab");
+    assert_eq!(tab_boxes(&harness, tab_rect(&harness, "Layers"), HEADER_RISE).len(), 0);
+}
+
+#[test]
+fn the_first_tabs_box_starts_on_the_panels_edge_and_a_later_tabs_box_keeps_its_inset() {
+    let mut harness = app();
+    let layers = tab_rect(&harness, "Layers");
+    let boxes = tab_boxes(&harness, layers, HEADER_RISE);
+    assert!(!boxes.is_empty(), "the shown Layers tab has its box");
+    assert!(boxes.iter().all(|shown| (shown.left() - layers.left()).abs() < 0.5), "{boxes:?} starts on the panel's left edge {}", layers.left());
+
+    let settings = tab_rect(&harness, "Texture Set Settings");
+    click_at(&mut harness, settings.center());
+    harness.run_steps(SETTLE_FRAMES);
+    let boxes = tab_boxes(&harness, settings, HEADER_RISE);
+    assert!(!boxes.is_empty(), "the shown Texture Set Settings tab has its box");
+    assert!(boxes.iter().all(|shown| (shown.left() - (settings.left() + BOX_INSET)).abs() < 0.5), "{boxes:?} keeps its air from the Layers tab");
+}
+
+/// The middle of the first capital's ink in each painted text reading `name`
+fn capital_middles(harness: &Harness<'_, TextureCraftApp>, name: &str) -> Vec<f32> {
+    harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == name => {
+                let row = text.galley.rows.first()?;
+                let glyph = row.glyphs.iter().find(|glyph| glyph.chr.is_uppercase())?;
+                Some(text.pos.y + row.pos.y + glyph.pos.y + glyph.uv_rect.offset.y + glyph.uv_rect.size.y / 2.0)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Names' capitals and the close × share the header band's middle: the tab strip plus, under another panel, the gutter above it less the separation
+#[test]
+fn header_names_capitals_and_close_buttons_sit_on_the_header_bands_middle() {
+    let harness = app();
+    let headers = [
+        ("Texture Sets", "TEXTURE SETS", 0.0),
+        ("Layers", "LAYERS", HEADER_RISE),
+        ("Texture Set Settings", "TEXTURE SET SETTINGS", HEADER_RISE),
+        ("Properties - ", "PROPERTIES - PAINT", HEADER_RISE),
+    ];
+    for (tab, name, rise) in headers {
+        let tab = tab_rect(&harness, tab);
+        let middle = (tab.top() - rise + tab.bottom()) / 2.0;
+        let capitals = capital_middles(&harness, name);
+        assert!(!capitals.is_empty(), "{name} is painted");
+        assert!(capitals.iter().all(|capital| (capital - middle).abs() < 0.75), "{name}'s capitals at {capitals:?}, its band's middle at {middle}");
+    }
+
+    let properties = tab_rect(&harness, "Properties - ");
+    let close = panel_close_button(&harness, properties);
+    let middle = (properties.top() - HEADER_RISE + properties.bottom()) / 2.0;
+    assert!((close.center().y - middle).abs() < 0.5, "the close × at {}, the band's middle at {middle}", close.center().y);
 }
 
 /// Where the label on `name`'s row and to its right ends, for each label named `name`

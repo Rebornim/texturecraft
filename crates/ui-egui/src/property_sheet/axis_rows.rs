@@ -59,7 +59,7 @@ impl PropertySheet<'_> {
         let caption = painter.layout_no_wrap(title.to_uppercase(), semibold(SMALL_TEXT_SIZE), tokens.text_dim).size().x;
         let room = self.right - self.left - caption - UNAVAILABLE_AIR;
         let galley = crate::widgets::elided(&painter, reason, SMALL_TEXT_SIZE, tokens.text_dim, room);
-        let cut = galley.text() != reason;
+        let cut = galley.elided;
         let rect = Rect::from_min_size(pos2(self.right - galley.size().x, center_y - galley.size().y / 2.0), galley.size());
         painter.galley(rect.min, galley, tokens.text_dim);
         let id = self.next_id();

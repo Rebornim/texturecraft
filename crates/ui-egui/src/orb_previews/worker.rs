@@ -4,26 +4,33 @@ use super::{OrbJob, OrbResult, newest_per_place};
 
 /// The thread that renders orbs
 pub(super) struct Worker {
-    pub(super) jobs: std::sync::mpsc::Sender<OrbJob>,
+    /// Each job comes with the context to repaint when its picture is ready
+    pub(super) jobs: std::sync::mpsc::Sender<(OrbJob, Context)>,
     pub(super) results: std::sync::mpsc::Receiver<OrbResult>,
 }
 
 impl Worker {
-    pub(super) fn start(ctx: &Context) -> Option<Worker> {
-        let (jobs, job_rx) = std::sync::mpsc::channel::<OrbJob>();
+    pub(super) fn start() -> Option<Worker> {
+        let (jobs, job_rx) = std::sync::mpsc::channel::<(OrbJob, Context)>();
         let (result_tx, results) = std::sync::mpsc::channel();
-        let ctx = ctx.clone();
         let spawned = std::thread::Builder::new().name("texturecraft-material-orbs".into()).spawn(move || {
             // Its own pool keeps orbs from queuing ahead of painting and compositing
             let threads = std::thread::available_parallelism().map_or(1, |n| n.get().saturating_sub(1).max(1));
             let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).thread_name(|i| format!("texturecraft-orb-{i}")).build();
             let mut waiting: Vec<OrbJob> = Vec::new();
+            let mut repaint: Option<Context> = None;
             loop {
                 if waiting.is_empty() {
-                    let Ok(job) = job_rx.recv() else { break };
+                    // Idle, the thread holds no context: the context owns the job sender, so a held one would keep both alive
+                    drop(repaint.take());
+                    let Ok((job, ctx)) = job_rx.recv() else { break };
                     waiting.push(job);
+                    repaint = Some(ctx);
                 }
-                waiting.extend(job_rx.try_iter());
+                for (job, ctx) in job_rx.try_iter() {
+                    waiting.push(job);
+                    repaint = Some(ctx);
+                }
                 for key in newest_per_place(&mut waiting) {
                     if result_tx.send(OrbResult::Dropped { key }).is_err() {
                         return;
@@ -46,7 +53,9 @@ impl Worker {
                     return;
                 }
 
-                ctx.request_repaint();
+                if let Some(ctx) = &repaint {
+                    ctx.request_repaint();
+                }
                 if !full {
                     job.quick = false;
                     waiting.push(job);

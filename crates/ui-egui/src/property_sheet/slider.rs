@@ -291,6 +291,7 @@ impl PropertySheet<'_> {
 
         let tokens = self.tokens;
         let Some(mut typed_text) = editing else {
+            self.skip_typing_edit();
             let response = self.ui.interact(rect, id.with("value"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
             response.widget_info(|| WidgetInfo::labeled(egui::Role::Label, true, crate::i18n::trf("{label} value", &[("label", label)])));
             self.ui.painter().text(pos2(right, center_y), Align2::RIGHT_CENTER, shown, semibold(TEXT_SIZE), tokens.text);
@@ -313,13 +314,13 @@ impl PropertySheet<'_> {
             return None;
         }
 
-        self.ui.data_mut(|data| data.remove::<String>(field_id));
+        let untouched = self.end_typing(field_id, &typed_text);
         if self.ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             return None;
         }
 
-        // Leaving the field as it opened changes nothing: no undo step, no rounding to the shown decimals
-        if typed_text.trim() == seeded() {
+        // Leaving the field as it opened changes nothing: no undo step, no rounding to the shown decimals, no overwriting a value changed meanwhile
+        if untouched || typed_text.trim() == seeded() {
             return None;
         }
 

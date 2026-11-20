@@ -80,3 +80,30 @@ fn color_selections_go_in_the_mask_and_are_selected() {
     assert_eq!(mask, vec![first, second]);
     assert!(s.doc.project.layer(layer).unwrap().content_effects.is_empty());
 }
+
+/// An instance with no mask of its own: the Add mask items start one on the instance and leave the source's mask (or its lack of one) alone
+#[test]
+fn add_mask_on_an_instance_starts_its_own_mask() {
+    for source_mask in [None, Some("mask.add.white")] {
+        for (command, params) in [
+            ("mask.add.heightCombination", json!({})),
+            ("mask.add.colorSelection", json!({"color": [1.0, 0.0, 0.0]})),
+            ("mask.add.bitmap", json!({"alpha": "scratches"})),
+        ] {
+            let (mut s, source) = fill();
+            if let Some(add) = source_mask {
+                execute(&mut s, add, &json!({"layer": source.0})).unwrap();
+            }
+            let before = s.doc.project.layer(source).unwrap().mask.clone();
+            let instance = LayerId(execute(&mut s, "layer.instance", &json!({"layer": source.0})).unwrap()["layer"].as_u64().unwrap());
+
+            let mut params = params;
+            params["layer"] = json!(instance.0);
+            let (effect, _) = added(&mut s, command, params);
+
+            assert_eq!(s.doc.project.layer(source).unwrap().mask, before, "{command} left the source's mask as it was");
+            let own = s.doc.project.layer(instance).unwrap().mask.as_ref().map(|mask| mask.effects.iter().map(|effect| effect.id).collect::<Vec<_>>());
+            assert_eq!(own, Some(vec![effect]), "{command} started the instance's own mask");
+        }
+    }
+}

@@ -6,9 +6,6 @@ use texturecraft_core::{Bevel, BevelBlur, BevelCorner, DirectionalDistance, Filt
 use crate::distance_envelope::DistanceEnvelope;
 use crate::eval::{MIN_ALPHA, blur};
 
-/// Samples a Directional Distance trail reads behind a texel at most (beyond, samples spread out)
-const TRAIL_SAMPLES: i32 = 64;
-
 /// From a texel's centre to the edge between it and the nearest texel across: half a texel short of their centres' distance
 const EDGE_OFFSET: f32 = 0.5;
 
@@ -176,24 +173,111 @@ fn chessboard_distances(feature: &[bool], (width, height): (usize, usize)) -> Ve
 
 /// For every texel, how far (a share of `reach` texels) the nearest texel of the shapes `inside` lies behind it against `direction`, if one is in reach
 fn trail_distances(inside: &[bool], (width, height): (usize, usize), direction: [f32; 2], reach: f32) -> Vec<Option<f32>> {
-    let samples = (reach.ceil() as i32).clamp(1, TRAIL_SAMPLES);
-    let step = reach / samples as f32;
-    (0..width * height)
-        .into_par_iter()
-        .map(|texel| {
-            let (x, y) = ((texel % width.max(1)) as f32, (texel / width.max(1)) as f32);
-            (0..=samples).find_map(|sample| {
-                let back = sample as f32 * step;
-                let (sample_x, sample_y) = ((x - direction[0] * back).round(), (y - direction[1] * back).round());
-                let hit = sample_x >= 0.0
-                    && sample_y >= 0.0
-                    && (sample_x as usize) < width
-                    && (sample_y as usize) < height
-                    && inside.get(sample_y as usize * width + sample_x as usize).copied().unwrap_or(false);
-                hit.then(|| if reach > 0.0 { back / reach } else { 0.0 })
-            })
-        })
-        .collect()
+    let steps = trail_steps((width, height), direction, reach);
+
+    // Each row of shapes as bits, a row without one as no words: steps landing on it find nothing
+    let shapes: Vec<Vec<u64>> = inside.par_chunks(width.max(1)).map(row_bits).collect();
+
+    let mut distances = vec![None; width * height];
+    distances.par_chunks_mut(width.max(1)).enumerate().for_each(|(y, row)| trail_row(row, y, &shapes, &steps));
+    distances
+}
+
+/// The texel steps back along a trail against `direction`, nearest first, each with its share of `reach`: texel coordinates are whole, so every texel takes the same steps
+fn trail_steps((width, height): (usize, usize), direction: [f32; 2], reach: f32) -> Vec<(isize, isize, f32)> {
+    // Steps of one texel along the direction's longer axis visit every column (or row) the trail crosses, so no thin shape is stepped over
+    let longer_axis = direction[0].abs().max(direction[1].abs());
+    let samples = if reach > 0.0 && longer_axis > 0.0 { (reach * longer_axis).ceil() as usize } else { 0 };
+    let step = if samples > 0 { reach / samples as f32 } else { 0.0 };
+
+    let mut steps: Vec<(isize, isize, f32)> = Vec::new();
+    for sample in 0..=samples {
+        let back = sample as f32 * step;
+
+        // Rounded half up, so a whole texel coordinate added to it rounds the same; a NaN direction lands nowhere
+        let (across, down) = ((0.5 - direction[0] * back).floor(), (0.5 - direction[1] * back).floor());
+        if !(across.is_finite() && down.is_finite()) {
+            break;
+        }
+
+        // A step as long as the region leaves it from every texel, and never comes back in
+        let (across, down) = (across as isize, down as isize);
+        if across.unsigned_abs() >= width || down.unsigned_abs() >= height {
+            break;
+        }
+
+        // Rounding puts several samples on one texel: the nearest counts
+        if steps.last().is_some_and(|(last_across, last_down, _)| (*last_across, *last_down) == (across, down)) {
+            continue;
+        }
+        steps.push((across, down, if reach > 0.0 { back / reach } else { 0.0 }));
+    }
+    steps
+}
+
+/// A row of shapes as bits, [`u64::BITS`] texels a word; no words when it has none
+fn row_bits(row: &[bool]) -> Vec<u64> {
+    if !row.contains(&true) {
+        return Vec::new();
+    }
+
+    let mut words = vec![0u64; row.len().div_ceil(WORD_BITS)];
+    for (word, texels) in words.iter_mut().zip(row.chunks(WORD_BITS)) {
+        *word = texels.iter().enumerate().filter(|(_, inside)| **inside).fold(0, |bits, (bit, _)| bits | 1 << bit);
+    }
+    words
+}
+
+/// Texels in a word of a row's bits
+const WORD_BITS: usize = u64::BITS as usize;
+
+/// Row `y`'s trail distances into `row`: a step at a time, every texel the step brings onto a shape takes its share, unless an earlier step did
+fn trail_row(row: &mut [Option<f32>], y: usize, shapes: &[Vec<u64>], steps: &[(isize, isize, f32)]) {
+    let width = row.len();
+    let mut found = vec![0u64; width.div_ceil(WORD_BITS)];
+    let mut unfound = width;
+
+    // The last word's bits past the row's end are no texels
+    let last_word = found.len().saturating_sub(1);
+    let tail = width % WORD_BITS;
+    let last_word_texels = if tail > 0 { (1u64 << tail) - 1 } else { u64::MAX };
+
+    for (across, down, share) in steps {
+        // A step past the region's top or bottom leaves it for good
+        let Some(source) = y.checked_add_signed(*down).and_then(|source_y| shapes.get(source_y)) else { break };
+        if source.is_empty() {
+            continue;
+        }
+
+        for (word, found_word) in found.iter_mut().enumerate() {
+            let in_row = if word == last_word { last_word_texels } else { u64::MAX };
+            let landed = bits_from(source, (word * WORD_BITS) as isize + across) & !*found_word & in_row;
+            *found_word |= landed;
+
+            let mut remaining = landed;
+            while remaining != 0 {
+                let bit = remaining.trailing_zeros() as usize;
+                remaining &= remaining - 1;
+                if let Some(slot) = row.get_mut(word * WORD_BITS + bit) {
+                    *slot = Some(*share);
+                }
+                unfound = unfound.saturating_sub(1);
+            }
+        }
+
+        if unfound == 0 {
+            break;
+        }
+    }
+}
+
+/// The [`WORD_BITS`] bits of row bits `source` from texel `start` on, none past either end
+fn bits_from(source: &[u64], start: isize) -> u64 {
+    let bits = WORD_BITS as isize;
+    let (word, shift) = (start.div_euclid(bits), start.rem_euclid(bits) as u32);
+    let at = |index: isize| usize::try_from(index).ok().and_then(|index| source.get(index)).copied().unwrap_or(0);
+    let low = at(word) >> shift;
+    if shift == 0 { low } else { low | at(word + 1) << (u64::BITS - shift) }
 }
 
 #[cfg(test)]
@@ -239,5 +323,64 @@ mod tests {
         assert_eq!(trail[0], Some(0.0), "on the shape");
         assert_eq!(trail[2], Some(0.5), "two texels behind, half the reach");
         assert_eq!(trail[width + 4], Some(1.0), "at the reach's end");
+    }
+
+    #[test]
+    fn a_long_trail_steps_over_no_thin_shape() {
+        // A one-texel shape at column 0 of an 8 × 1 region, with a reach far longer than the region
+        let (width, height) = (8, 1);
+        let inside: Vec<bool> = (0..width * height).map(|texel| texel == 0).collect();
+        let reach = 128.0;
+
+        let trail = trail_distances(&inside, (width, height), [1.0, 0.0], reach);
+
+        assert_eq!(trail[3], Some(3.0 / reach), "three texels behind");
+        assert!(trail.iter().all(Option::is_some), "every texel behind the shape is in its trail: {trail:?}");
+    }
+
+    /// The trail as every texel walks it on its own, one sample at a time: what the shared steps must match
+    fn walked_trail_distances(inside: &[bool], (width, height): (usize, usize), direction: [f32; 2], reach: f32) -> Vec<Option<f32>> {
+        let longer_axis = direction[0].abs().max(direction[1].abs());
+        let samples = if reach > 0.0 && longer_axis > 0.0 { (reach * longer_axis).ceil() as usize } else { 0 };
+        let step = if samples > 0 { reach / samples as f32 } else { 0.0 };
+        (0..width * height)
+            .into_par_iter()
+            .map(|texel| {
+                let (x, y) = ((texel % width) as f32, (texel / width) as f32);
+                (0..=samples)
+                    .map(|sample| {
+                        let back = sample as f32 * step;
+                        (back, (x - direction[0] * back).round(), (y - direction[1] * back).round())
+                    })
+                    .take_while(|(_, sample_x, sample_y)| *sample_x >= 0.0 && *sample_y >= 0.0 && (*sample_x as usize) < width && (*sample_y as usize) < height)
+                    .find_map(|(back, sample_x, sample_y)| inside[sample_y as usize * width + sample_x as usize].then(|| back / reach))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn shared_trail_steps_find_what_each_texel_walking_its_own_finds() {
+        // About one texel in fifty a shape, in a region whose rows end part way through a word
+        // Small enough that the walk's float sums round as exactly as the shared steps (thousands of texels across, a near tie can round a texel over)
+        let (width, height) = (150, 97);
+        let mut seed = 12345u32;
+        let inside: Vec<bool> = (0..width * height)
+            .map(|_| {
+                seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                (seed >> 16) % 97 < 2
+            })
+            .collect();
+
+        for angle in [0.0, 17.0, 45.0, 90.0, 135.0, 200.0, 290.0, 333.0] {
+            for reach in [9.3, 60.0, 400.0] {
+                let direction = crate::eval::direction(angle);
+
+                let shared = trail_distances(&inside, (width, height), direction, reach);
+
+                let walked = walked_trail_distances(&inside, (width, height), direction, reach);
+                assert!(walked.iter().any(Option::is_some) && walked.iter().any(Option::is_none), "{angle}° {reach}: a field with texels in and out of reach");
+                assert_eq!(shared, walked, "{angle}° reach {reach}");
+            }
+        }
     }
 }

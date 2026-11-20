@@ -243,8 +243,9 @@ impl PropertySheet<'_> {
             painter.rect_stroke(field, CornerRadius::same(CONTROL_RADIUS), Stroke::new(1.0, tokens.accent), StrokeKind::Inside);
 
             if response.lost_focus() {
-                self.ui.data_mut(|data| data.remove::<String>(typing_id));
+                let untouched = self.end_typing(typing_id, &text);
                 if let Ok(typed) = text.trim().parse::<u32>()
+                    && !untouched
                     && typed != *seed
                     && !self.ui.input(|input| input.key_pressed(egui::Key::Escape))
                 {
@@ -255,6 +256,7 @@ impl PropertySheet<'_> {
                 self.ui.data_mut(|data| data.insert_temp(typing_id, text));
             }
         } else {
+            self.skip_typing_edit();
             let response = self.ui.interact(field, id, Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, crate::i18n::trf("{label} value", &[("label", &label)])));
             painter.text(pos2(field.right() - SEED_VALUE_INSET, center_y), Align2::RIGHT_CENTER, seed.to_string(), semibold(TEXT_SIZE), tokens.text);

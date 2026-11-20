@@ -36,7 +36,7 @@ impl AnisotropicKuwahara {
     /// Sectors the ellipse is split into
     pub const SECTORS: usize = 8;
 
-    /// The sector weighing exponent at the least and the most Sharpness
+    /// The sector weighing exponent at a Sharpness of 0 and of 1 (Sharpness stops at [`Self::MIN_SHARPNESS`], so the least it weighs with is 5.5)
     const SHARPNESS_EXPONENT_MIN: f32 = 2.0;
     const SHARPNESS_EXPONENT_MAX: f32 = 16.0;
 
@@ -79,5 +79,14 @@ mod tests {
         assert_eq!(AnisotropicKuwahara { anisotropy: 0.0, ..filter }.axes(4.0, 1.0), (4.0, 4.0));
         assert!(AnisotropicKuwahara { sharpness: 1.0, ..filter }.sharpness_exponent() > filter.sharpness_exponent());
         assert!(AnisotropicKuwahara { smoothness: 1.0, ..filter }.sector_exponent() < filter.sector_exponent());
+    }
+
+    #[test]
+    fn sharpness_weighs_on_a_line_from_its_exponent_at_0_to_its_exponent_at_1() {
+        let at = |sharpness: f32| AnisotropicKuwahara { sharpness, ..AnisotropicKuwahara::LIBRARY }.sharpness_exponent();
+
+        assert_eq!(at(AnisotropicKuwahara::MIN_SHARPNESS), 5.5, "the least Sharpness, a quarter of the way along");
+        assert_eq!(at(0.0), 5.5, "below the least, the least");
+        assert_eq!(at(1.0), 16.0, "the most Sharpness weighs with the most exponent");
     }
 }

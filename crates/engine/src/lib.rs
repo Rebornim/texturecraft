@@ -41,6 +41,7 @@ mod log_level;
 mod mask_bitmap;
 pub mod mask_cmds;
 pub mod mask_export;
+mod mask_owner;
 mod mask_preview_pixel;
 pub mod material_lib;
 mod material_preview_pixel;

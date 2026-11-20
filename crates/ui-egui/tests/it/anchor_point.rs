@@ -69,3 +69,35 @@ fn a_click_on_a_reference_selects_what_reads_the_anchor_point() {
     assert_eq!(harness.state().session.selected_layer(), Some(top));
     assert_eq!(harness.state().session.target, StackTarget::Effect(reader));
 }
+
+/// A reader's name longer than the band is cut short before its kind, and hovering the row shows it in full
+#[test]
+fn a_long_reference_name_is_cut_short_and_shows_in_full_on_hover() {
+    const LONG_NAME: &str = "Rust along every lower edge of the hull plates where rain water collects and runs";
+    // Frames past the tooltip delay
+    const TOOLTIP_FRAMES: usize = 60;
+    let (mut harness, _, top, _) = anchor_harness();
+    harness.state_mut().run("layer.rename", json!({"layer": top.0, "name": LONG_NAME}));
+    harness.run_steps(REDRAW_FRAMES);
+    let row = harness.get_by_role_and_label(Role::Button, &format!("{LONG_NAME} Mask fill")).rect();
+    let before = harness.query_all_by_label(LONG_NAME).count();
+
+    harness.hover_at(row.center());
+    harness.run_steps(TOOLTIP_FRAMES);
+
+    // The row's own label is its name and kind; the Layers row shows the name too
+    assert_eq!(harness.query_all_by_label(LONG_NAME).count(), before + 1, "the tooltip carries the full name");
+}
+
+#[test]
+fn a_name_typed_then_left_with_shift_tab_is_kept() {
+    let (mut harness, anchor, _, _) = anchor_harness();
+    let steps = harness.state().session.history_labels().len();
+    type_name(&mut harness, "Edges");
+
+    // The focus moves back to a control drawn before the field: the field never sees itself focused again
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+    harness.run_steps(SETTLE_FRAMES);
+    assert_eq!(anchor_name(&harness, anchor), "Edges", "the typed name is kept");
+    assert_eq!(harness.state().session.history_labels().len(), steps + 1, "in one undo step");
+}

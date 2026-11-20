@@ -21,8 +21,11 @@ pub(crate) fn instance_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer:
 
     // A missing source has no texture set left; the instance's own names where it was
     let set = set_name(project, if missing { layer.id } else { source });
-    let picture =
-        if missing { None } else { app.layer_panel.texture(ui.ctx(), &app.session, ThumbTarget::Content { layer: source, channel: Channel::BaseColor }) };
+    let picture = if missing {
+        None
+    } else {
+        app.layer_panel.texture_outside(ui.ctx(), &app.session, ThumbTarget::Content { layer: source, channel: Channel::BaseColor })
+    };
     let tokens = Tokens::get(ui.ctx());
     let thumbnail = |painter: &Painter, rect: Rect| paint_thumbnail(painter, rect, picture, missing, &tokens);
 
@@ -56,5 +59,42 @@ fn paint_thumbnail(painter: &Painter, rect: Rect, picture: Option<TextureId>, mi
         None => {
             painter.rect_filled(rect, radius, tokens.field);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use serde_json::json;
+    use texturecraft_engine::compose::ThumbTarget;
+    use texturecraft_engine::core::{Channel, LayerId};
+
+    use crate::docking::Panel;
+
+    #[test]
+    fn the_source_card_renders_its_picture_while_layers_is_closed() {
+        // Long enough for the render worker on a busy machine
+        const ATTEMPTS: usize = 500;
+        const WAIT: Duration = Duration::from_millis(10);
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut harness = crate::frame_gizmo::tests::ball_app(false);
+        let source = harness.state_mut().run("layer.add.fill", json!({})).unwrap()["layer"].as_u64().unwrap();
+        let instance = harness.state_mut().run("layer.instance", json!({"layer": source})).unwrap()["layer"].as_u64().unwrap();
+        harness.state_mut().run("layer.select", json!({"layer": instance, "target": "content"})).unwrap();
+        harness.state_mut().ui.dock.close(Panel::Layers);
+        let target = ThumbTarget::Content { layer: LayerId(source), channel: Channel::BaseColor };
+
+        let rendered = (0..ATTEMPTS).any(|_| {
+            harness.step();
+            let fresh = harness.state().layer_panel.service().is_fresh(target);
+            if !fresh {
+                std::thread::sleep(WAIT);
+            }
+            fresh
+        });
+
+        assert!(!harness.state().ui.dock.is_open(Panel::Layers), "Layers stays closed");
+        assert!(rendered, "the Instance card's source picture renders without the Layers panel");
     }
 }

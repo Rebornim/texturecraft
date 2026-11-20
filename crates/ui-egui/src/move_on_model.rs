@@ -132,7 +132,7 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, pad: &egui::Response, ta
         && pad.is_pointer_button_down_on()
         && let Some(at) = pointer
     {
-        held = Some(MoveHold { target, last: at, stepped: false, pass: pass.wrapping_sub(1) });
+        held = Some(MoveHold { target, last: at, edited_revision: None, pass: pass.wrapping_sub(1) });
     }
 
     let Some(mut held) = held.filter(|_| primary && target.projection(app).is_some()) else {
@@ -175,15 +175,26 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, pad: &egui::Response, ta
     ctx.request_repaint();
 }
 
-/// Runs one edit of the hold; every edit after the first joins the first's undo step
-fn step(app: &mut TextureCraftApp, held: &mut MoveHold, command: &str, mut params: Value) {
-    params["merge"] = json!(held.stepped);
-    held.stepped |= texturecraft_engine::execute(&mut app.session, command, &params).is_ok();
+/// Runs one edit of the hold; the edits after the first that changed something join its undo step
+fn step(app: &mut TextureCraftApp, held: &mut MoveHold, command: &str, params: Value) {
+    crate::projection_gizmo::edit_in_one_step(&mut app.session, command, params, &mut held.edited_revision);
 }
 
-/// The selected planar or warp frame of a fill layer, which moves by its frame
+/// The selected planar or warp frame of a fill layer or of a mask fill effect, which moves by its frame
 fn frame_of(app: &TextureCraftApp, target: MoveOnModel, rect: Rect) -> Option<FrameGizmo> {
-    FrameGizmo::of(app, rect).filter(|gizmo| target.effect.is_none() && gizmo.layer == target.layer && gizmo.effect.is_none())
+    FrameGizmo::of(app, rect).filter(|gizmo| match target.effect {
+        Some(effect) => gizmo.effect == Some(effect),
+        None => gizmo.layer == target.layer && gizmo.effect.is_none(),
+    })
+}
+
+/// The `layer` (and for a mask fill `effect`) params of `layer.decal.set` editing `gizmo`'s frame, added to `params`
+fn frame_target(mut params: Value, gizmo: &FrameGizmo) -> Value {
+    params["layer"] = json!(gizmo.layer.0);
+    if let Some(effect) = gizmo.effect {
+        params["effect"] = json!(effect.0);
+    }
+    params
 }
 
 /// A projection's UV tiling, rotation and offset (None for Fill (Match per UV Tile))
@@ -203,10 +214,8 @@ fn placement(projection: &Projection) -> Option<([f32; 2], f32, [f32; 2])> {
 fn dragged(app: &TextureCraftApp, target: MoveOnModel, from: Pos2, to: Pos2, turn: bool, rect: Rect) -> Option<(&'static str, Value)> {
     let delta = to - from;
     if let Some(gizmo) = frame_of(app, target, rect) {
-        let mut params =
-            if turn { json!({"rotation": gizmo.decal.rotation - delta.x * TURN_PER_POINT}) } else { json!({"offset": gizmo.slid_on_screen(delta)?}) };
-        params["layer"] = json!(target.layer.0);
-        return Some(("layer.decal.set", params));
+        let params = if turn { json!({"rotation": gizmo.decal.rotation - delta.x * TURN_PER_POINT}) } else { json!({"offset": gizmo.slid_on_screen(delta)?}) };
+        return Some(("layer.decal.set", frame_target(params, &gizmo)));
     }
 
     if !turn && let Some(round) = RoundGizmo::of(app, rect).filter(|round| round.target == target) {
@@ -230,7 +239,7 @@ fn dragged(app: &TextureCraftApp, target: MoveOnModel, from: Pos2, to: Pos2, tur
 fn resized(app: &TextureCraftApp, target: MoveOnModel, growth: f32, rect: Rect) -> Option<(&'static str, Value)> {
     if let Some(gizmo) = frame_of(app, target, rect) {
         let [width, height] = gizmo.decal.size;
-        return Some(("layer.decal.set", json!({"layer": target.layer.0, "size": [width * growth, height * growth]})));
+        return Some(("layer.decal.set", frame_target(json!({"size": [width * growth, height * growth]}), &gizmo)));
     }
 
     let (tiling, _, _) = placement(&target.projection(app)?)?;
@@ -336,6 +345,32 @@ mod tests {
         assert_eq!(projection(&harness, layer), slid, "no mode is left on");
     }
 
+    /// A mask fill's warp frame moves with the hold as a fill layer's does: the frame slides, not only the image inside it
+    #[test]
+    fn holding_a_mask_fills_pad_slides_its_frame() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app("triplanar");
+        harness.state_mut().run("mask.add.black", json!({"layer": layer.0})).unwrap();
+        let effect = harness.state_mut().run("effect.add.fill", json!({"layer": layer.0, "target": "mask"})).unwrap()["effect"].as_u64().unwrap();
+        harness.state_mut().run("layer.fill.projection", json!({"effect": effect, "projection": "warp"})).unwrap();
+        harness.state_mut().run("layer.select", json!({"layer": layer.0, "target": effect})).unwrap();
+        harness.run_steps(4);
+        let mask_projection = |harness: &Harness| match &harness.state().session.doc.project.effect(LayerId(effect)).unwrap().1.kind {
+            EffectKind::Fill { projection, .. } => projection.clone(),
+            other => panic!("a mask fill: {other:?}"),
+        };
+        let Projection::Warp { frame: before, uv: uv_before, .. } = mask_projection(&harness) else { panic!("a warp") };
+
+        let mut pointer = press_the_button(&mut harness);
+        assert_eq!(harness.state().moving_on_model, Some(MoveOnModel { layer, effect: Some(LayerId(effect)) }), "a press starts the hold");
+        pointer.drags(&mut harness, vec2(-60.0, 0.0), 10, Modifiers::NONE);
+        let_go(&mut harness, &mut pointer);
+
+        let Projection::Warp { frame: after, uv: uv_after, .. } = mask_projection(&harness) else { panic!("still a warp") };
+        assert_ne!(after.offset, before.offset, "the frame slid");
+        assert_eq!(uv_after, uv_before, "not only the image inside it");
+    }
+
     /// Losing the focus mid-hold (Alt+Tab) ends it as letting go does: one undo step, the pointer shown, and moves after it (egui still has the button down) leave the projection alone
     #[test]
     fn losing_the_window_focus_mid_hold_ends_it_as_letting_go_does() {
@@ -434,6 +469,28 @@ mod tests {
         wheel(&mut harness, &mut pointer);
         assert_ne!(harness.state().session.camera, camera, "let go, the wheel zooms the camera");
         assert_eq!(uv_of(&projection(&harness, layer)), scaled, "and leaves the projection alone");
+    }
+
+    /// A hold whose first edit changes nothing (Shift with an up and down drag turns a frame by nothing) makes no undo step, so its later edits make the hold's own step instead of joining the edit before it
+    #[test]
+    fn a_hold_that_first_changes_nothing_keeps_its_own_undo_step() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app("warp");
+        harness.state_mut().run("layer.decal.set", json!({"layer": layer.0, "rotation": 30.0})).unwrap();
+        harness.run_steps(2);
+        let turned = projection(&harness, layer);
+        let steps = harness.state().session.history_labels().len();
+
+        let mut pointer = press_the_button(&mut harness);
+        pointer.drags(&mut harness, vec2(0.0, -40.0), 10, Modifiers::SHIFT);
+        assert_eq!(projection(&harness, layer), turned, "an up and down turn changes nothing");
+        pointer.drags(&mut harness, vec2(0.0, -40.0), 10, Modifiers::NONE);
+        let_go(&mut harness, &mut pointer);
+        assert_ne!(projection(&harness, layer), turned, "the slide moved the frame");
+        assert_eq!(harness.state().session.history_labels().len(), steps + 1, "the hold made its own undo step");
+
+        harness.state_mut().session.undo().unwrap();
+        assert_eq!(projection(&harness, layer), turned, "undo takes back the hold only");
     }
 
     /// A UV image slides as far as the mouse goes, past the window's edge; a warp's frame slides across its plane

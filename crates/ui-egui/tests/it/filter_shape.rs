@@ -5,8 +5,8 @@ use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use texturecraft_engine::core::{
-    BevelBlur, BevelCorner, BevelDirection, Filter, MirrorCorner, MirrorMode, OutlinePosition, SlopeBlending, ThresholdMode, WarpBlending, WarpMode,
-    WarpSourceMode,
+    BevelBlur, BevelCorner, BevelDirection, EffectKind, Filter, MirrorCorner, MirrorMode, OutlinePosition, SlopeBlending, ThresholdMode, WarpBlending,
+    WarpMode, WarpSourceMode,
 };
 use texturecraft_ui_egui::TextureCraftApp;
 
@@ -251,6 +251,22 @@ fn warp_directional_mode_and_its_angle() {
     undo(&mut harness);
 
     assert!(matches!(filter_of(&harness, effect), Filter::SourceWarp(warp) if warp.mode == WarpMode::Warp), "{:?}", filter_of(&harness, effect));
+}
+
+/// A legacy Warp's seed past 2^24 opens in the Seed field exactly as stored (it read through an f32, one less)
+#[test]
+fn legacy_warp_seed_past_two_to_the_24_opens_as_stored() {
+    const LARGE_SEED: u32 = 16_777_217;
+    let (mut harness, effect) = app_with("warp", "mask", WINDOW_HEIGHT);
+    let project = &mut harness.state_mut().session.doc.project;
+    project.effect_mut(effect).unwrap().kind = EffectKind::Filter(Filter::Warp { intensity: 8.0, scale: 4.0, seed: LARGE_SEED, divider: 1 });
+    harness.run_steps(2);
+
+    let field = harness.get_by_role_and_label(Role::Label, "Seed value").rect();
+    click_at(&mut harness, field.center());
+
+    let typed = harness.get_all_by_role(Role::TextInput).filter(|node| node.rect().intersects(field)).find_map(|node| node.accesskit_node().value());
+    assert_eq!(typed, Some(LARGE_SEED.to_string()));
 }
 
 /// Blur Slope's ÷ chip picks the divider, the dice picks a new Seed, and Source Parameters' Blur shows 0..20 over the stored 0..1

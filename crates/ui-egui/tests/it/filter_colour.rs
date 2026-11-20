@@ -26,6 +26,18 @@ fn hsl_mode_switches_and_its_sliders_sit_at_the_middle() {
     assert!(matches!(filter_of(&harness, effect), Filter::Hsl { saturation, .. } if saturation > 0.95), "{:?}", filter_of(&harness, effect));
 }
 
+/// A stored hue past half a turn (0.75, the same hue as -0.25) shows wrapped round on the centred Hue slider, not pinned at its right end
+#[test]
+fn hsl_hue_past_half_a_turn_shows_wrapped_round() {
+    let (mut harness, effect) = app_with("hsl", "content", WINDOW_HEIGHT);
+    harness.state_mut().run("effect.set", serde_json::json!({"effect": effect.0, "hue": 0.75}));
+    harness.run_steps(2);
+
+    let shown = harness.get_by_role_and_label(Role::Slider, "Hue").accesskit_node().numeric_value().unwrap();
+
+    assert!((shown - 0.25).abs() < 1e-3, "a quarter turn back shows a quarter left of the middle: {shown}");
+}
+
 /// Color Balance's tone cards fold one at a time, and a row edits only its own card's tone
 #[test]
 fn color_balance_tone_cards_fold_and_edit_their_own_tone() {

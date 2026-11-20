@@ -14,7 +14,14 @@ impl PropertySheet<'_> {
         let (control, _) = self.row(label);
         let typing_id = self.next_id().with("typed");
         let typing = self.ui.memory(|memory| memory.has_focus(typing_id));
-        let mut text = self.ui.data(|data| data.get_temp::<String>(typing_id)).filter(|_| typing).unwrap_or_else(|| name.to_owned());
+
+        // The draft is read even when the focus already left (Shift+Tab, a field built earlier this frame took it): it commits below; it lasts one frame without the focus. Escape drops it, read from the frame's raw input as an app shortcut may already have taken the key
+        let escaped =
+            self.ui.input(|input| input.raw.events.iter().any(|event| matches!(event, egui::Event::Key { key: egui::Key::Escape, pressed: true, .. })));
+        if escaped {
+            self.ui.data_mut(|data| data.remove::<String>(typing_id));
+        }
+        let mut text = self.ui.data(|data| data.get_temp::<String>(typing_id)).unwrap_or_else(|| name.to_owned());
 
         let tokens = self.tokens;
         let outline = Stroke::new(1.0, if typing { tokens.accent } else { tokens.field_border });
@@ -36,7 +43,6 @@ impl PropertySheet<'_> {
 
         self.ui.data_mut(|data| data.remove::<String>(typing_id));
         let typed = text.trim();
-        let escaped = self.ui.input(|input| input.key_pressed(egui::Key::Escape));
         (response.lost_focus() && !escaped && !typed.is_empty() && typed != name).then(|| typed.to_owned())
     }
 }

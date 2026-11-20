@@ -464,3 +464,22 @@ fn a_hand_picked_id_mask_picks_without_a_bake() {
     assert_eq!(picked.len(), 4, "the click adds a row");
     assert_eq!(picked[3], ID_PART.map(|channel| channel as f32 / 255.0), "read from the chosen image");
 }
+
+#[test]
+fn clearing_the_only_id_mask_ends_a_waiting_pick() {
+    let (mut session, effect) = color_selection_session(false);
+    session.doc.baked.clear();
+    let texture = session.import_resource_bytes("parts.png", id_map_png()).unwrap();
+    execute(&mut session, "effect.set", &json!({"effect": effect.0, "idMap": texture})).unwrap();
+    let mut harness = Harness::builder().with_size(PROPERTIES_WINDOW).build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.run_steps(STARTUP_FRAMES);
+    harness.get_by_label(PICK_COLOR).click();
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(harness.state().picking_id_color.is_some(), "the pick waits");
+
+    let clear = harness.get_by_role_and_label(Role::Button, "Clear").rect().center();
+    click_at(&mut harness, clear);
+    assert_eq!(selection(&harness, effect).id_map, None);
+    assert!(harness.state().picking_id_color.is_none(), "with no ID map left the pick ends");
+    assert_eq!(harness.state().session.view, ViewMode::Material, "and the earlier view comes back");
+}

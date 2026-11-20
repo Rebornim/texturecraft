@@ -54,6 +54,9 @@ const DIGITS_INSET: f32 = 20.0;
 /// Passes after the hex field last had focus that a typed code still applies (egui reports a lost focus up to two passes late)
 const FOCUS_LOOKBACK_PASSES: u64 = 2;
 
+/// Where the hex field notes the pass in which Escape ended its typing (that Escape does not close the picker)
+const HEX_ESCAPE_KEY: &str = "color_picker_hex_escape";
+
 /// From the right edge to the centre of the eyedropper and of the ⋯ menu
 const EYEDROPPER_INSET: f32 = 7.0;
 const MENU_INSET: f32 = 6.0;
@@ -257,6 +260,7 @@ impl PropertySheet<'_> {
         painter.text(pos2(field.left() + HASH_INSET, field.center().y), Align2::LEFT_CENTER, "#", FontId::proportional(TEXT_SIZE), tokens.text_dim);
         let digits = Rect::from_min_max(pos2(field.left() + DIGITS_INSET, field.top()), field.right_bottom());
         let text_id = id.with("typed");
+        let opened_id = text_id.with("opened");
         let editing = self.ui.data(|data| data.get_temp::<String>(text_id));
 
         // Text left by a picker that closed mid-edit (its field no longer drawn, so never told it lost focus) is not shown again
@@ -268,7 +272,10 @@ impl PropertySheet<'_> {
         let focused_pass = self.ui.data(|data| data.get_temp::<u64>(focused_pass_id));
         let focused = focused_pass.is_some_and(|focused_pass| pass.saturating_sub(focused_pass) <= FOCUS_LOOKBACK_PASSES);
         if editing.is_some() && !focused {
-            self.ui.data_mut(|data| data.remove::<String>(text_id));
+            self.ui.data_mut(|data| {
+                data.remove::<String>(text_id);
+                data.remove::<String>(opened_id);
+            });
         }
         let editing = editing.filter(|_| focused);
 
@@ -277,7 +284,10 @@ impl PropertySheet<'_> {
             response.widget_info(|| WidgetInfo::labeled(Role::TextInput, true, tr("Hex color")));
             self.ui.painter().text(pos2(digits.left(), digits.center().y), Align2::LEFT_CENTER, hex(shown), semibold(TEXT_SIZE), tokens.text);
             if response.clicked() {
-                self.ui.data_mut(|data| data.insert_temp(text_id, hex(shown)));
+                self.ui.data_mut(|data| {
+                    data.insert_temp(opened_id, hex(shown));
+                    data.insert_temp(text_id, hex(shown));
+                });
                 self.ui.memory_mut(|memory| memory.request_focus(text_id));
             }
             return None;
@@ -295,14 +305,21 @@ impl PropertySheet<'_> {
             return None;
         }
 
-        self.ui.data_mut(|data| data.remove::<String>(text_id));
+        let opened = self.ui.data_mut(|data| {
+            data.remove::<String>(text_id);
+            data.remove_temp::<String>(opened_id)
+        });
         if self.ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            // Escape ends the typing only: the picker stays open
+            let pass = self.ui.ctx().cumulative_pass_nr();
+            self.ui.data_mut(|data| data.insert_temp(egui::Id::unique(HEX_ESCAPE_KEY), pass));
             return None;
         }
 
-        // Left as it opened, the code is no edit: reading it back would round the colour to what the code shows
+        // Left as it opened, the code is no edit: reading it back would round the colour to what the code shows, or write it over a colour changed meanwhile
         let typed = parse_hex(&text)?;
-        (hex(typed) != hex(shown)).then_some(typed)
+        let code = hex(typed);
+        (Some(&code) != opened.as_ref() && code != hex(shown)).then_some(typed)
     }
 
     /// The model dropdown, sized to its value, and the ⋯ menu at the right edge; a click in its list picks, a hover changes nothing
@@ -420,7 +437,8 @@ impl PropertySheet<'_> {
         let (mut applied, mut edit) = (None, None);
         for (index, &color) in swatches.iter().take(MAX_SWATCHES).enumerate() {
             let chip = chip_at(index);
-            let chip_id = self.next_id();
+            // Keyed by its colour too: a chip whose swatch moved (the list changed under an open menu) closes that menu
+            let chip_id = self.next_id().with(color.map(f32::to_bits));
             let response = self.ui.interact(chip, chip_id, Sense::click());
             response.widget_info(|| WidgetInfo::labeled(Role::Button, true, format!("#{}", hex(state.space.shown(color)))));
             let border = if response.hovered() { tokens.accent } else { Color32::TRANSPARENT };
@@ -452,6 +470,11 @@ impl PropertySheet<'_> {
         self.drawn(block.bottom());
         (applied, edit)
     }
+}
+
+/// Whether Escape this pass ended typing in the open picker's hex field
+pub(super) fn hex_took_escape(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp::<u64>(egui::Id::unique(HEX_ESCAPE_KEY))) == Some(ctx.cumulative_pass_nr())
 }
 
 /// Where the pointer presses or drags `response` this frame

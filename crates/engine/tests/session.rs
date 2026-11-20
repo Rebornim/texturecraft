@@ -440,6 +440,7 @@ fn hunt_filters(hostile: &[Value]) {
                 params["filter"] = json!(def.id);
                 params["target"] = json!(target);
                 let added = execute(&mut s, "effect.add.filter", &params).ok().and_then(|reply| reply["effect"].as_u64());
+                s.update();
 
                 // Extreme values are clamped, not refused, so every filter meets them on the content
                 if target == "content" && extremes.contains(given) {
@@ -449,10 +450,12 @@ fn hunt_filters(hostile: &[Value]) {
                     for edit in &extremes {
                         let mut edit = edit.clone();
                         edit["effect"] = json!(effect);
-                        let _ = execute(&mut s, "effect.set", &edit);
+                        // Each accepted value reaches the compositor before the next edit replaces it
+                        if execute(&mut s, "effect.set", &edit).is_ok() {
+                            s.update();
+                        }
                     }
                 }
-                s.update();
             }
         }
     }

@@ -131,7 +131,7 @@ impl OrbPreviews {
         let key = job.key;
         let worker = match self.worker.take() {
             Some(worker) => worker,
-            None => match Worker::start(ctx) {
+            None => match Worker::start() {
                 Some(worker) => worker,
                 None => {
                     // No thread: render here rather than show nothing
@@ -141,9 +141,9 @@ impl OrbPreviews {
                 }
             },
         };
-        match worker.jobs.send(job) {
+        match worker.jobs.send((job, ctx.clone())) {
             Ok(()) => self.worker = Some(worker),
-            Err(std::sync::mpsc::SendError(job)) => {
+            Err(std::sync::mpsc::SendError((job, _))) => {
                 let job = OrbJob { quick: false, ..job };
                 self.store(ctx, key, true, job.picture());
             }
@@ -261,6 +261,31 @@ mod tests {
         assert!(!OrbPreviews::settled(&ctx), "the new look is rendering");
         draw_until_settled(&ctx, place, &rougher);
         assert!(OrbPreviews::settled(&ctx));
+    }
+
+    /// A dropped context lets go of its orb pictures and closes its worker's job channel: the idle worker holds no context
+    #[test]
+    fn a_dropped_context_frees_its_previews_while_the_worker_idles() {
+        // Long enough for the worker to finish its last job on a busy machine
+        const ATTEMPTS: usize = 2000;
+        const WAIT: Duration = Duration::from_millis(5);
+        let ctx = Context::default();
+        let job = OrbJob::new(copper(0.3), 64, Color32::BLACK);
+        draw_until_settled(&ctx, Id::unique("orb"), &job);
+        let shared = ctx.data(|data| data.get_temp::<Shared>(Id::unique("orb_previews"))).unwrap();
+        let previews = Arc::downgrade(&shared);
+        drop(shared);
+
+        drop(ctx);
+
+        let freed = (0..ATTEMPTS).any(|_| {
+            let freed = previews.upgrade().is_none();
+            if !freed {
+                std::thread::sleep(WAIT);
+            }
+            freed
+        });
+        assert!(freed, "the worker kept the dropped context and its previews alive");
     }
 
     #[test]

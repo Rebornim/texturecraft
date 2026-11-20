@@ -2,7 +2,7 @@
 
 use egui::{Color32, Pos2, Rect, Stroke, Ui, vec2};
 use serde_json::{Value, json};
-use texturecraft_engine::compose::axis_frame::placed_from_axis;
+use texturecraft_engine::compose::axis_frame::{placed_from_axis, placing_moves_pattern};
 use texturecraft_engine::compose::frame_placement::folded;
 use texturecraft_engine::compose::pattern::{decal_axes, decal_corners};
 use texturecraft_engine::core::{Decal, EffectKind, Fill, LayerId, LayerKind, Projection};
@@ -77,25 +77,30 @@ impl FrameGizmo {
 
         let layers = &app.session.doc.project;
         let selected = app.session.selected_layer()?;
-        let (layer, effect, projection) = match app.session.target {
+        let (layer, effect, projection, sources) = match app.session.target {
             StackTarget::Content => {
                 let layer = layers.content_layer(selected)?;
-                let LayerKind::Fill(Fill { projection, .. }) = &layer.kind else { return None };
+                let LayerKind::Fill(Fill { projection, sources, .. }) = &layer.kind else { return None };
 
-                (layer.id, None, projection)
+                (layer.id, None, projection, sources.values().collect::<Vec<_>>())
             }
             StackTarget::Effect(effect) => {
                 // Only the selected layer's effective mask may supply a frame, including an instance's inherited mask
                 let owner = layers.mask_owner(selected);
                 let mask = layers.layer(owner).ok()?.mask.as_ref()?;
                 let mask_effect = mask.effects.iter().find(|candidate| candidate.id == effect)?;
-                let EffectKind::Fill { projection, .. } = &mask_effect.kind else { return None };
+                let EffectKind::Fill { projection, source, .. } = &mask_effect.kind else { return None };
 
-                (owner, Some(effect), projection)
+                (owner, Some(effect), projection, vec![source])
             }
             StackTarget::Mask => return None,
         };
 
+        // An axis planar reading a pattern keeps its axis (see [`placing_moves_pattern`]): it has no frame to move
+        let unplaced = matches!(projection, Projection::Planar { placed: None, .. });
+        if unplaced && placing_moves_pattern(sources.into_iter()) {
+            return None;
+        }
         let placed = placed_from_axis(projection, app.session.mesh.bounds());
 
         // Where the projection lands: a projector's own turn and scale moved into the frame, as the panel's 3D projection settings show it
@@ -560,6 +565,24 @@ pub(crate) mod tests {
         assert!(gizmo(&harness).corners[1].distance(to) < 1.5, "the corner sits under the pointer");
     }
 
+    /// A move that arrives in the same frame as the release still moves the corner: it ends under the pointer, not one step short
+    #[test]
+    fn a_move_in_the_release_frame_still_moves_the_corner() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, _) = fill_app("warp");
+        let warp = gizmo(&harness);
+        let to = warp.corners[1] + vec2(-40.0, 30.0);
+        press_and_move(&mut harness, warp.corners[1], warp.corners[1].lerp(to, 0.5), Modifiers::NONE);
+
+        // Straight into the next frame's input: the harness's queued events would each get a frame of their own
+        let release = egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE };
+        harness.input_mut().events.extend([egui::Event::PointerMoved(to), release]);
+        harness.run_steps(2);
+
+        assert!(crate::projection_gizmo::dragging::<FrameGizmo>(&harness.ctx).is_none(), "the release ends the drag");
+        assert!(gizmo(&harness).corners[1].distance(to) < 1.5, "the corner sits under the release point: {:?} {to:?}", gizmo(&harness).corners[1]);
+    }
+
     /// The across and up arrows slide a frame on its own plane and the out arrow moves it along its normal, each following the pointer; one undo step per drag
     #[test]
     fn the_arrows_move_a_frame_along_its_directions() {
@@ -681,6 +704,77 @@ pub(crate) mod tests {
         harness.event(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
         harness.run_steps(2);
         assert_eq!(harness.state().session.history_labels().len(), steps + 1, "one undo step");
+    }
+
+    /// The rest of a drag held at `from`: moves to `to` over a few frames and lets go there
+    fn move_and_let_go(harness: &mut egui_kittest::Harness<'_, TextureCraftApp>, from: Pos2, to: Pos2) {
+        for step in 1..=4 {
+            harness.event(egui::Event::PointerMoved(from.lerp(to, step as f32 / 4.0)));
+            harness.run_steps(1);
+        }
+        harness.event(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        harness.run_steps(2);
+    }
+
+    /// A drag whose first edit changes nothing (its arrow pulled further past the offset limit) makes no undo step, so its later edits make the drag's own step instead of joining the edit before it
+    #[test]
+    fn a_drag_that_first_changes_nothing_keeps_its_own_undo_step() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app("warp");
+
+        // The frame waits at its left limit, a mesh diagonal off the ball's centre, clear of the panels on the right; the camera backs off so it shows with its arrows
+        harness.state_mut().run("layer.decal.set", json!({"layer": layer.0, "offset": [-100.0, 0.0]})).unwrap();
+        harness.state_mut().session.camera.distance *= 3.0;
+        harness.run_steps(2);
+        let at_limit = projection(&harness, layer);
+        let steps = harness.state().session.history_labels().len();
+        let start = gizmo(&harness);
+        let tip = start.arrows[0].expect("the across arrow shows");
+        let inward = (tip - start.center).normalized();
+
+        press_and_move(&mut harness, tip, tip - inward * 25.0, Modifiers::NONE);
+
+        assert_eq!(projection(&harness, layer), at_limit, "past the limit the frame stays where it is");
+        move_and_let_go(&mut harness, tip - inward * 25.0, tip + inward * 25.0);
+
+        assert_ne!(projection(&harness, layer), at_limit, "back inside the frame moves");
+        assert_eq!(harness.state().session.history_labels().len(), steps + 1, "the drag made its own undo step");
+
+        harness.state_mut().session.undo().unwrap();
+        assert_eq!(projection(&harness, layer), at_limit, "undo takes back the drag only");
+    }
+
+    /// An axis planar reading a pattern keeps its axis, so it shows no frame to drag; reading an image it shows one
+    #[test]
+    fn an_axis_planar_reading_a_pattern_has_no_frame() {
+        let (mut harness, layer) = fill_app("planar");
+        assert!(FrameGizmo::of(harness.state(), harness.state().viewport_rect).is_some(), "a uniform fill places as its frame");
+
+        harness.state_mut().run("layer.fill.set", json!({"layer": layer.0, "channel": "roughness", "procedural": "Checker"})).unwrap();
+        harness.run_steps(2);
+        assert!(FrameGizmo::of(harness.state(), harness.state().viewport_rect).is_none(), "placing would move the pattern");
+    }
+
+    /// An Undo mid-drag takes the drag's step away: the drag's next edits make a step of their own instead of joining the drag before it
+    #[test]
+    fn undo_mid_drag_leaves_the_drag_before_its_own_step() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app("warp");
+        let center = gizmo(&harness).center;
+        drag(&mut harness, center, center + vec2(30.0, 0.0), Modifiers::NONE);
+        let first = projection(&harness, layer);
+        let steps = harness.state().session.history_labels().len();
+
+        let center = gizmo(&harness).center;
+        press_and_move(&mut harness, center, center + vec2(0.0, 30.0), Modifiers::NONE);
+        harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
+        harness.run_steps(1);
+        assert_eq!(projection(&harness, layer), first, "Ctrl+Z undid the drag so far");
+        move_and_let_go(&mut harness, center + vec2(0.0, 30.0), center + vec2(0.0, 40.0));
+        assert_eq!(harness.state().session.history_labels().len(), steps + 1, "the drag's later edits made a step of their own");
+
+        harness.state_mut().session.undo().unwrap();
+        assert_eq!(projection(&harness, layer), first, "undo goes back to where the first drag left the frame");
     }
 
     /// A click as a mouse sends it: move there, press, release

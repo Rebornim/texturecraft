@@ -70,7 +70,14 @@ pub(crate) fn hex(rgb: [f32; 3]) -> String {
 
 /// A typed hex code (`#` optional, 6 or 3 digits) as 0..1 components; None when it isn't one
 pub(crate) fn parse_hex(text: &str) -> Option<[f32; 3]> {
-    let digits = text.trim().trim_start_matches('#');
+    let text = text.trim();
+    let digits = text.strip_prefix('#').unwrap_or(text);
+
+    // Only hex digits: a sign ("+F" parses as a number) or a second `#` makes it no code
+    if !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+
     let full: String = match digits.len() {
         3 => digits.chars().flat_map(|digit| [digit, digit]).collect(),
         6 => digits.to_owned(),
@@ -92,6 +99,8 @@ mod tests {
         assert_eq!(parse_hex("12345"), None);
         assert_eq!(parse_hex("GG0000"), None);
         assert_eq!(parse_hex("€€€"), None, "multi-byte text is not a code");
+        assert_eq!(parse_hex("+F8000"), None, "a sign is not a digit");
+        assert_eq!(parse_hex("##f80"), None, "one `#` at most");
     }
 
     #[test]

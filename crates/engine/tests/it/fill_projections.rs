@@ -76,7 +76,11 @@ fn three_d_projection_settings_turn_stretch_and_move_every_3d_projection() {
 
     let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap();
     let row = inspect["layers"].as_array().unwrap().iter().find(|l| l["id"] == layer.0).unwrap().clone();
-    assert_eq!(row["fill"]["projectionSettings"]["Cylindrical"]["projector"]["scale"], json!([1.0, 1.0, 1.0]));
+    let cylindrical = &row["fill"]["projectionSettings"]["Cylindrical"];
+    assert!(
+        cylindrical.is_object() && cylindrical.get("projector").is_none(),
+        "a reset projector is the default, left out as older projects saved it: {cylindrical}"
+    );
 }
 
 /// A negative projector scale mirrors that axis, as a project file's does: the command keeps its sign and limits only its size
@@ -176,12 +180,14 @@ fn backface_culling_keeps_a_planar_projection_off_faces_turned_away() {
     execute(&mut s, "layer.visible", &json!({"layer": layer.0, "visible": false})).unwrap();
     let empty = snapshot(&mut s);
     execute(&mut s, "layer.visible", &json!({"layer": layer.0, "visible": true})).unwrap();
-    set(&mut s, layer, json!({"projection": "planar", "axis": 2}));
+    // Without depth culling the planar projection reaches the far side, so only backface culling can take it off
+    set(&mut s, layer, json!({"projection": "planar", "axis": 2, "depthCulling": false}));
     let plain = snapshot(&mut s);
-    set(&mut s, layer, json!({"backfaceCulling": true, "backfaceAngle": 90, "backfaceHardness": 1}));
-    let culled = snapshot(&mut s);
     let (far, near) = (facing_z(&s, -1.1, -0.05), facing_z(&s, 0.05, 1.1));
     assert!(!far.is_empty() && !near.is_empty());
+    assert!(far.iter().any(|&i| plain[i] != empty[i]), "without culling the projection reaches the far side");
+    set(&mut s, layer, json!({"backfaceCulling": true, "backfaceAngle": 90, "backfaceHardness": 1}));
+    let culled = snapshot(&mut s);
     assert!(far.iter().all(|&i| culled[i] == empty[i]), "faces turned away get none of the projection");
     assert!(near.iter().all(|&i| culled[i] == plain[i]), "faces turned towards it keep all of it");
 
@@ -445,6 +451,59 @@ fn moving_an_axis_planar_places_it_as_its_frame_first() {
     assert!(execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "rotation": 30})).is_err(), "a spherical projection has no frame");
 }
 
+/// An axis planar reading a procedural keeps its axis: a placed frame reads the pattern in its own uv, so placing it would move the pattern; a mask fill's pattern stays the same way
+#[test]
+fn an_axis_planar_reading_a_pattern_is_not_placed() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    set(&mut s, layer, json!({"projection": "planar", "axis": 0, "scale": 1.5}));
+    let axis = projection(&s, layer);
+    let before = snapshot(&mut s);
+
+    assert!(execute(&mut s, "layer.decal.set", &json!({"layer": layer.0})).is_err(), "placing would move the pattern");
+    assert_eq!(projection(&s, layer), axis, "the planar keeps its axis");
+    assert_eq!(snapshot(&mut s), before, "and the pattern stays where it was");
+
+    let added = execute(&mut s, "effect.add.fill", &json!({"layer": layer.0, "target": "mask", "projection": "planar"})).unwrap();
+    let effect = added["effect"].as_u64().unwrap();
+    execute(&mut s, "layer.fill.set", &json!({"effect": effect, "procedural": "Checker"})).unwrap();
+    assert!(execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "effect": effect})).is_err(), "a mask fill's pattern keeps its axis too");
+}
+
+/// Backface culling under an uneven or mirrored projector scale cannot keep its facing in a frame: moving it is refused with the way out, and nothing changes
+#[test]
+fn a_frame_under_uneven_culling_is_refused_with_the_way_out_and_changes_nothing() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    let ramp = s.import_resource_bytes("ramp.png", ramp_png()).unwrap();
+    execute(&mut s, "layer.fill.set", &json!({"layer": layer.0, "channel": "baseColor", "image": ramp})).unwrap();
+    set(&mut s, layer, json!({"projection": "planar", "axis": 2, "backfaceCulling": true}));
+
+    // An axis planar with an uneven then a mirrored scale, then a placed frame with an uneven one
+    for (scale, placed) in [(json!([2, 1, 1]), false), (json!([1.5, -1.5, 1.5]), false), (json!([2, 1, 1]), true)] {
+        let edit = if placed { json!({"layer": layer.0, "frameOffset": [0.1, 0, 0]}) } else { json!({"layer": layer.0}) };
+        if placed {
+            set(&mut s, layer, json!({"projectorScale": 1}));
+            execute(&mut s, "layer.decal.set", &json!({"layer": layer.0})).unwrap();
+            assert!(projection(&s, layer).placed().is_some(), "an even scale places the frame");
+        }
+
+        set(&mut s, layer, json!({"projectorScale": scale}));
+        let before = projection(&s, layer);
+        let steps = s.history_labels().len();
+
+        let refused = execute(&mut s, "layer.decal.set", &edit).unwrap_err().to_string();
+
+        assert!(refused.contains("even out the projector scale or turn backface culling off"), "{scale} placed {placed}: {refused}");
+        assert_eq!(projection(&s, layer), before, "{scale} placed {placed}: the projection is unchanged");
+        assert_eq!(s.history_labels().len(), steps, "{scale} placed {placed}: no undo step");
+    }
+
+    // A placed frame's edit that moves no frame still lands
+    execute(&mut s, "layer.decal.set", &json!({"layer": layer.0, "flipU": true})).unwrap();
+    assert!(projection(&s, layer).frame().is_some_and(|frame| frame.flip[0]), "the flip lands on the placed frame");
+}
+
 /// A frame's 3D projection settings (Offset, Rotation, Scale as the panel and the gizmo share them) move it in one undo step, and a turned or scaled projector folds into the frame first, landing the same
 #[test]
 fn a_frame_takes_its_offset_rotation_and_scale_and_folds_its_projector_in_first() {
@@ -548,6 +607,23 @@ fn inspect_shows_a_mask_decals_frame_as_a_layer_decals() {
     let mask_effects = row(&mask_decal["layer"])["mask"]["effects"].clone();
     let mask_effect = mask_effects.as_array().unwrap().iter().find(|effect| effect["id"] == mask_decal["maskEffect"]).unwrap().clone();
 
+    // Each side holds a frame on the requested point and normal, so two missing frames cannot match as nulls
+    let on_request = |frame: &Value| {
+        let near = |key: &str, want: [f64; 3]| {
+            frame[key]
+                .as_array()
+                .is_some_and(|got| got.len() == 3 && got.iter().zip(want).all(|(got, want)| got.as_f64().is_some_and(|got| (got - want).abs() < 1e-3)))
+        };
+        near("center", [0.0, 0.0, 1.0]) && near("normal", [0.0, 0.0, 1.0])
+    };
+    for (name, frame) in [
+        ("layer decal", &layer_frame),
+        ("layer decal reply", &layer_decal["decal"]),
+        ("mask decal", &mask_effect["decal"]),
+        ("mask decal reply", &mask_decal["decal"]),
+    ] {
+        assert!(on_request(frame), "the {name} shows its frame on the requested placement: {frame}");
+    }
     assert_eq!(layer_frame, layer_decal["decal"], "a layer decal's frame");
     assert_eq!(mask_effect["decal"], mask_decal["decal"], "a mask decal's frame");
 }
@@ -664,7 +740,7 @@ fn reset_fill_settings_keeps_a_warp_frame_and_restores_its_settings() {
 }
 
 #[test]
-fn malformed_warp_corners_and_copy_flips_are_rejected_and_change_nothing() {
+fn malformed_warp_corners_copy_flips_and_a_warps_own_placement_are_rejected_and_change_nothing() {
     let mut s = session();
     let layer = checker_fill(&mut s);
     set(&mut s, layer, json!({"projection": "warp"}));
@@ -676,6 +752,10 @@ fn malformed_warp_corners_and_copy_flips_are_rejected_and_change_nothing() {
         json!({"warpCorners": [[0, 0], [0, 0], [0, 0], ["x", 0]]}),
         json!({"warpCorners": "pulled"}),
         json!({"flipCopy": [true, "x"]}),
+        // A warp is placed by its frame (layer.decal.set): a scale or offset of its own would change nothing
+        json!({"scale": 2}),
+        json!({"offset": [1, 0, 0]}),
+        json!({"projection": "warp", "scale": 2, "offset": [1, 0, 0]}),
     ] {
         let mut p = bad.clone();
         p["layer"] = json!(layer.0);

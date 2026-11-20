@@ -169,6 +169,11 @@ fn check_list(harness: &mut Harness<'_, TextureCraftApp>, button: Rect, name: &s
     if !zooms(harness, gesture_start) {
         problems.push(format!("{name}: the wheel over the view does not zoom while it is open"));
     }
+
+    // Each gesture starts with the list open, whatever the one before did to it
+    if !is_open(harness) && !open(harness, button) {
+        return [problems, vec![format!("{name}: it does not open again after the wheel")]].concat();
+    }
     if !pans(harness, gesture_start) {
         problems.push(format!("{name}: a middle drag in the view does not pan while it is open"));
     }

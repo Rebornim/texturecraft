@@ -13,14 +13,31 @@ pub(super) struct ValueText<'a> {
 /// How far below a value's centre its typing line runs
 const LINE_DROP: f32 = 9.0;
 
+/// Where the field `field_id` keeps the text its typing opened with
+fn opened_id(field_id: egui::Id) -> egui::Id {
+    field_id.with("opened")
+}
+
 impl super::PropertySheet<'_> {
     /// Starts typing `text` into the field `field_id`, all of it selected so the first key replaces it
     pub(super) fn start_typing(&mut self, field_id: egui::Id, text: String) {
         let mut state = egui::text_edit::TextEditState::load(self.ui.ctx(), field_id).unwrap_or_default();
         state.cursor.set_char_range(Some(egui::text::CCursorRange::select_all_str(&text)));
         state.store(self.ui.ctx(), field_id);
-        self.ui.data_mut(|data| data.insert_temp(field_id, text));
+        self.ui.data_mut(|data| {
+            data.insert_temp(opened_id(field_id), text.clone());
+            data.insert_temp(field_id, text);
+        });
         self.ui.memory_mut(|memory| memory.request_focus(field_id));
+    }
+
+    /// Ends typing into the field `field_id`; whether `typed` is still the text it opened with (left so, it changes nothing, even after the value changed meanwhile)
+    pub(super) fn end_typing(&mut self, field_id: egui::Id, typed: &str) -> bool {
+        let opened = self.ui.data_mut(|data| {
+            data.remove::<String>(field_id);
+            data.remove_temp::<String>(opened_id(field_id))
+        });
+        opened.is_some_and(|opened| opened.trim() == typed.trim())
     }
 
     /// Shows `edit` from `left` to `right` centred on `center_y` (an edit is never shorter than the theme's interact height), so its value sits where the shown value sat; leaves the sheet's rows where they are
@@ -31,6 +48,11 @@ impl super::PropertySheet<'_> {
         let layout = egui::Layout::centered_and_justified(egui::Direction::TopDown);
         let mut child = self.ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(layout));
         child.add(edit.frame(egui::Frame::NONE).margin(egui::vec2(0.0, 0.0)))
+    }
+
+    /// Takes the one auto id [`Self::typing_edit`]'s child takes, for a value shown instead of typed: the controls after it keep their ids when typing starts or ends, so a click from one field to the next types into the one clicked
+    pub(super) fn skip_typing_edit(&mut self) {
+        self.ui.skip_ahead_auto_ids(1);
     }
 
     /// The 1 px line under a typeable value centred on `center_y`, from `left` to `right`: grey on hover, accent while typing

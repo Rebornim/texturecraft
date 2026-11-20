@@ -658,15 +658,18 @@ fn a_plain_fill_switches_to_one_whole_material_picks_it_from_its_card_and_clears
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Metallic").is_none(), "the Material side has no channel cards");
     click_node(&mut harness, Role::ComboBox, "None");
 
-    // The card opens the material picker, not a list: its search keeps only the materials it names
+    // The card opens the material picker, not a list: unfiltered it offers the plain materials but no smart ones
+    assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Steel").is_some(), "the picker offers the plain materials");
+    assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Steel Painted Worn").is_none(), "smart materials are folders of layers: not offered");
+
+    // Its search keeps only the materials it names
     harness.event(egui::Event::Text("hammered".into()));
     harness.run_steps(SETTLE_FRAMES);
     assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Steel").is_none(), "searching hides what it doesn't name");
-    assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Steel Painted Worn").is_none(), "smart materials are folders of layers: not offered");
     click_node(&mut harness, Role::ListBoxOption, "Copper Hammered");
     assert_eq!(whole_material(&harness, layer).as_deref(), Some("copper_hammered"), "the picker sets the whole material");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Copper Hammered").is_some(), "the card names it");
-    assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Steel").is_none(), "the picker closed on the pick");
+    assert!(harness.query_by_role(Role::ListBoxOption).is_none(), "the picker closed on the pick");
 
     click_node(&mut harness, Role::RadioButton, "Channels");
     assert!(matches!(source(&harness, layer, Channel::BaseColor), Source::Procedural { .. }), "the material set every channel");
@@ -736,4 +739,62 @@ fn an_armed_eyedropper_is_the_pointer_over_the_whole_window_and_the_app_losing_t
     assert!(harness.state().picking_color.is_none() && harness.state().screen_pick.is_none(), "another app came forward: the pick ends");
     assert_eq!(base_color(&harness, layer), before, "nothing changes");
     assert_ne!(harness.output().platform_output.cursor_icon, egui::CursorIcon::None, "the pointer is the user's again");
+}
+
+#[test]
+fn escape_in_the_hex_field_ends_the_typing_and_a_second_escape_closes_the_picker() {
+    let (mut harness, layer) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
+    click(&mut harness, Role::Button, "Base color");
+    click(&mut harness, Role::TextInput, "Hex color");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.event(egui::Event::Text("FF8000".into()));
+    harness.run_steps(1);
+
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_some(), "the first Escape only ends the typing");
+    assert_eq!(base_color(&harness, layer), [0.2, 0.2, 0.2], "and applies nothing");
+
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(SETTLE_FRAMES);
+    assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "the next Escape closes the picker");
+}
+
+#[test]
+fn a_hex_code_left_as_it_opened_keeps_a_colour_set_meanwhile() {
+    let (mut harness, layer) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
+    click(&mut harness, Role::Button, "Base color");
+    click(&mut harness, Role::TextInput, "Hex color");
+
+    // An agent sets the colour while the field is open
+    harness.state_mut().run("layer.fill.set", json!({"layer": layer.0, "channel": "baseColor", "color": [0.0, 0.0, 1.0]})).unwrap();
+    harness.run_steps(2);
+    let depth = undo_depth(&harness);
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(SETTLE_FRAMES);
+    assert_eq!(base_color(&harness, layer), [0.0, 0.0, 1.0], "the untouched code is not written back");
+    assert_eq!(undo_depth(&harness), depth, "no undo step");
+}
+
+#[test]
+fn a_swatch_menu_left_open_while_the_list_changes_never_removes_another_swatch() {
+    let (mut harness, _) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
+    let [red, green, blue] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    for color in [red, green, blue] {
+        harness.state_mut().run("swatch.add", json!({"color": color})).unwrap();
+    }
+    click(&mut harness, Role::Button, "Base color");
+    let green_chip = harness.get_by_role_and_label(Role::Button, "#00FF00").rect();
+    right_click(&mut harness, green_chip.center());
+    assert!(harness.query_by_role_and_label(Role::Button, "Remove swatch").is_some(), "the green swatch's menu is open");
+
+    // An agent removes the first swatch: green moves to its place, blue to green's
+    harness.state_mut().run("swatch.remove", json!({"index": 0})).unwrap();
+    harness.run_steps(SETTLE_FRAMES);
+    if let Some(remove) = harness.query_by_role_and_label(Role::Button, "Remove swatch").map(|node| node.rect()) {
+        click_at(&mut harness, remove.center());
+    }
+    let swatches = &harness.state().session.doc.project.swatches;
+    assert!(swatches.contains(&blue), "blue stays: {swatches:?}");
+    assert!(*swatches == vec![blue] || *swatches == vec![green, blue], "only the green swatch the menu was opened on may go: {swatches:?}");
 }

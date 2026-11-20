@@ -91,6 +91,41 @@ fn a_warp_mode_given_with_the_former_directional_warp_id_wins() {
     assert!(matches!(edited, EffectKind::Filter(Filter::SourceWarp(warp)) if warp.mode == WarpMode::Warp), "{edited:?}");
 }
 
+/// A content warp effect saved before the warp modes, as `filter`
+fn saved_warp(s: &mut Session, filter: Filter) -> LayerId {
+    let id = add(s, "effect.add.filter", json!({"filter": "warp", "target": "content"}));
+    s.doc.project.effect_mut(id).unwrap().kind = EffectKind::Filter(filter);
+    id
+}
+
+#[test]
+fn asking_a_saved_warp_for_another_mode_replaces_it_with_a_warp_in_that_mode() {
+    let mut s = session();
+    let warp = saved_warp(&mut s, Filter::Warp { intensity: 8.0, scale: 4.0, seed: 1, divider: 1 });
+    let directional = saved_warp(&mut s, Filter::DirectionalWarp { intensity: 8.0, angle: 0.0, scale: 4.0, seed: 1, divider: 1 });
+
+    set(&mut s, warp, json!({"filter": "warpDirectional", "angle": 90.0}));
+    set(&mut s, directional, json!({"filter": "warp", "warpMode": "multiDirectional"}));
+
+    let edited = effect(&s, warp).kind;
+    assert!(matches!(edited, EffectKind::Filter(Filter::SourceWarp(warp)) if warp.mode == WarpMode::Directional && warp.angle == 90.0), "{edited:?}");
+    let edited = effect(&s, directional).kind;
+    assert!(matches!(edited, EffectKind::Filter(Filter::SourceWarp(warp)) if warp.mode == WarpMode::MultiDirectional), "{edited:?}");
+}
+
+#[test]
+fn editing_a_saved_warp_in_its_own_mode_keeps_it() {
+    let mut s = session();
+    let warp = saved_warp(&mut s, Filter::Warp { intensity: 8.0, scale: 4.0, seed: 1, divider: 1 });
+    let directional = saved_warp(&mut s, Filter::DirectionalWarp { intensity: 8.0, angle: 0.0, scale: 4.0, seed: 1, divider: 1 });
+
+    set(&mut s, warp, json!({"filter": "warp", "warpMode": "warp", "seed": 3}));
+    set(&mut s, directional, json!({"filter": "warpDirectional", "angle": 45.0}));
+
+    assert_eq!(effect(&s, warp).kind, EffectKind::Filter(Filter::Warp { intensity: 8.0, scale: 4.0, seed: 3, divider: 1 }));
+    assert_eq!(effect(&s, directional).kind, EffectKind::Filter(Filter::DirectionalWarp { intensity: 8.0, angle: 45.0, scale: 4.0, seed: 1, divider: 1 }));
+}
+
 #[test]
 fn swapping_to_a_gradient_given_colors_ramps_evenly_through_them() {
     let mut s = session();

@@ -3,8 +3,8 @@
 //! the frame of any planar or warp projection
 
 use serde_json::{Value, json};
-use texturecraft_compose::axis_frame::placed_from_axis;
-use texturecraft_compose::frame_placement::{MIN_FRAME_SIDE, folded, longer_side, placed, placement as frame_placement};
+use texturecraft_compose::axis_frame::{placed_from_axis, placing_moves_pattern};
+use texturecraft_compose::frame_placement::{MIN_FRAME_SIDE, culling_folds, folded, longer_side, placed, placement as frame_placement};
 use texturecraft_core::{
     Channel, Decal, DecalFlip, DecalSymmetry, Effect, EffectKind, Fill, Layer, LayerId, LayerKind, Mask, MaskBackground, Projection, Source,
 };
@@ -31,7 +31,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit decal",
             [],
             None,
-            "{layer? | effect?: a mask fill effect id (a decal placed as a mask; with `layer`, it must be in that layer) — any fill with a planar or warp projection: moves the frame it projects from (an axis planar is first placed as the frame it projects from, reading images exactly as before; a warp keeps its corners), x?, y?, viewport? | position?, normal? (re-place it on its own texture set), up?: [x,y,z] (default: the decal's up carried along when it moves onto a surface facing another way), size?: height | [w,h], keepProportions?: true keeps the image's aspect (the current ratio without an image): a height sets the width, a [w,h] pair or no size sets the height from the width, flipU?, flipV?: mirror the image left to right / top to bottom inside the frame, rotation?: degrees, offset?: [right, up] (world units from where it was placed), depth?: world units (a warp: its Projection Depth becomes this over the frame's longer side), frameOffset?: [x, y, z] (the frame's centre in mesh radii from the mesh's centre), frameRotation?: [x, y, z] degrees (its turn: unturned it faces +Z with +Y up), frameScale?: [width, height, reach] (in mesh diagonals; reach = how far it projects in front of and behind it, a warp's Projection Depth times its longer side) — the frame as the 3D projection settings show it, applied before the other fields; any projector turn or scale is first folded into the frame (it lands the same), symmetry?: x|y|z|off, symmetryFlip?: none|u|v, symmetryOffset? (the mirrored copy; the flip and offset alone keep the axis), image?: replaces the image in the channel or mask it was placed in, merge?: true continues the previous Edit decal undo step (drags); a call that changes nothing adds no undo step}",
+            "{layer? | effect?: a mask fill effect id (a decal placed as a mask; with `layer`, it must be in that layer) — any fill with a planar or warp projection: moves the frame it projects from (an axis planar is first placed as the frame it projects from, reading images exactly as before; a warp keeps its corners), x?, y?, viewport? | position?, normal? (re-place it on its own texture set), up?: [x,y,z] (default: the decal's up carried along when it moves onto a surface facing another way), size?: height | [w,h], keepProportions?: true keeps the image's aspect (the current ratio without an image): a height sets the width, a [w,h] pair or no size sets the height from the width, flipU?, flipV?: mirror the image left to right / top to bottom inside the frame, rotation?: degrees, offset?: [right, up] (world units from where it was placed), depth?: world units (a warp: its Projection Depth becomes this over the frame's longer side), frameOffset?: [x, y, z] (the frame's centre in mesh radii from the mesh's centre), frameRotation?: [x, y, z] degrees (its turn: unturned it faces +Z with +Y up), frameScale?: [width, height, reach] (in mesh diagonals; reach = how far it projects in front of and behind it, a warp's Projection Depth times its longer side) — the frame as the 3D projection settings show it, applied before the other fields; any projector turn or scale is first folded into the frame (it lands the same); refused: an axis planar reading a procedural (placing it would move the pattern) and, under backface culling with an uneven or mirrored projector scale, placing an axis planar or the frame fields (even the scale out or turn culling off), symmetry?: x|y|z|off, symmetryFlip?: none|u|v, symmetryOffset? (the mirrored copy; the flip and offset alone keep the axis), image?: replaces the image in the channel or mask it was placed in, merge?: true continues the previous Edit decal undo step (drags); a call that changes nothing adds no undo step}",
             always,
             set
         ),
@@ -234,6 +234,15 @@ fn add(session: &mut Session, params: &Value) -> Result<Value> {
 /// The projection of fill layer `id`, or of mask fill effect `effect` when given, with the frame it projects from: an axis planar is placed as the frame it already projects from (it reads images exactly as before), a turned or scaled projector is folded into its frame
 fn framed(session: &Session, command: &str, id: LayerId, effect: Option<LayerId>) -> Result<(Projection, Decal)> {
     let projection = stored_projection(session, command, id, effect)?;
+    if matches!(projection, Projection::Planar { placed: None, .. }) && placing_moves_pattern(stored_sources(session, id, effect).into_iter()) {
+        return Err(bad(command, "an axis planar reading a procedural pattern keeps its axis: placing its frame would move the pattern"));
+    }
+
+    // A frame faces one way: culling read through an uneven or mirrored scale would hide other faces once the scale is in the frame (a placed frame keeps its edits that move no frame)
+    if matches!(projection, Projection::Planar { placed: None, .. }) && !culling_keeps_facing(projection) {
+        return Err(bad(command, UNFOLDABLE_CULLING));
+    }
+
     let projection = placed_from_axis(projection, session.mesh.bounds()).unwrap_or_else(|| projection.clone());
 
     // The frame moves as it lands: a projector's own turn and scale go into it first
@@ -245,6 +254,18 @@ fn framed(session: &Session, command: &str, id: LayerId, effect: Option<LayerId>
     Ok((projection, frame))
 }
 
+/// Whether `projection`'s backface culling keeps its facing once its projector's turn and scale are in its frame
+fn culling_keeps_facing(projection: &Projection) -> bool {
+    match projection {
+        Projection::Planar { projector, .. } | Projection::Warp { projector, .. } => culling_folds(projector),
+        _ => true,
+    }
+}
+
+/// Why a projector whose backface culling cannot keep its facing in a frame is not moved, and the way out
+const UNFOLDABLE_CULLING: &str =
+    "backface culling under an uneven or mirrored projector scale cannot move into a frame: even out the projector scale or turn backface culling off";
+
 /// The projection fill layer `id`, or mask fill effect `effect` when given, holds
 fn stored_projection<'a>(session: &'a Session, command: &str, id: LayerId, effect: Option<LayerId>) -> Result<&'a Projection> {
     match effect {
@@ -255,6 +276,20 @@ fn stored_projection<'a>(session: &'a Session, command: &str, id: LayerId, effec
         None => match &session.doc.project.layer(id)?.kind {
             LayerKind::Fill(fill) => Ok(&fill.projection),
             _ => Err(bad(command, "the layer is not a fill layer")),
+        },
+    }
+}
+
+/// The sources fill layer `id`, or mask fill effect `effect` when given, reads
+fn stored_sources(session: &Session, id: LayerId, effect: Option<LayerId>) -> Vec<&Source> {
+    match effect {
+        Some(effect) => match session.doc.project.effect(effect).map(|(_, effect)| &effect.kind) {
+            Some(EffectKind::Fill { source, .. }) => vec![source],
+            _ => Vec::new(),
+        },
+        None => match session.doc.project.layer(id).map(|layer| &layer.kind) {
+            Ok(LayerKind::Fill(fill)) => fill.sources.values().collect(),
+            _ => Vec::new(),
         },
     }
 }
@@ -289,6 +324,10 @@ fn placed_as_shown(session: &Session, command: &str, params: &Value, projection:
         Some(_) => vec3(params, key).map(Some).ok_or_else(|| bad(command, format!("`{key}` must be [x, y, z]"))),
     };
     let bounds = session.mesh.bounds();
+    if !culling_keeps_facing(projection) {
+        return Err(bad(command, UNFOLDABLE_CULLING));
+    }
+
     let mut shown = frame_placement(projection, bounds).ok_or_else(|| bad(command, "the frame is degenerate"))?;
     if let Some(offset) = read("frameOffset")? {
         shown.offset = offset.clamp(Vec3::splat(-MAX_FRAME_OFFSET), Vec3::splat(MAX_FRAME_OFFSET)).to_array();

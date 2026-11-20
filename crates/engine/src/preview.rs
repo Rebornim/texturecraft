@@ -206,8 +206,12 @@ mod tests {
     #[test]
     fn the_edge_shaping_filters_show_their_shapes_not_black() {
         let size = 32;
+        // A neutral filter shows the checker as it is; an edge filter must change it
+        let checker = filter("levels", size).unwrap();
         for id in ["bevelSmooth", "directionalDistance"] {
-            let lit: Vec<f32> = filter(id, size).unwrap().into_iter().flatten().map(|sample| sample.base.iter().sum::<f32>() / 3.0).collect();
+            let pixels = filter(id, size).unwrap();
+            assert!(pixels != checker, "{id}: the preview shows the unchanged checker");
+            let lit: Vec<f32> = pixels.into_iter().flatten().map(|sample| sample.base.iter().sum::<f32>() / 3.0).collect();
             let bright = lit.iter().filter(|value| **value > 0.25).count();
             assert!(bright * 5 > lit.len(), "{id}: {bright} of {} texels lit", lit.len());
         }

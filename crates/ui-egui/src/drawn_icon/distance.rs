@@ -10,18 +10,31 @@ pub(crate) fn convex_polygon(point: Point, corners: &[Point]) -> f32 {
     let count = corners.len() as f32;
     let centre = corners.iter().fold([0.0, 0.0], |sum, corner| [sum[0] + corner[0] / count, sum[1] + corner[1] / count]);
     let next = corners.iter().skip(1).chain(std::iter::once(&first));
-    corners
+
+    // A repeated corner (a list that closes on its first corner) has no edge, and its zero normal would read as on the outline
+    let edges: Vec<(Point, Point, f32)> = corners
         .iter()
         .zip(next)
-        .map(|(from, to)| {
-            let edge = [to[0] - from[0], to[1] - from[1]];
-            let length = edge[0].hypot(edge[1]).max(f32::EPSILON);
+        .map(|(from, to)| (*from, [to[0] - from[0], to[1] - from[1]]))
+        .map(|(from, edge)| (from, edge, edge[0].hypot(edge[1])))
+        .filter(|(_, _, length)| *length > f32::EPSILON)
+        .collect();
+    if edges.len() < POLYGON_MIN_EDGES {
+        return f32::INFINITY;
+    }
+
+    edges
+        .into_iter()
+        .map(|(from, edge, length)| {
             let normal = [edge[1] / length, -edge[0] / length];
-            let side = dot(sub(point, *from), normal);
-            if dot(sub(centre, *from), normal) > 0.0 { -side } else { side }
+            let side = dot(sub(point, from), normal);
+            if dot(sub(centre, from), normal) > 0.0 { -side } else { side }
         })
         .fold(f32::NEG_INFINITY, f32::max)
 }
+
+/// Fewer edges than a triangle's enclose nothing
+const POLYGON_MIN_EDGES: usize = 3;
 
 /// The distance from `point` to the axis-aligned rectangle from `min` to `max`
 pub(crate) fn rectangle(point: Point, min: Point, max: Point) -> f32 {
@@ -56,5 +69,15 @@ mod tests {
         assert!((reversed - 0.25).abs() < 1e-6, "either winding order");
         assert_eq!(convex_polygon([0.0, 0.0], &[]), f32::INFINITY, "no corners, no ink");
         assert!((disc([0.0, 2.0], [0.0, 0.0], 1.5) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_corner_list_that_closes_on_its_first_corner_draws_the_same_polygon() {
+        let open = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let closed = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]];
+        for point in [[0.5, 0.5], [0.25, 0.75], [1.25, 0.5]] {
+            assert!((convex_polygon(point, &closed) - convex_polygon(point, &open)).abs() < 1e-6, "{point:?}");
+        }
+        assert_eq!(convex_polygon([0.0, 0.0], &[[0.0, 0.0], [1.0, 0.0], [0.0, 0.0]]), f32::INFINITY, "a line encloses no ink");
     }
 }

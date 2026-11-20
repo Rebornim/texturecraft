@@ -99,6 +99,9 @@ const PREVIEW_DARK: f32 = 0.18;
 /// The preview checker's light cells, as a fraction of the way from `field` to `text`
 const PREVIEW_LIGHT: f32 = 0.55;
 
+/// Where the mean of the checker's dark and light cells sits between them
+const CHECKER_MEAN: f32 = 0.5;
+
 /// The width of every outline, border and ring line in these pictures
 const LINE_WIDTH: f32 = 1.0;
 
@@ -161,6 +164,11 @@ pub(crate) fn lattice_preview(painter: &Painter, rect: Rect, (columns, shift): (
         let span = |first: i32, last: i32| if repeat { first..last.min(first.saturating_add(PREVIEW_MAX_SPAN)) } else { first.max(0)..last.min(1) };
         let (dark, light) = (lerp_color(tokens.field, tokens.text, PREVIEW_DARK), lerp_color(tokens.field, tokens.text, PREVIEW_LIGHT));
         let border = Stroke::new(LINE_WIDTH, tokens.accent);
+
+        // Repeating past the most tiles drawn, a tile is about a pixel: the window reads as the checker's mean, so the undrawn tiles leave no bare field
+        if repeat && (0..2).any(|axis| high(axis).saturating_sub(low(axis)) > PREVIEW_MAX_SPAN) {
+            painter.rect_filled(rect, 0, lerp_color(dark, light, CHECKER_MEAN));
+        }
         for tile_x in span(low(0), high(0)) {
             for tile_y in span(low(1), high(1)) {
                 for (cell_x, cell_y) in TILE_CELLS {
@@ -361,6 +369,41 @@ mod tests {
     use texturecraft_engine::core::SymmetryKind;
 
     use super::*;
+
+    /// A repeating map far denser than the tiles drawn (Scaling 64 turned 45°) still fills the whole window, its far corner too
+    #[test]
+    fn a_dense_repeating_preview_leaves_no_bare_field() {
+        use texturecraft_engine::core::TileTransform;
+
+        let tokens = Tokens::for_brightness(crate::theme::Brightness::MediumDark);
+        let transform = TileTransform { scaling: [64.0, 64.0], rotation: 45.0, ..TileTransform::LIBRARY };
+        let rect = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(100.0, 100.0));
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| lattice_preview(ui.painter(), rect, transform.affine(), true, &tokens));
+
+        // Whether a filled shape other than the bare field covers `point`
+        let covered = |point: Pos2| {
+            output.shapes.iter().any(|clipped| match &clipped.shape {
+                Shape::Rect(shape) => shape.fill != tokens.field && shape.fill != Color32::TRANSPARENT && shape.rect.contains(point),
+                Shape::Path(path) if path.fill != Color32::TRANSPARENT => {
+                    let corners = &path.points;
+                    let side = |index: usize| {
+                        let (from, to) = (corners[index], corners[(index + 1) % corners.len()]);
+                        (to - from).x * (point - from).y - (to - from).y * (point - from).x
+                    };
+                    let sides: Vec<f32> = (0..corners.len()).map(side).collect();
+                    sides.iter().all(|side| *side >= 0.0) || sides.iter().all(|side| *side <= 0.0)
+                }
+                _ => false,
+            })
+        };
+        for corner in [pos2(1.0, 1.0), pos2(99.0, 1.0), pos2(1.0, 99.0), pos2(99.0, 99.0)] {
+            assert!(covered(corner), "the preview fills {corner:?}");
+        }
+
+        // No renderer takes the uploads here
+        output.drop_without_applying_deltas();
+    }
 
     /// A hand-edited span past a full turn spaces the ring's dots as the engine spaces the copies: six copies 60° apart, none on top of another
     #[test]

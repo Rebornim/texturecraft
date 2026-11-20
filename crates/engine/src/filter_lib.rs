@@ -122,7 +122,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Restore defaults",
             [],
             None,
-            "{effect?: filter effect id, default the selected effect} — its filter's parameters back to their defaults (name, channels and blending stay) in one undo step; no step when they are already; returns {changed}",
+            "{effect?: filter effect id, default the selected effect} — its filter's parameters back to their defaults (name, channels and blending stay; a filter saved before its library replacement becomes that replacement, as the library adds it) in one undo step; no step when they are already; returns {changed}",
             has_layer,
             restore_defaults
         ),
@@ -591,7 +591,7 @@ fn apply_conversion(p: &Value, conversion: &mut GrayscaleConversion, cmd: &str) 
     Ok(())
 }
 
-/// Make a gradient use its first `wanted` colors: an evenly spaced ramp keeps its places from now on, and each added color starts as the last one at 1
+/// Make a gradient use its first `wanted` colors: an evenly spaced ramp keeps its places from now on, and each added color starts at 1 as the ramp's color there
 fn set_quantity(colors: &mut Vec<[f32; 3]>, positions: &mut Vec<f32>, quantity: &mut Option<u8>, wanted: u8) {
     let used = quantity.map_or(colors.len(), usize::from).min(colors.len());
 
@@ -602,7 +602,10 @@ fn set_quantity(colors: &mut Vec<[f32; 3]>, positions: &mut Vec<f32>, quantity: 
     }
 
     let wanted_len = usize::from(wanted);
-    let fill = colors.get(used.saturating_sub(1)).copied().unwrap_or([1.0; 3]);
+
+    // At 1 the blend space does not matter: only the rightmost stop counts, which need not be the last in the list
+    let used_colors = colors.get(..used).unwrap_or_default();
+    let fill = texturecraft_core::gradient_input::ramp(used_colors, positions, true, 1.0).unwrap_or([1.0; 3]);
     if colors.len() < wanted_len {
         colors.resize(wanted_len, fill);
     }
@@ -688,6 +691,19 @@ fn one_of<T: std::fmt::Display>(allowed: &[T]) -> String {
     match words.split_last() {
         Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
         _ => words.concat(),
+    }
+}
+
+/// Whether `p` asks `filter`, a warp saved before the warp modes, for a mode it can't hold: Directional Warp's former id on a Warp, or a `warpMode` it is not
+pub(crate) fn changes_saved_warp_mode(named: &str, p: &Value, filter: &Filter) -> bool {
+    let saved_mode = match filter {
+        Filter::Warp { .. } => WarpMode::Warp,
+        Filter::DirectionalWarp { .. } => WarpMode::Directional,
+        _ => return false,
+    };
+    match p.get("warpMode") {
+        Some(mode) => mode.as_str() != Some(saved_mode.id()),
+        None => is_directional_warp(named) && saved_mode != WarpMode::Directional,
     }
 }
 

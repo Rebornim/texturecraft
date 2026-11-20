@@ -12,12 +12,12 @@ pub struct ColorSelection {
     /// How far each component may be from a selected color and still count as it
     pub tolerance: f32,
     /// The value selected parts get
-    #[serde(default = "full")]
+    #[serde(default = "full", skip_serializing_if = "is_full")]
     pub output: f32,
     /// 1 is a hard edge (what selections saved before hardness did); lower ramps over 1 − hardness past the tolerance
-    #[serde(default = "full")]
+    #[serde(default = "full", skip_serializing_if = "is_full")]
     pub hardness: f32,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "SelectionBackground::is_default")]
     pub background: SelectionBackground,
     /// The image resource read as the ID map; none reads the texture set's ID mesh map
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -26,6 +26,11 @@ pub struct ColorSelection {
 
 fn full() -> f32 {
     1.0
+}
+
+/// Whether an output or hardness is what selections saved before it existed had (not saved then, so they save as they were)
+fn is_full(value: &f32) -> bool {
+    *value == full()
 }
 
 impl ColorSelection {
@@ -84,10 +89,7 @@ mod tests {
         let saved = r#"{"ColorSelection":{"colors":[[1.0,0.0,0.0]],"tolerance":0.1}}"#;
         let EffectKind::ColorSelection(selection) = serde_json::from_str::<EffectKind>(saved).unwrap() else { panic!("not a color selection") };
         assert_eq!(selection, ColorSelection::new(vec![[1.0, 0.0, 0.0]], 0.1));
-        assert_eq!(
-            serde_json::to_string(&EffectKind::ColorSelection(selection)).unwrap(),
-            r#"{"ColorSelection":{"colors":[[1.0,0.0,0.0]],"tolerance":0.1,"output":1.0,"hardness":1.0,"background":"Black"}}"#
-        );
+        assert_eq!(serde_json::to_string(&EffectKind::ColorSelection(selection)).unwrap(), saved, "it saves as it was saved");
     }
 
     #[test]

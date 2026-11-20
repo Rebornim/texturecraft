@@ -110,6 +110,20 @@ fn a_saved_gradient_keeps_its_places_when_it_gains_a_color() {
     assert_eq!(colors.last(), Some(&[1.0; 3]), "the new color starts as the last one");
 }
 
+/// A color added at 1 starts as the ramp's color there: its rightmost stop's, not the last one listed
+#[test]
+fn an_added_color_keeps_the_ramps_end() {
+    let mut s = session();
+    let effect = filtered(&mut s, [0.5; 3], json!({"filter": "gradientMap", "colors": [[1, 1, 1], [0, 0, 0]]}));
+    set(&mut s, effect, json!({"positions": [0.8, 0.2]}));
+    let before = filter_of(&s, effect).ramp_at(0.9);
+
+    set(&mut s, effect, json!({"quantity": 3}));
+
+    assert_eq!(before, Some([1.0; 3]), "white past its stop at 0.8");
+    assert_eq!(filter_of(&s, effect).ramp_at(0.9), before, "the added color at 1 keeps the end white");
+}
+
 /// Gradient Curve: values remapped through the preset after balance, contrast and invert
 #[test]
 fn gradient_curve_remaps_through_its_preset() {

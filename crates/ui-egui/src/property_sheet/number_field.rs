@@ -121,13 +121,13 @@ impl PropertySheet<'_> {
                 return None;
             }
 
-            self.ui.data_mut(|data| data.remove::<String>(typing_id));
+            let untouched = self.end_typing(typing_id, &text);
             if self.ui.input(|input| input.key_pressed(egui::Key::Escape)) {
                 return None;
             }
 
-            // Leaving the field as it opened changes nothing: no undo step, no rounding to the shown decimals
-            if text.trim() == shown_number(field.value, decimals) {
+            // Leaving the field as it opened changes nothing: no undo step, no rounding to the shown decimals, no overwriting a value changed meanwhile
+            if untouched || text.trim() == shown_number(field.value, decimals) {
                 return None;
             }
 
@@ -140,6 +140,7 @@ impl PropertySheet<'_> {
             return Some(false);
         }
 
+        self.skip_typing_edit();
         let response = self.ui.interact(rect, id, Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
         response.widget_info(|| egui::WidgetInfo::slider(true, f64::from(field.value), format!("{label} {}", field.tag)));
         let tag_right = match field.tag_color {

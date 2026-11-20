@@ -30,10 +30,15 @@ impl<K> ResourcePickerItem<K> {
         tiles
     }
 
-    /// Whether a search for `query` (lowercase) keeps the item; compares as it lowercases, so the open picker builds no lowercase copy of every label each frame
+    /// Whether a search for `query` (from [`search_query`]) keeps the item; compares as it lowercases, so the open picker builds no lowercase copy of every label each frame
     pub fn matches(&self, query: &str) -> bool {
         query.is_empty() || self.label.char_indices().any(|(start, _)| self.label.get(start..).is_some_and(|rest| starts_with_lowercase(rest, query)))
     }
+}
+
+/// The search for `text` as [`ResourcePickerItem::matches`] takes it: trimmed and lowercased letter by letter as labels are (a word's last Σ lowercases to σ, as in the label, not to ς)
+pub(crate) fn search_query(text: &str) -> String {
+    text.trim().chars().flat_map(char::to_lowercase).collect()
 }
 
 /// Whether `text`, lowercased, starts with `query`
@@ -71,5 +76,13 @@ mod tests {
         assert!(item("ÜBERZUG Grün").matches("grün"));
         assert!(item("Ποτάμι").matches("ποτ"));
         assert!(!item("Grün").matches("grun"), "an accent is part of the letter");
+    }
+
+    #[test]
+    fn a_search_for_a_whole_label_ending_in_capital_sigma_finds_it() {
+        let query = search_query(" ΟΣ ");
+        assert!(item("ΟΣ").matches(&query), "the query lowercases the final Σ as the label does: {query}");
+        assert!(item("ΚΟΣΜΟΣ").matches(&search_query("ΚΟΣΜΟΣ")));
+        assert!(item("Fine Cracks").matches(&search_query("CRACK")));
     }
 }

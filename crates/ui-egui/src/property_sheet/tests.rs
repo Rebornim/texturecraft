@@ -277,7 +277,7 @@ fn card_under_caption(ui: &mut egui::Ui, state: &mut (bool, std::cell::Cell<Opti
 fn thumbnail_under_caption(instance: bool) -> Rect {
     let mut harness = builder(Brightness::MediumDark).build_ui_state(card_under_caption, (instance, std::cell::Cell::new(None)));
     harness.run_steps(3);
-    harness.state().1.get().unwrap_or(Rect::NOTHING)
+    harness.state().1.get().unwrap_or_else(|| panic!("the card (instance: {instance}) paints no thumbnail"))
 }
 
 /// The instance card keeps a card's air under its caption and above its thumbnail, as a slot card does (it sat 6 px higher)
@@ -395,8 +395,10 @@ fn open_and_leave_at(harness: &mut Harness<'_, Gallery>, at: egui::Pos2) {
     harness.drag_at(at);
     harness.drop_at(at);
     harness.run_steps(2);
+    assert!(harness.query_by_role(egui::Role::TextInput).is_some(), "a click at {at:?} opens the value to type");
     harness.key_press(egui::Key::Enter);
     harness.run_steps(2);
+    assert!(harness.query_by_role(egui::Role::TextInput).is_none(), "Enter closes the value at {at:?}");
 }
 
 /// A value opened to type and left as it opened is not an edit: no undo step, and its hidden digits are not rounded away
@@ -414,6 +416,53 @@ fn a_value_opened_and_left_untyped_changes_nothing() {
     assert!(harness.state().hardness_merges.is_empty(), "the slider reports no edit: {:?}", harness.state().hardness_merges);
     assert_eq!(harness.state().position[0], 1.2345, "the number field keeps its unrounded value");
     assert!(harness.state().position_merges.is_empty(), "the number field reports no edit: {:?}", harness.state().position_merges);
+}
+
+/// A value opened to type and left untyped while something else changed it (an agent's command) keeps the newer value: no edit, no undo step
+#[test]
+fn a_value_left_untyped_keeps_a_change_made_while_it_was_open() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut harness = gallery_harness(Brightness::MediumDark, Gallery { hardness: 0.333, position: [1.2345, 0.0, 0.0], ..Gallery::default() });
+    for (newer_seed, label) in (1..).zip(["Hardness value", "Position X", "Seed value"]) {
+        let at = harness.get_by_label(label).rect().center();
+        harness.drag_at(at);
+        harness.drop_at(at);
+        harness.run_steps(2);
+        assert!(harness.query_by_role(egui::Role::TextInput).is_some(), "{label}: the click opens the value to type");
+
+        // Changed elsewhere while the field is open, then Enter without typing
+        harness.state_mut().hardness = 0.9;
+        harness.state_mut().position[0] = 0.5;
+        harness.state_mut().seed = newer_seed;
+        harness.run_steps(1);
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        assert!(harness.query_by_role(egui::Role::TextInput).is_none(), "{label}: Enter closes the value");
+        assert_eq!(harness.state().hardness, 0.9, "{label}: the slider keeps the newer value");
+        assert_eq!(harness.state().position[0], 0.5, "{label}: the number field keeps the newer value");
+        assert_eq!(harness.state().seed, newer_seed, "{label}: the seed keeps the newer value");
+    }
+    assert!(harness.state().hardness_merges.is_empty(), "the slider reports no edit: {:?}", harness.state().hardness_merges);
+    assert!(harness.state().position_merges.is_empty(), "the number field reports no edit: {:?}", harness.state().position_merges);
+}
+
+/// A reason too long for its caption's row is cut with "…", and hovering it shows it whole
+#[test]
+fn a_cut_unavailable_reason_reads_whole_in_its_tooltip() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    const REASON: &str = "Not available with this projection, for a reason far too long to fit beside the caption";
+    const TOOLTIP_WAIT_FRAMES: usize = 60;
+    let mut harness = builder(Brightness::MediumDark).build_ui(|ui| {
+        ui.set_width(PANEL_WIDTH);
+        PropertySheet::show(ui, "unavailable", |sheet| sheet.section_unavailable("Symmetry", REASON));
+    });
+    harness.run_steps(2);
+    let reason = harness.get_by_label(REASON).rect();
+    assert!(reason.right() <= PANEL_WIDTH + 1.0, "the reason is cut to fit the panel: {reason:?}");
+
+    harness.hover_at(reason.center());
+    harness.run_steps(TOOLTIP_WAIT_FRAMES);
+    assert!(harness.get_all_by_label(REASON).count() > 1, "its tooltip reads it whole");
 }
 
 /// A typed value that lands on the current one is no edit: one past the end kept at the end, or the same number written another way
@@ -465,6 +514,7 @@ fn a_drag_merges_after_its_first_step_and_a_click_does_not() {
     harness.drop_at(click);
     harness.run();
 
+    assert!(drag_merges.len() >= 2, "the drag changes the value more than once: {drag_merges:?}");
     assert_eq!(drag_merges.first(), Some(&false), "the drag's first change starts an undo step: {drag_merges:?}");
     assert!(drag_merges.iter().skip(1).all(|merge| *merge), "later changes continue it: {drag_merges:?}");
     let merges = &harness.state().hardness_merges;
@@ -491,6 +541,7 @@ fn a_drag_pressed_past_the_tracks_end_starts_an_undo_step_with_its_first_change(
     harness.run();
 
     let merges = &harness.state().hardness_merges;
+    assert!(merges.len() >= 2, "the drag changes the value more than once: {merges:?}");
     assert_eq!(merges.first(), Some(&false), "the first real change starts an undo step: {merges:?}");
     assert!(merges.iter().skip(1).all(|merge| *merge), "later changes continue it: {merges:?}");
 }
@@ -513,6 +564,7 @@ fn a_number_field_held_still_then_dragged_starts_an_undo_step_with_its_first_cha
     harness.run();
 
     let merges = &harness.state().position_merges;
+    assert!(merges.len() >= 2, "the drag changes the value more than once: {merges:?}");
     assert_eq!(merges.first(), Some(&false), "the first move starts an undo step: {merges:?}");
     assert!(merges.iter().skip(1).all(|merge| *merge), "later moves continue it: {merges:?}");
 }
@@ -548,6 +600,7 @@ fn a_gradient_marker_pressed_past_the_ramps_end_starts_an_undo_step_with_its_fir
     harness.run();
 
     let merges = &harness.state().1;
+    assert!(merges.len() >= 2, "the drag changes the value more than once: {merges:?}");
     assert_eq!(merges.first(), Some(&false), "the first real change starts an undo step: {merges:?}");
     assert!(merges.iter().skip(1).all(|merge| *merge), "later changes continue it: {merges:?}");
 }

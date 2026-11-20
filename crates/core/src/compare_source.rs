@@ -47,4 +47,14 @@ impl CompareSource {
     pub(crate) fn saved_right() -> CompareSource {
         CompareSource::Constant
     }
+
+    /// Whether a left side reads what saved compare masks did (not saved then)
+    pub(crate) fn is_saved_left(&self) -> bool {
+        *self == CompareSource::saved_left()
+    }
+
+    /// Whether a right side reads what saved compare masks did (not saved then)
+    pub(crate) fn is_saved_right(&self) -> bool {
+        *self == CompareSource::saved_right()
+    }
 }

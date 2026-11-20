@@ -25,19 +25,28 @@ impl PropertySheet<'_> {
         let center_y = rect.center().y;
         let face = self.bled_row(rect);
         let id = self.next_id();
-        let response = self.ui.interact(face, id, Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, format!("{name} {kind}")));
-
         let tokens = self.tokens;
         let painter = self.ui.painter().clone();
+
+        // The kind and the arrow keep their room; a name too long for the rest is cut short and shows in full on hover
+        let kind_galley = painter.layout_no_wrap(kind.to_owned(), FontId::proportional(TEXT_SIZE), tokens.text_dim);
+        let name_left = self.left + GLYPH_CENTER + GLYPH_TO_NAME;
+        let name_room = self.right - ARROW_INSET - ARROW_SIZE * 0.5 - kind_galley.size().x - NAME_TO_KIND - name_left;
+        let name_galley = crate::widgets::elided(&painter, name, TEXT_SIZE, tokens.text, name_room);
+        let cut_short = name_galley.elided;
+
+        let response = self.ui.interact(face, id, Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        let response = if cut_short { response.on_hover_text(name) } else { response };
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, format!("{name} {kind}")));
+
         if response.hovered() {
             painter.rect_filled(face, CornerRadius::same(ROW_RADIUS), tokens.button);
             painter.text(pos2(self.right - ARROW_INSET, center_y), Align2::CENTER_CENTER, ic::CARET_RIGHT, FontId::proportional(ARROW_SIZE), tokens.text);
         }
         painter.text(pos2(self.left + GLYPH_CENTER, center_y), Align2::CENTER_CENTER, glyph, FontId::proportional(GLYPH_SIZE), tokens.text_dim);
-        let name_left = self.left + GLYPH_CENTER + GLYPH_TO_NAME;
-        let name_rect = painter.text(pos2(name_left, center_y), Align2::LEFT_CENTER, name, FontId::proportional(TEXT_SIZE), tokens.text);
-        painter.text(pos2(name_rect.right() + NAME_TO_KIND, center_y), Align2::LEFT_CENTER, kind, FontId::proportional(TEXT_SIZE), tokens.text_dim);
+        let name_right = name_left + name_galley.size().x;
+        painter.galley(pos2(name_left, center_y - name_galley.size().y * 0.5), name_galley, tokens.text);
+        painter.galley(pos2(name_right + NAME_TO_KIND, center_y - kind_galley.size().y * 0.5), kind_galley, tokens.text_dim);
         self.drawn(rect.bottom());
         response.clicked()
     }

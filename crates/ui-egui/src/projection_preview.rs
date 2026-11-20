@@ -141,8 +141,8 @@ const MIN_SIZE: f32 = 1e-4;
 /// A ray this close to parallel to a face or the cylinder's axis never meets it
 const PARALLEL_TOLERANCE: f32 = 1e-6;
 
-/// Draw the preview of `projection` on a mesh within `bounds` into `rect`, rendered once per projection, size and theme, with a quarter of the rays while a drag is held (None for projections without one: UV, warp)
-pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Projection, bounds: (Vec3, Vec3), tokens: &Tokens) -> Option<()> {
+/// Draw the preview of `projection` on a mesh within `bounds` into `rect`, rendered once per projection, size and theme, with a quarter of the rays while a drag is held (None for projections without one: UV, warp); each `owner` (the docked panel's square, the popup's) keeps its own picture
+pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Projection, bounds: (Vec3, Vec3), tokens: &Tokens, owner: egui::Id) -> Option<()> {
     let shown = shown_projection(projection, bounds)?;
     let ctx = painter.ctx();
     let side = ((rect.width() * ctx.pixels_per_point()).round() as usize).clamp(1, MAX_SIDE_PX);
@@ -151,7 +151,9 @@ pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Pro
     let (resting, half) = resting_fit(&shown, shape);
     let key = format!("{side}{half}{shown:?}{:?}{:?}{:?}", tokens.field, tokens.text, tokens.accent);
     let held = ctx.input(|input| input.pointer.any_down());
-    let id = egui::Id::unique("projection_preview");
+    let id = slot(owner);
+    #[cfg(test)]
+    ctx.data_mut(|data| data.insert_temp(egui::Id::unique(LAST_OWNER), owner));
 
     // The picture, the key and the rays per pixel it was rendered with; a drag's lighter picture is redone in full once the pointer is let go
     let cached = ctx.data(|data| data.get_temp::<RenderedPreview>(id));
@@ -185,16 +187,32 @@ pub(crate) fn projection_preview(painter: &Painter, rect: Rect, projection: &Pro
     Some(())
 }
 
+/// Where `owner`'s preview square keeps its picture
+fn slot(owner: egui::Id) -> egui::Id {
+    egui::Id::unique(("projection_preview", owner))
+}
+
+/// Where tests find the owner of the square drawn last
+#[cfg(test)]
+const LAST_OWNER: &str = "projection_preview_last_owner";
+
+/// The picture of the square drawn last (tests)
+#[cfg(test)]
+fn last_rendered(ctx: &egui::Context) -> Option<RenderedPreview> {
+    let owner = ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::unique(LAST_OWNER)))?;
+    ctx.data(|data| data.get_temp::<RenderedPreview>(slot(owner)))
+}
+
 /// What the preview square last rendered (tests: a drag re-renders it)
 #[cfg(test)]
 pub(crate) fn shown_key(ctx: &egui::Context) -> Option<String> {
-    ctx.data(|data| data.get_temp::<RenderedPreview>(egui::Id::unique("projection_preview"))).map(|rendered| rendered.key)
+    last_rendered(ctx).map(|rendered| rendered.key)
 }
 
 /// How the preview square was last rendered, with rays per pixel (tests: a drag renders it lighter, the release in full)
 #[cfg(test)]
 pub(crate) fn shown_supersample(ctx: &egui::Context) -> Option<usize> {
-    ctx.data(|data| data.get_temp::<RenderedPreview>(egui::Id::unique("projection_preview"))).map(|rendered| rendered.supersample)
+    last_rendered(ctx).map(|rendered| rendered.supersample)
 }
 
 /// The projection the preview renders: a planar placed on the model shows straight onto the sphere's front as big against the sphere as its frame is against the mesh, stretched, turned round its normal and slid across its plane as the frame is, cropped to its rectangle
@@ -736,7 +754,7 @@ mod tests {
                         move |ui| {
                             let tokens = Tokens::for_brightness(brightness);
                             ui.painter().rect_filled(ui.ctx().content_rect(), 0, tokens.panel);
-                            projection_preview(ui.painter(), rect, &projection, BOUNDS, &tokens);
+                            projection_preview(ui.painter(), rect, &projection, BOUNDS, &tokens, egui::Id::unique("square"));
                         },
                     );
                 harness.run_steps(2);
@@ -755,7 +773,7 @@ mod tests {
         let tokens = tokens();
         let input = egui::RawInput { events, ..Default::default() };
         let mut output = ctx.run_ui(input, |ui| {
-            projection_preview(ui.painter(), Rect::from_min_size(pos2(0.0, 0.0), vec2(64.0, 64.0)), projection, BOUNDS, &tokens);
+            projection_preview(ui.painter(), Rect::from_min_size(pos2(0.0, 0.0), vec2(64.0, 64.0)), projection, BOUNDS, &tokens, egui::Id::unique("square"));
         });
 
         // No renderer takes the uploads here
@@ -779,6 +797,29 @@ mod tests {
         preview_frame(&ctx, &spherical(2.0), vec![button(false)]);
         assert_eq!(shown_supersample(&ctx), Some(SUPERSAMPLE), "let go: the same picture in full");
         assert_eq!(shown_key(&ctx), dragged);
+    }
+
+    /// Two squares of one projection at different sizes in one frame (the docked panel's and the popup's) keep their own pictures, so neither re-renders over the other
+    #[test]
+    fn two_squares_drawn_together_keep_their_own_pictures() {
+        let ctx = egui::Context::default();
+        let tokens = tokens();
+        let (docked, popup) = (egui::Id::unique("docked"), egui::Id::unique("popup"));
+        let rendered = |owner| ctx.data(|data| data.get_temp::<RenderedPreview>(slot(owner))).expect("a picture");
+        let mut shown = Vec::new();
+        for _ in 0..2 {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                projection_preview(ui.painter(), Rect::from_min_size(pos2(0.0, 0.0), vec2(64.0, 64.0)), &spherical(1.0), BOUNDS, &tokens, docked);
+                projection_preview(ui.painter(), Rect::from_min_size(pos2(100.0, 0.0), vec2(96.0, 96.0)), &spherical(1.0), BOUNDS, &tokens, popup);
+            });
+            output.textures_delta.clear();
+            shown.push([docked, popup].map(|owner| rendered(owner).texture.id()));
+        }
+
+        let [docked_picture, popup_picture] = [rendered(docked), rendered(popup)];
+        assert_ne!(docked_picture.texture.id(), popup_picture.texture.id(), "each square draws its own texture");
+        assert!(docked_picture.key.starts_with("64") && popup_picture.key.starts_with("96"), "each picture is rendered at its own side");
+        assert_eq!(shown[0], shown[1], "the next frame keeps both pictures");
     }
 
     /// Render times of the preview square (prints ms per render at its largest side; run with --ignored --nocapture)

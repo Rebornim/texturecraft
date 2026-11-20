@@ -195,7 +195,7 @@ impl RoundGizmo {
         self.outline.push(circle(|unit| at(local + Vec3::new(unit.x, 0.0, unit.y) * radius)));
     }
 
-    /// A cylinder round `axis` over a mesh of half sizes `half`: its caps and side lines, a double arrow on the top rim that stretches its height (seen end on, a dot) and a dot on its right side that scales it across
+    /// A cylinder round `axis` over a mesh of half sizes `half`: its caps and side lines, a double arrow on the top rim that stretches its height (seen end on, a dot) and a dot on its right side that scales it across (seen end on, on the rim's right)
     fn cylinder_handles(&mut self, at: impl Fn(Vec3) -> Option<Pos2>, axis: usize, half: Vec3, facing: Vec3, view: Rect) {
         let local = self.local;
         let along = Vec3::AXES[axis];
@@ -211,18 +211,23 @@ impl RoundGizmo {
         if let Some(rim) = top.iter().copied().min_by(|first, second| first.y.total_cmp(&second.y)) {
             self.sizes.push(SizeHandle { at: kept_in(view, rim), axes: only_axis(axis), along: along_axis });
         }
+        let right_of_rim = top.iter().copied().max_by(|first, second| first.x.total_cmp(&second.x));
         self.outline.extend([top, cap(-half_height)]);
 
-        // The two side lines, where the round side turns away from the camera
-        let Some(side) = along.cross(facing - along * facing.dot(along)).try_normalize() else { return };
+        // The two side lines, where the round side turns away from the camera; seen end on there are none, and the dot sits on the rim's right
+        let side = along.cross(facing - along * facing.dot(along)).try_normalize();
         let mut sides = Vec::new();
-        for edge in [side, -side] {
+        for edge in side.into_iter().flat_map(|side| [side, -side]) {
             if let (Some(top), Some(bottom)) = (at(local + edge * radius + along * half_height), at(local + edge * radius - along * half_height)) {
                 self.outline.push(vec![top, bottom]);
                 sides.push(top.lerp(bottom, 0.5));
             }
         }
-        if let Some(side) = sides.into_iter().max_by(|first, second| first.x.total_cmp(&second.x)) {
+        let across_at = match side {
+            Some(_) => sides.into_iter().max_by(|first, second| first.x.total_cmp(&second.x)),
+            None => right_of_rim,
+        };
+        if let Some(side) = across_at {
             let mut across = [true; 3];
             across[axis] = false;
             self.sizes.push(SizeHandle { at: kept_in(view, side), axes: across, along: None });
@@ -854,5 +859,97 @@ pub(crate) mod tests {
 
         drag(&mut harness, from, from + vec2(40.0, 0.0), Modifiers::NONE);
         assert_ne!(projection(&harness, layer), before, "the next press slides again");
+    }
+
+    /// A tri-planar fill selected while the quick mask is edited with the Paint tool: brushes act and the projector shows
+    fn quick_mask_paint_app() -> (egui_kittest::Harness<'static, TextureCraftApp>, LayerId) {
+        let (mut harness, layer) = fill_app("triplanar");
+        harness.state_mut().run("viewport.quickMask", json!({"enabled": true})).unwrap();
+        harness.state_mut().run("viewport.quickMask.edit", json!({"editing": true})).unwrap();
+        harness.state_mut().session.tool.tool = texturecraft_engine::Tool::Paint;
+        harness.run_steps(2);
+        assert!(gizmo(&harness).sizes.len() > 1, "the projector shows");
+        (harness, layer)
+    }
+
+    /// A Ctrl+drag that starts on a handle changes the brush only: the projector stays where it is
+    #[test]
+    fn a_ctrl_drag_on_a_handle_changes_the_brush_and_not_the_projection() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = quick_mask_paint_app();
+        let before = projection(&harness, layer);
+        let flow = harness.state().session.tool.brush.flow;
+        let center = gizmo(&harness).center;
+
+        harness.event(egui::Event::ModifiersChanged(Modifiers::COMMAND));
+        drag(&mut harness, center, center + vec2(-40.0, 0.0), Modifiers::COMMAND);
+        harness.event(egui::Event::ModifiersChanged(Modifiers::NONE));
+        harness.run_steps(2);
+        assert_ne!(harness.state().session.tool.brush.flow, flow, "the drag changes the brush");
+        assert_eq!(projection(&harness, layer), before, "and leaves the projection");
+    }
+
+    /// A press on a handle's edge that drifts just off it before release (still a click) is the handle's: it paints no dab
+    #[test]
+    fn a_click_that_drifts_off_a_handle_paints_nothing() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, _) = quick_mask_paint_app();
+        let shown = gizmo(&harness);
+        let rect = harness.state().viewport_rect;
+        let on_model = |p: Pos2| {
+            harness
+                .state()
+                .session
+                .pick(texturecraft_engine::geom::glam::Vec2::new(p.x - rect.left(), p.y - rect.top()), harness.state().session.viewport)
+                .is_some()
+        };
+        let drift = 2.0;
+
+        // The centre square's last point along some direction whose point a drift further is off every handle and on the model
+        let (edge, off) = (0..16)
+            .filter_map(|step| {
+                let toward = egui::Vec2::angled(step as f32 / 16.0 * std::f32::consts::TAU);
+                let edge = (0..200).map(|half| shown.center + toward * (half as f32 * 0.5)).take_while(|p| shown.grab(*p).is_some()).last()?;
+                let off = edge + toward * drift;
+                (shown.grab(off).is_none() && on_model(off)).then_some((edge, off))
+            })
+            .next()
+            .expect("a handle edge on the model");
+        let click = |harness: &mut egui_kittest::Harness<'_, TextureCraftApp>, from: Pos2, to: Pos2| {
+            harness.hover_at(from);
+            harness.run_steps(1);
+            harness.event(egui::Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+            harness.run_steps(1);
+            harness.event(egui::Event::PointerMoved(to));
+            harness.run_steps(1);
+            harness.event(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+            harness.run_steps(2);
+        };
+
+        let painted = harness.state().session.quick_mask.revision;
+        click(&mut harness, edge, off);
+        assert_eq!(harness.state().session.quick_mask.revision, painted, "a press that began on the handle paints no dab");
+
+        // The same click a little past the handle paints
+        click(&mut harness, off, off + (off - edge));
+        assert_ne!(harness.state().session.quick_mask.revision, painted, "a press off the handle paints");
+    }
+
+    /// A cylinder seen straight down its axis keeps the dot that scales it across, on its rim's right
+    #[test]
+    fn a_cylinder_seen_end_on_keeps_its_across_dot() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app_with(json!({"projection": "cylindrical", "axis": 2}));
+        harness.state_mut().session.camera.yaw = 0.0;
+        harness.state_mut().session.camera.pitch = 0.0;
+        harness.run_steps(2);
+
+        let end_on = gizmo(&harness);
+        let across = [true, true, false];
+        let dot = end_on.sizes.iter().find(|size| size.axes == across).unwrap_or_else(|| panic!("the across dot: {:?}", end_on.sizes)).at;
+        assert_eq!(end_on.grab(dot), Some(RoundGrab::Size(across)));
+        drag(&mut harness, dot, end_on.center + (dot - end_on.center) * 1.5, Modifiers::NONE);
+        let (projector, _) = projector_and_offset(&projection(&harness, layer));
+        assert!(projector.scale[0] > 1.2 && projector.scale[1] > 1.2 && projector.scale[2] == 1.0, "it scales across only: {:?}", projector.scale);
     }
 }

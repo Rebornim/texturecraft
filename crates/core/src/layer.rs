@@ -311,6 +311,11 @@ impl Sampling {
     pub fn saved_before() -> Sampling {
         Sampling::SAVED_BEFORE
     }
+
+    /// Whether it samples as fills saved before the field existed did (not saved then, so they save as they were)
+    pub fn is_saved_before(&self) -> bool {
+        *self == Sampling::SAVED_BEFORE
+    }
 }
 
 /// Where a texture or procedural is sampled from on the surface.
@@ -325,9 +330,9 @@ pub enum Projection {
         scale: f32,
         sharpness: f32,
         offset: [f32; 3],
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "UvTransform::is_default")]
         uv: UvTransform,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Projector::is_default")]
         projector: Projector,
     },
     /// World-space planar projection along an axis (0 = X, 1 = Y, 2 = Z), or from a frame placed on the surface
@@ -335,9 +340,9 @@ pub enum Projection {
         scale: f32,
         axis: u8,
         offset: [f32; 3],
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "UvTransform::is_default")]
         uv: UvTransform,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Projector::is_default")]
         projector: Projector,
         /// The frame it projects from when placed on the surface (scale, axis and offset then unused)
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -346,25 +351,25 @@ pub enum Projection {
     /// Spherical projection around the mesh center
     Spherical {
         scale: f32,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "UvTransform::is_default")]
         uv: UvTransform,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "is_zero_offset")]
         offset: [f32; 3],
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Projector::is_default")]
         projector: Projector,
     },
     /// Cylindrical projection around an axis
     Cylindrical {
         scale: f32,
         axis: u8,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "UvTransform::is_default")]
         uv: UvTransform,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "is_zero_offset")]
         offset: [f32; 3],
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Projector::is_default")]
         projector: Projector,
         /// The arc one repeat of the source spans around the axis (degrees), centred on the front
-        #[serde(default = "full_turn")]
+        #[serde(default = "full_turn", skip_serializing_if = "is_full_turn")]
         angle: f32,
     },
     /// A planar projection from a frame whose four corners are pulled freely, bending the image to the quad they make
@@ -391,6 +396,13 @@ pub struct UvTransform {
 impl Default for UvTransform {
     fn default() -> Self {
         UvTransform { tiling: [1.0, 1.0], rotation: 0.0, offset: [0.0, 0.0] }
+    }
+}
+
+impl UvTransform {
+    /// Whether it changes nothing, as projections saved before it existed did (not saved then)
+    pub fn is_default(&self) -> bool {
+        *self == UvTransform::default()
     }
 }
 
@@ -428,6 +440,16 @@ fn not_flipped(flip: &[bool; 2]) -> bool {
 /// Serde default of a cylindrical projection's angle: the whole way round
 fn full_turn() -> f32 {
     crate::FULL_TURN_DEGREES
+}
+
+/// Whether a cylindrical projection spans the whole way round, as ones saved before the angle did (not saved then)
+fn is_full_turn(angle: &f32) -> bool {
+    *angle == full_turn()
+}
+
+/// Whether a spherical or cylindrical projection sits unshifted, as ones saved before the offset did (not saved then)
+fn is_zero_offset(offset: &[f32; 3]) -> bool {
+    *offset == [0.0; 3]
 }
 
 impl Default for Projection {
@@ -839,7 +861,7 @@ pub struct Fill {
     pub sources: BTreeMap<Channel, Source>,
     #[serde(serialize_with = "crate::saved_projection::save", deserialize_with = "crate::saved_projection::load")]
     pub projection: Projection,
-    #[serde(default = "Sampling::saved_before")]
+    #[serde(default = "Sampling::saved_before", skip_serializing_if = "Sampling::is_saved_before")]
     pub sampling: Sampling,
     /// Set when the sources are maps cooked from a MaterialCraft material.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -972,7 +994,7 @@ pub struct Levels {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub affects: Option<Channel>,
     /// Values past the input handles stop at the output ends; off, the remap's line carries on past them (older saves load clamped)
-    #[serde(default = "saved_levels_clamp")]
+    #[serde(default = "saved_levels_clamp", skip_serializing_if = "is_true")]
     pub clamp: bool,
 }
 
@@ -1955,7 +1977,7 @@ pub enum EffectKind {
         source: Source,
         #[serde(serialize_with = "crate::saved_projection::save", deserialize_with = "crate::saved_projection::load")]
         projection: Projection,
-        #[serde(default = "Sampling::saved_before")]
+        #[serde(default = "Sampling::saved_before", skip_serializing_if = "Sampling::is_saved_before")]
         sampling: Sampling,
     },
     Generator(Generator),
@@ -1970,15 +1992,15 @@ pub enum EffectKind {
         value: f32,
         /// How far apart two values may be and still count as equal ([`CompareOp::WithinTolerance`])
         tolerance: f32,
-        #[serde(default = "CompareSource::saved_left")]
+        #[serde(default = "CompareSource::saved_left", skip_serializing_if = "CompareSource::is_saved_left")]
         left: CompareSource,
-        #[serde(default = "CompareSource::saved_right")]
+        #[serde(default = "CompareSource::saved_right", skip_serializing_if = "CompareSource::is_saved_right")]
         right: CompareSource,
         /// The channel a layer side reads
-        #[serde(default = "saved_compare_channel")]
+        #[serde(default = "saved_compare_channel", skip_serializing_if = "is_saved_compare_channel")]
         channel: Channel,
         /// 1 is a hard step (what compare masks saved before hardness did); lower ramps over 1 − hardness
-        #[serde(default = "saved_compare_hardness")]
+        #[serde(default = "saved_compare_hardness", skip_serializing_if = "is_saved_compare_hardness")]
         hardness: f32,
     },
     /// Content only: a material fill (one source per channel; channels without a source are
@@ -2062,6 +2084,16 @@ fn saved_compare_channel() -> Channel {
 /// The hardness of compare masks saved before hardness existed (a hard step)
 fn saved_compare_hardness() -> f32 {
     1.0
+}
+
+/// Whether a compare mask reads the channel saved ones did (not saved then)
+fn is_saved_compare_channel(channel: &Channel) -> bool {
+    *channel == saved_compare_channel()
+}
+
+/// Whether a compare mask is the hard step saved ones were (not saved then)
+fn is_saved_compare_hardness(hardness: &f32) -> bool {
+    *hardness == saved_compare_hardness()
 }
 
 impl EffectKind {
@@ -2396,6 +2428,34 @@ mod tests {
     }
 
     #[test]
+    fn fills_and_effects_in_the_shape_older_projects_saved_save_unchanged() {
+        let fills = [
+            r#"{"sources":{"BaseColor":{"Uniform":[0.5,0.5,0.5]}},"projection":{"Uv":{"scale":[1.0,1.0],"rotation":0.0,"offset":[0.0,0.0]}}}"#,
+            r#"{"sources":{},"projection":{"Triplanar":{"scale":1.0,"sharpness":0.5,"offset":[0.0,0.0,0.0]}}}"#,
+            r#"{"sources":{},"projection":{"Planar":{"scale":2.0,"axis":2,"offset":[0.0,1.0,0.0]}}}"#,
+            r#"{"sources":{},"projection":{"Spherical":{"scale":1.0}}}"#,
+            r#"{"sources":{},"projection":{"Cylindrical":{"scale":1.0,"axis":1}}}"#,
+            r#"{"sources":{},"projection":{"Decal":{"center":[0.0,0.0,0.0],"normal":[0.0,0.0,1.0],"up":[0.0,1.0,0.0],"size":[1.0,1.0],"rotation":0.0,"offset":[0.0,0.0],"depth":1.0}}}"#,
+        ];
+        for saved in fills {
+            let loaded: Fill = serde_json::from_str(saved).unwrap();
+            assert_eq!(serde_json::to_string(&loaded).unwrap(), saved, "a fill saves as it was saved");
+        }
+
+        let effects = [
+            r#"{"Fill":{"source":{"Uniform":[0.5,0.5,0.5]},"projection":{"Triplanar":{"scale":1.0,"sharpness":0.5,"offset":[0.0,0.0,0.0]}}}}"#,
+            r#"{"Levels":{"in_low":0.2,"in_high":0.6,"gamma":1.0,"out_low":0.0,"out_high":1.0}}"#,
+            r#"{"Compare":{"op":"GreaterThan","value":0.5,"tolerance":0.1}}"#,
+            r#"{"ColorSelection":{"colors":[[1.0,0.0,0.0]],"tolerance":0.1}}"#,
+            r#"{"Material":{"sources":{},"projection":{"Spherical":{"scale":2.0}}}}"#,
+        ];
+        for saved in effects {
+            let loaded: EffectKind = serde_json::from_str(saved).unwrap();
+            assert_eq!(serde_json::to_string(&loaded).unwrap(), saved, "an effect saves as it was saved");
+        }
+    }
+
+    #[test]
     fn levels_saved_before_the_channel_and_clamp_load_as_they_rendered() {
         let saved = serde_json::json!({"in_low": 0.2, "in_high": 0.6, "gamma": 1.0, "out_low": 0.0, "out_high": 1.0});
         let loaded: Levels = serde_json::from_value(saved.clone()).unwrap();
@@ -2404,7 +2464,10 @@ mod tests {
         assert!(Channel::ALL.iter().all(|&channel| loaded.remaps(channel)));
         let saved_again = serde_json::to_value(loaded).unwrap();
         assert!(saved_again.get("affects").is_none(), "no channel is saved, as before: {saved_again}");
+        assert!(saved_again.get("clamp").is_none(), "a clamped level is saved as before: {saved_again}");
         assert_eq!(serde_json::from_value::<Levels>(saved_again).unwrap(), loaded);
+        let unclamped = serde_json::to_value(Levels { clamp: false, ..loaded }).unwrap();
+        assert_eq!(serde_json::from_value::<Levels>(unclamped).unwrap(), Levels { clamp: false, ..loaded }, "an unclamped level keeps its choice");
         let base = Levels { affects: Some(Channel::BaseColor), ..loaded };
         assert!(base.remaps(Channel::BaseColor) && !base.remaps(Channel::Roughness));
     }
@@ -2534,6 +2597,7 @@ mod tests {
         let kind: EffectKind = serde_json::from_str(saved).unwrap();
         let EffectKind::Compare { left, right, channel, hardness, .. } = kind else { panic!("{kind:?}") };
         assert_eq!((left, right, channel, hardness), (CompareSource::ThisMask, CompareSource::Constant, Channel::Height, 1.0));
+        assert_eq!(serde_json::to_string(&kind).unwrap(), saved, "an unedited compare saves only its op, value and tolerance");
         let round_trip: EffectKind = serde_json::from_str(&serde_json::to_string(&kind).unwrap()).unwrap();
         assert_eq!(round_trip, kind);
     }

@@ -2764,13 +2764,18 @@ pub(crate) fn anchors_below(project: &texturecraft_engine::core::Project, reader
 
 /// Anchor choices for an effect, valid for its owner and recorded below the displayed instance
 pub(crate) fn effect_anchors_below(app: &TextureCraftApp, layer: LayerId, effect: LayerId) -> Vec<(LayerId, String)> {
-    let owner = app.session.doc.project.effect(effect).map_or(layer, |(owner, _)| owner);
-    let owner_anchors = anchors_below(&app.session.doc.project, owner);
+    project_effect_anchors_below(&app.session.doc.project, layer, effect)
+}
+
+/// [`effect_anchors_below`] in `project`
+pub(crate) fn project_effect_anchors_below(project: &texturecraft_engine::core::Project, layer: LayerId, effect: LayerId) -> Vec<(LayerId, String)> {
+    let owner = project.effect(effect).map_or(layer, |(owner, _)| owner);
+    let owner_anchors = anchors_below(project, owner);
     if owner == layer {
         return owner_anchors;
     }
 
-    let displayed_anchors = anchors_below(&app.session.doc.project, layer);
+    let displayed_anchors = anchors_below(project, layer);
     owner_anchors.into_iter().filter(|(id, _)| displayed_anchors.iter().any(|(displayed, _)| id == displayed)).collect()
 }
 

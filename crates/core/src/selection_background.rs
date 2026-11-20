@@ -18,6 +18,11 @@ impl SelectionBackground {
     pub const ALL: [SelectionBackground; 4] =
         [SelectionBackground::Transparent, SelectionBackground::Black, SelectionBackground::White, SelectionBackground::Gray];
 
+    /// Whether it is what selections saved before the choice had (not saved then)
+    pub fn is_default(&self) -> bool {
+        *self == SelectionBackground::default()
+    }
+
     /// Command id
     pub fn id(self) -> &'static str {
         match self {

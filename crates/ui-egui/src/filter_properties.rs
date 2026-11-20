@@ -168,6 +168,14 @@ fn filter_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, effect:
     slot.reset
 }
 
+/// The seed of a legacy seeded filter as stored ([`scalar_params`] hands it over as an f32, which rounds seeds past 2^24)
+fn legacy_seed(filter: &Filter) -> Option<u32> {
+    match filter {
+        Filter::Warp { seed, .. } | Filter::DirectionalWarp { seed, .. } | Filter::SlopeBlur { seed, .. } => Some(*seed),
+        _ => None,
+    }
+}
+
 /// The filter's own rows: Seed first, Intensity with its Divider chip, angles with their dial, then the color editors
 fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, filter: &Filter) {
     let set = |app: &mut TextureCraftApp, key: &str, value: Value, merge: bool| {
@@ -215,11 +223,11 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64,
     {
         set(app, "invert", json!(on), false);
     }
-    if let Some(&(_, label, value, _, _)) = params.iter().find(|(key, ..)| *key == "seed") {
-        let mut seed = value as u32;
-        if sheet.seed(tr(label), &mut seed) {
-            set(app, "seed", json!(seed), false);
-        }
+    if let Some(&(_, label, ..)) = params.iter().find(|(key, ..)| *key == "seed")
+        && let Some(mut seed) = legacy_seed(filter)
+        && sheet.seed(tr(label), &mut seed)
+    {
+        set(app, "seed", json!(seed), false);
     }
     let divided = divided_key(filter);
     for (key, label, mut value, min, max) in params.into_iter().filter(|(key, ..)| *key != "seed") {
@@ -767,9 +775,9 @@ fn hsl(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, [hue, 
         app.run("effect.set", json!({"effect": id, "mode": if mode == 1 { "perceptive" } else { "regular" }}));
     }
 
-    // Shown around 0.5: the hue as half a turn either way, saturation and lightness as −1..1 halved
+    // Shown around 0.5: the hue as half a turn either way (a stored turn past half wraps round), saturation and lightness as −1..1 halved
     let rows = [
-        ("hue", tr("Hue"), 0.5 + hue, 1.0),
+        ("hue", tr("Hue"), (hue + 0.5).rem_euclid(1.0), 1.0),
         ("saturation", tr("Saturation"), 0.5 + saturation / 2.0, 2.0),
         ("lightness", tr("Lightness"), 0.5 + lightness / 2.0, 2.0),
     ];

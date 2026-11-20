@@ -22,8 +22,10 @@ pub fn warp_uv(corners: &[[f32; 2]; 4], p: Vec2) -> Option<Vec2> {
         let root = discriminant.sqrt();
         let near = |v: f32| across(e, f, g, h, v).map(|u| Vec2::new(u, v));
 
-        // Two solutions: keep the one nearer the quad
-        let candidates = [near((-k1 - root) / (2.0 * k2)), near((-k1 + root) / (2.0 * k2))];
+        // Two solutions, neither found by subtracting near-equal values (which loses the answer when the quad is nearly a parallelogram): keep the one nearer the quad
+        let q = -0.5 * (k1 + root.copysign(k1));
+        // q is 0 only for a double root at 0, which q / k2 still finds (k0 / q is then not finite, so no candidate)
+        let candidates = [near(q / k2), near(k0 / q)];
         candidates.into_iter().flatten().min_by(|x, y| outside(*x).total_cmp(&outside(*y)))?
     };
     uv.is_finite().then_some(uv)
@@ -71,6 +73,8 @@ mod tests {
             [[-0.6, 0.4], [0.5, 0.7], [0.3, -0.5], [-0.4, -0.45]],
             [[-0.5, 0.5], [0.9, 0.5], [0.5, -0.5], [-0.5, -0.5]],
             [[-0.2, 0.6], [0.2, 0.6], [0.7, -0.6], [-0.7, -0.6]],
+            // Nearly a parallelogram: one corner a hair out
+            [[0.0, 0.0], [1.0, 0.0], [1.0 + 1.0 / 262_144.0, 1.0], [0.0, 1.0]],
         ];
         for quad in quads {
             for i in 0..=10 {

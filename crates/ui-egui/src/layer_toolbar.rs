@@ -57,6 +57,13 @@ const CHANNEL_CARET_INSET: f32 = 10.0;
 const CHANNEL_CARET_SIZE: f32 = 12.0;
 const TEXT_SIZE: f32 = 12.0;
 
+/// The row's width besides the channel list's: its padding, the two menu buttons and their gaps
+const MENUS_ROW_WIDTH: f32 = 2.0 * SIDE_PADDING + CHANNEL_GAP + 2.0 * MENU_BUTTON_WIDTH + MENU_GAP;
+/// The three add-layer buttons and Remove
+const LAYER_BUTTONS_WIDTH: f32 = 4.0 * BUTTON_WIDTH + 3.0 * BUTTON_GAP;
+/// The width every control takes in one row
+const ONE_ROW_WIDTH: f32 = MENUS_ROW_WIDTH + CHANNEL_WIDTH + GROUP_GAP + LAYER_BUTTONS_WIDTH;
+
 /// A hanging menu: its caption, rows, icon and text columns and its smallest width
 const MENU_PADDING: f32 = 4.0;
 const MENU_CAPTION_HEIGHT: f32 = 22.0;
@@ -88,46 +95,55 @@ pub(crate) const NEW_FILTER: &str = texturecraft_engine::mask_cmds::EMPTY_FILTER
 /// The Layers panel's top row and what its menus open
 pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
-    let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), BAR_HEIGHT), Sense::hover());
-    let anchor = ui.interact(bar, ui.scope_id().with("layer_toolbar"), Sense::hover());
+
+    // A panel narrower than one row puts the add-layer buttons and Remove on a second row, where they stay inside it
+    let width = ui.available_width();
+    let two_rows = width < ONE_ROW_WIDTH;
+    let (area, _) = ui.allocate_exact_size(vec2(width, if two_rows { 2.0 * BAR_HEIGHT } else { BAR_HEIGHT }), Sense::hover());
+    let anchor = ui.interact(area, ui.scope_id().with("layer_toolbar"), Sense::hover());
+    let bar = Rect::from_min_size(area.min, vec2(width, BAR_HEIGHT));
     let top = bar.center().y - CONTROL_HEIGHT * 0.5;
     let mut x = bar.left() + SIDE_PADDING;
-    let control = |x: f32, width: f32| Rect::from_min_size(pos2(x, top), vec2(width, CONTROL_HEIGHT));
+    let control = |x: f32, top: f32, width: f32| Rect::from_min_size(pos2(x, top), vec2(width, CONTROL_HEIGHT));
 
-    channel_list(app, ui, control(x, CHANNEL_WIDTH), &tokens);
-    x += CHANNEL_WIDTH + CHANNEL_GAP;
+    // Narrower still, the channel list gives up width before a menu button leaves the panel
+    let channel_width = CHANNEL_WIDTH.min(width - MENUS_ROW_WIDTH).max(0.0);
+    channel_list(app, ui, control(x, top, channel_width), &tokens);
+    x += channel_width + CHANNEL_GAP;
 
     let selected = app.session.selected_layer().filter(|id| app.session.doc.project.layers.contains_key(id));
     let effects = || effect_items(app, layer_of(app, selected));
-    let mut pick = menu_button(ui, control(x, MENU_BUTTON_WIDTH), tr("Add effect"), MenuIcon::Glyph(ic::MAGIC_WAND), tr("Add effect"), effects, &tokens);
+    let mut pick = menu_button(ui, control(x, top, MENU_BUTTON_WIDTH), tr("Add effect"), MenuIcon::Glyph(ic::MAGIC_WAND), tr("Add effect"), effects, &tokens);
     x += MENU_BUTTON_WIDTH + MENU_GAP;
     let masks = || mask_items(layer_of(app, selected));
-    pick = pick.or(menu_button(ui, control(x, MENU_BUTTON_WIDTH), tr("Add mask"), MenuIcon::Mask, tr("Add mask"), masks, &tokens));
+    pick = pick.or(menu_button(ui, control(x, top, MENU_BUTTON_WIDTH), tr("Add mask"), MenuIcon::Mask, tr("Add mask"), masks, &tokens));
     x += MENU_BUTTON_WIDTH + GROUP_GAP;
 
+    let (top, mut x) = if two_rows { (top + BAR_HEIGHT, bar.left() + SIDE_PADDING) } else { (top, x) };
     for (glyph, label, command) in [
         (ic::PAINT_BRUSH, tr("Add paint layer"), "layer.add.paint"),
         (ic::PAINT_BUCKET, tr("Add fill layer"), "layer.add.fill"),
         (ic::FOLDER_SIMPLE, tr("Add folder"), "layer.add.group"),
     ] {
-        if plain_button(ui, control(x, BUTTON_WIDTH), glyph, label, &tokens).clicked() {
+        if plain_button(ui, control(x, top, BUTTON_WIDTH), glyph, label, &tokens).clicked() {
             app.run(command, Value::Null);
         }
         x += BUTTON_WIDTH + BUTTON_GAP;
     }
-    let remove = control((bar.right() - SIDE_PADDING - BUTTON_WIDTH).max(x), BUTTON_WIDTH);
+    let remove = control((bar.right() - SIDE_PADDING - BUTTON_WIDTH).max(x), top, BUTTON_WIDTH);
     if plain_button(ui, remove, ic::TRASH, &crate::keymap::tip(&app.ui.keymap, tr("Remove layer"), "layer.remove"), &tokens).clicked() {
         app.run("layer.remove", Value::Null);
     }
 
-    let popup = ui.scope_id().with("bitmap_mask_picker");
+    // Keyed by the layer that opened it: a picker no longer shown when the selection moves closes, so its pick never lands on another layer
+    let popup = |layer: LayerId| ui.scope_id().with(("bitmap_mask_picker", layer.0));
     match (pick, selected) {
         (Some(Pick::Run { command, params }), Some(layer)) => run_on(app, ui, layer, command, params),
-        (Some(Pick::Bitmap), Some(_)) => resource_picker::toggle(ui.ctx(), popup),
+        (Some(Pick::Bitmap), Some(layer)) => resource_picker::toggle(ui.ctx(), popup(layer)),
         _ => {}
     }
     if let Some(layer) = selected {
-        bitmap_picker(app, &anchor, popup, layer);
+        bitmap_picker(app, &anchor, popup(layer), layer);
     }
 }
 

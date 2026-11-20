@@ -19,7 +19,7 @@ use texturecraft_engine::texel::linear_to_srgb;
 
 use crate::TextureCraftApp;
 use crate::color_picker::{ColorPick, SwatchEdit};
-use crate::dock::{anchors_below, with};
+use crate::dock::{anchors_below, project_effect_anchors_below, with};
 use crate::fill_panel::{FillKey, fill_key};
 use crate::i18n::{n_, tr};
 use crate::material_orb::material_orb;
@@ -101,7 +101,8 @@ pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
             material_card(app, sheet, link, layer, &look, salt);
             mapping_band(app, sheet, fill, &shown, layer);
             let texture_set = texture_set_size(app, link.size);
-            if let Some(picked) = resolution_band(sheet, link.resolution.unwrap_or(CookResolution::TEXTURE_SET), texture_set) {
+            let picked = resolution_band(sheet, link.resolution.unwrap_or(CookResolution::TEXTURE_SET), texture_set).filter(|_| LINK_EDITABLE);
+            if let Some(picked) = picked {
                 let size = resolution_json(picked);
                 if app.run("material.link.resolution", with(&json!({"layer": layer.0, "cook": false}), size)).is_some() {
                     app.cook_link(layer);
@@ -120,6 +121,9 @@ pub(crate) fn material_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
         }
     }
 }
+
+/// Whether a linked material's settings can change here: a change cooks it again, which needs the MaterialCraft CLI the browser has not got (it shows them as they were cooked)
+const LINK_EDITABLE: bool = cfg!(not(target_arch = "wasm32"));
 
 /// What the orb shows instead of the whole material, following the Layers panel's channel list: the channel picked there alone (None: the whole material)
 fn channel_orb_look(ui: &UiState, fill: &Fill, on: &[Channel], images: &HashMap<String, Arc<ImageRes>>) -> Option<OrbMaterial> {
@@ -211,9 +215,13 @@ pub(crate) fn source_card(
     };
     let ctx = sheet.ui.ctx().clone();
 
-    // The anchors above the reader are listed only while the picker is open
+    // The anchors below the reader are listed only while the picker is open; an effect's (an instance's inherited mask fill) must also sit below the effect's owner
+    let effect = base.get("effect").and_then(Value::as_u64).map(LayerId);
     let tabs = |thumbs: &mut Thumbs| {
-        let anchors = anchors_below(&app.session.doc.project, reader);
+        let anchors = match effect {
+            Some(effect) => project_effect_anchors_below(&app.session.doc.project, reader, effect),
+            None => anchors_below(&app.session.doc.project, reader),
+        };
         source_tabs(thumbs, &ctx, &app.session.images, &anchors, shown_color(uniform))
     };
     let picked = resource_picker::show(&slot.pick, popup, &mut app.thumbs, Some(&current), reveal, tabs);
@@ -251,9 +259,21 @@ pub(crate) fn source_card(
                 }
             }
         }
+        Source::Anchor { anchor, channel, .. } if slot_of == SourceSlot::Grayscale && !crate::dock::anchor_in_mask(app, anchor) => {
+            anchor_channel_row(app, sheet, base, reader, channel);
+        }
         Source::Image { .. } | Source::Anchor { .. } => {}
     }
     sheet.close_card();
+}
+
+/// The channel a mask fill reads from a content anchor point as gray (a mask anchor point reads its mask's one gray)
+fn anchor_channel_row(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, base: &Value, reader: LayerId, channel: Channel) {
+    let project = &app.session.doc.project;
+    let channels = project.locate(reader).and_then(|(set, _, _)| project.texture_set(set).ok()).map(|set| set.channel_list()).unwrap_or_default();
+    if let (Some(picked), _) = sheet.dropdown(tr("Channel"), channel, &channels, |option| tr(option.label()).to_string(), None) {
+        app.run("effect.set", with(base, json!({"anchorChannel": picked.id()})));
+    }
 }
 
 /// Runs the fill command `choice` asks for on the slot (Import opens the import dialog)
@@ -473,7 +493,7 @@ fn material_card(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, link:
     let slot = sheet.slot(&|painter, rect| material_orb(painter, rect, look, &tokens, ("card", salt)), &link.name, tr("Material"), None, false, false);
     let presets: Vec<usize> = (0..link.presets.len()).collect();
     let preset_name = |index: usize| link.presets.get(index).map(|preset| preset.name.clone()).unwrap_or_default();
-    let editable = cfg!(not(target_arch = "wasm32"));
+    let editable = LINK_EDITABLE;
     if editable
         && let (Some(index), _) = sheet.hanging_list(&slot.pick, usize::MAX, &presets, &preset_name, None)
         && app.run("material.link.preset", with(&base, json!({"name": preset_name(index)}))).is_some()

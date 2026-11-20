@@ -148,6 +148,9 @@ mod tests {
         let cavities = StylizedLighting { diffuse_cavity: 1.0, ..StylizedLighting::PLAIN };
         assert_eq!(cavities.shading(sky).shade(gray, UP, [1.0, 0.5], &material(0.5)), gray, "flat: no cavity");
         assert_eq!(cavities.shading(sky).shade(gray, UP, [1.0, 0.2], &material(0.5)), [0.0; 3], "a deep cavity");
+        let sun = light(90.0, 1.0, 0.0);
+        assert_eq!(cavities.shading(sun).shade(gray, UP, [1.0, 0.5], &material(0.5)), gray, "flat in the sun: no cavity");
+        assert_eq!(cavities.shading(sun).shade(gray, UP, [1.0, 0.2], &material(0.5)), [0.0; 3], "a deep cavity in the sun");
         let edges = StylizedLighting { edges_intensity: 1.0, ..StylizedLighting::PLAIN };
         assert_eq!(edges.shading(sky).shade(gray, UP, [1.0, 0.9], &material(0.5)), [1.0; 3], "a sharp edge");
     }

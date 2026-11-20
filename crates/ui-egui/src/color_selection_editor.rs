@@ -36,6 +36,11 @@ pub fn color_selection_properties(app: &mut TextureCraftApp, ui: &mut Ui, effect
         sheet.section(tr("Color selection"), false);
         let has_id_map = id_mask_slot(app, sheet, effect, selection, &tokens);
 
+        // A pick waiting on a map that is gone (its image cleared, no baked ID map) ends, as its disabled Pick color shows
+        if !has_id_map && picking.is_some() {
+            IdColorPick::end(app);
+        }
+
         sheet.caption(tr("Output value"));
         let ramp = sheet.ramp(tr("Output value"), &mut output, 0.0..=1.0);
         if ramp.invert {

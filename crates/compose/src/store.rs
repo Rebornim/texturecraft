@@ -170,7 +170,12 @@ impl ImageRes {
             Filtering::Nearest => self.nearest(u, v, repeat),
             Filtering::BilinearSharp => full(u, v),
             Filtering::BilinearHq => {
-                let lod = if footprint.is_finite() && footprint > 1.0 { footprint.log2() } else { 0.0 };
+                // Not shrunk: the full image alone, without building mips it does not read
+                if !(footprint.is_finite() && footprint > 1.0) {
+                    return full(u, v);
+                }
+
+                let lod = footprint.log2();
 
                 // Level 0 is the full image, level n the nth mip (the smallest past the last)
                 let mips = self.mips();
@@ -257,5 +262,15 @@ mod tests {
         assert_eq!(quartered, [1.5; 4], "a 1-texel level holds the mean");
         assert_eq!(past_the_last, quartered, "a footprint past the last level reads the last one");
         assert!(between[0] > 2.0 && between[0] < 3.0, "half a level blends the full image's 3 and level 1's 2: {between:?}");
+    }
+
+    #[test]
+    fn an_unshrunk_high_quality_read_builds_no_mips() {
+        let image = ramp();
+
+        let full = image.sample_filtered(0.375, 0.5, sampling(Filtering::BilinearHq, UvWrap::Repeat), 1.0);
+
+        assert_eq!(full, [1.0; 4]);
+        assert!(image.mips.get().is_none(), "a footprint of 1 reads only the full image");
     }
 }

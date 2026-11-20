@@ -42,8 +42,18 @@ impl PickerState {
 
     /// Shows the values in `space` from now on
     pub(crate) fn set_space(&mut self, space: ColorSpace) {
+        let [hue, saturation, _] = self.hsv;
         self.space = space;
         self.set_linear(self.linear);
+
+        // A gray keeps the hue it had and a black its saturation too, so raising Value brings the colour back
+        let [_, new_saturation, new_value] = self.hsv;
+        if new_saturation == 0.0 {
+            self.hsv[0] = hue;
+        }
+        if new_value == 0.0 {
+            self.hsv[1] = saturation;
+        }
     }
 
     /// The colour's values in the shown space
@@ -56,5 +66,30 @@ impl PickerState {
         self.open = true;
         self.before = linear;
         self.set_linear(linear);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_black_keeps_its_hue_and_saturation_through_a_colour_space_change() {
+        let mut state = PickerState::default();
+        let blue = 2.0 / 3.0;
+        state.set_hsv([blue, 1.0, 0.0]);
+        state.set_space(ColorSpace::Linear);
+        assert_eq!(state.hsv, [blue, 1.0, 0.0], "black keeps the field's hue and saturation");
+        state.set_hsv([state.hsv[0], state.hsv[1], 1.0]);
+        let [red, green, blue_part] = state.linear;
+        assert!(blue_part > 0.9 && red < 0.01 && green < 0.01, "raising Value brings blue back: {:?}", state.linear);
+
+        // A gray keeps its hue but takes its own saturation; a colour is read again
+        state.set_hsv([0.25, 0.0, 0.5]);
+        state.set_space(ColorSpace::Srgb);
+        assert_eq!((state.hsv[0], state.hsv[1]), (0.25, 0.0));
+        state.set_hsv([0.0, 1.0, 1.0]);
+        state.set_space(ColorSpace::Linear);
+        assert!(state.hsv[0].abs() < 1e-4 && (state.hsv[1] - 1.0).abs() < 1e-4, "red reads as red: {:?}", state.hsv);
     }
 }

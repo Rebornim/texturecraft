@@ -236,18 +236,38 @@ fn paint_histogram(ui: &Ui, well: Rect, series: &[(&[u32], Color32)]) {
     }
 
     let fullest = series.iter().flat_map(|(counts, _)| counts.iter().copied()).max().unwrap_or(0).max(1) as f32;
-    for (counts, color) in series {
-        let fill = lerp_color(tokens.field, *color, HISTOGRAM_TINT);
-        let bar_width = well.width() / counts.len().max(1) as f32;
-        for (index, count) in counts.iter().enumerate() {
-            let bar_height = well.height() * *count as f32 / fullest;
-            let x = well.left() + index as f32 * bar_width;
-            painter.rect_filled(Rect::from_min_max(pos2(x, well.bottom() - bar_height), pos2(x + bar_width, well.bottom())), 0.0, fill);
+    let buckets = series.iter().map(|(counts, _)| counts.len()).max().unwrap_or(0);
+    let bar_width = well.width() / buckets.max(1) as f32;
+    for index in 0..buckets {
+        let bars: Vec<(u32, Color32)> = series.iter().map(|(counts, color)| (counts.get(index).copied().unwrap_or(0), *color)).collect();
+        let x = well.left() + index as f32 * bar_width;
+        for (low, high, color) in bucket_segments(&bars) {
+            let [bottom, top] = [low, high].map(|count| well.bottom() - well.height() * count as f32 / fullest);
+            painter.rect_filled(Rect::from_min_max(pos2(x, top), pos2(x + bar_width, bottom)), 0.0, lerp_color(tokens.field, color, HISTOGRAM_TINT));
         }
     }
 
     vertical_line(well.left(), tokens.text_dim);
     vertical_line(well.right(), tokens.text_dim);
+}
+
+/// One bucket's bars (count, colour) as stacked segments (from count, to count, colour): each segment in the sum of the colours of every bar reaching it, so bars of equal height show as their mix instead of the last one drawn hiding the others
+fn bucket_segments(bars: &[(u32, Color32)]) -> Vec<(u32, u32, Color32)> {
+    let mut heights: Vec<u32> = bars.iter().map(|(count, _)| *count).filter(|count| *count > 0).collect();
+    heights.sort_unstable();
+    heights.dedup();
+
+    let mut low = 0;
+    let mut segments = Vec::with_capacity(heights.len());
+    for high in heights {
+        let reaching = bars.iter().filter(|(count, _)| *count >= high).map(|(_, color)| *color);
+        let mix = reaching.fold(Color32::BLACK, |sum, color| {
+            Color32::from_rgb(sum.r().saturating_add(color.r()), sum.g().saturating_add(color.g()), sum.b().saturating_add(color.b()))
+        });
+        segments.push((low, high, mix));
+        low = high;
+    }
+    segments
 }
 
 /// Each handle filled with its gray, the active one on top, and its value beside it, overlapping values left out
@@ -399,6 +419,19 @@ fn number_field(ui: &mut Ui, id: Id, label: Id, handle: LevelsHandle, levels: &m
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn equal_component_bars_show_their_mix_and_a_lone_bar_its_own_colour() {
+        let [red, green, blue] = [Color32::from_rgb(200, 0, 0), Color32::from_rgb(0, 200, 0), Color32::from_rgb(0, 0, 200)];
+
+        let equal = bucket_segments(&[(5, red), (5, green), (5, blue)]);
+        let stepped = bucket_segments(&[(2, red), (5, green), (0, blue)]);
+        let lone = bucket_segments(&[(4, blue)]);
+
+        assert_eq!(equal, [(0, 5, Color32::from_rgb(200, 200, 200))], "equal counts read as one neutral bar, not blue over the others");
+        assert_eq!(stepped, [(0, 2, Color32::from_rgb(200, 200, 0)), (2, 5, green)], "where red ends green shows alone");
+        assert_eq!(lone, [(0, 4, blue)], "a single series keeps its colour");
+    }
 
     #[test]
     fn switching_effects_releases_old_field_and_drag_state() {

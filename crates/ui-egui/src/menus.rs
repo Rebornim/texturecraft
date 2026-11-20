@@ -534,7 +534,7 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
             app.ui.rail_panel = None;
         } else if escape_is_free && app.picking_id_color.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
             crate::id_color_pick::IdColorPick::end(app);
-        } else if app.picking_symmetry_plane && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if escape_is_free && app.picking_symmetry_plane && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.picking_symmetry_plane = false;
         } else if escape_is_free && app.ui.mode == Mode::Painting && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.session.cancel_stroke();

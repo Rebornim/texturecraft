@@ -6,7 +6,7 @@ use egui_phosphor::regular as ic;
 use crate::i18n::tr;
 use crate::picker_tab::PickerTab;
 use crate::property_sheet::{TAB_GAP, TAB_ICON_CENTER, TAB_ICON_SIZE, TAB_NAME_LEFT, TAB_PADDING, TAB_ROUNDING, TAB_TEXT_SIZE, TAB_TOP};
-use crate::resource_picker_item::ResourcePickerItem;
+use crate::resource_picker_item::{ResourcePickerItem, search_query};
 use crate::theme::{HARD_SHADOW, Tokens, semibold};
 use crate::thumbs::Thumbs;
 use crate::tile_picture::TilePicture;
@@ -136,7 +136,7 @@ pub(crate) fn show<K: Clone + PartialEq>(
             let mut open_tab =
                 if just_opened { current_tab().or(stored_tab) } else { stored_tab.or_else(current_tab) }.unwrap_or(0).min(tabs.len().saturating_sub(1));
 
-            let query = ui.data(|data| data.get_temp::<String>(search_id(popup_id))).unwrap_or_default().trim().to_lowercase();
+            let query = search_query(&ui.data(|data| data.get_temp::<String>(search_id(popup_id))).unwrap_or_default());
             if tabs.len() > 1
                 && let Some(clicked) = tab_strip(ui, &tabs, open_tab, &query)
             {
@@ -260,7 +260,7 @@ fn search_field(ui: &mut Ui, popup_id: Id, just_opened: bool) -> String {
         }
     }
 
-    let query = search.trim().to_lowercase();
+    let query = search_query(&search);
     ui.data_mut(|data| data.insert_temp(search_id(popup_id), search));
     query
 }

@@ -28,6 +28,11 @@ impl Projector {
         Projector { depth: DepthCulling::NEW, ..Projector::default() }
     }
 
+    /// Whether it is the default, which projections saved before it existed load as (not saved then)
+    pub fn is_default(&self) -> bool {
+        *self == Projector::default()
+    }
+
     /// Whether it turns or stretches the projection at all
     pub fn turns(&self) -> bool {
         self.rotation != [0.0; 3] || self.scale != [1.0; 3]

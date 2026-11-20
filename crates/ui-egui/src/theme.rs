@@ -407,8 +407,8 @@ pub(crate) fn lerp_color(from: Color32, to: Color32, amount: f32) -> Color32 {
     Color32::from_rgb(mix(from.r(), to.r()), mix(from.g(), to.g()), mix(from.b(), to.b()))
 }
 
-/// Least contrast a tinted color name keeps against its background (the WCAG ratio for large or bold text and UI parts)
-const TINT_MIN_CONTRAST: f32 = 3.0;
+/// Least contrast a tinted color name keeps against its background (the WCAG ratio for normal text: the names are regular 12 pt lettering)
+const TINT_MIN_CONTRAST: f32 = 4.5;
 
 /// How finely [`legible_tint`] walks from the tint to the text colour: a tenth of the way at a time keeps as much of the tint as reads
 const TINT_STEPS: u8 = 10;
@@ -447,14 +447,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tint_names_read_on_a_light_card_and_stay_as_they_are_on_a_dark_one() {
+    fn tint_names_reach_normal_text_contrast_and_a_tint_that_already_reads_stays_as_it_is() {
         for theme in [Brightness::Light, Brightness::MediumLight, Brightness::MediumDark, Brightness::Dark] {
             let tokens = Tokens::for_brightness(theme);
             for tint in OPPOSITE_COLORS.into_iter().chain(AXIS_COLORS) {
                 let shown = legible_tint(tint, tokens.row, tokens.text);
                 assert!(contrast_ratio(shown, tokens.row) >= TINT_MIN_CONTRAST, "{theme:?} {tint:?} -> {shown:?}");
-                if tokens.dark {
-                    assert_eq!(shown, tint, "{theme:?}");
+                if contrast_ratio(tint, tokens.row) >= TINT_MIN_CONTRAST {
+                    assert_eq!(shown, tint, "{theme:?}: a tint that already reads stays as it is");
                 }
             }
         }

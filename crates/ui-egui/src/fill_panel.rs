@@ -377,10 +377,11 @@ fn placement_rows(
         _ => None,
     };
     let projection = &fill.projection;
+    let owner = sheet.ui.scope_id();
     let picture = |painter: &Painter, rect: Rect| match warp {
         Some((corners, size, turn)) => warp_preview(painter, rect, corners, size, turn, placement, &tokens),
         None => {
-            if projection_preview(painter, rect, projection, bounds, &tokens).is_none() {
+            if projection_preview(painter, rect, projection, bounds, &tokens, owner).is_none() {
                 window_preview(painter, rect, placement, &tokens);
             }
         }

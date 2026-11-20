@@ -5,7 +5,7 @@ use egui::{
 };
 use egui_phosphor::regular as ic;
 
-use super::color_picker_rows::{FIELD_HEIGHT, FIELD_MIN_HEIGHT};
+use super::color_picker_rows::{FIELD_HEIGHT, FIELD_MIN_HEIGHT, hex_took_escape};
 use super::{PAD, PropertySheet};
 use crate::color_picker::{ColorModel, ColorPick, ColorSpace, PickerState};
 use crate::fill_material_panel::shown_color;
@@ -265,8 +265,10 @@ impl PropertySheet<'_> {
                 && input.pointer.interact_pos().is_some_and(|at| !face.contains(at) && !bar.rect.contains(at) && !eyedropper.contains(at))
         });
 
-        // The app leaves Escape to an open picker (menus.rs); Escape in the hex field ends the typing first
-        let escape = ctx.input(|input| input.key_pressed(egui::Key::Escape)) && ctx.memory(|memory| memory.focused().is_none_or(|focused| focused == bar.id));
+        // The app leaves Escape to an open picker (menus.rs); Escape in the hex field ends the typing first (egui drops the field's focus before it hears the key)
+        let escape = ctx.input(|input| input.key_pressed(egui::Key::Escape))
+            && ctx.memory(|memory| memory.focused().is_none_or(|focused| focused == bar.id))
+            && !hex_took_escape(&ctx);
         if closed || (!list_open && !waiting && (pressed_outside || escape)) {
             state.open = false;
             crate::color_picker::forget_window(&ctx);

@@ -121,7 +121,7 @@ impl StylizedShading {
             let normal_dot_half = dot(normal, half).max(0.0);
             let highlight = ggx(normal_dot_half, roughness) / COOK_TORRANCE_DENOMINATOR * facing * specular_cavity;
             for (((diffuse, specular), color), f0) in diffuse.iter_mut().zip(&mut specular).zip(color).zip(f0) {
-                *diffuse += color * intensity * facing;
+                *diffuse += color * intensity * facing * diffuse_cavity;
                 *specular += color * intensity * highlight * schlick(f0, normal_dot_half);
             }
         }

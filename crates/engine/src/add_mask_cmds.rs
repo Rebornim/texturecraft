@@ -5,7 +5,7 @@ use texturecraft_core::{BlendMode, EffectKind, Sampling, Source};
 use texturecraft_paint::alphas;
 
 use crate::commands::{CommandSpec, bad, has_layer, strp};
-use crate::mask_cmds::{color_selection, mask_target, new_compare, push_effect_as, push_effect_with};
+use crate::mask_cmds::{color_selection, mask_target, new_compare, push_effect_as, push_own_mask_effect};
 use crate::{Result, Session, cmd};
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -26,7 +26,7 @@ pub fn specs() -> Vec<CommandSpec> {
             None,
             "{layer?} → {effect} — a compare mask (this layer's height greater than the layers below it, hardness 0.9) in the layer's mask (a new one if it has none); selected",
             has_layer,
-            |s, p| push_effect_as(s, &mask_target(p), new_compare(), BlendMode::Normal, "Add mask with height combination")
+            |s, p| push_own_mask_effect(s, p, new_compare(), "Add mask with height combination", |_| Ok(()))
         ),
         cmd!(
             "effect.add.colorSelection",
@@ -61,5 +61,5 @@ fn add_bitmap(s: &mut Session, p: &Value) -> Result<Value> {
     let projection = crate::layer_cmds::projection_from(p, CMD, None, || crate::warp_cmds::fitted_frame(&s.mesh))?;
     let kind = EffectKind::Fill { source: Source::Image { name, normal_format: Default::default() }, projection, sampling: Sampling::default() };
     let add_library = |s: &mut Session| library.map_or(Ok(()), |alpha| s.add_library_alpha(alpha).map(|_| ()));
-    push_effect_with(s, &mask_target(p), kind, BlendMode::Normal, "Add bitmap mask", add_library)
+    push_own_mask_effect(s, p, kind, "Add bitmap mask", add_library)
 }

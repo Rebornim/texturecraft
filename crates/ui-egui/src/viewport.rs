@@ -915,7 +915,8 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     }
 
     // The selected fill's frame (planar, warp) or round projector (tri-planar, spherical, cylindrical): only a press on one of its handles moves it
-    let gizmo_free = !alt && !holding && !s_held && !v_held && !focus_pick && !popup && !picking && touch.is_none() && !DecalDrop::blocks_input(ui.ctx());
+    let gizmo_free =
+        !adjusting && !alt && !holding && !s_held && !v_held && !focus_pick && !popup && !picking && touch.is_none() && !DecalDrop::blocks_input(ui.ctx());
     let gizmo = ShownGizmo::of(app, rect);
     let frame_drag = gizmo_free && ShownGizmo::input(app, ui, &response, rect, gizmo.as_ref());
 
@@ -953,9 +954,9 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     // A handle owns a new click, but a stroke already under way must still finish over it
     let symmetry_handle = !app.session.stroke_active() && crate::symmetry::manipulator_hovered(app, ui, rect);
 
-    // A projection gizmo's handle owns a press that began on it (the pointer may have left it by the time the drag registers)
-    let pressed_at = ui.input(|input| if input.pointer.any_down() { input.pointer.press_origin() } else { input.pointer.hover_pos() });
-    let gizmo_handle = gizmo_free && !app.session.stroke_active() && pressed_at.is_some_and(|at| gizmo.as_ref().is_some_and(|gizmo| gizmo.on_handle(rect, at)));
+    // A projection gizmo's handle owns a press that began on it through its release (the pointer may have left it by then)
+    let began_on_handle = handle_press(ui.ctx(), |at| gizmo.as_ref().is_some_and(|gizmo| gizmo.on_handle(rect, at)));
+    let gizmo_handle = gizmo_free && !app.session.stroke_active() && began_on_handle;
 
     // Painting
     let painting = tool_acts(app)
@@ -1767,6 +1768,30 @@ fn scale_brush_by_wheel(app: &mut TextureCraftApp, scroll: f32) {
     brush.size = (brush.size * (1.0 + scroll * WHEEL_BRUSH_SIZE_PER_POINT)).clamp(MIN_BRUSH_SIZE, MAX_BRUSH_SIZE);
 }
 
+/// Whether the press under way, or released this frame, began on a projection handle (`on_handle`); with no press, whether the pointer is on one
+fn handle_press(ctx: &egui::Context, on_handle: impl Fn(Pos2) -> bool) -> bool {
+    let id = egui::Id::unique(HANDLE_PRESS_ID);
+    let (pressed, down, released, origin, hover) = ctx.input(|input| {
+        let pointer = &input.pointer;
+        (pointer.any_pressed(), pointer.any_down(), pointer.any_released(), pointer.press_origin(), pointer.hover_pos())
+    });
+
+    // Kept from the press frame: egui forgets the press origin on the release frame, where a short drift still makes a click
+    if pressed {
+        let on = origin.is_some_and(&on_handle);
+        ctx.data_mut(|data| data.insert_temp(id, on));
+    }
+    let kept = ctx.data(|data| data.get_temp::<bool>(id)).filter(|_| down || released);
+    if !down {
+        ctx.data_mut(|data| data.remove::<bool>(id));
+    }
+
+    kept.unwrap_or_else(|| (if down { origin } else { hover }).is_some_and(on_handle))
+}
+
+/// Where [`handle_press`] keeps whether the press began on a handle
+const HANDLE_PRESS_ID: &str = "projection_handle_press";
+
 /// Ctrl (Cmd on macOS) + drag changes the brush instead of painting: true while it applies (see `adjust_brush`)
 fn brush_drag(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response) -> bool {
     // Ctrl+Shift+left is not a brush change: it is left to the snapped straight line
@@ -2233,7 +2258,7 @@ fn view_2d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     }
 
     // Match the 3D view's stamp size and hardness
-    let show_brush_cursor = tool_acts(app) && !alt && !v_held;
+    let show_brush_cursor = tool_acts(app) && !alt && !v_held && app.picking_color.is_none();
     let pointer_in_view = ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| rect.contains(p));
     if show_brush_cursor
         && !path_tool
@@ -2603,6 +2628,7 @@ mod tests {
 
     #[test]
     fn picking_shows_the_id_mask_its_color_selection_reads() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         use texturecraft_engine::{StackTarget, execute};
 
         let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
@@ -2621,6 +2647,7 @@ mod tests {
     /// A click in the 2D view while a colour bar's eyedropper waits paints nothing: the pick keeps waiting, as over the 3D view
     #[test]
     fn a_waiting_eyedropper_keeps_a_2d_view_click_from_painting() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let session = texturecraft_engine::sample_session(256, 64).unwrap();
         let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1600.0, 960.0)).build_eframe(|context| TextureCraftApp::new(context, session));
         harness.state_mut().ui.layout = ViewLayout::Only2D;

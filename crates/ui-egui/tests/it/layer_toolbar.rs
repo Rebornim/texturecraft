@@ -97,6 +97,58 @@ fn bitmap_opens_the_texture_picker_and_adds_the_mask_only_once_one_is_picked() {
     assert!(matches!(kinds.as_slice(), [EffectKind::Fill { source: Source::Image { name: read, .. }, .. }] if *read == name), "{kinds:?}");
 }
 
+/// The Bitmap picker belongs to the layer that opened it: when an agent selects another layer it closes, and a click where its tile was masks neither
+#[test]
+fn the_bitmap_picker_closes_when_the_selection_moves_and_masks_no_other_layer() {
+    let (mut harness, opener) = app();
+    let other = LayerId(harness.state_mut().run("layer.add.fill", Value::Null).unwrap()["layer"].as_u64().unwrap());
+    harness.state_mut().run("layer.select", json!({"layer": opener.0}));
+    harness.run_steps(SETTLE_FRAMES);
+    pick(&mut harness, "Add mask", "Bitmap");
+    let alpha = alphas::find("round_soft").unwrap();
+    let tile = harness.get_by_label(&alpha.label).rect();
+
+    harness.state_mut().run("layer.select", json!({"layer": other.0}));
+    harness.run_steps(SETTLE_FRAMES);
+    let still_open = egui::Popup::is_any_open(&harness.ctx);
+    click_at(&mut harness, tile.center());
+
+    assert!(!still_open, "the picker closes with its layer's selection");
+    assert!(mask_kinds(&harness, other).is_empty(), "the pick never masks the newly selected layer");
+    assert!(mask_kinds(&harness, opener).is_empty(), "nor the layer that opened it");
+}
+
+/// A floating Layers panel this narrow cannot hold the toolbar on one row
+const NARROW_LAYERS: [f32; 4] = [600.0, 200.0, 200.0, 400.0];
+
+/// In a narrow floating Layers panel the add-layer buttons and Remove wrap inside it, where a click still reaches them
+#[test]
+fn a_narrow_layers_panel_keeps_every_toolbar_button_inside_and_clickable() {
+    use craft_ui::docking::Action;
+    use texturecraft_ui_egui::docking::{Dock, Panel, permissions};
+
+    let (mut harness, _) = app();
+    let mut workspace = harness.state().ui.dock.workspace().clone();
+    workspace.apply_all([Action::Float { panel: Panel::Layers, rect: NARROW_LAYERS }], permissions).unwrap();
+    harness.state_mut().ui.dock = Dock::from_value(serde_json::to_value(workspace).unwrap());
+    harness.run_steps(SETTLE_FRAMES);
+    let [left, _, width, _] = NARROW_LAYERS;
+
+    for label in ["Add effect", "Add mask", "Add paint layer", "Add fill layer", "Add folder", "Remove layer"] {
+        let button = harness.query_all_by_label_contains(label).find(|node| node.accesskit_node().role() == Role::Button).unwrap().rect();
+        assert!(button.left() >= left && button.right() <= left + width, "{label} at {button:?} stays inside the panel");
+    }
+
+    let layers = |harness: &Harness<'_, TextureCraftApp>| harness.state().session.doc.project.layers.len();
+    let before = layers(&harness);
+    let folder = harness.get_by_role_and_label(Role::Button, "Add folder").rect();
+    click_at(&mut harness, folder.center());
+    assert_eq!(layers(&harness), before + 1, "Add folder answers a click");
+    let remove = harness.query_all_by_label_contains("Remove layer").find(|node| node.accesskit_node().role() == Role::Button).unwrap().rect();
+    click_at(&mut harness, remove.center());
+    assert_eq!(layers(&harness), before, "and Remove does");
+}
+
 #[test]
 fn a_toolbar_tooltip_shows_above_its_button_off_the_layer_rows() {
     let (mut harness, _) = app();

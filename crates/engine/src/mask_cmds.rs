@@ -8,6 +8,7 @@ use texturecraft_core::{
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
 use crate::layer_cmds::{projection_from, projection_from_fields};
+use crate::mask_owner::MaskOwner;
 use crate::session::StackTarget;
 use crate::{EngineError, Result, Session, cmd};
 
@@ -144,7 +145,7 @@ fn add_mask(s: &mut Session, p: &Value, bg: MaskBackground) -> Result<Value> {
 }
 
 fn add_color_mask(s: &mut Session, p: &Value) -> Result<Value> {
-    push_effect_as(s, &mask_target(p), color_selection("mask.add.colorSelection", p)?, BlendMode::Normal, "Add mask with color selection")
+    push_own_mask_effect(s, p, color_selection("mask.add.colorSelection", p)?, "Add mask with color selection", |_| Ok(()))
 }
 
 /// A colour selection with the `color` and `tolerance` params of command `cmd`
@@ -248,17 +249,23 @@ fn push_effect(s: &mut Session, p: &Value, kind: EffectKind, blend: BlendMode) -
 
 /// [`push_effect`] as the undo step `label`
 pub(crate) fn push_effect_as(s: &mut Session, p: &Value, kind: EffectKind, blend: BlendMode, label: &str) -> Result<Value> {
-    push_effect_with(s, p, kind, blend, label, |_| Ok(()))
+    push_effect_in(s, p, kind, blend, label, |_| Ok(()), MaskOwner::Shared)
 }
 
-/// [`push_effect_as`] that makes the change `first` in the same undo step before adding the effect
-pub(crate) fn push_effect_with(
+/// An Add mask item's effect, `first` made in the same undo step: it goes in the layer's own mask, so an instance without one gets its own instead of changing its source's
+pub(crate) fn push_own_mask_effect(s: &mut Session, p: &Value, kind: EffectKind, label: &str, first: impl FnOnce(&mut Session) -> Result<()>) -> Result<Value> {
+    push_effect_in(s, &mask_target(p), kind, BlendMode::Normal, label, first, MaskOwner::Own)
+}
+
+/// [`push_effect_as`] into `owner`'s mask, making the change `first` in the same undo step before adding the effect
+fn push_effect_in(
     s: &mut Session,
     p: &Value,
     mut kind: EffectKind,
     blend: BlendMode,
     label: &str,
     first: impl FnOnce(&mut Session) -> Result<()>,
+    owner: MaskOwner,
 ) -> Result<Value> {
     let content = kind.content_only() == Some(true) || content_target(p, "effect.add")?;
     if kind.content_only().is_some_and(|content_only| content_only != content) {
@@ -273,7 +280,11 @@ pub(crate) fn push_effect_with(
         let new_effect = s.doc.project.alloc_id();
 
         // An instance's content and (unless it has its own) mask belong to its source
-        let id = if content { s.doc.project.content_layer(id).map_or(id, |source| source.id) } else { s.doc.project.mask_owner(id) };
+        let id = match (content, owner) {
+            (true, _) => s.doc.project.content_layer(id).map_or(id, |source| source.id),
+            (false, MaskOwner::Own) => id,
+            (false, MaskOwner::Shared) => s.doc.project.mask_owner(id),
+        };
         let layer = s.doc.project.layer_mut(id)?;
         let background = if matches!(kind, EffectKind::Generator(_) | EffectKind::Fill { .. } | EffectKind::ColorSelection(_)) {
             MaskBackground::Black
@@ -761,10 +772,15 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         _ => None,
     };
 
-    // Naming the filter the effect already is edits its parameters like a plain effect.set (Directional Warp's former id also sets its mode)
+    // Naming the filter the effect already is edits its parameters like a plain effect.set (Directional Warp's former id also sets its mode); a warp saved before the warp modes has no mode to set, so another mode replaces it as a swap does
+    let changes_saved_warp_mode = |filter: &str| matches!(session.doc.project.effect(effect), Some((_, Effect { kind: EffectKind::Filter(saved), .. })) if crate::filter_lib::changes_saved_warp_mode(filter, params, saved));
     let swapped = match strp(params, "filter") {
         Some(EMPTY_FILTER) => Some(emptied_filter(session, effect)?),
-        Some(filter) if crate::filter_lib::find(filter).is_some_and(|def| current_filter_id(session, effect) == Some(def.id)) => None,
+        Some(filter)
+            if crate::filter_lib::find(filter).is_some_and(|def| current_filter_id(session, effect) == Some(def.id)) && !changes_saved_warp_mode(filter) =>
+        {
+            None
+        }
         Some(filter) => Some(swapped_filter(session, effect, filter, params)?),
         None => None,
     };

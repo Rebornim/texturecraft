@@ -96,7 +96,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill source",
             [],
             None,
-            "{layer? | effect?: content fill effect id, channel, color?: ([r,g,b] linear or \"#rrggbb\" sRGB)|value?|procedural?: kind, scale?, seed?, contrast?, balance?, invert?, low?, high?, resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3, tile?: {Tile Generator settings in camelCase, as project.inspect shows them}, tileDefaults?: true (alone, they edit the channel's pattern)|image?, normalFormat?: openGl|directX (the image's normal map convention; alone, it changes the channel's image)|anchor?: anchor effect id, anchorChannel?, colors?: gradient map of a color channel's procedural or anchor, 1 to 16 colors dark to light ([r, g, b] linear or \"#rrggbb\" sRGB; [] removes it; absent keeps it; alone, it changes the channel's source)|gradientMap?: true (turns the color stops on from the channel's current procedural or anchor: a procedural's low, their midpoint and high; an anchor's black, gray and white; stops already there stay), enabled?, solo?: true (this channel on, every other one off)}",
+            "{layer? | effect?: content fill effect id, channel, color?: ([r,g,b] linear or \"#rrggbb\" sRGB)|value?|procedural?: kind, scale?, seed?, contrast?, balance?, invert?, low?, high? (the same kind keeps what is not given), resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3, tile?: {Tile Generator settings in camelCase, as project.inspect shows them}, tileDefaults?: true (alone, they edit the channel's pattern)|image?, normalFormat?: openGl|directX (the image's normal map convention; alone, it changes the channel's image)|anchor?: anchor effect id, anchorChannel?, colors?: gradient map of a color channel's procedural or anchor, 1 to 16 colors dark to light ([r, g, b] linear or \"#rrggbb\" sRGB; [] removes it; absent keeps it; alone, it changes the channel's source)|gradientMap?: true (turns the color stops on from the channel's current procedural or anchor: a procedural's low, their midpoint and high; an anchor's black, gray and white; stops already there stay), enabled?, solo?: true (this channel on, every other one off)}",
             has_layer,
             fill_set
         ),
@@ -614,26 +614,21 @@ fn fill_source_from(
     normal_format: Option<NormalFormat>,
 ) -> Result<Option<Source>> {
     const CMD: &str = "layer.fill.set";
-    let low = color_param(CMD, params, "low")?.unwrap_or([0.0; 3]);
-    let high = color_param(CMD, params, "high")?.unwrap_or([1.0; 3]);
+    let low = color_param(CMD, params, "low")?;
+    let high = color_param(CMD, params, "high")?;
     let uniform = color_param(CMD, params, "color")?.or(color_param(CMD, params, "value")?);
 
     if let Some(name) = strp(params, "procedural") {
         let kind = ProceduralKind::parse(name).ok_or_else(|| bad(CMD, format!("unknown procedural `{name}`")))?;
-        let mut pattern = Procedural::new(kind);
+        // A pattern of the same kind keeps what `params` do not give; another kind starts from its defaults
+        let (mut pattern, current_low, current_high) = match fill_mut(session, target)?.sources.get(&channel) {
+            Some(Source::Procedural { pattern, low, high, .. }) if pattern.kind == kind => (pattern.clone(), *low, *high),
+            _ => (Procedural::new(kind), [0.0; 3], [1.0; 3]),
+        };
+
         crate::procedural_params::pattern_basics_from(params, &mut pattern);
-
-        // A pattern of the same kind keeps its resolution and Tile Generator settings
-        let current = fill_mut(session, target)?.sources.get(&channel);
-        if let Some(Source::Procedural { pattern: current, .. }) = current
-            && current.kind == kind
-        {
-            pattern.resolution = current.resolution;
-            pattern.tile = current.tile.clone();
-        }
-
         crate::procedural_params::pattern_settings_from(CMD, params, &mut pattern)?;
-        return Ok(Some(Source::Procedural { pattern, low, high, ramp: Vec::new() }));
+        return Ok(Some(Source::Procedural { pattern, low: low.unwrap_or(current_low), high: high.unwrap_or(current_high), ramp: Vec::new() }));
     }
 
     if let Some(color) = uniform {

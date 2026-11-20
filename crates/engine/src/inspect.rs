@@ -12,7 +12,8 @@ fn source_json(source: &Source) -> Value {
         Source::Uniform(value) => json!({ "uniform": value }),
         Source::Procedural { pattern, low, high, ramp } => {
             let mut report = json!({
-                "procedural": pattern.kind.label(), "scale": pattern.scale, "seed": pattern.seed, "contrast": pattern.contrast, "low": low, "high": high
+                "procedural": pattern.kind.label(), "scale": pattern.scale, "seed": pattern.seed, "contrast": pattern.contrast,
+                "balance": pattern.balance, "invert": pattern.invert, "low": low, "high": high
             });
 
             if !pattern.resolution.is_default() {

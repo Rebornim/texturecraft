@@ -76,3 +76,18 @@ fn the_attributes_band_opens_on_a_click() {
     click_at(&mut harness, band.center());
     assert!(harness.query_by_label(category).is_none());
 }
+
+/// An open section that makes the panel scroll keeps its rows in place from frame to frame (the scroll bar refits no row)
+#[test]
+fn the_sheet_keeps_its_layout_when_the_scroll_bar_comes_in() {
+    let (mut harness, _) = app_with("bevelSmooth");
+    click(&mut harness, Role::Button, "Attributes");
+    let layout = |harness: &Harness<'_, TextureCraftApp>| -> Vec<egui::Rect> {
+        harness.query_all_by_role(Role::ComboBox).chain(harness.query_all_by_role(Role::Button)).map(|node| node.rect()).collect()
+    };
+    let first = layout(&harness);
+    for frame in 0..3 {
+        harness.run_steps(1);
+        assert_eq!(layout(&harness), first, "frame {frame}");
+    }
+}

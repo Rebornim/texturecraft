@@ -101,6 +101,7 @@ mod window_menu_684;
 mod filter_card;
 mod filter_colour;
 mod filter_gradient;
+mod filter_light;
 mod stencil;
 mod symmetry;
 mod symmetry_2d;

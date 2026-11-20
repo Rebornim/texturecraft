@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::grayscale_mode::GrayscaleMode;
 
+/// Full contrast stays a finite step instead of a division by zero
+const MIN_STEEPNESS: f32 = 1e-3;
+
 /// The gray, blurred, balanced, contrasted and maybe inverted value a gradient looks up
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -45,7 +48,7 @@ impl GradientInput {
 pub fn shape(x: f32, balance: f32, contrast: f32, invert: bool) -> f32 {
     let unit = |v: f32| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
     let balanced = unit(x) + unit(balance) - 0.5;
-    let steep = (1.0 - unit(contrast)).max(1e-3);
+    let steep = (1.0 - unit(contrast)).max(MIN_STEEPNESS);
     let y = unit((balanced - 0.5) / steep + 0.5);
     if invert { 1.0 - y } else { y }
 }
@@ -66,11 +69,11 @@ pub fn ramp(colors: &[[f32; 3]], positions: &[f32], linear: bool, t: f32) -> Opt
         return None;
     };
 
-    let f = if p1 > p0 { ((t - p0) / (p1 - p0)).clamp(0.0, 1.0) } else { 0.0 };
+    let share = if p1 > p0 { ((t - p0) / (p1 - p0)).clamp(0.0, 1.0) } else { 0.0 };
     Some(if linear {
-        std::array::from_fn(|k| c0[k] + (c1[k] - c0[k]) * f)
+        std::array::from_fn(|k| c0[k] + (c1[k] - c0[k]) * share)
     } else {
-        std::array::from_fn(|k| srgb_to_linear(linear_to_srgb(c0[k]) + (linear_to_srgb(c1[k]) - linear_to_srgb(c0[k])) * f))
+        std::array::from_fn(|k| srgb_to_linear(linear_to_srgb(c0[k]) + (linear_to_srgb(c1[k]) - linear_to_srgb(c0[k])) * share))
     })
 }
 

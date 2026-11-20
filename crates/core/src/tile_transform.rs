@@ -47,6 +47,7 @@ impl TileTransform {
         let (low, high) = Self::SCALING;
         let scaling = self.scaling.map(|s| finite(s, 1.0).clamp(low, high));
         let (sin, cos) = finite(self.rotation, 0.0).to_radians().sin_cos();
+
         // Turn, then scale (a fill's Tiling convention): one step across moves (cos, sin) scaled
         let mut columns = [[cos * scaling[0], sin * scaling[1]], [-sin * scaling[0], cos * scaling[1]]];
         let square = (finite(self.rotation, 0.0) / 90.0).fract().abs() < 1e-4;
@@ -69,6 +70,7 @@ impl TileTransform {
             columns[1] = columns[1].map(|v| -v);
         }
         let offset = self.offset.map(|o| finite(o, 0.0).clamp(-Self::MAX_OFFSET, Self::MAX_OFFSET));
+
         // About the tile's centre: the centre reads the centre moved by the offset
         let shift = [0, 1].map(|axis| 0.5 + offset[axis] - 0.5 * (columns[0][axis] + columns[1][axis]));
         (columns, shift)
@@ -127,14 +129,17 @@ mod tests {
         let transform = TileTransform { scaling: [2.0, 2.0], rotation: 30.0, ..TileTransform::LIBRARY };
         let (columns, _) = transform.affine();
         assert_eq!(columns, [[2.0, 1.0], [-1.0, 2.0]], "the turn snaps to whole steps, about 26.6°");
+
         // A small turn of the plain tile snaps back to no turn, never to nothing
         let small = TileTransform { rotation: 10.0, ..TileTransform::LIBRARY };
         assert_eq!(small.affine().0, [[1.0, 0.0], [0.0, 1.0]]);
         let tiny = TileTransform { scaling: [0.1, 0.1], rotation: 45.0, ..TileTransform::LIBRARY };
         assert!(tiny.affine().0.iter().all(|column| column != &[0.0, 0.0]));
+
         // Unsafe, the turn is exact
         let free = TileTransform { tile_safe: false, ..transform };
         assert!((free.affine().0[0][1] - 2.0 * 30f32.to_radians().sin()).abs() < 1e-5);
+
         // A square turn keeps its scaling
         let square = TileTransform { scaling: [1.5, 1.5], rotation: 90.0, ..TileTransform::LIBRARY };
         assert!((square.affine().0[1][0] + 1.5).abs() < 1e-5);

@@ -112,6 +112,7 @@ pub fn filter(id: &str, size: usize) -> Option<Vec<Option<Sample>>> {
         EffectKind::Filter(f) => EffectKind::Filter(magnified(f, 2048.0 / res as f32)),
         k => k,
     };
+
     // The filters that shape a mask's edge read where values cross 0.5: they get black and white shapes, where the clouds would leave them black
     let shapes = matches!(kind, EffectKind::Filter(Filter::BevelSmooth(_) | Filter::DirectionalDistance(_)));
     let mesh = texturecraft_geom::primitives::plane(2.0, 2);

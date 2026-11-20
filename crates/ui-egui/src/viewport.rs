@@ -731,6 +731,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     let local = |pointer: egui::Pos2| Vec2::new(pointer.x - rect.left(), pointer.y - rect.top());
     let adjusting = brush_drag(app, ui, &response);
     let ctrl = ui.input(|input| input.modifiers.ctrl);
+
     // A held Move on model button owns the pointer and the wheel until it lets go: the camera, brush and gizmos keep still
     let holding = crate::move_on_model::holding(app, ui.ctx());
     let navigating = !adjusting && !holding && (alt || ui.input(|input| input.pointer.middle_down() || input.pointer.secondary_down()));
@@ -871,6 +872,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     let rail_popup = crate::rail_popup::blocks_paint_input(app, ui.ctx());
 
     crate::properties_popup::open_on_right_click(app, ui, &response, rect, s_held || v_held);
+
     // A press that closes an open colour picker only closes it: it neither paints nor moves a projection
     let picker = crate::color_picker::blocks_view_press(ui.ctx());
     let popup = app.properties_popup.is_some() || rail_popup || picker;
@@ -882,6 +884,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         if app.picking_color.is_none() {
             crate::id_color_pick::IdColorPick::draw_cursor(ui, rect);
         }
+
         // The eyedropper's disc shows the colour a click here would pick
         if app.picking_color.is_some()
             && let Some(hover) = response.hover_pos()
@@ -930,6 +933,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
 
     // A handle owns a new click, but a stroke already under way must still finish over it
     let symmetry_handle = !app.session.stroke_active() && crate::symmetry::manipulator_hovered(app, ui, rect);
+
     // A projection gizmo's handle owns a press that began on it (the pointer may have left it by the time the drag registers)
     let pressed_at = ui.input(|input| if input.pointer.any_down() { input.pointer.press_origin() } else { input.pointer.hover_pos() });
     let gizmo_handle = gizmo_free
@@ -2021,6 +2025,7 @@ fn view_2d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         }
         app.ui.uv_zoom = new_zoom;
     }
+
     // A held Move on model button takes the wheel
     if response.hovered() && app.moving_on_model.is_none() {
         size_brush_by_ctrl_wheel(app, ui);

@@ -50,6 +50,7 @@ impl FillCopies {
                 scale[axis] = -1.0;
                 Mat3::from_diagonal(scale)
             }
+
             // Copy `k` is the original turned by `k` steps, so a texel samples the original turned back
             SymmetryKind::Radial => Mat3::from_axis_angle(Vec3::AXES[axis], -(k as f32 * self.symmetry.step()).to_radians()),
         };
@@ -64,9 +65,10 @@ impl Iterator for FillCopies {
         if self.next >= self.count {
             return None;
         }
-        let k = (self.first + self.next) % self.count;
+
+        let index = (self.first + self.next) % self.count;
         self.next += 1;
-        Some(self.copy(k))
+        Some(self.copy(index))
     }
 }
 
@@ -86,6 +88,7 @@ mod tests {
         mirror.position = [0.5, 0.0, 0.0];
         let left: Vec<FillCopy> = FillCopies::new(&mirror, Vec3::new(-1.0, 0.0, 0.0), Vec3::ZERO, 2.0).collect();
         assert_eq!(left.len(), 2);
+
         // The plane passes at x = 1 (half a radius of 2): a point at -1 sees the original at 3 first
         assert!(left[0].point(Vec3::new(-1.0, 0.2, 0.0)).abs_diff_eq(Vec3::new(3.0, 0.2, 0.0), 1e-5));
         assert!(left[1].point(Vec3::new(-1.0, 0.2, 0.0)).abs_diff_eq(Vec3::new(-1.0, 0.2, 0.0), 1e-5));
@@ -103,8 +106,10 @@ mod tests {
         assert_eq!(copies.len(), 4);
         assert_eq!(copies[0].uv(Vec2::new(0.25, 0.5)), Vec2::new(0.25, 0.5));
         assert_eq!(copies[1].uv(Vec2::new(0.25, 0.5)), Vec2::new(0.75, 0.5));
+
         // Copy 1 sits a quarter turn on: a texel on +Y samples the original on +X
         assert!(copies[1].point(Vec3::Y).abs_diff_eq(Vec3::X, 1e-5));
+
         // A texel on +Y lies in copy 1's wedge, so copy 1 comes first there
         let on_y: Vec<FillCopy> = FillCopies::new(&radial, Vec3::Y, Vec3::ZERO, 1.0).collect();
         assert!(on_y[0].point(Vec3::Y).abs_diff_eq(Vec3::X, 1e-5));

@@ -37,6 +37,7 @@ fn set_material(s: &mut Session, p: &Value) -> Result<Value> {
             if found.smart {
                 return Err(bad(CMD, format!("`{}` is a smart material (a folder of layers): add it from the shelf with material.apply", found.id)));
             }
+
             Some(found)
         }
         None => return Err(bad(CMD, "`material` is required: a material id or null")),
@@ -48,16 +49,16 @@ fn set_material(s: &mut Session, p: &Value) -> Result<Value> {
             Some(found) => Some((found.id, whole_fill(s, found, &channels)?)),
             None => None,
         };
-        let f = fill_mut(s, target)?;
+        let edited = fill_mut(s, target)?;
         let written: Vec<_> = match whole {
             Some((id, fill)) => {
-                f.sources = fill.sources.into_iter().filter(|(channel, _)| channels.contains(channel)).collect();
-                f.material = Some(id.to_string());
-                f.sources.keys().copied().collect()
+                edited.sources = fill.sources.into_iter().filter(|(channel, _)| channels.contains(channel)).collect();
+                edited.material = Some(id.to_string());
+                edited.sources.keys().copied().collect()
             }
             None => {
-                f.sources.clear();
-                f.material = None;
+                edited.sources.clear();
+                edited.material = None;
                 return Ok(());
             }
         };

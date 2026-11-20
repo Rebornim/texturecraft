@@ -48,6 +48,7 @@ fn add_bitmap(s: &mut Session, p: &Value) -> Result<Value> {
             if !s.images.contains_key(image) {
                 return Err(bad(CMD, format!("no image resource `{image}` (import it first)")));
             }
+
             image.to_owned()
         }
         (None, Some(alpha)) => {

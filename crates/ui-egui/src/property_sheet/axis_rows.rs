@@ -6,7 +6,7 @@ use egui::{Align2, Color32, FontId, Painter, Rect, Response, Role, Sense, Stroke
 
 use super::row::SECTION_CAPTION_CENTER;
 use super::slider::{KNOB_RADIUS, Track};
-use super::{PropertySheet, SMALL_TEXT_SIZE, StackSlider, TEXT_SIZE};
+use super::{BLOCK_MARGIN, PropertySheet, SMALL_TEXT_SIZE, StackSlider, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// From the right edge to the centre of a caption's switch
@@ -28,9 +28,6 @@ const PART_LINE: f32 = 22.0;
 const STACK_CAPTION_LINE: f32 = 18.0;
 const STACK_PART_LINE: f32 = 22.0;
 const STACK_GAP: f32 = 6.0;
-
-/// Air above and below a picture block, like a control's
-const BLOCK_MARGIN: f32 = 2.0;
 
 /// The picture's top below the block's (the first caption's letters), how much shorter it is than the stack, and its air before the controls column
 const PICTURE_TOP: f32 = 4.0;

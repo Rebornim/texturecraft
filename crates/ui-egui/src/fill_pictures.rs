@@ -10,6 +10,9 @@ use crate::warp_checker::warp_checker;
 
 use crate::theme::Tokens;
 
+/// The projection glyph's height, as a share of its picture's
+const PROJECTION_GLYPH_SHARE: f32 = 0.85;
+
 /// The shape a projection wraps around, as an icon in the accent colour
 pub(crate) fn projection_picture(painter: &Painter, rect: Rect, kind: ProjectionKind, tokens: &Tokens) {
     use egui_phosphor::regular as icon;
@@ -20,11 +23,15 @@ pub(crate) fn projection_picture(painter: &Painter, rect: Rect, kind: Projection
         ProjectionKind::Spherical => icon::GLOBE,
         ProjectionKind::Cylindrical => icon::CYLINDER,
     };
-    painter.text(rect.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(rect.height() * 0.85), tokens.accent);
+    painter.text(rect.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(rect.height() * PROJECTION_GLYPH_SHARE), tokens.accent);
 }
 
 /// Cells across a magnified edge in the Filtering picture
 const EDGE_CELLS: usize = 6;
+
+/// How steeply each filtering ramps across the magnified edge: Sharp nearly a step, HQ a soft blend
+const SHARP_EDGE_RAMP: f32 = 3.0;
+const HQ_EDGE_RAMP: f32 = 1.2;
 
 /// A magnified diagonal edge: smooth (HQ), crisp (Sharp) or stair-stepped (Nearest)
 pub(crate) fn filtering_picture(painter: &Painter, rect: Rect, filtering: Filtering, tokens: &Tokens) {
@@ -34,8 +41,8 @@ pub(crate) fn filtering_picture(painter: &Painter, rect: Rect, filtering: Filter
             let across = (i as f32 - j as f32) / EDGE_CELLS as f32;
             let amount = match filtering {
                 Filtering::Nearest => f32::from(u8::from(i >= j)),
-                Filtering::BilinearSharp => (0.5 + across * 3.0).clamp(0.0, 1.0),
-                Filtering::BilinearHq => (0.5 + across * 1.2).clamp(0.0, 1.0),
+                Filtering::BilinearSharp => (0.5 + across * SHARP_EDGE_RAMP).clamp(0.0, 1.0),
+                Filtering::BilinearHq => (0.5 + across * HQ_EDGE_RAMP).clamp(0.0, 1.0),
             };
             let color = lerp_color(tokens.field, tokens.accent, amount);
             let min = pos2(rect.left() + i as f32 * cell, rect.top() + j as f32 * cell);
@@ -47,6 +54,12 @@ pub(crate) fn filtering_picture(painter: &Painter, rect: Rect, filtering: Filter
 /// Cells of the UV Wrap picture's grid
 const WRAP_CELLS: usize = 3;
 
+/// The gap kept around each Wrap tile, in points
+const WRAP_TILE_INSET: f32 = 0.75;
+
+/// A repeated tile's accent strength beside the own tile's
+const WRAP_REPEAT_SHADE: f32 = 0.55;
+
 /// A 3 × 3 grid: the middle tile is the image's own; filled tiles are where it repeats
 pub(crate) fn wrap_picture(painter: &Painter, rect: Rect, wrap: UvWrap, tokens: &Tokens) {
     let (across, down) = wrap.repeats();
@@ -56,11 +69,11 @@ pub(crate) fn wrap_picture(painter: &Painter, rect: Rect, wrap: UvWrap, tokens: 
         for j in 0..WRAP_CELLS {
             let own = i == middle && j == middle;
             let repeated = own || (across && j == middle) || (down && i == middle) || (across && down);
-            let tile = Rect::from_min_size(pos2(rect.left() + i as f32 * cell, rect.top() + j as f32 * cell), vec2(cell, cell)).shrink(0.75);
+            let tile = Rect::from_min_size(pos2(rect.left() + i as f32 * cell, rect.top() + j as f32 * cell), vec2(cell, cell)).shrink(WRAP_TILE_INSET);
             if own {
                 painter.rect_filled(tile, 1, tokens.accent);
             } else if repeated {
-                painter.rect_filled(tile, 1, tokens.accent.gamma_multiply(0.55));
+                painter.rect_filled(tile, 1, tokens.accent.gamma_multiply(WRAP_REPEAT_SHADE));
             } else {
                 painter.rect_stroke(tile, 1, Stroke::new(1.0, tokens.separator), egui::StrokeKind::Inside);
             }
@@ -70,6 +83,9 @@ pub(crate) fn wrap_picture(painter: &Painter, rect: Rect, wrap: UvWrap, tokens: 
 
 /// Most tiles drawn across the window preview: beyond this the pattern is too fine to read
 const PREVIEW_MAX_TILES: f32 = 24.0;
+
+/// The fewest tiles a preview shows, so a zero Tiling cannot divide by zero
+pub(crate) const PREVIEW_MIN_TILES: f32 = 1e-3;
 /// Most tiles drawn along one direction of a lattice preview, whatever its map
 const PREVIEW_MAX_SPAN: i32 = 64;
 /// The two shades of the preview's checker cells, as fractions of the way from `field` to `text`
@@ -91,18 +107,23 @@ const WINDOW_MIDDLE: f32 = 0.5;
 
 /// The window preview's map, and where the Offset carried the window's middle (0..1): the checker slides with it, so a drag right moves both right
 fn slid_window(placement: Placement) -> ([[f32; 2]; 2], [f32; 2]) {
-    let tiling = [placement.tiling[0].clamp(1e-3, PREVIEW_MAX_TILES), placement.tiling[1].clamp(1e-3, PREVIEW_MAX_TILES)];
+    let tiling = placement.tiling.map(|tiles| tiles.clamp(PREVIEW_MIN_TILES, PREVIEW_MAX_TILES));
     let (sin, cos) = placement.rotation.to_radians().sin_cos();
+
     // Turn, scale, then offset: one step across the window moves (cos, sin) scaled in the texture
     let columns = [[cos * tiling[0], sin * tiling[1]], [-sin * tiling[0], cos * tiling[1]]];
     let [[a, b], [c, d]] = columns;
     let det = a * d - c * b;
     let [x, y] = placement.offset;
+
     // The window step the Offset is worth: the map undone; the image moves against the Offset it samples at
     let moved = [(d * x - c * y) / det, (a * y - b * x) / det];
     let carried = if moved.iter().all(|value| value.is_finite()) { [WINDOW_MIDDLE - moved[0], WINDOW_MIDDLE - moved[1]] } else { [WINDOW_MIDDLE; 2] };
     (columns, carried)
 }
+
+/// A flatter map shows nothing: the window could not be undone from it
+const MIN_MAP_DETERMINANT: f32 = 1e-9;
 
 /// The window preview for any linear map: window point (u, v) shows the texture at `columns[0] · u + columns[1] · v + shift`; without `repeat` only tile 0..1
 pub(crate) fn lattice_preview(painter: &Painter, rect: Rect, (columns, shift): ([[f32; 2]; 2], [f32; 2]), repeat: bool, tokens: &Tokens) {
@@ -110,7 +131,7 @@ pub(crate) fn lattice_preview(painter: &Painter, rect: Rect, (columns, shift): (
     painter.rect_filled(rect, 0, tokens.field);
     let [[a, b], [c, d]] = columns;
     let det = a * d - c * b;
-    if det.abs() > 1e-9 && det.is_finite() && shift.iter().all(|s| s.is_finite()) {
+    if det.abs() > MIN_MAP_DETERMINANT && det.is_finite() && shift.iter().all(|s| s.is_finite()) {
         // Texture coordinates → the window: undo the shift, then the map
         let to_window = |t: [f32; 2]| -> Pos2 {
             let (x, y) = (t[0] - shift[0], t[1] - shift[1]);
@@ -148,9 +169,24 @@ fn accent_shade(tokens: &Tokens) -> Color32 {
 /// How far the darker accent sits from the accent towards black
 const ACCENT_SHADE: f32 = 0.36;
 
+/// The margin inside a small setting picture, in points
+const PICTURE_INSET: f32 = 3.0;
+
+/// Depth culling's hidden part, as a share of its picture's height
+const DEPTH_UNDER_SHARE: f32 = 0.45;
+
+/// The arrow glyph's size in the Depth picture
+const DEPTH_ARROW_SIZE: f32 = 9.0;
+
+/// The Angle picture's radius, as a share of its width
+const ANGLE_RADIUS_SHARE: f32 = 0.45;
+
+/// The warp preview's outline width
+const WARP_EDGE_WIDTH: f32 = 1.5;
+
 /// Shape crop: the projection inside its shape only, or past it too
 pub(crate) fn crop_picture(painter: &Painter, rect: Rect, crop: ShapeCrop, tokens: &Tokens) {
-    let inner = rect.shrink(3.0);
+    let inner = rect.shrink(PICTURE_INSET);
     match crop {
         ShapeCrop::Cropped => {
             painter.rect_filled(inner, 3, accent_shade(tokens));
@@ -165,22 +201,25 @@ pub(crate) fn crop_picture(painter: &Painter, rect: Rect, crop: ShapeCrop, token
 /// Depth culling, seen from the side: the surface the projection lands on and what lies under it
 pub(crate) fn depth_picture(painter: &Painter, rect: Rect, tokens: &Tokens) {
     let top = rect.top() + rect.height() * 0.25;
-    let under = Rect::from_min_max(pos2(rect.left(), top), pos2(rect.right(), top + rect.height() * 0.45 + 2.0));
+    let under = Rect::from_min_max(pos2(rect.left(), top), pos2(rect.right(), top + rect.height() * DEPTH_UNDER_SHARE + 2.0));
     painter.rect_filled(under, 2, accent_shade(tokens));
     painter.line_segment([pos2(rect.left(), top), pos2(rect.right(), top)], Stroke::new(1.0, tokens.text));
     painter.text(
-        pos2(rect.center().x, rect.top() + 3.0),
+        pos2(rect.center().x, rect.top() + PICTURE_INSET),
         egui::Align2::CENTER_CENTER,
         egui_phosphor::regular::ARROW_DOWN,
-        egui::FontId::proportional(9.0),
+        egui::FontId::proportional(DEPTH_ARROW_SIZE),
         tokens.accent,
     );
 }
 
 /// Backface culling: a face turned away, darker while culled
 pub(crate) fn backface_picture(painter: &Painter, rect: Rect, on: bool, tokens: &Tokens) {
-    let (left, apex, right) =
-        (pos2(rect.left() + 2.0, rect.bottom() - 3.0), pos2(rect.center().x, rect.top() + 3.0), pos2(rect.right() - 2.0, rect.bottom() - 3.0));
+    let (left, apex, right) = (
+        pos2(rect.left() + 2.0, rect.bottom() - PICTURE_INSET),
+        pos2(rect.center().x, rect.top() + PICTURE_INSET),
+        pos2(rect.right() - 2.0, rect.bottom() - PICTURE_INSET),
+    );
     painter.add(Shape::convex_polygon(vec![left, apex, right], if on { accent_shade(tokens) } else { tokens.accent }, Stroke::NONE));
     painter.line_segment([apex, right], Stroke::new(1.0, tokens.text));
 }
@@ -191,7 +230,7 @@ const ARC_POINTS: usize = 48;
 /// A cylindrical projection's Angle seen from above: the slice of a turn one repeat spans
 pub(crate) fn angle_picture(painter: &Painter, rect: Rect, degrees: f32, tokens: &Tokens) {
     let center = rect.center();
-    let radius = rect.width() * 0.45;
+    let radius = rect.width() * ANGLE_RADIUS_SHARE;
     let sweep = degrees.clamp(0.0, 360.0) / 360.0;
     if sweep >= 1.0 {
         painter.circle_filled(center, radius, tokens.accent);
@@ -202,6 +241,7 @@ pub(crate) fn angle_picture(painter: &Painter, rect: Rect, degrees: f32, tokens:
             let turn = (step as f32 / steps as f32 * sweep - 0.25) * std::f32::consts::TAU;
             points.push(pos2(center.x + radius * turn.cos(), center.y + radius * turn.sin()));
         }
+
         // A slice wider than half a turn is not convex: fill it as a fan from the centre
         for pair in points[1..].windows(2) {
             painter.add(Shape::convex_polygon(vec![center, pair[0], pair[1]], tokens.accent, Stroke::NONE));
@@ -224,6 +264,7 @@ pub(crate) fn warp_preview(painter: &Painter, rect: Rect, corners: [[f32; 2]; 4]
     painter.rect_filled(rect, 0, tokens.field);
     let span = size.map(|side| (side * WARP_SPAN_PER_DIAGONAL).clamp(*WARP_SPAN_RANGE.start(), *WARP_SPAN_RANGE.end()));
     let (sin, cos) = turn.to_radians().sin_cos();
+
     // Across and up in frame sizes from its centre -> turned -> the square
     let [top_left, top_right, bottom_right, bottom_left] = corners.map(|[x, y]| {
         let (x, y) = (x * span[0], y * span[1]);
@@ -235,7 +276,7 @@ pub(crate) fn warp_preview(painter: &Painter, rect: Rect, corners: [[f32; 2]; 4]
         painter.add(Shape::convex_polygon(outline, if lit { light } else { dark }, Stroke::NONE));
     }
     let edge = vec![top_left, top_right, bottom_right, bottom_left];
-    painter.add(Shape::closed_line(edge.clone(), Stroke::new(1.5, tokens.accent)));
+    painter.add(Shape::closed_line(edge.clone(), Stroke::new(WARP_EDGE_WIDTH, tokens.accent)));
     for corner in edge {
         painter.circle(corner, WARP_HANDLE_RADIUS, tokens.text, Stroke::new(1.0, tokens.accent));
     }
@@ -287,9 +328,11 @@ mod tests {
         let slid = placement([-0.25, 0.0]);
         let (columns, dot) = slid_window(slid);
         assert_eq!(columns, still, "the view never zooms or turns for the Offset");
+
         // A pad drag right lowers the Offset: the dot goes right, an eighth of the window along the turned U
         let expected = [0.5 + 0.125 * 30f32.to_radians().cos(), 0.5 - 0.125 * 30f32.to_radians().sin()];
         assert!((dot[0] - expected[0]).abs() < 1e-5 && (dot[1] - expected[1]).abs() < 1e-5, "{dot:?} vs {expected:?}");
+
         // The checker point under the middle at Offset 0 shows under the dot now
         let [[a, b], [c, d]] = columns;
         let texture_at = |[u, v]: [f32; 2], offset: [f32; 2]| [a * u + c * v + offset[0], b * u + d * v + offset[1]];

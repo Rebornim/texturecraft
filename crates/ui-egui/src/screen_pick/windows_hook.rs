@@ -38,6 +38,7 @@ pub(super) fn run(shared: &Arc<PickShared>, outcomes: Sender<PickOutcome>, ctx: 
     if let Ok(mut hook) = HOOK.lock() {
         *hook = Some(HookState { generation, shared: Arc::clone(shared), outcomes, ctx: ctx.clone(), pressed: false, done: false });
     }
+
     // Before the hook: while it is in place this thread must keep reading messages, or every mouse move on the desktop stalls
     let pointer = super::windows_pointer::SystemPointer::show(dpi);
     let Ok(module) = HINSTANCE::GetModuleHandle(None) else { return finish(&unavailable, &ctx) };
@@ -48,6 +49,7 @@ pub(super) fn run(shared: &Arc<PickShared>, outcomes: Sender<PickOutcome>, ctx: 
     // A thread timer wakes GetMessage so the loop sees a stop and the disc follows; the hook procedure runs inside GetMessage
     let timer = HWND::NULL.SetTimer(1, STOP_CHECK_MS, None);
     let mut message = MSG::default();
+
     // The disc follows on a thread of its own: this one must answer the hook at once, or every mouse move stalls
     let disc = pointer.as_ref().map(|pointer| (pointer.shown_event.clone(), pointer.cell));
     std::thread::scope(|scope| {
@@ -86,6 +88,7 @@ extern "system" fn mouse_hook(code: i32, wparam: usize, lparam: isize) -> isize 
     if code >= 0 && take(wparam) {
         return 1;
     }
+
     winsafe::CallNextHookEx(code, wparam, lparam)
 }
 
@@ -99,9 +102,11 @@ fn take(message: usize) -> bool {
         state.pressed = false;
         return true;
     }
+
     if message != co::WM::LBUTTONDOWN.raw() || state.done {
         return false;
     }
+
     let Ok(point) = winsafe::GetCursorPos() else { return false };
     if over_own_window(point) || over_windows(&state.shared.windows(), point.x, point.y) {
         return false;

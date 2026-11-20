@@ -430,6 +430,7 @@ pub fn projector_local(projector: &Projector, c: &Coords) -> Coords {
     if !projector.turns() {
         return *c;
     }
+
     let [x, y, z] = projector.rotation.map(f32::to_radians);
     let to_local = Mat3::from_euler(EulerRot::ZYX, z, y, x).transpose();
     let scale = Vec3::from(projector.scale).map(|s| if s.abs() < 1e-6 { 1e-6 } else { s });
@@ -617,6 +618,7 @@ pub fn frame_facing(d: &Decal, projector: &Projector, nrm: Vec3) -> f32 {
     if !projector.turns() {
         return nrm.dot(n);
     }
+
     let turned = Vec3::new(nrm.dot(r), nrm.dot(u), nrm.dot(n));
     projector_local(projector, &Coords { uv: Vec2::ZERO, pos: Vec3::ZERO, nrm: turned }).nrm.z
 }
@@ -631,6 +633,7 @@ pub fn frame_crop(d: &Decal, local: Vec3) -> f32 {
     if local.x.abs() > 0.5 || local.y.abs() > 0.5 {
         return 0.0;
     }
+
     depth_fade(local.z, d.depth)
 }
 
@@ -640,6 +643,7 @@ pub fn depth_fade(z: f32, depth: f32) -> f32 {
     if lz > depth {
         return 0.0;
     }
+
     1.0 - smoothstep(0.75 * depth, depth, lz)
 }
 

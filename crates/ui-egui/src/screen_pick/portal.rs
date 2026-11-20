@@ -26,6 +26,7 @@ pub(super) fn run(shared: &Arc<PickShared>, outcomes: &Sender<PickOutcome>, ctx:
         if shared.stopped() {
             return;
         }
+
         std::thread::sleep(POLL);
     }
     let outcome = pick_color().unwrap_or(PickOutcome::Unavailable);
@@ -49,6 +50,7 @@ fn pick_color() -> Option<PickOutcome> {
     if code != RESPONSE_SUCCESS {
         return Some(PickOutcome::Cancelled);
     }
+
     let (red, green, blue): (f64, f64, f64) = results.get("color")?.try_clone().ok()?.try_into().ok()?;
     Some(PickOutcome::Picked([red, green, blue].map(to_byte)))
 }
@@ -58,5 +60,6 @@ fn to_byte(component: f64) -> u8 {
     if component.is_nan() {
         return 0;
     }
+
     (component.clamp(0.0, 1.0) * 255.0).round() as u8
 }

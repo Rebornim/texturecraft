@@ -26,11 +26,13 @@ pub(crate) fn anchor_properties(app: &mut TextureCraftApp, ui: &mut Ui, anchor: 
         if let Some(renamed) = sheet.name_field(tr("Anchor point name"), name) {
             app.run("effect.set", json!({"effect": anchor.0, "name": renamed}));
         }
+
         // The count says when nothing reads it
         let count = references.len().to_string();
         if !sheet.band(tr("References"), true, None, Some(&count)).open {
             return;
         }
+
         for reference in &references {
             if sheet.reference_row(reference.glyph, &reference.name, tr(reference.kind)) {
                 let target = reference.effect.map_or_else(|| json!("content"), |effect| json!(effect.0));

@@ -103,6 +103,7 @@ impl FrameGizmo {
             StackTarget::Mask => return None,
         };
         let placed = placed_from_axis(projection, app.session.mesh.bounds());
+
         // Where the projection lands: a projector's own turn and scale moved into the frame, as the panel's 3D projection settings show it
         let landed = folded(placed.as_ref().unwrap_or(projection))?;
         let decal = *landed.frame()?;
@@ -170,6 +171,7 @@ impl FrameGizmo {
         if facing.abs() < 1e-4 {
             return None;
         }
+
         let hit = ray.origin + ray.dir * ((self.origin - ray.origin).dot(out) / facing);
         let local = [(hit - self.origin).dot(across) / self.decal.size[0], (hit - self.origin).dot(up) / self.decal.size[1]];
         local.iter().all(|value| value.is_finite()).then_some(local)
@@ -237,6 +239,7 @@ fn solve(a: egui::Vec2, b: egui::Vec2, delta: egui::Vec2) -> Option<[f32; 2]> {
     if det.abs() < 1e-6 {
         return None;
     }
+
     Some([(delta.x * b.y - delta.y * b.x) / det, (a.x * delta.y - a.y * delta.x) / det])
 }
 
@@ -307,8 +310,10 @@ pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Respons
         && let Some((command, mut params)) = drag.start.edit(app, rect, drag.grab, drag.from, pointer)
     {
         params["merge"] = json!(drag.stepped);
+
         // Off the plane or past the size limits: the frame waits where it is
         drag.stepped |= texturecraft_engine::execute(&mut app.session, command, &params).is_ok();
+
         // The panel drew before this edit: one more frame shows its fields and preview where the frame is now
         ctx.request_repaint();
     }
@@ -325,14 +330,11 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
     let active = ui.ctx().data(|data| data.get_temp::<FrameDrag>(drag_id())).map(|drag| drag.grab);
     let hovered = ui.ctx().pointer_hover_pos().filter(|hover| rect.contains(*hover)).and_then(|hover| gizmo.grab(hover));
     let lit = |grab: FrameGrab| active == Some(grab) || (active.is_none() && hovered == Some(grab));
-    let shadow = Stroke::new(3.0, Color32::from_black_alpha(140));
     let dot_fill = |grab: FrameGrab| if lit(grab) { tokens.viewport_accent } else { Color32::WHITE };
 
     let mut outline = gizmo.corners.to_vec();
     outline.push(gizmo.corners[0]);
-    for stroke in [shadow, Stroke::new(1.2, Color32::from_white_alpha(230))] {
-        painter.add(egui::Shape::dashed_line(&outline, stroke, 6.0, 4.0));
-    }
+    dashed_outline(&painter, &outline);
     if let Some(ring) = &gizmo.ring {
         let color = if lit(FrameGrab::Turn) { tokens.viewport_accent } else { AXIS_COLORS[2] };
         painter.add(egui::Shape::line(ring.to_vec(), Stroke::new(SHAFT_WIDTH + HALO_EXTRA_WIDTH, HALO)));
@@ -366,7 +368,7 @@ pub(crate) fn move_handles(painter: &egui::Painter, center: Pos2, arrows: [Optio
 
         let color = arrow_color(axis);
         let direction = (tip - center).normalized();
-        let side = direction.rot90() * ARROW_HEAD * 0.45;
+        let side = direction.rot90() * ARROW_HEAD * ARROW_HEAD_HALF_WIDTH;
         let start = center + direction * CENTER_SQUARE * 0.5;
         painter.line_segment([start, tip], Stroke::new(SHAFT_WIDTH + HALO_EXTRA_WIDTH, HALO));
         painter.line_segment([start, tip], Stroke::new(SHAFT_WIDTH, color));
@@ -376,9 +378,28 @@ pub(crate) fn move_handles(painter: &egui::Painter, center: Pos2, arrows: [Optio
     painter.rect(square_rect, 2.0, square, edge, egui::StrokeKind::Middle);
 }
 
+/// The dashed outline's dark shadow under its light dashes, and the dash and gap lengths
+const OUTLINE_SHADOW_WIDTH: f32 = 3.0;
+const OUTLINE_WIDTH: f32 = 1.2;
+const OUTLINE_DASH: f32 = 6.0;
+const OUTLINE_GAP: f32 = 4.0;
+
+/// A gizmo's dashed outline through `points`, light over a dark shadow so it reads on any model
+pub(crate) fn dashed_outline(painter: &egui::Painter, points: &[Pos2]) {
+    for stroke in [Stroke::new(OUTLINE_SHADOW_WIDTH, Color32::from_black_alpha(140)), Stroke::new(OUTLINE_WIDTH, Color32::from_white_alpha(230))] {
+        painter.add(egui::Shape::dashed_line(points, stroke, OUTLINE_DASH, OUTLINE_GAP));
+    }
+}
+
+/// An arrow head's half width, as a share of its length
+const ARROW_HEAD_HALF_WIDTH: f32 = 0.45;
+
+/// The dark rim around a handle dot
+const DOT_RIM: f32 = 1.5;
+
 /// A handle dot of `radius`: `fill` over a dark rim, so it reads on a light or dark model
 pub(crate) fn handle_dot(painter: &egui::Painter, at: Pos2, radius: f32, fill: Color32) {
-    painter.circle_filled(at, radius + 1.5, HALO);
+    painter.circle_filled(at, radius + DOT_RIM, HALO);
     painter.circle(at, radius, fill, Stroke::new(1.0, Color32::from_black_alpha(200)));
 }
 
@@ -455,11 +476,13 @@ pub(crate) mod tests {
             harness.event_modifiers(egui::Event::PointerMoved(from.lerp(to, step as f32 / 6.0)), modifiers);
             harness.step();
             let now = projection(harness, layer);
+
             // Until the pointer passes the drag threshold nothing moves
             if now == was {
                 assert_eq!(moved, 0, "frame {step}: once started, every frame of the drag moves it");
                 continue;
             }
+
             moved += 1;
             check(harness);
             let key = crate::projection_preview::shown_key(&harness.ctx);
@@ -485,6 +508,7 @@ pub(crate) mod tests {
     #[test]
     fn an_axis_planar_is_placed_on_its_first_drag_and_its_handles_move_size_and_stretch_it() {
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+
         // Repeating three times across the mesh, the frame is smaller than the ball
         let (mut harness, layer) = fill_app_with(json!({"projection": "planar", "scale": 3}));
         let axis = gizmo(&harness);
@@ -706,6 +730,9 @@ pub(crate) mod tests {
     /// The panel's 3D projection settings show the frame the gizmo drags (its centre, turn and size), and the preview square follows, every frame of every drag: resize, stretch, slide, turn, a warp's slide and corners; one undo step per drag
     #[test]
     fn the_panel_and_its_preview_follow_every_frame_of_a_frame_drag() {
+        // Dolly exponent stepping the camera back before the corner drag
+        const CORNER_ZOOM_OUT: f32 = 0.4;
+
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         use texturecraft_engine::compose::frame_placement::placement;
 
@@ -726,11 +753,16 @@ pub(crate) mod tests {
         let center = gizmo(&harness).center;
         drag_frames(&mut harness, layer, center, center + vec2(30.0, -10.0), Modifiers::NONE, true, check(layer));
         let slid = placement(&projection(&harness, layer), harness.state().session.mesh.bounds()).unwrap();
+
         // The top edge dot and a corner inside the view (the frame starts bigger than the model)
         let side = gizmo(&harness);
         drag_frames(&mut harness, layer, side.sides[0], side.center + (side.sides[0] - side.center) * 0.5, Modifiers::NONE, true, check(layer));
         let narrowed = placement(&projection(&harness, layer), harness.state().session.mesh.bounds()).unwrap();
         assert!(narrowed.scale[1] < slid.scale[1] * 0.75 && (narrowed.scale[0] - slid.scale[0]).abs() < 1e-4, "{slid:?} -> {narrowed:?}");
+
+        // The view steps back so a corner shows beside the panels
+        harness.state_mut().session.camera.zoom(-CORNER_ZOOM_OUT);
+        harness.run_steps(2);
         let corner = gizmo(&harness);
         let view = harness.state().viewport_rect.shrink(10.0);
         let inside = *corner.corners.iter().find(|at| view.contains(**at)).expect("a corner in the view");

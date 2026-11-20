@@ -37,6 +37,7 @@ impl ProjectorView {
             ProjectorView::Axis { axis, projector, center, radius } => {
                 let at = Coords { uv: Vec2::ZERO, pos: (p - *center) / *radius, nrm: Vec3::Z };
                 let l = projector_local(projector, &at).pos;
+
                 // The side each axis projects from, as its backface culling reads it
                 match axis {
                     0 => Vec3::new(l.z, l.y, -l.x),

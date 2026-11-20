@@ -20,6 +20,7 @@ impl SoftBox {
     pub fn eval(&self, d: Vec3) -> Vec3 {
         let elevation = d.y.clamp(-1.0, 1.0).asin().to_degrees();
         let azimuth = d.z.atan2(d.x).to_degrees();
+
         // The azimuth difference wrapped to -180..180 degrees
         let azimuth_step = ((azimuth - self.azimuth + 540.0).rem_euclid(360.0)) - 180.0;
         let (x, y) = (azimuth_step.abs() / self.half_width, (elevation - self.elevation).abs() / self.half_height);

@@ -109,7 +109,7 @@ impl PropertySheet<'_> {
         let row = self.bled_row(rect);
         let pick_id = self.next_id();
         let pick = self.ui.interact(row, pick_id, Sense::click());
-        pick.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, name));
+        pick.widget_info(|| egui::WidgetInfo { current_text_value: Some(source.to_owned()), ..egui::WidgetInfo::labeled(egui::Role::ComboBox, true, name) });
         let mut result = SlotResponse { pick, clear: false, reset: false, toggled: false };
 
         let tokens = self.tokens;
@@ -281,17 +281,9 @@ impl PropertySheet<'_> {
         dice_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr("Random")));
 
         if dice_response.clicked() {
-            *seed = next_seed(*seed);
+            *seed = texturecraft_engine::folder_cmds::next_seed(*seed);
             changed = true;
         }
         changed
     }
-}
-
-/// A new seed that looks random but follows from the old one (SplitMix32's mixing step), so tests and replays get the same sequence
-pub(crate) fn next_seed(seed: u32) -> u32 {
-    let mut z = seed.wrapping_add(0x9e37_79b9);
-    z = (z ^ (z >> 16)).wrapping_mul(0x85eb_ca6b);
-    z = (z ^ (z >> 13)).wrapping_mul(0xc2b2_ae35);
-    z ^ (z >> 16)
 }

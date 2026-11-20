@@ -7,14 +7,17 @@ use crate::round_gizmo::RoundGizmo;
 
 /// The selected fill's projection gizmo the 3D view shows, built once a frame: a planar or warp frame, or a round projector
 pub(crate) enum ShownGizmo {
-    Frame(FrameGizmo),
-    Round(RoundGizmo),
+    // Both boxed: each gizmo is hundreds of bytes and of a different size
+    Frame(Box<FrameGizmo>),
+    Round(Box<RoundGizmo>),
 }
 
 impl ShownGizmo {
     /// The gizmo of the selected fill's projection: none while the Projection row's eye hides it
     pub(crate) fn of(app: &TextureCraftApp, rect: Rect) -> Option<ShownGizmo> {
-        FrameGizmo::shown(app, rect).map(ShownGizmo::Frame).or_else(|| RoundGizmo::shown(app, rect).map(ShownGizmo::Round))
+        FrameGizmo::shown(app, rect)
+            .map(|frame| ShownGizmo::Frame(Box::new(frame)))
+            .or_else(|| RoundGizmo::shown(app, rect).map(|round| ShownGizmo::Round(Box::new(round))))
     }
 
     fn frame(gizmo: Option<&ShownGizmo>) -> Option<&FrameGizmo> {

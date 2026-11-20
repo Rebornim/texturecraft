@@ -18,7 +18,7 @@ impl<K> ResourcePickerItem<K> {
     /// A picker's Textures tiles: Import... first, then the project's images sorted by name, library alphas left out; `image` gives an image's id. A thumbnail is made only once its tile is drawn, so opening the picker does not resample every image
     pub fn textures(images: &ImageStore, import: K, image: impl Fn(&str) -> K) -> Vec<Self> {
         let mut named: Vec<_> = images.iter().filter(|(name, _)| library_alpha_of(name).is_none()).collect();
-        named.sort_by(|(left, _), (right, _)| left.cmp(right));
+        named.sort_by_key(|(name, _)| *name);
 
         let mut tiles = vec![Self { id: import, label: tr("Import...").to_owned(), caption: None, picture: TilePicture::Import }];
         tiles.extend(named.into_iter().map(|(name, resource)| Self {

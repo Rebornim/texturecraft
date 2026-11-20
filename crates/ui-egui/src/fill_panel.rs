@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use texturecraft_engine::compose::frame_placement;
 use texturecraft_engine::compose::tile_length::{MeshSize, tile_length, tiling_for_length};
 use texturecraft_engine::core::{Backface, Channel, Fill, Filtering, LayerId, Projection, Projector, ScaleMode, ShapeCrop, UvWrap};
+use texturecraft_engine::layer_cmds::{MAX_PLACEMENT, MIN_SCALE};
 use texturecraft_engine::paint::FULL_TURN_DEGREES;
 
 use crate::TextureCraftApp;
@@ -30,7 +31,7 @@ const CM_PER_UNIT: f32 = 100.0;
 const TILING_TRACK: RangeInclusive<f32> = 0.01..=5.0;
 
 /// What a typed tiling may be: the command's own limits
-const TILING_TYPED: RangeInclusive<f32> = 0.001..=1000.0;
+const TILING_TYPED: RangeInclusive<f32> = MIN_SCALE..=MAX_PLACEMENT;
 
 /// What the Size (cm) track spans
 const SIZE_CM_TRACK: RangeInclusive<f32> = 1.0..=500.0;
@@ -41,8 +42,8 @@ const SIZE_CM_TYPED: RangeInclusive<f32> = 0.1..=100_000.0;
 /// What an Offset track spans (tiles, centred on zero)
 const OFFSET_TRACK: RangeInclusive<f32> = -2.0..=2.0;
 
-/// What a typed offset may be (tiles)
-const OFFSET_TYPED: RangeInclusive<f32> = -1000.0..=1000.0;
+/// What a typed offset may be (tiles): the command's own limits
+const OFFSET_TYPED: RangeInclusive<f32> = -MAX_PLACEMENT..=MAX_PLACEMENT;
 
 /// Range of a fill's rotation, a full turn
 const ROTATION_RANGE: RangeInclusive<f32> = 0.0..=FULL_TURN_DEGREES;
@@ -88,11 +89,23 @@ pub(crate) fn fill_key(base: &Value) -> FillKey {
     (base.get("layer").and_then(Value::as_u64), base.get("effect").and_then(Value::as_u64))
 }
 
-/// The mesh's size for the texture set being painted, as the projections see it
-fn mesh_size(app: &TextureCraftApp) -> MeshSize {
+/// The mesh's size for the texture set being painted, as the projections see it, measured once per mesh and material
+fn mesh_size(app: &TextureCraftApp, ctx: &egui::Context) -> MeshSize {
     let mesh = &app.session.mesh;
     let material = app.session.doc.project.texture_set(app.session.ts()).map_or(0, |texture_set| texture_set.material);
-    MeshSize { radius: mesh.radius(), uv_density: mesh.uv_density(material).unwrap_or(1.0) }
+    let key = (app.session.mesh_id, material);
+
+    // Both measures walk the whole mesh, too slow for every frame the sheet draws on a dense mesh
+    let cache_id = egui::Id::unique("tc_fill_mesh_size");
+    if let Some((cached_key, size)) = ctx.data(|data| data.get_temp::<((u64, usize), MeshSize)>(cache_id))
+        && cached_key == key
+    {
+        return size;
+    }
+
+    let size = MeshSize { radius: mesh.radius(), uv_density: mesh.uv_density(material).unwrap_or(1.0) };
+    ctx.data_mut(|data| data.insert_temp(cache_id, (key, size)));
+    size
 }
 
 /// A fill's whole Properties: the Fill section, the Symmetry section, then the Material section with one slot per channel that is on
@@ -145,7 +158,7 @@ fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fil
         return;
     }
 
-    let size = mesh_size(app);
+    let size = mesh_size(app, sheet.ui.ctx());
     let length = tile_length(&fill.projection, size);
     let physical = length.is_some() && fill.sampling.scale == ScaleMode::PhysicalSize;
     if length.is_some() {

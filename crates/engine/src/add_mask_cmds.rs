@@ -33,7 +33,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add color selection",
             ["Layers", "Effects"],
             None,
-            "{layer?, color?: [r,g,b] a first ID color (default: none), tolerance?} → {effect} — in the layer's mask (a new black one if it has none; colour selections go on masks only); selected",
+            "{layer?, color?: a first ID color as [r,g,b] linear or \"#rrggbb\" sRGB (default: none), tolerance?} → {effect} — in the layer's mask (a new black one if it has none; colour selections go on masks only); selected",
             has_layer,
             |s, p| push_effect_as(s, &mask_target(p), color_selection("effect.add.colorSelection", p)?, BlendMode::Normal, "Add color selection")
         ),

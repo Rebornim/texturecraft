@@ -1,8 +1,8 @@
 //! MaterialCraft materials as fill layers. A `.mcmat` portable material becomes a fill whose
 //! channel sources are its cooked maps (image resources) and whose [`MaterialLink`] keeps the
 //! graph's exposed parameters. Changing one re-cooks the maps through `materialcraft-cli` at the
-//! layer's picked resolution (default: the texture set's), with the set's baked mesh maps feeding graph inputs of the same name.
-//! Both apps use the shared craft-mcmat container and the public CLI.
+//! layer's picked resolution (default: the texture set's), with the set's baked mesh maps feeding graph inputs of the same name;
+//! both apps use the shared craft-mcmat container and the public CLI
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;

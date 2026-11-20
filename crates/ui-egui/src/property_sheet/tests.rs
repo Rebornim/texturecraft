@@ -4,9 +4,9 @@ use egui_kittest::kittest::Queryable as _;
 use egui_phosphor::regular as ic;
 
 use super::number_field::shown_number;
-use super::slot::next_seed;
 use super::{NumberField, PropertySheet};
 use crate::theme::{Accent, Brightness, Tokens};
+use texturecraft_engine::folder_cmds::next_seed;
 
 mod filtering;
 mod gallery;

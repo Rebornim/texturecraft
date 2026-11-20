@@ -6,7 +6,7 @@ use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::compose::ThumbTarget;
 use texturecraft_engine::core::{
-    BakedMap, BlendMode, Channel, ChannelBlend, Effect, EffectKind, Layer, LayerId, LayerKind, LinkParam, MaterialLink, Projection, Sampling, Source,
+    BakedMap, BlendMode, Channel, ChannelBlend, Effect, EffectKind, Layer, LayerId, LayerKind, LinkParam, Projection, Sampling, Source,
 };
 use texturecraft_engine::paint::alpha_params::MAX_ALPHA_CONTRAST;
 use texturecraft_engine::paint::{BrushAlpha, BrushSettings, alphas};
@@ -1002,6 +1002,9 @@ fn effect_row(
     painter.text(eye.center(), egui::Align2::CENTER_CENTER, eye_glyph, egui::FontId::proportional(EYE_FONT_SIZE), tokens.text_dim);
     let thumbnail = Rect::from_min_size(pos2(content_left + EYE_COLUMN_WIDTH, rect.center().y - preview_size * 0.5), vec2(preview_size, preview_size));
     let channel = app.ui.layer_channel;
+
+    // A content effect blends each channel on its own: its row shows and sets the displayed channel's blending, as a layer row does
+    let row_channel = (!in_mask && !app.ui.layer_material_view).then_some(channel);
     if !thumb_box(ui, app, thumbnail, ThumbTarget::Stage { effect: effect_id, channel }, false) {
         let glyph = if in_mask { ic::MAGIC_WAND } else { ic::SPHERE };
         painter.text(thumbnail.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(preview_size * 0.5), tokens.text_dim);
@@ -1036,13 +1039,15 @@ fn effect_row(
         let opacity_center = pos2(mode_rect.right() + ROW_CONTROL_GAP + EFFECT_OPACITY_WIDTH * 0.5, rect.center().y);
         let opacity_rect = Rect::from_center_size(opacity_center, vec2(EFFECT_OPACITY_WIDTH, ROW_CONTROL_HEIGHT));
         let id = ui.scope_id().with(("eff_blend", effect_id.0));
-        let (mode, opacity) =
-            blend_controls(ui, id, (mode_rect, opacity_rect), (effect.blend, effect.opacity), (tr("Blending mode of the effect"), &effect.name));
+        let shown = effect.blend_of(row_channel);
+        let tip = if row_channel.is_some() { tr("Blending mode of the displayed channel") } else { tr("Blending mode of the effect") };
+        let (mode, opacity) = blend_controls(ui, id, (mode_rect, opacity_rect), (shown.mode, shown.opacity), (tip, &effect.name));
+        let channel_id = row_channel.map(Channel::id);
         if let Some(mode) = mode {
-            app.run("effect.set", json!({"effect": effect_id.0, "blend": format!("{mode:?}")}));
+            app.run("effect.set", json!({"effect": effect_id.0, "channel": channel_id, "blend": format!("{mode:?}")}));
         }
         if let Some((opacity, merge)) = opacity {
-            app.run("effect.set", json!({"effect": effect_id.0, "opacity": opacity, "merge": merge}));
+            app.run("effect.set", json!({"effect": effect_id.0, "channel": channel_id, "opacity": opacity, "merge": merge}));
         }
     }
 
@@ -1106,6 +1111,32 @@ fn effect_row(
                 ui.close();
             }
         }
+
+        // One channel's blending (the channel the Layers panel shows) on every channel, or every channel's carried to another effect
+        ui.separator();
+        let blends = effect.kind.blends();
+        let copied = app.session.blending_clipboard.is_some();
+        ui.add_enabled_ui(blends, |ui| {
+            ui.menu_button(tr("Blending options"), |ui| {
+                let channel = row_channel.map(Channel::id);
+                let mut item = |ui: &mut Ui, label: &str, command: &str, enabled: bool| {
+                    if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                        app.run("layer.select", json!({"layer": layer.id.0, "target": effect_id.0}));
+                        app.run(command, json!({"effect": effect_id.0, "channel": channel}));
+                        ui.close();
+                    }
+                };
+
+                // The row's channel lends its blending; a mask effect blends one channel and the Material view shows no channel, so only copy and paste apply there
+                let lends = channel.is_some();
+                item(ui, tr("Use this blend mode on every channel"), "effect.blending.modeToEveryChannel", lends);
+                item(ui, tr("Use this opacity on every channel"), "effect.blending.opacityToEveryChannel", lends);
+                item(ui, tr("Use both on every channel"), "effect.blending.bothToEveryChannel", lends);
+                ui.separator();
+                item(ui, tr("Copy channel blending"), "effect.blending.copy", true);
+                item(ui, tr("Paste channel blending"), "effect.blending.paste", copied);
+            });
+        });
     });
 }
 
@@ -2925,8 +2956,7 @@ fn world_scale(ui: &mut Ui, scale: f32, edit: &mut impl FnMut(Value)) {
     }
 }
 
-/// A slider per offset component ("Offset U", …): the whole offset once one is edited, with
-/// [`slider_edit`]'s `merge`.
+/// A slider per offset component ("Offset U", …): the whole offset once one is edited, with [`slider_edit`]'s `merge`
 fn offset_sliders<const N: usize>(ui: &mut Ui, axes: [&str; N], mut values: [f32; N]) -> Option<([f32; N], bool)> {
     let mut edit = None;
     for (axis, value) in axes.iter().zip(values.iter_mut()) {
@@ -2936,7 +2966,7 @@ fn offset_sliders<const N: usize>(ui: &mut Ui, axes: [&str; N], mut values: [f32
     edit.map(|merge| (values, merge))
 }
 
-/// The axis a planar or cylindrical projection runs along: the one picked, if any.
+/// The axis a planar or cylindrical projection runs along: the one picked, if any
 fn axis_combo(ui: &mut Ui, axis: u8) -> Option<u8> {
     let mut picked = None;
     combo(ui, tr("Axis"), ["X", "Y", "Z"].get(usize::from(axis)).copied().unwrap_or("Z"), |ui| {

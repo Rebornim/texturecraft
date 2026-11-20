@@ -340,6 +340,27 @@ fn filled(far: &[usize], values: &[f32], empty: &[f32]) -> usize {
     far.iter().filter(|&&i| values[i] != empty[i]).count()
 }
 
+/// The symmetry axis is read from an index or from the letter tool.brush takes; any other value is refused, never ignored
+#[test]
+fn fill_symmetry_axis_reads_an_index_or_a_letter() {
+    let mut s = session();
+    let layer = checker_fill(&mut s);
+    let axis = |s: &Session| match &s.doc.project.layer(layer).unwrap().kind {
+        LayerKind::Fill(fill) => fill.sampling.symmetry.axis,
+        _ => panic!("a fill layer"),
+    };
+
+    set(&mut s, layer, json!({"symmetryAxis": "Y"}));
+    assert_eq!(axis(&s), 1);
+    set(&mut s, layer, json!({"symmetryAxis": 2}));
+    assert_eq!(axis(&s), 2);
+
+    for refused in [json!("w"), json!(true), json!(-1), json!(3)] {
+        assert!(execute(&mut s, "layer.fill.projection", &json!({"layer": layer.0, "symmetryAxis": refused})).is_err(), "{refused}");
+    }
+    assert_eq!(axis(&s), 2, "a refused axis changes nothing");
+}
+
 /// Mirror and radial symmetry copy a planar projection onto the sphere's far side and leave the near side as it was; Flip copy turns the copies' images over; UV projections and older saves have no copies
 #[test]
 fn fill_symmetry_mirrors_or_turns_copies_of_a_3d_projection() {

@@ -270,9 +270,9 @@ const GRADIENT_COLORS_GIVEN_MAX: usize = 16;
 /// The fewest colors a gradient's Color Quantity uses
 pub const GRADIENT_QUANTITY_MIN: u8 = 2;
 
-/// Stylized lighting's Sun Intensity, Exposure (stops either way) and Height Intensity ends
+/// Stylized lighting's Sun Intensity end
 pub const SUN_INTENSITY_MAX: f32 = 10.0;
-const EXPOSURE_MAX_EV: f32 = 5.0;
+/// Environment lighting's Height Intensity end
 const HEIGHT_INTENSITY_MAX: f32 = 8.0;
 
 /// The Gradient filter as the library adds it: black, mid gray and white at 0, 0.5 and 1 (the other seven colors wait white at 1)
@@ -529,7 +529,7 @@ pub fn scalar_params(filter: &Filter) -> Vec<(&'static str, &'static str, f32, f
         Filter::EnvironmentLighting { horizontal, vertical, exposure, height_intensity, ambient_occlusion, specular_occlusion } => vec![
             ("horizontalRotation", "Horizontal Rotation", *horizontal, 0.0, FULL_TURN_DEGREES),
             ("verticalRotation", "Vertical Rotation", *vertical, 0.0, FULL_TURN_DEGREES),
-            ("exposure", "Exposure", *exposure, -EXPOSURE_MAX_EV, EXPOSURE_MAX_EV),
+            ("exposure", "Exposure", *exposure, -Filter::ENVIRONMENT_EXPOSURE_STOPS, Filter::ENVIRONMENT_EXPOSURE_STOPS),
             ("heightIntensity", "Height Intensity", *height_intensity, 0.0, HEIGHT_INTENSITY_MAX),
             ("ambientOcclusion", "Ambient Occlusion Intensity", *ambient_occlusion, 0.0, 1.0),
             ("specularOcclusion", "Specular Occlusion Intensity", *specular_occlusion, 0.0, 1.0),
@@ -1052,7 +1052,7 @@ pub(crate) fn apply(p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
                     *slot = degrees.rem_euclid(FULL_TURN_DEGREES);
                 }
             }
-            set(exposure, "exposure", -EXPOSURE_MAX_EV, EXPOSURE_MAX_EV);
+            set(exposure, "exposure", -Filter::ENVIRONMENT_EXPOSURE_STOPS, Filter::ENVIRONMENT_EXPOSURE_STOPS);
             set(height_intensity, "heightIntensity", 0.0, HEIGHT_INTENSITY_MAX);
             set(ambient_occlusion, "ambientOcclusion", 0.0, 1.0);
             set(specular_occlusion, "specularOcclusion", 0.0, 1.0);

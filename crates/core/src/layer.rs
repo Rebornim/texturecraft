@@ -114,6 +114,10 @@ impl HeightMask {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a fill holds its projection inline; boxing it would cost every fill read an indirection to save a few hundred bytes per paint layer or folder"
+)]
 pub enum LayerKind {
     /// Painted pixels, stored per channel by the engine under the layer id.
     Paint,
@@ -1584,6 +1588,9 @@ pub fn gradient(colors: &[[f32; 3]], t: f32) -> Option<[f32; 3]> {
 }
 
 impl Filter {
+    /// The most Baked Lighting Environment's Exposure brightens or darkens, in stops
+    pub const ENVIRONMENT_EXPOSURE_STOPS: f32 = 5.0;
+
     /// The choices of an intensity's divider
     pub const DIVIDERS: [u16; 4] = [1, 10, 100, 1000];
 

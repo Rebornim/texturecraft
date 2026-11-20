@@ -59,8 +59,8 @@ impl FillCopies {
 
 /// The radial copy nearest a texel `turned` degrees round the axis, of `count` copies `step` degrees apart over `span` degrees: copy 0 across the gap a span under a full turn leaves, else the nearest by its step
 fn nearest_copy(turned: f32, step: f32, count: u32, span: f32) -> u32 {
-    // A span of nothing stacks every copy on the original
-    if !(step > 0.0) {
+    // A span of nothing (or no step at all) stacks every copy on the original
+    if step.is_nan() || step <= 0.0 {
         return 0;
     }
 

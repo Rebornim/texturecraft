@@ -594,6 +594,15 @@ with `material.apply` instead. The fill remembers the material (`Fill.material`,
 - `mask.add.bitmap {layer?, image | alpha, projection?}` adds a mask fill reading an image's gray;
   `effect.set {effect, idMap: image resource | null}` gives a colour selection its own ID map in place of
   the baked one; `tool.material {maskImage: image resource | null}` paints an image's gray into masks.
+- `effect.add.colorSelection {layer?, color?, tolerance?}` and `mask.add.heightCombination {layer?}` add a
+  colour selection or a compare mask (this layer's height against the layers below) to a layer's mask,
+  making the mask first when it has none; both return `{effect}`.
+- `effect.filter.restoreDefaults {effect?}` puts a filter's parameters back to its defaults (name,
+  channels and blending stay) and returns `{changed}`.
+- `layer.fill.resetProjection {layer? | effect?}` puts the Fill section back to a new fill's (same
+  projection kind; a placed frame, the symmetry and the sources stay); `layer.fill.resetFrame` puts a
+  warp's frame back around the mesh with its corners unpulled. Each is one undo step, or none when
+  nothing changes.
 
 ## MaterialCraft materials
 

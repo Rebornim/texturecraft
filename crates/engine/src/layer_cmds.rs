@@ -31,9 +31,6 @@ const MAX_CORNER_REACH: f32 = 100.0;
 /// The largest Projection Depth, in lengths of the frame's longer side
 pub(crate) const MAX_PROJECTION_DEPTH: f32 = 100.0;
 
-/// The highest contrast a procedural pattern takes
-const MAX_PATTERN_CONTRAST: f32 = 20.0;
-
 /// The `layer.fill.set` keys a one-source grayscale fill (a mask fill or a filter's image input) has no use for
 const GRAY_REFUSED_KEYS: [&str; 4] = ["channel", "enabled", "solo", "normalFormat"];
 
@@ -129,7 +126,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill projection",
             [],
             None,
-            "{layer? | effect?: content or mask fill effect id, projection?: uvTile (Fill (Match per UV Tile))|uv|triplanar|planar|spherical|cylindrical|warp (default: the current one; a new warp's frame sits around the mesh, seen from the front), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections: one number), offset?: [u, v] (uv) | [x, y, z] (3D projections), projectorRotation?: [x, y, z] degrees, projectorScale?: number | [x, y, z] (3D projection settings; a negative axis mirrors it), shapeCrop?: cropped|extendsOutside (3D projections), backfaceCulling?: bool, backfaceAngle?: degrees, backfaceHardness?: 0..1 (planar, cylindrical), depthCulling?: bool, depthCullingHardness?: 0..1 (planar, warp; surfaces hidden from the projector behind others get none of it; new planar and warp projections start with it on at 0.75), sharpness?: 1..64 (triplanar), warpCorners?: [[x, y] × 4] (warp: top left, top right, bottom right, bottom left, across and up in frame sizes from its centre; unpulled = ±0.5), projectionDepth?: lengths of the frame's longer side it reaches in front of and behind it when cropped (warp), angle?: 1..360 degrees one repeat spans (cylindrical), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar), symmetry?: bool (copies of a 3D projection; UV projections have none), symmetryType?: mirror|radial, symmetryAxis?: 0|1|2 (the mirror plane's normal or the turning axis), flipCopy?: [u, v] (turn the copies' images over), axisPosition?: number | [x, y, z] (where the plane or axis passes, -1..1 mesh radii from the mesh's centre), symmetryCount?: 2..64 (radial copies, the original included), angleSpan?: 1..360 degrees (radial copies spread over it; 360 spaces them evenly)} — what is not given keeps its value",
+            "{layer? | effect?: content or mask fill effect id, projection?: uvTile (Fill (Match per UV Tile))|uv|triplanar|planar|spherical|cylindrical|warp (default: the current one; a new warp's frame sits around the mesh, seen from the front), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections: one number), offset?: [u, v] (uv) | [x, y, z] (3D projections), projectorRotation?: [x, y, z] degrees, projectorScale?: number | [x, y, z] (3D projection settings; a negative axis mirrors it), shapeCrop?: cropped|extendsOutside (3D projections), backfaceCulling?: bool, backfaceAngle?: degrees, backfaceHardness?: 0..1 (planar, cylindrical), depthCulling?: bool, depthCullingHardness?: 0..1 (planar, warp; surfaces hidden from the projector behind others get none of it; new planar and warp projections start with it on at 0.75), sharpness?: 1..64 (triplanar), warpCorners?: [[x, y] × 4] (warp: top left, top right, bottom right, bottom left, across and up in frame sizes from its centre; unpulled = ±0.5), projectionDepth?: lengths of the frame's longer side it reaches in front of and behind it when cropped (warp), angle?: 1..360 degrees one repeat spans (cylindrical), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar), symmetry?: bool (copies of a 3D projection; UV projections have none), symmetryType?: mirror|radial, symmetryAxis?: 0|1|2 or x|y|z (the mirror plane's normal or the turning axis), flipCopy?: [u, v] (turn the copies' images over), axisPosition?: number | [x, y, z] (where the plane or axis passes, -1..1 mesh radii from the mesh's centre), symmetryCount?: 2..64 (radial copies, the original included), angleSpan?: 1..360 degrees (radial copies spread over it; 360 spaces them evenly)} — what is not given keeps its value",
             has_layer,
             fill_projection
         ),
@@ -774,14 +771,14 @@ fn gray_source(s: &Session, p: &Value, effect: LayerId, current: Source) -> Resu
         let Source::Procedural { pattern, .. } = &current else {
             return Err(bad(FILL_SET, "the source has no pattern: give `procedural` with its settings"));
         };
+
         Ok((procedural_from(p, pattern.kind, Some(&current), [None, None])?, None))
     } else {
         Err(bad(FILL_SET, "give `value`, `procedural`, `image`, `alpha` or `anchor`"))
     }
 }
 
-/// The procedural source `params` ask for with `low`/`high` already parsed: a pattern of the same kind as `current` keeps what
-/// `params` do not give; another kind starts from its defaults
+/// The procedural source `params` ask for with `low`/`high` already parsed: a pattern of the same kind as `current` keeps what `params` do not give; another kind starts from its defaults
 fn procedural_from(params: &Value, kind: ProceduralKind, current: Option<&Source>, [low, high]: [Option<[f32; 3]>; 2]) -> Result<Source> {
     let (mut pattern, current_low, current_high) = match current {
         Some(Source::Procedural { pattern, low, high, .. }) if pattern.kind == kind => (pattern.clone(), *low, *high),
@@ -1089,9 +1086,13 @@ fn symmetry_from(p: &Value, cmd: &str, current: FillSymmetry) -> Result<FillSymm
     if let Some(id) = strp(p, "symmetryType") {
         symmetry.kind = SymmetryKind::from_id(id).ok_or_else(|| bad(cmd, format!("unknown symmetryType `{id}`: mirror or radial")))?;
     }
-    if let Some(axis) = u64p(p, "symmetryAxis") {
-        symmetry.axis =
-            u8::try_from(axis).ok().filter(|axis| *axis <= FillSymmetry::LAST_AXIS).ok_or_else(|| bad(cmd, "symmetryAxis is 0 (X), 1 (Y) or 2 (Z)"))?;
+    if let Some(given) = p.get("symmetryAxis").filter(|given| !given.is_null()) {
+        // An index or the letter tool.brush takes for its own symmetry axis
+        let axis = match given {
+            Value::String(letter) => ["x", "y", "z"].iter().position(|name| letter.eq_ignore_ascii_case(name)).and_then(|index| u8::try_from(index).ok()),
+            index => index.as_u64().and_then(|index| u8::try_from(index).ok()).filter(|index| *index <= FillSymmetry::LAST_AXIS),
+        };
+        symmetry.axis = axis.ok_or_else(|| bad(cmd, "symmetryAxis is 0 (X), 1 (Y) or 2 (Z), or \"x\", \"y\" or \"z\""))?;
     }
     if let Some(flips) = p.get("flipCopy") {
         let [Some(across), Some(down)] = flips.as_array().map(Vec::as_slice).unwrap_or_default().iter().map(Value::as_bool).collect::<Vec<_>>()[..] else {
@@ -1106,7 +1107,7 @@ fn symmetry_from(p: &Value, cmd: &str, current: FillSymmetry) -> Result<FillSymm
         let (fewest, most) = (u64::from(*FillSymmetry::COUNTS.start()), u64::from(*FillSymmetry::COUNTS.end()));
         symmetry.count = u32::try_from(count.clamp(fewest, most)).unwrap_or(*FillSymmetry::COUNTS.start());
     }
-    symmetry.span = f32p(p, "angleSpan").map_or(symmetry.span, |span| span.clamp(*FillSymmetry::SPANS.start(), *FillSymmetry::SPANS.end()));
+    symmetry.span = f32p(p, "angleSpan").map_or(symmetry.span, |span| clamp_to(span, &FillSymmetry::SPANS));
     Ok(symmetry)
 }
 

@@ -15,7 +15,6 @@ mod color_picker;
 mod color_selection_editor;
 mod compare_mask_rows;
 mod curvature_generator;
-mod decal_proportions;
 mod display_environment;
 mod display_post_effects;
 mod effect_rows;
@@ -37,7 +36,6 @@ mod filter_picker;
 mod folder_properties;
 mod frame_selection;
 mod generator_panel;
-mod gradient_map_menu;
 mod help_menu_664;
 mod history_panel;
 mod import_resources;
@@ -117,6 +115,10 @@ mod stencil;
 mod symmetry;
 mod symmetry_2d;
 mod tile_generator_panel;
+
+/// eframe's in-memory storage, shared by the tests that save and restore the UI state
+#[path = "../../src/ui_state_store/memory_storage.rs"]
+mod memory_storage;
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};

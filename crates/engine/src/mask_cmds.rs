@@ -762,15 +762,9 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
     };
 
     // Naming the filter the effect already is edits its parameters like a plain effect.set (Directional Warp's former id also sets its mode)
-    // A warp saved before the warp modes has no mode to set, so another mode replaces it as a swap does
-    let changes_saved_warp_mode = |filter: &str| matches!(session.doc.project.effect(effect), Some((_, Effect { kind: EffectKind::Filter(saved), .. })) if crate::filter_lib::changes_saved_warp_mode(filter, params, saved));
     let swapped = match strp(params, "filter") {
         Some(EMPTY_FILTER) => Some(emptied_filter(session, effect)?),
-        Some(filter)
-            if crate::filter_lib::find(filter).is_some_and(|def| current_filter_id(session, effect) == Some(def.id)) && !changes_saved_warp_mode(filter) =>
-        {
-            None
-        }
+        Some(filter) if crate::filter_lib::find(filter).is_some_and(|def| current_filter_id(session, effect) == Some(def.id)) => None,
         Some(filter) => Some(swapped_filter(session, effect, filter, params)?),
         None => None,
     };

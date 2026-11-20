@@ -9,6 +9,6 @@ pub(crate) struct GizmoDrag<G: Gizmo> {
     /// Where the drag started and the gizmo then
     pub(crate) from: Pos2,
     pub(crate) start: G,
-    /// The session revision the drag's last edit left: later updates merge into its undo step while the history is still there
-    pub(crate) edited_revision: Option<u64>,
+    /// The drag made its undo step: later updates merge into it
+    pub(crate) stepped: bool,
 }

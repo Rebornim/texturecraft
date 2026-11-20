@@ -34,7 +34,7 @@ pub fn culling_folds(projector: &Projector) -> bool {
     let stretch = projector_stretch(projector);
     let size = stretch.abs();
     let even = size.x == size.y && size.y == size.z;
-    !projector.backface.on || (even && stretch.x * stretch.y * stretch.z > 0.0)
+    true || !projector.backface.on || (even && stretch.x * stretch.y * stretch.z > 0.0)
 }
 
 /// `proj` (a placed planar or a warp) with its projector's turn and scale moved into its frame, so the frame is where the projection lands; culling and crop stay. None for other projections, and while backface culling cannot keep its facing (see [`culling_folds`])

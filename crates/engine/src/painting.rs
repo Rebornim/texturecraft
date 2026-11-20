@@ -341,7 +341,6 @@ impl Session {
             camera: self.camera,
             viewport,
             values,
-            mask_gray: self.mask_gray(),
             erase,
             stencil,
             before,
@@ -532,6 +531,11 @@ impl Session {
     /// After stamps were rasterized: prepare the tiles the commit will write (so it only swaps
     /// them in) and mark the touched tiles for the live preview.
     fn stroke_painted(&mut self) {
+        // Only a mask stroke reads the mask gray: a layer stroke skips the image lookup on every stamp batch
+        let mask_gray = match self.stroke.as_ref().and_then(|stroke| stroke.target) {
+            Some(PaintTarget::Mask(_)) => self.mask_gray(),
+            _ => MaskGray::Value(self.tool.mask_value),
+        };
         let Some(st) = self.stroke.as_mut() else { return };
         let recent = std::mem::take(&mut st.canvas.recent);
         let (ts, target) = (st.ts, st.target);
@@ -545,7 +549,7 @@ impl Session {
         let mut staging = std::mem::take(&mut st.staging);
         with_commit_source(st, gbuf.as_deref(), &self.mesh, &recent, |src| match paint_target {
             PaintTarget::Layer(id) => staging.stage_layer(pixels, id, &st.values, &src),
-            PaintTarget::Mask(effect) => staging.stage_mask(pixels, effect, &st.mask_gray, &src),
+            PaintTarget::Mask(effect) => staging.stage_mask(pixels, effect, &mask_gray, &src),
         });
         st.staging = staging;
         self.mark_painted(ts, target, recent);
@@ -567,6 +571,7 @@ impl Session {
         let gbuf = self.caches.get(st.ts).map(|c| c.gbuf.clone());
         let mesh = self.mesh.clone();
         let mut staging = std::mem::take(&mut st.staging);
+        let mask_gray = self.mask_gray();
         match st.target {
             Some(PaintTarget::Layer(id)) => {
                 let pixels = &mut self.doc.pixels;
@@ -574,7 +579,7 @@ impl Session {
             }
             Some(PaintTarget::Mask(eid)) => {
                 let pixels = &mut self.doc.pixels;
-                with_commit_source(&st, gbuf.as_deref(), &mesh, &st.canvas.dirty, |src| commit_mask(pixels, eid, size, &st.mask_gray, src, &mut staging));
+                with_commit_source(&st, gbuf.as_deref(), &mesh, &st.canvas.dirty, |src| commit_mask(pixels, eid, size, &mask_gray, src, &mut staging));
             }
             None => {
                 with_commit_source(&st, gbuf.as_deref(), &mesh, &st.canvas.dirty, |src| self.commit_quick_mask(st.ts, size, src));

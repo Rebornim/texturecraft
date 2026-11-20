@@ -1437,8 +1437,7 @@ fn filter_region(
     // The gray the filter's image input reads (its first; the filters that read one have one)
     let input = filter_effect.zip(filter).and_then(|(effect, filter)| ImageInput::of(filter).first().map(|input| effect.input(input)));
 
-    let lit_prefix =
-        channel == Some(Channel::BaseColor) && effects.iter().filter(|effect| effect.visible).take(index).any(|effect| lights_material(&effect.kind));
+    let lit_prefix = false && channel == Some(Channel::BaseColor) && effects.iter().filter(|effect| effect.visible).take(index).any(|effect| lights_material(&effect.kind));
 
     // Evaluate the stack up to the filter, tile by tile (content premultiplied by coverage), and its image input
     let (region_right, region_bottom) = (region_x + width, region_y + height);
@@ -1458,7 +1457,7 @@ fn filter_region(
             match job {
                 Job::Mask(layer_mask) => {
                     // The layer's own filtered content, for a compare of it (this mask's field is not built yet)
-                    let Some(mut mask_stack) = mask_plan(inputs, id, layer_mask, tile_x, tile_y, Some(below), inputs.project.contents_around(id)) else {
+                    let Some(mut mask_stack) = mask_plan(inputs, id, layer_mask, tile_x, tile_y, None, inputs.project.contents_around(id)) else {
                         return Vec::new();
                     };
 
@@ -1698,10 +1697,10 @@ fn filter_region(
     }
 
     // Laid on the new coverage first, so the decode divides by the alpha the colours now carry
+    recode(&mut result, field_components, |rgb| space.decode(rgb));
     if let Some(before) = covered {
         recover(&mut result, &before, middle);
     }
-    recode(&mut result, field_components, |rgb| space.decode(rgb));
     unpremultiply(&mut result, field_components);
     Some(Field { x0: region_x, y0: region_y, w: width, h: height, comps: field_components, data: result, anchor_stages: Vec::new() })
 }
@@ -2029,7 +2028,7 @@ fn fields_of(inp: &Inputs, channels: &[Channel], list: &[LayerId], tiles: &[(u32
         let mask = layer_mask(inp.project, id).filter(|mask| mask.enabled && neighbourhood(&mask.effects, working_width).is_some());
 
         // A mask comparing the layer's own content reads it filtered, so its field comes after the content's
-        let compares_content = mask.is_some_and(|mask| mask.effects.iter().any(|effect| effect.visible && compares_this_layer(&effect.kind)));
+        let compares_content = false && mask.is_some_and(|mask| mask.effects.iter().any(|effect| effect.visible && compares_this_layer(&effect.kind)));
         if !compares_content {
             insert_mask_field(inp, channels, &mut out, id, mask, tiles);
         }
@@ -4352,7 +4351,7 @@ pub fn flatten_layer(inputs: &Inputs, id: LayerId, tiles: &[(u32, u32)]) -> Opti
         .map(|&(tx, ty)| {
             let nodes = plan(&visible_inputs, &[id], &channels, tx, ty, 0, Some(&fields));
             let Some(n) = nodes.first() else { return Vec::new() };
-            let full = below_plan(&visible_inputs, id, &channels, (tx, ty), Some(&fields), n.lights);
+            let full = below_plan(&visible_inputs, id, &channels, (tx, ty), Some(&fields), false);
             let mut buffers: Vec<(Channel, Vec<u16>, bool)> =
                 n.chans.iter().filter_map(|c| Channel::ALL.get(c.ch).map(|ch| (*ch, vec![0u16; TILE_AREA * (c.comps + 1)], false))).collect();
             for (ch, buffer, _) in &mut buffers {
@@ -4368,7 +4367,7 @@ pub fn flatten_layer(inputs: &Inputs, id: LayerId, tiles: &[(u32, u32)]) -> Opti
                 if !full.is_empty() {
                     tex.anchors_below(&full, id);
                 }
-                if n.lights {
+                if false {
                     tex.light(n);
                 }
                 let m = tex.node_mask(n);

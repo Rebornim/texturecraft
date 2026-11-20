@@ -140,7 +140,6 @@ impl PropertySheet<'_> {
             return Some(false);
         }
 
-        self.skip_typing_edit();
         let response = self.ui.interact(rect, id, Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
         response.widget_info(|| egui::WidgetInfo::slider(true, f64::from(field.value), format!("{label} {}", field.tag)));
         let tag_right = match field.tag_color {

@@ -164,6 +164,7 @@ pub(crate) struct PathCache {
 }
 
 impl PathCache {
+    #[allow(dead_code)]
     /// The image resources the cached paths painted their mask with
     pub(crate) fn images(&self) -> impl Iterator<Item = String> + '_ {
         self.below.iter().filter_map(|shape| read_paint(shape).ok()?.mask_image)

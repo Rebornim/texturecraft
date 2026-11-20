@@ -132,7 +132,7 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, pad: &egui::Response, ta
         && pad.is_pointer_button_down_on()
         && let Some(at) = pointer
     {
-        held = Some(MoveHold { target, last: at, edited_revision: None, pass: pass.wrapping_sub(1) });
+        held = Some(MoveHold { target, last: at, stepped: false, pass: pass.wrapping_sub(1) });
     }
 
     let Some(mut held) = held.filter(|_| primary && target.projection(app).is_some()) else {
@@ -176,8 +176,9 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, pad: &egui::Response, ta
 }
 
 /// Runs one edit of the hold; the edits after the first that changed something join its undo step
-fn step(app: &mut TextureCraftApp, held: &mut MoveHold, command: &str, params: Value) {
-    crate::projection_gizmo::edit_in_one_step(&mut app.session, command, params, &mut held.edited_revision);
+fn step(app: &mut TextureCraftApp, held: &mut MoveHold, command: &str, mut params: Value) {
+    params["merge"] = json!(held.stepped);
+    held.stepped |= texturecraft_engine::execute(&mut app.session, command, &params).is_ok();
 }
 
 /// The selected planar or warp frame of a fill layer, which moves by its frame

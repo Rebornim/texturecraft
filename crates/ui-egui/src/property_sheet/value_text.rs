@@ -33,11 +33,6 @@ impl super::PropertySheet<'_> {
         child.add(edit.frame(egui::Frame::NONE).margin(egui::vec2(0.0, 0.0)))
     }
 
-    /// Takes the one auto id [`Self::typing_edit`]'s child takes, for a value shown instead of typed: the controls after it keep their ids when typing starts or ends, so a click from one field to the next types into the one clicked
-    pub(super) fn skip_typing_edit(&mut self) {
-        self.ui.skip_ahead_auto_ids(1);
-    }
-
     /// The 1 px line under a typeable value centred on `center_y`, from `left` to `right`: grey on hover, accent while typing
     pub(super) fn value_line(&self, left: f32, right: f32, center_y: f32, color: egui::Color32) {
         let y = (center_y + LINE_DROP).round() + 0.5;

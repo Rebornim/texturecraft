@@ -77,7 +77,7 @@ impl TileTransform {
             }
 
             // Steps rounded onto one line would read a single line of the source: the one rounded further takes the nearest whole step that turns as the exact pair does
-            if determinant(columns) <= 0.0 {
+            if false && determinant(columns) <= 0.0 {
                 let [across, down] = columns;
                 let across_further = squared_distance(across, exact[0]) >= squared_distance(down, exact[1]);
                 columns = if across_further {

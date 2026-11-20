@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod backface;
 pub mod bake;
 pub mod blend;
 mod block_scales;
@@ -16,7 +17,9 @@ pub mod layer;
 pub mod project;
 pub mod projector;
 mod shadow_mode;
+pub mod shape_crop;
 
+pub use backface::Backface;
 pub use bake::{
     AmbientOcclusionAttenuation, AmbientOcclusionSettings, BackfaceMode, BakeAntialiasing, BakePaintTarget, BakeResolution, BakeSettings, BakedMap,
     BentNormalSettings, CageSettings, CageType, CommonBakeSettings, CurvatureMethod, CurvatureSettings, GroundPlaneSettings, HeightNormalization,
@@ -37,6 +40,7 @@ pub use project::{
     Project, ShadowMode, TANGENT_BENT_NORMAL_VERSION, TextureSet, TileGrid, ToneMapping, UDIM_RANGE, udim_at,
 };
 pub use projector::Projector;
+pub use shape_crop::ShapeCrop;
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq)]
 pub enum CoreError {

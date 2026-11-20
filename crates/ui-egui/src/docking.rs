@@ -412,15 +412,17 @@ const TAB_TEXT_SIZE: f32 = 12.5;
 /// Narrowest panel tab, in points
 const MIN_TAB_WIDTH: f32 = 54.0;
 
-/// The dock look: each panel group a card on the window's frame colour, tab strips without hard lines, the shown tab a pill
+/// The dock look: every panel group is a card under one chrome-coloured header bar, names in capitals at the left, a close × at the right
 fn style(ui: &Ui, tokens: &Tokens) -> DockStyle {
     let mut dock_style = DockStyle::from_ui(ui);
     dock_style.gap = f32::from(crate::theme::GUTTER);
     dock_style.min_pane = MIN_PANE_EXTENT;
 
     dock_style.background = tokens.panel;
-    dock_style.tab_background = tokens.panel;
-    dock_style.active_background = tokens.button;
+    dock_style.tab_background = tokens.chrome;
+
+    // The shown and the hovered tab keep the bar's colour; their names brighten instead
+    dock_style.active_background = tokens.chrome;
     dock_style.text = tokens.text_strong;
     dock_style.inactive_text = tokens.text_dim;
     dock_style.border = egui::Stroke::NONE;
@@ -491,6 +493,20 @@ pub fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     }
 }
 
+/// Size of the panel names on a header bar
+const HEADER_TITLE_SIZE: f32 = 12.0;
+
+/// Side of the close × at the right end of a header bar
+const HEADER_CLOSE_SIZE: f32 = 22.0;
+
+/// Room right of the close × button, so its glyph ends where the Properties controls end (side padding plus scroll bar gutter)
+const HEADER_CLOSE_RIGHT_MARGIN: f32 = 18.0;
+
+/// Whether a docked group's header bar ends in a close × (floating windows have one on their title bar; the viewport never closes)
+fn header_closes(active: &Panel, floating: bool) -> bool {
+    !floating && permissions(active).closable
+}
+
 /// The panels' contents, names and limits for the dock area
 struct Panels<'a> {
     app: &'a mut TextureCraftApp,
@@ -552,8 +568,48 @@ impl DockContent<Panel> for Panels<'_> {
         }
     }
 
-    fn label(&mut self, _ui: &Ui, _panel: &Panel, logical: &str, font: &egui::FontId, color: egui::Color32) -> egui::WidgetText {
-        RichText::new(logical).font(font.clone()).color(color).into()
+    fn label(&mut self, _ui: &Ui, _panel: &Panel, logical: &str, _font: &egui::FontId, color: egui::Color32) -> egui::WidgetText {
+        // Capitals on the bar only: menus and screen readers keep the logical name
+        RichText::new(logical.to_uppercase()).font(crate::theme::semibold(HEADER_TITLE_SIZE)).color(color).into()
+    }
+
+    fn group_header_width(&self, panels: &[Panel], active: &Panel, floating: bool, _strip_width: f32) -> f32 {
+        if header_closes(active, floating) {
+            HEADER_CLOSE_SIZE + HEADER_CLOSE_RIGHT_MARGIN
+        } else if redocks(panels, active, floating) {
+            DOCK_BUTTON_SIZE + DOCK_BUTTON_MARGIN
+        } else {
+            0.0
+        }
+    }
+
+    /// A docked group's bar ends in its close ×; a rail panel floating on its own carries the Dock button that sends it back to the rail
+    fn group_header(&mut self, ui: &mut Ui, panels: &[Panel], active: &Panel, floating: bool) {
+        if redocks(panels, active, floating) {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if crate::widgets::icon_button(ui, egui_phosphor::regular::ARROW_SQUARE_IN, tr("Dock"), false, DOCK_BUTTON_SIZE).clicked() {
+                    self.app.ui.dock.close(*active);
+                }
+            });
+            return;
+        }
+        if !header_closes(active, floating) {
+            return;
+        }
+
+        let rect = ui.max_rect();
+        let button = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - HEADER_CLOSE_RIGHT_MARGIN - HEADER_CLOSE_SIZE / 2.0, rect.center().y),
+            vec2(HEADER_CLOSE_SIZE, HEADER_CLOSE_SIZE),
+        );
+        let clicked = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(button), |ui| {
+                crate::widgets::icon_button(ui, egui_phosphor::regular::X, tr("Close Panel"), false, HEADER_CLOSE_SIZE).clicked()
+            })
+            .inner;
+        if clicked {
+            self.app.ui.dock.close(*active);
+        }
     }
 
     fn permissions(&self, panel: &Panel) -> Permissions {
@@ -567,23 +623,6 @@ impl DockContent<Panel> for Panels<'_> {
 
     fn floating_size(&self, _panel: &Panel) -> Option<egui::Vec2> {
         Some(vec2(300.0, 380.0))
-    }
-
-    fn group_header_width(&self, panels: &[Panel], active: &Panel, floating: bool, _strip_width: f32) -> f32 {
-        if redocks(panels, active, floating) { DOCK_BUTTON_SIZE + DOCK_BUTTON_MARGIN } else { 0.0 }
-    }
-
-    /// A rail panel floating on its own carries the Dock button that sends it back to the rail
-    fn group_header(&mut self, ui: &mut Ui, panels: &[Panel], active: &Panel, floating: bool) {
-        if !redocks(panels, active, floating) {
-            return;
-        }
-
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if crate::widgets::icon_button(ui, egui_phosphor::regular::ARROW_SQUARE_IN, tr("Dock"), false, DOCK_BUTTON_SIZE).clicked() {
-                self.app.ui.dock.close(*active);
-            }
-        });
     }
 }
 

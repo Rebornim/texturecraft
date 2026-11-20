@@ -64,6 +64,8 @@ impl TileTransform {
         let square = (quarter_turns - quarter_turns.round()).abs() < SQUARE_TURN_TOLERANCE;
 
         if self.tile_safe && !square {
+            let exact = columns;
+
             // Whole steps of the source per tile edge keep the edges meeting; a step can never vanish
             for column in &mut columns {
                 let rounded = column.map(f32::round);
@@ -71,6 +73,17 @@ impl TileTransform {
                     if column[0].abs() >= column[1].abs() { [column[0].signum(), 0.0] } else { [0.0, column[1].signum()] }
                 } else {
                     rounded
+                };
+            }
+
+            // Steps rounded onto one line would read a single line of the source: the one rounded further takes the nearest whole step that turns as the exact pair does
+            if determinant(columns) <= 0.0 {
+                let [across, down] = columns;
+                let across_further = squared_distance(across, exact[0]) >= squared_distance(down, exact[1]);
+                columns = if across_further {
+                    turning_step(exact[0], |step| [step, down]).map_or(columns, |step| [step, down])
+                } else {
+                    turning_step(exact[1], |step| [across, step]).map_or(columns, |step| [across, step])
                 };
             }
         }
@@ -96,6 +109,24 @@ impl TileTransform {
         let steps = [columns[0][0] - 1.0, columns[0][1], columns[1][0], columns[1][1] - 1.0];
         steps.iter().chain(&shift).all(|along| along.abs() < IDENTITY_TOLERANCE)
     }
+}
+
+/// How the second column turns from the first: positive anticlockwise, as every exact turn and scale does, 0 when they lie on one line
+fn determinant([across, down]: [[f32; 2]; 2]) -> f32 {
+    across[0] * down[1] - across[1] * down[0]
+}
+
+fn squared_distance(a: [f32; 2], b: [f32; 2]) -> f32 {
+    (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)
+}
+
+/// The whole step nearest `exact` (a corner of the cell it lies in) whose columns from `pair` turn as an exact pair does; a corner always does, since `exact` itself turns that way
+fn turning_step(exact: [f32; 2], pair: impl Fn([f32; 2]) -> [[f32; 2]; 2]) -> Option<[f32; 2]> {
+    let [x, y] = exact.map(f32::floor);
+    [[x, y], [x + 1.0, y], [x, y + 1.0], [x + 1.0, y + 1.0]]
+        .into_iter()
+        .filter(|corner| determinant(pair(*corner)) > 0.0)
+        .min_by(|a, b| squared_distance(*a, exact).total_cmp(&squared_distance(*b, exact)))
 }
 
 #[cfg(test)]
@@ -164,6 +195,16 @@ mod tests {
         // A turn just short of a whole one is square too (a tiny negative turn is stored that way)
         let nearly_whole = TileTransform { scaling: [1.5, 1.5], rotation: 359.99995, ..TileTransform::LIBRARY };
         assert!((nearly_whole.affine().0[0][0] - 1.5).abs() < 1e-5, "{:?}", nearly_whole.affine().0);
+    }
+
+    #[test]
+    fn a_tile_safe_turn_never_rounds_both_steps_onto_one_line() {
+        // Narrow and tall, turned half a quarter: both steps round straight down, so one moves off that line
+        let narrow = TileTransform { scaling: [0.1, 2.0], rotation: 45.0, ..TileTransform::LIBRARY };
+
+        let (columns, _) = narrow.affine();
+
+        assert!(determinant(columns) > 0.0, "the source is read in two directions: {columns:?}");
     }
 
     #[test]

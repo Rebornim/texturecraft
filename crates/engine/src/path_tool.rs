@@ -156,12 +156,18 @@ impl PathState {
 #[derive(Clone)]
 pub(crate) struct PathCache {
     pub(crate) eid: LayerId,
-    // Alpha image resources are not part of this cache key
-    // Replacing an alpha takes effect when a cached path changes
+    // A change to the mask images `below` paints with drops the cache (Session::invalidate_changed)
     key: (u64, Option<(u32, u32)>),
     below: Vec<PathShape>,
     mask: Option<texturecraft_texel::TileImage>,
     layers: Vec<((LayerId, Channel), texturecraft_texel::TileImage)>,
+}
+
+impl PathCache {
+    /// The image resources the cached paths painted their mask with
+    pub(crate) fn images(&self) -> impl Iterator<Item = String> + '_ {
+        self.below.iter().filter_map(|shape| read_paint(shape).ok()?.mask_image)
+    }
 }
 
 /// What a stored path is painted with ([`PathShape::paint`]).
@@ -1228,6 +1234,37 @@ mod tests {
         let remaining_tiles = s.path_cache.as_ref().map_or(0, |cache| cache.layers.iter().map(|(_, image)| image.allocated_count()).sum::<usize>());
         assert_eq!(remaining_tiles, 0);
         assert!(s.path_cache.is_none(), "deleting the path effect releases its cached tiles");
+    }
+
+    #[test]
+    fn removing_a_cached_paths_mask_image_repaints_it_with_the_mask_value() {
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::sphere(1.0, 24, 12), "builtin:test", None, 128).unwrap();
+        s.update();
+        let layer = execute(&mut s, "layer.add.paint", &Value::Null).unwrap()["layer"].as_u64().unwrap();
+        execute(&mut s, "mask.add.black", &json!({"layer": layer})).unwrap();
+        execute(&mut s, "layer.select", &json!({"layer": layer, "target": "mask"})).unwrap();
+        execute(&mut s, "tool.brush", &json!({"size": 6})).unwrap();
+        let white = texturecraft_formats::gray16_png(1, 1, [1.0].into_iter()).unwrap();
+        let image = s.import_resource_bytes("brush.png", white).unwrap();
+        execute(&mut s, "tool.material", &json!({"maskImage": image, "maskValue": 0.5})).unwrap();
+        let mut eid = 0;
+        for v in [0.3, 0.7] {
+            let r = execute(&mut s, "tool.path", &json!({"uvPoints": [[0.1, v], [0.9, v + 0.05]], "commit": true})).unwrap();
+            eid = r["committed"]["effect"].as_u64().unwrap();
+        }
+        let eid = LayerId(eid);
+        execute(&mut s, "path.edit", &json!({"effect": eid.0, "index": 1})).unwrap();
+        execute(&mut s, "tool.path", &json!({"uvPoints": [[0.1, 0.6], [0.9, 0.6]]})).unwrap();
+        assert_eq!(s.path_cache.as_ref().map(|c| c.below.len()), Some(1), "the bottom path is cached");
+
+        execute(&mut s, "resource.remove", &json!({"name": image})).unwrap();
+        execute(&mut s, "tool.path", &json!({"uvPoints": [[0.1, 0.65], [0.9, 0.65]]})).unwrap();
+        let mask = |s: &Session| format!("{:?}", s.doc.pixels.masks.get(&eid));
+        let edited = mask(&s);
+        s.path_cache = None;
+        s.render_paths(eid, 0).unwrap();
+
+        assert_eq!(edited, mask(&s), "the bottom path paints the mask value as a full repaint does");
     }
 
     #[test]

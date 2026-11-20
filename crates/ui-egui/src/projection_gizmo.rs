@@ -5,7 +5,8 @@ mod gizmo_drag;
 mod shown_gizmo;
 
 use egui::{PointerButton, Rect};
-use serde_json::json;
+use serde_json::{Value, json};
+use texturecraft_engine::Session;
 
 use crate::TextureCraftApp;
 use crate::viewport::focus_lost;
@@ -31,7 +32,7 @@ pub(crate) fn input<G: Gizmo>(app: &mut TextureCraftApp, ctx: &egui::Context, re
         && let (Some(gizmo), Some(from)) = (gizmo, ctx.input(|input| input.pointer.press_origin()))
         && let Some(grab) = gizmo.grab(from)
     {
-        drag = Some(GizmoDrag { grab, from, start: gizmo.clone(), stepped: false });
+        drag = Some(GizmoDrag { grab, from, start: gizmo.clone(), edited_revision: None });
     }
 
     // A window that lost the focus gets no release: the drag ends there
@@ -48,16 +49,24 @@ pub(crate) fn input<G: Gizmo>(app: &mut TextureCraftApp, ctx: &egui::Context, re
     ctx.set_cursor_icon(gizmo.unwrap_or(&drag.start).cursor(drag.grab, true));
 
     if let Some(pointer) = response.interact_pointer_pos().filter(|_| ctx.input(|input| input.pointer.delta() != egui::Vec2::ZERO))
-        && let Some((command, mut params)) = drag.start.edit(app, rect, drag.grab, drag.from, pointer)
+        && let Some((command, params)) = drag.start.edit(app, rect, drag.grab, drag.from, pointer)
     {
-        params["merge"] = json!(drag.stepped);
-
-        // Off the plane or past the size limits: the projection waits where it is
-        drag.stepped |= texturecraft_engine::execute(&mut app.session, command, &params).is_ok();
+        edit_in_one_step(&mut app.session, command, params, &mut drag.edited_revision);
 
         // The panel drew before this edit: one more frame shows its fields and preview where the projection is now
         ctx.request_repaint();
     }
     ctx.data_mut(|data| data.insert_temp(G::drag_id(), drag));
     true
+}
+
+/// Runs one edit of a drag or hold, joining the undo step its last edit (at `edited_revision`) made while the history is still where that edit left it: an edit that changed nothing made no step to join, and an Undo took the step away
+pub(crate) fn edit_in_one_step(session: &mut Session, command: &str, mut params: Value, edited_revision: &mut Option<u64>) {
+    params["merge"] = json!(*edited_revision == Some(session.revision));
+    let before = session.revision;
+
+    // Off the plane or past the size limits: the projection waits where it is
+    if texturecraft_engine::execute(session, command, &params).is_ok() && session.revision != before {
+        *edited_revision = Some(session.revision);
+    }
 }

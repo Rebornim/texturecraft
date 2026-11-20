@@ -4,7 +4,7 @@ use egui::{Event, Modifiers, PointerButton, Pos2, Role};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
-use texturecraft_engine::core::{EffectKind, LayerId, ProceduralKind, Projection, ResolutionMode, Source};
+use texturecraft_engine::core::{Channel, EffectKind, LayerId, ProceduralKind, Projection, ResolutionMode, Source};
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::move_on_model::MoveOnModel;
 
@@ -124,4 +124,27 @@ fn a_mask_fills_projection_moves_on_the_model_and_resets_with_its_section() {
 
     click(&mut harness, Role::Button, "Fill: Reset to defaults");
     assert_eq!(mask_fill(&harness, effect).1, Projection::default(), "the Fill section's reset reaches the mask fill");
+}
+
+/// A mask fill reading a content anchor point picks the channel it reads in its Grayscale card
+#[test]
+fn a_mask_fill_reading_a_content_anchor_picks_its_channel() {
+    let mut session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();
+    let low = texturecraft_engine::execute(&mut session, "layer.add.fill", &json!({"roughness": 0.2})).unwrap()["layer"].clone();
+    let anchor = texturecraft_engine::execute(&mut session, "effect.add.anchor", &json!({"layer": low, "target": "content"})).unwrap()["effect"].clone();
+    let top = texturecraft_engine::execute(&mut session, "layer.add.paint", &json!({})).unwrap()["layer"].clone();
+    let added = texturecraft_engine::execute(&mut session, "effect.add.fill", &json!({"layer": top, "target": "mask", "anchor": anchor})).unwrap();
+    let effect = LayerId(added["effect"].as_u64().unwrap());
+    texturecraft_engine::execute(&mut session, "layer.select", &json!({"layer": top, "target": effect.0})).unwrap();
+    let mut harness = Harness::builder().with_size(WINDOW_SIZE).build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(STARTUP_FRAMES);
+    let Source::Anchor { channel, .. } = mask_fill(&harness, effect).0 else { panic!("an anchor source") };
+    assert_eq!(channel, Channel::Height, "a new anchor source reads height");
+
+    click_below(&mut harness, Role::ComboBox, "Channel");
+    click(&mut harness, Role::ListBoxOption, "Roughness");
+
+    let Source::Anchor { channel, .. } = mask_fill(&harness, effect).0 else { panic!("still an anchor source") };
+    assert_eq!(channel, Channel::Roughness, "the pick reads the anchor's roughness");
 }

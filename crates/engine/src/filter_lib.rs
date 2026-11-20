@@ -691,6 +691,19 @@ fn one_of<T: std::fmt::Display>(allowed: &[T]) -> String {
     }
 }
 
+/// Whether `p` asks `filter`, a warp saved before the warp modes, for a mode it can't hold: Directional Warp's former id on a Warp, or a `warpMode` it is not
+pub(crate) fn changes_saved_warp_mode(named: &str, p: &Value, filter: &Filter) -> bool {
+    let saved_mode = match filter {
+        Filter::Warp { .. } => WarpMode::Warp,
+        Filter::DirectionalWarp { .. } => WarpMode::Directional,
+        _ => return false,
+    };
+    match p.get("warpMode") {
+        Some(mode) => mode.as_str() != Some(saved_mode.id()),
+        None => is_directional_warp(named) && saved_mode != WarpMode::Directional,
+    }
+}
+
 /// [`apply`] for the filter id `named`, if one is given: Directional Warp's former id turns a Warp to Directional mode unless `warpMode` is given
 pub(crate) fn apply_named(named: Option<&str>, p: &Value, filter: &mut Filter, cmd: &str) -> Result<()> {
     apply(p, filter, cmd)?;

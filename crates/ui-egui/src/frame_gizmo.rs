@@ -683,6 +683,64 @@ pub(crate) mod tests {
         assert_eq!(harness.state().session.history_labels().len(), steps + 1, "one undo step");
     }
 
+    /// The rest of a drag held at `from`: moves to `to` over a few frames and lets go there
+    fn move_and_let_go(harness: &mut egui_kittest::Harness<'_, TextureCraftApp>, from: Pos2, to: Pos2) {
+        for step in 1..=4 {
+            harness.event(egui::Event::PointerMoved(from.lerp(to, step as f32 / 4.0)));
+            harness.run_steps(1);
+        }
+        harness.event(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        harness.run_steps(2);
+    }
+
+    /// A drag whose first edit changes nothing (its arrow pulled further past the offset limit) makes no undo step, so its later edits make the drag's own step instead of joining the edit before it
+    #[test]
+    fn a_drag_that_first_changes_nothing_keeps_its_own_undo_step() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app("warp");
+        harness.state_mut().run("layer.decal.set", json!({"layer": layer.0, "offset": [100.0, 0.0]})).unwrap();
+
+        // The camera backs off so the frame, a mesh diagonal off the ball's centre, shows with its arrows
+        harness.state_mut().session.camera.distance *= 3.0;
+        harness.run_steps(2);
+        let at_limit = projection(&harness, layer);
+        let steps = harness.state().session.history_labels().len();
+        let start = gizmo(&harness);
+        let tip = start.arrows[0].expect("the across arrow shows");
+        let along = (tip - start.center).normalized();
+
+        press_and_move(&mut harness, tip, tip + along * 25.0, Modifiers::NONE);
+        assert_eq!(projection(&harness, layer), at_limit, "past the limit the frame stays where it is");
+        move_and_let_go(&mut harness, tip + along * 25.0, tip - along * 25.0);
+        assert_ne!(projection(&harness, layer), at_limit, "back inside the frame moves");
+        assert_eq!(harness.state().session.history_labels().len(), steps + 1, "the drag made its own undo step");
+
+        harness.state_mut().session.undo().unwrap();
+        assert_eq!(projection(&harness, layer), at_limit, "undo takes back the drag only");
+    }
+
+    /// An Undo mid-drag takes the drag's step away: the drag's next edits make a step of their own instead of joining the drag before it
+    #[test]
+    fn undo_mid_drag_leaves_the_drag_before_its_own_step() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app("warp");
+        let center = gizmo(&harness).center;
+        drag(&mut harness, center, center + vec2(30.0, 0.0), Modifiers::NONE);
+        let first = projection(&harness, layer);
+        let steps = harness.state().session.history_labels().len();
+
+        let center = gizmo(&harness).center;
+        press_and_move(&mut harness, center, center + vec2(0.0, 30.0), Modifiers::NONE);
+        harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
+        harness.run_steps(1);
+        assert_eq!(projection(&harness, layer), first, "Ctrl+Z undid the drag so far");
+        move_and_let_go(&mut harness, center + vec2(0.0, 30.0), center + vec2(0.0, 40.0));
+        assert_eq!(harness.state().session.history_labels().len(), steps + 1, "the drag's later edits made a step of their own");
+
+        harness.state_mut().session.undo().unwrap();
+        assert_eq!(projection(&harness, layer), first, "undo goes back to where the first drag left the frame");
+    }
+
     /// A click as a mouse sends it: move there, press, release
     fn click(harness: &mut egui_kittest::Harness<'_, TextureCraftApp>, at: Pos2) {
         harness.event(egui::Event::PointerMoved(at));

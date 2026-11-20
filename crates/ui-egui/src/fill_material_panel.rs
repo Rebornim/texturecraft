@@ -251,9 +251,21 @@ pub(crate) fn source_card(
                 }
             }
         }
+        Source::Anchor { anchor, channel, .. } if slot_of == SourceSlot::Grayscale && !crate::dock::anchor_in_mask(app, anchor) => {
+            anchor_channel_row(app, sheet, base, reader, channel);
+        }
         Source::Image { .. } | Source::Anchor { .. } => {}
     }
     sheet.close_card();
+}
+
+/// The channel a mask fill reads from a content anchor point as gray (a mask anchor point reads its mask's one gray)
+fn anchor_channel_row(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, base: &Value, reader: LayerId, channel: Channel) {
+    let project = &app.session.doc.project;
+    let channels = project.locate(reader).and_then(|(set, _, _)| project.texture_set(set).ok()).map(|set| set.channel_list()).unwrap_or_default();
+    if let (Some(picked), _) = sheet.dropdown(tr("Channel"), channel, &channels, |option| tr(option.label()).to_string(), None) {
+        app.run("effect.set", with(base, json!({"anchorChannel": picked.id()})));
+    }
 }
 
 /// Runs the fill command `choice` asks for on the slot (Import opens the import dialog)

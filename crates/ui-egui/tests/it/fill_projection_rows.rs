@@ -212,6 +212,27 @@ fn the_fill_caption_resets_the_whole_fill_section_to_its_projections_defaults_in
     assert_eq!(fill(&harness, layer), after_band, "one undo step brings the whole section back");
 }
 
+/// A click from one typed number field to the next types into the one clicked: the field after it keeps its own value
+#[test]
+fn a_click_from_one_typed_field_to_the_next_types_into_the_one_clicked() {
+    let (mut harness, _) = app_with_fill("planar");
+    let value = |harness: &Harness<'_, TextureCraftApp>, label: &str| harness.get_by_label(label).accesskit_node().numeric_value().unwrap();
+    let untouched = value(&harness, "Offset Z");
+
+    click_label(&mut harness, "Offset X");
+    harness.event(egui::Event::Text("0.1".into()));
+    harness.run_steps(SETTLE_FRAMES);
+    click_label(&mut harness, "Offset Y");
+    harness.event(egui::Event::Text("0.2".into()));
+    harness.run_steps(SETTLE_FRAMES);
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(SETTLE_FRAMES);
+
+    assert!((value(&harness, "Offset X") - 0.1).abs() < 1e-4, "the first field took its value");
+    assert!((value(&harness, "Offset Y") - 0.2).abs() < 1e-4, "the clicked field took the typing");
+    assert_eq!(value(&harness, "Offset Z"), untouched, "the field after it kept its value");
+}
+
 /// A projection's Shape crop, if it has a projector
 fn crop(projection: &Projection) -> Option<ShapeCrop> {
     match projection {

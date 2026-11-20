@@ -29,7 +29,15 @@ pub struct FramePlacement {
     pub scale: [f32; 3],
 }
 
-/// `proj` (a placed planar or a warp) with its projector's turn and scale moved into its frame, so the frame is where the projection lands; culling and crop stay. None for other projections
+/// Whether backface culling faces the same way once `projector`'s scale is moved into a frame: culling is off, or the scale is even and keeps the side the frame faces (culling reads the scaled normal, a frame its own)
+pub fn culling_folds(projector: &Projector) -> bool {
+    let stretch = projector_stretch(projector);
+    let size = stretch.abs();
+    let even = size.x == size.y && size.y == size.z;
+    !projector.backface.on || (even && stretch.x * stretch.y * stretch.z > 0.0)
+}
+
+/// `proj` (a placed planar or a warp) with its projector's turn and scale moved into its frame, so the frame is where the projection lands; culling and crop stay. None for other projections, and while backface culling cannot keep its facing (see [`culling_folds`])
 pub fn folded(proj: &Projection) -> Option<Projection> {
     let (frame, projector) = match proj {
         Projection::Planar { placed: Some(frame), projector, .. } | Projection::Warp { frame, projector, .. } => (frame, projector),
@@ -38,6 +46,10 @@ pub fn folded(proj: &Projection) -> Option<Projection> {
 
     if !projector.turns() {
         return Some(proj.clone());
+    }
+
+    if !culling_folds(projector) {
+        return None;
     }
 
     let (origin, across, up, _) = decal_axes(frame)?;
@@ -155,7 +167,7 @@ pub fn upright_turn(frame: &Decal) -> Option<f32> {
 
 #[cfg(test)]
 mod tests {
-    use texturecraft_core::{DecalFlip, DecalSymmetry, ShapeCrop, UvTransform};
+    use texturecraft_core::{Backface, DecalFlip, DecalSymmetry, ShapeCrop, UvTransform};
     use texturecraft_geom::glam::Vec2;
 
     use super::*;
@@ -229,6 +241,30 @@ mod tests {
         let unturned = planar(Projector::default());
         assert_eq!(folded(&unturned), Some(unturned), "nothing to fold: unchanged");
         assert_eq!(folded(&Projection::default()), None);
+    }
+
+    #[test]
+    fn folding_keeps_what_backface_culling_hides() {
+        let backface = Backface { on: true, angle: 60.0, hardness: 1.0 };
+        let square = Decal { center: [0.0; 3], normal: [0.0, 0.0, 1.0], up: [0.0, 1.0, 0.0], size: [1.0, 1.0], rotation: 0.0, offset: [0.0; 2], ..frame() };
+
+        // Half way between across and out: a scale across tilts the culled normal past the angle, a negative one turns it round
+        let normal = Vec3::new(1.0, 0.0, 1.0).normalize();
+        let center = (BOUNDS.0 + BOUNDS.1) * 0.5;
+        let cover = |proj: &Projection| framed_cover(proj, Vec3::ZERO, normal, center).map(|(_, cover)| cover);
+
+        for scale in [[4.0, 1.0, 1.0], [1.5, -1.5, 1.5], [1.7; 3]] {
+            let projector = Projector { scale, backface, ..Projector::default() };
+            let proj = Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: UvTransform::default(), projector, placed: Some(square) };
+            match folded(&proj) {
+                Some(flat) => {
+                    assert_eq!(cover(&proj), cover(&flat), "{scale:?}: culling changed");
+                    close(&samples(&proj), &samples(&flat));
+                }
+                None => assert!(!culling_folds(&projector), "{scale:?}: only a scale culling cannot keep stays unfolded"),
+            }
+        }
+        assert!(folded(&planar(Projector { scale: [1.7; 3], backface, ..Projector::default() })).is_some(), "an even scale still folds");
     }
 
     #[test]

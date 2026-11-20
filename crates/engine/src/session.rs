@@ -351,6 +351,8 @@ pub(crate) struct ActiveStroke {
     pub camera: OrbitCamera,
     pub viewport: Vec2,
     pub values: BTreeMap<Channel, [f32; 3]>,
+    /// What a mask stroke paints, resolved once so staging, preview and commit read one image
+    pub mask_gray: texturecraft_compose::MaskGray,
     pub erase: bool,
     /// Projection tool: the stencil captured with the stroke's camera.
     pub stencil: Option<texturecraft_compose::Stencil>,
@@ -730,6 +732,15 @@ impl Session {
             self.path_cache = None;
         }
 
+        // Cached path pixels were painted with the mask images their paths name
+        let resource_changed = |name: &str| match (previous_document.resources.get(name), self.doc.resources.get(name)) {
+            (Some(previous), Some(current)) => !Arc::ptr_eq(previous, current),
+            (previous, current) => previous.is_some() != current.is_some(),
+        };
+        if self.path_cache.as_ref().is_some_and(|cache| cache.images().any(|name| resource_changed(&name))) {
+            self.path_cache = None;
+        }
+
         // Removed or replaced resources may change any set's rendered content
         let removed_or_replaced_resource =
             previous_document.resources.iter().any(|(name, previous)| !self.doc.resources.get(name).is_some_and(|current| Arc::ptr_eq(previous, current)));
@@ -995,7 +1006,7 @@ impl Session {
                 opacity: stroke.stroke.settings.opacity,
                 erase: stroke.erase,
                 values: stroke.values.clone(),
-                mask_gray: self.mask_gray(),
+                mask_gray: stroke.mask_gray.clone(),
                 stencil: stroke.stencil.clone(),
                 carried_mask: stroke.canvas.pickup.as_ref().and_then(|pickup| pickup.mask_values()).cloned(),
                 carried: stroke.canvas.pickup.as_ref().map(|pickup| pickup.values.clone()).unwrap_or_default(),

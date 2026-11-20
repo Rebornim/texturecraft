@@ -3,11 +3,16 @@
 use texturecraft_core::{Decal, Projection, Projector};
 use texturecraft_geom::glam::{EulerRot, Mat3, Vec3};
 
+use crate::frame_placement::culling_folds;
 use crate::pattern::{DEPTH_FADE_START, frame_uv_from_corner, mesh_frame, nonzero_stretch, projector_stretch};
 
-/// The placed planar projection that reads images exactly as axis planar `proj` does on a mesh within `bounds` (None for other projections, placed ones included)
+/// The placed planar projection that reads images exactly as axis planar `proj` does on a mesh within `bounds` (None for other projections, placed ones included, and while backface culling cannot keep its facing in a frame: see [`culling_folds`])
 pub fn placed_from_axis(proj: &Projection, bounds: (Vec3, Vec3)) -> Option<Projection> {
     let Projection::Planar { scale, axis, offset, uv, projector, placed: None } = proj else { return None };
+
+    if !culling_folds(projector) {
+        return None;
+    }
 
     let frame = axis_frame(*scale, *axis, Vec3::from(*offset), projector, bounds)?;
 
@@ -63,7 +68,7 @@ const DEPTH_SPARE: f32 = 1.01;
 
 #[cfg(test)]
 mod tests {
-    use texturecraft_core::{ShapeCrop, UvTransform};
+    use texturecraft_core::{Backface, ShapeCrop, UvTransform};
     use texturecraft_geom::glam::Vec2;
 
     use super::*;
@@ -105,6 +110,35 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_placed_axis_planar_keeps_what_backface_culling_hides() {
+        let (lo, hi) = (Vec3::new(-1.0, -0.5, -2.0), Vec3::new(3.0, 1.5, 0.5));
+        let center = (lo + hi) * 0.5;
+        let radius = (hi - lo).length() * 0.5;
+        let backface = Backface { on: true, angle: 60.0, hardness: 1.0 };
+
+        // Half way between across and out: a stretch across tilts the culled normal past the angle, a negative one turns it round
+        let halfway = (center, Vec3::new(1.0, 0.0, 1.0).normalize());
+
+        for stretch in [[4.0, 1.0, 1.0], [1.5, -1.5, 1.5], [1.7; 3]] {
+            let projector = Projector { scale: stretch, backface, ..Projector::default() };
+            let axis_planar = Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: UvTransform::default(), projector, placed: None };
+            let Some(placed) = placed_from_axis(&axis_planar, (lo, hi)) else {
+                assert!(!culling_folds(&projector), "{stretch:?}: only a stretch culling cannot keep stays unplaced");
+                continue;
+            };
+
+            for (position, normal) in points(lo, hi).into_iter().chain([halfway]) {
+                let coords = Coords { uv: Vec2::ZERO, pos: (position - center) / radius, nrm: normal };
+                let (_, cover) = framed_cover(&placed, position, normal, center).expect("a placed frame covers");
+                assert!((projector_cover(&axis_planar, &coords) - cover).abs() < 1e-3, "{stretch:?}: culling changed at {normal}");
+            }
+        }
+        let even = Projector { scale: [1.7; 3], backface, ..Projector::default() };
+        let axis_planar = Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: UvTransform::default(), projector: even, placed: None };
+        assert!(placed_from_axis(&axis_planar, (lo, hi)).is_some(), "an even stretch is still placed");
     }
 
     #[test]

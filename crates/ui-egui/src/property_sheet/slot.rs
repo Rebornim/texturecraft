@@ -255,6 +255,7 @@ impl PropertySheet<'_> {
                 self.ui.data_mut(|data| data.insert_temp(typing_id, text));
             }
         } else {
+            self.skip_typing_edit();
             let response = self.ui.interact(field, id, Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, crate::i18n::trf("{label} value", &[("label", &label)])));
             painter.text(pos2(field.right() - SEED_VALUE_INSET, center_y), Align2::RIGHT_CENTER, seed.to_string(), semibold(TEXT_SIZE), tokens.text);

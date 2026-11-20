@@ -5,6 +5,7 @@ use texturecraft_engine::core::{Filtering, ShapeCrop, UvWrap};
 
 use crate::fill_placement::Placement;
 use crate::projection_kind::ProjectionKind;
+use crate::projection_preview::{edge_markers, passed_sides};
 use crate::warp_checker::warp_checker;
 
 use crate::theme::Tokens;
@@ -75,13 +76,29 @@ const PREVIEW_MAX_SPAN: i32 = 64;
 const PREVIEW_DARK: f32 = 0.18;
 const PREVIEW_LIGHT: f32 = 0.55;
 
-/// A window on the surface: a UV checker (2 × 2 cells per tile, accent tile borders) tiled, turned and slid as the fill is
+/// A window that follows the projection: a UV checker (2 × 2 cells per tile, accent tile borders) tiled and turned as the fill is, the filled dot in the middle, the ring where the centre sits with Offset 0
 pub(crate) fn window_preview(painter: &Painter, rect: Rect, placement: Placement, tokens: &Tokens) {
+    let (columns, rest) = followed_window(placement);
+    lattice_preview(painter, rect, (columns, [0.0, 0.0]), true, tokens);
+    let center = pos2(rect.left() + rest[0] * rect.width(), rect.top() + rest[1] * rect.height());
+    let painter = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
+    crate::preview_dots::preview_dots(&painter, center, rect.center(), tokens);
+    edge_markers(&painter, rect, passed_sides(std::iter::once(center), rect), tokens);
+}
+
+/// The window preview's map, and where the window's centre with Offset 0 lands in it (0..1): the view follows the Offset, so only that centre moves
+fn followed_window(placement: Placement) -> ([[f32; 2]; 2], [f32; 2]) {
     let tiling = [placement.tiling[0].clamp(1e-3, PREVIEW_MAX_TILES), placement.tiling[1].clamp(1e-3, PREVIEW_MAX_TILES)];
     let (sin, cos) = placement.rotation.to_radians().sin_cos();
     // Turn, scale, then offset: one step across the window moves (cos, sin) scaled in the texture
     let columns = [[cos * tiling[0], sin * tiling[1]], [-sin * tiling[0], cos * tiling[1]]];
-    lattice_preview(painter, rect, (columns, placement.offset), true, tokens);
+    let [[a, b], [c, d]] = columns;
+    let det = a * d - c * b;
+    let [x, y] = placement.offset;
+    // The window step the Offset is worth: the map undone
+    let moved = [(d * x - c * y) / det, (a * y - b * x) / det];
+    let rest = if moved.iter().all(|value| value.is_finite()) { [0.5 + moved[0], 0.5 + moved[1]] } else { [0.5, 0.5] };
+    (columns, rest)
 }
 
 /// The window preview for any linear map: window point (u, v) shows the texture at `columns[0] · u + columns[1] · v + shift`; without `repeat` only tile 0..1
@@ -252,4 +269,22 @@ const RING_SEGMENTS: usize = 64;
 fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
     let mix = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round().clamp(0.0, 255.0) as u8;
     Color32::from_rgb(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The UV view follows the projection: the checker shows as at Offset 0 whatever the Offset, and the ring (the window's centre at Offset 0) moves the other way
+    #[test]
+    fn the_uv_view_follows_the_offset_and_the_ring_moves_away() {
+        let placement = |offset: [f32; 2]| Placement { tiling: [2.0, 2.0], rotation: 30.0, offset };
+        let (still, rest) = followed_window(placement([0.0, 0.0]));
+        assert_eq!(rest, [0.5, 0.5], "at Offset 0 the ring holds the dot in the middle");
+        let (columns, ring) = followed_window(placement([0.25, 0.0]));
+        assert_eq!(columns, still, "the checker stands still");
+        // 0.25 along U with a 30 degree turn and Tiling 2: an eighth of the window along the turned U
+        let expected = [0.5 + 0.125 * 30f32.to_radians().cos(), 0.5 - 0.125 * 30f32.to_radians().sin()];
+        assert!((ring[0] - expected[0]).abs() < 1e-5 && (ring[1] - expected[1]).abs() < 1e-5, "{ring:?} vs {expected:?}");
+    }
 }

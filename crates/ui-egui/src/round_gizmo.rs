@@ -121,6 +121,11 @@ fn drag_id() -> egui::Id {
 }
 
 impl RoundGizmo {
+    /// The projector as the 3D view shows it: none while the Projection row's eye hides the projection gizmos
+    pub(crate) fn shown(app: &TextureCraftApp, rect: Rect) -> Option<RoundGizmo> {
+        RoundGizmo::of(app, rect).filter(|_| app.session.doc.project.display.projection_gizmos)
+    }
+
     /// The projector of the selected tri-planar, spherical or cylindrical fill
     pub(crate) fn of(app: &TextureCraftApp, rect: Rect) -> Option<RoundGizmo> {
         if app.ui.mode != crate::state::Mode::Painting {
@@ -394,18 +399,21 @@ fn on_view_plane(app: &TextureCraftApp, rect: Rect, origin: Vec3, forward: Vec3,
 pub(crate) fn hovered(app: &TextureCraftApp, ui: &Ui, rect: Rect) -> bool {
     let dragging = ui.ctx().data(|data| data.get_temp::<RoundDrag>(drag_id())).is_some();
     dragging
-        || ui.ctx().pointer_hover_pos().is_some_and(|hover| rect.contains(hover) && RoundGizmo::of(app, rect).is_some_and(|gizmo| gizmo.grab(hover).is_some()))
+        || ui
+            .ctx()
+            .pointer_hover_pos()
+            .is_some_and(|hover| rect.contains(hover) && RoundGizmo::shown(app, rect).is_some_and(|gizmo| gizmo.grab(hover).is_some()))
 }
 
 /// Whether screen point `at` is on one of the selected projector's handles
 pub(crate) fn handle_at(app: &TextureCraftApp, rect: Rect, at: Pos2) -> bool {
-    rect.contains(at) && RoundGizmo::of(app, rect).is_some_and(|gizmo| gizmo.grab(at).is_some())
+    rect.contains(at) && RoundGizmo::shown(app, rect).is_some_and(|gizmo| gizmo.grab(at).is_some())
 }
 
 /// Drags on the projector's handles (one undo step per drag, the projection updates live); returns whether a drag owns the pointer
 pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response, rect: Rect) -> bool {
     let ctx = ui.ctx();
-    let gizmo = RoundGizmo::of(app, rect);
+    let gizmo = RoundGizmo::shown(app, rect);
     let mut drag = ctx.data(|data| data.get_temp::<RoundDrag>(drag_id())).filter(|drag| gizmo.as_ref().is_some_and(|gizmo| gizmo.target == drag.start.target));
     if response.drag_started_by(PointerButton::Primary)
         && let (Some(gizmo), Some(from)) = (&gizmo, ctx.input(|input| input.pointer.press_origin()))
@@ -434,7 +442,7 @@ pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Respons
 
 /// The projector over the 3D view: dashed shape, rings, arrows, centre square and dots; the cursor shows what the handle under it does
 pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
-    let Some(gizmo) = RoundGizmo::of(app, rect) else { return };
+    let Some(gizmo) = RoundGizmo::shown(app, rect) else { return };
 
     let tokens = Tokens::get(ui.ctx());
     let painter = ui.painter_at(rect);

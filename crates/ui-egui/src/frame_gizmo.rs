@@ -554,10 +554,24 @@ pub(crate) mod tests {
         harness.run_steps(4);
         harness.render().unwrap().save(directory.join("move-planar-side-hover.png")).unwrap();
 
-        harness.get_by_label("Move on model").click();
-        harness.hover_at(planar.arrows[0].unwrap());
-        harness.run_steps(4);
-        harness.render().unwrap().save(directory.join("move-planar-trackpad.png")).unwrap();
+        // Move on model held down and dragged into the 3D view: the button stays lit and the frame follows
+        let button = harness.get_by_label("Move on model").rect().center();
+        harness.event(egui::Event::PointerMoved(button));
+        harness.event(egui::Event::PointerButton { pos: button, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        harness.run_steps(2);
+        for step in 1..=6 {
+            harness.event(egui::Event::PointerMoved(button + vec2(-40.0, 10.0) * step as f32));
+            harness.run_steps(1);
+        }
+        harness.run_steps(3);
+        harness.render().unwrap().save(directory.join("move-planar-held.png")).unwrap();
+        harness.event(egui::Event::PointerButton {
+            pos: button + vec2(-240.0, 60.0),
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        });
+        harness.run_steps(2);
 
         let (mut harness, layer) = fill_app_rendered(json!({"projection": "warp"}), true);
         checker(&mut harness, layer);
@@ -588,7 +602,6 @@ pub(crate) mod tests {
 
         let (mut harness, layer) = fill_app_rendered(json!({"projection": "spherical"}), true);
         checker(&mut harness, layer);
-        harness.get_by_label("Move on model").click();
         harness.run_steps(4);
         let round = crate::round_gizmo::RoundGizmo::of(harness.state(), harness.state().viewport_rect).unwrap();
         let (dot, _) = round.dots[0];
@@ -651,12 +664,10 @@ pub(crate) mod tests {
         let scaled = placement(&projection(&harness, layer), harness.state().session.mesh.bounds()).unwrap();
         assert!(scaled.scale[1] < narrowed.scale[1] * 0.8 && scaled.scale[0] < narrowed.scale[0] * 0.8, "a corner scales it: {scaled:?}");
 
-        // Move on model: Shift+drag turns the frame round its normal
-        harness.state_mut().moving_on_model = Some(crate::move_on_model::MoveOnModel::layer(layer));
-        harness.run_steps(2);
+        // Move on model held with Shift turns the frame round its normal
         let before = placement(&projection(&harness, layer), harness.state().session.mesh.bounds()).unwrap();
-        let off = gizmo(&harness).center + vec2(-100.0, 80.0);
-        drag_frames(&mut harness, layer, off, off + vec2(60.0, 0.0), Modifiers::SHIFT, true, check(layer));
+        let button = harness.get_by_label("Move on model").rect().center();
+        drag_frames(&mut harness, layer, button, button + vec2(-60.0, 0.0), Modifiers::SHIFT, true, check(layer));
         let turned = placement(&projection(&harness, layer), harness.state().session.mesh.bounds()).unwrap();
         assert!((turned.rotation[2] - before.rotation[2]).abs() > 10.0, "turned: {before:?} -> {turned:?}");
         assert_eq!(harness.state().session.history_labels().len(), steps + 4, "one undo step per drag");

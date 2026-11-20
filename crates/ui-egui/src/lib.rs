@@ -70,6 +70,7 @@ mod material_orb;
 mod material_preview_image;
 pub mod menus;
 mod mesh_export_options;
+mod move_hold;
 pub mod move_on_model;
 mod name_error;
 mod named_layout;
@@ -139,7 +140,6 @@ mod tile_edits;
 mod tile_picture;
 pub mod titlebar;
 pub mod toolbar;
-mod trackpad_drag;
 pub mod ui_state_store;
 pub mod unavailable;
 #[cfg(not(target_arch = "wasm32"))]
@@ -263,7 +263,7 @@ pub struct TextureCraftApp {
     pub last_paint_point: Option<uv_paint_point::SurfacePaintPoint>,
     /// The last finished 2D stroke's endpoint, scoped to its mesh and texture set for Shift+click lines
     pub last_paint_uv: Option<uv_paint_point::UvPaintPoint>,
-    /// The fill Move on model moves: drags in the 3D view slide its projection, the wheel resizes it, Shift+drag turns it
+    /// The fill whose Move on model button is held down: dragging slides its projection, Shift or the right button turns it, the wheel scales it
     pub moving_on_model: Option<move_on_model::MoveOnModel>,
     /// The Properties popup a right click in a view opens.
     pub properties_popup: Option<properties_popup::PropertiesPopup>,

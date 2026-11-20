@@ -21,6 +21,8 @@ mod organic;
 pub mod pattern;
 mod pattern_context;
 pub mod projector_cover;
+pub mod projector_depth;
+pub mod projector_view;
 pub mod solo;
 pub mod store;
 pub mod thumb;

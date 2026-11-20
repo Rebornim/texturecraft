@@ -3,7 +3,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 
 use super::system_pointer::SystemPointer;
-use super::{Hold, hold, hold_like, settle};
+use super::{Hold, ask_for_hold, hold_like, settle};
 
 /// A strip that scrubs: dragging it adds the pointer's moves to the state, holding the pointer while it does
 fn scrub_strip(hold_as: Hold) -> Harness<'static, Vec2> {
@@ -11,7 +11,7 @@ fn scrub_strip(hold_as: Hold) -> Harness<'static, Vec2> {
         |ui, moved: &mut Vec2| {
             let response = ui.interact(Rect::from_min_size(pos2(10.0, 10.0), vec2(100.0, 24.0)), ui.scope_id().with("scrub"), Sense::drag());
             if response.dragged() {
-                hold(ui.ctx());
+                ask_for_hold(ui.ctx());
                 *moved += response.drag_delta();
             }
             settle(ui.ctx());

@@ -20,7 +20,8 @@ pub struct MoveOnModel {
 }
 
 impl MoveOnModel {
-    pub fn layer(layer: LayerId) -> MoveOnModel {
+    /// A fill layer's own projection
+    pub(crate) fn layer(layer: LayerId) -> MoveOnModel {
         MoveOnModel { layer, effect: None }
     }
 
@@ -110,6 +111,7 @@ fn still_pressed(ctx: &egui::Context) -> bool {
     ctx.input(|input| input.pointer.primary_down()) && !crate::viewport::focus_lost(ctx)
 }
 
+/// Ends the hold where it is: its edits stay one undo step
 fn end(app: &mut TextureCraftApp, ctx: &egui::Context) {
     app.moving_on_model = None;
     ctx.data_mut(|data| data.remove::<MoveHold>(hold_id()));
@@ -144,7 +146,7 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, pad: &egui::Response, ta
     };
 
     app.moving_on_model = Some(target);
-    crate::pointer_lock::hold(ctx);
+    crate::pointer_lock::ask_for_hold(ctx);
     if held.pass == pass {
         return;
     }
@@ -154,7 +156,7 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, pad: &egui::Response, ta
     let rect = app.viewport_rect;
     if let Some(at) = pointer.filter(|at| *at != held.last) {
         if let Some((command, params)) = dragged(app, target, held.last, at, turn, rect) {
-            step(app, &mut held, command, &params);
+            step(app, &mut held, command, params);
         }
         held.last = at;
     }
@@ -164,7 +166,7 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, pad: &egui::Response, ta
     if wheel != 0.0
         && let Some((command, params)) = resized(app, target, (SCALE_PER_WHEEL_POINT * wheel).exp(), rect)
     {
-        step(app, &mut held, command, &params);
+        step(app, &mut held, command, params);
     }
 
     ctx.data_mut(|data| data.insert_temp(hold_id(), held));
@@ -174,8 +176,7 @@ fn hold(app: &mut TextureCraftApp, ctx: &egui::Context, pad: &egui::Response, ta
 }
 
 /// Runs one edit of the hold; every edit after the first joins the first's undo step
-fn step(app: &mut TextureCraftApp, held: &mut MoveHold, command: &str, params: &Value) {
-    let mut params = params.clone();
+fn step(app: &mut TextureCraftApp, held: &mut MoveHold, command: &str, mut params: Value) {
     params["merge"] = json!(held.stepped);
     held.stepped |= texturecraft_engine::execute(&mut app.session, command, &params).is_ok();
 }
@@ -238,6 +239,7 @@ fn resized(app: &TextureCraftApp, target: MoveOnModel, growth: f32, rect: Rect) 
     Some(("layer.fill.projection", params))
 }
 
+/// Adds the `layer` or `effect` param naming `target` to `params`
 fn merge_target(params: &mut Value, target: MoveOnModel) {
     if let (Some(params), Value::Object(fields)) = (params.as_object_mut(), target.target()) {
         params.extend(fields);

@@ -161,7 +161,7 @@ impl PropertySheet<'_> {
         }
 
         if response.dragged() {
-            crate::pointer_lock::hold(self.ui.ctx());
+            crate::pointer_lock::ask_for_hold(self.ui.ctx());
         }
         let delta = response.drag_delta().x;
         let moved = response.dragged() && delta != 0.0;

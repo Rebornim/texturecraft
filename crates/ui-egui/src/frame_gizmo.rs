@@ -1,6 +1,6 @@
 //! The frame of the selected planar or warp projection in the 3D view: the centre square slides it, the axis arrows move it along its across, up and out directions, the ring turns it round its normal, a planar's corners scale it, the edge dots stretch one side, a warp's corners pull freely
 
-use egui::{Color32, PointerButton, Pos2, Rect, Stroke, Ui, vec2};
+use egui::{Color32, Pos2, Rect, Stroke, Ui, vec2};
 use serde_json::{Value, json};
 use texturecraft_engine::compose::axis_frame::placed_from_axis;
 use texturecraft_engine::compose::frame_placement::folded;
@@ -9,13 +9,12 @@ use texturecraft_engine::core::{Decal, EffectKind, Fill, LayerId, LayerKind, Pro
 use texturecraft_engine::geom::glam::Vec3;
 
 use crate::TextureCraftApp;
+use crate::projection_gizmo::{Gizmo, dragging};
 use crate::theme::{AXIS_COLORS, Tokens};
-use crate::viewport::{focus_lost, project, view_ray};
+use crate::viewport::{project, view_ray};
 
-mod frame_drag;
 mod frame_grab;
 
-use frame_drag::FrameDrag;
 pub(crate) use frame_grab::FrameGrab;
 
 fn drag_id() -> egui::Id {
@@ -66,7 +65,9 @@ pub(crate) const TURN_RING: f32 = 84.0;
 /// Points on a frame's turn ring, the first repeated at the end to close it
 pub(crate) const TURN_RING_POINTS: usize = 49;
 /// The smallest share of its size a dragged side keeps
-const MIN_STRETCH: f32 = 0.02;
+const MIN_SIDE_STRETCH: f32 = 0.02;
+/// The least distance from the centre a resize drag measures from, so a press on the centre never divides by zero (points)
+pub(crate) const MIN_HANDLE_REACH: f32 = 1.0;
 
 impl FrameGizmo {
     /// The frame as the 3D view shows it: none while the Projection row's eye hides the projection gizmos
@@ -210,12 +211,12 @@ impl FrameGizmo {
                 }
             }
             FrameGrab::Scale => {
-                let scale = (to - center).length() / (from - center).length().max(1.0);
+                let scale = (to - center).length() / (from - center).length().max(MIN_HANDLE_REACH);
                 json!({"size": [self.decal.size[0] * scale, self.decal.size[1] * scale]})
             }
             FrameGrab::Side(side) => {
                 let direction = *self.sides.get(side)? - center;
-                let stretch = ((to - center).dot(direction) / (from - center).dot(direction).max(1.0)).max(MIN_STRETCH);
+                let stretch = ((to - center).dot(direction) / (from - center).dot(direction).max(MIN_HANDLE_REACH)).max(MIN_SIDE_STRETCH);
                 let mut size = self.decal.size;
                 size[1 - side % 2] *= stretch;
                 json!({"size": size})
@@ -298,74 +299,45 @@ pub(crate) fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     p.distance(a + ab * t)
 }
 
-/// Whether the pointer is over one of the selected frame's handles (the brush cursor hides there)
-pub(crate) fn hovered(app: &TextureCraftApp, ui: &Ui, rect: Rect) -> bool {
-    let dragging = ui.ctx().data(|data| data.get_temp::<FrameDrag>(drag_id())).is_some();
-    dragging
-        || ui
-            .ctx()
-            .pointer_hover_pos()
-            .is_some_and(|hover| rect.contains(hover) && FrameGizmo::shown(app, rect).is_some_and(|gizmo| gizmo.grab(hover).is_some()))
+impl Gizmo for FrameGizmo {
+    type Grab = FrameGrab;
+
+    fn drag_id() -> egui::Id {
+        drag_id()
+    }
+
+    fn grab(&self, p: Pos2) -> Option<FrameGrab> {
+        FrameGizmo::grab(self, p)
+    }
+
+    fn same_projection(&self, other: &FrameGizmo) -> bool {
+        self.layer == other.layer && self.effect == other.effect
+    }
+
+    fn edit(&self, app: &TextureCraftApp, rect: Rect, grab: FrameGrab, from: Pos2, to: Pos2) -> Option<(&'static str, Value)> {
+        FrameGizmo::edit(self, app, rect, grab, from, to)
+    }
 }
 
-/// Whether screen point `at` is on one of the selected frame's handles
-pub(crate) fn handle_at(app: &TextureCraftApp, rect: Rect, at: Pos2) -> bool {
-    rect.contains(at) && FrameGizmo::shown(app, rect).is_some_and(|gizmo| gizmo.grab(at).is_some())
-}
-
-/// Drags on the selected frame's handles (one undo step per drag, the projection updates live); returns whether a frame drag owns the pointer
-pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response, rect: Rect) -> bool {
+/// Drags on the selected frame's handles; returns whether a frame drag owns the pointer. The cursor shows what the handle under it, or the one dragged, does
+pub(crate) fn input(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response, rect: Rect, gizmo: Option<&FrameGizmo>) -> bool {
     let ctx = ui.ctx();
-    let gizmo = FrameGizmo::shown(app, rect);
-    let on_frame = |drag: &FrameDrag| gizmo.as_ref().is_some_and(|gizmo| gizmo.layer == drag.layer && gizmo.effect == drag.effect);
-    let mut drag = ctx.data(|data| data.get_temp::<FrameDrag>(drag_id())).filter(on_frame);
-    if response.drag_started_by(PointerButton::Primary)
-        && let (Some(gizmo), Some(from)) = (&gizmo, ctx.input(|input| input.pointer.press_origin()))
-        && let Some(grab) = gizmo.grab(from)
-    {
-        drag = Some(FrameDrag { layer: gizmo.layer, effect: gizmo.effect, grab, from, start: *gizmo, stepped: false });
-    }
-
-    // A window that lost the focus gets no release: the drag ends there
-    let dragging = (response.dragged_by(PointerButton::Primary) || response.drag_started_by(PointerButton::Primary)) && !focus_lost(ctx);
-    let Some(mut drag) = drag.filter(|_| dragging) else {
-        let_go(ctx);
-        if let (Some(gizmo), Some(hover)) = (&gizmo, response.hover_pos())
-            && let Some(grab) = gizmo.grab(hover)
-        {
-            ctx.set_cursor_icon(grab.cursor(false));
-        }
-        return false;
+    let owned = crate::projection_gizmo::input(app, ctx, response, rect, gizmo);
+    let cursor = match dragging::<FrameGizmo>(ctx) {
+        Some(drag) => Some(drag.grab.cursor(true)),
+        None => gizmo.zip(response.hover_pos()).and_then(|(gizmo, hover)| gizmo.grab(hover)).map(|grab| grab.cursor(false)),
     };
-
-    ctx.set_cursor_icon(drag.grab.cursor(true));
-    if let Some(pointer) = response.interact_pointer_pos().filter(|_| ctx.input(|input| input.pointer.delta() != egui::Vec2::ZERO))
-        && let Some((command, mut params)) = drag.start.edit(app, rect, drag.grab, drag.from, pointer)
-    {
-        params["merge"] = json!(drag.stepped);
-
-        // Off the plane or past the size limits: the frame waits where it is
-        drag.stepped |= texturecraft_engine::execute(&mut app.session, command, &params).is_ok();
-
-        // The panel drew before this edit: one more frame shows its fields and preview where the frame is now
-        ctx.request_repaint();
+    if let Some(cursor) = cursor {
+        ctx.set_cursor_icon(cursor);
     }
-    ctx.data_mut(|data| data.insert_temp(drag_id(), drag));
-    true
-}
-
-/// Ends a frame drag under way where it is: its undo step stays one step
-pub(crate) fn let_go(ctx: &egui::Context) {
-    ctx.data_mut(|data| data.remove::<FrameDrag>(drag_id()));
+    owned
 }
 
 /// The selected frame over the 3D view: dashed outline, corner and edge dots, and the centre square with its axis arrows
-pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
-    let Some(gizmo) = FrameGizmo::shown(app, rect) else { return };
-
+pub(crate) fn overlay(ui: &Ui, rect: Rect, gizmo: &FrameGizmo) {
     let tokens = Tokens::get(ui.ctx());
     let painter = ui.painter_at(rect);
-    let active = ui.ctx().data(|data| data.get_temp::<FrameDrag>(drag_id())).map(|drag| drag.grab);
+    let active = dragging::<FrameGizmo>(ui.ctx()).map(|drag| drag.grab);
     let hovered = ui.ctx().pointer_hover_pos().filter(|hover| rect.contains(*hover)).and_then(|hover| gizmo.grab(hover));
     let lit = |grab: FrameGrab| active == Some(grab) || (active.is_none() && hovered == Some(grab));
     let dot_fill = |grab: FrameGrab| if lit(grab) { tokens.viewport_accent } else { Color32::WHITE };
@@ -400,7 +372,6 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) {
 
 /// The centre square (filled `square`) with its X/Y/Z arrows to `arrows`, coloured by `arrow_color`; shafts and heads over a dark halo like the symmetry manipulator's
 pub(crate) fn move_handles(painter: &egui::Painter, center: Pos2, arrows: [Option<Pos2>; 3], arrow_color: impl Fn(usize) -> Color32, square: Color32) {
-    let edge = Stroke::new(1.0, Color32::from_black_alpha(200));
     for (axis, tip) in arrows.into_iter().enumerate() {
         let Some(tip) = tip else { continue };
 
@@ -410,10 +381,10 @@ pub(crate) fn move_handles(painter: &egui::Painter, center: Pos2, arrows: [Optio
         let start = center + direction * CENTER_SQUARE * 0.5;
         painter.line_segment([start, tip], Stroke::new(SHAFT_WIDTH + HALO_EXTRA_WIDTH, HALO));
         painter.line_segment([start, tip], Stroke::new(SHAFT_WIDTH, color));
-        painter.add(egui::Shape::convex_polygon(vec![tip + direction * ARROW_HEAD, tip + side, tip - side], color, edge));
+        painter.add(egui::Shape::convex_polygon(vec![tip + direction * ARROW_HEAD, tip + side, tip - side], color, HANDLE_EDGE));
     }
     let square_rect = Rect::from_center_size(center, vec2(CENTER_SQUARE, CENTER_SQUARE));
-    painter.rect(square_rect, 2.0, square, edge, egui::StrokeKind::Middle);
+    painter.rect(square_rect, CENTER_SQUARE_CORNER_RADIUS, square, HANDLE_EDGE, egui::StrokeKind::Middle);
 }
 
 /// The dashed outline's dark shadow under its light dashes, and the dash and gap lengths
@@ -434,11 +405,15 @@ const ARROW_HEAD_HALF_WIDTH: f32 = 0.45;
 
 /// The dark rim around a handle dot
 const DOT_RIM: f32 = 1.5;
+/// The thin dark edge round handle dots, arrow heads and the centre square
+pub(crate) const HANDLE_EDGE: Stroke = Stroke { width: 1.0, color: Color32::from_black_alpha(200) };
+/// The centre square's corner radius (points)
+const CENTER_SQUARE_CORNER_RADIUS: f32 = 2.0;
 
 /// A handle dot of `radius`: `fill` over a dark rim, so it reads on a light or dark model
 pub(crate) fn handle_dot(painter: &egui::Painter, at: Pos2, radius: f32, fill: Color32) {
     painter.circle_filled(at, radius + DOT_RIM, HALO);
-    painter.circle(at, radius, fill, Stroke::new(1.0, Color32::from_black_alpha(200)));
+    painter.circle(at, radius, fill, HANDLE_EDGE);
 }
 
 #[cfg(test)]
@@ -511,7 +486,7 @@ pub(crate) mod tests {
 
     /// Whether a frame drag is under way
     fn frame_dragging(harness: &egui_kittest::Harness<'_, TextureCraftApp>) -> bool {
-        harness.ctx.data(|data| data.get_temp::<FrameDrag>(drag_id())).is_some()
+        crate::projection_gizmo::dragging::<FrameGizmo>(&harness.ctx).is_some()
     }
 
     /// A drag as a mouse sends it, one small move per frame; after each frame `check` looks at the app and (with `preview`) the 3D preview square must have re-rendered
@@ -605,6 +580,40 @@ pub(crate) mod tests {
         assert_eq!((frame, corners[0], corners[2], corners[3]), (warp.decal, [-0.5, 0.5], [0.5, -0.5], [-0.5, -0.5]), "only that corner moves");
         assert!(corners[1][0] < 0.45 && corners[1][1] < 0.45, "top right pulled in: {corners:?}");
         assert!(gizmo(&harness).corners[1].distance(to) < 1.5, "the corner sits under the pointer");
+    }
+
+    /// The across and up arrows slide a frame on its own plane and the out arrow moves it along its normal, each following the pointer; one undo step per drag
+    #[test]
+    fn the_arrows_move_a_frame_along_its_directions() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut harness, layer) = fill_app("warp");
+        let steps = harness.state().session.history_labels().len();
+        let frame = |harness: &egui_kittest::Harness<'_, TextureCraftApp>| match projection(harness, layer) {
+            Projection::Warp { frame, .. } => frame,
+            other => panic!("still a warp: {other:?}"),
+        };
+
+        for axis in 0..3 {
+            let start = gizmo(&harness);
+            let tip = start.arrows[axis].unwrap_or_else(|| panic!("arrow {axis} shows"));
+            let along = (tip - start.center).normalized();
+            let before = frame(&harness);
+            drag(&mut harness, tip, tip + along * 25.0, Modifiers::NONE);
+
+            let moved = gizmo(&harness);
+            assert!(
+                (moved.center - start.center).dot(along) > 15.0,
+                "arrow {axis}: the centre follows the pointer along it: {:?} -> {:?}",
+                start.center,
+                moved.center
+            );
+            assert_eq!(frame(&harness).normal, before.normal, "arrow {axis}: moving never turns the frame");
+
+            // Across and up slide it on its own plane, out moves it along its normal
+            let shift = moved.origin - start.origin;
+            assert!(shift.normalize().dot(start.axes[axis]) > 0.99, "arrow {axis} moves it along its own direction: {shift:?}");
+            assert_eq!(harness.state().session.history_labels().len(), steps + axis + 1, "arrow {axis}: one undo step per drag");
+        }
     }
 
     /// The panel's Rotation turns a frame and its Scale sizes it, so the gizmo does both: the ring turns a planar or warp frame round its normal, following the pointer round the centre; a warp's edge dots size its frame as a planar's do

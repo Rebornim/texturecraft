@@ -18,6 +18,7 @@ use crate::gpu::ViewCallback;
 use crate::i18n::{tr, trf};
 use crate::path_hit::PathHit;
 use crate::path_surface_cache::{PathSurfaceCache, SurfaceCurve};
+use crate::projection_gizmo::ShownGizmo;
 use crate::state::ViewLayout;
 use crate::theme::Tokens;
 use crate::toolbar::{MAX_BRUSH_SIZE, MIN_BRUSH_SIZE};
@@ -46,12 +47,12 @@ pub fn set_focus_picking(ctx: &egui::Context, on: bool) {
 
 /// What the views' aux texture shows: the quick mask being edited, a mesh map, the image a pending ID pick reads instead of the ID mesh map, or a mask
 fn aux_view(app: &TextureCraftApp) -> Option<crate::gpu::AuxView> {
-    match app.session.view {
+    match (app.session.view, app.picking_id_color) {
         _ if quick_mask_shown(app) => Some(crate::gpu::AuxView::QuickMask),
-        ViewMode::MeshMap(BakedMap::Id) if app.picking_id_color.is_some() => app.picking_id_color.map(|pick| crate::gpu::AuxView::IdMask(pick.effect)),
-        ViewMode::MeshMap(map) => Some(crate::gpu::AuxView::MeshMap(map)),
-        ViewMode::Mask(id) => Some(crate::gpu::AuxView::Mask(id)),
-        ViewMode::Image => Some(crate::gpu::AuxView::Image),
+        (ViewMode::MeshMap(BakedMap::Id), Some(pick)) => Some(crate::gpu::AuxView::IdMask(pick.effect)),
+        (ViewMode::MeshMap(map), _) => Some(crate::gpu::AuxView::MeshMap(map)),
+        (ViewMode::Mask(id), _) => Some(crate::gpu::AuxView::Mask(id)),
+        (ViewMode::Image, _) => Some(crate::gpu::AuxView::Image),
         _ if app.ui.mode == crate::state::Mode::Baking && app.ui.bake_visualization.bent_normal_shown() => {
             Some(crate::gpu::AuxView::MeshMap(BakedMap::BentNormal))
         }
@@ -915,13 +916,16 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
 
     // The selected fill's frame (planar, warp) or round projector (tri-planar, spherical, cylindrical): only a press on one of its handles moves it
     let gizmo_free = !alt && !holding && !s_held && !v_held && !focus_pick && !popup && !picking && touch.is_none() && !DecalDrop::blocks_input(ui.ctx());
-    let frame_drag = gizmo_free && (crate::frame_gizmo::input(app, ui, &response, rect) || crate::round_gizmo::input(app, ui, &response, rect));
+    let gizmo = ShownGizmo::of(app, rect);
+    let frame_drag = gizmo_free && ShownGizmo::input(app, ui, &response, rect, gizmo.as_ref());
 
     // Alt (or another mode) taking the pointer mid-drag ends the drag: let go of Alt, it must not resume from where it began before the camera moved
     if !gizmo_free {
-        crate::frame_gizmo::let_go(ui.ctx());
-        crate::round_gizmo::let_go(ui.ctx());
+        ShownGizmo::let_go(ui.ctx());
     }
+
+    // A drag moved the projection: its handles and outline show where it is now
+    let gizmo = if frame_drag { ShownGizmo::of(app, rect) } else { gizmo };
 
     let projection_drag = frame_drag || holding;
     let plane_pick = !popup
@@ -951,9 +955,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
 
     // A projection gizmo's handle owns a press that began on it (the pointer may have left it by the time the drag registers)
     let pressed_at = ui.input(|input| if input.pointer.any_down() { input.pointer.press_origin() } else { input.pointer.hover_pos() });
-    let gizmo_handle = gizmo_free
-        && !app.session.stroke_active()
-        && pressed_at.is_some_and(|at| crate::frame_gizmo::handle_at(app, rect, at) || crate::round_gizmo::handle_at(app, rect, at));
+    let gizmo_handle = gizmo_free && !app.session.stroke_active() && pressed_at.is_some_and(|at| gizmo.as_ref().is_some_and(|gizmo| gizmo.on_handle(rect, at)));
 
     // Painting
     let painting = tool_acts(app)
@@ -1049,8 +1051,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && app.picking_id_color.is_none()
         && app.picking_color.is_none()
         && app.moving_on_model.is_none()
-        && !crate::frame_gizmo::hovered(app, ui, rect)
-        && !crate::round_gizmo::hovered(app, ui, rect)
+        && !ShownGizmo::hovered(ui, rect, gizmo.as_ref())
         && let Some(hover_pos) = if adjusting { ui.input(|input| input.pointer.press_origin()) } else { response.hover_pos() }
         && let Some(hit) = app.session.pick(local(hover_pos), app.session.viewport)
     {
@@ -1080,8 +1081,9 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     }
     crate::symmetry::overlay(app, ui, rect, symmetry_cursor);
     stencil_overlay(app, ui, rect);
-    crate::frame_gizmo::overlay(app, ui, rect);
-    crate::round_gizmo::overlay(app, ui, rect);
+    if let Some(gizmo) = &gizmo {
+        gizmo.overlay(app, ui, rect);
+    }
     brush_readout(app, ui, &response, adjusting);
     if app.session.quick_mask.editing && app.picking_id_color.is_none() {
         ui.painter_at(rect).text(

@@ -1824,7 +1824,7 @@ fn properties_has_fill_tabs(app: &TextureCraftApp) -> bool {
     let layer = app.session.selected_layer().and_then(|id| app.session.doc.project.layers.get(&id));
     app.session.tool.tool != Tool::PolygonFill
         && app.session.target == StackTarget::Content
-        && layer.is_some_and(|layer| matches!(&layer.kind, LayerKind::Fill(fill) if !matches!(fill.projection, Projection::Decal(_))))
+        && layer.is_some_and(|layer| matches!(&layer.kind, LayerKind::Fill(fill) if fill.projection.placed().is_none()))
 }
 
 /// Room around the Properties rows not yet laid out by the property sheet, as every other panel has
@@ -2907,7 +2907,7 @@ fn projection_transform(ui: &mut Ui, projection: &Projection, salt: &str, edit: 
         Projection::Triplanar { uv, .. } | Projection::Planar { uv, .. } | Projection::Spherical { uv, .. } | Projection::Cylindrical { uv, .. } => {
             (uv.tiling, uv.rotation, uv.offset, "uvOffset")
         }
-        Projection::UvTile | Projection::Decal(_) => return,
+        Projection::UvTile => return,
     };
     let lock_id = ui.make_persistent_id(("fill_tiling_lock", salt));
     let mut locked = ui.data(|data| data.get_temp::<bool>(lock_id)).unwrap_or(tiling[0] == tiling[1]);
@@ -2934,7 +2934,7 @@ fn projection_transform(ui: &mut Ui, projection: &Projection, salt: &str, edit: 
             }
         }
         Projection::Spherical { scale, .. } | Projection::Cylindrical { scale, .. } => world_scale(ui, *scale, edit),
-        Projection::Uv { .. } | Projection::UvTile | Projection::Decal(_) => {}
+        Projection::Uv { .. } | Projection::UvTile => {}
     }
 }
 
@@ -3255,7 +3255,7 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, effe
                     ui.label(RichText::new(tr("Colors read as gray. Add a levels or blur effect above to shape the result.")).color(tokens.text_dim));
                 }
                 Source::Image { .. } => {
-                    if let Projection::Decal(decal) = projection {
+                    if let Projection::Planar { placed: Some(decal), .. } = projection {
                         decal_editor(app, ui, decal, &json!({"effect": id}), layer.id);
                     } else {
                         projection_editor(app, ui, projection, "effect.set", &json!({"effect": id}), &format!("maskfill{id}"));

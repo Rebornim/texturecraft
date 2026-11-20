@@ -19,3 +19,10 @@ impl Default for Projector {
         Projector { rotation: [0.0; 3], scale: [1.0; 3], crop: ShapeCrop::default(), backface: Backface::default() }
     }
 }
+
+impl Projector {
+    /// Whether it turns or stretches the projection at all
+    pub fn turns(&self) -> bool {
+        self.rotation != [0.0; 3] || self.scale != [1.0; 3]
+    }
+}

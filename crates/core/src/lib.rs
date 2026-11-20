@@ -16,6 +16,7 @@ mod env_alignment;
 pub mod layer;
 pub mod project;
 pub mod projector;
+mod saved_projection;
 mod shadow_mode;
 pub mod shape_crop;
 

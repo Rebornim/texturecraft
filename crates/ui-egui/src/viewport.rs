@@ -1174,7 +1174,7 @@ impl DecalFrame {
         match app.session.target {
             StackTarget::Content => {
                 let layer = layers.content_layer(selected)?;
-                let LayerKind::Fill(Fill { projection: Projection::Decal(decal), .. }) = &layer.kind else { return None };
+                let LayerKind::Fill(Fill { projection: Projection::Planar { placed: Some(decal), .. }, .. }) = &layer.kind else { return None };
 
                 Some((layer.id, None, *decal))
             }
@@ -1183,7 +1183,7 @@ impl DecalFrame {
                 let owner = layers.mask_owner(selected);
                 let mask = layers.layer(owner).ok()?.mask.as_ref()?;
                 let mask_effect = mask.effects.iter().find(|candidate| candidate.id == effect)?;
-                let EffectKind::Fill { projection: Projection::Decal(decal), .. } = &mask_effect.kind else { return None };
+                let EffectKind::Fill { projection: Projection::Planar { placed: Some(decal), .. }, .. } = &mask_effect.kind else { return None };
 
                 Some((owner, Some(effect), *decal))
             }
@@ -2903,7 +2903,7 @@ mod tests {
 
             let effect = &harness.state().session.doc.project.effect(effect).unwrap().1.kind;
             assert!(
-                matches!(effect, texturecraft_engine::core::EffectKind::Fill { projection: texturecraft_engine::core::Projection::Decal(decal), .. } if *decal == original.decal)
+                matches!(effect, texturecraft_engine::core::EffectKind::Fill { projection: texturecraft_engine::core::Projection::Planar { placed: Some(decal), .. }, .. } if *decal == original.decal)
             );
         }
     }

@@ -35,7 +35,7 @@ impl HeightToNormal {
     pub const MAX_INTENSITY: f32 = 50.0;
 
     /// Height Depth over Surface Size a Normal Intensity of 1 tilts like (so the default 10 matches the default 16 cm over 300 cm)
-    const INTENSITY_UNIT: f32 = 16.0 / 300.0 / 10.0;
+    const INTENSITY_UNIT: f32 = Self::LIBRARY.height_depth / Self::LIBRARY.surface_size / Self::LIBRARY.intensity;
 
     /// How much a change of height per texel tilts the normal at `res` texels across a UV tile (0 for hostile values)
     pub fn strength(&self, res: u32) -> f32 {

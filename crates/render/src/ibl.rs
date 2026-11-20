@@ -56,16 +56,8 @@ impl EnvImage {
 
     /// Box-downsample by 2.
     pub fn half(&self) -> EnvImage {
-        let (w, h) = ((self.width / 2).max(1), (self.height / 2).max(1));
-        let mut data = vec![[0.0f32; 3]; (w * h) as usize];
-        data.par_chunks_mut(w as usize).enumerate().for_each(|(y, row)| {
-            for (x, px) in row.iter_mut().enumerate() {
-                let (sx, sy) = (x as i64 * 2, y as i64 * 2);
-                let s = (self.get(sx, sy) + self.get(sx + 1, sy) + self.get(sx, sy + 1) + self.get(sx + 1, sy + 1)) * 0.25;
-                *px = s.to_array();
-            }
-        });
-        EnvImage { width: w, height: h, data }
+        let (width, height, data) = environment_sky::half(self.width, self.height, |x, y| self.get(x as i64, y as i64));
+        EnvImage { width, height, data: data.iter().map(Vec3::to_array).collect() }
     }
 
     /// An imported equirect image (`rgba` row-major, top row first, sRGB-encoded when `srgb`) as
@@ -165,11 +157,7 @@ pub fn prefilter(env: &EnvImage, levels: u32) -> Vec<EnvImage> {
 /// Diffuse irradiance as 9 SH coefficients (already convolved with the cosine lobe and divided
 /// by π, so `Σ c·Y(n)` times albedo is the diffuse radiance).
 pub fn sh9(env: &EnvImage) -> [[f32; 3]; 9] {
-    let mut src = env.clone();
-    while src.width > 128 {
-        src = src.half();
-    }
-    environment_sky::sh9(src.width, src.height, |x, y| src.get(x as i64, y as i64))
+    environment_sky::sh9_averaged(env.width, env.height, |x, y| env.get(x as i64, y as i64))
 }
 
 #[cfg(test)]

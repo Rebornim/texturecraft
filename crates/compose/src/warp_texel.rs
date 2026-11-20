@@ -16,7 +16,7 @@ pub(crate) const MIN_READ_WEIGHT: f32 = 1e-6;
 
 /// Warp `warp` at texel `(x, y)` (`res` texels across a UV tile, `comps` values a texel) into `acc`: where its source sends it, or those reads blended
 pub(crate) fn warp_texel(warp: &SourceWarp, (x, y): (f32, f32), (res, comps): (u32, usize), acc: &mut [f32; 5], (sample, input): (Sample<'_>, Input<'_>)) {
-    let source = WarpSourceSample { source: &warp.source, seed: warp.seed, res, comps, sample, input };
+    let source = WarpSourceSample::new(&warp.source, warp.seed, (res, comps), (sample, input));
     let reach = warp.move_texels(res);
     if warp.mode == WarpMode::Warp {
         let probe = SourceWarp::probe_texels(res);

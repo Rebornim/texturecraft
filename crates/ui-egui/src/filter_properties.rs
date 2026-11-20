@@ -306,7 +306,7 @@ fn anisotropic_kuwahara(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>
     let rows = [
         ("radius", tr("Radius"), kuwahara.radius, 0.0..=AnisotropicKuwahara::MAX_RADIUS),
         ("smoothness", tr("Smoothness"), kuwahara.smoothness, 0.0..=1.0),
-        ("sharpness", tr("Sharpness"), kuwahara.sharpness, AnisotropicKuwahara::LIBRARY.sharpness..=1.0),
+        ("sharpness", tr("Sharpness"), kuwahara.sharpness, AnisotropicKuwahara::MIN_SHARPNESS..=1.0),
         ("tensorSmoothness", tr("Tensor Smoothness"), kuwahara.tensor_smoothness, 0.0..=1.0),
         ("anisotropy", tr("Anisotropy"), kuwahara.anisotropy, 0.0..=1.0),
     ];

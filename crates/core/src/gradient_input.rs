@@ -2,13 +2,14 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::finite_unit;
 use crate::grayscale_mode::GrayscaleMode;
 
 /// Full contrast stays a finite step instead of a division by zero
 const MIN_STEEPNESS: f32 = 1e-3;
 
 /// The balance that leaves the gray as it is
-const NEUTRAL_BALANCE: f32 = 0.5;
+pub(crate) const NEUTRAL_BALANCE: f32 = 0.5;
 
 /// The gray, blurred, balanced, contrasted and maybe inverted value a gradient looks up
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -48,18 +49,20 @@ impl GradientInput {
             return x;
         }
 
-        shape(x, self.balance, self.contrast, self.invert)
+        shape_gray(x, self.balance, self.contrast, self.invert)
     }
 }
 
 /// Gray `x` balanced (0.5 keeps it), contrasted around mid gray (0 keeps it, 1 is a step at 0.5) and maybe inverted, in 0..1
-pub fn shape(x: f32, balance: f32, contrast: f32, invert: bool) -> f32 {
-    let unit = |v: f32| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
-    let balanced = unit(x) + unit(balance) - 0.5;
-    let steep = (1.0 - unit(contrast)).max(MIN_STEEPNESS);
-    let y = unit((balanced - 0.5) / steep + 0.5);
-    if invert { 1.0 - y } else { y }
+pub fn shape_gray(x: f32, balance: f32, contrast: f32, invert: bool) -> f32 {
+    let balanced = finite_unit(x) + finite_unit(balance) - NEUTRAL_BALANCE;
+    let steep = (1.0 - finite_unit(contrast)).max(MIN_STEEPNESS);
+    let shaped = finite_unit((balanced - 0.5) / steep + 0.5);
+    if invert { 1.0 - shaped } else { shaped }
 }
+
+/// A ramp stop's place and color
+type Stop = (f32, [f32; 3]);
 
 /// The color at `t` on a ramp of `colors` placed at `positions` (each 0..1, evenly spaced where missing), blended in linear or sRGB
 pub fn ramp(colors: &[[f32; 3]], positions: &[f32], linear: bool, t: f32) -> Option<[f32; 3]> {
@@ -70,9 +73,6 @@ pub fn ramp(colors: &[[f32; 3]], positions: &[f32], linear: bool, t: f32) -> Opt
         .enumerate()
         .map(|(index, color)| (positions.get(index).copied().filter(|p| p.is_finite()).unwrap_or_else(|| even(index)).clamp(0.0, 1.0), *color));
     let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.0 };
-
-    // A stop's place and color
-    type Stop = (f32, [f32; 3]);
 
     // The stops each side of `t` without sorting them, per texel: the last placed at or before it and the first placed after it
     let (mut before, mut after): (Option<Stop>, Option<Stop>) = (None, None);
@@ -85,17 +85,20 @@ pub fn ramp(colors: &[[f32; 3]], positions: &[f32], linear: bool, t: f32) -> Opt
             after = Some((position, color));
         }
     }
-    let ((p0, c0), (p1, c1)) = match (before, after) {
+    let ((before_place, before_color), (after_place, after_color)) = match (before, after) {
         (Some(before), Some(after)) => (before, after),
         (Some(only), None) | (None, Some(only)) => (only, only),
         (None, None) => return None,
     };
 
-    let share = if p1 > p0 { ((t - p0) / (p1 - p0)).clamp(0.0, 1.0) } else { 0.0 };
+    let share = if after_place > before_place { ((t - before_place) / (after_place - before_place)).clamp(0.0, 1.0) } else { 0.0 };
     Some(if linear {
-        std::array::from_fn(|k| c0[k] + (c1[k] - c0[k]) * share)
+        std::array::from_fn(|k| before_color[k] + (after_color[k] - before_color[k]) * share)
     } else {
-        std::array::from_fn(|k| srgb_to_linear(linear_to_srgb(c0[k]) + (linear_to_srgb(c1[k]) - linear_to_srgb(c0[k])) * share))
+        std::array::from_fn(|k| {
+            let (before, after) = (linear_to_srgb(before_color[k]), linear_to_srgb(after_color[k]));
+            srgb_to_linear(before + (after - before) * share)
+        })
     })
 }
 

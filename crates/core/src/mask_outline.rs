@@ -2,8 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::OutlinePosition;
-use crate::bevel_smooth::CURVE_SHAPE_BASE;
+use crate::{OutlinePosition, RampCurve, at_or_above_threshold};
 
 /// A band along the edge where values cross a threshold, outside, inside or on both sides of the shapes
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -28,12 +27,16 @@ impl MaskOutline {
 
     /// Whether `value` is inside the shapes
     pub fn inside(&self, value: f32) -> bool {
-        let threshold = if self.threshold.is_finite() { self.threshold.clamp(0.0, 1.0) } else { Self::LIBRARY.threshold };
-        value >= threshold - f32::EPSILON
+        at_or_above_threshold(value, self.threshold, Self::LIBRARY.threshold)
     }
 
-    /// The band at a texel inside the shapes or not, `closeness` to the edge going from 1 at it to 0 at the band's reach
-    pub fn band(&self, inside: bool, closeness: f32) -> f32 {
+    /// The curve the band's fade takes (Curve), worked out once per filter
+    pub fn fade_curve(&self) -> RampCurve {
+        RampCurve::new(0.0, self.curve)
+    }
+
+    /// The band at a texel inside the shapes or not, `closeness` to the edge going from 1 at it to 0 at the band's reach, its fade bent by [`MaskOutline::fade_curve`]
+    pub fn band(&self, fade_curve: RampCurve, inside: bool, closeness: f32) -> f32 {
         let closeness = if closeness.is_finite() { closeness.clamp(0.0, 1.0) } else { 0.0 };
         if !self.position.covers(inside) || closeness <= 0.0 || !self.width.is_finite() || self.width <= 0.0 {
             return 0.0;
@@ -44,8 +47,7 @@ impl MaskOutline {
             return 1.0;
         }
 
-        let curve = if self.curve.is_finite() { self.curve.clamp(-1.0, 1.0) } else { 0.0 };
-        (closeness / blur).min(1.0).powf(CURVE_SHAPE_BASE.powf(-curve))
+        fade_curve.apply(closeness / blur)
     }
 
     /// The result at a texel of value `value`: the band on black, or over the value
@@ -58,17 +60,22 @@ impl MaskOutline {
 mod tests {
     use super::*;
 
+    /// The band with the curve worked out as the filter does
+    fn band(filter: MaskOutline, inside: bool, closeness: f32) -> f32 {
+        filter.band(filter.fade_curve(), inside, closeness)
+    }
+
     #[test]
     fn the_band_lies_on_its_side_of_the_edge() {
         let outline = MaskOutline::LIBRARY;
         assert!(outline.inside(1.0) && !outline.inside(0.99));
-        assert_eq!(outline.band(false, 0.3), 1.0, "a hard band outside");
-        assert_eq!(outline.band(true, 0.3), 0.0, "nothing inside an outside band");
-        assert_eq!(outline.band(false, 0.0), 0.0, "nothing past its reach");
+        assert_eq!(band(outline, false, 0.3), 1.0, "a hard band outside");
+        assert_eq!(band(outline, true, 0.3), 0.0, "nothing inside an outside band");
+        assert_eq!(band(outline, false, 0.0), 0.0, "nothing past its reach");
         let inside = MaskOutline { position: OutlinePosition::Inside, ..outline };
-        assert_eq!((inside.band(true, 0.3), inside.band(false, 0.3)), (1.0, 0.0));
+        assert_eq!((band(inside, true, 0.3), band(inside, false, 0.3)), (1.0, 0.0));
         let both = MaskOutline { position: OutlinePosition::Both, ..outline };
-        assert_eq!((both.band(true, 0.3), both.band(false, 0.3)), (1.0, 1.0));
+        assert_eq!((band(both, true, 0.3), band(both, false, 0.3)), (1.0, 1.0));
         assert_eq!(outline.apply(0.4, 0.0), 0.0, "from black");
         assert_eq!(MaskOutline { from_black: false, ..outline }.apply(0.4, 0.0), 0.4, "over the values");
     }
@@ -76,10 +83,10 @@ mod tests {
     #[test]
     fn blur_fades_the_band_and_curve_shape_bends_the_fade() {
         let soft = MaskOutline { blur: 1.0, ..MaskOutline::LIBRARY };
-        assert!((soft.band(false, 0.5) - 0.5).abs() < 1e-6, "a linear fade");
-        assert!(MaskOutline { curve: 0.5, ..soft }.band(false, 0.5) > 0.5, "falls off later");
-        assert!(MaskOutline { curve: -0.5, ..soft }.band(false, 0.5) < 0.5, "falls off sooner");
-        assert_eq!(MaskOutline { blur: 0.5, ..soft }.band(false, 0.6), 1.0, "only the far part fades");
-        assert_eq!(MaskOutline { width: f32::NAN, threshold: f32::NAN, ..soft }.band(false, 0.5), 0.0);
+        assert!((band(soft, false, 0.5) - 0.5).abs() < 1e-6, "a linear fade");
+        assert!(band(MaskOutline { curve: 0.5, ..soft }, false, 0.5) > 0.5, "falls off later");
+        assert!(band(MaskOutline { curve: -0.5, ..soft }, false, 0.5) < 0.5, "falls off sooner");
+        assert_eq!(band(MaskOutline { blur: 0.5, ..soft }, false, 0.6), 1.0, "only the far part fades");
+        assert_eq!(band(MaskOutline { width: f32::NAN, threshold: f32::NAN, ..soft }, false, 0.5), 0.0);
     }
 }

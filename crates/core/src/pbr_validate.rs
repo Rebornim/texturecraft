@@ -31,7 +31,13 @@ impl PbrValidate {
     const ALBEDO_BRIGHT: f32 = 240.0;
 
     /// Metal from this value up counts as metal
-    const METAL: f32 = 0.5;
+    const METAL_THRESHOLD: f32 = 0.5;
+
+    /// Metal Reflectance Range's choices are percent of sRGB white
+    const PERCENT: f32 = 100.0;
+
+    /// Base Color Range's choices are sRGB steps of 255
+    const SRGB_STEPS: f32 = 255.0;
 
     /// The color of a texel outside its range
     pub const INVALID: [f32; 3] = [1.0, 0.0, 0.0];
@@ -39,10 +45,10 @@ impl PbrValidate {
     /// Straight linear base color `color` of a texel with metal `metal`: its own color when valid or not checked, red when not
     pub fn check(&self, color: [f32; 3], metal: f32) -> [f32; 3] {
         let srgb = linear_to_srgb(lum(color).clamp(0.0, 1.0));
-        let valid = if metal >= Self::METAL {
-            !self.mode.checks_metal() || srgb >= f32::from(self.metal_low) / 100.0
+        let valid = if metal >= Self::METAL_THRESHOLD {
+            !self.mode.checks_metal() || srgb >= f32::from(self.metal_low) / Self::PERCENT
         } else {
-            !self.mode.checks_albedo() || (f32::from(self.albedo_dark) / 255.0..=Self::ALBEDO_BRIGHT / 255.0).contains(&srgb)
+            !self.mode.checks_albedo() || (f32::from(self.albedo_dark) / Self::SRGB_STEPS..=Self::ALBEDO_BRIGHT / Self::SRGB_STEPS).contains(&srgb)
         };
         if valid { color } else { Self::INVALID }
     }

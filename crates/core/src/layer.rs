@@ -5,11 +5,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::curve_preset::CurvePreset;
-use crate::gradient_input::{GradientInput, ramp, shape};
+use crate::gradient_input::{GradientInput, ramp, shape_gray};
 use crate::{
     AnisotropicKuwahara, Backface, BakedMap, Bevel, BevelSmooth, BlendMode, Channel, ChannelKind, ColorMatch, CompareSource, ContentsOffset, DepthCulling,
     DirectionalDistance, DirectionalLight, FillSymmetry, GrayscaleConversion, HeightToNormal, HighpassSpace, MaskOutline, Mirror, PbrValidate, Projector,
-    RandomizedSeed, ShapeCrop, SourceSlopeBlur, SourceWarp, StylizedLighting, SunAndSky, ThresholdMode, TileTransform, lum,
+    RandomizedSeed, ShapeCrop, SourceSlopeBlur, SourceWarp, StylizedLighting, SunAndSky, ThresholdMode, TileTransform, finite_unit, lum,
 };
 
 mod curvature_detail;
@@ -1683,7 +1683,6 @@ impl Filter {
         // Replace Color's least softness, so a hard edge divides by no zero
         const REPLACE_MIN_SOFTNESS: f32 = 1e-6;
 
-        let unit = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 };
         Some(match self {
             Filter::Invert => per_unit(kind, v, |x| 1.0 - x),
             Filter::Threshold { level, mode } => per_unit(kind, v, |x| if mode.passes(x, *level) { 1.0 } else { 0.0 }),
@@ -1694,12 +1693,12 @@ impl Filter {
             },
             Filter::ContrastLuminosity { contrast, luminosity } => {
                 let slope = 1.0 + contrast.clamp(-1.0, 1.0);
-                per_unit(kind, v, |x| unit((x - 0.5) * slope + 0.5 + luminosity))
+                per_unit(kind, v, |x| finite_unit((x - 0.5) * slope + 0.5 + luminosity))
             }
             Filter::ColorCorrect { shadows, midtones, highlights } => {
                 // [contrast, luminosity, saturation] at the texel's lightness, weighted as color balance
                 let at = |lightness: f32| -> [f32; 3] {
-                    let (in_shadows, in_midtones, in_highlights) = tone_weights(unit(lightness));
+                    let (in_shadows, in_midtones, in_highlights) = tone_weights(finite_unit(lightness));
                     std::array::from_fn(|k| shadows[k] * in_shadows + midtones[k] * in_midtones + highlights[k] * in_highlights)
                 };
                 let correct = |x: f32, [contrast, luminosity, _]: [f32; 3]| (x - 0.5) * (1.0 + contrast.clamp(-1.0, 1.0)) + 0.5 + luminosity.clamp(-1.0, 1.0);
@@ -1709,14 +1708,14 @@ impl Filter {
                         let corrected = v.map(|x| correct(x, tone));
                         let gray = lum(corrected);
                         let gain = 2.0 * tone[2].clamp(0.0, 1.0);
-                        corrected.map(|x| unit(gray + (x - gray) * gain))
+                        corrected.map(|x| finite_unit(gray + (x - gray) * gain))
                     }
-                    _ => per_unit(kind, v, |x| unit(correct(x, at(x)))),
+                    _ => per_unit(kind, v, |x| finite_unit(correct(x, at(x)))),
                 }
             }
             Filter::ColorBalance { shadows, midtones, highlights } => {
                 let shift = |component: usize, lightness: f32| {
-                    let (in_shadows, in_midtones, in_highlights) = tone_weights(unit(lightness));
+                    let (in_shadows, in_midtones, in_highlights) = tone_weights(finite_unit(lightness));
                     shadows.get(component).copied().unwrap_or(0.0) * in_shadows
                         + midtones.get(component).copied().unwrap_or(0.0) * in_midtones
                         + highlights.get(component).copied().unwrap_or(0.0) * in_highlights
@@ -1724,9 +1723,9 @@ impl Filter {
                 match kind {
                     ChannelKind::Color => {
                         let lightness = lum(v);
-                        std::array::from_fn(|k| unit(v[k] + shift(k, lightness)))
+                        std::array::from_fn(|k| finite_unit(v[k] + shift(k, lightness)))
                     }
-                    _ => per_unit(kind, v, |x| unit(x + (shift(0, x) + shift(1, x) + shift(2, x)) / 3.0)),
+                    _ => per_unit(kind, v, |x| finite_unit(x + (shift(0, x) + shift(1, x) + shift(2, x)) / 3.0)),
                 }
             }
             Filter::GradientMap { input, .. } => match kind {
@@ -1734,10 +1733,10 @@ impl Filter {
                 // A height reads the ramp at its 0..1 place, as projects saved before did
                 _ => per_unit(kind, v, |x| self.ramp_at(input.shape(x)).map_or(x, lum)),
             },
-            Filter::GradientCurve { preset, invert, balance, contrast } => per_unit(kind, v, |x| preset.at(shape(x, *balance, *contrast, *invert))),
+            Filter::GradientCurve { preset, invert, balance, contrast } => per_unit(kind, v, |x| preset.at(shape_gray(x, *balance, *contrast, *invert))),
             Filter::GradientDynamic { color, .. } => match kind {
-                ChannelKind::Color => color.map(unit),
-                _ => per_unit(kind, v, |_| unit(lum(*color))),
+                ChannelKind::Color => color.map(finite_unit),
+                _ => per_unit(kind, v, |_| finite_unit(lum(*color))),
             },
             Filter::Posterize { levels, .. } => per_unit(kind, v, |x| posterize(x, *levels)),
             Filter::Smoothstep { min, max } => per_unit(kind, v, |x| smoothstep(*min, *max, x)),
@@ -1745,7 +1744,7 @@ impl Filter {
                 let (offset, multiply) = (finite_or(*offset, 0.0), finite_or(*multiply, 1.0));
                 per_unit(kind, v, |x| {
                     let x = if *invert { 1.0 - x } else { x };
-                    unit((x - 0.5) * multiply + 0.5 + offset)
+                    finite_unit((x - 0.5) * multiply + 0.5 + offset)
                 })
             }
             Filter::InvertOff => v,
@@ -1761,14 +1760,14 @@ impl Filter {
                     per_unit(kind, v, |x| if x >= position { 1.0 } else { 0.0 })
                 } else {
                     let width = (1.0 - contrast.clamp(0.0, 1.0)).max(SCAN_MIN_WIDTH);
-                    per_unit(kind, v, |x| unit((x - position) / width + 0.5))
+                    per_unit(kind, v, |x| finite_unit((x - position) / width + 0.5))
                 }
             }
-            Filter::HistogramRange { range, position } => per_unit(kind, v, |x| unit(position + (x - position) * range)),
+            Filter::HistogramRange { range, position } => per_unit(kind, v, |x| finite_unit(position + (x - position) * range)),
             Filter::HistogramShift { offset } => per_unit(kind, v, |x| {
                 // Wrapped by hand: `rem_euclid` would also send white (1 + 0) to black
-                let y = unit(x) + offset.clamp(-1.0, 1.0);
-                unit(if y > 1.0 {
+                let y = finite_unit(x) + offset.clamp(-1.0, 1.0);
+                finite_unit(if y > 1.0 {
                     y - 1.0
                 } else if y < 0.0 {
                     y + 1.0
@@ -1799,7 +1798,7 @@ impl Filter {
                         let closeness = 1.0 - (distance - tolerance) / softness.max(REPLACE_MIN_SOFTNESS);
                         closeness * closeness * (3.0 - 2.0 * closeness)
                     };
-                    std::array::from_fn(|k| unit(v[k] + (to[k] - from[k]) * weight))
+                    std::array::from_fn(|k| finite_unit(v[k] + (to[k] - from[k]) * weight))
                 }
                 _ => v,
             },

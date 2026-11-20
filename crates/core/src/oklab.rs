@@ -1,5 +1,4 @@
-//! The OKLab perceptual color space (Björn Ottosson's public construction) for hue, chroma and lightness shifts that keep
-//! perceived lightness: a perceptive HSL turn moves a yellow to a blue of the same brightness, not a dark one
+//! The OKLab perceptual color space (Björn Ottosson's public construction): hue, chroma and lightness shifts that keep perceived lightness
 
 /// Linear sRGB to OKLab `[L, a, b]`
 pub fn from_linear([r, g, b]: [f32; 3]) -> [f32; 3] {

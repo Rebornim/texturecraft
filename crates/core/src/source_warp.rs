@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{WarpBlending, WarpMode, WarpSource, WarpSourceMode};
+use crate::{WarpBlending, WarpMode, WarpSource, WarpSourceMode, finite_unit};
 
 /// Texels read from where a source sends them: along its slope, along one direction, or along several blended
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -47,8 +47,7 @@ impl SourceWarp {
 
     /// How many texels a texel moves at most at `res` texels across a UV tile
     pub fn move_texels(&self, res: u32) -> f32 {
-        let intensity = if self.intensity.is_finite() { self.intensity.clamp(0.0, 1.0) } else { 0.0 };
-        intensity / f32::from(self.divider.max(1)) * res as f32
+        move_texels(self.intensity, self.divider, res)
     }
 
     /// How many texels each side of a texel Warp mode measures the source's slope across
@@ -94,6 +93,11 @@ impl SourceWarp {
         let reach = self.move_texels(res);
         [x * fit * reach, y * fit * reach]
     }
+}
+
+/// How many texels Intensity over Divider moves at `res` texels across a UV tile (Warp's and Blur Slope's)
+pub(crate) fn move_texels(intensity: f32, divider: u16, res: u32) -> f32 {
+    finite_unit(intensity) / f32::from(divider.max(1)) * res as f32
 }
 
 #[cfg(test)]

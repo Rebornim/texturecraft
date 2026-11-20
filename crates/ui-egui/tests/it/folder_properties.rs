@@ -8,9 +8,18 @@ use texturecraft_engine::core::{Channel, ContentsOffset, LayerId, LayerKind, Sou
 use texturecraft_engine::execute;
 use texturecraft_ui_egui::TextureCraftApp;
 
+use crate::{BAKE_RESOLUTION, DRAG_STEP_FRAMES, FRAME_SECONDS, PROPERTIES_WINDOW, SETTLE_FRAMES, SLIDER_END_INSET, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+
+/// How near a dragged Scale and Rotation land to the track's value (a drag ends a pixel or so off it)
+const SCALE_TOLERANCE: f32 = 0.05;
+const ROTATION_TOLERANCE_DEGREES: f32 = 3.0;
+
+/// Hovers a drag passes through on its way, so the slider follows it as a hand would
+const DRAG_MOVES: usize = 3;
+
 /// A folder holding a Clouds fill (or nothing), the folder selected: (harness, folder, fill)
 fn folder_harness(with_fill: bool) -> (Harness<'static, TextureCraftApp>, LayerId, LayerId) {
-    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let mut session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();
     let fill = LayerId(execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].as_u64().unwrap());
     execute(&mut session, "layer.fill.set", &json!({"layer": fill.0, "channel": "baseColor", "procedural": "Clouds", "seed": 7})).unwrap();
     let folder = if with_fill {
@@ -19,9 +28,9 @@ fn folder_harness(with_fill: bool) -> (Harness<'static, TextureCraftApp>, LayerI
         LayerId(execute(&mut session, "layer.add.group", &json!({})).unwrap()["layer"].as_u64().unwrap())
     };
     execute(&mut session, "layer.select", &json!({"layer": folder.0, "target": "content"})).unwrap();
-    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).with_step_dt(1.0 / 60.0).build_eframe(|cc| TextureCraftApp::new(cc, session));
+    let mut harness = Harness::builder().with_size(PROPERTIES_WINDOW).with_step_dt(FRAME_SECONDS).build_eframe(|cc| TextureCraftApp::new(cc, session));
     harness.state_mut().ui.prefs.language = "en".into();
-    harness.run_steps(4);
+    harness.run_steps(STARTUP_FRAMES);
     (harness, folder, fill)
 }
 
@@ -32,15 +41,15 @@ fn offset(harness: &Harness<'_, TextureCraftApp>, folder: LayerId) -> ContentsOf
 /// Drags the slider labelled `label` from its middle to `to` (0 = its left end, 1 = its right end), hovering on the way
 fn drag(harness: &mut Harness<'_, TextureCraftApp>, label: &str, to: f32) {
     let track = harness.get_by_role_and_label(Role::Slider, label).rect();
-    let at = |t: f32| egui::pos2(track.left() + 5.0 + (track.width() - 10.0) * t, track.center().y);
+    let at = |t: f32| egui::pos2(track.left() + SLIDER_END_INSET + (track.width() - 2.0 * SLIDER_END_INSET) * t, track.center().y);
     harness.drag_at(at(0.5));
-    harness.run_steps(2);
-    for step in 1..=3 {
-        harness.hover_at(at(0.5 + (to - 0.5) * step as f32 / 3.0));
-        harness.run_steps(2);
+    harness.run_steps(DRAG_STEP_FRAMES);
+    for step in 1..=DRAG_MOVES {
+        harness.hover_at(at(0.5 + (to - 0.5) * step as f32 / DRAG_MOVES as f32));
+        harness.run_steps(DRAG_STEP_FRAMES);
     }
     harness.drop_at(at(to));
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
 }
 
 #[test]
@@ -49,17 +58,17 @@ fn scale_and_rotation_drags_are_one_undo_step_each_and_the_reset_drops_them() {
     let steps = harness.state().session.history_labels().len();
     drag(&mut harness, "Scale", 1.0);
     let scaled = offset(&harness, folder);
-    assert!((scaled.scale - 4.0).abs() < 0.05, "the right end is x4: {scaled:?}");
+    assert!((scaled.scale - 4.0).abs() < SCALE_TOLERANCE, "the right end is x4: {scaled:?}");
     assert_eq!(harness.state().session.history_labels().len(), steps + 1, "one undo step for the drag");
     drag(&mut harness, "Rotation", 0.75);
     let turned = offset(&harness, folder);
-    assert!((turned.rotation - 90.0).abs() < 3.0 && turned.scale == scaled.scale, "{turned:?}");
+    assert!((turned.rotation - 90.0).abs() < ROTATION_TOLERANCE_DEGREES && turned.scale == scaled.scale, "{turned:?}");
     assert_eq!(harness.state().session.history_labels().len(), steps + 2);
     let LayerKind::Fill(own) = &harness.state().session.doc.project.layer(fill).unwrap().kind else { panic!("not a fill") };
     assert_eq!(own.projection, Default::default(), "the fill keeps its own projection");
 
     harness.get_by_role_and_label(Role::Button, "Contents: Reset to defaults").click();
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     assert!(offset(&harness, folder).is_none(), "the reset drops the offset");
     assert_eq!(harness.state().session.history_labels().len(), steps + 3);
 }
@@ -76,7 +85,7 @@ fn randomize_seeds_is_one_undo_step_the_contents_reset_puts_them_back_and_an_emp
     };
     let steps = harness.state().session.history_labels().len();
     harness.get_by_role_and_label(Role::Button, "Randomize seeds").click();
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     assert_ne!(seed(&harness), 7);
     assert_eq!(harness.state().session.history_labels().len(), steps + 1);
 
@@ -84,7 +93,7 @@ fn randomize_seeds_is_one_undo_step_the_contents_reset_puts_them_back_and_an_emp
     let reset = harness.get_by_role_and_label(Role::Button, "Contents: Reset to defaults");
     assert!(!reset.accesskit_node().is_disabled(), "randomized seeds light the reset");
     reset.click();
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     assert_eq!(seed(&harness), 7, "the seed from before Randomize seeds");
     assert_eq!(harness.state().session.history_labels().len(), steps + 2);
     assert!(harness.get_by_role_and_label(Role::Button, "Contents: Reset to defaults").accesskit_node().is_disabled(), "nothing left to reset");

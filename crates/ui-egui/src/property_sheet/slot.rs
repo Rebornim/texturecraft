@@ -3,7 +3,8 @@ use egui_phosphor::regular as ic;
 
 use super::group::CARD_BLEED;
 use super::row::RESET_AT_DEFAULT_OPACITY;
-use super::{ButtonIcon, PropertySheet, ROW_HEIGHT, SlotResponse, TEXT_SIZE};
+use super::switch_control::PILL_SIZE;
+use super::{ButtonIcon, CONTROL_RADIUS, PropertySheet, ROW_HEIGHT, SlotResponse, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Air between a slot card's top and its slot row
@@ -28,12 +29,8 @@ const SOURCE_BELOW_CENTER: f32 = 8.0;
 /// The square a slot's end glyph sits in
 const SLOT_GLYPH_BOX: f32 = 18.0;
 
-/// The on/off pill: its size, the extra margin it answers clicks in, its knob's radius and how far the knob sits from the middle
-const TOGGLE_WIDTH: f32 = 22.0;
-const TOGGLE_HEIGHT: f32 = 13.0;
+/// The extra margin the on/off pill answers clicks in
 const TOGGLE_HIT_MARGIN: f32 = 3.0;
-const KNOB_RADIUS: f32 = 4.0;
-const KNOB_TRAVEL: f32 = 4.5;
 
 /// The seed's dice glyph size
 const DICE_ICON_SIZE: f32 = 14.0;
@@ -60,6 +57,7 @@ const DICE_WIDTH: f32 = 28.0;
 
 /// Air between a full-width button's icon and its words
 const BUTTON_ICON_GAP: f32 = 8.0;
+
 /// Size of a full-width button's icon
 const BUTTON_ICON_SIZE: f32 = 14.0;
 
@@ -116,18 +114,23 @@ impl PropertySheet<'_> {
         pick.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, name));
         let mut result = SlotResponse { pick, clear: false, reset: false, toggled: false };
 
-        let t = self.tokens;
+        let tokens = self.tokens;
         let painter = self.ui.painter().clone();
         thumbnail(&painter, thumb);
-        painter.rect_stroke(thumb, CornerRadius::ZERO, Stroke::new(1.0, if result.pick.hovered() { t.accent } else { t.field_border }), StrokeKind::Inside);
+        painter.rect_stroke(
+            thumb,
+            CornerRadius::ZERO,
+            Stroke::new(1.0, if result.pick.hovered() { tokens.accent } else { tokens.field_border }),
+            StrokeKind::Inside,
+        );
         let text_x = thumb.right() + THUMB_TO_NAME;
-        let (name_font, name_color) = if enabled { (semibold(TEXT_SIZE), t.text) } else { (FontId::proportional(TEXT_SIZE), t.text_dim) };
+        let (name_font, name_color) = if enabled { (semibold(TEXT_SIZE), tokens.text) } else { (FontId::proportional(TEXT_SIZE), tokens.text_dim) };
         painter.text(pos2(text_x, center_y - NAME_ABOVE_CENTER), Align2::LEFT_CENTER, name, name_font, name_color);
-        painter.text(pos2(text_x, center_y + SOURCE_BELOW_CENTER), Align2::LEFT_CENTER, source, FontId::proportional(SOURCE_TEXT_SIZE), t.text_dim);
+        painter.text(pos2(text_x, center_y + SOURCE_BELOW_CENTER), Align2::LEFT_CENTER, source, FontId::proportional(SOURCE_TEXT_SIZE), tokens.text_dim);
 
         for (shown, live, x, glyph, tip, slot) in [
-            (clear, true, clear_x, ic::X, "Clear", &mut result.clear),
-            (reset.is_some(), reset.unwrap_or(false), reset_x, ic::ARROW_COUNTER_CLOCKWISE, "Restore defaults", &mut result.reset),
+            (clear, true, clear_x, ic::X, crate::i18n::n_("Clear"), &mut result.clear),
+            (reset.is_some(), reset.unwrap_or(false), reset_x, ic::CLOCK_COUNTER_CLOCKWISE, crate::i18n::n_("Restore defaults"), &mut result.reset),
         ] {
             if !shown {
                 continue;
@@ -145,27 +148,23 @@ impl PropertySheet<'_> {
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, live, crate::i18n::tr(tip)));
             *slot = live && response.clicked();
             let color = match (live, response.hovered()) {
-                (false, _) => t.text_dim.gamma_multiply(RESET_AT_DEFAULT_OPACITY),
-                (true, true) => t.text,
-                (true, false) => t.text_dim,
+                (false, _) => tokens.text_dim.gamma_multiply(RESET_AT_DEFAULT_OPACITY),
+                (true, true) => tokens.text,
+                (true, false) => tokens.text_dim,
             };
             painter.text(glyph_rect.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(SLOT_ICON_SIZE), color);
         }
 
         if let Some(on) = on {
-            let pill = Rect::from_center_size(pos2(self.right - SLOT_TOGGLE_INSET, center_y), vec2(TOGGLE_WIDTH, TOGGLE_HEIGHT));
+            let pill = Rect::from_center_size(pos2(self.right - SLOT_TOGGLE_INSET, center_y), PILL_SIZE);
             let id = self.next_id();
-            if self.ui.interact(pill.expand(TOGGLE_HIT_MARGIN), id, Sense::click()).clicked() {
+            let response = self.ui.interact(pill.expand(TOGGLE_HIT_MARGIN), id, Sense::click());
+            if response.clicked() {
                 *on = !*on;
                 result.toggled = true;
             }
-            let (fill, border, knob, knob_x) = if *on {
-                (t.accent_dim, t.accent, t.text, pill.center().x + KNOB_TRAVEL)
-            } else {
-                (t.button, t.button_border, t.text_dim, pill.center().x - KNOB_TRAVEL)
-            };
-            painter.rect(pill, CornerRadius::same(6), fill, Stroke::new(1.0, border), StrokeKind::Inside);
-            painter.circle_filled(pos2(knob_x, center_y), KNOB_RADIUS, knob);
+            response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, *on, name));
+            self.pill(pill.center(), *on, true);
         }
         self.drawn(thumb.bottom());
         result
@@ -194,20 +193,20 @@ impl PropertySheet<'_> {
         let response = self.ui.interact(button, id, sense);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, text));
 
-        let t = self.tokens;
+        let tokens = self.tokens;
         let painter = self.ui.painter();
         painter.rect(
             button,
-            CornerRadius::same(4),
+            CornerRadius::same(CONTROL_RADIUS),
             match (lit, enabled && response.hovered()) {
-                (true, _) => t.accent_dim,
-                (false, true) => t.row_hover,
-                (false, false) => t.button,
+                (true, _) => tokens.accent_dim,
+                (false, true) => tokens.row_hover,
+                (false, false) => tokens.button,
             },
-            Stroke::new(1.0, if lit { t.accent } else { t.button_border }),
+            Stroke::new(1.0, if lit { tokens.accent } else { tokens.button_border }),
             StrokeKind::Inside,
         );
-        let color = if enabled { t.text } else { t.text_dim };
+        let color = if enabled { tokens.text } else { tokens.text_dim };
         let font = FontId::proportional(TEXT_SIZE);
         let (icon_width, icon_galley) = match icon {
             ButtonIcon::Glyph(glyph) => {
@@ -237,16 +236,16 @@ impl PropertySheet<'_> {
         let dice = Rect::from_min_max(pos2(self.right - DICE_WIDTH, control.top()), control.max);
         let id = self.next_id();
         let typing_id = id.with("typed");
-        let t = self.tokens;
+        let tokens = self.tokens;
         let painter = self.ui.painter().clone();
-        painter.rect(field, CornerRadius::same(4), t.field, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
+        painter.rect(field, CornerRadius::same(CONTROL_RADIUS), tokens.field, Stroke::new(1.0, tokens.field_border), StrokeKind::Inside);
 
         // The value sits right like every number; the box lights on hover and goes accent while typing
         let mut changed = false;
         if let Some(mut text) = self.ui.data(|data| data.get_temp::<String>(typing_id)) {
             let edit = egui::TextEdit::singleline(&mut text).id(typing_id).font(semibold(TEXT_SIZE)).align(egui::Align2::RIGHT_CENTER);
             let response = self.typing_edit(field.left() + SEED_VALUE_INSET, field.right() - SEED_VALUE_INSET, center_y, edit);
-            painter.rect_stroke(field, CornerRadius::same(4), Stroke::new(1.0, t.accent), StrokeKind::Inside);
+            painter.rect_stroke(field, CornerRadius::same(CONTROL_RADIUS), Stroke::new(1.0, tokens.accent), StrokeKind::Inside);
             if response.lost_focus() {
                 self.ui.data_mut(|data| data.remove::<String>(typing_id));
                 if let Ok(typed) = text.trim().parse::<u32>()
@@ -261,9 +260,10 @@ impl PropertySheet<'_> {
             }
         } else {
             let response = self.ui.interact(field, id, Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
-            painter.text(pos2(field.right() - SEED_VALUE_INSET, center_y), Align2::RIGHT_CENTER, seed.to_string(), semibold(TEXT_SIZE), t.text);
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, crate::i18n::trf("{label} value", &[("label", &label)])));
+            painter.text(pos2(field.right() - SEED_VALUE_INSET, center_y), Align2::RIGHT_CENTER, seed.to_string(), semibold(TEXT_SIZE), tokens.text);
             if response.hovered() {
-                painter.rect_stroke(field, CornerRadius::same(4), Stroke::new(1.0, t.button_border), StrokeKind::Inside);
+                painter.rect_stroke(field, CornerRadius::same(CONTROL_RADIUS), Stroke::new(1.0, tokens.button_border), StrokeKind::Inside);
             }
             if response.clicked() {
                 self.start_typing(typing_id, seed.to_string());
@@ -274,12 +274,12 @@ impl PropertySheet<'_> {
         let dice_response = self.tip(self.ui.interact(dice, dice_id, Sense::click()), crate::i18n::tr("Random"));
         painter.rect(
             dice,
-            CornerRadius::same(4),
-            if dice_response.hovered() { t.row_hover } else { t.button },
-            Stroke::new(1.0, t.button_border),
+            CornerRadius::same(CONTROL_RADIUS),
+            if dice_response.hovered() { tokens.row_hover } else { tokens.button },
+            Stroke::new(1.0, tokens.button_border),
             StrokeKind::Inside,
         );
-        painter.text(dice.center(), Align2::CENTER_CENTER, ic::DICE_FIVE, FontId::proportional(DICE_ICON_SIZE), t.text);
+        painter.text(dice.center(), Align2::CENTER_CENTER, ic::DICE_FIVE, FontId::proportional(DICE_ICON_SIZE), tokens.text);
         dice_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr("Random")));
         if dice_response.clicked() {
             *seed = next_seed(*seed);

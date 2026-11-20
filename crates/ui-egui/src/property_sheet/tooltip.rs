@@ -4,6 +4,7 @@ use super::PropertySheet;
 
 /// Where a tooltip goes when the window has no room above a control in the panel's right half: below it, then the other edge
 const RIGHT_HALF_FALLBACKS: [RectAlign; 3] = [RectAlign::BOTTOM_END, RectAlign::TOP_START, RectAlign::BOTTOM_START];
+
 /// The same for a control in the panel's left half
 const LEFT_HALF_FALLBACKS: [RectAlign; 3] = [RectAlign::BOTTOM_START, RectAlign::TOP_END, RectAlign::BOTTOM_END];
 

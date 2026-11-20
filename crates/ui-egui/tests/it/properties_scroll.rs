@@ -7,18 +7,10 @@ use serde_json::json;
 use texturecraft_engine::execute;
 use texturecraft_ui_egui::TextureCraftApp;
 
+use crate::{BAKE_RESOLUTION, REDRAW_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+
 /// Short enough that a fill's Properties scrolls
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1000.0);
-
-/// Small texture and bake sizes keep the sample session fast; the panel doesn't depend on them
-const TEXTURE_RESOLUTION: u32 = 256;
-const BAKE_RESOLUTION: u32 = 64;
-
-/// Frames for the first layout and fonts to settle
-const STARTUP_FRAMES: usize = 4;
-
-/// Frames for a click, a selection change or a jump to reach the panel
-const SETTLE_FRAMES: usize = 4;
 
 /// The app with two UV fills ("Fill A", "Fill B") and a folder ("Folder", a short panel), Fill A selected
 fn harness() -> Harness<'static, TextureCraftApp> {
@@ -42,7 +34,7 @@ fn harness() -> Harness<'static, TextureCraftApp> {
 fn click_at(harness: &mut Harness<'_, TextureCraftApp>, at: egui::Pos2) {
     harness.drag_at(at);
     harness.drop_at(at);
-    harness.run_steps(SETTLE_FRAMES);
+    harness.run_steps(REDRAW_FRAMES);
 }
 
 /// Selects the Layers panel row labelled `name` by clicking it

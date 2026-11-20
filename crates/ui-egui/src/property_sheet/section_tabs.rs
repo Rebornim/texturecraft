@@ -12,8 +12,11 @@ pub(super) use section_tops::SectionTops;
 /// Height of the tab strip
 const STRIP_HEIGHT: f32 = 30.0;
 
+/// How far the first tab reaches left of the rows' side padding
+const FIRST_TAB_OUTDENT: f32 = 4.0;
+
 /// From the panel's left edge to the first tab
-const FIRST_TAB: f32 = PAD - 4.0;
+const FIRST_TAB: f32 = PAD - FIRST_TAB_OUTDENT;
 
 /// A tab's width beyond its name: icon and air (the resource picker's tabs share these measures)
 pub(crate) const TAB_PADDING: f32 = 38.0;
@@ -90,11 +93,11 @@ pub(crate) fn section_tabs(ui: &mut Ui, scope: SectionScope, top_corner: u8, tab
     let corners = CornerRadius { nw: top_corner, ne: top_corner, sw: 0, se: 0 };
     ui.painter().rect_filled(strip, corners, tokens.chrome);
     let seen = ui.data(|data| data.get_temp::<SectionTops>(sections_id(scope))).unwrap_or_default();
-    let lit = seen.lit().map(str::to_owned);
+    let lit = seen.lit();
 
     let mut x = strip.left() + FIRST_TAB;
     for (index, (icon, title)) in tabs.iter().enumerate() {
-        let on = lit.as_deref().map_or(index == 0, |lit| lit == *title);
+        let on = lit.map_or(index == 0, |lit| lit == *title);
         let width = ui.painter().layout_no_wrap((*title).to_owned(), semibold(TAB_TEXT_SIZE), Color32::WHITE).size().x + TAB_PADDING;
         let tab = Rect::from_min_max(pos2(x, strip.top() + TAB_TOP), pos2(x + width, strip.bottom() + TAB_BELOW));
         let response = ui.interact(tab, ui.scope_id().with(("section_tab", index)), Sense::click());

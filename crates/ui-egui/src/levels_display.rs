@@ -3,6 +3,7 @@
 use egui::Color32;
 use texturecraft_engine::compose::EffectHistogram;
 
+use crate::i18n::n_;
 use crate::theme::{AXIS_COLORS, Tokens};
 
 /// A levels histogram's view: the three colours, all pooled, one colour, or luminance
@@ -14,22 +15,22 @@ pub(crate) enum LevelsDisplay {
     Red,
     Green,
     Blue,
-    Lum,
+    Luminance,
 }
 
 impl LevelsDisplay {
     pub(crate) const ALL: [LevelsDisplay; 6] =
-        [LevelsDisplay::Colors, LevelsDisplay::Rgb, LevelsDisplay::Red, LevelsDisplay::Green, LevelsDisplay::Blue, LevelsDisplay::Lum];
+        [LevelsDisplay::Colors, LevelsDisplay::Rgb, LevelsDisplay::Red, LevelsDisplay::Green, LevelsDisplay::Blue, LevelsDisplay::Luminance];
 
-    /// Its word on the display switch (short words of the reference's switch, not translated)
+    /// Its word on the display switch, untranslated (short words of the reference's switch)
     pub(crate) fn word(self) -> &'static str {
         match self {
-            LevelsDisplay::Colors => "Colors",
+            LevelsDisplay::Colors => n_("Colors"),
             LevelsDisplay::Rgb => "RGB",
             LevelsDisplay::Red => "R",
             LevelsDisplay::Green => "G",
             LevelsDisplay::Blue => "B",
-            LevelsDisplay::Lum => "Lum",
+            LevelsDisplay::Luminance => n_("Lum"),
         }
     }
 
@@ -41,7 +42,7 @@ impl LevelsDisplay {
             LevelsDisplay::Red => std::slice::from_ref(red),
             LevelsDisplay::Green => std::slice::from_ref(green),
             LevelsDisplay::Blue => std::slice::from_ref(blue),
-            LevelsDisplay::Rgb | LevelsDisplay::Lum => &[],
+            LevelsDisplay::Rgb | LevelsDisplay::Luminance => &[],
         }
     }
 
@@ -55,7 +56,7 @@ impl LevelsDisplay {
             LevelsDisplay::Green => component(1).into_iter().collect(),
             LevelsDisplay::Blue => component(2).into_iter().collect(),
             LevelsDisplay::Rgb => vec![(histogram.all.as_slice(), tokens.text)],
-            LevelsDisplay::Lum => vec![(histogram.luminance.as_slice(), tokens.text)],
+            LevelsDisplay::Luminance => vec![(histogram.luminance.as_slice(), tokens.text)],
         }
     }
 
@@ -67,7 +68,7 @@ impl LevelsDisplay {
             LevelsDisplay::Red => component(0),
             LevelsDisplay::Green => component(1),
             LevelsDisplay::Blue => component(2),
-            LevelsDisplay::Lum => &histogram.luminance,
+            LevelsDisplay::Luminance => &histogram.luminance,
         }
     }
 }

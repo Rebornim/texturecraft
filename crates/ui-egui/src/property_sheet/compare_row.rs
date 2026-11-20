@@ -5,7 +5,7 @@ use egui::{Align2, Color32, CornerRadius, FontId, Rect, Role, Sense, WidgetInfo,
 use egui_phosphor::regular as ic;
 
 use super::choice::{CARET_INSET, CARET_ROOM, truncated};
-use super::{CompareRowResponse, ICON_SIZE, PropertySheet};
+use super::{CONTROL_RADIUS, CompareRowResponse, ICON_SIZE, PropertySheet};
 
 /// Width of the operator switch at the right end of the first row
 const OPERATOR_SWITCH_WIDTH: f32 = 66.0;
@@ -15,6 +15,9 @@ const OPERATOR_AIR: f32 = 6.0;
 
 /// Width of a source's colour tag
 const TAG_WIDTH: f32 = 3.0;
+
+/// Corner radius of a source's colour tag: softens its ends without rounding a 3 px bar into a pill
+const TAG_RADIUS: u8 = 1;
 
 /// From a tagged dropdown's left edge to its value
 const TAGGED_VALUE_INSET: f32 = 10.0;
@@ -34,7 +37,7 @@ impl PropertySheet<'_> {
         let left_button = Rect::from_x_y_ranges(self.left..=(switch.left() - OPERATOR_AIR), first.y_range());
         let left_response = self.tagged_button(left_button, &name(left), tags[0]);
         let left_pick = self.hanging_list(&left_response, left, options, &name, None).0;
-        let operator_pick = self.segments(switch, operators, operator, &[], None);
+        let operator_pick = self.segments(switch, operators, operator, super::switch_control::untinted, None);
 
         let second = self.wide_row();
         let right_response = self.tagged_button(second, &name(right), tags[1]);
@@ -47,14 +50,14 @@ impl PropertySheet<'_> {
         let id = self.next_id();
         let response = self.ui.interact(rect, id, Sense::click());
         response.widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, value));
-        let t = self.tokens;
+        let tokens = self.tokens;
         let painter = self.ui.painter();
-        painter.rect_filled(rect, CornerRadius::same(4), if response.hovered() { t.row_hover } else { t.button });
-        painter.rect_filled(Rect::from_x_y_ranges(rect.left()..=(rect.left() + TAG_WIDTH), rect.y_range()), CornerRadius::same(1), tag);
+        painter.rect_filled(rect, CornerRadius::same(CONTROL_RADIUS), if response.hovered() { tokens.row_hover } else { tokens.button });
+        painter.rect_filled(Rect::from_x_y_ranges(rect.left()..=(rect.left() + TAG_WIDTH), rect.y_range()), CornerRadius::same(TAG_RADIUS), tag);
         let text_x = rect.left() + TAGGED_VALUE_INSET;
-        let galley = truncated(painter, value, rect.right() - CARET_ROOM - text_x, t.text);
-        painter.galley(pos2(text_x, rect.center().y - galley.size().y / 2.0), galley, t.text);
-        painter.text(pos2(rect.right() - CARET_INSET, rect.center().y), Align2::CENTER_CENTER, ic::CARET_DOWN, FontId::proportional(ICON_SIZE), t.text);
+        let galley = truncated(painter, value, rect.right() - CARET_ROOM - text_x, tokens.text);
+        painter.galley(pos2(text_x, rect.center().y - galley.size().y / 2.0), galley, tokens.text);
+        painter.text(pos2(rect.right() - CARET_INSET, rect.center().y), Align2::CENTER_CENTER, ic::CARET_DOWN, FontId::proportional(ICON_SIZE), tokens.text);
         response
     }
 }

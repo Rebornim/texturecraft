@@ -390,8 +390,17 @@ pub fn apply(ctx: &egui::Context, b: Brightness, accent: Accent) {
 /// X, Y and Z as the view corner, the symmetry manipulator and the 3D fields show them
 pub const AXIS_COLORS: [Color32; 3] = [Color32::from_rgb(0xd8, 0x60, 0x4f), Color32::from_rgb(0x6c, 0xbc, 0x5a), Color32::from_rgb(0x5a, 0x8c, 0xe0)];
 
+/// The axes' letters, as the Axis switches and the 3D fields' tags show them
+pub const AXIS_NAMES: [&str; 3] = ["X", "Y", "Z"];
+
 /// Cyan, magenta and yellow: the opposites of [`AXIS_COLORS`] at the same brightness (Color Balance's color names)
 pub const OPPOSITE_COLORS: [Color32; 3] = [Color32::from_rgb(0x52, 0xb8, 0xc4), Color32::from_rgb(0xc4, 0x6a, 0xc8), Color32::from_rgb(0xd2, 0xb8, 0x52)];
+
+/// `from` moved `amount` of the way to `to` in gamma space, opaque
+pub(crate) fn lerp_color(from: Color32, to: Color32, amount: f32) -> Color32 {
+    let mix = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * amount).round().clamp(0.0, 255.0) as u8;
+    Color32::from_rgb(mix(from.r(), to.r()), mix(from.g(), to.g()), mix(from.b(), to.b()))
+}
 
 /// Least contrast a tinted color name keeps against its background (the WCAG ratio for large or bold text and UI parts)
 const TINT_MIN_CONTRAST: f32 = 3.0;
@@ -432,11 +441,11 @@ mod tests {
     #[test]
     fn tint_names_read_on_a_light_card_and_stay_as_they_are_on_a_dark_one() {
         for theme in [Brightness::Light, Brightness::MediumLight, Brightness::MediumDark, Brightness::Dark] {
-            let t = Tokens::for_brightness(theme);
+            let tokens = Tokens::for_brightness(theme);
             for tint in OPPOSITE_COLORS.into_iter().chain(AXIS_COLORS) {
-                let shown = legible_tint(tint, t.row, t.text);
-                assert!(contrast_ratio(shown, t.row) >= TINT_MIN_CONTRAST, "{theme:?} {tint:?} -> {shown:?}");
-                if t.dark {
+                let shown = legible_tint(tint, tokens.row, tokens.text);
+                assert!(contrast_ratio(shown, tokens.row) >= TINT_MIN_CONTRAST, "{theme:?} {tint:?} -> {shown:?}");
+                if tokens.dark {
                     assert_eq!(shown, tint, "{theme:?}");
                 }
             }

@@ -10,23 +10,34 @@ use texturecraft_engine::paint::alphas;
 use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
 
+use crate::{BAKE_RESOLUTION, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+
+/// Tall enough for the toolbar, the layer rows and their menus at once
+const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 1200.0);
+
+/// Frames past the tooltip delay at the harness's step
+const TOOLTIP_DELAY_FRAMES: usize = 60;
+
+/// Slack, in points, for a list row that starts on the list's own bottom edge
+const EDGE_TOLERANCE: f32 = 1.0;
+
 /// The app with a selected fill layer, its content the target
 fn app() -> (Harness<'static, TextureCraftApp>, LayerId) {
-    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let mut session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();
     let layer = LayerId(execute(&mut session, "layer.add.fill", &Value::Null).unwrap()["layer"].as_u64().unwrap());
     execute(&mut session, "layer.select", &json!({"layer": layer.0})).unwrap();
-    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).build_eframe(|cc| TextureCraftApp::new(cc, session));
+    let mut harness = Harness::builder().with_size(WINDOW_SIZE).build_eframe(|cc| TextureCraftApp::new(cc, session));
     harness.state_mut().ui.prefs.language = "en".into();
-    harness.run_steps(4);
+    harness.run_steps(STARTUP_FRAMES);
     (harness, layer)
 }
 
 /// Opens the row's menu `menu` and clicks its item `item`
 fn pick(harness: &mut Harness<'_, TextureCraftApp>, menu: &str, item: &str) {
     harness.get_by_role_and_label(Role::Button, menu).click();
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     harness.get_by_role_and_label(Role::Button, item).click();
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
 }
 
 fn mask_kinds(harness: &Harness<'_, TextureCraftApp>, layer: LayerId) -> Vec<EffectKind> {
@@ -42,16 +53,17 @@ fn add_effect_greys_mask_only_effects_on_the_content_and_adds_them_in_the_mask()
         pick(&mut harness, "Add effect", item);
         assert_eq!(harness.state().session.history_labels().len(), steps, "{item} is greyed on the layer content, not sent to the mask");
         harness.key_press(egui::Key::Escape);
-        harness.run_steps(2);
+        harness.run_steps(SETTLE_FRAMES);
     }
     assert!(harness.state().session.doc.project.layer(layer).unwrap().mask.is_none());
 
     harness.state_mut().run("mask.add.white", json!({"layer": layer.0}));
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     pick(&mut harness, "Add effect", "Color selection");
     let kinds = mask_kinds(&harness, layer);
     assert!(matches!(kinds.as_slice(), [EffectKind::ColorSelection(_)]), "{kinds:?}");
-    let added = harness.state().session.doc.project.layer(layer).unwrap().mask.as_ref().unwrap().effects[0].id;
+    let mask = harness.state().session.doc.project.layer(layer).unwrap().mask.as_ref().unwrap();
+    let added = mask.effects.iter().find(|effect| matches!(effect.kind, EffectKind::ColorSelection(_))).unwrap().id;
     assert_eq!(harness.state().session.target, StackTarget::Effect(added), "the new colour selection is selected");
 }
 
@@ -74,14 +86,14 @@ fn bitmap_opens_the_texture_picker_and_adds_the_mask_only_once_one_is_picked() {
     assert!(egui::Popup::is_any_open(&harness.ctx), "Bitmap opens the texture picker");
     assert!(harness.state().session.doc.project.layer(layer).unwrap().mask.is_none(), "no mask until a texture is picked");
     harness.key_press(egui::Key::Escape);
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     assert!(!egui::Popup::is_any_open(&harness.ctx));
     assert!(harness.state().session.doc.project.layer(layer).unwrap().mask.is_none(), "Escape adds nothing");
 
-    let alpha = &alphas::library()[0];
+    let alpha = alphas::find("round_soft").unwrap();
     pick(&mut harness, "Add mask", "Bitmap");
     harness.get_by_label(&alpha.label).click();
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     let kinds = mask_kinds(&harness, layer);
     let name = texturecraft_engine::fill_alpha::resource_name(alpha);
     assert!(matches!(kinds.as_slice(), [EffectKind::Fill { source: Source::Image { name: read, .. }, .. }] if *read == name), "{kinds:?}");
@@ -94,7 +106,7 @@ fn a_toolbar_tooltip_shows_above_its_button_off_the_layer_rows() {
     harness.hover_at(button.center());
 
     // Past the tooltip delay
-    harness.run_steps(60);
+    harness.run_steps(TOOLTIP_DELAY_FRAMES);
     let tip =
         harness.get_all_by_label("Add effect").find(|node| node.accesskit_node().role() == Role::Label).map(|node| node.rect()).expect("the button's tooltip");
     assert!(tip.bottom() <= button.top(), "the tooltip sits above the toolbar: {tip:?} {button:?}");
@@ -113,8 +125,8 @@ fn pick_channel(harness: &mut Harness<'_, TextureCraftApp>, current: &str, item:
         harness.event(egui::Event::PointerButton { pos: list.center(), button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
         harness.run_steps(1);
     }
-    harness.run_steps(3);
-    let below = |rect: egui::Rect| rect.top() >= list.bottom() - 1.0 && rect.left() < list.right() && rect.right() > list.left();
+    harness.run_steps(SETTLE_FRAMES);
+    let below = |rect: egui::Rect| rect.top() >= list.bottom() - EDGE_TOLERANCE && rect.left() < list.right() && rect.right() > list.left();
     let row = harness.query_all_by_label(item).map(|node| node.rect()).filter(|rect| below(*rect)).min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
 
     // A real press and release on the row, as a mouse would
@@ -124,7 +136,7 @@ fn pick_channel(harness: &mut Harness<'_, TextureCraftApp>, current: &str, item:
         harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
         harness.run_steps(1);
     }
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
 }
 
 #[test]

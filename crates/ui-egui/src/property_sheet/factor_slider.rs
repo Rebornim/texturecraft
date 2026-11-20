@@ -3,7 +3,8 @@
 use std::ops::RangeInclusive;
 
 use super::PropertySheet;
-use super::slider::{KNOB_RADIUS, Track};
+use super::slider::KNOB_RADIUS;
+use super::track::Track;
 use super::value_text::ValueText;
 
 impl PropertySheet<'_> {
@@ -20,7 +21,7 @@ impl PropertySheet<'_> {
         let shown = format!("×{:.2}", *factor);
         self.measure_value(&shown);
         let width = self.used.value_width.max(super::VALUE_MIN_WIDTH);
-        let entered = self.value_text_field(id, ValueText { right: self.right, width, center_y, shown: &shown, suffix: "" }, *factor, &typed, 2);
+        let entered = self.value_text_field(id, ValueText { label: &label, right: self.right, width, center_y, shown: &shown, suffix: "" }, *factor, &typed, 2);
         Self::apply_typed(factor, entered, dragged)
     }
 }

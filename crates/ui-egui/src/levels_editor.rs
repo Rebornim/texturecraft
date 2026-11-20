@@ -3,9 +3,10 @@
 use egui::{Color32, CursorIcon, Id, Pos2, Rect, Response, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 use texturecraft_engine::core::Levels;
 
+use crate::exact_entry_open::ExactEntryOpen;
 use crate::i18n::tr;
 use crate::levels_handle::LevelsHandle;
-use crate::theme::Tokens;
+use crate::theme::{Tokens, lerp_color};
 
 const HISTOGRAM_HEIGHT: f32 = 70.0;
 const HANDLE_HEIGHT: f32 = 11.0;
@@ -28,6 +29,9 @@ const FIELD_LABEL_SIZE: f32 = 11.5;
 
 /// How much of a histogram's colour shows over the well (the rest is the well)
 const HISTOGRAM_TINT: f32 = 0.55;
+
+/// Room the well's painter keeps round the well, so the edge lines on its sides are not clipped
+const WELL_CLIP_MARGIN: f32 = 1.0;
 
 /// Gray of the gamma handle, between the black input-low and white input-high handles
 const GAMMA_HANDLE_GRAY: u8 = 128;
@@ -152,10 +156,6 @@ pub fn levels_editor(ui: &mut Ui, id_salt: impl std::hash::Hash + std::fmt::Debu
     edit
 }
 
-/// Marks the exact-entry fields as shown; they appear on a handle's double-click or Enter and close when typing ends
-#[derive(Clone, Copy)]
-struct ExactEntryOpen;
-
 /// Properties shows one effect at a time; its old cursor, draft and drag state must not accumulate
 fn forget_previous_editor(ui: &Ui, id: Id, handles: &[LevelsHandle]) {
     let owner = ui.make_persistent_id("levels_editor_owner");
@@ -226,7 +226,7 @@ fn value_rect(rect: Rect, handle: LevelsHandle, levels: &Levels, size: egui::Vec
 /// The histograms in their well over quarter lines, each a column per bucket in its colour, the tallest bucket of all filling the well
 fn paint_histogram(ui: &Ui, well: Rect, series: &[(&[u32], Color32)]) {
     let tokens = Tokens::get(ui.ctx());
-    let painter = ui.painter_at(well.expand(1.0));
+    let painter = ui.painter_at(well.expand(WELL_CLIP_MARGIN));
     painter.rect_filled(well, 0.0, tokens.field);
     let vertical_line = |x: f32, color: Color32| painter.line_segment([pos2(x, well.top()), pos2(x, well.bottom())], Stroke::new(1.0, color));
     for fraction in GRID_FRACTIONS {
@@ -246,12 +246,6 @@ fn paint_histogram(ui: &Ui, well: Rect, series: &[(&[u32], Color32)]) {
 
     vertical_line(well.left(), tokens.text_dim);
     vertical_line(well.right(), tokens.text_dim);
-}
-
-/// `from` moved `amount` of the way to `to`, opaque
-fn lerp_color(from: Color32, to: Color32, amount: f32) -> Color32 {
-    let mix = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * amount).round() as u8;
-    Color32::from_rgb(mix(from.r(), to.r()), mix(from.g(), to.g()), mix(from.b(), to.b()))
 }
 
 /// Each handle filled with its gray, the active one on top, and its value beside it, overlapping values left out

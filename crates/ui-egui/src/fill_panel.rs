@@ -14,13 +14,13 @@ use crate::dock::with;
 use crate::fill_pictures::{
     angle_picture, backface_picture, crop_picture, depth_picture, filtering_picture, projection_picture, warp_preview, window_preview, wrap_picture,
 };
-use crate::fill_placement::Placement;
 use crate::i18n::{filtering_label, tr, wrap_label};
 use crate::move_on_model::MoveOnModel;
+use crate::placement::Placement;
 use crate::projection_kind::ProjectionKind;
 use crate::projection_preview::projection_preview;
 use crate::property_sheet::{NumberField, PreviewLower, PreviewSize, PropertySheet, RowLead};
-use crate::theme::{AXIS_COLORS, Tokens};
+use crate::theme::{AXIS_COLORS, AXIS_NAMES, Tokens};
 
 /// Centimetres in one mesh unit: meshes are read in metres
 const CM_PER_UNIT: f32 = 100.0;
@@ -73,6 +73,14 @@ pub(crate) fn fill_tabs(grayscale: bool) -> [(&'static str, &'static str); 3] {
     [(ic::SLIDERS_HORIZONTAL, tr("Fill")), (ic::FLIP_HORIZONTAL, tr("Symmetry")), last]
 }
 
+/// Which fill a `base` addresses, (layer, effect), as the salt of its rows' widget state
+pub(crate) type FillKey = (Option<u64>, Option<u64>);
+
+/// The [`FillKey`] of the fill at `base`
+pub(crate) fn fill_key(base: &Value) -> FillKey {
+    (base.get("layer").and_then(Value::as_u64), base.get("effect").and_then(Value::as_u64))
+}
+
 /// The mesh's size for the texture set being painted, as the projections see it
 fn mesh_size(app: &TextureCraftApp) -> MeshSize {
     let mesh = &app.session.mesh;
@@ -88,18 +96,16 @@ pub(crate) fn fill_sheet(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_
 
 /// The Fill section (with its reset) and the Symmetry section of the fill at `base`: a fill layer's, a content fill effect's or a mask fill's
 pub(crate) fn placement_sections(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, reader: LayerId) {
-    let salt = base.to_string();
-
     // The section reset: projection, placement, sampling and culling back to a new fill's in one undo step
     if sheet.section_reset(tr("Fill"), !texturecraft_engine::fill_reset_cmds::at_defaults(&fill.projection, fill.sampling)) {
         app.run("layer.fill.resetProjection", base.clone());
     }
-    projection_rows(app, sheet, fill, base, &salt, reader);
+    projection_rows(app, sheet, fill, base, fill_key(base), reader);
     crate::fill_symmetry_panel::symmetry_section(app, sheet, &fill.projection, fill.sampling, base);
 }
 
 /// Projection, Scale, the preview with size and offset (held, it moves the projection on the model), Rotation, the culling rows, then the Filtering and edges and 3D projection settings bands
-fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, salt: &str, reader: LayerId) {
+fn projection_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, salt: FillKey, reader: LayerId) {
     let tokens = Tokens::get(sheet.ui.ctx());
     let kind = ProjectionKind::of(&fill.projection);
     let run = |app: &mut TextureCraftApp, fields: Value| {
@@ -312,7 +318,7 @@ fn placement_rows(
         Projection::UvTile => return,
     };
 
-    let link_id = sheet.ui.make_persistent_id(("fill_tiling_link", base.to_string()));
+    let link_id = sheet.ui.make_persistent_id(("fill_tiling_link", fill_key(base)));
     let mut linked = sheet.ui.data(|data| data.get_temp::<bool>(link_id)).unwrap_or(tiling[0] == tiling[1]);
     let was_linked = linked;
     let mut values = match length {
@@ -390,7 +396,7 @@ fn placement_rows(
 
 /// One X, Y, Z row of the 3D projection settings
 fn xyz_fields(values: [f32; 3], speed: f32, decimals: usize, suffix: &'static str) -> [NumberField<'static>; 3] {
-    let mut fields = ["X", "Y", "Z"].map(|tag| NumberField { tag, tag_color: None, value: 0.0, speed, decimals, suffix });
+    let mut fields = AXIS_NAMES.map(|tag| NumberField { tag, tag_color: None, value: 0.0, speed, decimals, suffix });
     for ((field, value), color) in fields.iter_mut().zip(values).zip(AXIS_COLORS) {
         field.value = value;
         field.tag_color = Some(color);
@@ -399,7 +405,7 @@ fn xyz_fields(values: [f32; 3], speed: f32, decimals: usize, suffix: &'static st
 }
 
 /// The 3D projection settings: the projector's Offset, Rotation and Scale in X, Y and Z; a frame on the surface shows its own (where its centre is, how it is turned, how big it is), the same values its gizmo drags
-fn world_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, salt: &str) {
+fn world_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, salt: FillKey) {
     let Some(projector) = projector_of(&fill.projection) else { return };
     if !sheet.band(tr("3D projection settings"), true, None, None).open {
         return;
@@ -449,7 +455,7 @@ fn world_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &F
 }
 
 /// The Scale X, Y, Z row with its link: the new scale and whether it continues the drag's undo step; linked, one field scales all three by the same factor
-fn scale_row(sheet: &mut PropertySheet<'_>, scale: [f32; 3], salt: &str) -> Option<(Vec<f32>, bool)> {
+fn scale_row(sheet: &mut PropertySheet<'_>, scale: [f32; 3], salt: FillKey) -> Option<(Vec<f32>, bool)> {
     let link_id = sheet.ui.make_persistent_id(("projector_scale_link", salt));
     let [x, y, z] = scale;
     let mut linked = sheet.ui.data(|data| data.get_temp::<bool>(link_id)).unwrap_or(x == y && y == z);

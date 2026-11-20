@@ -4,7 +4,7 @@ use egui::Pos2;
 use texturecraft_engine::compose::pattern::FRAME_UV_CENTER;
 
 use crate::fill_pictures::PREVIEW_MIN_TILES;
-use crate::fill_placement::Placement;
+use crate::placement::Placement;
 
 /// Checker cells along each axis of one repeat of the image (an untiled, unturned image shows 4 × 4 cells across the frame)
 pub(crate) const CELLS_PER_TILE: f32 = 4.0;

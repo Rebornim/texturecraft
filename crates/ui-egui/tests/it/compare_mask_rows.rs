@@ -8,15 +8,23 @@ use texturecraft_engine::core::{Channel, CompareOp, CompareSource, EffectKind, L
 use texturecraft_engine::execute;
 use texturecraft_ui_egui::TextureCraftApp;
 
+use crate::{BAKE_RESOLUTION, DRAG_STEP_FRAMES, FRAME_SECONDS, PROPERTIES_WINDOW, REDRAW_FRAMES, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+
+/// How far left of the source list a click lands, clear of the list and its popup
+const OUTSIDE_OFFSET: f32 = 400.0;
+
+/// One wheel notch over the view, in points
+const WHEEL_NOTCH: f32 = 60.0;
+
 /// A fill over a fill, a compare mask on the top one, selected: (harness, compare effect)
 fn compare_harness() -> (Harness<'static, TextureCraftApp>, LayerId) {
-    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let mut session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();
     execute(&mut session, "layer.add.fill", &json!({"roughness": 0.2})).unwrap();
     let layer = execute(&mut session, "layer.add.fill", &json!({"roughness": 0.6})).unwrap()["layer"].clone();
     let effect = LayerId(execute(&mut session, "effect.add.compare", &json!({"layer": layer})).unwrap()["effect"].as_u64().unwrap());
     execute(&mut session, "layer.select", &json!({"layer": layer, "target": effect.0})).unwrap();
-    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).with_step_dt(1.0 / 60.0).build_eframe(|cc| TextureCraftApp::new(cc, session));
-    harness.run_steps(4);
+    let mut harness = Harness::builder().with_size(PROPERTIES_WINDOW).with_step_dt(FRAME_SECONDS).build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.run_steps(STARTUP_FRAMES);
     (harness, effect)
 }
 
@@ -39,9 +47,9 @@ fn has_slider(harness: &Harness<'_, TextureCraftApp>, label: &str) -> bool {
 /// Opens the list of the source showing `name` and picks `option`
 fn pick_source(harness: &mut Harness<'_, TextureCraftApp>, name: &str, option: &str) {
     harness.get_by_role_and_label(Role::ComboBox, name).click();
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     harness.get_by_role_and_label(Role::ListBoxOption, option).click();
-    harness.run_steps(4);
+    harness.run_steps(REDRAW_FRAMES);
 }
 
 #[test]
@@ -62,7 +70,7 @@ fn the_rows_show_and_edit_the_comparison_one_undo_step_each() {
     assert_eq!(compare(&harness, effect).0, CompareSource::ThisMask);
 
     harness.get_by(|node| node.role() == Role::RadioButton && node.label().as_deref() == Some("≈")).click();
-    harness.run_steps(4);
+    harness.run_steps(REDRAW_FRAMES);
     assert_eq!(compare(&harness, effect).1, CompareOp::WithinTolerance);
     assert!(has_slider(&harness, "Tolerance"), "within tolerance shows its tolerance");
 
@@ -76,7 +84,7 @@ fn a_source_list_leaves_the_view_its_wheel_and_closes_on_escape_or_a_click_outsi
     let (mut harness, effect) = compare_harness();
     let open_list = |harness: &mut Harness<'_, TextureCraftApp>| {
         harness.get_by_role_and_label(Role::ComboBox, "Layers below").click();
-        harness.run_steps(3);
+        harness.run_steps(SETTLE_FRAMES);
         assert!(egui::Popup::is_any_open(&harness.ctx), "the source list opens");
     };
     open_list(&mut harness);
@@ -85,25 +93,25 @@ fn a_source_list_leaves_the_view_its_wheel_and_closes_on_escape_or_a_click_outsi
     harness.hover_at(harness.state().viewport_rect.center());
     harness.event(egui::Event::MouseWheel {
         unit: egui::MouseWheelUnit::Point,
-        delta: egui::vec2(0.0, 60.0),
+        delta: egui::vec2(0.0, WHEEL_NOTCH),
         phase: egui::TouchPhase::Move,
         source: egui::MouseWheelSource::Wheel,
         modifiers: egui::Modifiers::NONE,
     });
-    harness.run_steps(4);
+    harness.run_steps(REDRAW_FRAMES);
     assert_ne!(harness.state().session.camera.distance, distance, "the wheel over the view zooms with the list open");
 
     harness.key_press(egui::Key::Escape);
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
     assert!(!egui::Popup::is_any_open(&harness.ctx), "Escape closes the list");
 
     open_list(&mut harness);
     let combo = harness.get_by_role_and_label(Role::ComboBox, "Layers below").rect();
-    let outside = egui::pos2(combo.min.x - 400.0, combo.min.y);
+    let outside = egui::pos2(combo.min.x - OUTSIDE_OFFSET, combo.min.y);
     harness.hover_at(outside);
     for pressed in [true, false] {
         harness.event(egui::Event::PointerButton { pos: outside, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
-        harness.run_steps(2);
+        harness.run_steps(DRAG_STEP_FRAMES);
     }
     assert!(!egui::Popup::is_any_open(&harness.ctx), "a click outside closes the list");
     assert_eq!(compare(&harness, effect).2, CompareSource::LayersBelow, "nothing changed");

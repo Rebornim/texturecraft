@@ -3,8 +3,9 @@ use std::ops::RangeInclusive;
 use egui::{Align2, Color32, CornerRadius, FontId, Id, Rect, Response, Sense, Stroke, StrokeKind, WidgetInfo, pos2};
 use egui_phosphor::regular as ic;
 
+use super::track::Track;
 use super::value_text::ValueText;
-use super::{ICON_SIZE, PropertySheet, ROW_HIT_HALF_HEIGHT, RowLead, SMALL_TEXT_SIZE, TEXT_SIZE};
+use super::{CONTROL_RADIUS, ICON_SIZE, PropertySheet, ROW_HIT_HALF_HEIGHT, RowLead, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Radius of a slider's knob
@@ -22,6 +23,9 @@ const ZERO_TICK_HALF: f32 = 4.0;
 /// Radius of an angle row's dial
 const DIAL_RADIUS: f32 = 8.0;
 
+/// The quarter turn back from the screen's 0 rad (pointing right) that points the dial's hand straight up at 0°
+const DIAL_ZERO_DEGREES: f32 = 90.0;
+
 /// Air between the dial and the value, and between the track's end and the dial
 const DIAL_AIR: f32 = 6.0;
 
@@ -36,18 +40,6 @@ const CHIP_PADDING: f32 = 24.0;
 
 /// Air between the chip and the value, beyond the panel's value column
 const CHIP_TO_VALUE: f32 = 18.0;
-
-/// What a slider's knob runs along and shows
-pub(super) struct Track {
-    pub(super) start: f32,
-    pub(super) end: f32,
-    pub(super) center_y: f32,
-    /// Where a two-sided range's fill starts and its tick sits (0 for signed ranges, 0.5 for a 0..1 range centred on "unchanged")
-    pub(super) zero: Option<f32>,
-
-    /// The track is a picture of its range (a gray ramp) drawn by the caller: no line and no fill
-    pub(super) ramp: bool,
-}
 
 /// Where a slider's unit chip draws its caret and its text, from the chip's right end
 const CHIP_CARET_INSET: f32 = 9.0;
@@ -70,7 +62,7 @@ impl PropertySheet<'_> {
         let id = self.next_id();
         let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, zero: None, ramp: false };
         let dragged = self.track(id, lead.text(), &track, value, &range);
-        let typed = self.value_field(id, center_y, *value, &range, decimals, suffix);
+        let typed = self.value_field(id, lead.text(), center_y, *value, &range, decimals, suffix);
         Self::apply_typed(value, typed, dragged)
     }
 
@@ -80,7 +72,7 @@ impl PropertySheet<'_> {
         let id = self.next_id();
         let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, zero: Some(0.0), ramp: false };
         let dragged = self.track(id, label, &track, value, &range);
-        let typed = self.value_field(id, center_y, *value, &range, decimals, "");
+        let typed = self.value_field(id, label, center_y, *value, &range, decimals, "");
         Self::apply_typed(value, typed, dragged)
     }
 
@@ -90,14 +82,14 @@ impl PropertySheet<'_> {
         let id = self.next_id();
         let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, zero: Some(centre), ramp: false };
         let dragged = self.track(id, label, &track, value, &range);
-        let typed = self.value_field(id, center_y, *value, &range, decimals, "");
+        let typed = self.value_field(id, label, center_y, *value, &range, decimals, "");
         Self::apply_typed(value, typed, dragged)
     }
 
     /// A −1..1 balance between two tinted color names, left as the label and right after the track (`rights`: the group's right names)
     pub(crate) fn tinted_slider(&mut self, left: (&str, Color32), right: (&str, Color32), rights: &[&str], value: &mut f32) -> Option<bool> {
-        let t = self.tokens;
-        let readable = |tint: Color32| crate::theme::legible_tint(tint, t.row, t.text);
+        let tokens = self.tokens;
+        let readable = |tint: Color32| crate::theme::legible_tint(tint, tokens.row, tokens.text);
         let (control, center_y) = self.row_with(RowLead::Tinted { text: left.0, color: readable(left.1) });
         let id = self.next_id();
         let widest = rights.iter().map(|name| self.text_width(name, FontId::proportional(TEXT_SIZE))).fold(0.0, f32::max);
@@ -106,7 +98,7 @@ impl PropertySheet<'_> {
         let range = -1.0..=1.0;
         let dragged = self.track(id, left.0, &track, value, &range);
         self.ui.painter().text(pos2(word_x, center_y), Align2::LEFT_CENTER, right.0, FontId::proportional(TEXT_SIZE), readable(right.1));
-        let typed = self.value_field(id, center_y, *value, &range, 2, "");
+        let typed = self.value_field(id, left.0, center_y, *value, &range, 2, "");
         Self::apply_typed(value, typed, dragged)
     }
 
@@ -139,20 +131,20 @@ impl PropertySheet<'_> {
         };
         let dragged = self.track(id, lead.text(), &track, degrees, &range);
 
-        let t = self.tokens;
+        let tokens = self.tokens;
         let painter = self.ui.painter();
-        painter.circle_stroke(pos2(dial_x, center_y), DIAL_RADIUS, Stroke::new(KNOB_STROKE, t.button_border));
-        let turn = (*degrees - 90.0).to_radians();
+        painter.circle_stroke(pos2(dial_x, center_y), DIAL_RADIUS, Stroke::new(KNOB_STROKE, tokens.button_border));
+        let turn = (*degrees - DIAL_ZERO_DEGREES).to_radians();
         let hand = pos2(dial_x + DIAL_RADIUS * turn.cos(), center_y + DIAL_RADIUS * turn.sin());
-        painter.line_segment([pos2(dial_x, center_y), hand], Stroke::new(TRACK_WIDTH, t.text));
+        painter.line_segment([pos2(dial_x, center_y), hand], Stroke::new(TRACK_WIDTH, tokens.text));
 
         let typed = if plus {
             let shown = format!("{:+.0}°", *degrees);
             self.measure_value(&shown);
             let width = self.used.value_width.max(super::VALUE_MIN_WIDTH);
-            self.value_text_field(id, ValueText { right: self.right, width, center_y, shown: &shown, suffix: "°" }, *degrees, &range, 0)
+            self.value_text_field(id, ValueText { label: &lead.text(), right: self.right, width, center_y, shown: &shown, suffix: "°" }, *degrees, &range, 0)
         } else {
-            self.value_field(id, center_y, *degrees, &range, 0, "°")
+            self.value_field(id, lead.text(), center_y, *degrees, &range, 0, "°")
         };
         Self::apply_typed(degrees, typed, dragged)
     }
@@ -175,19 +167,19 @@ impl PropertySheet<'_> {
         let chip_response = self.ui.interact(chip_rect, id.with("chip"), Sense::click());
         chip_response.widget_info(|| WidgetInfo::labeled(egui::Role::ComboBox, true, chip));
 
-        let t = self.tokens;
+        let tokens = self.tokens;
         let open = egui::Popup::is_id_open(self.ui.ctx(), egui::Popup::default_response_id(&chip_response));
         let painter = self.ui.painter();
-        painter.rect_filled(chip_rect, CornerRadius::same(4), if chip_response.hovered() { t.row_hover } else { t.button });
+        painter.rect_filled(chip_rect, CornerRadius::same(CONTROL_RADIUS), if chip_response.hovered() { tokens.row_hover } else { tokens.button });
         if open {
-            painter.rect_stroke(chip_rect, CornerRadius::same(4), Stroke::new(1.0, t.accent), StrokeKind::Inside);
+            painter.rect_stroke(chip_rect, CornerRadius::same(CONTROL_RADIUS), Stroke::new(1.0, tokens.accent), StrokeKind::Inside);
         }
-        painter.text(pos2(chip_end - CHIP_CARET_INSET, center_y), Align2::CENTER_CENTER, ic::CARET_DOWN, FontId::proportional(ICON_SIZE), t.text);
-        painter.text(pos2(chip_end - CHIP_TEXT_INSET, center_y), Align2::RIGHT_CENTER, chip, semibold(SMALL_TEXT_SIZE), t.text);
+        painter.text(pos2(chip_end - CHIP_CARET_INSET, center_y), Align2::CENTER_CENTER, ic::CARET_DOWN, FontId::proportional(ICON_SIZE), tokens.text);
+        painter.text(pos2(chip_end - CHIP_TEXT_INSET, center_y), Align2::RIGHT_CENTER, chip, semibold(SMALL_TEXT_SIZE), tokens.text);
 
         let track = Track { start: control.left() + KNOB_RADIUS, end: chip_rect.left() - DIAL_AIR - KNOB_RADIUS, center_y, zero: None, ramp: false };
         let dragged = self.track(id, label, &track, value, &range);
-        let typed = self.value_field(id, center_y, *value, &range, decimals, "");
+        let typed = self.value_field(id, label, center_y, *value, &range, decimals, "");
         (Self::apply_typed(value, typed, dragged), chip_response)
     }
 
@@ -203,7 +195,7 @@ impl PropertySheet<'_> {
     }
 
     /// Paints a track with its knob and moves `value` while it is clicked or dragged
-    pub(super) fn track(&mut self, id: Id, label: &str, track: &Track, value: &mut f32, range: &RangeInclusive<f32>) -> Option<bool> {
+    pub(super) fn track(&mut self, id: Id, label: impl std::fmt::Display, track: &Track, value: &mut f32, range: &RangeInclusive<f32>) -> Option<bool> {
         let (minimum, maximum) = (*range.start(), *range.end());
         let span = (maximum - minimum).max(f32::EPSILON);
         let length = (track.end - track.start).max(1.0);
@@ -212,43 +204,56 @@ impl PropertySheet<'_> {
             pos2(track.end + KNOB_RADIUS, track.center_y + ROW_HIT_HALF_HEIGHT),
         );
         let response = self.ui.interact(hit, id, Sense::click_and_drag());
-        response.widget_info(|| WidgetInfo::slider(true, f64::from(*value), label));
+        response.widget_info(|| WidgetInfo::slider(true, f64::from(*value), &label));
 
-        let mut edit = None;
+        let mut moved = false;
         if (response.dragged() || response.clicked())
             && let Some(pointer) = response.interact_pointer_pos()
         {
             let picked = (minimum + (pointer.x - track.start) / length * span).clamp(minimum, maximum);
             if picked != *value {
                 *value = picked;
-                edit = Some(response.dragged() && !response.drag_started());
+                moved = true;
             }
         }
 
-        let t = self.tokens;
+        // A press's first change starts an undo step, its later changes continue it
+        let edit = crate::widgets::press_edit(self.ui, response.id, moved);
+
+        let tokens = self.tokens;
         let at = |v: f32| track.start + ((v - minimum) / span).clamp(0.0, 1.0) * length;
         let knob_x = at(*value);
         let zero_x = track.zero.map_or(track.start, |zero| at(zero.clamp(minimum, maximum)));
         let painter = self.ui.painter();
         if !track.ramp {
-            painter.line_segment([pos2(track.start, track.center_y), pos2(track.end, track.center_y)], Stroke::new(TRACK_WIDTH, t.button_border));
-            painter.line_segment([pos2(zero_x.min(knob_x), track.center_y), pos2(zero_x.max(knob_x), track.center_y)], Stroke::new(TRACK_WIDTH, t.accent));
+            painter.line_segment([pos2(track.start, track.center_y), pos2(track.end, track.center_y)], Stroke::new(TRACK_WIDTH, tokens.button_border));
+            painter.line_segment([pos2(zero_x.min(knob_x), track.center_y), pos2(zero_x.max(knob_x), track.center_y)], Stroke::new(TRACK_WIDTH, tokens.accent));
         }
         if track.zero.is_some() {
             let tick = [pos2(zero_x, track.center_y - ZERO_TICK_HALF), pos2(zero_x, track.center_y + ZERO_TICK_HALF)];
-            painter.line_segment(tick, Stroke::new(1.0, t.text_dim));
+            painter.line_segment(tick, Stroke::new(1.0, tokens.text_dim));
         }
-        let outline = if response.hovered() || response.dragged() { t.accent } else { t.text };
-        painter.circle(pos2(knob_x, track.center_y), KNOB_RADIUS, t.panel, Stroke::new(KNOB_STROKE, outline));
+        let outline = if response.hovered() || response.dragged() { tokens.accent } else { tokens.text };
+        painter.circle(pos2(knob_x, track.center_y), KNOB_RADIUS, tokens.panel, Stroke::new(KNOB_STROKE, outline));
         edit
     }
 
-    /// The value at the row's end; a click turns it into a field, which returns the typed value when done
-    pub(super) fn value_field(&mut self, id: Id, center_y: f32, value: f32, range: &RangeInclusive<f32>, decimals: usize, suffix: &str) -> Option<f32> {
+    /// The value at the row's end, answering as `label`'s value; a click turns it into a field, which returns the typed value when done
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn value_field(
+        &mut self,
+        id: Id,
+        label: impl std::fmt::Display,
+        center_y: f32,
+        value: f32,
+        range: &RangeInclusive<f32>,
+        decimals: usize,
+        suffix: &str,
+    ) -> Option<f32> {
         let shown = format!("{value:.decimals$}{suffix}");
         self.measure_value(&shown);
         let width = self.used.value_width.max(super::VALUE_MIN_WIDTH);
-        self.value_field_at(id, self.right, width, center_y, value, range, decimals, suffix)
+        self.value_text_field(id, ValueText { label: &label, right: self.right, width, center_y, shown: &shown, suffix }, value, range, decimals)
     }
 
     /// [`Self::value_field`] ending at `right`, `width` wide, outside the panel's value column
@@ -256,6 +261,7 @@ impl PropertySheet<'_> {
     pub(super) fn value_field_at(
         &mut self,
         id: Id,
+        label: impl std::fmt::Display,
         right: f32,
         width: f32,
         center_y: f32,
@@ -265,22 +271,23 @@ impl PropertySheet<'_> {
         suffix: &str,
     ) -> Option<f32> {
         let shown = format!("{value:.decimals$}{suffix}");
-        self.value_text_field(id, ValueText { right, width, center_y, shown: &shown, suffix }, value, range, decimals)
+        self.value_text_field(id, ValueText { label: &label, right, width, center_y, shown: &shown, suffix }, value, range, decimals)
     }
 
     /// A value drawn as `text.shown` that turns into a field when clicked; returns the typed value (its `text.suffix` and a leading "×" or "x" allowed), kept in `range`
     pub(super) fn value_text_field(&mut self, id: Id, text: ValueText<'_>, value: f32, range: &RangeInclusive<f32>, decimals: usize) -> Option<f32> {
-        let ValueText { right, width, center_y, shown, suffix } = text;
+        let ValueText { label, right, width, center_y, shown, suffix } = text;
         let rect = Rect::from_min_max(pos2(right - width, center_y - ROW_HIT_HALF_HEIGHT), pos2(right, center_y + ROW_HIT_HALF_HEIGHT));
         let field_id = id.with("typed");
         let editing = self.ui.data(|data| data.get_temp::<String>(field_id));
 
-        let t = self.tokens;
+        let tokens = self.tokens;
         let Some(mut text) = editing else {
             let response = self.ui.interact(rect, id.with("value"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
-            self.ui.painter().text(pos2(right, center_y), Align2::RIGHT_CENTER, shown, semibold(TEXT_SIZE), t.text);
+            response.widget_info(|| WidgetInfo::labeled(egui::Role::Label, true, crate::i18n::trf("{label} value", &[("label", label)])));
+            self.ui.painter().text(pos2(right, center_y), Align2::RIGHT_CENTER, shown, semibold(TEXT_SIZE), tokens.text);
             if response.hovered() {
-                self.value_line(rect.left(), right, center_y, t.field_border);
+                self.value_line(rect.left(), right, center_y, tokens.field_border);
             }
             if response.clicked() {
                 self.start_typing(field_id, format!("{value:.decimals$}"));
@@ -291,7 +298,7 @@ impl PropertySheet<'_> {
         // Typing happens on the value's own line: no box, the line under it goes accent
         let edit = egui::TextEdit::singleline(&mut text).id(field_id).font(semibold(TEXT_SIZE)).align(egui::Align2::RIGHT_CENTER);
         let response = self.typing_edit(rect.left(), right, center_y, edit);
-        self.value_line(rect.left(), right, center_y, t.accent);
+        self.value_line(rect.left(), right, center_y, tokens.accent);
         if !response.lost_focus() {
             self.ui.data_mut(|data| data.insert_temp(field_id, text));
             return None;

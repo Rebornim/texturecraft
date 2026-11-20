@@ -43,6 +43,9 @@ const PICKER_BOTTOM: f32 = 10.0;
 /// The picker's height before it was first measured, so it stays on screen beside a bar near the window's bottom
 const PICKER_HEIGHT_GUESS: f32 = 340.0;
 
+/// Corner radius of a colour bar
+const BAR_RADIUS: u8 = 3;
+
 /// Corner radius of the picker
 const PICKER_RADIUS: u8 = 7;
 
@@ -62,12 +65,17 @@ const PICKER_MIN_WIDTH: f32 = 240.0;
 const RESIZE_GRIP: f32 = 5.0;
 const RESIZE_CORNER: f32 = 8.0;
 
-/// The picker state stored at `state_id`, else a closed picker in the last colour space and model used
+/// The picker state stored at `state_id`, else a closed picker
 fn picker_state(ctx: &egui::Context, state_id: Id) -> PickerState {
-    ctx.data(|data| data.get_temp::<PickerState>(state_id)).unwrap_or_else(|| {
-        let (space, model) = ctx.data(|data| data.get_temp::<(ColorSpace, ColorModel)>(Id::unique(PREFERENCES_KEY))).unwrap_or_default();
-        PickerState { space, model, ..PickerState::default() }
-    })
+    ctx.data(|data| data.get_temp::<PickerState>(state_id)).unwrap_or_default()
+}
+
+/// Opens `state` on `linear` in the colour space and model the user last picked in any picker
+fn open_picker(ctx: &egui::Context, state: &mut PickerState, linear: [f32; 3]) {
+    let (space, model) = ctx.data(|data| data.get_temp::<(ColorSpace, ColorModel)>(Id::unique(PREFERENCES_KEY))).unwrap_or_default();
+    state.space = space;
+    state.model = model;
+    state.open_on(linear);
 }
 
 impl PropertySheet<'_> {
@@ -77,7 +85,7 @@ impl PropertySheet<'_> {
         let state_id = bar.with("picker");
         let mut state = picker_state(ctx, state_id);
         if !state.open {
-            state.open_on(linear);
+            open_picker(ctx, &mut state, linear);
             ctx.data_mut(|data| data.insert_temp(state_id, state));
         }
     }
@@ -109,12 +117,12 @@ impl PropertySheet<'_> {
         eyedropping: Option<Id>,
         swatches: &[[f32; 3]],
     ) -> ColorPick {
-        let id = self.next_id();
+        let id = self.named_id("color_bar", label);
         let response = self.ui.interact(bar, id, Sense::click());
         response.widget_info(|| WidgetInfo::labeled(Role::Button, true, label));
-        let t = self.tokens;
-        let border = if response.hovered() { t.accent } else { t.field_border };
-        self.ui.painter().rect(bar, CornerRadius::same(3), shown_color(linear), Stroke::new(1.0, border), StrokeKind::Inside);
+        let tokens = self.tokens;
+        let border = if response.hovered() { tokens.accent } else { tokens.field_border };
+        self.ui.painter().rect(bar, CornerRadius::same(BAR_RADIUS), shown_color(linear), Stroke::new(1.0, border), StrokeKind::Inside);
 
         let waiting = eyedropping == Some(id);
         if waiting {
@@ -122,7 +130,7 @@ impl PropertySheet<'_> {
         }
         let glyph = Rect::from_center_size(pos2(eyedropper_x, bar.center().y), vec2(EYEDROPPER_TARGET, EYEDROPPER_TARGET));
         let mut pick = ColorPick::none(id);
-        pick.eyedropper = self.eyedropper_at(glyph, waiting, t.text_dim);
+        pick.eyedropper = self.eyedropper_at(glyph, waiting, tokens.text_dim);
         self.drawn(bar.bottom());
 
         let ctx = self.ui.ctx().clone();
@@ -137,36 +145,24 @@ impl PropertySheet<'_> {
             if state.open {
                 state.open = false;
             } else {
-                state.open_on(linear);
+                open_picker(&ctx, &mut state, linear);
             }
         }
 
         if state.open {
-            let inside = self.picker_popup(&response, glyph, label, &mut state, waiting, swatches, id);
+            let inside = self.picker_popup(&response, glyph, label, &mut state, waiting, swatches);
             pick.picked = pick.picked.or(inside.picked);
             pick.merge = inside.merge;
             pick.eyedropper |= inside.eyedropper;
             pick.swatch = inside.swatch;
         }
-        ctx.data_mut(|data| {
-            data.insert_temp(state_id, state);
-            data.insert_temp(Id::unique(PREFERENCES_KEY), (state.space, state.model));
-        });
+        ctx.data_mut(|data| data.insert_temp(state_id, state));
         pick
     }
 
-    /// The open picker: a window the panel's width until resized (its edges and corners drag its size, kept for every picker), its rows at its edges (the project's `swatches` last), titled `label`, standing beside the panel level with `bar` (its title bar drags it, × or Escape closes it, and so does a press off it, the bar and the bar's `eyedropper` unless an eyedropper pick waits)
-    #[allow(clippy::too_many_arguments)]
-    fn picker_popup(
-        &mut self,
-        bar: &Response,
-        eyedropper: Rect,
-        label: &str,
-        state: &mut PickerState,
-        waiting: bool,
-        swatches: &[[f32; 3]],
-        id: Id,
-    ) -> ColorPick {
+    /// The open picker: a window the panel's width until resized (its edges and corners drag its size, kept for every picker), its rows at its edges (the project's `swatches` last), titled `label`, standing beside the panel level with `bar` (its title bar drags it, × or Escape closes it, and so does a press off it, the bar and the bar's `eyedropper` unless an eyedropper pick waits); a space or model the user picks becomes the next picker's
+    fn picker_popup(&mut self, bar: &Response, eyedropper: Rect, label: &str, state: &mut PickerState, waiting: bool, swatches: &[[f32; 3]]) -> ColorPick {
+        let id = bar.id;
         let ctx = self.ui.ctx().clone();
         let size_id = Id::unique(SIZE_KEY);
         let kept = ctx.data_mut(|data| data.get_persisted::<[f32; 2]>(size_id));
@@ -190,14 +186,14 @@ impl PropertySheet<'_> {
         // A press that picks from one of the picker's own lists must not close it
         let list_open = egui::Popup::is_any_open(&ctx);
         let tokens = self.tokens;
-        let title = label;
+        let shown_in = (state.space, state.model);
 
         let shown = egui::Area::new(id.with("picker_area")).order(Order::Foreground).fixed_pos(corner).show(&ctx, |ui| {
             let background = ui.painter().add(egui::Shape::Noop);
             let title_bar = Rect::from_min_size(corner, vec2(width, TITLE_HEIGHT));
             let close = Rect::from_center_size(pos2(title_bar.right() - TITLE_INSET, title_bar.center().y), vec2(CLOSE_TARGET, CLOSE_TARGET));
             let drag = ui.interact(Rect::from_min_max(title_bar.min, pos2(close.left(), title_bar.bottom())), id.with("picker_title"), Sense::drag());
-            drag.widget_info(|| WidgetInfo::labeled(Role::TitleBar, true, title));
+            drag.widget_info(|| WidgetInfo::labeled(Role::TitleBar, true, label));
             let drag = drag.on_hover_cursor(egui::CursorIcon::Grab);
             let closed = ui.interact(close, id.with("picker_close"), Sense::click());
             closed.widget_info(|| WidgetInfo::labeled(Role::Button, true, tr("Close")));
@@ -205,7 +201,7 @@ impl PropertySheet<'_> {
             painter.text(
                 pos2(title_bar.left() + PAD, title_bar.center().y),
                 Align2::LEFT_CENTER,
-                title,
+                label,
                 FontId::proportional(TITLE_TEXT_SIZE),
                 tokens.text_dim,
             );
@@ -243,6 +239,9 @@ impl PropertySheet<'_> {
         });
         let (pick, face, dragged, closed, resize) = shown.inner;
         ctx.data_mut(|data| data.insert_temp(height_id, face.height()));
+        if (state.space, state.model) != shown_in {
+            ctx.data_mut(|data| data.insert_temp(Id::unique(PREFERENCES_KEY), (state.space, state.model)));
+        }
         if let Some(delta) = dragged {
             state.moved_to = Some(corner + delta);
         }

@@ -9,12 +9,9 @@ use texturecraft_engine::core::{FillSymmetry, Projection, Sampling, SymmetryKind
 use crate::TextureCraftApp;
 use crate::dock::with;
 use crate::fill_pictures::ring_picture;
-use crate::i18n::tr;
+use crate::i18n::{n_, tr};
 use crate::property_sheet::{PropertySheet, StackSlider};
-use crate::theme::{AXIS_COLORS, Tokens};
-
-/// The axes' names, as the Axis switch and the axis position's letters show them
-const AXIS_NAMES: [&str; 3] = ["X", "Y", "Z"];
+use crate::theme::{AXIS_COLORS, AXIS_NAMES, Tokens};
 
 /// What the Axis position track spans, in mesh radii from the mesh's centre
 const POSITION_RANGE: RangeInclusive<f32> = -FillSymmetry::REACH..=FillSymmetry::REACH;
@@ -37,6 +34,7 @@ pub(crate) fn symmetry_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
         sheet.section_unavailable(tr("Symmetry"), reason);
         return;
     }
+
     let switch = sheet.section_switch(tr("Symmetry"), symmetry.on);
     if switch.clicked() {
         run(app, json!({"symmetry": !symmetry.on}));
@@ -49,7 +47,7 @@ pub(crate) fn symmetry_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
     if let Some(kind) = picked {
         run(app, json!({"symmetryType": kind.id()}));
     }
-    let axis = usize::from(symmetry.axis.min(2));
+    let axis = axis_index(&symmetry);
     if let Some(picked) = sheet.switch_tinted(tr("Axis"), &AXIS_NAMES, axis, &AXIS_COLORS) {
         run(app, json!({"symmetryAxis": picked}));
     }
@@ -65,9 +63,10 @@ pub(crate) fn symmetry_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
     // A mirror moves its plane along its axis; radial copies turn round an axis that moves across it
     let moving: Vec<usize> = match symmetry.kind {
         SymmetryKind::Mirror => vec![axis],
-        SymmetryKind::Radial => (0..3).filter(|other| *other != axis).collect(),
+        SymmetryKind::Radial => (0..AXIS_NAMES.len()).filter(|other| *other != axis).collect(),
     };
-    let mut parts: Vec<(&str, egui::Color32, f32)> = moving.iter().map(|&a| (AXIS_NAMES[a], AXIS_COLORS[a], symmetry.position[a])).collect();
+    let mut parts: Vec<(&str, egui::Color32, f32)> =
+        moving.iter().map(|&axis_index| (AXIS_NAMES[axis_index], AXIS_COLORS[axis_index], symmetry.position[axis_index])).collect();
     if let Some((index, merge)) = sheet.lettered_sliders(tr("Axis position"), &mut parts, POSITION_RANGE, 2)
         && let (Some(&moved), Some((_, _, value))) = (moving.get(index), parts.get(index))
     {
@@ -77,10 +76,15 @@ pub(crate) fn symmetry_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
     }
 }
 
+/// The axis `symmetry` copies round or mirrors across, as an index into [`AXIS_NAMES`] (a stored axis past Z reads as Z)
+fn axis_index(symmetry: &FillSymmetry) -> usize {
+    usize::from(symmetry.axis).min(AXIS_NAMES.len() - 1)
+}
+
 /// Count and Angle span beside the ring of copies, seen along the axis
 fn radial_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, symmetry: &FillSymmetry, base: &Value) {
     let tokens = Tokens::get(sheet.ui.ctx());
-    let axis_color = AXIS_COLORS[usize::from(symmetry.axis.min(2))];
+    let axis_color = AXIS_COLORS[axis_index(symmetry)];
     let (count, span) = (symmetry.copies(), symmetry.span);
     let picture = |painter: &Painter, rect: Rect| ring_picture(painter, rect, count, span, axis_color, &tokens);
     let (mut count_value, mut span_value) = (count as f32, span);
@@ -99,7 +103,7 @@ fn radial_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, symmetr
 /// The Type dropdown's name for `kind`
 fn kind_label(kind: SymmetryKind) -> &'static str {
     match kind {
-        SymmetryKind::Mirror => "Mirror symmetry",
-        SymmetryKind::Radial => "Radial symmetry",
+        SymmetryKind::Mirror => n_("Mirror symmetry"),
+        SymmetryKind::Radial => n_("Radial symmetry"),
     }
 }

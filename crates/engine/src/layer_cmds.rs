@@ -4,7 +4,7 @@
 use serde_json::{Value, json};
 use texturecraft_core::{
     BlendMode, Channel, ChannelBlend, ChannelKind, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, NormalFormat, Procedural, ProceduralKind, Project,
-    Projection, Sampling, ScaleMode, Source, UvTransform, UvWrap,
+    Projection, Projector, Sampling, ScaleMode, Source, UvTransform, UvWrap,
 };
 
 use crate::commands::{
@@ -731,76 +731,87 @@ fn with_ramp(channel: Channel, current: Option<&Source>, source: Option<Source>,
     Ok(Some(source))
 }
 
-/// Parse projection settings, retaining unspecified fields when the projection kind stays the same.
-pub(crate) fn projection_from(params: &Value, command: &str, current: Option<&Projection>) -> Result<Projection> {
-    projection_from_fields(params, command, current, true)
-}
-
-/// A procedural mask can assign the command's scale to its pattern instead of its projection.
-pub(crate) fn projection_from_fields(params: &Value, command: &str, current: Option<&Projection>, read_scale: bool) -> Result<Projection> {
-    const MIN_SCALE: f32 = 0.001;
-    const MAX_SCALE: f32 = 1000.0;
-    const MAX_OFFSET: f32 = 1000.0;
-    const DEFAULT_SHARPNESS: f32 = 8.0;
-    const MAX_SHARPNESS: f32 = 64.0;
-
-    let named = match strp(params, "projection") {
+/// The projection `p` asks for. Fields it does not give keep their values from `current` when
+/// that is of the same kind (or `p` names no kind), and the kind's defaults otherwise.
+pub(crate) fn projection_from(p: &Value, cmd: &str, current: Option<&Projection>) -> Result<Projection> {
+    let named = match strp(p, "projection") {
         None => None,
         Some("uv") => Some(Projection::default()),
-        Some("triplanar" | "tri-planar") => Some(Projection::Triplanar { scale: 1.0, sharpness: DEFAULT_SHARPNESS, offset: [0.0; 3], uv: Default::default() }),
-        Some("planar") => Some(Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: Default::default() }),
-        Some("spherical") => Some(Projection::Spherical { scale: 1.0, uv: Default::default() }),
-        Some("cylindrical") => Some(Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default() }),
-        Some(other) => return Err(bad(command, format!("unknown projection `{other}`"))),
+        Some("triplanar" | "tri-planar") => {
+            Some(Projection::Triplanar { scale: 1.0, sharpness: 8.0, offset: [0.0; 3], uv: Default::default(), projector: Default::default() })
+        }
+        Some("planar") => Some(Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: Default::default(), projector: Default::default() }),
+        Some("spherical") => Some(Projection::Spherical { scale: 1.0, uv: Default::default(), offset: [0.0; 3], projector: Default::default() }),
+        Some("cylindrical") => Some(Projection::Cylindrical { scale: 1.0, axis: 1, uv: Default::default(), offset: [0.0; 3], projector: Default::default() }),
+        Some(other) => return Err(bad(cmd, format!("unknown projection `{other}`"))),
     };
-    let mut projection = match (named, current) {
-        (Some(named), Some(current)) if std::mem::discriminant(&named) == std::mem::discriminant(current) => current.clone(),
-        (Some(named), _) => named,
-        (None, current) => current.cloned().unwrap_or_default(),
+    let mut proj = match (named, current) {
+        (Some(n), Some(c)) if std::mem::discriminant(&n) == std::mem::discriminant(c) => c.clone(),
+        (Some(n), _) => n,
+        (None, c) => c.cloned().unwrap_or_default(),
     };
-
-    let new_scale = if read_scale { floats::<2>(params, "scale", MIN_SCALE, MAX_SCALE) } else { None };
-    let tiling = floats::<2>(params, "tiling", MIN_SCALE, MAX_SCALE);
-    let rotation = f32p(params, "rotation").map(|degrees| degrees.rem_euclid(360.0));
-    let new_axis = u64p(params, "axis").map(|axis| axis.min(2) as u8);
+    let scale = floats::<2>(p, "scale", 0.001, 1000.0);
+    let tiling = floats::<2>(p, "tiling", 0.001, 1000.0);
+    let rotation = f32p(p, "rotation").map(|r| r.rem_euclid(360.0));
+    let axis = u64p(p, "axis").map(|a| a.min(2) as u8);
     // The UV transformations of a 3D projection: tiling, rotation and an offset across the surface
     let place = |uv: &mut UvTransform| {
         uv.tiling = tiling.unwrap_or(uv.tiling);
         uv.rotation = rotation.unwrap_or(uv.rotation);
-        uv.offset = floats(params, "uvOffset", -MAX_OFFSET, MAX_OFFSET).unwrap_or(uv.offset);
+        uv.offset = floats(p, "uvOffset", -1000.0, 1000.0).unwrap_or(uv.offset);
     };
-    match &mut projection {
-        Projection::Uv { scale, rotation: uv_rotation, offset } => {
+    // The 3D projection settings: the projector's offset, turn and per-axis scale
+    let offset3 = floats::<3>(p, "offset", -1000.0, 1000.0);
+    let turn = |pr: &mut Projector| {
+        pr.rotation = floats(p, "projectorRotation", -360.0, 360.0).unwrap_or(pr.rotation);
+        pr.scale = floats(p, "projectorScale", 0.001, 1000.0).unwrap_or(pr.scale);
+    };
+    match &mut proj {
+        Projection::Uv { scale: s, rotation: r, offset } => {
             // A UV projection's scale is its tiling
-            *scale = tiling.or(new_scale).unwrap_or(*scale);
-            *uv_rotation = rotation.unwrap_or(*uv_rotation);
-            *offset = floats(params, "offset", -MAX_OFFSET, MAX_OFFSET).unwrap_or(*offset);
+            *s = tiling.or(scale).unwrap_or(*s);
+            *r = rotation.unwrap_or(*r);
+            *offset = floats(p, "offset", -1000.0, 1000.0).unwrap_or(*offset);
         }
-        Projection::Triplanar { scale, sharpness, offset, uv } => {
-            *scale = new_scale.map_or(*scale, |axes| axes[0]);
-            *sharpness = f32p(params, "sharpness").map_or(*sharpness, |value| value.clamp(1.0, MAX_SHARPNESS));
-            *offset = floats(params, "offset", -MAX_OFFSET, MAX_OFFSET).unwrap_or(*offset);
+        Projection::Triplanar { scale: s, sharpness, offset, uv, projector } => {
+            *s = scale.map_or(*s, |v| v[0]);
+            *sharpness = f32p(p, "sharpness").map_or(*sharpness, |v| v.clamp(1.0, 64.0));
+            *offset = offset3.unwrap_or(*offset);
             place(uv);
+            turn(projector);
         }
-        Projection::Planar { scale, axis, offset, uv } => {
-            *scale = new_scale.map_or(*scale, |axes| axes[0]);
-            *axis = new_axis.unwrap_or(*axis);
-            *offset = floats(params, "offset", -MAX_OFFSET, MAX_OFFSET).unwrap_or(*offset);
+        Projection::Planar { scale: s, axis: a, offset, uv, projector } => {
+            *s = scale.map_or(*s, |v| v[0]);
+            *a = axis.unwrap_or(*a);
+            *offset = offset3.unwrap_or(*offset);
             place(uv);
+            turn(projector);
         }
-        Projection::Spherical { scale, uv } => {
-            *scale = new_scale.map_or(*scale, |axes| axes[0]);
+        Projection::Spherical { scale: s, uv, offset, projector } => {
+            *s = scale.map_or(*s, |v| v[0]);
+            *offset = offset3.unwrap_or(*offset);
             place(uv);
+            turn(projector);
         }
-        Projection::Cylindrical { scale, axis, uv } => {
-            *scale = new_scale.map_or(*scale, |axes| axes[0]);
-            *axis = new_axis.unwrap_or(*axis);
+        Projection::Cylindrical { scale: s, axis: a, uv, offset, projector } => {
+            *s = scale.map_or(*s, |v| v[0]);
+            *a = axis.unwrap_or(*a);
+            *offset = offset3.unwrap_or(*offset);
             place(uv);
+            turn(projector);
         }
         Projection::Decal(_) => {}
     }
+    Ok(proj)
+}
 
-    Ok(projection)
+/// The projection `params` asks for, as [`projection_from`]; without `read_scale` its `scale` is left out (a procedural mask's scale is its pattern's)
+pub(crate) fn projection_from_fields(params: &Value, command: &str, current: Option<&Projection>, read_scale: bool) -> Result<Projection> {
+    let mut placement = params.clone();
+    if !read_scale && let Some(fields) = placement.as_object_mut() {
+        fields.remove("scale");
+    }
+    projection_from(&placement, command, current)
 }
 
 /// `current` with the `filtering`, `wrap` and `scaleMode` params applied

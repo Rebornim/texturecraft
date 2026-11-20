@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BakedMap, BlendMode, Channel, ChannelKind, lum};
+use crate::{BakedMap, BlendMode, Channel, ChannelKind, Projector, lum};
 
 mod curvature_detail;
 mod curvature_mode;
@@ -298,6 +298,8 @@ pub enum Projection {
         offset: [f32; 3],
         #[serde(default)]
         uv: UvTransform,
+        #[serde(default)]
+        projector: Projector,
     },
     /// World-space planar projection along an axis (0 = X, 1 = Y, 2 = Z).
     Planar {
@@ -306,12 +308,18 @@ pub enum Projection {
         offset: [f32; 3],
         #[serde(default)]
         uv: UvTransform,
+        #[serde(default)]
+        projector: Projector,
     },
     /// Spherical projection around the mesh center.
     Spherical {
         scale: f32,
         #[serde(default)]
         uv: UvTransform,
+        #[serde(default)]
+        offset: [f32; 3],
+        #[serde(default)]
+        projector: Projector,
     },
     /// Cylindrical projection around an axis.
     Cylindrical {
@@ -319,6 +327,10 @@ pub enum Projection {
         axis: u8,
         #[serde(default)]
         uv: UvTransform,
+        #[serde(default)]
+        offset: [f32; 3],
+        #[serde(default)]
+        projector: Projector,
     },
     /// A geometry decal: the image projected from a frame placed on the surface (outside the
     /// frame, behind it or beyond its depth the fill does not cover).

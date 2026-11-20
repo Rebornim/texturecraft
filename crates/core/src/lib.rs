@@ -14,6 +14,7 @@ pub mod channel;
 mod env_alignment;
 pub mod layer;
 pub mod project;
+pub mod projector;
 mod shadow_mode;
 
 pub use bake::{
@@ -35,6 +36,7 @@ pub use project::{
     AoMixing, BlockScales, Camera, DepthOfField, DisplaySettings, EnvAlignment, FORMAT_VERSION, MAX_RESOLUTION, MIN_RESOLUTION, NormalFormat, NormalMixing,
     Project, ShadowMode, TANGENT_BENT_NORMAL_VERSION, TextureSet, TileGrid, ToneMapping, UDIM_RANGE, udim_at,
 };
+pub use projector::Projector;
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq)]
 pub enum CoreError {

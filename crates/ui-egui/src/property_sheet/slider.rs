@@ -7,7 +7,7 @@ use super::{ICON_SIZE, PropertySheet, RowLead, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Radius of a slider's knob
-const KNOB_RADIUS: f32 = 5.0;
+pub(super) const KNOB_RADIUS: f32 = 5.0;
 
 /// Width of a slider's knob outline
 const KNOB_STROKE: f32 = 1.5;
@@ -177,7 +177,7 @@ impl PropertySheet<'_> {
     }
 
     /// The value at the row's end; a click turns it into a field, which returns the typed value when done
-    fn value_field(&mut self, id: Id, center_y: f32, value: f32, range: &RangeInclusive<f32>, decimals: usize, suffix: &str) -> Option<f32> {
+    pub(super) fn value_field(&mut self, id: Id, center_y: f32, value: f32, range: &RangeInclusive<f32>, decimals: usize, suffix: &str) -> Option<f32> {
         let shown = format!("{value:.decimals$}{suffix}");
         self.measure_value(&shown);
         let width = self.used.value_width.max(super::VALUE_MIN_WIDTH);

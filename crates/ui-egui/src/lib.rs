@@ -33,6 +33,7 @@ mod fill_pictures;
 mod fill_placement;
 mod fill_source_slot;
 mod fill_source_target;
+mod fill_symmetry_panel;
 mod filter_slot;
 pub mod fonts;
 mod generator_panel;

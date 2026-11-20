@@ -1,7 +1,9 @@
 //! A fill's whole material: set every channel of a fill layer or content fill effect from one built-in material at once
 
 use serde_json::Value;
-use texturecraft_core::{Channel, EffectKind, Fill, LayerKind, Source};
+use std::collections::BTreeMap;
+
+use texturecraft_core::{Channel, EffectKind, Fill, LayerKind, Project, Source};
 
 use crate::commands::{CommandSpec, bad, has_layer, strp};
 use crate::layer_cmds::{FillTarget, fill_mut, fill_target};
@@ -32,7 +34,7 @@ fn set_material(s: &mut Session, p: &Value) -> Result<Value> {
     let target = fill_target(s, p, CMD)?;
     let material = material_param(p)?;
     let set = target_set(s, target)?;
-    if holds(s, target, material)? {
+    if holds(s, target, set, material)? {
         return Ok(Value::Null);
     }
 
@@ -51,10 +53,9 @@ fn set_material(s: &mut Session, p: &Value) -> Result<Value> {
     };
 
     s.edit(&format!("Set fill material {}", found.label), |s| {
-        let channels = s.doc.project.texture_set(set)?.channel_list();
-        let fill = whole_fill(s, found, &channels)?;
+        let sources = material_sources(&mut s.doc.project, set, found)?;
         let edited = fill_mut(s, target)?;
-        edited.sources = fill.sources.into_iter().filter(|(channel, _)| channels.contains(channel)).collect();
+        edited.sources = sources;
         edited.material = Some(found.id.to_string());
         let written: Vec<Channel> = edited.sources.keys().copied().collect();
         if let FillTarget::Layer(id) = target {
@@ -86,8 +87,8 @@ fn material_param(p: &Value) -> Result<Option<&'static SmartMaterial>> {
     }
 }
 
-/// Whether the fill at `target` already holds `material` whole (or, for `None`, no material and its channels' defaults), so setting it changes nothing
-fn holds(s: &Session, target: FillTarget, material: Option<&SmartMaterial>) -> Result<bool> {
+/// Whether the fill at `target` (in texture set `set`) already holds `material` whole (or, for `None`, no material and its channels' defaults), so setting it changes nothing
+fn holds(s: &Session, target: FillTarget, set: usize, material: Option<&SmartMaterial>) -> Result<bool> {
     let (fill, layer_channels) = match target {
         FillTarget::Layer(id) => {
             let layer = s.doc.project.layer(id)?;
@@ -104,10 +105,10 @@ fn holds(s: &Session, target: FillTarget, material: Option<&SmartMaterial>) -> R
         return Ok(false);
     }
 
-    // Any channel edit clears the material, so a fill still holding it has the material's sources
+    // A channel set on its own clears the material; one turned off or back on keeps it, so an effect (whose sources are its channels) compares them whole
     Ok(match (material, layer_channels) {
         (Some(_), Some(channels)) => channels.len() == fill.sources.len() && fill.sources.keys().all(|channel| channels.contains_key(channel)),
-        (Some(_), None) => true,
+        (Some(found), None) => fill.sources == material_sources(&mut s.doc.project.clone(), set, found)?,
         (None, Some(_)) => fill.sources.is_empty(),
         (None, None) => fill.sources.iter().all(|(channel, source)| *source == Source::uniform_of(*channel)),
     })
@@ -124,9 +125,16 @@ fn target_set(s: &Session, target: FillTarget) -> Result<usize> {
     s.doc.project.locate(owner).map(|(set, ..)| set).ok_or_else(|| bad(CMD, format!("layer {} is in no texture set", owner.0)))
 }
 
+/// The sources `material` writes in texture set `set`: its fill's channels the set has (the built fill's ids are taken from `project`)
+fn material_sources(project: &mut Project, set: usize, material: &SmartMaterial) -> Result<BTreeMap<Channel, Source>> {
+    let channels = project.texture_set(set)?.channel_list();
+    let fill = whole_fill(project, material, &channels)?;
+    Ok(fill.sources.into_iter().filter(|(channel, _)| channels.contains(channel)).collect())
+}
+
 /// The one unmasked fill a plain material is made of
-fn whole_fill(s: &mut Session, material: &SmartMaterial, channels: &[Channel]) -> Result<Fill> {
-    let layers = build(&mut Builder { p: &mut s.doc.project, channels: channels.to_vec() }, material.id)?;
+fn whole_fill(project: &mut Project, material: &SmartMaterial, channels: &[Channel]) -> Result<Fill> {
+    let layers = build(&mut Builder { p: project, channels: channels.to_vec() }, material.id)?;
     match <[_; 1]>::try_from(layers) {
         Ok([layer]) if layer.mask.is_none() => match layer.kind {
             LayerKind::Fill(fill) => Ok(fill),
@@ -145,7 +153,7 @@ mod tests {
         let mut s = Session::new_project("t", texturecraft_geom::primitives::sphere(1.0, 16, 8), "builtin:sphere", None, 128).unwrap();
         let channels = s.doc.project.texture_set(s.ts()).map(|set| set.channel_list()).unwrap_or_default();
         for material in whole_materials() {
-            assert!(whole_fill(&mut s, material, &channels).is_ok(), "{}", material.id);
+            assert!(whole_fill(&mut s.doc.project, material, &channels).is_ok(), "{}", material.id);
         }
     }
 }

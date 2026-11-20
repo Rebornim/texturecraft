@@ -58,8 +58,10 @@ impl ColorSelection {
             return 1.0;
         }
 
+        // A NaN tolerance or hardness (only a hand-edited file holds one) selects nothing, as a NaN component does
         let width = 1.0 - self.hardness.clamp(0.0, 1.0);
-        if width <= 0.0 { 0.0 } else { (1.0 - past / width).clamp(0.0, 1.0) }
+        let ramp = if width <= 0.0 { 0.0 } else { (1.0 - past / width).clamp(0.0, 1.0) };
+        if ramp.is_nan() { 0.0 } else { ramp }
     }
 
     /// The gray this selection gives ID color `id` and how much of it covers the mask below (a transparent background covers only the selection)
@@ -100,6 +102,18 @@ mod tests {
         assert!((ramped - 0.5).abs() < 1e-5, "{ramped}");
         selection.colors.clear();
         assert_eq!(selection.value(Some([1.0, 0.0, 0.0])), (0.0, 1.0));
+    }
+
+    #[test]
+    fn a_nan_tolerance_or_hardness_selects_nothing() {
+        let mut nan_tolerance = ColorSelection::new(vec![[1.0, 0.0, 0.0]], f32::NAN);
+        nan_tolerance.hardness = 0.5;
+        let mut nan_hardness = ColorSelection::new(vec![[1.0, 0.0, 0.0]], 0.1);
+        nan_hardness.hardness = f32::NAN;
+
+        for selection in [nan_tolerance, nan_hardness] {
+            assert_eq!(selection.amount(Some([0.8, 0.0, 0.0])), 0.0);
+        }
     }
 
     #[test]

@@ -610,7 +610,7 @@ operation returns a busy error and can be retried.
 | `material.link.preset` | `{layer?, name, cook?: true}` |
 | `material.link.map` | `{layer?, channel, output}`: the channel reads another output of the material |
 | `material.link.resolution` | `{layer?, relative: -3..3 \| fixed: 128..8192, cook?: true}`: the size the material cooks at |
-| `material.link.cook` | `{layer?}`: re-cook at the texture set's resolution with its baked mesh maps (after a bake or a resize) |
+| `material.link.cook` | `{layer?}`: re-cook at its picked resolution (default: the texture set's) with its baked mesh maps (after a bake or a resize) |
 | `material.link.saveSource` | `{layer?, path}`: the original linked source with its `.mcmat`, `.mcraft` or `.sbs` extension |
 
 For a 1024-pixel texture set, TextureCraft requests `materialcraft-cli export source.mcmat maps --profile maps --size 1024x1024` with repeated `--set` and `--input` arguments. It discovers the published image inputs through `info` when the texture set supplies mesh maps. The desktop worker decodes the returned maps before installing the fill at its original drop target. The executable is resolved from

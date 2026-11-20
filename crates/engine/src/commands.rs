@@ -123,6 +123,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(crate::view_cmds::specs());
         v.extend(crate::solo::specs());
         v.extend(crate::camera_cmds::specs());
+        v.extend(crate::swatch_cmds::specs());
         v.extend(crate::quick_mask::specs());
         v.extend(crate::set_cmds::specs());
         v.extend(crate::meshmap_cmds::specs());

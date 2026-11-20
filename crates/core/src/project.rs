@@ -15,6 +15,9 @@ pub const FORMAT_VERSION: u32 = 3;
 /// First format whose baked bent normal maps are in tangent space
 pub const TANGENT_BENT_NORMAL_VERSION: u32 = 3;
 
+/// Most colour swatches a project keeps.
+pub const MAX_SWATCHES: usize = 64;
+
 /// Maximum group nesting (also bounds recursion over hostile project files)
 pub const MAX_DEPTH: usize = 16;
 
@@ -430,6 +433,9 @@ pub struct Project {
     /// Saved and imported cameras (the viewport's default camera is not in the list).
     #[serde(default)]
     pub cameras: Vec<Camera>,
+    /// The project's colour swatches (linear RGB), in the order they were added; projects without any save none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub swatches: Vec<[f32; 3]>,
 }
 
 impl Project {
@@ -446,6 +452,7 @@ impl Project {
             next_id: 1,
             display: DisplaySettings::default(),
             cameras: Vec::new(),
+            swatches: Vec::new(),
         }
     }
 

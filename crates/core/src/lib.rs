@@ -44,8 +44,8 @@ pub use layer::{
     TileInputDistribution, TileShape, TileSizeMode, TileSymmetry, UvTransform, UvWrap, gradient, hsl_adjust, per_unit,
 };
 pub use project::{
-    AoMixing, BlockScales, Camera, DepthOfField, DisplaySettings, EnvAlignment, FORMAT_VERSION, MAX_RESOLUTION, MIN_RESOLUTION, NormalFormat, NormalMixing,
-    Project, ShadowMode, TANGENT_BENT_NORMAL_VERSION, TextureSet, TileGrid, ToneMapping, UDIM_RANGE, udim_at,
+    AoMixing, BlockScales, Camera, DepthOfField, DisplaySettings, EnvAlignment, FORMAT_VERSION, MAX_RESOLUTION, MAX_SWATCHES, MIN_RESOLUTION, NormalFormat,
+    NormalMixing, Project, ShadowMode, TANGENT_BENT_NORMAL_VERSION, TextureSet, TileGrid, ToneMapping, UDIM_RANGE, udim_at,
 };
 pub use projector::Projector;
 pub use shape_crop::ShapeCrop;

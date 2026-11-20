@@ -79,6 +79,7 @@ mod side_panels;
 mod skew_paint;
 mod smudge_channels;
 mod snapped_lines;
+mod source_picker;
 mod split_divider;
 mod temp_dir;
 mod template_invert;

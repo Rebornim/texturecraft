@@ -1,4 +1,4 @@
-//! A fill channel takes an image resource from its slot's source list
+//! A fill channel takes an image resource from its slot's source picker
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -6,11 +6,13 @@ use serde_json::json;
 use texturecraft_engine::core::{Channel, LayerId, LayerKind, Source};
 use texturecraft_ui_egui::TextureCraftApp;
 
-/// Opens the Roughness slot's source list on the Material tab, hanging at the card's width
-fn open_roughness_source_menu(harness: &mut Harness<'_, TextureCraftApp>) {
+/// Opens the Roughness slot's source picker on the Material tab and types `search` into its search field, which has the focus
+fn open_roughness_source_menu(harness: &mut Harness<'_, TextureCraftApp>, search: &str) {
     harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
     harness.run_steps(3);
     harness.get_by_role_and_label(egui::Role::ComboBox, "Roughness").click();
+    harness.run_steps(2);
+    harness.event(egui::Event::Text(search.into()));
     harness.run_steps(2);
 }
 
@@ -28,7 +30,7 @@ fn a_fill_channel_takes_an_image_from_its_source_picker() {
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(4);
 
-    open_roughness_source_menu(&mut harness);
+    open_roughness_source_menu(&mut harness, "rough");
     harness.get_by_role_and_label(egui::Role::ListBoxOption, &name).click();
     harness.run_steps(3);
 
@@ -53,7 +55,8 @@ fn the_source_picker_offers_only_images_that_were_decoded() {
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(4);
 
-    open_roughness_source_menu(&mut harness);
+    // Both names match the search, so only the decoded one may show
+    open_roughness_source_menu(&mut harness, "png");
 
     assert!(harness.query_by_label(&name).is_some(), "a decoded image is offered");
     assert!(harness.query_by_label("broken.png").is_none(), "an image that did not decode is not");

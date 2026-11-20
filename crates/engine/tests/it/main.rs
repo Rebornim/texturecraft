@@ -14,6 +14,7 @@ mod effect_blending;
 mod export_colour_space;
 mod export_file_types;
 mod export_maps;
+mod fill_alpha_source;
 mod fill_patterns;
 mod fill_projections;
 mod fill_sampling;

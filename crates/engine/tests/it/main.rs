@@ -28,6 +28,7 @@ mod instances;
 mod layer_multi_select;
 mod mask_clone_smudge;
 mod mask_export;
+mod mask_fill_source;
 mod materialcraft_link;
 mod materialx;
 mod materialx_import;

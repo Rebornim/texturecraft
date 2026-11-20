@@ -65,11 +65,14 @@ fn click_at(harness: &mut Harness<'_, TextureCraftApp>, position: Pos2) {
 }
 
 /// Whether the last frame drew the eyedropper glyph with its tip at `pointer`
+/// Whether the pointer at `pointer` is the drawn eyedropper: the system pointer hidden and a picture painted under it
 fn eyedropper_at(harness: &Harness<'_, TextureCraftApp>, pointer: Pos2) -> bool {
-    harness.output().shapes.iter().any(|clipped| match &clipped.shape {
-        egui::Shape::Text(text) => text.galley.text() == egui_phosphor::regular::EYEDROPPER && (text.pos.x - pointer.x).abs() < 1.0,
-        _ => false,
-    })
+    let output = harness.output();
+    output.platform_output.cursor_icon == egui::CursorIcon::None
+        && output.shapes.iter().any(|clipped| match &clipped.shape {
+            egui::Shape::Mesh(mesh) => mesh.texture_id != egui::TextureId::default() && mesh.calc_bounds().expand(1.0).contains(pointer),
+            _ => false,
+        })
 }
 
 fn pick_color_label() -> String {

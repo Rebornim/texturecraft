@@ -33,8 +33,6 @@ mod fill_material_panel;
 mod fill_panel;
 mod fill_pictures;
 mod fill_placement;
-mod fill_source_slot;
-mod fill_source_target;
 mod fill_symmetry_panel;
 mod filter_slot;
 pub mod fonts;
@@ -57,6 +55,7 @@ mod levels_properties;
 mod line_snap;
 mod list_action;
 pub mod log_panel;
+mod mask_fill_panel;
 mod mask_preview_image;
 mod material_orb;
 mod material_preview_image;
@@ -99,7 +98,6 @@ pub mod render_mode;
 mod resolution_band;
 mod resource_panel;
 mod resource_picker;
-mod resource_picker_choice;
 mod resource_picker_item;
 mod round_gizmo;
 mod running_bake;
@@ -121,6 +119,7 @@ mod slot_thumbnail;
 #[cfg(not(target_arch = "wasm32"))]
 mod smart_mask_menu;
 mod soft_box;
+mod source_slot;
 pub mod state;
 mod surface_paint_point;
 pub mod symmetry;
@@ -256,8 +255,6 @@ pub struct TextureCraftApp {
     pub last_paint_uv: Option<uv_paint_point::UvPaintPoint>,
     /// The fill Move on model moves: drags in the 3D view slide its projection, the wheel resizes it, Shift+drag turns it
     pub moving_on_model: Option<move_on_model::MoveOnModel>,
-    /// The decal layer or mask fill effect the next click in the 3D view places
-    pub placing_decal: Option<texturecraft_engine::core::LayerId>,
     /// The Properties popup a right click in a view opens.
     pub properties_popup: Option<properties_popup::PropertiesPopup>,
     /// The color selection the next click in the 3D or 2D view picks an ID color for
@@ -371,7 +368,6 @@ impl TextureCraftApp {
             last_paint_point: None,
             last_paint_uv: None,
             moving_on_model: None,
-            placing_decal: None,
             properties_popup: None,
             picking_id_color: None,
             picking_symmetry_plane: false,

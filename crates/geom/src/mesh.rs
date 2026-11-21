@@ -610,7 +610,9 @@ mod tests {
     #[test]
     fn uv_density_is_mesh_units_per_uv_unit() {
         assert_eq!(quad().uv_density(0), Some(1.0));
+
         let plane = crate::primitives::plane(3.0, 4).uv_density(0).unwrap();
+
         assert!((plane - 3.0).abs() < 1e-4, "{plane}");
         assert_eq!(quad().uv_density(1), None, "no triangles of that material");
     }

@@ -109,12 +109,16 @@ mod tests {
         let warp = SourceWarp::LIBRARY;
         assert!((warp.move_texels(2048) - 20.48).abs() < 1e-3, "0.1 ÷ 10 of the tile");
         assert_eq!(warp.angles().count(), 0);
+
         let directional = SourceWarp { mode: WarpMode::Directional, angle: 30.0, ..warp };
         assert_eq!(directional.angles().collect::<Vec<_>>(), vec![30.0]);
+
         let multi = SourceWarp { mode: WarpMode::MultiDirectional, angle: 10.0, ..warp };
         assert_eq!(multi.angles().collect::<Vec<_>>(), vec![10.0, 100.0, 190.0, 280.0]);
+
         let chained = SourceWarp { blending: WarpBlending::Chain, ..multi };
         assert!((chained.reach(2048) - 4.0 * 20.48).abs() < 1e-3, "four moves one after the other");
+
         let input = SourceWarp { source: WarpSource { mode: WarpSourceMode::PreviousInput, ..WarpSource::LIBRARY }, ..warp };
         assert!((input.reach(2048) - (20.48 + 8.0)).abs() < 1e-3, "plus where it measures the slope");
         assert_eq!((SourceWarp::amount(0.0), SourceWarp::amount(0.5), SourceWarp::amount(1.0)), (-1.0, 0.0, 1.0));
@@ -125,8 +129,10 @@ mod tests {
         let warp = SourceWarp::LIBRARY;
         let gentle = warp.slope_move([0.01, 0.0], 2048);
         assert!(gentle[0] > 0.0 && gentle[0] < warp.move_texels(2048), "{gentle:?}");
+
         let steep = warp.slope_move([1.0, 1.0], 2048);
         assert!((steep[0].hypot(steep[1]) - warp.move_texels(2048)).abs() < 1e-3, "a cliff moves the whole way, no further: {steep:?}");
+
         let hostile = SourceWarp { intensity: f32::NAN, angle: f32::INFINITY, directions: 9, divider: 0, mode: WarpMode::MultiDirectional, ..warp };
         assert_eq!((hostile.move_texels(2048), hostile.angles().collect::<Vec<_>>()), (0.0, vec![0.0]));
         assert_eq!(hostile.slope_move([f32::NAN, 1.0], 2048)[0], 0.0);

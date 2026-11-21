@@ -459,7 +459,7 @@ fn color_picker(ui: &mut Ui, id: egui::Id, c: &mut Color32, width: f32) -> bool 
     let tk = Tokens::get(ui.ctx());
     let mut srgb = [c.r(), c.g(), c.b()];
     let hsv_of = |srgb: [u8; 3]| hsv_from_rgb(srgb.map(|v| v as f32 / 255.0));
-    // Remembered with the color it was for, so hue and saturation survive black, white and grays.
+    // Remembered with the color it was for, so hue and saturation survive black, white and grays
     let (mut h, mut s, mut v) = ui.data(|d| d.get_temp::<(Color32, (f32, f32, f32))>(id)).filter(|(k, _)| k == c).map_or_else(|| hsv_of(srgb), |(_, hsv)| hsv);
     let mut typed = false;
     let mut dragged = false;
@@ -475,7 +475,7 @@ fn color_picker(ui: &mut Ui, id: egui::Id, c: &mut Color32, width: f32) -> bool 
         (h, s, v) = hsv_of(srgb);
     }
     let border = Stroke::new(1.0, tk.field_border);
-    // Saturation across, value up.
+    // Saturation across, value up
     let (rect, resp) = ui.allocate_exact_size(vec2(width, width), Sense::click_and_drag());
     if let Some(p) = resp.interact_pointer_pos().filter(|_| resp.dragged() || resp.clicked()) {
         (s, v) = (((p.x - rect.left()) / rect.width()).clamp(0.0, 1.0), 1.0 - ((p.y - rect.top()) / rect.height()).clamp(0.0, 1.0));
@@ -510,7 +510,12 @@ pub(crate) fn gradient(painter: &egui::Painter, rect: egui::Rect, rgb: impl Fn(f
     /// Cells across and down: fine enough that a hue strip's six ramps read smooth
     const GRID_CELLS: u32 = 24;
 
-    let mut mesh = egui::Mesh::default();
+    let side_vertices = GRID_CELLS as usize + 1;
+    let cell_count = (GRID_CELLS * GRID_CELLS) as usize;
+    // Each grid cell contributes two triangles
+    let mut mesh =
+        egui::Mesh { vertices: Vec::with_capacity(side_vertices * side_vertices), indices: Vec::with_capacity(cell_count * 6), ..Default::default() };
+
     for j in 0..=GRID_CELLS {
         for i in 0..=GRID_CELLS {
             let (x, y) = (i as f32 / GRID_CELLS as f32, j as f32 / GRID_CELLS as f32);
@@ -518,6 +523,7 @@ pub(crate) fn gradient(painter: &egui::Painter, rect: egui::Rect, rgb: impl Fn(f
             mesh.colored_vertex(rect.lerp_inside(vec2(x, y)), Color32::from_rgb(r, g, b));
         }
     }
+
     for j in 0..GRID_CELLS {
         for i in 0..GRID_CELLS {
             let top_left = j * (GRID_CELLS + 1) + i;
@@ -526,6 +532,7 @@ pub(crate) fn gradient(painter: &egui::Painter, rect: egui::Rect, rgb: impl Fn(f
             mesh.add_triangle(top_left + 1, bottom_left + 1, bottom_left);
         }
     }
+
     painter.add(mesh);
 }
 

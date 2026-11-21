@@ -1,6 +1,6 @@
 //! glTF 2.0 / GLB: the default scene's node tree, flattened to world space.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use texturecraft_geom::glam::{Mat3, Mat4, Vec2, Vec3, Vec4};
 
@@ -23,8 +23,12 @@ fn limits() -> craft_mesh::Limits {
     craft_mesh::Limits {
         max_vertices: super::MAX_VERTICES,
         max_triangles: texturecraft_geom::MAX_TRIANGLES,
+        max_meshes: super::MAX_VERTICES,
+        max_parts: super::MAX_VERTICES,
+        max_materials: super::MAX_VERTICES,
         max_depth: MAX_DEPTH,
         max_nodes: MAX_NODE_VISITS,
+        max_data_bytes: super::MAX_MESH_FILE_BYTES as usize,
         ..craft_mesh::Limits::default()
     }
 }
@@ -103,6 +107,7 @@ struct Attrs {
     /// White where a primitive has no COLOR_0.
     colors: Vec<Vec4>,
     color_seen: bool,
+    seen_materials: HashSet<String>,
 }
 
 fn add_part(
@@ -129,7 +134,7 @@ fn add_part(
         Some(i) => scene.materials.get(i).filter(|m| !m.name.is_empty()).map(|m| m.name.clone()).unwrap_or_else(|| format!("Material_{i}")),
     };
     if let Some(i) = part.material
-        && !raw.base_colors.iter().any(|c| c.material == mat_name)
+        && attrs.seen_materials.insert(mat_name.clone())
         && let Some(mat) = scene.materials.get(i)
     {
         base_color(raw, scene, mat, &mat_name);

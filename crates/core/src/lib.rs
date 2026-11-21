@@ -45,6 +45,8 @@ pub mod mirror_mode;
 pub mod oklab;
 pub mod outline_position;
 pub mod pbr_validate;
+mod prepared_color_match;
+mod prepared_gradient;
 pub mod project;
 pub mod projector;
 pub mod ramp_curve;
@@ -122,6 +124,8 @@ pub use mirror_corner::MirrorCorner;
 pub use mirror_mode::MirrorMode;
 pub use outline_position::OutlinePosition;
 pub use pbr_validate::PbrValidate;
+pub use prepared_color_match::PreparedColorMatch;
+pub use prepared_gradient::PreparedGradient;
 pub use project::{
     AoMixing, BlockScales, Camera, DepthOfField, DisplaySettings, EnvAlignment, FORMAT_VERSION, MAX_RESOLUTION, MAX_SWATCHES, MIN_RESOLUTION, NormalFormat,
     NormalMixing, Project, ShadowMode, TANGENT_BENT_NORMAL_VERSION, TextureSet, TileGrid, ToneMapping, UDIM_RANGE, udim_at,

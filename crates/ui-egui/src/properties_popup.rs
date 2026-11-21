@@ -39,6 +39,7 @@ pub(crate) fn open_on_right_click(app: &mut TextureCraftApp, ui: &Ui, response: 
         && !gesture_key_held
         && !crate::viewport::focus_picking(ui.ctx())
         && ui.input(|input| input.modifiers.is_none());
+
     if !free || !response.clicked_by(PointerButton::Secondary) {
         return;
     }
@@ -51,6 +52,7 @@ pub(crate) fn open_on_right_click(app: &mut TextureCraftApp, ui: &Ui, response: 
 /// Draws the open popup and closes it on a press outside it (but not an eyedropper pick's) or when the app leaves Painting
 pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     let (any_down, pressed_at) = ctx.input(|input| (input.pointer.any_down(), input.pointer.press_origin().filter(|_| input.pointer.any_pressed())));
+
     match app.properties_popup {
         _ if app.ui.mode != Mode::Painting => app.properties_popup = None,
         Some(PropertiesPopup::Closing) if !any_down => app.properties_popup = None,
@@ -72,8 +74,10 @@ pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     egui::Area::new(area_id()).order(egui::Order::Foreground).fixed_pos(at).constrain_to(bounds.shrink(PROPERTIES_POPUP_VIEW_MARGIN)).show(ctx, |ui| {
         egui::Frame::popup(ui.style()).fill(tokens.panel).inner_margin(egui::Margin::ZERO).show(ui, |ui| {
             ui.set_width(PROPERTIES_POPUP_WIDTH);
+
             // The area's remembered size would otherwise cap the scroll height
             ui.set_max_height(bounds.height() * PROPERTIES_POPUP_MAX_HEIGHT_SHARE);
+
             // A floating bar would cover the sliders' right-aligned values
             ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
 

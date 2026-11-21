@@ -174,6 +174,7 @@ fn check_list(harness: &mut Harness<'_, TextureCraftApp>, button: Rect, name: &s
     if !is_open(harness) && !open(harness, button) {
         return [problems, vec![format!("{name}: it does not open again after the wheel")]].concat();
     }
+
     if !pans(harness, gesture_start) {
         problems.push(format!("{name}: a middle drag in the view does not pan while it is open"));
     }
@@ -182,6 +183,7 @@ fn check_list(harness: &mut Harness<'_, TextureCraftApp>, button: Rect, name: &s
     if !is_open(harness) && !open(harness, button) {
         return [problems, vec![format!("{name}: a second click does not open it")]].concat();
     }
+
     if !orbits(harness, gesture_start) {
         problems.push(format!("{name}: an Alt drag in the view does not orbit while it is open"));
     }
@@ -189,6 +191,7 @@ fn check_list(harness: &mut Harness<'_, TextureCraftApp>, button: Rect, name: &s
     if !is_open(harness) && !open(harness, button) {
         return [problems, vec![format!("{name}: it does not open again")]].concat();
     }
+
     harness.key_press(egui::Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
     if is_open(harness) {
@@ -219,6 +222,7 @@ fn every_list_opens_leaves_the_view_its_camera_and_closes_on_escape_a_click_and_
     for (screen, mut harness) in screens() {
         let count = lists(&harness).len();
         assert!(count > 0, "{screen}: lists show");
+
         for index in 0..count {
             // Looked up again each time: a closed list or a stroke may move the rows below
             let Some((button, shown)) = lists(&harness).get(index).cloned() else {
@@ -233,6 +237,7 @@ fn every_list_opens_leaves_the_view_its_camera_and_closes_on_escape_a_click_and_
             }
         }
     }
+
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
@@ -257,6 +262,7 @@ fn the_colour_picker_window_and_the_symmetry_settings_leave_the_view_its_wheel_m
     harness.run_steps(SETTLE_FRAMES);
     let settings_open = |harness: &Harness<'_, TextureCraftApp>| harness.query_by_label("Radial symmetry").is_some();
     assert!(settings_open(&harness), "the settings open");
+
     let start = gesture_start(&harness);
     assert!(zooms(&mut harness, start), "the wheel over the view zooms with the symmetry settings open");
     assert!(settings_open(&harness), "the wheel leaves the settings open");

@@ -27,7 +27,9 @@ fn the_distance_map_slot_picks_its_source() {
     assert!(lowest(&harness, Role::ComboBox, "Distance Map").top() > topmost(&harness, Role::Button, "Attributes").bottom(), "after the filter card");
 
     click(&mut harness, Role::ComboBox, "Distance Map");
+
     assert!(harness.query_by_role_and_label(Role::Tab, "Anchor points").is_some(), "the slot opens the source picker");
+
     click(&mut harness, Role::ListBoxOption, "Clouds");
 
     let Some(Source::Procedural { pattern, low, high, .. }) = input(&harness, effect, "distanceMap") else { panic!("a procedural") };
@@ -36,6 +38,7 @@ fn the_distance_map_slot_picks_its_source() {
 
     // The filter card has its own ×: the slot's is the lower one
     click(&mut harness, Role::Button, "Clear");
+
     assert_eq!(input(&harness, effect, "distanceMap"), None, "back to its default white");
 
     let ramp = harness.get_by_role_and_label(Role::Slider, "Distance Map").rect();
@@ -79,6 +82,7 @@ fn the_attributes_row_opens_on_a_click() {
     let (mut harness, _) = app_with("bevelSmooth", "mask", WINDOW_HEIGHT);
     let category = "Category: Filter";
     assert!(harness.query_by_label(category).is_none(), "closed by default");
+
     let band = topmost(&harness, Role::Button, "Attributes");
     assert!(band.bottom() < lowest(&harness, Role::ComboBox, "Distance Map").top(), "above the input's card");
 
@@ -109,6 +113,7 @@ fn the_sheet_keeps_its_layout_when_the_scroll_bar_comes_in() {
 
     for frame in 0..3 {
         harness.run_steps(1);
+
         assert_eq!(layout(&harness), first, "frame {frame}");
     }
 }

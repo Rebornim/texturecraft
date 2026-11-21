@@ -688,9 +688,11 @@ mod tests {
     fn default_workspace_has_every_panel_and_is_valid() {
         let w = default_workspace();
         assert!(validate(&w).is_ok());
+
         for panel in Panel::ALL {
             assert!(w.layout.contains(&panel) || w.hidden.iter().any(|(p, _)| *p == panel), "{panel:?} is neither shown nor hidden");
         }
+
         assert_eq!(panels_of(&w), [Panel::Assets, Panel::Viewport, Panel::TextureSetList, Panel::Layers, Panel::TextureSetSettings, Panel::Properties]);
     }
 
@@ -703,6 +705,7 @@ mod tests {
         let Node::Split { size: SplitSize::Ratio(layers), first, second, .. } = below_sets.as_ref() else { panic!("layers | properties") };
         assert!(matches!(first.as_ref(), Node::Tabs { panels, .. } if panels.first() == Some(&Panel::Layers)));
         assert!(matches!(second.as_ref(), Node::Tabs { panels, .. } if panels == &[Panel::Properties]));
+
         let properties = 1.0 - layers;
         assert!((2.0 / 3.0..0.7).contains(&properties), "Properties takes about 69% of the column, at least two thirds: {properties}");
     }
@@ -716,6 +719,7 @@ mod tests {
         let Node::Split { size, .. } = below_sets.as_mut() else { panic!("layers | properties") };
         *size = SplitSize::Ratio(0.57);
         let back = Dock::from_value(serde_json::to_value(&workspace).unwrap());
+
         assert_eq!(back.workspace(), &workspace, "a layout saved with the old split opens unchanged");
     }
 

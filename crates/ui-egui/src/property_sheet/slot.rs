@@ -230,21 +230,20 @@ impl PropertySheet<'_> {
         let dice = Rect::from_min_max(pos2(self.right - DICE_WIDTH, control.top()), control.max);
 
         let id = self.next_id();
-        let typing_id = id.with("typed");
+        let typing_id = id.with((self.id, "typed"));
         let tokens = self.tokens;
         let painter = self.ui.painter().clone();
         painter.rect(field, CornerRadius::same(CONTROL_RADIUS), tokens.field, Stroke::new(1.0, tokens.field_border), StrokeKind::Inside);
 
         // The value sits right like every number; the box lights on hover and goes accent while typing
         let mut changed = false;
-        if let Some(mut text) = self.ui.data(|data| data.get_temp::<String>(typing_id)) {
-            let edit = egui::TextEdit::singleline(&mut text).id(typing_id).font(semibold(TEXT_SIZE)).align(egui::Align2::RIGHT_CENTER);
-            let response = self.typing_edit(field.left() + SEED_VALUE_INSET, field.right() - SEED_VALUE_INSET, center_y, edit);
+        if let Some(mut draft) = self.typing_draft(typing_id) {
+            let response = self.typing_edit(field.left() + SEED_VALUE_INSET, field.right() - SEED_VALUE_INSET, center_y, typing_id, &mut draft);
             painter.rect_stroke(field, CornerRadius::same(CONTROL_RADIUS), Stroke::new(1.0, tokens.accent), StrokeKind::Inside);
 
             if response.lost_focus() {
-                let untouched = self.end_typing(typing_id, &text);
-                if let Ok(typed) = text.trim().parse::<u32>()
+                let untouched = self.end_typing(typing_id, &draft);
+                if let Ok(typed) = draft.text.trim().parse::<u32>()
                     && !untouched
                     && typed != *seed
                     && !self.ui.input(|input| input.key_pressed(egui::Key::Escape))
@@ -253,7 +252,7 @@ impl PropertySheet<'_> {
                     changed = true;
                 }
             } else {
-                self.ui.data_mut(|data| data.insert_temp(typing_id, text));
+                self.keep_typing(typing_id, draft);
             }
         } else {
             self.skip_typing_edit();

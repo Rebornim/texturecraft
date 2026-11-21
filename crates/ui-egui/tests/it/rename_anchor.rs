@@ -192,6 +192,7 @@ fn a_fill_on_a_higher_layer_reads_a_mask_anchor_added_in_the_interface() {
 
     // Add effect adds to the mask, since the mask's fill is the selected target of the Low layer
     assert!(matches!(h.state().session.target, StackTarget::Effect(_)));
+
     add_effect(&mut h, "Anchor point");
     let anchor = mask_anchor_of(&h, low).expect("the anchor point is in the mask of Low");
     assert!(h.state().session.doc.project.layer(LayerId(low)).unwrap().content_effects.is_empty(), "the anchor point is not on the layer content");
@@ -200,6 +201,7 @@ fn a_fill_on_a_higher_layer_reads_a_mask_anchor_added_in_the_interface() {
     let high = high_layer(&mut h.state_mut().session);
     h.run_steps(3);
     add_effect(&mut h, "Fill");
+
     assert!(matches!(reader_source(&h, high), Source::Uniform(_)), "a new fill starts as a uniform value");
 
     // The Anchor points tab lists the mask anchor of the layer below
@@ -229,6 +231,7 @@ fn a_fill_on_a_higher_layer_reads_a_mask_anchor_added_in_the_interface() {
     let ref_anchor = id(&texturecraft_engine::execute(&mut reference, "effect.add.anchor", &json!({"target": "mask"})).unwrap(), "effect");
     high_layer(&mut reference);
     texturecraft_engine::execute(&mut reference, "effect.add.fill", &json!({"anchor": ref_anchor})).unwrap();
+
     assert!(close(base_color(&mut h.state_mut().session), base_color(&mut reference)));
 
     // Save and reopen keep the link and the result
@@ -253,12 +256,16 @@ fn a_fill_on_a_higher_layer_reads_a_mask_anchor_added_in_the_interface() {
         .id
         .0;
     h.state_mut().run("effect.set", json!({"effect": fill, "value": 1.0}));
+
     assert!(matches!(reader_source(&h, high), Source::Uniform(_)));
+
     h.state_mut().session.modified = false;
     reopen(&mut h, &file);
+
     assert_eq!(mask_anchor_of(&h, low), Some(anchor), "the anchor point is still in the mask");
     let Source::Anchor { anchor: read, .. } = reader_source(&h, high) else { panic!("the reopened fill reads an anchor") };
     assert_eq!(read.0, anchor, "the reopened fill still reads that anchor");
     assert!(close(base_color(&mut h.state_mut().session), [expected; 3]), "{:?}", base_color(&mut h.state_mut().session));
+
     std::fs::remove_dir_all(file.parent().unwrap()).unwrap();
 }

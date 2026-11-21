@@ -1463,8 +1463,14 @@ fn write_float_raster(
 }
 
 fn write_raster(image: &CodecImage, format: CodecFormat) -> std::result::Result<Vec<u8>, craft_image_codecs::CodecError> {
-    let options =
-        EncodeOptions { jpeg_quality: JPEG_QUALITY, webp_lossless: true, embed_icc: image.icc.is_some(), embed_metadata: false, ..EncodeOptions::default() };
+    let options = EncodeOptions {
+        jpeg_quality: JPEG_QUALITY,
+        jpeg_chroma_subsampling: false, // Keep the 4:4:4 sampling used before the cutover.
+        webp_lossless: true,
+        embed_icc: image.icc.is_some(),
+        embed_metadata: false,
+        ..EncodeOptions::default()
+    };
     craft_image_codecs::encode(image, format, &options)
 }
 

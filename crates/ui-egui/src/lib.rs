@@ -161,6 +161,7 @@ mod uv_tile_grid;
 mod uv_view_map;
 mod view_mode_picker;
 pub mod viewport;
+mod viewport_mesh_bounds;
 mod warp_checker;
 pub mod web_files;
 pub mod widgets;
@@ -233,6 +234,7 @@ pub struct Toast {
 
 pub struct TextureCraftApp {
     pub session: Session,
+    viewport_mesh_bounds: viewport_mesh_bounds::ViewportMeshBounds,
     /// A smooth move to a saved camera in progress.
     camera_glide: Option<CameraGlide>,
     /// Yaw and pitch an Alt+Shift drag has reached before snapping to 90° steps (see `viewport`).
@@ -367,6 +369,7 @@ impl TextureCraftApp {
             uv_rotation_snap: None,
             uv_view_reset: false,
             session,
+            viewport_mesh_bounds: viewport_mesh_bounds::ViewportMeshBounds::default(),
             ui,
             ui_store,
             gpu,
@@ -1073,7 +1076,7 @@ impl eframe::App for TextureCraftApp {
         self.poll_link_cooks(ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.poll_link_imports(ctx);
-        self.thumbs.sync_images(&self.session.images, self.session.revision);
+        self.thumbs.sync_project_previews(&self.session);
 
         // The library shelf rescans when the window comes back (MaterialCraft may have sent a material)
         let focused = ctx.input(|input| input.viewport().focused).unwrap_or(true);

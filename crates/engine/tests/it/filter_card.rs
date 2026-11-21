@@ -24,14 +24,19 @@ fn an_empty_filter_renders_nothing_until_one_is_picked() {
 
     assert_eq!(filter_of(&s, effect), Filter::Empty);
     assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Filter (empty)");
+
     assert_close(center(&mut s, Channel::BaseColor), [0.2; 3], "an empty filter leaves the color");
 
     set(&mut s, effect, json!({"filter": "invert"}));
+
     assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Invert");
+
     assert_close(center(&mut s, Channel::BaseColor), [0.8; 3], "the picked filter works");
 
     set(&mut s, effect, json!({"filter": "none"}));
+
     assert_eq!(filter_of(&s, effect), Filter::Empty);
+
     assert_close(center(&mut s, Channel::BaseColor), [0.2; 3], "emptied again");
 }
 
@@ -50,6 +55,7 @@ fn a_content_filter_leaves_the_channels_switched_off() {
     let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap();
     let row = inspect["layers"].as_array().unwrap().iter().find(|row| row["id"] == layer).unwrap().clone();
     let filter_row = row["contentEffects"].as_array().unwrap().iter().find(|filter_row| filter_row["id"] == effect.0).unwrap();
+
     assert_eq!(filter_row["offChannels"], json!(["roughness"]));
 
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
@@ -57,6 +63,7 @@ fn a_content_filter_leaves_the_channels_switched_off() {
 
     set(&mut s, effect, json!({"channels": {"roughness": false}}));
     set(&mut s, effect, json!({"channels": {"roughness": true}}));
+
     assert!(s.doc.project.effect(effect).unwrap().1.off_channels.is_empty());
 
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "channels": {"nope": false}})).is_err());
@@ -90,12 +97,15 @@ fn the_divider_divides_the_intensity() {
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "divider": 7})).is_err());
 
     set(&mut s, effect, json!({"divider": 100}));
+
     assert!(matches!(filter_of(&s, effect), Filter::SourceSlopeBlur(SourceSlopeBlur { divider: 100, .. })));
 
     let saved = serde_json::to_value(Filter::Warp { intensity: 1.0, scale: 2.0, seed: 3, divider: 1 }).unwrap();
+
     assert_eq!(saved, json!({"Warp": {"intensity": 1.0, "scale": 2.0, "seed": 3}}), "saved as before dividers");
 
     let loaded: Filter = serde_json::from_value(saved).unwrap();
+
     assert_eq!(loaded, Filter::Warp { intensity: 1.0, scale: 2.0, seed: 3, divider: 1 });
 }
 
@@ -110,20 +120,24 @@ fn restore_defaults_puts_the_filters_parameters_back() {
     assert_eq!(s.history_labels().len(), steps, "no step at defaults");
 
     set(&mut s, effect, json!({"intensity": 0.5, "seed": 9, "divider": 100, "channels": {"height": false}}));
+
     assert_eq!(execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap(), json!({"changed": true}));
     assert_eq!(filter_of(&s, effect), defaults);
 
     let restored = s.doc.project.effect(effect).unwrap().1.clone();
+
     assert_eq!(restored.name, "Wobble");
     assert!(restored.off_channels.contains(&Channel::Height));
 
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
+
     assert!(matches!(filter_of(&s, effect), Filter::SourceWarp(SourceWarp { divider: 100, seed: 9, .. })), "one undo step");
 
     let empty = filtered_layer(&mut s, json!({"filter": "none"})).1;
     assert_eq!(execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": empty.0})).unwrap(), json!({"changed": false}));
 
     let fill = execute(&mut s, "effect.add.fill", &json!({"target": "content"})).unwrap()["effect"].as_u64().unwrap();
+
     assert!(execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": fill})).is_err());
 }
 
@@ -136,5 +150,6 @@ fn filter_list_describes_and_tags_every_filter() {
         assert!(def["tags"].as_array().is_some_and(|tags| !tags.is_empty()), "{def}");
     }
     let blur = listed.as_array().unwrap().iter().find(|def| def["id"] == "blur").unwrap();
+
     assert_eq!(blur["tags"], json!(["blur", "soften"]));
 }

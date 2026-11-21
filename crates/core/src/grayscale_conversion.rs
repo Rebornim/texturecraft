@@ -69,10 +69,13 @@ mod tests {
     fn weights_balance_contrast_and_invert_shape_the_gray() {
         let only_red = GrayscaleConversion { weights: [1.0, 0.0, 0.0, 0.0], ..GrayscaleConversion::LIBRARY };
         assert!((only_red.gray([0.6, 1.0, 1.0], 1.0) - 0.6).abs() < 1e-6);
+
         let alpha = GrayscaleConversion { weights: [0.0, 0.0, 0.0, 1.0], ..GrayscaleConversion::LIBRARY };
         assert!((alpha.gray([1.0; 3], 0.25) - 0.25).abs() < 1e-6, "Alpha weighs the coverage");
+
         let inverted = GrayscaleConversion { invert: true, mode: ConversionMode::Max, ..GrayscaleConversion::LIBRARY };
         assert!((inverted.gray([0.2, 0.7, 0.1], 1.0) - 0.3).abs() < 1e-6);
+
         let contrasted = GrayscaleConversion { contrast: 1.0, mode: ConversionMode::Average, ..GrayscaleConversion::LIBRARY };
         assert_eq!(contrasted.gray([0.6; 3], 1.0), 1.0);
     }

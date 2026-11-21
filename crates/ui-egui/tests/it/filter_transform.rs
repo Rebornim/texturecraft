@@ -82,5 +82,6 @@ fn rotation_drag_is_one_undo_step() {
     assert_eq!(undo_depth(&harness), depth + 1, "one undo step for the drag");
 
     undo(&mut harness);
+
     assert_eq!(filter_of(&harness, effect), Filter::Transform(TileTransform::LIBRARY));
 }

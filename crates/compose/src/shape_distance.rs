@@ -37,9 +37,8 @@ pub(crate) fn distance_filter(
         [value] => *value,
         _ => 0.0,
     };
-    let values: Vec<f32> = data.par_chunks(components).map(value).collect();
     let shapes = |inside: &(dyn Fn(f32) -> bool + Sync)| -> Vec<bool> {
-        values.par_iter().zip(cover.par_iter()).map(|(value, covered)| *covered > 0.0 && inside(*value)).collect()
+        data.par_chunks(components).zip(cover.par_iter()).map(|(pixel, covered)| *covered > 0.0 && inside(value(pixel))).collect()
     };
     let smoothed = |field: &mut [f32], texels: f32| {
         let radius = texels.round() as usize;
@@ -55,15 +54,22 @@ pub(crate) fn distance_filter(
             let edge = edge_distances(&inside, (width, height), bevel.corner == BevelCorner::Angular);
             let reach = bevel.reach(tile_resolution);
             let mut slope: Vec<f32> = inside.par_iter().zip(edge.par_iter()).map(|(inside, edge)| bevel.slope(*inside, *edge, reach)).collect();
-            let mut blurred = slope.clone();
-            smoothed(&mut blurred, bevel.smoothing_texels(tile_resolution));
-            slope.par_iter_mut().zip(blurred.par_iter()).for_each(|(sharp, blurred)| {
-                *sharp = match bevel.blur {
-                    BevelBlur::Uniform => *blurred,
-                    // Sharp at the slope's foot, as blurred as Uniform at its top
-                    BevelBlur::NonUniform => *sharp + (blurred - *sharp) * *sharp,
-                };
-            });
+            drop(edge);
+
+            let smoothing_radius = bevel.smoothing_texels(tile_resolution).round() as usize;
+            if smoothing_radius > 0 {
+                match bevel.blur {
+                    BevelBlur::Uniform => blur(&mut slope, width, height, smoothing_radius),
+                    BevelBlur::NonUniform => {
+                        let mut blurred = slope.clone();
+                        blur(&mut blurred, width, height, smoothing_radius);
+
+                        // Keep the foot sharp and blur the top at full strength
+                        slope.par_iter_mut().zip(blurred).for_each(|(sharp, blurred)| *sharp += (blurred - *sharp) * *sharp);
+                    }
+                }
+            }
+
             let bevel = *bevel;
             (inside, Box::new(move |texel, inside, value| bevel.apply(inside, value, slope.get(texel).copied().unwrap_or(1.0))))
         }
@@ -77,6 +83,7 @@ pub(crate) fn distance_filter(
                 .enumerate()
                 .map(|(texel, (inside, edge))| smooth.value(curve, *inside, *edge, reach * map(texel)))
                 .collect();
+            drop(edge);
             smoothed(&mut ramp, smooth.smoothing_texels(tile_resolution));
             (inside, Box::new(move |texel, _, value| ramp.get(texel).copied().unwrap_or(value)))
         }
@@ -116,34 +123,42 @@ pub(crate) fn distance_filter(
 
 /// Every texel's distance (texels) to the edge between it and the nearest texel on the other side of the shapes `inside`: straight-line, or the larger axis distance when `angular`
 fn edge_distances(inside: &[bool], (width, height): (usize, usize), angular: bool) -> Vec<f32> {
-    let outside: Vec<bool> = inside.iter().map(|inside| !inside).collect();
-    let (to_inside, to_outside) = if angular {
-        (chessboard_distances(inside, (width, height)), chessboard_distances(&outside, (width, height)))
-    } else {
-        (straight_distances(inside, (width, height)), straight_distances(&outside, (width, height)))
-    };
-    inside
-        .par_iter()
-        .zip(to_inside.par_iter().zip(to_outside.par_iter()))
-        .map(|(inside, (to_inside, to_outside))| (if *inside { *to_outside } else { *to_inside } - EDGE_OFFSET).max(0.0))
-        .collect()
+    let distances = if angular { chessboard_distances } else { straight_distances };
+    let mut to_inside = distances(inside, (width, height), true);
+    let to_outside = distances(inside, (width, height), false);
+
+    to_inside
+        .par_iter_mut()
+        .zip(to_outside)
+        .zip(inside)
+        .for_each(|((to_inside, to_outside), inside)| *to_inside = (if *inside { to_outside } else { *to_inside } - EDGE_OFFSET).max(0.0));
+
+    to_inside
 }
 
-/// Every texel's straight-line distance (texels) to the nearest texel where `feature` holds; farther than the region when none does
-fn straight_distances(feature: &[bool], (width, height): (usize, usize)) -> Vec<f32> {
-    // Squared distances, separable: along the rows, then along the columns of those
+/// Each texel's straight-line distance to the nearest texel on the requested side.
+fn straight_distances(inside: &[bool], (width, height): (usize, usize), target_side: bool) -> Vec<f32> {
+    // Start beyond the region so a line without a feature stays out of reach
     let far = ((width + height) as f32).powi(2);
-    let mut rows: Vec<f32> = feature.iter().map(|feature| if *feature { 0.0 } else { far }).collect();
+    let mut rows: Vec<f32> = inside.iter().map(|inside| if *inside == target_side { 0.0 } else { far }).collect();
     rows.par_chunks_mut(width.max(1)).for_each_init(DistanceEnvelope::default, |envelope, row| envelope.lower(row));
+
     let mut columns: Vec<f32> = (0..width * height).map(|at| rows.get((at % height.max(1)) * width + at / height.max(1)).copied().unwrap_or(far)).collect();
     columns.par_chunks_mut(height.max(1)).for_each_init(DistanceEnvelope::default, |envelope, column| envelope.lower(column));
-    (0..width * height).map(|at| columns.get((at % width.max(1)) * height + at / width.max(1)).copied().unwrap_or(far).sqrt()).collect()
+
+    // Reuse the row buffer for the final distances in row-major order
+    rows.resize(width * height, far);
+    for (index, distance) in rows.iter_mut().enumerate() {
+        *distance = columns.get((index % width.max(1)) * height + index / width.max(1)).copied().unwrap_or(far).sqrt();
+    }
+
+    rows
 }
 
-/// Every texel's distance (texels, the larger of across and down) to the nearest texel where `feature` holds; farther than the region when none does
-fn chessboard_distances(feature: &[bool], (width, height): (usize, usize)) -> Vec<f32> {
+/// Each texel's distance to the nearest texel on the requested side, measured along the larger axis.
+fn chessboard_distances(inside: &[bool], (width, height): (usize, usize), target_side: bool) -> Vec<f32> {
     let far = (width + height) as f32;
-    let mut distances: Vec<f32> = feature.iter().map(|feature| if *feature { 0.0 } else { far }).collect();
+    let mut distances: Vec<f32> = inside.iter().map(|inside| if *inside == target_side { 0.0 } else { far }).collect();
 
     // One pass down from the texels above and left, one up from those below and right
     let step = |distances: &mut [f32], (x, y): (usize, usize), neighbours: [(isize, isize); 4]| {
@@ -210,6 +225,7 @@ fn trail_steps((width, height): (usize, usize), direction: [f32; 2], reach: f32)
         if steps.last().is_some_and(|(last_across, last_down, _)| (*last_across, *last_down) == (across, down)) {
             continue;
         }
+
         steps.push((across, down, if reach > 0.0 { back / reach } else { 0.0 }));
     }
     steps
@@ -289,12 +305,12 @@ mod tests {
         // One feature texel in the middle of a 5 × 5 region
         let mut feature = vec![false; 25];
         feature[12] = true;
-        let straight = straight_distances(&feature, (5, 5));
-        let chessboard = chessboard_distances(&feature, (5, 5));
+        let straight = straight_distances(&feature, (5, 5), true);
+        let chessboard = chessboard_distances(&feature, (5, 5), true);
         assert_eq!((straight[12], straight[13], chessboard[13]), (0.0, 1.0, 1.0));
         assert!((straight[0] - 8f32.sqrt()).abs() < 1e-5, "{}", straight[0]);
         assert_eq!(chessboard[0], 2.0, "a corner is as far as its larger axis");
-        let none = straight_distances(&[false; 4], (2, 2));
+        let none = straight_distances(&[false; 4], (2, 2), true);
         assert!(none.iter().all(|distance| *distance >= 4.0), "no feature is beyond the region");
     }
 
@@ -304,8 +320,8 @@ mod tests {
         let (width, height) = (7, 3);
         let mut feature = vec![false; width * height];
         feature[1] = true;
-        let straight = straight_distances(&feature, (width, height));
-        let chessboard = chessboard_distances(&feature, (width, height));
+        let straight = straight_distances(&feature, (width, height), true);
+        let chessboard = chessboard_distances(&feature, (width, height), true);
 
         let at = |x: usize, y: usize| y * width + x;
         assert_eq!((straight[at(1, 0)], straight[at(6, 0)], straight[at(1, 2)]), (0.0, 5.0, 2.0));
@@ -360,8 +376,8 @@ mod tests {
 
     #[test]
     fn shared_trail_steps_find_what_each_texel_walking_its_own_finds() {
-        // About one texel in fifty a shape, in a region whose rows end part way through a word
-        // Small enough that the walk's float sums round as exactly as the shared steps (thousands of texels across, a near tie can round a texel over)
+        // Sparse rows end partway through a word
+        // Keep the region small enough to avoid rounding nearly tied rays into different texels
         let (width, height) = (150, 97);
         let mut seed = 12345u32;
         let inside: Vec<bool> = (0..width * height)

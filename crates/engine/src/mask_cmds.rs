@@ -585,6 +585,7 @@ fn levels_target(levels: &mut Levels, content: bool) -> Result<()> {
     } else if levels.affects.is_some() {
         return Err(bad("effect.add", "a mask's levels remap its one value: leave out `affects`"));
     }
+
     Ok(())
 }
 
@@ -772,7 +773,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         _ => None,
     };
 
-    // Naming the filter the effect already is edits its parameters like a plain effect.set (Directional Warp's former id also sets its mode); a warp saved before the warp modes has no mode to set, so another mode replaces it as a swap does
+    // Update matching filter variants in place and rebuild when the legacy filter lacks the requested mode
     let changes_saved_warp_mode = |filter: &str| matches!(session.doc.project.effect(effect), Some((_, Effect { kind: EffectKind::Filter(saved), .. })) if crate::filter_lib::changes_saved_warp_mode(filter, params, saved));
     let swapped = match strp(params, "filter") {
         Some(EMPTY_FILTER) => Some(emptied_filter(session, effect)?),
@@ -964,7 +965,7 @@ fn swapped_filter(s: &Session, effect: LayerId, id: &str, p: &Value) -> Result<(
         return Err(bad(CMD, format!("{} goes on layer content, not on masks", def.label)));
     }
 
-    // Built as effect.add.filter builds it, from the id given, so a former id such as `warpDirectional` sets the same mode it adds with
+    // Resolve legacy IDs the same way as effect.add.filter to preserve their modes
     let kind = crate::filter_lib::build_for(CMD, id, p)?;
     Ok((kind, def.label))
 }

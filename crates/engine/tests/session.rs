@@ -181,6 +181,7 @@ fn polygon_fill_and_color_picker() {
     execute(&mut s, "tool.click", &json!({"x": 200, "y": 200})).unwrap();
     execute(&mut s, "tool.colorPicker", &Value::Null).unwrap();
     let r = execute(&mut s, "tool.click", &json!({"x": 200, "y": 200})).unwrap();
+
     assert!((r["roughness"][0].as_f64().unwrap() - 0.9).abs() < 0.01, "{r}");
 }
 
@@ -197,8 +198,11 @@ fn color_at_reads_the_surface_without_changing_the_brush() {
     let read = s.color_at(Vec2::new(200.0, 200.0), viewport).unwrap();
 
     let surface = read.get(&Channel::Roughness).unwrap();
+
     assert!((surface[0] - 0.9).abs() < 0.01, "{surface:?}");
+
     let brush = s.tool.values.get(&Channel::Roughness).unwrap();
+
     assert!((brush[0] - 0.2).abs() < 0.01, "the brush keeps its own value: {brush:?}");
 }
 
@@ -253,10 +257,10 @@ fn panic_hunt() {
         if spec.id == "project.sample" {
             continue; // slow (bakes); covered elsewhere
         }
+
         for p in &hostile {
             let mut s = session();
-            // Match the 256px fixture: otherwise empty/irrelevant bake.run params perform
-            // repeated 2048px default bakes. Keep every input, ray count and fresh session.
+            // Match the 256px fixture so empty bake options cannot launch a 2048px bake
             for texture_set in &mut s.doc.project.texture_sets {
                 texture_set.bake.common.resolution = texturecraft_engine::core::BakeResolution::R256;
             }
@@ -1093,14 +1097,19 @@ fn blending_set_gives_each_channel_its_own_mode_and_opacity_in_one_undo_step() {
     assert_eq!((after[&Channel::BaseColor].mode, after[&Channel::BaseColor].opacity), (texturecraft_engine::core::BlendMode::Multiply, 0.25));
     assert_eq!((after[&Channel::Roughness].mode, after[&Channel::Roughness].opacity), (before[&Channel::Roughness].mode, 0.5));
     assert_eq!(after[&Channel::Metallic], before[&Channel::Metallic], "channels not listed stay as they were");
+
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
+
     assert_eq!(read(&s), before, "one undo step restores every listed channel");
+
     execute(&mut s, "edit.redo", &Value::Null).unwrap();
 
     // A channel the layer has disabled stays disabled
     execute(&mut s, "layer.blend", &json!({"layer": layer, "channel": "metallic", "enabled": false})).unwrap();
     execute(&mut s, "layer.blending.set", &json!({"layer": layer, "channels": {"metallic": {"opacity": 0.1}}})).unwrap();
+
     assert!(!read(&s).contains_key(&Channel::Metallic));
+
     let stable = read(&s);
     for bad in [
         json!({"layer": layer}),
@@ -1112,21 +1121,61 @@ fn blending_set_gives_each_channel_its_own_mode_and_opacity_in_one_undo_step() {
         assert_eq!(read(&s), stable, "an error changes nothing");
     }
     execute(&mut s, "layer.blending.set", &json!({"layer": layer, "channels": {"baseColor": {"opacity": 2.0}, "roughness": {"opacity": -1.0}}})).unwrap();
+
     assert_eq!((read(&s)[&Channel::BaseColor].opacity, read(&s)[&Channel::Roughness].opacity), (1.0, 0.0), "opacity is clamped");
 }
 
 #[test]
-fn a_new_session_forgets_the_projector_depth_maps_built_before_it() {
-    use texturecraft_engine::compose::projector_depth::ProjectorDepth;
-    use texturecraft_engine::core::{Projection, Projector, UvTransform};
+fn interleaved_sessions_render_depth_from_their_own_mesh() {
+    use texturecraft_engine::geom::{Mesh, glam::Vec3};
 
-    let mesh = primitives::sphere(1.0, 16, 8);
-    let projection =
-        Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: UvTransform::default(), projector: Projector::depth_culled(), placed: None };
-    let built = ProjectorDepth::of(&mesh, mesh.bounds(), &projection).unwrap();
+    let make_mesh = |front_edge| {
+        let mut positions = vec![
+            Vec3::new(0.0, -1.0, 0.5),
+            Vec3::new(front_edge, -1.0, 0.5),
+            Vec3::new(front_edge, 1.0, 0.5),
+            Vec3::new(0.0, 1.0, 0.5),
+            Vec3::new(-1.0, -1.0, -0.5),
+            Vec3::new(1.0, -1.0, -0.5),
+            Vec3::new(1.0, 1.0, -0.5),
+            Vec3::new(-1.0, 1.0, -0.5),
+        ];
+        // Padding makes the old sampled key miss the front edge
+        positions.resize(200, Vec3::ZERO);
+        let mut uvs = vec![
+            Vec2::new(0.5, 0.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(0.5, 1.0),
+            Vec2::new(0.0, 0.0),
+            Vec2::new(0.5, 0.0),
+            Vec2::new(0.5, 1.0),
+            Vec2::new(0.0, 1.0),
+        ];
+        uvs.resize(positions.len(), Vec2::ZERO);
+        let normals = vec![Vec3::Z; positions.len()];
+        Mesh::from_parts(positions, Some(normals), uvs, vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7], "Two squares").unwrap()
+    };
 
-    Session::new_project("t", primitives::sphere(1.0, 16, 8), "builtin:sphere", None, 128).unwrap();
+    let mut covered = Session::new_project("Covered", make_mesh(1.0), "squares", None, 128).unwrap();
+    let mut exposed = Session::new_project("Exposed", make_mesh(0.5), "squares", None, 128).unwrap();
+    let sample_rear_surface = |session: &Session| session.caches[0].composite.value(Channel::BaseColor, 56, 32);
 
-    let after = ProjectorDepth::of(&mesh, mesh.bounds(), &projection).unwrap();
-    assert!(!std::sync::Arc::ptr_eq(&built, &after), "a mesh sharing the old one's fingerprint must not take its map");
+    for session in [&mut covered, &mut exposed] {
+        execute(session, "layer.add.fill", &json!({"color": [1.0, 0.0, 0.0]})).unwrap();
+        execute(
+            session,
+            "layer.fill.projection",
+            &json!({
+                "projection": "planar", "axis": 2, "depthCulling": true, "depthCullingHardness": 1.0,
+            }),
+        )
+        .unwrap();
+        session.update();
+    }
+
+    let hidden = sample_rear_surface(&covered);
+    let visible = sample_rear_surface(&exposed);
+    assert!((hidden[0] - hidden[1]).abs() < 0.05, "the rear surface is occluded: {hidden:?}");
+    assert!(visible[0] > visible[1] + 0.5, "the rear surface is exposed: {visible:?}");
 }

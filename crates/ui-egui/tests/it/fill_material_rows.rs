@@ -81,10 +81,12 @@ fn the_channel_strip_turns_a_channel_and_its_card_off_and_on() {
 
     click(&mut harness, Role::CheckBox, "Metal");
     let channels = &harness.state().session.doc.project.layer(layer).unwrap().channels;
+
     assert!(!channels.contains_key(&Channel::Metallic), "off in the strip, the fill stops writing Metallic");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Metallic").is_none(), "a channel that is off has no card");
 
     click(&mut harness, Role::CheckBox, "Metal");
+
     assert!(harness.state().session.doc.project.layer(layer).unwrap().channels.contains_key(&Channel::Metallic));
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Metallic").is_some());
 }
@@ -110,6 +112,7 @@ fn a_slot_lists_its_sources_restores_a_procedural_and_clears_back_to_uniform() {
     assert_eq!(pattern, Procedural::new(ProceduralKind::Clouds), "⟲ keeps the pattern and restores its settings");
 
     click_in_slot(&mut harness, "Metallic", Role::Button, "Clear");
+
     assert_eq!(source(&harness, layer, Channel::Metallic), Source::uniform_of(Channel::Metallic), "× goes back to a uniform value");
 }
 
@@ -167,12 +170,15 @@ fn source_picker_images_render_on_scroll_and_release_on_removal() {
     harness.run_steps(THUMBNAIL_FRAMES);
     let scrolled = image_thumbnails(&harness);
     assert!(scrolled > opened, "a scroll makes the thumbnails of the tiles it brings into view: {opened} -> {scrolled}");
+
     click(&mut harness, Role::ListBoxOption, &last);
+
     assert_eq!(source(&harness, layer, Channel::Metallic), Source::image(last));
 
     let app = harness.state_mut();
     app.session.images.clear();
     app.thumbs.sync_images(&app.session.images, app.session.revision + 1);
+
     assert_eq!(image_thumbnails(&harness), 0, "removed images release their picker thumbnails");
 }
 
@@ -220,11 +226,13 @@ fn a_linked_material_shows_its_inputs_and_the_switch_shows_its_channels() {
 
     let wear = float_param("wear", "Wear", 0.5);
     link_fill(&mut harness, layer, vec![wear], &[]);
+
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Painted steel").is_some(), "the Material side shows the whole material");
     assert!(harness.query_by_role_and_label(Role::Slider, "Wear").is_some(), "with its inputs");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Metallic").is_none(), "and no channel cards");
 
     click(&mut harness, Role::RadioButton, "Channels");
+
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Metallic").is_some(), "the Channels side shows a card per channel");
     assert!(harness.query_by_role_and_label(Role::Slider, "Wear").is_none());
 }
@@ -259,11 +267,13 @@ fn a_linked_whole_number_input_changes_only_on_a_new_whole_number() {
     // A link without a package fails to re-cook with a toast: no toast, no cook
     click_at(&mut harness, along(track, 0.32));
     harness.run_steps(SETTLE_FRAMES);
+
     assert_eq!(undo_depth(&harness), steps, "3.2 rounds to the 3 the input holds: no undo step");
     assert!(harness.state().toasts.is_empty(), "and no re-cook");
 
     drag(&mut harness, along(track, 0.3), along(track, 0.53));
     harness.run_steps(SETTLE_FRAMES);
+
     assert_eq!(fill_of(&harness, layer).link.unwrap().params[0].value, json!({"t": "int", "v": 5}), "the drag ends on 5");
     assert_eq!(undo_depth(&harness), steps + 1, "the drag's whole numbers merge into one step");
 }
@@ -313,18 +323,25 @@ fn a_linked_material_maps_its_channels_and_picks_its_resolution() {
     // Channels mapping: the Roughness row lists the outputs; picking one makes Roughness read it
     click_below(&mut harness, Role::ComboBox, "roughness");
     click(&mut harness, Role::ListBoxOption, "baseColor");
+
     assert_eq!(link(&harness).output_of(Channel::Roughness), "baseColor");
     assert!(matches!(source(&harness, layer, Channel::Roughness), Source::Image { name, .. } if name == "steel_base.png"));
 
     // Resolution: folded until clicked; Fixed keeps the size, the list picks another, Relative goes back to a factor
     assert!(harness.query_by_role_and_label(Role::RadioButton, "Fixed").is_none(), "Resolution starts folded");
+
     click_below(&mut harness, Role::Button, "Resolution");
     click_below(&mut harness, Role::RadioButton, "Fixed");
+
     assert_eq!(link(&harness).resolution, Some(CookResolution::Fixed(TEXTURE_RESOLUTION)));
+
     click_below(&mut harness, Role::ComboBox, "256 × 256");
     click(&mut harness, Role::ListBoxOption, "1024 × 1024");
+
     assert_eq!(link(&harness).resolution, Some(CookResolution::Fixed(1024)));
+
     click_below(&mut harness, Role::RadioButton, "Relative");
+
     assert_eq!(link(&harness).resolution, Some(CookResolution::Relative(2)), "1024 is the texture set's ×4");
 }
 
@@ -374,6 +391,7 @@ fn the_colour_bar_opens_the_picker_which_types_restores_and_waits_for_an_eyedrop
     let (mut harness, layer) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
     let before = base_color(&harness, layer);
     click(&mut harness, Role::Button, "Base color");
+
     assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "the picker shows its colour space");
 
     type_hex(&mut harness, "FF8000");
@@ -383,6 +401,7 @@ fn the_colour_bar_opens_the_picker_which_types_restores_and_waits_for_an_eyedrop
 
     click(&mut harness, Role::ComboBox, "HSV");
     click(&mut harness, Role::ListBoxOption, "RGB");
+
     assert!(harness.query_by_role_and_label(Role::Slider, "R").is_some(), "the sliders edit R, G and B");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "picking from its own list keeps the picker open");
 
@@ -392,6 +411,7 @@ fn the_colour_bar_opens_the_picker_which_types_restores_and_waits_for_an_eyedrop
 
     click_picker_eyedropper(&mut harness);
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.state().picking_color.is_some(), "the eyedropper waits for a click on the model");
 }
 
@@ -427,13 +447,16 @@ fn the_picker_is_a_window_beside_the_panel_that_its_title_drags_and_its_close_or
         .unwrap()
         .rect();
     click_at(&mut harness, close.center());
+
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "× closes it");
 
     click(&mut harness, Role::Button, "Base color");
     let reopened = harness.get_by_role_and_label(Role::TitleBar, "Base color").rect();
     assert!((reopened.min - moved.min).length() < 1.0, "it opens again where it was dragged: {reopened:?}");
+
     harness.key_press(egui::Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "Escape closes it");
 }
 
@@ -443,10 +466,12 @@ fn escape_ends_an_eyedropper_pick_before_the_picker_and_an_alt_orbit_keeps_the_p
     click(&mut harness, Role::Button, "Base color");
     click_bar_eyedropper(&mut harness);
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.state().picking_color.is_some(), "the eyedropper waits for a click on the model");
 
     harness.key_press(egui::Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.state().picking_color.is_none(), "Escape ends the pick");
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_some(), "the same Escape leaves the picker open");
 
@@ -461,10 +486,12 @@ fn escape_ends_an_eyedropper_pick_before_the_picker_and_an_alt_orbit_keeps_the_p
     harness.event(egui::Event::PointerButton { pos: view + egui::vec2(40.0, 10.0), button: egui::PointerButton::Primary, pressed: false, modifiers: alt });
     harness.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_some(), "an Alt+drag on the model orbits and keeps the picker open");
 
     harness.key_press(egui::Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "the next Escape closes the picker");
 }
 
@@ -491,26 +518,35 @@ fn the_swatches_row_keeps_the_picker_colour_in_the_project_applies_it_on_a_click
     let add = harness.get_by_role_and_label(Role::Button, "Add swatch").rect();
     let space = harness.get_by_role_and_label(Role::ComboBox, "sRGB").rect();
     assert!(add.top() > space.bottom() && (add.left() - space.left()).abs() < 1.0, "the row is under the picker, at its left edge: {add:?}");
+
     click_at(&mut harness, add.center());
+
     assert_eq!(harness.state().session.doc.project.swatches, vec![orange], "+ keeps the picker's colour in the project");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "the picker stays open");
+
     let depth = undo_depth(&harness);
     let kept = harness.get_by_role_and_label(Role::Button, "#FF8000").rect();
     click_at(&mut harness, kept.center());
+
     assert_eq!(undo_depth(&harness), depth, "a swatch the picker already shows changes nothing");
 
     click(&mut harness, Role::Button, "Previous color");
+
     assert_eq!(base_color(&harness, layer), before);
+
     let chip = harness.get_by_role_and_label(Role::Button, "#FF8000").rect();
     let moved_add = harness.get_by_role_and_label(Role::Button, "Add swatch").rect();
     assert!((chip.left() - add.left()).abs() < 1.0 && moved_add.left() > chip.right(), "the swatch takes the + chip's place, + moves right");
+
     click_at(&mut harness, chip.center());
+
     assert_eq!(base_color(&harness, layer), orange, "a click on a swatch applies it");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "applying keeps the picker open");
 
     right_click(&mut harness, chip.center());
     let remove = harness.get_by_role_and_label(Role::Button, "Remove swatch").rect();
     click_at(&mut harness, remove.center());
+
     assert!(harness.state().session.doc.project.swatches.is_empty(), "its right-click menu removes it");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "a pick in the menu keeps the picker open");
 }
@@ -523,6 +559,7 @@ fn a_hex_code_left_as_it_opened_is_no_edit() {
     click(&mut harness, Role::TextInput, "Hex color");
     harness.key_press(egui::Key::Enter);
     harness.run_steps(SETTLE_FRAMES);
+
     assert_eq!(base_color(&harness, layer), [0.2, 0.2, 0.2], "the colour is not rounded to the code it shows");
     assert_eq!(undo_depth(&harness), depth, "no undo step");
 }
@@ -555,6 +592,7 @@ fn a_hex_code_half_typed_when_a_press_closes_the_picker_is_gone_when_it_opens_ag
     harness.run_steps(1);
     let view = harness.state().viewport_rect.center();
     click_at(&mut harness, view);
+
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "the press closes the picker");
     assert_eq!(base_color(&harness, layer), [0.2, 0.2, 0.2], "closing applies nothing");
 
@@ -563,6 +601,7 @@ fn a_hex_code_half_typed_when_a_press_closes_the_picker_is_gone_when_it_opens_ag
     click(&mut harness, Role::TextInput, "Hex color");
     harness.key_press(egui::Key::Enter);
     harness.run_steps(SETTLE_FRAMES);
+
     assert_eq!(base_color(&harness, layer), [0.2, 0.2, 0.2], "the field shows the colour's own code, not the text typed before");
     assert_eq!(undo_depth(&harness), depth, "no undo step");
 }
@@ -587,6 +626,7 @@ const FIELD_MIN_HEIGHT: f32 = 100.0;
 fn the_picker_is_titled_by_its_channel_resizes_from_its_edges_keeps_its_size_and_previews_nothing_on_hover() {
     let (mut harness, _) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
     click(&mut harness, Role::Button, "Base color");
+
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_some(), "the title is the channel's name alone");
 
     let face = picker_face(&harness);
@@ -596,10 +636,13 @@ fn the_picker_is_titled_by_its_channel_resizes_from_its_edges_keeps_its_size_and
     let by = egui::vec2(80.0, 60.0);
     let corner = face.right_bottom() - egui::vec2(2.0, 2.0);
     drag(&mut harness, corner, corner + by);
+
     assert!(harness.query_by_role_and_label(Role::ComboBox, "sRGB").is_some(), "a resize keeps the picker open");
+
     let grown = picker_face(&harness);
     assert!((grown.min - face.min).length() < 1.0, "the bottom right corner leaves the top left where it was: {grown:?} {face:?}");
     assert!((grown.size() - (face.size() + by)).length() < 1.0, "the corner drags the size: {grown:?} from {face:?}");
+
     let grown_field = harness.get_by_role_and_label(Role::Slider, "Saturation and value").rect();
     let grown_hue = harness.get_by_role_and_label(Role::Slider, "Hue").rect();
     let grown_track = harness.get_by_role_and_label(Role::Slider, "S").rect();
@@ -630,17 +673,23 @@ fn the_picker_is_titled_by_its_channel_resizes_from_its_edges_keeps_its_size_and
     let value = |harness: &Harness<'_, TextureCraftApp>| harness.get_by_role_and_label(Role::Slider, "V").accesskit_node().numeric_value();
     let shown = value(&harness);
     assert!(shown.is_some(), "the V slider says its value");
+
     click(&mut harness, Role::ComboBox, "sRGB");
     harness.get_by_role_and_label(Role::ListBoxOption, "Linear").hover();
     harness.run_steps(SETTLE_FRAMES);
+
     assert_eq!(value(&harness), shown, "a hovered colour space changes nothing");
+
     harness.key_press(egui::Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
     click(&mut harness, Role::ComboBox, "HSV");
     harness.get_by_role_and_label(Role::ListBoxOption, "RGB").hover();
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.query_by_role_and_label(Role::Slider, "R").is_none(), "a hovered model changes nothing");
+
     click(&mut harness, Role::ListBoxOption, "RGB");
+
     assert!(harness.query_by_role_and_label(Role::Slider, "R").is_some(), "a click picks it");
 }
 
@@ -655,7 +704,9 @@ fn a_plain_fill_switches_to_one_whole_material_picks_it_from_its_card_and_clears
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Metallic").is_some(), "a plain fill opens on Channels: a card per channel");
 
     click_node(&mut harness, Role::RadioButton, "Material");
+
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Metallic").is_none(), "the Material side has no channel cards");
+
     click_node(&mut harness, Role::ComboBox, "None");
 
     // The card opens the material picker, not a list: unfiltered it offers the plain materials but no smart ones
@@ -665,18 +716,23 @@ fn a_plain_fill_switches_to_one_whole_material_picks_it_from_its_card_and_clears
     // Its search keeps only the materials it names
     harness.event(egui::Event::Text("hammered".into()));
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Steel").is_none(), "searching hides what it doesn't name");
+
     click_node(&mut harness, Role::ListBoxOption, "Copper Hammered");
+
     assert_eq!(whole_material(&harness, layer).as_deref(), Some("copper_hammered"), "the picker sets the whole material");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Copper Hammered").is_some(), "the card names it");
     assert!(harness.query_by_role(Role::ListBoxOption).is_none(), "the picker closed on the pick");
 
     click_node(&mut harness, Role::RadioButton, "Channels");
+
     assert!(matches!(source(&harness, layer, Channel::BaseColor), Source::Procedural { .. }), "the material set every channel");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Height").is_some(), "its channels show as cards");
 
     click_node(&mut harness, Role::RadioButton, "Material");
     click_in_slot(&mut harness, "Copper Hammered", Role::Button, "Clear");
+
     assert_eq!(whole_material(&harness, layer), None, "× drops the material");
     assert_eq!(source(&harness, layer, Channel::BaseColor), Source::uniform_of(Channel::BaseColor), "and returns the channels to their defaults");
 }
@@ -694,17 +750,22 @@ fn pick_outside(harness: &mut Harness<'_, TextureCraftApp>, outcome: PickOutcome
 fn a_click_outside_the_app_hands_its_screen_colour_to_the_bar_and_a_cancelled_or_impossible_one_changes_nothing() {
     let (mut harness, layer) = app_with_fill(json!({"color": [0.2, 0.2, 0.2]}));
     assert!(!harness.state().screen_picking, "tests have no real window: no system hook or grab");
+
     let before = base_color(&harness, layer);
     click(&mut harness, Role::Button, "Base color");
 
     pick_outside(&mut harness, PickOutcome::Unavailable);
+
     assert!(harness.state().picking_color.is_some(), "where the system cannot read the screen the pick stays on the model");
     assert_eq!(base_color(&harness, layer), before, "nothing changes until a click");
+
     harness.key_press(egui::Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.state().picking_color.is_none() && harness.state().screen_pick.is_none(), "Escape ends the pick and its wait");
 
     pick_outside(&mut harness, PickOutcome::Cancelled);
+
     assert!(harness.state().picking_color.is_none(), "dismissing the desktop's picker ends the pick");
     assert_eq!(base_color(&harness, layer), before, "a cancelled pick changes nothing");
 
@@ -733,9 +794,12 @@ fn an_armed_eyedropper_is_the_pointer_over_the_whole_window_and_the_app_losing_t
 
     harness.state_mut().screen_pick = Some(ScreenPick::waiting(bar));
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.state().picking_color.is_some(), "a focused app keeps waiting");
+
     harness.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().focused = Some(false);
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.state().picking_color.is_none() && harness.state().screen_pick.is_none(), "another app came forward: the pick ends");
     assert_eq!(base_color(&harness, layer), before, "nothing changes");
     assert_ne!(harness.output().platform_output.cursor_icon, egui::CursorIcon::None, "the pointer is the user's again");
@@ -752,11 +816,13 @@ fn escape_in_the_hex_field_ends_the_typing_and_a_second_escape_closes_the_picker
 
     harness.key_press(egui::Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_some(), "the first Escape only ends the typing");
     assert_eq!(base_color(&harness, layer), [0.2, 0.2, 0.2], "and applies nothing");
 
     harness.key_press(egui::Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "the next Escape closes the picker");
 }
 
@@ -772,6 +838,7 @@ fn a_hex_code_left_as_it_opened_keeps_a_colour_set_meanwhile() {
     let depth = undo_depth(&harness);
     harness.key_press(egui::Key::Enter);
     harness.run_steps(SETTLE_FRAMES);
+
     assert_eq!(base_color(&harness, layer), [0.0, 0.0, 1.0], "the untouched code is not written back");
     assert_eq!(undo_depth(&harness), depth, "no undo step");
 }
@@ -786,6 +853,7 @@ fn a_swatch_menu_left_open_while_the_list_changes_never_removes_another_swatch()
     click(&mut harness, Role::Button, "Base color");
     let green_chip = harness.get_by_role_and_label(Role::Button, "#00FF00").rect();
     right_click(&mut harness, green_chip.center());
+
     assert!(harness.query_by_role_and_label(Role::Button, "Remove swatch").is_some(), "the green swatch's menu is open");
 
     // An agent removes the first swatch: green moves to its place, blue to green's

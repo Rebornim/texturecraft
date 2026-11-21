@@ -133,15 +133,18 @@ fn dragging_the_divider_resizes_the_views_within_their_minimum_width() {
     assert_eq!(harness.state().ui.split_ratio, 0.5);
 
     drag(&mut harness, PointerButton::Primary, pos2(start_x, y), pos2(start_x - 200.0, y));
+
     assert!((divider_x(&harness) - (start_x - 200.0)).abs() < 0.5, "follows the pointer: {}", divider_x(&harness));
     assert!((harness.state().ui.split_ratio - (start_x - 200.0 - views_left) / views_width).abs() < 1e-3);
 
     let x = divider_x(&harness);
     drag(&mut harness, PointerButton::Primary, pos2(x, y), pos2(views_left + 10.0, y));
+
     assert!((divider_x(&harness) - views_left - MIN_VIEW_WIDTH).abs() < 0.5, "clamped on the left: {}", divider_x(&harness));
 
     let x = divider_x(&harness);
     drag(&mut harness, PointerButton::Primary, pos2(x, y), pos2(views_right - 10.0, y));
+
     assert!((views_right - divider_x(&harness) - MIN_VIEW_WIDTH).abs() < 0.5, "clamped on the right: {}", divider_x(&harness));
 }
 

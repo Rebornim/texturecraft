@@ -14,6 +14,10 @@ use crate::commands::{
 use crate::layer_selection::{batch_param, ids_json};
 use crate::{EngineError, Result, Session, cmd, session::StackTarget};
 
+mod fill_target;
+
+pub(crate) use fill_target::FillTarget;
+
 /// One full turn, in degrees (the brush's, so every angle wraps on the same turn)
 pub(crate) use texturecraft_paint::FULL_TURN_DEGREES;
 
@@ -514,14 +518,6 @@ fn blending_set(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(Value::Null)
 }
 
-/// Which fill `layer.fill.*` edits: a fill layer's (`layer`), a content fill effect's (`effect`) or a mask fill effect's (`effect`: one grayscale source, no channels or material)
-#[derive(Clone, Copy)]
-pub(crate) enum FillTarget {
-    Layer(LayerId),
-    Effect(LayerId),
-    Mask(LayerId),
-}
-
 pub(crate) fn fill_target(s: &Session, p: &Value, cmd: &str) -> Result<FillTarget> {
     match u64p(p, "effect").map(LayerId) {
         Some(effect) => match s.doc.project.effect(effect).map(|(_, found)| &found.kind) {
@@ -556,6 +552,7 @@ pub(crate) fn placement_mut(s: &mut Session, target: FillTarget) -> Result<(&mut
             _ => Err(EngineError::Other("not a mask fill effect".into())),
         };
     }
+
     let fill = fill_mut(s, target)?;
     Ok((&mut fill.projection, &mut fill.sampling))
 }
@@ -572,10 +569,12 @@ fn fill_set(session: &mut Session, params: &Value) -> Result<Value> {
     if let Some(input) = strp(params, "input") {
         return input_set(session, params, input);
     }
+
     let target = fill_target(session, params, FILL_SET)?;
     if let FillTarget::Mask(effect) = target {
         return mask_fill_set(session, params, effect);
     }
+
     let channel = channel_param(FILL_SET, params, "channel")?.ok_or_else(|| bad(FILL_SET, "`channel` is required"))?;
 
     // `solo`: this channel on, every other one off

@@ -16,11 +16,16 @@ const EDGE_FADE_START: f32 = 0.8;
 const EDGE_FADE_WIDTH: f32 = 0.4;
 
 impl SoftBox {
-    /// The light the box sends along direction `d`
-    pub fn eval(&self, d: Vec3) -> Vec3 {
-        let elevation = d.y.clamp(-1.0, 1.0).asin().to_degrees();
-        let azimuth = d.z.atan2(d.x).to_degrees();
+    /// Convert the sampled direction to degrees once for all the lights
+    pub fn angles(direction: Vec3) -> (f32, f32) {
+        let elevation = direction.y.clamp(-1.0, 1.0).asin().to_degrees();
+        let azimuth = direction.z.atan2(direction.x).to_degrees();
 
+        (azimuth, elevation)
+    }
+
+    /// The light the box sends along the sampled azimuth and elevation
+    pub fn eval(&self, azimuth: f32, elevation: f32) -> Vec3 {
         // The azimuth difference wrapped to -180..180 degrees
         let azimuth_step = ((azimuth - self.azimuth + 540.0).rem_euclid(360.0)) - 180.0;
         let (x, y) = (azimuth_step.abs() / self.half_width, (elevation - self.elevation).abs() / self.half_height);

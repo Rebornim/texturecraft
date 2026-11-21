@@ -78,6 +78,7 @@ mod tests {
     fn a_warp_has_its_custom_noise_only_in_that_source_mode() {
         let warp = SourceWarp::LIBRARY;
         assert!(ImageInput::of(&Filter::SourceWarp(warp)).is_empty());
+
         let custom = SourceWarp { source: WarpSource { mode: WarpSourceMode::CustomNoise, ..warp.source }, ..warp };
         assert_eq!(ImageInput::of(&Filter::SourceWarp(custom)), vec![ImageInput::CUSTOM_NOISE]);
         assert_eq!(ImageInput::named(&Filter::SourceWarp(warp), "customNoise"), Some(ImageInput::CUSTOM_NOISE), "kept while the mode is off");

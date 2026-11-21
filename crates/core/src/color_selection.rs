@@ -42,10 +42,14 @@ impl ColorSelection {
     /// How much ID color `id` is selected, 0..1 (none: no ID map there)
     pub fn amount(&self, id: Option<[f32; 3]>) -> f32 {
         let Some(id) = id else { return 0.0 };
+        if self.tolerance.is_nan() || self.hardness.is_nan() {
+            return 0.0;
+        }
+
         let distance = self
             .colors
             .iter()
-            // A NaN component matches nothing (f32::max would drop it), as the old strict comparison did
+            // Carry NaN through the component maximum so a malformed color cannot match
             .map(|picked| {
                 picked
                     .iter()
@@ -63,10 +67,8 @@ impl ColorSelection {
             return 1.0;
         }
 
-        // A NaN tolerance or hardness (only a hand-edited file holds one) selects nothing, as a NaN component does
         let width = 1.0 - self.hardness.clamp(0.0, 1.0);
-        let ramp = if width <= 0.0 { 0.0 } else { (1.0 - past / width).clamp(0.0, 1.0) };
-        if ramp.is_nan() { 0.0 } else { ramp }
+        if width <= 0.0 { 0.0 } else { (1.0 - past / width).clamp(0.0, 1.0) }
     }
 
     /// The gray this selection gives ID color `id` and how much of it covers the mask below (a transparent background covers only the selection)
@@ -114,6 +116,7 @@ mod tests {
         nan_hardness.hardness = f32::NAN;
 
         for selection in [nan_tolerance, nan_hardness] {
+            assert_eq!(selection.amount(Some([1.0, 0.0, 0.0])), 0.0, "an exact match still needs valid settings");
             assert_eq!(selection.amount(Some([0.8, 0.0, 0.0])), 0.0);
         }
     }

@@ -35,8 +35,10 @@ impl Session {
 
         let bytes = png(alpha)?;
         let image = texturecraft_formats::decode_image(&bytes).map_err(|error| EngineError::Other(format!("{name}: {error}")))?;
+
         self.doc.resources.insert(name.clone(), Arc::new(bytes));
         self.images.insert(name.clone(), decoded(image));
+
         Ok(name)
     }
 }
@@ -60,6 +62,7 @@ mod tests {
             assert_eq!(name, format!("{PREFIX}{}{EXTENSION}", alpha.id), "the id is a safe resource name as it is");
             assert_eq!(library_alpha_of(&name).map(|found| &found.id), Some(&alpha.id));
         }
+
         assert!(library_alpha_of("alpha_.png").is_none());
     }
 }

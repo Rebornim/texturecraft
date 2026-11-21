@@ -33,6 +33,7 @@ pub mod pattern;
 mod pattern_context;
 pub mod projector_cover;
 pub mod projector_depth;
+mod projector_depth_cache;
 pub mod projector_view;
 mod shape_distance;
 mod slope_texel;
@@ -53,10 +54,12 @@ pub use display::{DisplayKind, kinds_for, tile_bytes};
 pub use effect_histogram::EffectHistogram;
 pub use eval::{
     BLOCK, Composite, Inputs, MASK_CHANNEL, PaintTarget, Stencil, StrokePreview, all_tiles, compare_histograms, composite_tiles, composite_tiles_cached,
-    covered_tiles, effect_histogram, flatten_layer, mask_at, mask_image, mask_texels, mask_values, pad_tiles, stack_reads_neighbours,
+    composite_tiles_with_projectors, covered_tiles, effect_histogram, flatten_layer, mask_at, mask_image, mask_texels, mask_values, pad_tiles,
+    stack_reads_neighbours,
 };
 pub use mask_gray::MaskGray;
 pub use pattern_context::PatternContext;
+pub use projector_depth_cache::ProjectorDepthCache;
 pub use solo::solo_project;
 pub use store::{BakedMaps, ImageRes, ImageStore, PixelStore};
 pub use thumb::{THUMB_TEXELS, ThumbImage, ThumbTarget};

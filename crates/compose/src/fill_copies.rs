@@ -104,13 +104,16 @@ mod tests {
         let mut mirror = symmetry(SymmetryKind::Mirror, 0);
         mirror.position = [0.5, 0.0, 0.0];
         let left: Vec<FillCopy> = FillCopies::new(&mirror, Vec3::new(-1.0, 0.0, 0.0), Vec3::ZERO, 2.0).collect();
+
         assert_eq!(left.len(), 2);
 
         // The plane passes at x = 1 (half a radius of 2): a point at -1 sees the original at 3 first
         assert!(left[0].point(Vec3::new(-1.0, 0.2, 0.0)).abs_diff_eq(Vec3::new(3.0, 0.2, 0.0), 1e-5));
         assert!(left[1].point(Vec3::new(-1.0, 0.2, 0.0)).abs_diff_eq(Vec3::new(-1.0, 0.2, 0.0), 1e-5));
         assert!(left[0].normal(Vec3::X).abs_diff_eq(-Vec3::X, 1e-5));
+
         let right: Vec<FillCopy> = FillCopies::new(&mirror, Vec3::new(2.0, 0.0, 0.0), Vec3::ZERO, 2.0).collect();
+
         assert!(right[0].point(Vec3::new(2.0, 0.3, 0.0)).abs_diff_eq(Vec3::new(2.0, 0.3, 0.0), 1e-5));
     }
 
@@ -120,6 +123,7 @@ mod tests {
         radial.count = 4;
         radial.flip = [true, false];
         let copies: Vec<FillCopy> = FillCopies::new(&radial, Vec3::X, Vec3::ZERO, 1.0).collect();
+
         assert_eq!(copies.len(), 4);
         assert_eq!(copies[0].uv(Vec2::new(0.25, 0.5)), Vec2::new(0.25, 0.5));
         assert_eq!(copies[1].uv(Vec2::new(0.25, 0.5)), Vec2::new(0.75, 0.5));
@@ -129,6 +133,7 @@ mod tests {
 
         // A texel on +Y lies in copy 1's wedge, so copy 1 comes first there
         let on_y: Vec<FillCopy> = FillCopies::new(&radial, Vec3::Y, Vec3::ZERO, 1.0).collect();
+
         assert!(on_y[0].point(Vec3::Y).abs_diff_eq(Vec3::X, 1e-5));
     }
 

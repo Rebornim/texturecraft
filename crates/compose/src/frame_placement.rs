@@ -240,6 +240,7 @@ mod tests {
             let flat = folded(&proj).unwrap();
             let Projector { rotation, scale, crop, .. } = projector_of(&flat);
             assert_eq!((rotation, scale, crop), ([0.0; 3], [1.0; 3], ShapeCrop::Cropped), "the turn and scale moved into the frame, the crop stayed");
+
             close(&samples(&proj), &samples(&flat));
         }
         let unturned = planar(Projector::default());
@@ -263,6 +264,7 @@ mod tests {
             match folded(&proj) {
                 Some(flat) => {
                     assert_eq!(cover(&proj), cover(&flat), "{scale:?}: culling changed");
+
                     close(&samples(&proj), &samples(&flat));
                 }
                 None => assert!(!culling_folds(&projector), "{scale:?}: only a scale culling cannot keep stays unfolded"),
@@ -286,11 +288,15 @@ mod tests {
 
             let width = folded(&proj).unwrap().frame().unwrap().size[0];
             let bigger = placed(&proj, &FramePlacement { scale: [place.scale[0] * 2.0, place.scale[1], place.scale[2]], ..place }, BOUNDS).unwrap();
+
             assert!((bigger.frame().unwrap().size[0] - width * 2.0).abs() < 1e-4, "Scale X doubles the width");
+
             let moved = placed(&proj, &FramePlacement { offset: [0.0; 3], ..place }, BOUNDS).unwrap();
+
             assert!((Vec3::from(moved.frame().unwrap().center) - Vec3::new(1.0, -0.5, 0.5)).length() < 1e-4, "offset 0 = the mesh's centre");
         }
         let place = placement(&planar(Projector::default()), BOUNDS).unwrap();
+
         assert_eq!(placed(&planar(Projector::default()), &FramePlacement { scale: [0.0, 1.0, 1.0], ..place }, BOUNDS), None, "no zero size");
         assert_eq!(placed(&planar(Projector::default()), &FramePlacement { rotation: [f32::NAN; 3], ..place }, BOUNDS), None);
         assert_eq!(placement(&Projection::default(), BOUNDS), None);
@@ -300,8 +306,11 @@ mod tests {
     fn a_frames_upright_turn_is_its_turn_round_its_normal() {
         let mut flat = Decal { normal: [0.0, 0.0, 1.0], up: [0.0, 1.0, 0.0], rotation: 30.0, offset: [0.0; 2], ..frame() };
         assert!((upright_turn(&flat).unwrap() - 30.0).abs() < 1e-3);
+
         flat.rotation = -100.0;
+
         assert!((upright_turn(&flat).unwrap() + 100.0).abs() < 1e-3);
+
         let top = Decal { normal: [0.0, 1.0, 0.0], up: [0.0, 0.0, -1.0], rotation: 0.0, ..frame() };
         assert!(upright_turn(&top).unwrap().abs() < 1e-3, "seen from above the far side is up");
     }

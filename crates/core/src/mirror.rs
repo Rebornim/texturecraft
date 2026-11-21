@@ -73,18 +73,23 @@ mod tests {
         let mut mirror = Mirror::LIBRARY;
         assert_eq!(mirror.source([0.25, 0.4]), [0.25, 0.4], "the left side stays");
         assert_eq!(mirror.source([0.75, 0.4]), [0.25, 0.4], "the right side reads the left");
+
         mirror.invert[0] = true;
+
         assert_eq!(mirror.source([0.25, 0.4]), [0.75, 0.4], "inverted, the left side reads the right");
 
         mirror.offset[0] = 0.25;
         mirror.invert[0] = false;
+
         assert_eq!(mirror.source([0.75, 0.0]), [0.25, 0.0], "a copy past the left edge folds back at it");
 
         mirror.mode = MirrorMode::AxisY;
+
         assert_eq!(mirror.source([0.9, 0.75]), [0.9, 0.25], "Axis Y reads the top for the bottom");
 
         mirror.mode = MirrorMode::Corner;
         mirror.corner = MirrorCorner::BottomRight;
+
         assert_eq!(mirror.source([0.25, 0.25]), [0.75, 0.75], "every quarter reads the kept one");
         assert_eq!(mirror.source([0.75, 0.75]), [0.75, 0.75]);
         assert!(mirror.on_axis([0.5, 0.1], 0.01) && mirror.on_axis([0.1, 0.5], 0.01) && !mirror.on_axis([0.1, 0.1], 0.01));

@@ -67,6 +67,7 @@ fn type_search(harness: &mut Harness<'_, TextureCraftApp>, text: &str) {
 fn a_procedural_tile_sets_the_channel_and_closes_the_picker() {
     let (mut harness, layer) = app_with_fill(|_, _| {});
     click_slot(&mut harness, "Roughness");
+
     assert!(harness.query_by_role_and_label(Role::Tab, "Resources").is_some(), "the picker has its Resources tab");
     assert!(harness.query_by_role_and_label(Role::Tab, "Anchor points").is_some(), "and its Anchor points tab");
 
@@ -79,6 +80,7 @@ fn a_procedural_tile_sets_the_channel_and_closes_the_picker() {
     click_slot(&mut harness, "Roughness");
     type_search(&mut harness, "uniform");
     click_tile(&mut harness, "Uniform value");
+
     assert_eq!(source(&harness, layer, Channel::Roughness), Source::uniform_of(Channel::Roughness));
 }
 
@@ -89,9 +91,13 @@ fn an_alpha_from_the_search_becomes_the_channels_source() {
 
     // The search field has the focus as the picker opens and searches every Resources group
     type_search(&mut harness, "crack");
+
     assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Clouds").is_none(), "the search hides what doesn't match");
+
     click_widget(&mut harness, Role::Button, "Clear search");
+
     assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Clouds").is_some(), "× clears the search");
+
     type_search(&mut harness, "crack");
 
     click_tile(&mut harness, "Cracks");
@@ -105,13 +111,16 @@ fn the_picker_opens_on_the_current_sources_tab_scrolled_to_it() {
         let stencil = json!({"layer": layer.0, "channel": "roughness", "alpha": "letter_z"});
         texturecraft_engine::execute(session, "layer.fill.set", &stencil).unwrap();
     });
+
     assert!(matches!(source(&harness, layer, Channel::Roughness), Source::Image { .. }));
+
     click_slot(&mut harness, "Roughness");
     harness.run_steps(SCROLL_FRAMES);
 
     // The last alpha sits far below the picker's first rows; it shows, outlined as the current
     let tile = harness.get_by_role_and_label(Role::ListBoxOption, "Stencil Z");
     assert_eq!(tile.accesskit_node().toggled(), Some(egui::accesskit::Toggled::True), "the current tile is outlined");
+
     let picker = picker_rect(&harness, "Stencil Z");
     assert!(picker.contains_rect(tile.rect()), "the current tile is scrolled into view: {:?} in {picker:?}", tile.rect());
 }
@@ -126,10 +135,12 @@ fn the_anchor_points_tab_lists_the_stacks_anchors() {
     let reader = harness.state().session.selected_layer().unwrap();
     click_slot(&mut harness, "Roughness");
     click_widget(&mut harness, Role::Tab, "Anchor points");
+
     assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Clouds").is_none(), "the tab shows anchors only");
 
     let anchor = harness.get_all_by_role(Role::ListBoxOption).find_map(|node| node.accesskit_node().label().filter(|label| label.contains("Edge wear")));
     click_tile(&mut harness, &anchor.expect("the anchor below is offered"));
+
     assert!(matches!(source(&harness, reader, Channel::Roughness), Source::Anchor { .. }));
 }
 
@@ -144,6 +155,7 @@ fn the_anchor_points_tab_lists_mask_anchor_points_by_name() {
     click_widget(&mut harness, Role::Tab, "Anchor points");
     let anchor = harness.get_all_by_role(Role::ListBoxOption).find_map(|node| node.accesskit_node().label().filter(|label| label.starts_with("Dirt mask")));
     click_tile(&mut harness, &anchor.expect("the mask anchor point below is offered under its own name"));
+
     assert!(matches!(source(&harness, reader, Channel::Roughness), Source::Anchor { .. }));
 }
 
@@ -171,9 +183,12 @@ fn escape_or_a_click_outside_closes_it_and_the_wheel_still_zooms_the_view() {
         modifiers: egui::Modifiers::NONE,
     });
     harness.run_steps(SCROLL_FRAMES);
+
     assert!(clouds(&harness).top() < first_tile.top(), "the wheel over the picker scrolls its grid");
+
     click_slot(&mut harness, "Roughness");
     click_slot(&mut harness, "Roughness");
+
     assert_eq!(clouds(&harness), first_tile, "the first tile shows again");
     assert_eq!(source(&harness, layer, Channel::Roughness), Source::uniform_of(Channel::Roughness), "nothing changed");
 }
@@ -193,6 +208,7 @@ fn near_the_windows_bottom_the_picker_opens_above_its_slot_at_full_size() {
     let shown = picker_rect(&harness, FIRST_TILE);
     assert!(shown.bottom() <= slot.top(), "with no room under the slot it opens above it, never over it: {shown:?} {slot:?}");
     assert!(harness.ctx.content_rect().contains_rect(shown), "inside the window: {shown:?}");
+
     click_slot(&mut harness, SLOT_LOW_IN_THE_CARD);
 
     harness.set_size(TALL_WINDOW_SIZE);

@@ -247,6 +247,7 @@ pub(crate) fn source_card(
         }
         return;
     }
+
     match source {
         Source::Uniform(value) => uniform_rows(app, sheet, slot_of, value, &set),
         Source::Procedural { pattern, low, high, .. } => procedural_rows(app, sheet, slot_of, &pattern, [low, high], slot.reset, &set),
@@ -348,6 +349,7 @@ fn uniform_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, slot_o
         }
         return;
     }
+
     let mut gray = value[0];
     let edit = sheet.ramp(label, &mut gray, slot_of.range());
     if edit.invert {
@@ -464,6 +466,7 @@ fn procedural_rows(
         app.run("layer.fill.set", set(with(&json!({"procedural": kind}), size)));
         return;
     }
+
     if let Some((key, value, merge)) = edit {
         let mut settings = json!({"procedural": kind, "merge": merge});
         settings[key] = value;

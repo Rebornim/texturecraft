@@ -4,10 +4,10 @@
 //! the stroke is drawn, so the commit itself is quick even at 8K.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use rayon::prelude::*;
-use texturecraft_compose::{MaskGray, PixelStore};
+use texturecraft_compose::{ImageRes, MaskGray, PixelStore};
 use texturecraft_core::{Channel, ChannelKind, LayerId};
 use texturecraft_texel::{TILE, TILE_AREA, TileData, TileImage, from_u16, from_u16_signed, to_u16, to_u16_signed};
 
@@ -36,8 +36,8 @@ fn over(img: &mut TileImage, b: &Blend, src: &CommitSource, mut staged: Option<S
     let comps = img.comps();
     let empty = empty_texel(b.kind, comps);
     let key = BlendKey::new(b, src);
-    // Tiles blend independently: build each new tile in parallel, then swap them in. The old
-    // tile data stays shared with undo snapshots.
+
+    // Compute replacement tiles in parallel while undo snapshots share the old tiles
     let image = &*img;
     let tiles: Vec<_> = src.tiles.iter().map(|&t| (t, staged.as_mut().and_then(|s| s.take(image, src.alpha, &key, &empty, t)))).collect();
     let updated: Vec<((u32, u32), Vec<u16>)> = tiles
@@ -47,9 +47,11 @@ fn over(img: &mut TileImage, b: &Blend, src: &CommitSource, mut staged: Option<S
             if let Some((data, true)) = staged {
                 return Some(((tx, ty), data));
             }
+
             if src.erase && !image.is_allocated(tx, ty) {
                 return None;
             }
+
             let carried = match b.carried.map(|c| c.tile(tx, ty)) {
                 Some(None) => return None,
                 Some(Some(t)) => Some(t),
@@ -74,6 +76,8 @@ fn blend_tile(dst: &mut [u16], components: usize, stroke_alpha: &[u16], (tx, ty)
     // The last component is the coverage, the ones before it the value
     let value_count = components.saturating_sub(1);
     let opacity = source.opacity.clamp(0.0, 1.0);
+    let gray_source = if source.erase || carried.is_some() { None } else { blend.gray };
+
     for i in 0..TILE_AREA {
         let mut weight = from_u16(stroke_alpha.get(i).copied().unwrap_or(0)) * opacity;
         if weight <= 0.0 {
@@ -96,7 +100,7 @@ fn blend_tile(dst: &mut [u16], components: usize, stroke_alpha: &[u16], (tx, ty)
         }
 
         let Some((coverage_slot, values)) = dst.get_mut(i * components..(i + 1) * components).and_then(<[u16]>::split_last_mut) else { continue };
-        let gray = blend.gray.map(|gray| gray.at(x, y, (source.alpha.width(), source.alpha.height())));
+        let gray = gray_source.map(|gray| gray.at(x, y, (source.alpha.width(), source.alpha.height())));
         let coverage = from_u16(*coverage_slot);
         for (component, slot) in values.iter_mut().enumerate() {
             let previous = dec(blend.kind, *slot);
@@ -135,18 +139,32 @@ fn fill_from(dst: &mut Vec<u16>, from: Option<&[u16]>, empty: &[u16]) {
 }
 
 /// What a pre-blended tile was blended with, besides the stroke alpha.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 struct BlendKey {
     value: Vec<f32>,
-    image: Option<String>,
+    image: Option<(Weak<ImageRes>, (u32, u32))>,
     opacity: f32,
     erase: bool,
 }
 
 impl BlendKey {
-    fn new(b: &Blend, src: &CommitSource) -> BlendKey {
-        let image = b.gray.and_then(MaskGray::image_name).map(str::to_owned);
-        BlendKey { value: b.value.to_vec(), image, opacity: src.opacity, erase: src.erase }
+    fn new(blend: &Blend, source: &CommitSource) -> Self {
+        let image = match blend.gray {
+            Some(MaskGray::Image { image, .. }) if !source.erase => Some((Arc::downgrade(image), (source.alpha.width(), source.alpha.height()))),
+            _ => None,
+        };
+        Self { value: blend.value.to_vec(), image, opacity: source.opacity, erase: source.erase }
+    }
+}
+
+impl PartialEq for BlendKey {
+    fn eq(&self, other: &Self) -> bool {
+        let same_image = match (&self.image, &other.image) {
+            (Some((image, size)), Some((other_image, other_size))) => Weak::ptr_eq(image, other_image) && size == other_size,
+            (None, None) => true,
+            _ => false,
+        };
+        same_image && self.value == other.value && self.opacity == other.opacity && self.erase == other.erase
     }
 }
 
@@ -183,23 +201,25 @@ impl StagedImage {
         if !same(e.from.as_ref(), current) || e.data.len() != TILE_AREA * image.comps() {
             return None;
         }
+
         if e.alpha.is_some() && self.key.as_ref() == Some(key) && same(e.alpha.as_ref(), alpha.tile_handle(t.0, t.1)) {
             return Some((e.data, true));
         }
+
         if e.alpha.is_some() {
-            // Blended with an older stroke alpha: back to the layer tile.
+            // Discard blends for superseded stroke alpha
             fill_from(&mut e.data, e.from.as_deref().map(Vec::as_slice), empty);
         }
         Some((e.data, false))
     }
 
     /// Prepare the tiles `src.tiles` of `img` (re-blending those staged before): a copy of the
-    /// image tile, blended with the stroke when it has no per-texel source or carried values
-    /// (those blend at the commit).
+    /// image tile, blended with the stroke when it has no stencil or carried values
+    /// (those blend at the commit)
     fn stage(&mut self, img: Option<&TileImage>, comps: usize, b: &Blend, src: &CommitSource) {
         let key = BlendKey::new(b, src);
         if self.key.as_ref() != Some(&key) {
-            // The stroke's settings changed: earlier blends are void.
+            // A changed dependency invalidates the staged blend
             self.tiles.clear();
             self.key = Some(key);
         }
@@ -210,10 +230,12 @@ impl StagedImage {
             .into_par_iter()
             .filter_map(|((tx, ty), old)| {
                 let from = img.and_then(|i| i.tile_handle(tx, ty));
-                // Erasing never allocates a tile.
+
+                // Erasing can only change an existing tile
                 if from.is_none() && src.erase {
                     return None;
                 }
+
                 let mut data = old.map(|o| o.data).unwrap_or_default();
                 fill_from(&mut data, from.map(|f| f.as_slice()), &empty);
                 let alpha = src.alpha.tile_handle(tx, ty).filter(|_| blend).cloned();
@@ -394,6 +416,7 @@ mod tests {
         commit_mask(&mut px, LayerId(9), (64, 64), &MaskGray::Value(1.0), src(&a, &tiles, 1.0, false), &mut Staging::default());
         let before = px.clone();
         commit_mask(&mut px, LayerId(9), (64, 64), &MaskGray::Value(0.0), src(&a, &tiles, 1.0, true), &mut Staging::default());
+
         assert_eq!(from_u16(before.masks[&LayerId(9)].get(5, 5)[1]), 1.0);
         assert_eq!(px.masks[&LayerId(9)].get(5, 5)[1], 0);
     }
@@ -439,9 +462,7 @@ mod tests {
         commit_layer(&mut base, LayerId(1), (64, 64), &vals, src(&a, &tiles, 1.0, false), &mut Staging::default());
         commit_mask(&mut base, LayerId(2), (64, 64), &MaskGray::Value(0.5), src(&a, &tiles, 1.0, false), &mut Staging::default());
         let carried: BTreeMap<Channel, TileImage> = vals.keys().map(|c| (*c, a.clone())).collect();
-        // Staged when the stroke started, then again after the alpha changed (pre-blended
-        // tiles re-blend), and staged once more with its last alpha change left out (that
-        // tile blends at the commit): the commit matches an unstaged one.
+        // The final unstaged alpha change still belongs in the commit
         for (erase, carry, stage_last) in [(false, false, true), (true, false, true), (false, false, false), (false, true, true)] {
             let mut a = a.clone();
             let mut staged = base.clone();
@@ -462,10 +483,10 @@ mod tests {
             commit_mask(&mut plain, LayerId(2), (64, 64), &MaskGray::Value(1.0), source(&a, &tiles, c, erase), &mut Staging::default());
             commit_layer(&mut staged, LayerId(1), (64, 64), &vals, source(&a, &tiles, c, erase), &mut staging);
             commit_mask(&mut staged, LayerId(2), (64, 64), &MaskGray::Value(1.0), source(&a, &tiles, c, erase), &mut staging);
+
             assert_eq!((&staged.layers, &staged.masks), (&plain.layers, &plain.masks), "erase {erase}, carried {carry}, staged last {stage_last}");
         }
-        // Tiles staged before the layer changed or with another value are stale: the commit
-        // reads the current tile.
+        // The commit must read the current tile when its staged values are stale
         let mut px = base.clone();
         let mut staging = Staging::default();
         staging.stage_layer(&px, LayerId(1), &vals, &src(&a, &tiles, 1.0, false));
@@ -476,6 +497,7 @@ mod tests {
         commit_mask(&mut expected, LayerId(2), (64, 64), &MaskGray::Value(1.0), src(&a, &tiles, 1.0, false), &mut Staging::default());
         commit_layer(&mut px, LayerId(1), (64, 64), &vals, src(&a, &tiles, 1.0, false), &mut staging);
         commit_mask(&mut px, LayerId(2), (64, 64), &MaskGray::Value(1.0), src(&a, &tiles, 1.0, false), &mut staging);
+
         assert_eq!((&px.layers, &px.masks), (&expected.layers, &expected.masks));
     }
 
@@ -495,14 +517,18 @@ mod tests {
 
         let mut plain = PixelStore::default();
         commit_mask(&mut plain, LayerId(4), (64, 64), &image("scratches", 0.0), src(&a, &tiles, 1.0, false), &mut Staging::default());
+
         assert!(gray_at(&plain, 16) < 0.05 && gray_at(&plain, 48) > 0.95, "left {} right {}", gray_at(&plain, 16), gray_at(&plain, 48));
 
-        // Staged with another image first: the commit blends the image it is given
+        // A resource replaced under the same name must invalidate its staged blend
         let mut staged = PixelStore::default();
         let mut staging = Staging::default();
+        let previous_image = image("scratches", 0.5);
         staging.stage_mask(&staged, LayerId(4), &image("other", 0.5), &src(&a, &tiles, 1.0, false));
-        staging.stage_mask(&staged, LayerId(4), &image("scratches", 0.0), &src(&a, &tiles, 1.0, false));
+        staging.stage_mask(&staged, LayerId(4), &previous_image, &src(&a, &tiles, 1.0, false));
+
         commit_mask(&mut staged, LayerId(4), (64, 64), &image("scratches", 0.0), src(&a, &tiles, 1.0, false), &mut staging);
+
         assert_eq!(staged.masks, plain.masks);
     }
 }

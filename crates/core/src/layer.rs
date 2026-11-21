@@ -8,39 +8,49 @@ use crate::curve_preset::CurvePreset;
 use crate::gradient_input::{GradientInput, ramp, shape_gray};
 use crate::{
     AnisotropicKuwahara, Backface, BakedMap, Bevel, BevelSmooth, BlendMode, Channel, ChannelKind, ColorMatch, CompareSource, ContentsOffset, DepthCulling,
-    DirectionalDistance, DirectionalLight, FillSymmetry, GrayscaleConversion, HeightToNormal, HighpassSpace, MaskOutline, Mirror, PbrValidate, Projector,
-    RandomizedSeed, ShapeCrop, SourceSlopeBlur, SourceWarp, StylizedLighting, SunAndSky, ThresholdMode, TileTransform, finite_unit, lum,
+    DirectionalDistance, DirectionalLight, GrayscaleConversion, HeightToNormal, HighpassSpace, MaskOutline, Mirror, PbrValidate, Projector, RandomizedSeed,
+    ShapeCrop, SourceSlopeBlur, SourceWarp, StylizedLighting, SunAndSky, ThresholdMode, TileTransform, finite_unit, lum,
 };
 
 mod curvature_detail;
 mod curvature_mode;
 mod decal_flip;
 mod decal_symmetry;
+mod filtering;
 mod generator_global;
 mod micro_detail;
 mod output_resolution;
 mod resolution_mode;
+mod sampling;
+mod scale_mode;
 mod tile_blending;
 mod tile_generator;
 mod tile_input_distribution;
 mod tile_shape;
 mod tile_size_mode;
 mod tile_symmetry;
+mod uv_transform;
+mod uv_wrap;
 
 pub use curvature_detail::CurvatureDetail;
 pub use curvature_mode::CurvatureMode;
 pub use decal_flip::DecalFlip;
 pub use decal_symmetry::DecalSymmetry;
+pub use filtering::Filtering;
 pub use generator_global::GeneratorGlobal;
 pub use micro_detail::MicroDetail;
 pub use output_resolution::OutputResolution;
 pub use resolution_mode::ResolutionMode;
+pub use sampling::Sampling;
+pub use scale_mode::ScaleMode;
 pub use tile_blending::TileBlending;
 pub use tile_generator::TileGenerator;
 pub use tile_input_distribution::TileInputDistribution;
 pub use tile_shape::TileShape;
 pub use tile_size_mode::TileSizeMode;
 pub use tile_symmetry::TileSymmetry;
+pub use uv_transform::UvTransform;
+pub use uv_wrap::UvWrap;
 
 /// Id of a layer or effect (one id space per project).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -109,6 +119,7 @@ impl HeightMask {
         if !self.enabled || !h.is_finite() {
             return m;
         }
+
         (m + self.contrast * 4.0 * m * (1.0 - m) * (h + self.offset)).clamp(0.0, 1.0)
     }
 }
@@ -197,127 +208,6 @@ impl Layer {
     }
 }
 
-/// How a fill reads its image sources between texels
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum Filtering {
-    /// Bilinear on the image level that matches the texel's footprint: smooth when the image is shrunk
-    #[default]
-    BilinearHq,
-    /// Bilinear on the full image: sharp, but may shimmer where the image is shrunk
-    BilinearSharp,
-    /// The nearest image texel
-    Nearest,
-}
-
-impl Filtering {
-    pub const ALL: [Filtering; 3] = [Filtering::BilinearHq, Filtering::BilinearSharp, Filtering::Nearest];
-
-    /// Command id
-    pub fn id(self) -> &'static str {
-        match self {
-            Filtering::BilinearHq => "bilinearHq",
-            Filtering::BilinearSharp => "bilinearSharp",
-            Filtering::Nearest => "nearest",
-        }
-    }
-
-    pub fn from_id(id: &str) -> Option<Filtering> {
-        Filtering::ALL.into_iter().find(|f| f.id() == id)
-    }
-}
-
-/// Whether a UV-placed fill repeats past its 0..1 tile, across, down, both or neither
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum UvWrap {
-    #[default]
-    Repeat,
-    RepeatHorizontally,
-    RepeatVertically,
-    /// One tile only: outside it the fill does not cover
-    None,
-}
-
-impl UvWrap {
-    pub const ALL: [UvWrap; 4] = [UvWrap::None, UvWrap::RepeatHorizontally, UvWrap::RepeatVertically, UvWrap::Repeat];
-
-    /// Command id
-    pub fn id(self) -> &'static str {
-        match self {
-            UvWrap::Repeat => "repeat",
-            UvWrap::RepeatHorizontally => "repeatHorizontally",
-            UvWrap::RepeatVertically => "repeatVertically",
-            UvWrap::None => "none",
-        }
-    }
-
-    pub fn from_id(id: &str) -> Option<UvWrap> {
-        UvWrap::ALL.into_iter().find(|w| w.id() == id)
-    }
-
-    /// Whether the fill repeats across (u) and down (v)
-    pub fn repeats(self) -> (bool, bool) {
-        match self {
-            UvWrap::Repeat => (true, true),
-            UvWrap::RepeatHorizontally => (true, false),
-            UvWrap::RepeatVertically => (false, true),
-            UvWrap::None => (false, false),
-        }
-    }
-}
-
-/// What a fill's size is set in: repeats of its tile, or the tile's length on the mesh (stored as tiling either way)
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum ScaleMode {
-    #[default]
-    Tiling,
-    PhysicalSize,
-}
-
-impl ScaleMode {
-    pub const ALL: [ScaleMode; 2] = [ScaleMode::Tiling, ScaleMode::PhysicalSize];
-
-    /// Command id
-    pub fn id(self) -> &'static str {
-        match self {
-            ScaleMode::Tiling => "tiling",
-            ScaleMode::PhysicalSize => "physicalSize",
-        }
-    }
-
-    pub fn from_id(id: &str) -> Option<ScaleMode> {
-        ScaleMode::ALL.into_iter().find(|mode| mode.id() == id)
-    }
-}
-
-/// How a fill samples its images and what its size is set in; older fills read with [`Sampling::SAVED_BEFORE`]
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Default)]
-pub struct Sampling {
-    #[serde(default)]
-    pub filtering: Filtering,
-    #[serde(default)]
-    pub wrap: UvWrap,
-    #[serde(default)]
-    pub scale: ScaleMode,
-    #[serde(default, skip_serializing_if = "FillSymmetry::is_default")]
-    pub symmetry: FillSymmetry,
-}
-
-impl Sampling {
-    /// What fills saved before the sampling choices existed did: plain bilinear
-    pub const SAVED_BEFORE: Sampling =
-        Sampling { filtering: Filtering::BilinearSharp, wrap: UvWrap::Repeat, scale: ScaleMode::Tiling, symmetry: FillSymmetry::OFF };
-
-    /// Serde default for fills saved before the field existed
-    pub fn saved_before() -> Sampling {
-        Sampling::SAVED_BEFORE
-    }
-
-    /// Whether it samples as fills saved before the field existed did (not saved then, so they save as they were)
-    pub fn is_saved_before(&self) -> bool {
-        *self == Sampling::SAVED_BEFORE
-    }
-}
-
 /// Where a texture or procedural is sampled from on the surface.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Projection {
@@ -383,27 +273,6 @@ pub enum Projection {
         uv: UvTransform,
         projector: Projector,
     },
-}
-
-/// Tiling, rotation (degrees) and offset a 3D projection lays on the surface; the default changes nothing
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct UvTransform {
-    pub tiling: [f32; 2],
-    pub rotation: f32,
-    pub offset: [f32; 2],
-}
-
-impl Default for UvTransform {
-    fn default() -> Self {
-        UvTransform { tiling: [1.0, 1.0], rotation: 0.0, offset: [0.0, 0.0] }
-    }
-}
-
-impl UvTransform {
-    /// Whether it changes nothing, as projections saved before it existed did (not saved then)
-    pub fn is_default(&self) -> bool {
-        *self == UvTransform::default()
-    }
 }
 
 /// The frame a planar projection placed on the surface (a decal) projects from, in world space
@@ -1566,6 +1435,7 @@ pub fn hsl_adjust(rgb: [f32; 3], hue: f32, saturation: f32, lightness: f32) -> [
     if s <= 0.0 {
         return [l; 3];
     }
+
     let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
     let p = 2.0 * l - q;
     [hue_to_rgb(p, q, h + 1.0 / 3.0), hue_to_rgb(p, q, h), hue_to_rgb(p, q, h - 1.0 / 3.0)]
@@ -1762,11 +1632,7 @@ impl Filter {
                     _ => per_unit(kind, v, |x| finite_unit(x + (shift(0, x) + shift(1, x) + shift(2, x)) / 3.0)),
                 }
             }
-            Filter::GradientMap { input, .. } => match kind {
-                ChannelKind::Color => self.ramp_at(input.shape(input.mode.gray(v)))?,
-                // A height reads the ramp at its 0..1 place, as projects saved before did
-                _ => per_unit(kind, v, |x| self.ramp_at(input.shape(x)).map_or(x, lum)),
-            },
+            Filter::GradientMap { input, .. } => input.map(kind, v, |position| self.ramp_at(position))?,
             Filter::GradientCurve { preset, invert, balance, contrast } => per_unit(kind, v, |x| preset.at(shape_gray(x, *balance, *contrast, *invert))),
             Filter::GradientDynamic { color, .. } => match kind {
                 ChannelKind::Color => color.map(finite_unit),
@@ -2408,9 +2274,11 @@ mod tests {
         assert!((l.apply(0.4) - 0.5).abs() < 1e-6);
         assert_eq!(l.apply(0.0), 0.0);
         assert_eq!(l.apply(1.0), 1.0);
+
         let g = Levels { gamma: 2.0, ..Levels::default() };
         assert!((g.apply(0.25) - 0.5).abs() < 1e-6);
-        // Degenerate ranges never divide by zero.
+
+        // Degenerate ranges never divide by zero
         let d = Levels { in_low: 0.5, in_high: 0.5, ..Levels::default() };
         assert!(d.apply(0.7).is_finite());
     }
@@ -2423,6 +2291,7 @@ mod tests {
         assert!((open.apply(0.0) + 0.5).abs() < 1e-6, "0.2 below the black handle is half a range below black");
         assert!((open.apply(0.8) - 1.5).abs() < 1e-6);
         assert!((open.apply(0.4) - clamped.apply(0.4)).abs() < 1e-6, "between the handles both remap alike");
+
         let bent = Levels { gamma: 2.0, ..open };
         assert!((bent.apply(0.0) + 0.5).abs() < 1e-6, "gamma bends only the part between the handles");
     }
@@ -2439,6 +2308,7 @@ mod tests {
         ];
         for saved in fills {
             let loaded: Fill = serde_json::from_str(saved).unwrap();
+
             assert_eq!(serde_json::to_string(&loaded).unwrap(), saved, "a fill saves as it was saved");
         }
 
@@ -2451,6 +2321,7 @@ mod tests {
         ];
         for saved in effects {
             let loaded: EffectKind = serde_json::from_str(saved).unwrap();
+
             assert_eq!(serde_json::to_string(&loaded).unwrap(), saved, "an effect saves as it was saved");
         }
     }
@@ -2459,15 +2330,21 @@ mod tests {
     fn levels_saved_before_the_channel_and_clamp_load_as_they_rendered() {
         let saved = serde_json::json!({"in_low": 0.2, "in_high": 0.6, "gamma": 1.0, "out_low": 0.0, "out_high": 1.0});
         let loaded: Levels = serde_json::from_value(saved.clone()).unwrap();
+
         assert!(loaded.clamp, "they stopped at the output ends");
         assert_eq!(loaded.affects, None, "they remapped every channel");
         assert!(Channel::ALL.iter().all(|&channel| loaded.remaps(channel)));
+
         let saved_again = serde_json::to_value(loaded).unwrap();
+
         assert!(saved_again.get("affects").is_none(), "no channel is saved, as before: {saved_again}");
         assert!(saved_again.get("clamp").is_none(), "a clamped level is saved as before: {saved_again}");
         assert_eq!(serde_json::from_value::<Levels>(saved_again).unwrap(), loaded);
+
         let unclamped = serde_json::to_value(Levels { clamp: false, ..loaded }).unwrap();
+
         assert_eq!(serde_json::from_value::<Levels>(unclamped).unwrap(), Levels { clamp: false, ..loaded }, "an unclamped level keeps its choice");
+
         let base = Levels { affects: Some(Channel::BaseColor), ..loaded };
         assert!(base.remaps(Channel::BaseColor) && !base.remaps(Channel::Roughness));
     }
@@ -2479,9 +2356,10 @@ mod tests {
         assert!(close(hsl_adjust(c, 0.0, 0.0, 0.0), c), "identity");
         assert!(close(hsl_adjust([1.0, 0.0, 0.0], 1.0 / 3.0, 0.0, 0.0), [0.0, 1.0, 0.0]), "red → green");
         assert!(close(hsl_adjust([1.0, 0.0, 0.0], -1.0 / 3.0, 0.0, 0.0), [0.0, 0.0, 1.0]), "red → blue");
+
         let gray = hsl_adjust(c, 0.0, -1.0, 0.0);
         assert!((gray[0] - gray[1]).abs() < 1e-6 && (gray[1] - gray[2]).abs() < 1e-6);
-        // Grays only change lightness, whatever the hue and saturation.
+        // Grays only change lightness, whatever the hue and saturation
         assert!(close(hsl_adjust([0.4; 3], 0.3, 1.0, 0.5), [0.7; 3]));
         assert!(close(hsl_adjust([0.4; 3], 0.0, 0.0, -0.5), [0.2; 3]));
         assert!(hsl_adjust([f32::NAN, 2.0, -1.0], f32::NAN, 5.0, -5.0).iter().all(|v| v.is_finite()));
@@ -2495,6 +2373,7 @@ mod tests {
             let x = step as f32 / 1000.0;
             let color = [x, 0.5 * x, 1.0 - x];
             assert_eq!(gm.point(ChannelKind::Color, color), gradient(&colors, lum(color)), "color {color:?}");
+
             let height = 2.0 * x - 1.0;
             let saved_before = per_unit(ChannelKind::Signed, [height; 3], |t| gradient(&colors, t).map_or(t, lum));
             assert_eq!(gm.point(ChannelKind::Signed, [height; 3]), Some(saved_before), "height {height}");
@@ -2508,29 +2387,39 @@ mod tests {
         let cl = Filter::ContrastLuminosity { contrast: 1.0, luminosity: 0.0 };
         assert!(close(cl.point(c, [0.25, 0.5, 0.75]).unwrap(), [0.0, 0.5, 1.0]));
         assert!(close(Filter::ContrastLuminosity { contrast: 0.0, luminosity: 0.2 }.point(ChannelKind::Scalar, [0.5; 3]).unwrap(), [0.7; 3]));
+
         let gm = Filter::even_gradient(vec![[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]);
         assert!(close(gm.point(c, [0.0; 3]).unwrap(), [1.0, 0.0, 0.0]));
         assert!(close(gm.point(c, [1.0; 3]).unwrap(), [0.0, 0.0, 1.0]));
         assert_eq!(Filter::even_gradient(vec![]).point(c, [0.3; 3]), None, "an empty gradient changes nothing");
+
         let gray_ramp = Filter::even_gradient(vec![[0.0; 3], [1.0; 3]]);
         assert!(close(gray_ramp.point(ChannelKind::Signed, [-0.6; 3]).unwrap(), [-0.6; 3]), "a height reads the ramp at its 0..1 place");
         assert!(close(Filter::Posterize { levels: 2.0, alpha: false }.point(c, [0.2, 0.6, 0.9]).unwrap(), [0.0, 1.0, 1.0]));
         assert!(close(Filter::Clamp { min: 0.8, max: 0.3 }.point(c, [0.1, 0.5, 0.9]).unwrap(), [0.3, 0.5, 0.8]), "swapped bounds never panic");
+
         let scan = |position, contrast| Filter::HistogramScan { position, contrast, invert_position: false }.point(c, [0.2, 0.5, 0.9]).unwrap();
+
         assert!(close(scan(0.5, 0.0), [0.2, 0.5, 0.9]), "a full-width ramp at the middle keeps the values");
         assert!(close(scan(0.4, 1.0), [0.0, 1.0, 1.0]), "full contrast is a step at the position");
         assert!(close(scan(0.5, 1.0), [0.0, 1.0, 1.0]), "the position itself goes to white");
         assert!(close(scan(0.7, 0.5), [0.0, 0.1, 0.9]));
+
         let range = |range, position| Filter::HistogramRange { range, position }.point(c, [0.2, 0.5, 0.9]).unwrap();
+
         assert!(close(range(1.0, 0.3), [0.2, 0.5, 0.9]) && close(range(0.0, 0.3), [0.3; 3]));
         assert!(close(range(0.5, 0.5), [0.35, 0.5, 0.7]));
+
         let shift = |offset| Filter::HistogramShift { offset }.point(c, [0.0, 0.5, 1.0]).unwrap();
+
         assert!(close(shift(0.0), [0.0, 0.5, 1.0]), "no offset keeps white white");
         assert!(close(shift(0.25), [0.25, 0.75, 0.25]) && close(shift(-0.25), [0.75, 0.25, 0.75]));
+
         let cb = Filter::ColorBalance { shadows: [0.2, 0.0, 0.0], midtones: [0.0; 3], highlights: [0.0, 0.0, 0.2] };
         assert!(cb.point(c, [0.05; 3]).unwrap()[0] > 0.2 && cb.point(c, [0.95; 3]).unwrap()[2] > 0.99);
         assert!(close(Filter::Invert.point(ChannelKind::Signed, [0.5; 3]).unwrap(), [-0.5; 3]));
         assert_eq!(Filter::Invert.point(ChannelKind::NormalMap, [0.5, 0.5, 1.0]), Some([0.5, 0.5, 1.0]));
+
         for f in [
             Filter::Blur { radius: 1.0, wrap: false },
             Filter::Warp { intensity: 1.0, scale: 1.0, seed: 0, divider: 1 },
@@ -2570,14 +2459,18 @@ mod tests {
         assert_eq!(EffectKind::Anchor.content_only(), None, "anchors go on content and masks");
         assert_eq!(EffectKind::Generator(Generator::new(GeneratorKind::Dirt)).content_only(), Some(false));
         assert_eq!(EffectKind::Filter(Filter::Invert).content_only(), None);
+
         let mut fill_layer = Layer::new(LayerId(1), "l", LayerKind::Paint, &[Channel::BaseColor]);
         assert!(!fill_layer.reads_anchor());
+
         let source = Source::Anchor { anchor: LayerId(9), channel: Channel::Height, ramp: Vec::new() };
         fill_layer.mask = Some(Mask {
             effects: vec![Effect::new(LayerId(2), EffectKind::Fill { source, projection: Projection::default(), sampling: Default::default() })],
             ..Mask::new(MaskBackground::Black)
         });
+
         assert!(fill_layer.reads_anchor());
+
         let reader = fill_layer.mask.as_ref().map(|mask| &mask.effects[0].kind);
         assert!(reader.is_some_and(|reader| reader.reads(Some(LayerId(9))) && reader.reads(None) && !reader.reads(Some(LayerId(8)))));
 
@@ -2585,9 +2478,12 @@ mod tests {
         let mut generator_layer = Layer::new(LayerId(3), "g", LayerKind::Paint, &[Channel::BaseColor]);
         let mut generator = Generator::new(GeneratorKind::Dirt);
         generator.micro = Some(MicroDetail { anchor: LayerId(9), amount: 0.5 });
+
         assert_eq!(EffectKind::Generator(generator.clone()).anchors_read(), [(LayerId(9), Channel::Height)]);
         assert!(EffectKind::Generator(generator.clone()).reads(Some(LayerId(9))) && !EffectKind::Generator(generator.clone()).reads(Some(LayerId(8))));
+
         generator_layer.mask = Some(Mask { effects: vec![Effect::new(LayerId(4), EffectKind::Generator(generator))], ..Mask::new(MaskBackground::Black) });
+
         assert!(generator_layer.reads_anchor());
     }
 
@@ -2598,7 +2494,9 @@ mod tests {
         let EffectKind::Compare { left, right, channel, hardness, .. } = kind else { panic!("{kind:?}") };
         assert_eq!((left, right, channel, hardness), (CompareSource::ThisMask, CompareSource::Constant, Channel::Height, 1.0));
         assert_eq!(serde_json::to_string(&kind).unwrap(), saved, "an unedited compare saves only its op, value and tolerance");
+
         let round_trip: EffectKind = serde_json::from_str(&serde_json::to_string(&kind).unwrap()).unwrap();
+
         assert_eq!(round_trip, kind);
     }
 
@@ -2611,6 +2509,7 @@ mod tests {
             assert_eq!(CompareOp::LesserThan.mask(left, right, 0.1, 1.0), step(left < right));
             assert_eq!(CompareOp::WithinTolerance.mask(left, right, 0.05, 1.0), step((left - right).abs() <= 0.05));
         }
+
         assert!((CompareOp::GreaterThan.mask(0.55, 0.5, 0.1, 0.9) - 0.5).abs() < 1e-5, "halfway up a 0.1 ramp");
         assert_eq!(CompareOp::GreaterThan.mask(0.45, 0.5, 0.1, 0.0), 0.0, "below the edge stays 0 however soft");
         assert_eq!(CompareOp::GreaterThan.mask(0.6, 0.5, 0.1, f32::NAN), 1.0, "a NaN hardness compares hard");

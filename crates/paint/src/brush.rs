@@ -496,6 +496,7 @@ mod tests {
                     (None, Some(lib)) => lib.sample(shape.level, x, y),
                     (None, None) => shape.alpha.sample(x, y, 0.4, 7),
                 };
+
                 assert_eq!(shape.sample(x, y, 0.4, 7).to_bits(), before.to_bits(), "{:?} at ({x}, {y})", shape.alpha);
             }
         }

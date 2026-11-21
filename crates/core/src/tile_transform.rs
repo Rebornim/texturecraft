@@ -161,14 +161,22 @@ mod tests {
         let mut transform = TileTransform { scaling: [2.0, 2.0], ..TileTransform::LIBRARY };
         assert!(near(transform.source([0.5, 0.5]).unwrap_or_default(), [0.5, 0.5]), "the centre stays");
         assert!(near(transform.source([0.75, 0.5]).unwrap_or_default(), [0.0, 0.5]), "twice the content: a quarter tile reads half a tile on");
+
         transform.repeat = RepeatMode::None;
+
         assert_eq!(transform.source([0.9, 0.5]), None, "past the content reads nothing without repeat");
+
         transform = TileTransform { offset: [0.25, 0.0], ..TileTransform::LIBRARY };
+
         assert!(near(transform.source([0.5, 0.5]).unwrap_or_default(), [0.75, 0.5]));
         assert!(near(transform.source([0.9, 0.5]).unwrap_or_default(), [0.15, 0.5]), "the read wraps round the tile");
+
         transform = TileTransform { flip: FlipMode::Horizontally, ..TileTransform::LIBRARY };
+
         assert!(near(transform.source([0.2, 0.3]).unwrap_or_default(), [0.8, 0.3]));
+
         transform.flip = FlipMode::Vertically;
+
         assert!(near(transform.source([0.2, 0.3]).unwrap_or_default(), [0.2, 0.7]));
     }
 
@@ -181,6 +189,7 @@ mod tests {
         // A small turn of the plain tile snaps back to no turn, never to nothing
         let small = TileTransform { rotation: 10.0, ..TileTransform::LIBRARY };
         assert_eq!(small.affine().0, [[1.0, 0.0], [0.0, 1.0]]);
+
         let tiny = TileTransform { scaling: [0.1, 0.1], rotation: 45.0, ..TileTransform::LIBRARY };
         assert!(tiny.affine().0.iter().all(|column| column != &[0.0, 0.0]));
 
@@ -213,6 +222,7 @@ mod tests {
             let transform = TileTransform { rotation: 359.99998, tile_safe, ..TileTransform::LIBRARY };
             assert!(transform.is_identity(), "tile safe {tile_safe}: {:?}", transform.affine());
         }
+
         assert!(!TileTransform { rotation: 359.9, tile_safe: false, ..TileTransform::LIBRARY }.is_identity());
     }
 

@@ -23,6 +23,7 @@ fn anisotropic_kuwahara_rows() {
 
     let Filter::AnisotropicKuwahara(kuwahara) = filter_of(&harness, effect) else { panic!("still Kuwahara") };
     assert!(kuwahara.custom_input);
+
     let slot = lowest(&harness, Role::ComboBox, "Custom Input");
     let radius = harness.get_by_role_and_label(Role::Slider, "Radius").rect();
     assert!(slot.center().y < radius.center().y, "its slot right under Extract Direction");
@@ -150,6 +151,7 @@ fn color_match_rows() {
 
     assert_eq!(color_match_of(&harness, effect).target_mode, TargetColorMode::ImageInput);
     assert!(harness.query_by_role_and_label(Role::Button, "Target Color").is_none(), "the Image Input slot replaces Target Color");
+
     let shown = harness.query_all_by_label("Image Input").count();
     assert!(shown >= 2, "the mode and its slot: {shown}");
 
@@ -164,15 +166,18 @@ fn color_match_rows() {
     click_at(&mut harness, row.center());
 
     assert_eq!(color_match_of(&harness, effect).source_mode, SourceColorMode::Parameter);
+
     let source = harness.get_by_role_and_label(Role::Button, "Source Color").rect();
     assert!(source.center().y < target_mode(&harness, "Image Input").center().y, "Source Color right under its mode");
 
     let luma = harness.get_by_role_and_label(Role::Slider, "Luma").rect();
     click_at(&mut harness, along(luma, 1.0));
+
     assert!(color_match_of(&harness, effect).luma > 0.95, "{}", color_match_of(&harness, effect).luma);
 
     let custom = harness.get_by_role_and_label(Role::CheckBox, "Custom Color Variation").rect();
     click_at(&mut harness, custom.center());
+
     assert!(!color_match_of(&harness, effect).custom_variation);
     assert!(harness.query_by_role_and_label(Role::Slider, "Hue").is_none(), "the Color Variation card goes with its switch");
 }

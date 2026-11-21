@@ -28,16 +28,19 @@ pub(crate) fn folder_properties(app: &mut TextureCraftApp, ui: &mut Ui, folder: 
         if sheet.section_reset(tr("Contents"), changed) {
             app.run("folder.contents.reset", json!({"layer": folder.0}));
         }
+
         let (low, high) = ContentsOffset::SCALE_RANGE;
         let mut scale = offset.scale;
         if let Some(merge) = sheet.factor_slider(tr("Scale"), &mut scale, SCALE_DOUBLINGS, low..=high) {
             app.run("folder.contents.set", json!({"layer": folder.0, "scale": scale, "merge": merge}));
         }
+
         let (turn_start, turn_end) = ContentsOffset::ROTATION_RANGE;
         let mut rotation = offset.rotation;
         if let Some(merge) = sheet.relative_angle(tr("Rotation"), &mut rotation, turn_start..=turn_end) {
             app.run("folder.contents.set", json!({"layer": folder.0, "rotation": rotation, "merge": merge}));
         }
+
         if sheet.button(ic::DICE_FIVE, tr("Randomize seeds")).clicked() {
             app.run("folder.randomizeSeeds", json!({"layer": folder.0}));
         }

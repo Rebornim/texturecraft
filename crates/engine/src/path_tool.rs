@@ -156,7 +156,7 @@ impl PathState {
 #[derive(Clone)]
 pub(crate) struct PathCache {
     pub(crate) eid: LayerId,
-    // A change to the mask images `below` paints with drops the cache (Session::invalidate_changed)
+    // Session::invalidate_changed discards the prefix when an image it reads changes
     key: (u64, Option<(u32, u32)>),
     below: Vec<PathShape>,
     mask: Option<texturecraft_texel::TileImage>,
@@ -165,8 +165,9 @@ pub(crate) struct PathCache {
 
 impl PathCache {
     /// The image resources the cached paths painted their mask with
-    pub(crate) fn images(&self) -> impl Iterator<Item = String> + '_ {
-        self.below.iter().filter_map(|shape| read_paint(shape).ok()?.mask_image)
+    pub(crate) fn images(&self) -> impl Iterator<Item = &str> + '_ {
+        // Only successfully painted paths enter the prefix
+        self.below.iter().filter_map(|shape| shape.paint.get("mask_image")?.as_str())
     }
 }
 
@@ -837,7 +838,7 @@ impl Session {
         let from = if back { &self.path_steps.0 } else { &self.path_steps.1 };
         let Some((index, state)) = from.iter().enumerate().rfind(|(_, state)| !state.same_curve(&self.tool.path)) else { return Ok(false) };
 
-        // Returning false here would let undo/redo consume document history instead.
+        // Keep undo and redo within the active path history
         if self.quick_mask.editing {
             return Err(EngineError::Other("paths can't edit the quick mask: stop editing it first".into()));
         }
@@ -1216,12 +1217,17 @@ mod tests {
         for v in [0.4, 0.45] {
             execute(&mut s, "tool.path", &json!({"uvPoints": [[0.1, v], [0.5, v], [0.9, v]]})).unwrap();
         }
+
         assert_eq!(s.path_cache.as_ref().map(|c| c.below.len()), Some(1));
+
         let r = s.render_paths(eid, 1).unwrap();
+
         assert!(r[0].is_null() && !r[1].is_null(), "the bottom path came from the cache: {r:?}");
+
         let cached = pixels(&s, eid);
         s.path_cache = None;
         s.render_paths(eid, 0).unwrap();
+
         assert_eq!(cached, pixels(&s, eid), "same pixels as painting every path");
         assert!(!cached.is_empty());
 
@@ -1255,6 +1261,7 @@ mod tests {
         let eid = LayerId(eid);
         execute(&mut s, "path.edit", &json!({"effect": eid.0, "index": 1})).unwrap();
         execute(&mut s, "tool.path", &json!({"uvPoints": [[0.1, 0.6], [0.9, 0.6]]})).unwrap();
+
         assert_eq!(s.path_cache.as_ref().map(|c| c.below.len()), Some(1), "the bottom path is cached");
 
         execute(&mut s, "resource.remove", &json!({"name": image})).unwrap();

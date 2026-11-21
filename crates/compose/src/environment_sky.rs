@@ -59,41 +59,44 @@ const SUN_RADIANCE: f32 = 120.0;
 
 /// The light a built-in environment `name` sends from direction `d` (unknown names give the default studio)
 pub fn radiance(name: &str, d: Vec3) -> Vec3 {
+    if name == "Sunset" {
+        let base = sky(d, Vec3::new(0.15, 0.25, 0.55), Vec3::new(1.4, 0.65, 0.3), Vec3::new(0.08, 0.06, 0.05));
+        let sun_dir = dir_of(0.12, 0.47);
+        let sun = smooth((d.dot(sun_dir) - SUN_EDGE_COS) / SUN_EDGE_WIDTH) * SUN_RADIANCE;
+        return base + Vec3::new(1.0, 0.6, 0.3) * sun;
+    }
+
+    let (azimuth, elevation) = SoftBox::angles(d);
     match name {
         "Studio Contrast" => {
             let base = sky(d, Vec3::splat(0.04), Vec3::splat(0.03), Vec3::splat(0.01));
-            base + SoftBox { azimuth: 35.0, elevation: 30.0, half_width: 22.0, half_height: 18.0, color: Vec3::new(14.0, 13.2, 12.0) }.eval(d)
-                + SoftBox { azimuth: -150.0, elevation: 40.0, half_width: 6.0, half_height: 30.0, color: Vec3::new(4.0, 4.4, 5.0) }.eval(d)
+            base + SoftBox { azimuth: 35.0, elevation: 30.0, half_width: 22.0, half_height: 18.0, color: Vec3::new(14.0, 13.2, 12.0) }.eval(azimuth, elevation)
+                + SoftBox { azimuth: -150.0, elevation: 40.0, half_width: 6.0, half_height: 30.0, color: Vec3::new(4.0, 4.4, 5.0) }.eval(azimuth, elevation)
         }
         "Overcast" => {
             let base = sky(d, Vec3::new(1.2, 1.25, 1.35), Vec3::new(0.95, 0.95, 0.95), Vec3::new(0.18, 0.2, 0.15));
-            base + SoftBox { azimuth: 60.0, elevation: 55.0, half_width: 40.0, half_height: 25.0, color: Vec3::splat(0.6) }.eval(d)
-        }
-        "Sunset" => {
-            let base = sky(d, Vec3::new(0.15, 0.25, 0.55), Vec3::new(1.4, 0.65, 0.3), Vec3::new(0.08, 0.06, 0.05));
-            let sun_dir = dir_of(0.12, 0.47);
-            let sun = smooth((d.dot(sun_dir) - SUN_EDGE_COS) / SUN_EDGE_WIDTH) * SUN_RADIANCE;
-            base + Vec3::new(1.0, 0.6, 0.3) * sun
+            base + SoftBox { azimuth: 60.0, elevation: 55.0, half_width: 40.0, half_height: 25.0, color: Vec3::splat(0.6) }.eval(azimuth, elevation)
         }
         "Warehouse" => {
             let mut c = sky(d, Vec3::splat(0.25), Vec3::splat(0.18), Vec3::splat(0.06));
             for k in 0..6 {
-                c += SoftBox { azimuth: -150.0 + k as f32 * 60.0, elevation: 50.0, half_width: 6.0, half_height: 3.0, color: Vec3::new(9.0, 8.5, 7.5) }.eval(d);
+                c += SoftBox { azimuth: -150.0 + k as f32 * 60.0, elevation: 50.0, half_width: 6.0, half_height: 3.0, color: Vec3::new(9.0, 8.5, 7.5) }
+                    .eval(azimuth, elevation);
             }
-            c + SoftBox { azimuth: 90.0, elevation: 5.0, half_width: 30.0, half_height: 12.0, color: Vec3::new(1.6, 1.8, 2.2) }.eval(d)
+            c + SoftBox { azimuth: 90.0, elevation: 5.0, half_width: 30.0, half_height: 12.0, color: Vec3::new(1.6, 1.8, 2.2) }.eval(azimuth, elevation)
         }
         "Night" => {
             let base = sky(d, Vec3::new(0.01, 0.015, 0.04), Vec3::new(0.03, 0.03, 0.06), Vec3::splat(0.005));
-            base + SoftBox { azimuth: 20.0, elevation: 15.0, half_width: 10.0, half_height: 10.0, color: Vec3::new(0.4, 1.6, 4.0) }.eval(d)
-                + SoftBox { azimuth: -110.0, elevation: 10.0, half_width: 12.0, half_height: 8.0, color: Vec3::new(4.0, 0.8, 1.6) }.eval(d)
+            base + SoftBox { azimuth: 20.0, elevation: 15.0, half_width: 10.0, half_height: 10.0, color: Vec3::new(0.4, 1.6, 4.0) }.eval(azimuth, elevation)
+                + SoftBox { azimuth: -110.0, elevation: 10.0, half_width: 12.0, half_height: 8.0, color: Vec3::new(4.0, 0.8, 1.6) }.eval(azimuth, elevation)
         }
 
         // "Studio Soft" (default)
         _ => {
             let base = sky(d, Vec3::new(0.5, 0.52, 0.56), Vec3::new(0.32, 0.32, 0.33), Vec3::new(0.08, 0.075, 0.07));
-            base + SoftBox { azimuth: 40.0, elevation: 35.0, half_width: 28.0, half_height: 20.0, color: Vec3::new(5.5, 5.2, 4.8) }.eval(d)
-                + SoftBox { azimuth: -125.0, elevation: 20.0, half_width: 35.0, half_height: 22.0, color: Vec3::new(1.1, 1.25, 1.5) }.eval(d)
-                + SoftBox { azimuth: 175.0, elevation: 55.0, half_width: 8.0, half_height: 25.0, color: Vec3::new(3.0, 3.0, 3.0) }.eval(d)
+            base + SoftBox { azimuth: 40.0, elevation: 35.0, half_width: 28.0, half_height: 20.0, color: Vec3::new(5.5, 5.2, 4.8) }.eval(azimuth, elevation)
+                + SoftBox { azimuth: -125.0, elevation: 20.0, half_width: 35.0, half_height: 22.0, color: Vec3::new(1.1, 1.25, 1.5) }.eval(azimuth, elevation)
+                + SoftBox { azimuth: 175.0, elevation: 55.0, half_width: 8.0, half_height: 25.0, color: Vec3::new(3.0, 3.0, 3.0) }.eval(azimuth, elevation)
         }
     }
 }

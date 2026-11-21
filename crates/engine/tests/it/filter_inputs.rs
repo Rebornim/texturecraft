@@ -41,21 +41,26 @@ fn a_distance_map_scales_the_bevel_smooth_distance() {
     assert_eq!(inputs(&s, effect), vec![("distanceMap".to_string(), Source::Uniform([0.5; 3]))]);
 
     let inspected = execute(&mut s, "project.inspect", &Value::Null).unwrap().to_string();
+
     assert!(inspected.contains("\"inputs\":{\"distanceMap\""), "inspect shows the input");
 
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
+
     assert!(inputs(&s, effect).is_empty(), "one undo step");
     assert_eq!(roughness(&mut s, at(4)), full);
 
     input(&mut s, effect, json!({"input": "distanceMap", "anchor": anchor.0, "anchorChannel": "roughness"})).unwrap();
+
     assert!((roughness(&mut s, at(4)) - half).abs() < 1e-3, "the anchor's 0.5 reads as the uniform 0.5");
 
     input(&mut s, effect, json!({"input": "distanceMap", "clear": true})).unwrap();
+
     assert!(inputs(&s, effect).is_empty() && roughness(&mut s, at(4)) == full, "cleared: white, as before");
 
     let steps = s.history_labels().len();
     input(&mut s, effect, json!({"input": "distanceMap", "value": 1.0})).unwrap();
     input(&mut s, effect, json!({"input": "distanceMap", "clear": true})).unwrap();
+
     assert!(inputs(&s, effect).is_empty(), "the default gray is not stored");
     assert_eq!(s.history_labels().len(), steps, "setting what the input already reads adds no undo step");
 
@@ -63,6 +68,7 @@ fn a_distance_map_scales_the_bevel_smooth_distance() {
     {
         assert!(input(&mut s, effect, bad.clone()).is_err(), "{bad}");
     }
+
     assert!(input(&mut s, anchor, json!({"input": "distanceMap", "value": 0.5})).is_err(), "not a filter");
 }
 
@@ -74,9 +80,11 @@ fn a_black_distance_map_leaves_no_trail() {
     let effect = add_filter(&mut s, json!({"filter": "directionalDistance"}));
 
     set(&mut s, effect, json!({"angle": if outward > 0 { 0.0 } else { 180.0 }, "distance": 0.05}));
+
     assert!(roughness(&mut s, at(1)) > 0.0, "a trail");
 
     input(&mut s, effect, json!({"input": "distanceMap", "value": 0.0})).unwrap();
+
     assert_eq!((roughness(&mut s, at(1)), roughness(&mut s, at(-2))), (0.0, 1.0), "no trail, the shapes stay");
 }
 
@@ -92,18 +100,23 @@ fn a_custom_noise_moves_the_warp() {
 
     let effect = add_filter(&mut s, json!({"filter": "warp"}));
     set(&mut s, effect, json!({"intensity": 0.05, "divider": 1, "warpMode": "directional", "sourceMode": "customNoise"}));
+
     assert!(moved(&mut s) < 2e-3, "its default mid gray moves nothing");
 
     input(&mut s, effect, json!({"input": "customNoise", "procedural": "gradient"})).unwrap();
+
     assert!(moved(&mut s) > 0.01, "a source moves texels: {}", moved(&mut s));
 
     set(&mut s, effect, json!({"sourceMode": "defaultNoise"}));
+
     assert_eq!(inputs(&s, effect).len(), 1, "kept while another source mode is on");
 
     let (_, found) = s.doc.project.effect(effect).unwrap();
     let saved = serde_json::to_value(Effect { inputs: Default::default(), ..found.clone() }).unwrap();
+
     assert!(saved.get("inputs").is_none(), "no inputs, no key: saves as before");
 
     let loaded: Effect = serde_json::from_value(saved).unwrap();
+
     assert!(loaded.inputs.is_empty(), "an effect saved before loads with none");
 }

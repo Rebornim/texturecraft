@@ -37,6 +37,7 @@ pub(crate) fn preview_dots(painter: &Painter, center: Pos2, position: Pos2, toke
     let length = span.length();
     let start = DOT_RADIUS + LINE_SPACING;
     let end = length - RING_RADIUS - LINE_SPACING / 2.0;
+
     if length.is_finite() && end > start {
         let toward = span / length;
         let count = (((end - start) / LINE_SPACING).floor() as usize).min(MAX_LINE_DOTS);
@@ -46,6 +47,7 @@ pub(crate) fn preview_dots(painter: &Painter, center: Pos2, position: Pos2, toke
             painter.circle_filled(at, LINE_DOT, tokens.text);
         }
     }
+
     painter.circle_stroke(center, RING_RADIUS, Stroke::new(RING_UNDER, tokens.field));
     painter.circle_stroke(center, RING_RADIUS, Stroke::new(RING_LINE, tokens.text));
     painter.circle_filled(position, DOT_RADIUS + DOT_RIM, tokens.field);

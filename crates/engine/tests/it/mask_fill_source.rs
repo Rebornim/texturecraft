@@ -48,6 +48,7 @@ fn a_mask_fill_takes_a_procedural_an_image_an_alpha_or_a_value_as_its_one_graysc
     execute(&mut s, "layer.fill.set", &json!({"effect": effect.0, "procedural": kind.label(), "scale": 4.0})).unwrap();
     let Source::Procedural { pattern, low, high, .. } = source(&s, effect) else { panic!("not a procedural: {:?}", source(&s, effect)) };
     assert_eq!((pattern.kind, pattern.scale, low, high), (kind, 4.0, [0.0; 3], [1.0; 3]));
+
     let line = mask_line(&s, layer);
     assert!(line.iter().any(|value| (value - line[0]).abs() > 1e-3), "the mask follows the pattern: {line:?}");
 
@@ -58,20 +59,26 @@ fn a_mask_fill_takes_a_procedural_an_image_an_alpha_or_a_value_as_its_one_graysc
 
     let scratches = alphas::find("scratches").unwrap();
     execute(&mut s, "layer.fill.set", &json!({"effect": effect.0, "alpha": "scratches"})).unwrap();
+
     assert_eq!(source(&s, effect), Source::image(resource_name(scratches)));
     assert!(s.doc.resources.contains_key(&resource_name(scratches)));
 
     execute(&mut s, "layer.fill.set", &json!({"effect": effect.0, "value": 0.25})).unwrap();
+
     assert_eq!(source(&s, effect), Source::Uniform([0.25; 3]));
     assert!(mask_line(&s, layer).iter().all(|value| (value - 0.25).abs() < 1e-3));
+
     execute(&mut s, "layer.fill.set", &json!({"effect": effect.0, "value": 7.0})).unwrap();
+
     assert_eq!(source(&s, effect), Source::Uniform([1.0; 3]), "a mask value stays in 0..1");
 
     let inspected = execute(&mut s, "project.inspect", &Value::Null).unwrap().to_string();
+
     assert!(inspected.contains("projectionSettings"), "inspect shows the mask fill's projection");
 
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
+
     assert_eq!(source(&s, effect), Source::image(resource_name(scratches)), "each pick is one undo step");
 }
 
@@ -87,6 +94,7 @@ fn a_mask_fill_has_no_channels_or_material() {
     ] {
         assert!(execute(&mut s, "layer.fill.set", &refused).is_err(), "{refused}");
     }
+
     assert!(execute(&mut s, "layer.fill.material", &json!({"effect": effect.0, "material": null})).is_err());
     assert_eq!(source(&s, effect), before);
 }
@@ -95,11 +103,15 @@ fn a_mask_fill_has_no_channels_or_material() {
 fn a_mask_fill_is_projected_and_reset_like_any_fill() {
     let (mut s, _, effect) = mask_fill();
     execute(&mut s, "layer.fill.projection", &json!({"effect": effect.0, "projection": "planar", "scale": 2.0, "symmetry": true})).unwrap();
+
     assert!(matches!(projection(&s, effect), Projection::Planar { scale, .. } if scale == 2.0));
+
     let inspected = execute(&mut s, "project.inspect", &Value::Null).unwrap().to_string();
+
     assert!(inspected.contains("projectionSettings"), "inspect shows the mask fill's projection");
 
     execute(&mut s, "layer.fill.resetProjection", &json!({"effect": effect.0})).unwrap();
+
     assert!(matches!(projection(&s, effect), Projection::Planar { scale, .. } if scale == 1.0), "the reset keeps the projection, at its defaults");
     match &s.doc.project.effect(effect).unwrap().1.kind {
         EffectKind::Fill { sampling, .. } => assert!(sampling.symmetry.on, "the reset keeps the Symmetry section"),
@@ -107,6 +119,7 @@ fn a_mask_fill_is_projected_and_reset_like_any_fill() {
     }
 
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
+
     assert!(matches!(projection(&s, effect), Projection::Planar { scale, .. } if scale == 2.0), "the reset is one undo step");
 }
 
@@ -126,19 +139,23 @@ fn a_procedural_source_is_made_at_its_resolution() {
 
     // A quarter of the texture set's size: the pattern is made at 128 × 128 and smoothed back up
     execute(&mut s, "layer.fill.set", &json!({"effect": effect.0, "procedural": "Clouds", "resolutionFactor": -2})).unwrap();
+
     assert_eq!(resolution(&s, effect).factor, -2);
+
     let coarse = mask_line(&s, layer);
     assert!(coarse.iter().zip(&every_texel).any(|(sampled, exact)| (sampled - exact).abs() > 1e-3), "{coarse:?} vs {every_texel:?}");
     assert!(execute(&mut s, "project.inspect", &Value::Null).unwrap().to_string().contains("\"resolution\""), "inspect shows it");
 
     // Another parameter keeps it; a bad size is refused and changes nothing
     execute(&mut s, "layer.fill.set", &json!({"effect": effect.0, "procedural": "Clouds", "contrast": 1.0})).unwrap();
+
     assert_eq!(resolution(&s, effect).factor, -2);
     assert!(execute(&mut s, "layer.fill.set", &json!({"effect": effect.0, "procedural": "Clouds", "resolution": "big"})).is_err());
     assert_eq!(resolution(&s, effect).factor, -2);
 
     // The default size again: every texel, as before
     execute(&mut s, "layer.fill.set", &json!({"effect": effect.0, "procedural": "Clouds", "resolution": "auto", "resolutionFactor": 0})).unwrap();
+
     assert!(resolution(&s, effect).is_default());
     assert_eq!(mask_line(&s, layer), every_texel);
 }
@@ -147,6 +164,7 @@ fn a_procedural_source_is_made_at_its_resolution() {
 fn a_pattern_saved_before_resolutions_existed_reads_and_saves_unchanged() {
     let old = r#"{"kind":"Clouds","scale":4.0,"seed":1,"contrast":1.0,"balance":0.0,"invert":false}"#;
     let pattern: Procedural = serde_json::from_str(old).unwrap();
+
     assert_eq!(pattern, Procedural::new(ProceduralKind::Clouds));
     assert_eq!(serde_json::to_string(&pattern).unwrap(), old, "no resolution, no new field in the file");
 }

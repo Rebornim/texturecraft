@@ -25,6 +25,7 @@ fn masked(s: &mut Session, id: &str) -> LayerId {
 fn a_glow_saved_before_stays_additive_and_a_new_glow_is_the_halo() {
     let saved = json!({"Glow": {"radius": 16.0, "amount": 1.0}});
     let filter: Filter = serde_json::from_value(saved.clone()).unwrap();
+
     assert_eq!(filter, Filter::Glow { radius: 16.0, amount: 1.0 });
     assert_eq!(serde_json::to_value(&filter).unwrap(), saved);
 
@@ -61,11 +62,13 @@ fn drop_shadow_defaults_and_settings() {
     assert_eq!(filter_of(&s, effect), LIBRARY_DROP_SHADOW, "the workflow's defaults");
 
     set(&mut s, effect, json!({"angle": 450.0, "distance": -0.9, "size": 2.0, "spread": 0.3, "opacity": 0.25, "color": "#ffffff"}));
+
     assert_eq!(filter_of(&s, effect), Filter::DropShadow { angle: 90.0, distance: -0.5, size: 1.0, spread: 0.3, opacity: 0.25, color: [1.0; 3] });
 
     refused(&mut s, effect, &[json!({"color": [1.0]})]);
 
     let listed = execute(&mut s, "filter.list", &json!({})).unwrap();
+
     assert!(listed.as_array().unwrap().iter().any(|f| f["id"] == "dropShadow" && f["mask"] == true));
 }
 
@@ -80,6 +83,7 @@ fn on_content(s: &mut Session, id: &str) -> LayerId {
 fn a_baked_lighting_saved_before_stays_and_a_new_one_is_stylized() {
     let saved = json!({"BakedLighting": {"azimuth": 45.0, "elevation": 45.0, "light": 0.75, "ambient": 0.5, "occlusion": 1.0}});
     let filter: Filter = serde_json::from_value(saved.clone()).unwrap();
+
     assert!(filter.stylized_lighting().is_none(), "lights as before");
     assert_eq!(serde_json::to_value(&filter).unwrap(), saved);
     assert_eq!(filter.label(), "Baked Lighting Stylized");
@@ -91,6 +95,7 @@ fn a_baked_lighting_saved_before_stays_and_a_new_one_is_stylized() {
     assert_eq!(made, library_baked_lighting(), "the workflow's sun, sky and lights");
 
     let (stylized, _) = made.stylized_lighting().unwrap();
+
     assert_eq!(
         (stylized.output, stylized.mesh_only, stylized.dielectric_reflectance, stylized.cavity_smoothness),
         (LightingOutput::DiffuseSpecular, false, 0.04, 0.25)
@@ -98,6 +103,7 @@ fn a_baked_lighting_saved_before_stays_and_a_new_one_is_stylized() {
     assert_eq!((stylized.lights[0].azimuth, stylized.lights[1].azimuth, stylized.lights[0].intensity), (90.0, 180.0, 0.0));
 
     let listed = execute(&mut s, "filter.list", &json!({})).unwrap();
+
     assert!(listed.as_array().unwrap().iter().any(|f| f["id"] == "bakedLighting" && f["mask"] == false && f["label"] == "Baked Lighting Stylized"));
 }
 
@@ -120,6 +126,7 @@ fn stylized_lighting_settings_set_clamp_and_refuse() {
     );
     let filter = filter_of(&s, effect);
     let (stylized, light) = filter.stylized_lighting().unwrap();
+
     assert_eq!((light.sun.intensity, light.sky_intensity, stylized.sun_color), (0.8, 0.4, [1.0; 3]), "the rest as it lit");
 
     assert_eq!(stylized.sky_color, [0.1, 0.2, 0.3]);
@@ -132,6 +139,7 @@ fn stylized_lighting_settings_set_clamp_and_refuse() {
         effect,
         &[json!({"output": "both"}), json!({"input": 1}), json!({"normalDetails": "height"}), json!({"light2": 3}), json!({"groundColor": "dirt"})],
     );
+
     assert_eq!(filter_of(&s, effect), filter, "refusals change nothing");
 
     assert_eq!(execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap()["changed"], json!(true));
@@ -148,6 +156,7 @@ fn environment_lighting_defaults_and_settings() {
     assert_eq!((made.label(), s.doc.project.effect(effect).unwrap().1.name.as_str()), ("Baked Lighting Environment", "Baked Lighting Environment"));
 
     let off = &s.doc.project.effect(effect).unwrap().1.off_channels;
+
     assert!(!off.contains(&Channel::BaseColor) && off.contains(&Channel::Roughness) && off.contains(&Channel::Height), "only the Color pill is lit: {off:?}");
 
     let stylized = on_content(&mut s, "bakedLighting");
@@ -161,6 +170,7 @@ fn environment_lighting_defaults_and_settings() {
         effect,
         json!({"horizontalRotation": 370.0, "verticalRotation": -90.0, "exposure": 9.0, "heightIntensity": -1.0, "ambientOcclusion": 0.5, "specularOcclusion": 2.0}),
     );
+
     assert_eq!(
         filter_of(&s, effect),
         Filter::EnvironmentLighting {
@@ -177,6 +187,7 @@ fn environment_lighting_defaults_and_settings() {
     assert_eq!(filter_of(&s, effect), made);
 
     let listed = execute(&mut s, "filter.list", &json!({})).unwrap();
+
     assert!(listed.as_array().unwrap().iter().any(|f| f["id"] == "bakedLightingEnvironment" && f["mask"] == false));
 }
 
@@ -200,5 +211,36 @@ fn environment_lighting_follows_the_viewport_environment() {
     assert!(night[0] < studio[0] * 0.5, "the night lights it less: {night:?} vs {studio:?}");
 
     set(&mut s, effect, json!({"exposure": 3.0}));
+
     assert!(center(&mut s)[0] > night[0], "exposure brightens it");
+}
+
+#[test]
+fn reimporting_the_selected_environment_relights_the_composite() {
+    let mut session = session();
+    let image_bytes = |rgb: [u8; 3]| {
+        let image = image::RgbImage::from_pixel(8, 4, image::Rgb(rgb));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+        bytes.into_inner()
+    };
+    let sample = |session: &mut Session| {
+        session.update();
+        session.caches[0].composite.value(Channel::BaseColor, SIZE / 2, SIZE / 2)
+    };
+    execute(&mut session, "layer.add.fill", &json!({"color": [0.5, 0.5, 0.5]})).unwrap();
+    add_filter(&mut session, json!({"filter": "bakedLightingEnvironment"}));
+    let name = session.import_resource_bytes("lighting.png", image_bytes([255, 0, 0])).unwrap();
+    execute(&mut session, "display.set", &json!({"environment": format!("resource:{name}")})).unwrap();
+    let red = sample(&mut session);
+    assert!(red[0] > red[1], "the selected resource lights the base color");
+
+    execute(&mut session, "resource.remove", &json!({"name": name})).unwrap();
+    let fallback = sample(&mut session);
+    let replacement = session.import_resource_bytes("lighting.png", image_bytes([0, 255, 0])).unwrap();
+    let green = sample(&mut session);
+
+    assert_eq!(replacement, name);
+    assert_ne!(fallback, red);
+    assert!(green[1] > green[0] && green != fallback, "reimporting the referenced image relights the material: {green:?}");
 }

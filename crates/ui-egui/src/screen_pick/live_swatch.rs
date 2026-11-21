@@ -38,6 +38,7 @@ impl LiveSwatch {
     /// Shows the colour under the tip in the pointer's disc, while the pointer is off the app (the app draws its own there)
     fn refresh(&mut self, shared: &PickShared) {
         let Ok(point) = winsafe::GetCursorPos() else { return };
+
         if over_own_window(point) || over_windows(&shared.windows(), point.x, point.y) {
             return;
         }

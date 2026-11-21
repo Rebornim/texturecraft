@@ -45,6 +45,7 @@ impl DrawnIcon {
         let pixels = side as f32;
         let min = ((center.to_vec2() * pixels_per_point) - egui::Vec2::splat(pixels / 2.0)).round() / pixels_per_point;
         let rect = egui::Rect::from_min_size(min.to_pos2(), egui::Vec2::splat(pixels / pixels_per_point));
+
         let whole = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
         painter.image(self.texture(painter.ctx(), side).id(), rect, whole, color);
     }
@@ -52,6 +53,7 @@ impl DrawnIcon {
     /// The icon `side` pixels square as a white texture with its coverage as alpha, rendered once per size
     fn texture(self, ctx: &egui::Context, side: u32) -> egui::TextureHandle {
         let id = egui::Id::unique(("drawn_icon", self, side));
+
         if let Some(texture) = ctx.data(|data| data.get_temp::<egui::TextureHandle>(id)) {
             return texture;
         }
@@ -71,18 +73,22 @@ mod tests {
     #[test]
     fn an_icon_is_painted_as_one_tinted_texture_on_whole_pixels() {
         let ctx = egui::Context::default();
+
         let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let painter = ui.painter();
             DrawnIcon::Invert.paint(painter, egui::pos2(10.3, 20.6), 14.0, egui::Color32::RED);
             DrawnIcon::Invert.paint(painter, egui::pos2(40.0, 20.0), 14.0, egui::Color32::GREEN);
         });
+
         let shapes: Vec<egui::Shape> = output.shapes.iter().map(|clipped| clipped.shape.clone()).collect();
         output.drop_without_applying_deltas();
         let meshes: Vec<_> = shapes.iter().filter_map(|shape| if let egui::Shape::Mesh(mesh) = shape { Some(mesh.clone()) } else { None }).collect();
 
         assert_eq!(meshes.len(), 2, "one textured quad per icon: {shapes:?}");
+
         let [first, second] = [&meshes[0], &meshes[1]];
         assert_eq!(first.texture_id, second.texture_id, "the texture is rendered once per size");
+
         let bounds = first.calc_bounds();
         assert_eq!((bounds.min, bounds.size()), (egui::pos2(3.0, 14.0), egui::vec2(14.0, 14.0)), "snapped to whole pixels");
         assert!(first.vertices.iter().all(|vertex| vertex.color == egui::Color32::RED), "tinted");

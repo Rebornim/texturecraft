@@ -89,6 +89,7 @@ fn switching_projects_releases_image_previews_with_equal_revisions() {
 
         // Freshly loaded projects can have equal revisions despite different resources
         assert_eq!(loaded.revision, 1);
+
         session.switch_to(loaded);
         thumbnails.sync_images(&session.images, session.revision);
         let image = &session.images[&name];
@@ -134,6 +135,7 @@ fn a_mask_fill_selects_an_image_edits_projection_and_returns_to_uniform() {
     harness.run_steps(3);
 
     let effect = &harness.state().session.doc.project.effect(effect_id).unwrap().1.kind;
+
     assert!(matches!(effect, EffectKind::Fill { source: Source::Image { name, .. }, .. } if name == &image_name));
 
     click_node(&mut harness, egui::Role::ComboBox, "UV projection");
@@ -142,6 +144,7 @@ fn a_mask_fill_selects_an_image_edits_projection_and_returns_to_uniform() {
     harness.run_steps(3);
 
     let effect = &harness.state().session.doc.project.effect(effect_id).unwrap().1.kind;
+
     assert!(matches!(effect, EffectKind::Fill { projection: Projection::Triplanar { .. }, .. }));
 
     // The slot's × puts the mask fill back to a uniform value
@@ -149,6 +152,7 @@ fn a_mask_fill_selects_an_image_edits_projection_and_returns_to_uniform() {
     harness.run_steps(3);
 
     let effect = &harness.state().session.doc.project.effect(effect_id).unwrap().1.kind;
+
     assert!(matches!(effect, EffectKind::Fill { source: Source::Uniform(_), .. }));
 }
 

@@ -59,6 +59,7 @@ fn anisotropic_kuwahara_takes_its_settings_and_smooths() {
     assert_eq!(undone, AnisotropicKuwahara { radius: AnisotropicKuwahara::MAX_RADIUS, ..AnisotropicKuwahara::LIBRARY }, "one undo step");
 
     let inspect = execute(&mut s, "project.inspect", &json!({})).unwrap().to_string();
+
     assert!(inspect.contains("Anisotropic Kuwahara"));
 }
 
@@ -75,6 +76,7 @@ fn pbr_validate_marks_implausible_base_colors() {
     assert_eq!(filter_of(&s, effect), Filter::PbrValidate(PbrValidate::LIBRARY));
 
     let off = &s.doc.project.effect(effect).unwrap().1.off_channels;
+
     assert!(!off.contains(&Channel::BaseColor) && off.contains(&Channel::Metallic) && off.contains(&Channel::Roughness), "{off:?}");
     assert_eq!(base_color(&mut s, texel), PbrValidate::INVALID, "too dark");
     assert_eq!(s.caches[0].composite.value(Channel::Metallic, texel.0, texel.1)[0], 0.0, "the metal is left as it is");
@@ -84,6 +86,7 @@ fn pbr_validate_marks_implausible_base_colors() {
     assert!((shown[0] - dark).abs() < 1e-3, "Metal leaves non-metal colors unchecked: {shown:?}");
 
     set(&mut s, effect, json!({"validationMode": "albedo", "albedoDarkRangeThreshold": 50, "metalReflectanceRange": 70}));
+
     assert_eq!(filter_of(&s, effect), Filter::PbrValidate(PbrValidate { mode: ValidationMode::Albedo, albedo_dark: 50, metal_low: 70 }));
 
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "albedoDarkRangeThreshold": 40})).is_err());
@@ -109,6 +112,7 @@ fn height_to_normal_turns_the_height_into_the_normal() {
     let bumps = json!({"layer": fill, "channel": "height", "procedural": "Clouds", "scale": 16, "low": [-0.05, -0.05, -0.05], "high": [0.05, 0.05, 0.05]});
     execute(&mut s, "layer.fill.set", &bumps).unwrap();
     let texels: Vec<(u32, u32)> = (0..32).map(|k| (FINE_SET_SIZE / 4 + k, FINE_SET_SIZE / 2)).collect();
+
     assert!(tilt(&mut s, &texels) < 1e-3, "a fill's own normal is flat");
 
     let color = base_color(&mut s, texels[0]);
@@ -117,6 +121,7 @@ fn height_to_normal_turns_the_height_into_the_normal() {
     assert_eq!(filter_of(&s, effect), Filter::HeightToNormal(HeightToNormal::LIBRARY));
 
     let off = &s.doc.project.effect(effect).unwrap().1.off_channels;
+
     assert!(!off.contains(&Channel::Normal) && off.contains(&Channel::BaseColor) && off.contains(&Channel::Height), "{off:?}");
 
     let made = tilt(&mut s, &texels);
@@ -124,15 +129,19 @@ fn height_to_normal_turns_the_height_into_the_normal() {
     assert_eq!(base_color(&mut s, texels[0]), color, "the base color is left as it is");
 
     set(&mut s, effect, json!({"heightDepth": 64.0}));
+
     assert!(tilt(&mut s, &texels) > made * 1.5, "deeper heights tilt more");
 
     set(&mut s, effect, json!({"useWorldUnits": false, "normalIntensity": 0.0}));
+
     assert!(tilt(&mut s, &texels) < 1e-3, "no intensity: flat");
 
     execute(&mut s, "layer.fill.set", &json!({"layer": fill, "channel": "normal", "value": [0.7, 0.5, 0.95]})).unwrap();
+
     assert!(tilt(&mut s, &texels) < 1e-3, "Overwrite Existing Normal replaces the fill's normal");
 
     set(&mut s, effect, json!({"overwriteExistingNormal": false}));
+
     assert!((normal(&mut s, texels[0])[0] - 0.7).abs() < 0.02, "laid over the fill's normal: {:?}", normal(&mut s, texels[0]));
 
     let all = json!({"overwriteExistingNormal": true, "useWorldUnits": true, "surfaceSize": 0.0, "heightDepth": 500.0,
@@ -154,6 +163,7 @@ fn height_to_normal_turns_the_height_into_the_normal() {
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "useWorldUnits": "yes"})).is_err());
 
     let inspect = execute(&mut s, "project.inspect", &json!({})).unwrap().to_string();
+
     assert!(inspect.contains("Height To Normal"));
 }
 
@@ -167,15 +177,18 @@ fn color_match_moves_the_colors_to_the_target() {
     let texels: Vec<(u32, u32)> = (0..24).map(|k| (SIZE / 4 + k * 2, SIZE / 2)).collect();
     let before: Vec<[f32; 3]> = texels.iter().map(|t| base_color(&mut s, *t)).collect();
     let spread = |colors: &[[f32; 3]]| colors.iter().map(|c| c[0]).fold(f32::MIN, f32::max) - colors.iter().map(|c| c[0]).fold(f32::MAX, f32::min);
+
     assert!(spread(&before) > 0.05, "the clouds vary: {before:?}");
 
     let effect = add_filter(&mut s, json!({"filter": "Color Match"}));
     assert_eq!(filter_of(&s, effect), Filter::ColorMatch(ColorMatch::LIBRARY));
 
     let off = &s.doc.project.effect(effect).unwrap().1.off_channels;
+
     assert!(!off.contains(&Channel::BaseColor) && off.contains(&Channel::Roughness), "{off:?}");
 
     let new: Vec<[f32; 3]> = texels.iter().map(|t| base_color(&mut s, *t)).collect();
+
     assert!(spread(&new) > 0.02, "a new Color Match keeps the pattern: {new:?}");
 
     let redness = new.iter().map(|c| c[0] - c[2]).sum::<f32>() / new.len() as f32;
@@ -192,6 +205,7 @@ fn color_match_moves_the_colors_to_the_target() {
     // Without Custom Color Variation the texels keep their differences from the mean, now around the target
     set(&mut s, effect, json!({"customColorVariation": false}));
     let kept: Vec<[f32; 3]> = texels.iter().map(|t| base_color(&mut s, *t)).collect();
+
     assert!(spread(&kept) > 0.02, "variation kept: {kept:?}");
 
     let redness = kept.iter().map(|c| c[0] - c[2]).sum::<f32>() / kept.len() as f32;
@@ -200,6 +214,7 @@ fn color_match_moves_the_colors_to_the_target() {
     let brighter = |colors: &[[f32; 3]], a: usize, b: usize| colors[a][0] + colors[a][1] > colors[b][0] + colors[b][1];
     let (lightest, darkest) =
         (0..texels.len()).fold((0, 0), |(hi, lo), k| (if before[k][0] > before[hi][0] { k } else { hi }, if before[k][0] < before[lo][0] { k } else { lo }));
+
     assert!(brighter(&kept, lightest, darkest), "the lightest red stays the lightest");
 
     // Source Color Parameter: the texels of that color land on the target
@@ -238,5 +253,6 @@ fn color_match_moves_the_colors_to_the_target() {
         &[json!({"sourceColorMode": "median"}), json!({"targetColorMode": "input"}), json!({"customColorVariation": 1}), json!({"targetColor": "red"})],
     );
     let inspect = execute(&mut s, "project.inspect", &json!({})).unwrap().to_string();
+
     assert!(inspect.contains("Color Match"));
 }

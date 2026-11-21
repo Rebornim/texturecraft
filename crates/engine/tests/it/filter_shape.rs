@@ -21,10 +21,12 @@ fn threshold_modes_compare_their_way() {
     assert_eq!(roughness(&mut s, texel), 1.0);
 
     set(&mut s, effect, json!({"level": 0.25}));
+
     assert_eq!(roughness(&mut s, texel), 0.0, "a value at the level is not greater");
 
     for (mode, white) in [("greaterOrEqual", 1.0), ("lower", 0.0), ("lowerOrEqual", 1.0)] {
         set(&mut s, effect, json!({"mode": mode}));
+
         assert_eq!(roughness(&mut s, texel), white, "{mode}");
     }
 
@@ -32,6 +34,7 @@ fn threshold_modes_compare_their_way() {
     assert_eq!(filter_of(&s, effect), Filter::Threshold { level: 0.25, mode: ThresholdMode::LowerOrEqual }, "a refused mode changes nothing");
 
     execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap();
+
     assert_eq!(filter_of(&s, effect), Filter::Threshold { level: 0.01, mode: ThresholdMode::Greater });
 }
 
@@ -53,15 +56,18 @@ fn mirror_copies_one_side_over_the_other() {
     assert!((roughness(&mut s, right) - left_before).abs() < 2e-3, "the right side reads the left");
 
     set(&mut s, effect, json!({"invertAxisX": true}));
+
     assert!((roughness(&mut s, left) - right_before).abs() < 2e-3, "inverted, the left side reads the right");
 
     set(&mut s, effect, json!({"mode": "corner", "cornerType": "topRight"}));
+
     assert!((roughness(&mut s, (20, 20)) - roughness(&mut s, (SIZE - 1 - 20, 20))).abs() < 2e-3, "a corner mirrors across too");
 
     let Filter::Mirror(mirror) = filter_of(&s, effect) else { panic!() };
     assert_eq!((mirror.mode, mirror.corner), (MirrorMode::Corner, MirrorCorner::TopRight));
 
     set(&mut s, effect, json!({"mode": "axisX", "displayDebug": true}));
+
     assert_eq!(roughness(&mut s, (SIZE / 2, row)), 1.0, "Display Debug draws the axis white");
 
     refused(&mut s, effect, &[json!({"mode": "diagonal"}), json!({"cornerType": "middle"}), json!({"invertAxisY": "yes"})]);
@@ -82,14 +88,17 @@ fn mask_outline_draws_a_band_along_the_threshold_edge() {
     assert_eq!(s.doc.project.effect(effect).unwrap().1.name, "Mask Outline");
 
     set(&mut s, effect, json!({"threshold": 0.5, "width": 0.03}));
+
     assert_eq!(roughness(&mut s, at(2)), 1.0, "outside, next to the edge");
     assert_eq!(roughness(&mut s, at(8)), 0.0, "past the band");
     assert_eq!(roughness(&mut s, at(-2)), 0.0, "inside the shapes");
 
     set(&mut s, effect, json!({"maskPosition": "inside"}));
+
     assert_eq!((roughness(&mut s, at(-2)), roughness(&mut s, at(2))), (1.0, 0.0), "inside");
 
     set(&mut s, effect, json!({"maskPosition": "both"}));
+
     assert_eq!((roughness(&mut s, at(-2)), roughness(&mut s, at(2))), (1.0, 1.0), "both sides");
 
     set(&mut s, effect, json!({"startFromBlack": false}));
@@ -107,6 +116,7 @@ fn mask_outline_draws_a_band_along_the_threshold_edge() {
     assert_eq!((outline.position, outline.width, outline.curve), (OutlinePosition::Outside, 1.0, -1.0), "values clamp");
 
     execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap();
+
     assert_eq!(filter_of(&s, effect), Filter::MaskOutline(MaskOutline::LIBRARY));
 }
 
@@ -164,9 +174,11 @@ fn bevel_slopes_inwards_or_outwards() {
     assert_eq!(filter_of(&s, effect), Filter::DistanceBevel(expected), "values clamp");
 
     execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap();
+
     assert_eq!(filter_of(&s, effect), Filter::DistanceBevel(Bevel::LIBRARY));
 
     let old: Filter = serde_json::from_value(json!({"Bevel": {"width": 16.0}})).unwrap();
+
     assert_eq!(old, Filter::Bevel { width: 16.0, wrap: false }, "a bevel saved before keeps its width");
 }
 
@@ -194,6 +206,7 @@ fn bevel_smooth_ramps_from_the_edge() {
     assert!(edge_in > 0.5 && edge_out < 0.5 && edge_in - edge_out < 0.2, "across: mid gray at the edge: {edge_in} {edge_out}");
 
     set(&mut s, effect, json!({"curveOffset": 0.5}));
+
     assert!(roughness(&mut s, at(0)) > edge_in, "the offset raises the ramp");
 
     refused(&mut s, effect, &[json!({"direction": "up"}), json!({"wrap": "yes"})]);
@@ -224,9 +237,11 @@ fn directional_distance_trails_one_way() {
     assert!(near > further && further > 0.0, "fades away from them: {near} {further}");
 
     set(&mut s, effect, json!({"contrast": 0.5}));
+
     assert_eq!(roughness(&mut s, at(1)), 1.0, "contrast hardens the near trail");
 
     set(&mut s, effect, json!({"angle": away + 180.0, "contrast": 0.0}));
+
     assert!(roughness(&mut s, at(1)) < near, "against the angle the edge gets less trail");
 
     set(&mut s, effect, json!({"distance": 1.0, "angle": -90.0, "contrast": 3.0, "distanceMapMultiplier": -1.0}));
@@ -254,6 +269,7 @@ fn warp_modes_move_texels_their_way() {
     assert!(moved(&warped) > 0.01 && warped.iter().all(|v| v.is_finite()), "the noise moves texels: {}", moved(&warped));
 
     set(&mut s, effect, json!({"intensity": 0.0}));
+
     assert!(moved(&after(&mut s)) < 2e-3, "no intensity, no move");
 
     // Along the gradient where it rises: a texel above mid gray reads further up it, so it gets lighter
@@ -269,6 +285,7 @@ fn warp_modes_move_texels_their_way() {
     assert!(directional[texel] > before[texel] + 0.01, "{} -> {}", before[texel], directional[texel]);
 
     set(&mut s, effect, json!({"sourceMode": "customNoise"}));
+
     assert!(moved(&after(&mut s)) < 2e-3, "an unlinked custom noise is flat: nothing moves");
 
     set(&mut s, effect, json!({"warpMode": "multiDirectional", "sourceMode": "defaultNoise", "directions": 2, "blendingMode": "max"}));
@@ -281,6 +298,7 @@ fn warp_modes_move_texels_their_way() {
     assert!(average.iter().zip(max.iter().zip(&min)).all(|(average, (max, min))| *average <= max + 2e-3 && *average >= min - 2e-3), "the average between");
 
     set(&mut s, effect, json!({"blendingMode": "chain", "directions": 4}));
+
     assert!(after(&mut s).iter().all(|v| v.is_finite()));
 
     refused(&mut s, effect, &[json!({"warpMode": "spiral"}), json!({"directions": 3}), json!({"blendingMode": "sum"}), json!({"sourceMode": "image"})]);
@@ -297,11 +315,13 @@ fn warp_modes_move_texels_their_way() {
     // Saved before the modes: loads as it was, and Restore defaults gives the warp of its mode
     let saved = json!({"DirectionalWarp": {"intensity": 8.0, "angle": 30.0, "scale": 4.0, "seed": 3}});
     let old: Filter = serde_json::from_value(saved.clone()).unwrap();
+
     assert_eq!(old, Filter::DirectionalWarp { intensity: 8.0, angle: 30.0, scale: 4.0, seed: 3, divider: 1 });
     assert_eq!(serde_json::to_value(&old).unwrap(), saved, "saves as before");
 
     s.doc.project.effect_mut(former).unwrap().kind = EffectKind::Filter(old);
     execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": former.0})).unwrap();
+
     assert_eq!(filter_of(&s, former), Filter::SourceWarp(directional));
 }
 
@@ -336,6 +356,7 @@ fn slope_blur_reads_downhill_of_its_source() {
     set(&mut s, effect, json!({"blendingMode": "blur", "sourceMode": "previousInput"}));
     let downhill = after(&mut s);
     let rising = (SLOPE_WINDOW..SIZE as usize - SLOPE_WINDOW).find(|x| (x - SLOPE_WINDOW..x + SLOPE_WINDOW).all(|k| before[k + 1] > before[k] + 1e-4)).unwrap();
+
     assert!(downhill[rising] < before[rising] - 0.005, "{} -> {}", before[rising], downhill[rising]);
 
     set(&mut s, effect, json!({"quality": 0.0}));
@@ -343,6 +364,7 @@ fn slope_blur_reads_downhill_of_its_source() {
     assert!(coarse.iter().all(|v| v.is_finite()) && coarse != downhill, "fewer reads, another smear");
 
     set(&mut s, effect, json!({"sourceMode": "customNoise"}));
+
     assert!(moved(&after(&mut s)) < 2e-3, "an unlinked custom noise is flat: nothing smears");
 
     refused(&mut s, effect, &[json!({"blendingMode": "average"}), json!({"sourceMode": "image"}), json!({"divider": 7})]);
@@ -355,10 +377,12 @@ fn slope_blur_reads_downhill_of_its_source() {
     // Saved before its source settings: loads and saves as it was, and Restore defaults gives today's Blur Slope
     let saved = json!({"SlopeBlur": {"radius": 16.0, "scale": 4.0, "seed": 1}});
     let old: Filter = serde_json::from_value(saved.clone()).unwrap();
+
     assert_eq!(old, Filter::SlopeBlur { radius: 16.0, scale: 4.0, seed: 1, divider: 1 });
     assert_eq!(serde_json::to_value(&old).unwrap(), saved, "saves as before");
 
     s.doc.project.effect_mut(effect).unwrap().kind = EffectKind::Filter(old);
     execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap();
+
     assert_eq!(filter_of(&s, effect), Filter::SourceSlopeBlur(SourceSlopeBlur::LIBRARY));
 }

@@ -19,6 +19,7 @@ const MIN_BAR_WIDTH: f32 = KNOB_RADIUS * 4.0;
 pub(crate) fn gray_slider(ui: &mut Ui, label: &str, value: &mut f32) -> Option<bool> {
     let tokens = Tokens::get(ui.ctx());
     let (field, typed) = value_header(ui, label, value, 0.0..=1.0, 2);
+
     ui.horizontal(|ui| {
         let mut edit = typed;
 
@@ -28,6 +29,7 @@ pub(crate) fn gray_slider(ui: &mut Ui, label: &str, value: &mut f32) -> Option<b
         let width = (ui.available_width() - button_width - ui.spacing().item_spacing.x).max(MIN_BAR_WIDTH);
         let (rect, response) = ui.allocate_exact_size(vec2(width, KNOB_RADIUS * 2.0 + KNOB_STROKE * 2.0), Sense::click_and_drag());
         let bar = Rect::from_center_size(rect.center(), vec2(rect.width() - KNOB_RADIUS * 2.0, BAR_HEIGHT));
+
         if response.is_pointer_button_down_on() {
             // A grab of the bar ends typing, so the field shows the dragged value
             ui.data_mut(|data| data.remove_temp::<String>(field));
@@ -54,6 +56,7 @@ pub(crate) fn gray_slider(ui: &mut Ui, label: &str, value: &mut f32) -> Option<b
             *value = 1.0 - *value;
             edit = Some(false);
         }
+
         edit
     })
     .inner

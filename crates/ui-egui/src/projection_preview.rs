@@ -12,7 +12,7 @@ use texturecraft_engine::compose::frame_placement::{folded, upright_turn};
 use texturecraft_engine::compose::pattern::{Coords, decal_axes, image_samples};
 use texturecraft_engine::compose::projector_cover::projector_cover;
 use texturecraft_engine::core::{Projection, Projector, ShapeCrop};
-use texturecraft_engine::geom::glam::{Vec2, Vec3};
+use texturecraft_engine::geom::glam::{Vec2, Vec3, Vec4};
 
 use rayon::prelude::*;
 
@@ -131,6 +131,9 @@ const UNCOVERED: f32 = 0.45;
 
 /// How much of the projection reaches a ray past which it counts as covered, for the edge of its reach
 const HALF_COVERED: f32 = 0.5;
+
+/// A missed ray has no coverage value in the 0..1 range
+const MISSED_RAY_COVERAGE: f32 = -1.0;
 
 /// How far a ray on the edge of the projection's reach is drawn from the accent towards the shape's colour
 const EDGE_BLEND: f32 = 0.5;
@@ -376,18 +379,18 @@ fn render(projection: &Projection, side: usize, half: f32, supersample: usize, t
     let supersample = supersample.max(1);
     let rays = side * supersample;
 
-    // Per ray: the lit colour and how much of the projection lands there (None = the background)
-    let samples: Vec<Option<(Vec3, f32)>> = (0..rays * rays)
+    // Pack lit RGB and coverage into one vector per ray
+    let samples: Vec<Vec4> = (0..rays * rays)
         .into_par_iter()
         .map(|ray| {
             let (x, y) = (ray % rays, ray / rays);
             let across = ((x as f32 + 0.5) / rays as f32 * 2.0 - 1.0) * half;
             let down = ((y as f32 + 0.5) / rays as f32 * 2.0 - 1.0) * half;
             let origin = right * across - up * down + eye * CAMERA_DISTANCE;
-            let hit = intersect(shape, origin, forward)?;
+            let Some(hit) = intersect(shape, origin, forward) else { return Vec4::new(0.0, 0.0, 0.0, MISSED_RAY_COVERAGE) };
             let shade = AMBIENT + (1.0 - AMBIENT) * hit.nrm.dot(light).max(0.0);
             let (color, cover) = surface(projection, &hit, shades);
-            Some((color * shade, cover))
+            (color * shade).extend(cover)
         })
         .collect();
 
@@ -398,10 +401,13 @@ fn render(projection: &Projection, side: usize, half: f32, supersample: usize, t
         let mut sum = Vec3::ZERO;
         for sub in 0..supersample * supersample {
             let (rx, ry) = (x * supersample + sub % supersample, y * supersample + sub / supersample);
-            let color = match samples.get(ry * rays + rx).copied().flatten() {
-                Some((color, cover)) if on_edge(&samples, rays, rx, ry, cover) => edge.lerp(color, EDGE_BLEND),
-                Some((color, _)) => color,
-                None => background,
+            let sample = samples[ry * rays + rx];
+            let color = if sample.w == MISSED_RAY_COVERAGE {
+                background
+            } else if on_edge(&samples, rays, rx, ry, sample.w) {
+                edge.lerp(sample.truncate(), EDGE_BLEND)
+            } else {
+                sample.truncate()
             };
             sum += color;
         }
@@ -411,7 +417,7 @@ fn render(projection: &Projection, side: usize, half: f32, supersample: usize, t
 }
 
 /// Where the projection's reach ends on the shape: covered here, not on a neighbouring ray of the shape
-fn on_edge(samples: &[Option<(Vec3, f32)>], rays: usize, x: usize, y: usize, cover: f32) -> bool {
+fn on_edge(samples: &[Vec4], rays: usize, x: usize, y: usize, cover: f32) -> bool {
     if cover <= HALF_COVERED {
         return false;
     }
@@ -419,7 +425,7 @@ fn on_edge(samples: &[Option<(Vec3, f32)>], rays: usize, x: usize, y: usize, cov
     let neighbours = [(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)];
     neighbours
         .into_iter()
-        .any(|(nx, ny)| nx < rays && ny < rays && samples.get(ny * rays + nx).copied().flatten().is_some_and(|(_, cover)| cover <= HALF_COVERED))
+        .any(|(nx, ny)| nx < rays && ny < rays && samples.get(ny * rays + nx).is_some_and(|sample| sample.w != MISSED_RAY_COVERAGE && sample.w <= HALF_COVERED))
 }
 
 /// The unlit colour at a hit and how much of the projection reaches it, from the dark and light checker and the uncovered shape `shades` in linear light
@@ -649,6 +655,7 @@ mod tests {
     #[test]
     fn the_view_fits_the_projector_down_to_half_the_shape() {
         assert_eq!(fitted_half(&sized(0.4)), VIEW_HALF, "a small projector keeps the plain framing");
+
         let default = fitted_half(&sized(1.0));
         assert!(default > VIEW_HALF && default < MAX_VIEW_HALF, "{default}");
         assert_eq!(fitted_half(&sized(3.0)), MAX_VIEW_HALF, "x3 stops at half the shape's size");
@@ -660,6 +667,7 @@ mod tests {
             let screen = Screen { view: View::new(), rect, half: fitted_half(&shown) };
             passed_sides(outline.points().map(|point| screen.at(point)), rect)
         };
+
         assert_eq!(sides(1.0), [false; 4], "a fitted projector stays inside the square");
         assert_eq!(sides(3.0), [true; 4], "an x3 sphere runs past every side");
 
@@ -681,10 +689,12 @@ mod tests {
         for offset in [[0.0, 0.0, 0.0], [0.3, 0.0, 0.0], [1.5, 0.8, 0.0]] {
             let slid = Projection::Spherical { scale, uv, offset, projector };
             assert_eq!(fitted_half(&slid), fitted_half(&sized(1.0)), "Offset {offset:?} keeps the view");
+
             let (resting, half) = resting_fit(&slid, PreviewShape::Sphere);
             let screen = Screen { view: View::new(), rect, half };
             let ring = screen.at(resting.unwrap().center);
             let dot = screen.at(ProjectorOutline::of(&slid, PreviewShape::Sphere.half_size()).unwrap().center);
+
             assert!(ring.distance(rect.center()) < 1e-3, "the ring marks the middle: {ring:?}");
             assert_eq!(dot.distance(ring) > 1.0, offset != [0.0; 3], "the filled dot leaves the ring only when slid: {dot:?}");
         }
@@ -707,6 +717,7 @@ mod tests {
         let outline = ProjectorOutline::of(&sized(1.0), PreviewShape::Sphere.half_size()).unwrap();
         let hidden = |line: &Vec<Vec3>| line.iter().filter(|point| screen.hidden(PreviewShape::Sphere, **point)).count();
         assert_eq!(hidden(&outline.lines[0]), 0, "the rim is all seen");
+
         let equator = hidden(&outline.lines[1]);
         assert!(equator > 0 && equator < outline.lines[1].len(), "the equator is half hidden: {equator}");
     }
@@ -786,15 +797,21 @@ mod tests {
         let at = pos2(10.0, 10.0);
         let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
         preview_frame(&ctx, &spherical(1.0), Vec::new());
+
         assert_eq!(shown_supersample(&ctx), Some(SUPERSAMPLE), "at rest: in full");
 
         preview_frame(&ctx, &spherical(1.0), vec![egui::Event::PointerMoved(at), button(true)]);
+
         assert_eq!(shown_supersample(&ctx), Some(SUPERSAMPLE), "a press alone keeps the full picture: nothing changed");
+
         preview_frame(&ctx, &spherical(2.0), Vec::new());
+
         assert_eq!(shown_supersample(&ctx), Some(DRAG_SUPERSAMPLE), "a change while held renders lighter");
+
         let dragged = shown_key(&ctx);
 
         preview_frame(&ctx, &spherical(2.0), vec![button(false)]);
+
         assert_eq!(shown_supersample(&ctx), Some(SUPERSAMPLE), "let go: the same picture in full");
         assert_eq!(shown_key(&ctx), dragged);
     }

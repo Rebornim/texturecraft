@@ -43,6 +43,7 @@ impl PropertySheet<'_> {
             let painter = self.ui.painter();
             painter.rect(button, CornerRadius::same(CONTROL_RADIUS), fill, Stroke::new(1.0, tokens.button_border), StrokeKind::Inside);
             painter.text(button.center(), Align2::CENTER_CENTER, *word, font.clone(), if *enabled { tokens.text } else { tokens.text_dim });
+            self.paint_control_focus(&response);
             x = button.right() + BUTTON_GAP;
         }
 
@@ -54,9 +55,11 @@ impl PropertySheet<'_> {
         if response.clicked() {
             *on = !*on;
         }
+
         response.widget_info(|| WidgetInfo::selected(Role::CheckBox, true, *on, toggle_label));
         self.ui.painter().text(pos2(label_end, center_y), Align2::RIGHT_CENTER, toggle_label, font, tokens.text);
         self.pill(pill, *on, true);
+        self.paint_control_focus(&response);
         ActionRowResponse { clicked, toggled: response.clicked() }
     }
 }

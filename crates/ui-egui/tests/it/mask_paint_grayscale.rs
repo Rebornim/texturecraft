@@ -45,6 +45,7 @@ fn the_grayscale_slot_paints_one_gray_its_ramp_drags_and_inverts() {
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Grayscale").is_some(), "the Grayscale slot card");
 
     click(&mut harness, Role::Button, "Invert");
+
     assert_eq!(harness.state().session.tool.mask_value, 0.0, "white inverts to black");
 
     // A real drag along the ramp to its right end
@@ -58,6 +59,7 @@ fn the_grayscale_slot_paints_one_gray_its_ramp_drags_and_inverts() {
     }
     harness.drop_at(at(1.0));
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.state().session.tool.mask_value > 0.95, "dragged to {}", harness.state().session.tool.mask_value);
 }
 
@@ -65,18 +67,23 @@ fn the_grayscale_slot_paints_one_gray_its_ramp_drags_and_inverts() {
 fn the_slot_picks_an_image_to_paint_and_clear_goes_back_to_the_gray() {
     let (mut harness, image) = folder_mask_harness();
     click(&mut harness, Role::ComboBox, "Grayscale");
+
     assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Import...").is_some(), "Textures starts with Import...");
+
     harness.key_press(egui::Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.query_by_role_and_label(Role::ListBoxOption, "Import...").is_none(), "Escape closes the picker");
     assert_eq!(harness.state().session.tool.mask_image, None);
 
     click(&mut harness, Role::ComboBox, "Grayscale");
     click(&mut harness, Role::ListBoxOption, &image);
+
     assert_eq!(harness.state().session.tool.mask_image.as_deref(), Some(image.as_str()));
     assert!(harness.query_by_role_and_label(Role::Slider, "Grayscale").is_none(), "an image has no ramp");
 
     click(&mut harness, Role::Button, "Clear");
+
     assert_eq!(harness.state().session.tool.mask_image, None);
     assert!(harness.query_by_role_and_label(Role::Slider, "Grayscale").is_some(), "the ramp is back");
 }

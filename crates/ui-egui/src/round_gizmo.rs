@@ -89,7 +89,7 @@ impl RoundGizmo {
             _ => return None,
         };
 
-        let (lower, upper) = app.session.mesh.bounds();
+        let (lower, upper) = app.viewport_mesh_bounds.get(&app.session.mesh);
         let (mesh_center, radius) = mesh_frame((lower, upper));
         let [x, y, z] = projector.rotation.map(f32::to_radians);
         let turn = Mat3::from_euler(EulerRot::ZYX, z, y, x);
@@ -214,7 +214,7 @@ impl RoundGizmo {
         let right_of_rim = top.iter().copied().max_by(|first, second| first.x.total_cmp(&second.x));
         self.outline.extend([top, cap(-half_height)]);
 
-        // The two side lines, where the round side turns away from the camera; seen end on there are none, and the dot sits on the rim's right
+        // End-on views show a rim handle because the two side lines coincide
         let side = along.cross(facing - along * facing.dot(along)).try_normalize();
         let mut sides = Vec::new();
         for edge in side.into_iter().flat_map(|side| [side, -side]) {
@@ -273,7 +273,7 @@ impl RoundGizmo {
                 (turn, self.stretch, origin)
             }
             RoundGrab::Size(axes) => {
-                // How far the pointer went along the line from the centre through where the handle was grabbed (past the centre, none: a drag never flips it); the command keeps each axis's size in its limits on its own side, so does the offset worked out here
+                // Clamp the drag to the command's size limits so the offset keeps the same center
                 let reach = from - self.center;
                 let factor = ((to - self.center).dot(reach) / reach.length().max(MIN_HANDLE_REACH).powi(2)).max(0.0);
                 let stretch = Vec3::from(axes.map(|on| if on { factor } else { 1.0 })) * self.stretch;
@@ -477,6 +477,7 @@ pub(crate) mod tests {
         let stored = &mut harness.state_mut().session.doc.project.layer_mut(layer).unwrap().kind;
         let LayerKind::Fill(Fill { projection: Projection::Cylindrical { axis, .. }, .. }) = stored else { panic!("a cylindrical fill") };
         *axis = 3;
+
         assert_eq!(gizmo(&harness).outline, round_y);
     }
 
@@ -492,13 +493,16 @@ pub(crate) mod tests {
         let (projector, offset) = projector_and_offset(&projection(&harness, layer));
         assert!(offset[0] < -0.05 && offset[1].abs() < 1e-3 && offset[2].abs() < 1e-3, "the X arrow moves the centre along X: {offset:?}");
         assert_eq!(projector.rotation, [0.0; 3]);
+
         let moved = gizmo(&harness);
         assert!(moved.center.x > start.center.x + 20.0, "the centre follows: {moved:?}");
 
         // The Z ring (seen face on) turns it round Z; the centre stays where it is
         let clear = |p: &&Pos2| moved.rings[..2].iter().flatten().map(|other| other.distance(**p)).fold(f32::INFINITY, f32::min);
         let on_ring = *moved.rings[2].iter().max_by(|a, b| clear(a).total_cmp(&clear(b))).unwrap();
+
         assert_eq!(moved.grab(on_ring), Some(RoundGrab::Ring(2)));
+
         drag(&mut harness, on_ring, moved.center + (on_ring - moved.center).rot90(), Modifiers::NONE);
         let (turned, _) = projector_and_offset(&projection(&harness, layer));
         assert!(turned.rotation[2].abs() > 30.0 && turned.rotation[0].abs() < 1e-2, "{:?}", turned.rotation);
@@ -508,6 +512,7 @@ pub(crate) mod tests {
         let dot = scaling.sizes.iter().find(|size| size.axes == [true; 3]).expect("the even-scale dot").at;
         let center = scaling.center;
         assert_eq!(gizmo(&harness).grab(dot), Some(RoundGrab::Size([true; 3])));
+
         drag(&mut harness, dot, center + (dot - center) * 1.5, Modifiers::NONE);
         let (scaled, _) = projector_and_offset(&projection(&harness, layer));
         assert!(scaled.scale.iter().all(|scale| (scale - 1.5).abs() < 0.05), "the side dot scales it evenly: {:?}", scaled.scale);
@@ -523,9 +528,11 @@ pub(crate) mod tests {
         let height = cylinder.sizes.iter().find(|size| size.axes == [false, true, false]).expect("the height handle");
         let SizeHandle { at: top, axes, along } = *height;
         assert_eq!(axes, [false, true, false], "the top handle works along the axis");
+
         let along = along.expect("the height handle is a double arrow");
         assert!(along.y.abs() > 0.99, "drawn upright, along the upright axis: {along:?}");
         assert_eq!(cylinder.cursor(RoundGrab::Size(axes), false), egui::CursorIcon::ResizeVertical);
+
         drag(&mut harness, top, cylinder.center + (top - cylinder.center) * 0.5, Modifiers::NONE);
         let (projector, _) = projector_and_offset(&projection(&harness, layer));
         assert!(projector.scale[1] < 0.7 && projector.scale[0] == 1.0 && projector.scale[2] == 1.0, "{:?}", projector.scale);
@@ -594,6 +601,7 @@ pub(crate) mod tests {
         let center = gizmo(&harness).center;
         let to = center + vec2(40.0, 0.0);
         press_and_move(&mut harness, center, to, Modifiers::NONE);
+
         assert!(round_dragging(&harness), "the centre square is held");
 
         harness.event(egui::Event::WindowFocused(false));
@@ -606,6 +614,7 @@ pub(crate) mod tests {
             harness.event(egui::Event::PointerMoved(to + vec2(20.0, 10.0) * step as f32));
             harness.run_steps(1);
         }
+
         assert_eq!(projection(&harness, layer), left, "moves after it leave the projector where it was");
     }
 
@@ -623,6 +632,7 @@ pub(crate) mod tests {
 
         harness.event_modifiers(egui::Event::PointerMoved(to + vec2(20.0, 0.0)), Modifiers::ALT);
         harness.run_steps(1);
+
         assert_ne!(harness.state().session.camera, camera, "Alt turns the camera");
         assert!(!round_dragging(&harness), "and ends the projector drag");
 
@@ -630,9 +640,12 @@ pub(crate) mod tests {
             harness.event(egui::Event::PointerMoved(to + vec2(20.0, 5.0) * step as f32));
             harness.run_steps(1);
         }
+
         assert_eq!(projection(&harness, layer), slid, "Alt let go, the projector stays where the drag left it");
+
         harness.event(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
         harness.run_steps(2);
+
         assert_eq!(harness.state().session.history_labels().len(), steps + 1, "one undo step");
     }
 
@@ -647,11 +660,13 @@ pub(crate) mod tests {
         let front = gizmo(&harness);
         assert!(front.rings[0].is_empty(), "the X ring seen edge on is left out: {:?}", front.rings[0]);
         assert!(front.rings[1..].iter().all(|ring| !ring.is_empty()), "the Y and Z rings show");
+
         let on_the_line = front.center + vec2(0.0, 40.0);
         assert_ne!(front.grab(on_the_line), Some(RoundGrab::Ring(0)), "a press where its line would be does not grab it");
 
         harness.state_mut().session.camera.yaw = 0.5;
         harness.run_steps(2);
+
         assert!(gizmo(&harness).rings.iter().all(|ring| !ring.is_empty()), "turned aside, every ring shows");
     }
 
@@ -704,6 +719,7 @@ pub(crate) mod tests {
 
             let from = on_the_model_off_the_handles(&harness);
             drag(&mut harness, from, from + vec2(30.0, 0.0), Modifiers::NONE);
+
             assert_eq!(effect_projection(&harness, effect), before, "{kind}: a drag off the handles leaves the projection alone");
             assert_eq!(harness.state().session.history_labels().len(), steps, "{kind}: and adds no undo step");
 
@@ -712,6 +728,7 @@ pub(crate) mod tests {
                 None => crate::frame_gizmo::FrameGizmo::of(harness.state(), rect).unwrap_or_else(|| panic!("{kind}: a gizmo shows")).center,
             };
             drag(&mut harness, center, center + vec2(0.0, -30.0), Modifiers::NONE);
+
             assert_ne!(effect_projection(&harness, effect), before, "{kind}: the centre square moves it");
             assert_eq!(harness.state().session.history_labels().len(), steps + 1, "{kind}: one step, no stroke");
         }
@@ -724,8 +741,10 @@ pub(crate) mod tests {
         let (mut harness, layer) = fill_app("spherical");
         let start = gizmo(&harness);
         assert_eq!(start.sizes.len(), 1, "one dot: {:?}", start.sizes);
+
         let dot = start.sizes[0].at;
         assert_eq!(start.grab(dot), Some(RoundGrab::Size([true; 3])));
+
         drag(&mut harness, dot, start.center + (dot - start.center) * 1.4, Modifiers::NONE);
         let (scaled, _) = projector_and_offset(&projection(&harness, layer));
         assert!(scaled.scale.iter().all(|scale| (scale - 1.4).abs() < 0.08), "it scales evenly: {:?}", scaled.scale);
@@ -746,6 +765,7 @@ pub(crate) mod tests {
             Some(RoundGrab::Size([true, false, false])),
             "grabbed from its tip"
         );
+
         drag(&mut harness, across.at, box_gizmo.center + (across.at - box_gizmo.center) * 0.5, Modifiers::NONE);
         let (stretched, _) = projector_and_offset(&projection(&harness, layer));
         assert!((stretched.scale[0] - scaled.scale[0] * 0.5).abs() < 0.05, "the X face halves it across: {:?}", stretched.scale);
@@ -773,6 +793,7 @@ pub(crate) mod tests {
 
         let start = gizmo(&harness);
         assert_eq!(start.stretch, Vec3::from(mirrored), "the gizmo reads the mirror as the projection does");
+
         drag(&mut harness, start.center, start.center + vec2(30.0, -20.0), Modifiers::NONE);
         let (slid, offset) = projector_and_offset(&projection(&harness, layer));
         assert_eq!(slid.scale, mirrored, "a slide keeps the mirror");
@@ -781,6 +802,7 @@ pub(crate) mod tests {
         let tip = gizmo(&harness).arrows[1].unwrap();
         let center = gizmo(&harness).center;
         drag(&mut harness, tip, tip + (tip - center).normalized() * 20.0, Modifiers::NONE);
+
         assert_eq!(projector_and_offset(&projection(&harness, layer)).0.scale, mirrored, "so does a move along an arrow");
 
         let before_turn = projector_and_offset(&projection(&harness, layer)).0;
@@ -828,12 +850,15 @@ pub(crate) mod tests {
         let center = gizmo(&harness).center;
         harness.hover_at(center);
         harness.run_steps(2);
+
         assert_eq!(harness.output().platform_output.cursor_icon, egui::CursorIcon::Grab, "the centre square shows it slides");
 
         harness.event(egui::Event::ModifiersChanged(Modifiers::ALT));
         harness.event(egui::Event::PointerMoved(center + vec2(1.0, 0.0)));
         harness.run_steps(2);
+
         assert_ne!(harness.output().platform_output.cursor_icon, egui::CursorIcon::Grab, "with Alt held it does not");
+
         harness.event(egui::Event::ModifiersChanged(Modifiers::NONE));
         harness.run_steps(2);
     }
@@ -849,15 +874,19 @@ pub(crate) mod tests {
         harness.run_steps(25);
         harness.get_by_role_and_label(egui::Role::Button, "Base color").click();
         harness.run_steps(2);
+
         assert!(crate::color_picker::open_window(&harness.ctx).is_some(), "the picker is open");
+
         let steps = harness.state().session.history_labels().len();
 
         drag(&mut harness, from, from + vec2(40.0, 0.0), Modifiers::NONE);
+
         assert!(crate::color_picker::open_window(&harness.ctx).is_none(), "the press closed the picker");
         assert_eq!(projection(&harness, layer), before, "and slid nothing");
         assert_eq!(harness.state().session.history_labels().len(), steps, "nor made an undo step");
 
         drag(&mut harness, from, from + vec2(40.0, 0.0), Modifiers::NONE);
+
         assert_ne!(projection(&harness, layer), before, "the next press slides again");
     }
 
@@ -885,6 +914,7 @@ pub(crate) mod tests {
         drag(&mut harness, center, center + vec2(-40.0, 0.0), Modifiers::COMMAND);
         harness.event(egui::Event::ModifiersChanged(Modifiers::NONE));
         harness.run_steps(2);
+
         assert_ne!(harness.state().session.tool.brush.flow, flow, "the drag changes the brush");
         assert_eq!(projection(&harness, layer), before, "and leaves the projection");
     }
@@ -928,10 +958,12 @@ pub(crate) mod tests {
 
         let painted = harness.state().session.quick_mask.revision;
         click(&mut harness, edge, off);
+
         assert_eq!(harness.state().session.quick_mask.revision, painted, "a press that began on the handle paints no dab");
 
         // The same click a little past the handle paints
         click(&mut harness, off, off + (off - edge));
+
         assert_ne!(harness.state().session.quick_mask.revision, painted, "a press off the handle paints");
     }
 
@@ -948,6 +980,7 @@ pub(crate) mod tests {
         let across = [true, true, false];
         let dot = end_on.sizes.iter().find(|size| size.axes == across).unwrap_or_else(|| panic!("the across dot: {:?}", end_on.sizes)).at;
         assert_eq!(end_on.grab(dot), Some(RoundGrab::Size(across)));
+
         drag(&mut harness, dot, end_on.center + (dot - end_on.center) * 1.5, Modifiers::NONE);
         let (projector, _) = projector_and_offset(&projection(&harness, layer));
         assert!(projector.scale[0] > 1.2 && projector.scale[1] > 1.2 && projector.scale[2] == 1.0, "it scales across only: {:?}", projector.scale);

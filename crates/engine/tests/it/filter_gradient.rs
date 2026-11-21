@@ -16,6 +16,7 @@ fn near(a: f32, b: f32) -> bool {
 fn a_gradient_saved_before_reads_and_saves_as_before() {
     let saved = json!({"GradientMap": {"colors": [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]]}});
     let filter: Filter = serde_json::from_value(saved.clone()).unwrap();
+
     assert_eq!(filter, Filter::even_gradient(vec![[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]]));
     assert_eq!(serde_json::to_value(&filter).unwrap(), saved, "nothing new is saved");
 
@@ -40,12 +41,15 @@ fn gradient_places_quantity_and_input_transformation() {
     assert!(near(center(&mut s, Channel::BaseColor)[0], MID_GRAY / 2.0), "halfway from black to mid gray");
 
     set(&mut s, effect, json!({"positions": [0.0, 0.25, 1.0]}));
+
     assert!(near(center(&mut s, Channel::BaseColor)[0], MID_GRAY), "mid gray moved to 0.25");
 
     set(&mut s, effect, json!({"invert": true}));
+
     assert!(near(center(&mut s, Channel::BaseColor)[0], MID_GRAY + (1.0 - MID_GRAY) * (0.5 / 0.75)), "inverted, it reads 0.75");
 
     set(&mut s, effect, json!({"invert": false, "balance": 0.75}));
+
     assert!(near(center(&mut s, Channel::BaseColor)[0], MID_GRAY + (1.0 - MID_GRAY) * (0.25 / 0.75)), "balance 0.75 lifts it to 0.5");
 
     set(&mut s, effect, json!({"balance": 0.5, "positions": [0.0, 0.5, 1.0], "linear": false}));
@@ -53,6 +57,7 @@ fn gradient_places_quantity_and_input_transformation() {
     assert!(near(srgb, 0.0508), "blended in sRGB, halfway from black to mid gray is sRGB 0.25: {srgb}");
 
     set(&mut s, effect, json!({"quantity": 4}));
+
     assert_eq!(filter_of(&s, effect).ramp_colors().len(), 4);
 
     refused(
@@ -93,6 +98,7 @@ fn display_gradient_shows_the_ramp_across_the_texture() {
     let effect = filtered(&mut s, [0.9; 3], json!({"filter": "gradientMap", "debug": true}));
     let (value, uv) = (center(&mut s, Channel::BaseColor), center_uv(&mut s));
     let ramp = filter_of(&s, effect).ramp_at(uv.x).unwrap();
+
     assert!((0..3).all(|k| (value[k] - ramp[k]).abs() < 0.03), "{value:?} vs {ramp:?} at u {}", uv.x);
 }
 
@@ -136,9 +142,11 @@ fn gradient_curve_remaps_through_its_preset() {
     assert!(near(center(&mut s, Channel::BaseColor)[0], round), "Round at 0.25");
 
     set(&mut s, effect, json!({"preset": "easeIn"}));
+
     assert!(near(center(&mut s, Channel::BaseColor)[0], 0.0625), "Ease In at 0.25");
 
     set(&mut s, effect, json!({"invert": true}));
+
     assert!(near(center(&mut s, Channel::BaseColor)[0], 0.5625), "Ease In at 0.75");
 
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "preset": "spiral"})).is_err());

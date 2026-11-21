@@ -72,8 +72,10 @@ mod tests {
         assert_eq!(band(outline, false, 0.3), 1.0, "a hard band outside");
         assert_eq!(band(outline, true, 0.3), 0.0, "nothing inside an outside band");
         assert_eq!(band(outline, false, 0.0), 0.0, "nothing past its reach");
+
         let inside = MaskOutline { position: OutlinePosition::Inside, ..outline };
         assert_eq!((band(inside, true, 0.3), band(inside, false, 0.3)), (1.0, 0.0));
+
         let both = MaskOutline { position: OutlinePosition::Both, ..outline };
         assert_eq!((band(both, true, 0.3), band(both, false, 0.3)), (1.0, 1.0));
         assert_eq!(outline.apply(0.4, 0.0), 0.0, "from black");

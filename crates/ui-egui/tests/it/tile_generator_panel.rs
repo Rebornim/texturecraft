@@ -121,6 +121,7 @@ fn the_anchor_points_tab_picks_an_anchor() {
     // An anchor tile is labelled with the anchor's name; its layer is named only where two anchors share a name
     harness.get_by_role_and_label(Role::ListBoxOption, "Height").click();
     harness.run_steps(3);
+
     assert!(source(&harness, effect).anchor().is_some());
 }
 
@@ -155,6 +156,7 @@ fn an_amount_drag_is_one_undo_step_and_restore_defaults_puts_the_tiles_back() {
 
     drag_slider(&mut harness, "X amount");
     let tile = pattern(&harness, effect).tile.unwrap();
+
     assert!(tile.amount[0] > TileGenerator::default().amount[0], "the drag adds columns: {:?}", tile.amount);
     assert_eq!(harness.state().session.history_labels().len(), history + 1, "one drag is one undo step");
 
@@ -162,6 +164,7 @@ fn an_amount_drag_is_one_undo_step_and_restore_defaults_puts_the_tiles_back() {
     harness.run_steps(SCROLL_FRAMES);
     lowest(&harness, "Restore defaults").click();
     harness.run_steps(3);
+
     assert_eq!(*pattern(&harness, effect).tile.unwrap(), TileGenerator::default());
 }
 

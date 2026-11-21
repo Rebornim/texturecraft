@@ -51,28 +51,44 @@ impl ColorMatch {
 
     /// Linear `color` moved by the step from `source` to `target`; without Custom Color Variation it keeps all of its difference from the source, with it at most Hue, Chroma and Luma of it (all 0: the target color itself). Hostile values give the color back
     pub fn apply(&self, color: [f32; 3], source: [f32; 3], target: [f32; 3]) -> [f32; 3] {
-        let [lightness, a, b] = oklab::from_linear(color.map(|v| v.max(0.0)));
-        let [source_lightness, source_a, source_b] = oklab::from_linear(source.map(|v| v.max(0.0)));
-        let [target_lightness, target_a, target_b] = oklab::from_linear(target.map(|v| v.max(0.0)));
+        let lab = |color: [f32; 3]| oklab::from_linear(color.map(|component| component.max(0.0)));
+        let [lightness, a, b] = lab(color);
+        let [source_lightness, source_a, source_b] = lab(source);
+        let [target_lightness, target_a, target_b] = lab(target);
 
         let moved = if self.custom_variation {
-            let limit = |value: f32, max: f32| if value.is_finite() { value.clamp(0.0, max) } else { 0.0 };
-            let keep = |difference: f32, max: f32| difference.clamp(-max, max);
-            let (chroma, hue) = (a.hypot(b), b.atan2(a));
-            let (source_chroma, source_hue) = (source_a.hypot(source_b), source_b.atan2(source_a));
-            let (target_chroma, target_hue) = (target_a.hypot(target_b), target_b.atan2(target_a));
-            let turn = (hue - source_hue + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
-            let out_lightness = target_lightness + keep(lightness - source_lightness, limit(self.luma, Self::MAX_LUMA));
-            let out_chroma = (target_chroma + keep(chroma - source_chroma, limit(self.chroma, Self::MAX_CHROMA))).max(0.0);
-            let out_hue = target_hue + keep(turn, limit(self.hue, Self::MAX_HUE_DEGREES).to_radians());
-            [out_lightness, out_chroma * out_hue.cos(), out_chroma * out_hue.sin()]
+            self.move_polar(polar([lightness, a, b]), polar([source_lightness, source_a, source_b]), polar([target_lightness, target_a, target_b]))
         } else {
             [target_lightness + lightness - source_lightness, target_a + a - source_a, target_b + b - source_b]
         };
 
-        let out = oklab::to_linear(moved);
-        if out.iter().all(|v| v.is_finite()) { out.map(|v| v.clamp(0.0, 1.0)) } else { color }
+        matched_linear(color, moved)
     }
+
+    #[inline]
+    pub(super) fn move_polar(
+        &self,
+        [lightness, chroma, hue]: [f32; 3],
+        [source_lightness, source_chroma, source_hue]: [f32; 3],
+        [target_lightness, target_chroma, target_hue]: [f32; 3],
+    ) -> [f32; 3] {
+        let limit = |value: f32, max: f32| if value.is_finite() { value.clamp(0.0, max) } else { 0.0 };
+        let keep = |difference: f32, max: f32| difference.clamp(-max, max);
+        let turn = (hue - source_hue + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        let out_lightness = target_lightness + keep(lightness - source_lightness, limit(self.luma, Self::MAX_LUMA));
+        let out_chroma = (target_chroma + keep(chroma - source_chroma, limit(self.chroma, Self::MAX_CHROMA))).max(0.0);
+        let out_hue = target_hue + keep(turn, limit(self.hue, Self::MAX_HUE_DEGREES).to_radians());
+        [out_lightness, out_chroma * out_hue.cos(), out_chroma * out_hue.sin()]
+    }
+}
+
+pub(super) fn polar([lightness, a, b]: [f32; 3]) -> [f32; 3] {
+    [lightness, a.hypot(b), b.atan2(a)]
+}
+
+pub(super) fn matched_linear(original: [f32; 3], lab: [f32; 3]) -> [f32; 3] {
+    let out = oklab::to_linear(lab);
+    if out.iter().all(|value| value.is_finite()) { out.map(|value| value.clamp(0.0, 1.0)) } else { original }
 }
 
 #[cfg(test)]

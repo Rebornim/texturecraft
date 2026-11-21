@@ -60,11 +60,13 @@ fn this_layer_is_compared_with_the_layers_below() {
     assert_eq!(base_color(&mut session), LAYER_COLOR, "the layer shows where its mask compares true");
 
     execute(&mut session, "effect.set", &json!({"effect": compare.0, "op": "lesser"})).unwrap();
+
     assert!(close(mask(&mut session, top), 0.0));
     assert_eq!(base_color(&mut session), BELOW_COLOR, "the layer is hidden where the comparison fails");
 
     // Changing the layers below changes the mask above them (no stale cached stack)
     execute(&mut session, "layer.fill.set", &json!({"layer": bottom.0, "channel": "roughness", "value": 0.9})).unwrap();
+
     assert!(close(mask(&mut session, top), 1.0), "0.6 < 0.9 holds: {}", mask(&mut session, top));
     assert_eq!(base_color(&mut session), LAYER_COLOR);
 }
@@ -78,9 +80,11 @@ fn hardness_ramps_the_mask_past_the_edge() {
     assert!(close(mask(&mut session, top), 0.3), "{}", mask(&mut session, top));
 
     execute(&mut session, "effect.set", &json!({"effect": compare.0, "hardness": 1.0})).unwrap();
+
     assert!(close(mask(&mut session, top), 1.0), "a hard step: {}", mask(&mut session, top));
 
     execute(&mut session, "effect.set", &json!({"effect": compare.0, "op": "within", "tolerance": 0.02, "hardness": 0.9})).unwrap();
+
     assert!(close(mask(&mut session, top), 0.9), "0.01 past the tolerance of 0.1's ramp: {}", mask(&mut session, top));
 }
 
@@ -89,8 +93,11 @@ fn a_constant_side_and_the_mask_so_far() {
     let mut session = session();
     let (_, top, compare) = two_layers(&mut session, 0.2, 0.6);
     execute(&mut session, "effect.set", &json!({"effect": compare.0, "right": "constant", "value": 0.7, "hardness": 1.0})).unwrap();
+
     assert!(close(mask(&mut session, top), 0.0), "0.6 > 0.7 fails");
+
     execute(&mut session, "effect.set", &json!({"effect": compare.0, "left": "thisMask", "value": 0.5})).unwrap();
+
     assert!(close(mask(&mut session, top), 1.0), "a white mask (1) > 0.5 holds");
 
     let inspected = execute(&mut session, "project.inspect", &Value::Null).unwrap().to_string();
@@ -104,10 +111,15 @@ fn compare_parameters_are_one_undo_step_and_refuse_unknown_values() {
     let mut session = session();
     let (_, top, compare) = two_layers(&mut session, 0.2, 0.6);
     execute(&mut session, "effect.set", &json!({"effect": compare.0, "op": "lesser", "right": "constant", "value": 0.9})).unwrap();
+
     assert!(close(mask(&mut session, top), 1.0), "0.6 < 0.9");
+
     execute(&mut session, "edit.undo", &Value::Null).unwrap();
+
     assert!(close(mask(&mut session, top), 1.0), "back to 0.6 > layers below 0.2");
+
     let inspected = execute(&mut session, "project.inspect", &Value::Null).unwrap().to_string();
+
     assert!(inspected.contains("\"op\":\"greater\"") && inspected.contains("\"right\":\"layersBelow\""), "one undo step restores both");
 
     assert!(execute(&mut session, "effect.set", &json!({"effect": compare.0, "left": "elsewhere"})).is_err());
@@ -122,9 +134,11 @@ fn the_histogram_counts_what_each_side_reads() {
     let histogram = execute(&mut session, "effect.histogram", &json!({"effect": compare.0, "bins": 10})).unwrap();
     let busiest = |side: &str| {
         let counts: Vec<u64> = histogram["compare"][side].as_array().unwrap().iter().map(|count| count.as_u64().unwrap()).collect();
+
         assert!(counts.iter().sum::<u64>() > 0, "{side} counts texels");
         counts.iter().enumerate().max_by_key(|(_, count)| **count).map(|(bucket, _)| bucket).unwrap()
     };
+
     assert_eq!(busiest("left"), 6, "this layer's roughness 0.65");
     assert_eq!(busiest("right"), 2, "the layers below's roughness 0.25");
 }

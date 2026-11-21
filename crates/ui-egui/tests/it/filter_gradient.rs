@@ -18,6 +18,7 @@ fn a_gradient_marker_drags_its_color_along_the_ramp() {
 
     let Filter::GradientMap { positions, .. } = filter_of(&harness, effect) else { panic!() };
     let moved = positions.get(1).copied().unwrap();
+
     assert!(moved > 0.6, "dragged right: {positions:?}");
 
     undo(&mut harness);
@@ -48,7 +49,9 @@ fn a_color_quantity_drag_is_its_own_undo_step() {
     let (mut harness, effect) = app_with("gradientMap", "content", WINDOW_HEIGHT);
     let linear = harness.get_by_role_and_label(Role::CheckBox, "Blend Color in Linear").rect();
     click_at(&mut harness, linear.center());
+
     assert!(matches!(filter_of(&harness, effect), Filter::GradientMap { linear: false, .. }));
+
     let depth = undo_depth(&harness);
 
     // From 2.6 colors to 3.2 (both round to the 3 it has), then to 4.2

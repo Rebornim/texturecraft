@@ -2,8 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::finite_unit;
 use crate::grayscale_mode::GrayscaleMode;
+use crate::{ChannelKind, finite_unit, lum, per_unit};
 
 /// Full contrast stays a finite step instead of a division by zero
 const MIN_STEEPNESS: f32 = 1e-3;
@@ -44,12 +44,22 @@ impl GradientInput {
 
     /// The ramp position of gray `x`
     pub fn shape(&self, x: f32) -> f32 {
-        // Left as it is, the gray reaches the ramp bit for bit as projects saved before read it (the ramp clamps it)
+        // Preserve the exact input when the transformation is neutral
         if self.balance == NEUTRAL_BALANCE && self.contrast == 0.0 && !self.invert {
             return x;
         }
 
         shape_gray(x, self.balance, self.contrast, self.invert)
+    }
+
+    /// Apply a gradient to a channel using its ramp sampler
+    pub fn map(&self, kind: ChannelKind, value: [f32; 3], sample: impl Fn(f32) -> Option<[f32; 3]>) -> Option<[f32; 3]> {
+        if kind == ChannelKind::Color {
+            return sample(self.shape(self.mode.gray(value)));
+        }
+
+        // Preserve the signed-channel mapping and leave normals alone
+        Some(per_unit(kind, value, |gray| sample(self.shape(gray)).map_or(gray, lum)))
     }
 }
 
@@ -64,17 +74,21 @@ pub fn shape_gray(x: f32, balance: f32, contrast: f32, invert: bool) -> f32 {
 /// A ramp stop's place and color
 type Stop = (f32, [f32; 3]);
 
+pub(crate) fn ramp_stops<'a>(colors: &'a [[f32; 3]], positions: &'a [f32]) -> impl ExactSizeIterator<Item = Stop> + 'a {
+    let last = colors.len().saturating_sub(1);
+    colors.iter().copied().enumerate().map(move |(index, color)| {
+        let even_position = || if last == 0 { 0.0 } else { index as f32 / last as f32 };
+        let position = positions.get(index).copied().filter(|position| position.is_finite()).unwrap_or_else(even_position);
+        (position.clamp(0.0, 1.0), color)
+    })
+}
+
 /// The color at `t` on a ramp of `colors` placed at `positions` (each 0..1, evenly spaced where missing), blended in linear or sRGB
 pub fn ramp(colors: &[[f32; 3]], positions: &[f32], linear: bool, t: f32) -> Option<[f32; 3]> {
-    let last = colors.len().checked_sub(1)?;
-    let even = |index: usize| if last == 0 { 0.0 } else { index as f32 / last as f32 };
-    let stops = colors
-        .iter()
-        .enumerate()
-        .map(|(index, color)| (positions.get(index).copied().filter(|p| p.is_finite()).unwrap_or_else(|| even(index)).clamp(0.0, 1.0), *color));
+    let stops = ramp_stops(colors, positions);
     let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.0 };
 
-    // The stops each side of `t` without sorting them, per texel: the last placed at or before it and the first placed after it
+    // Keep the last stop at or before the sample and the first stop after it
     let (mut before, mut after): (Option<Stop>, Option<Stop>) = (None, None);
     for (position, color) in stops {
         if position <= t {
@@ -91,15 +105,14 @@ pub fn ramp(colors: &[[f32; 3]], positions: &[f32], linear: bool, t: f32) -> Opt
         (None, None) => return None,
     };
 
+    let encode = |color: [f32; 3]| if linear { color } else { color.map(linear_to_srgb) };
+    Some(interpolate((before_place, encode(before_color)), (after_place, encode(after_color)), linear, t))
+}
+
+pub(crate) fn interpolate((before_place, before_color): Stop, (after_place, after_color): Stop, linear: bool, t: f32) -> [f32; 3] {
     let share = if after_place > before_place { ((t - before_place) / (after_place - before_place)).clamp(0.0, 1.0) } else { 0.0 };
-    Some(if linear {
-        std::array::from_fn(|k| before_color[k] + (after_color[k] - before_color[k]) * share)
-    } else {
-        std::array::from_fn(|k| {
-            let (before, after) = (linear_to_srgb(before_color[k]), linear_to_srgb(after_color[k]));
-            srgb_to_linear(before + (after - before) * share)
-        })
-    })
+    let color = std::array::from_fn(|component| before_color[component] + (after_color[component] - before_color[component]) * share);
+    if linear { color } else { color.map(srgb_to_linear) }
 }
 
 // A copy of texturecraft_texel's: texel and core are both layer 0, so core cannot use it

@@ -60,6 +60,7 @@ fn scale_and_rotation_drags_are_one_undo_step_each_and_the_reset_drops_them() {
     let scaled = offset(&harness, folder);
     assert!((scaled.scale - 4.0).abs() < SCALE_TOLERANCE, "the right end is x4: {scaled:?}");
     assert_eq!(harness.state().session.history_labels().len(), steps + 1, "one undo step for the drag");
+
     drag(&mut harness, "Rotation", 0.75);
     let turned = offset(&harness, folder);
     assert!((turned.rotation - 90.0).abs() < ROTATION_TOLERANCE_DEGREES && turned.scale == scaled.scale, "{turned:?}");
@@ -69,6 +70,7 @@ fn scale_and_rotation_drags_are_one_undo_step_each_and_the_reset_drops_them() {
 
     harness.get_by_role_and_label(Role::Button, "Contents: Reset to defaults").click();
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(offset(&harness, folder).is_none(), "the reset drops the offset");
     assert_eq!(harness.state().session.history_labels().len(), steps + 3);
 }
@@ -86,14 +88,17 @@ fn randomize_seeds_is_one_undo_step_the_contents_reset_puts_them_back_and_an_emp
     let steps = harness.state().session.history_labels().len();
     harness.get_by_role_and_label(Role::Button, "Randomize seeds").click();
     harness.run_steps(SETTLE_FRAMES);
+
     assert_ne!(seed(&harness), 7);
     assert_eq!(harness.state().session.history_labels().len(), steps + 1);
 
     // The Contents reset lights up and puts the seed back, in one undo step
     let reset = harness.get_by_role_and_label(Role::Button, "Contents: Reset to defaults");
     assert!(!reset.accesskit_node().is_disabled(), "randomized seeds light the reset");
+
     reset.click();
     harness.run_steps(SETTLE_FRAMES);
+
     assert_eq!(seed(&harness), 7, "the seed from before Randomize seeds");
     assert_eq!(harness.state().session.history_labels().len(), steps + 2);
     assert!(harness.get_by_role_and_label(Role::Button, "Contents: Reset to defaults").accesskit_node().is_disabled(), "nothing left to reset");

@@ -38,6 +38,7 @@ fn a_mask_stroke_paints_the_tools_image_gray_and_null_goes_back_to_the_value() {
     let (mut session, layer) = masked_layer();
     let image = session.import_resource_bytes("halves.png", halves_png()).unwrap();
     let set = execute(&mut session, "tool.material", &json!({"maskImage": image})).unwrap();
+
     assert_eq!(set["maskImage"], json!(image));
     assert!(execute(&mut session, "tool.material", &json!({"maskImage": "missing.png"})).is_err(), "an unknown image is refused");
     assert!(execute(&mut session, "tool.material", &json!({"maskImage": 3})).is_err());
@@ -48,8 +49,11 @@ fn a_mask_stroke_paints_the_tools_image_gray_and_null_goes_back_to_the_value() {
 
     // Back to one value: the next stroke paints white on the left too
     let set = execute(&mut session, "tool.material", &json!({"maskImage": null})).unwrap();
+
     assert_eq!(set["maskImage"], Value::Null);
+
     execute(&mut session, "tool.strokeUv", &json!({"points": [[0.1, 0.5], [0.9, 0.5]]})).unwrap();
+
     assert!(mask_at(&session, layer, 0.25, 0.5) > 0.95);
 }
 
@@ -114,6 +118,7 @@ fn a_mask_stroke_paints_the_image_it_began_with_when_the_resource_is_replaced_mi
     session.end_stroke().unwrap();
 
     assert_eq!(replaced, image, "the white picture took the black one's name");
+
     let (left, right) = (mask_at(&session, layer, 0.25, 0.5), mask_at(&session, layer, 0.75, 0.5));
     assert!(left < 0.05 && right < 0.05, "the whole stroke is black: left {left}, right {right}");
 }

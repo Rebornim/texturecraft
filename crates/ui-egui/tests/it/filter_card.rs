@@ -17,6 +17,7 @@ fn a_pill_switches_its_channel_and_the_chip_picks_the_divider() {
 
     let chip = harness.get_by_role_and_label(Role::ComboBox, "÷10").rect();
     click_at(&mut harness, chip.center());
+
     assert!(egui::Popup::is_any_open(&harness.ctx), "the chip opens its list");
 
     let hundred = harness.get_by_role_and_label(Role::ListBoxOption, "÷100").rect();
@@ -33,6 +34,7 @@ fn restore_defaults_and_clear_on_the_card() {
 
     let restore = harness.get_by_role_and_label(Role::Button, "Restore defaults");
     assert!(restore.accesskit_node().is_disabled(), "inert at the defaults");
+
     let restore = restore.rect();
     let clear = harness.get_by_role_and_label(Role::Button, "Clear").rect();
     assert!((restore.center().y - clear.center().y).abs() < 0.5 && restore.right() < clear.left(), "⟲ beside × on the card");
@@ -68,6 +70,7 @@ fn the_filter_card_holds_its_parameters() {
     // A row inside the card keeps the card's bleed on both sides; a band would span the panel
     assert_eq!(attributes.left(), card.left() + CARD_BLEED, "{attributes:?} {card:?}");
     assert_eq!(sub_group.left(), attributes.left(), "a sub-group is a caption in the card, not a card of its own");
+
     for slider in harness.query_all_by_role(Role::Slider) {
         assert!(slider.rect().bottom() <= attributes.top(), "Attributes is the card's last row: {:?}", slider.rect());
     }

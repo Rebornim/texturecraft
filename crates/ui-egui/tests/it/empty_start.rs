@@ -381,6 +381,7 @@ fn close_releases_the_layer_thumbnail_snapshot() {
         invoke(&mut harness, "file.close");
 
         assert!(!harness.state().session.project_open);
+
         assert_eventually_released(&old_mesh);
         for (pixels, _) in &old_maps {
             assert_eventually_released(pixels);

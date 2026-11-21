@@ -56,8 +56,12 @@ impl EnvImage {
 
     /// Box-downsample by 2.
     pub fn half(&self) -> EnvImage {
-        let (width, height, data) = environment_sky::half(self.width, self.height, |x, y| self.get(x as i64, y as i64));
-        EnvImage { width, height, data: data.iter().map(Vec3::to_array).collect() }
+        Self::half_from(self.width, self.height, |x, y| self.get(i64::from(x), i64::from(y)))
+    }
+
+    fn half_from(width: u32, height: u32, texel: impl Fn(u32, u32) -> Vec3 + Sync) -> Self {
+        let (width, height, data) = environment_sky::half(width, height, texel);
+        Self { width, height, data: data.into_iter().map(|rgb| rgb.to_array()).collect() }
     }
 
     /// An imported equirect image (`rgba` row-major, top row first, sRGB-encoded when `srgb`) as
@@ -65,16 +69,32 @@ impl EnvImage {
     /// range, and images larger than [`MAX_IMPORT_WIDTH`] are box-downsampled. None when the
     /// pixel count does not match the size.
     pub fn from_rgba(width: u32, height: u32, rgba: &[[f32; 4]], srgb: bool) -> Option<EnvImage> {
-        if width == 0 || height == 0 || rgba.len() as u64 != width as u64 * height as u64 {
+        Self::from_pixels(width, height, rgba, srgb)
+    }
+
+    /// An imported linear RGB equirect image, with the same validation and size limits as [Self::from_rgba].
+    pub fn from_linear_rgb(width: u32, height: u32, rgb: &[[f32; 3]]) -> Option<Self> {
+        Self::from_pixels(width, height, rgb, false)
+    }
+
+    fn from_pixels<const COMPONENTS: usize>(width: u32, height: u32, pixels: &[[f32; COMPONENTS]], srgb: bool) -> Option<Self> {
+        if width == 0 || height == 0 || pixels.len() as u64 != width as u64 * height as u64 {
             return None;
         }
-        let linear = |v: f32| environment_sky::environment_linear(v, srgb);
-        let data = rgba.par_iter().map(|p| [linear(p[0]), linear(p[1]), linear(p[2])]).collect();
-        let mut img = EnvImage { width, height, data };
+
+        let linear_rgb = |pixel: &[f32; COMPONENTS]| std::array::from_fn(|component| environment_sky::environment_linear(pixel[component], srgb));
+        let mut img = if width > MAX_IMPORT_WIDTH || height > MAX_IMPORT_WIDTH {
+            // Linearize only the texels that contribute to the first reduced level
+            Self::half_from(width, height, |x, y| Vec3::from(linear_rgb(&pixels[y as usize * width as usize + x as usize])))
+        } else {
+            Self { width, height, data: pixels.par_iter().map(linear_rgb).collect() }
+        };
+
         while img.width > MAX_IMPORT_WIDTH || img.height > MAX_IMPORT_WIDTH {
             img = img.half();
         }
-        // The mip chain needs at least 4×2 texels at its last level.
+
+        // The mip chain needs at least 4×2 texels at its last level
         if img.width < 128 || img.height < 64 {
             let (w, h) = (img.width.max(128), img.height.max(64));
             let data = (0..w * h).map(|i| img.sample(dir_of(((i % w) as f32 + 0.5) / w as f32, ((i / w) as f32 + 0.5) / h as f32)).to_array()).collect();

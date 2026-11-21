@@ -49,10 +49,13 @@ fn add_effect_greys_mask_only_effects_on_the_content_and_adds_them_in_the_mask()
     let steps = harness.state().session.history_labels().len();
     for item in ["Compare mask", "Color selection", "Generator"] {
         pick(&mut harness, "Add effect", item);
+
         assert_eq!(harness.state().session.history_labels().len(), steps, "{item} is greyed on the layer content, not sent to the mask");
+
         harness.key_press(egui::Key::Escape);
         harness.run_steps(SETTLE_FRAMES);
     }
+
     assert!(harness.state().session.doc.project.layer(layer).unwrap().mask.is_none());
 
     harness.state_mut().run("mask.add.white", json!({"layer": layer.0}));
@@ -60,8 +63,10 @@ fn add_effect_greys_mask_only_effects_on_the_content_and_adds_them_in_the_mask()
     pick(&mut harness, "Add effect", "Color selection");
     let kinds = mask_kinds(&harness, layer);
     assert!(matches!(kinds.as_slice(), [EffectKind::ColorSelection(_)]), "{kinds:?}");
+
     let mask = harness.state().session.doc.project.layer(layer).unwrap().mask.as_ref().unwrap();
     let added = mask.effects.iter().find(|effect| matches!(effect.kind, EffectKind::ColorSelection(_))).unwrap().id;
+
     assert_eq!(harness.state().session.target, StackTarget::Effect(added), "the new colour selection is selected");
 }
 
@@ -74,6 +79,7 @@ fn add_mask_adds_a_height_combination_and_greys_once_the_layer_has_a_mask() {
 
     let steps = harness.state().session.history_labels().len();
     pick(&mut harness, "Add mask", "White");
+
     assert_eq!(harness.state().session.history_labels().len(), steps, "a layer with a mask adds to it through Add effect");
 }
 
@@ -81,10 +87,13 @@ fn add_mask_adds_a_height_combination_and_greys_once_the_layer_has_a_mask() {
 fn bitmap_opens_the_texture_picker_and_adds_the_mask_only_once_one_is_picked() {
     let (mut harness, layer) = app();
     pick(&mut harness, "Add mask", "Bitmap");
+
     assert!(egui::Popup::is_any_open(&harness.ctx), "Bitmap opens the texture picker");
     assert!(harness.state().session.doc.project.layer(layer).unwrap().mask.is_none(), "no mask until a texture is picked");
+
     harness.key_press(egui::Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(!egui::Popup::is_any_open(&harness.ctx));
     assert!(harness.state().session.doc.project.layer(layer).unwrap().mask.is_none(), "Escape adds nothing");
 
@@ -136,6 +145,7 @@ fn a_narrow_layers_panel_keeps_every_toolbar_button_inside_and_clickable() {
 
     for label in ["Add effect", "Add mask", "Add paint layer", "Add fill layer", "Add folder", "Remove layer"] {
         let button = harness.query_all_by_label_contains(label).find(|node| node.accesskit_node().role() == Role::Button).unwrap().rect();
+
         assert!(button.left() >= left && button.right() <= left + width, "{label} at {button:?} stays inside the panel");
     }
 
@@ -143,9 +153,12 @@ fn a_narrow_layers_panel_keeps_every_toolbar_button_inside_and_clickable() {
     let before = layers(&harness);
     let folder = harness.get_by_role_and_label(Role::Button, "Add folder").rect();
     click_at(&mut harness, folder.center());
+
     assert_eq!(layers(&harness), before + 1, "Add folder answers a click");
+
     let remove = harness.query_all_by_label_contains("Remove layer").find(|node| node.accesskit_node().role() == Role::Button).unwrap().rect();
     click_at(&mut harness, remove.center());
+
     assert_eq!(layers(&harness), before, "and Remove does");
 }
 

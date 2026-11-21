@@ -127,6 +127,7 @@ fn bevel_distance_drag_is_one_undo_step() {
     assert_eq!(undo_depth(&harness), depth + 1, "one undo step for the drag");
 
     undo(&mut harness);
+
     assert_eq!(filter_of(&harness, effect), Filter::DistanceBevel(before));
 }
 
@@ -195,6 +196,7 @@ fn warp_rows_follow_the_mode() {
 fn slope_blur_rows_set_the_smear() {
     let (mut harness, effect) = app_with("slopeBlur", "mask", WINDOW_HEIGHT);
     assert!(harness.query_by_label("Slope scale").is_none());
+
     let top = |harness: &Harness<'_, TextureCraftApp>, role: Role, label: &str| harness.get_by_role_and_label(role, label).rect().top();
     let order = [
         top(&harness, Role::Slider, "Intensity"),
@@ -266,6 +268,7 @@ fn legacy_warp_seed_past_two_to_the_24_opens_as_stored() {
     click_at(&mut harness, field.center());
 
     let typed = harness.get_all_by_role(Role::TextInput).filter(|node| node.rect().intersects(field)).find_map(|node| node.accesskit_node().value());
+
     assert_eq!(typed, Some(LARGE_SEED.to_string()));
 }
 
@@ -287,7 +290,9 @@ fn slope_blur_divider_seed_and_source_blur() {
     assert_eq!(slope.divider, 1000);
     assert_ne!(slope.seed, 0, "a new seed");
     assert!((slope.source.blur - 0.5).abs() < 0.01, "stored on 0..1: {}", slope.source.blur);
+
     let shown = harness.get_by_role_and_label(Role::Slider, "Blur").accesskit_node().numeric_value().unwrap();
+
     assert!((shown - 10.0).abs() < 0.2, "shown on 0..20: {shown}");
 }
 

@@ -67,16 +67,21 @@ const PICKER_MIN_WIDTH: f32 = 240.0;
 const RESIZE_GRIP: f32 = 5.0;
 const RESIZE_CORNER: f32 = 8.0;
 
+type VisiblePickers = egui::cache::FramePublisher<Id, PickerState>;
+
 /// The picker state stored at `state_id`, else a closed picker
 fn picker_state(ctx: &egui::Context, state_id: Id) -> PickerState {
-    ctx.data(|data| data.get_temp::<PickerState>(state_id)).unwrap_or_default()
+    ctx.memory_mut(|memory| memory.caches.cache::<VisiblePickers>().get(&state_id).copied()).unwrap_or_default()
 }
 
 /// Opens `state` on `linear` in the colour space and model the user last picked in any picker
-fn open_picker(ctx: &egui::Context, state: &mut PickerState, linear: [f32; 3]) {
-    let (space, model) = ctx.data(|data| data.get_temp::<(ColorSpace, ColorModel)>(Id::unique(PREFERENCES_KEY))).unwrap_or_default();
+fn open_picker(ctx: &egui::Context, state_id: Id, state: &mut PickerState, linear: [f32; 3]) {
+    let (preferences, moved_to) =
+        ctx.data(|data| (data.get_temp::<(ColorSpace, ColorModel)>(Id::unique(PREFERENCES_KEY)).unwrap_or_default(), data.get_temp::<Pos2>(state_id)));
+    let (space, model) = preferences;
     state.space = space;
     state.model = model;
+    state.moved_to = moved_to;
     state.open_on(linear);
 }
 
@@ -87,8 +92,8 @@ impl PropertySheet<'_> {
         let state_id = bar.with("picker");
         let mut state = picker_state(ctx, state_id);
         if !state.open {
-            open_picker(ctx, &mut state, linear);
-            ctx.data_mut(|data| data.insert_temp(state_id, state));
+            open_picker(ctx, state_id, &mut state, linear);
+            ctx.memory_mut(|memory| memory.caches.cache::<VisiblePickers>().set(state_id, state));
         }
     }
 
@@ -138,27 +143,44 @@ impl PropertySheet<'_> {
         let ctx = self.ui.ctx().clone();
         let state_id = id.with("picker");
         let mut state = picker_state(&ctx, state_id);
-        state.follow(linear);
         if let Some(picked) = ColorPick::delivered(&ctx, id) {
-            state.set_linear(picked);
             pick.picked = Some(picked);
         }
-        if response.clicked() {
+        let clicked = response.clicked();
+        let was_open = state.open;
+        if clicked {
             if state.open {
                 state.open = false;
             } else {
-                open_picker(&ctx, &mut state, linear);
+                open_picker(&ctx, state_id, &mut state, linear);
             }
         }
 
         if state.open {
+            state.follow(linear);
+            if let Some(picked) = pick.picked {
+                state.set_linear(picked);
+            }
+
+            let previous_position = state.moved_to;
             let inside = self.picker_popup(&response, glyph, label, &mut state, waiting, swatches);
             pick.picked = pick.picked.or(inside.picked);
             pick.merge = inside.merge;
             pick.eyedropper |= inside.eyedropper;
             pick.swatch = inside.swatch;
+
+            // Reopening remembers an explicit move without saving an inactive editor
+            if state.moved_to != previous_position
+                && let Some(moved_to) = state.moved_to
+            {
+                ctx.data_mut(|data| data.insert_temp(state_id, moved_to));
+            }
         }
-        ctx.data_mut(|data| data.insert_temp(state_id, state));
+
+        if was_open || state.open {
+            ctx.memory_mut(|memory| memory.caches.cache::<VisiblePickers>().set(state_id, state));
+        }
+
         pick
     }
 
@@ -174,8 +196,7 @@ impl PropertySheet<'_> {
         // A kept size may come from a bigger screen or a damaged settings file (max/min also turn NaN into a bound)
         let width = width.max(PICKER_MIN_WIDTH).min(screen.width().max(PICKER_MIN_WIDTH));
         let field_height = field_height.max(FIELD_MIN_HEIGHT).min(screen.height().max(FIELD_MIN_HEIGHT));
-        let height_id = id.with("picker_height");
-        let height = ctx.data(|data| data.get_temp::<f32>(height_id)).unwrap_or(PICKER_HEIGHT_GUESS + field_height - FIELD_HEIGHT);
+        let height = state.height.unwrap_or(PICKER_HEIGHT_GUESS + field_height - FIELD_HEIGHT);
         let panel = Rect::from_x_y_ranges(self.ui.clip_rect().left().min(self.left - PAD)..=self.right + PAD, screen.y_range());
         let corner = state.moved_to.unwrap_or_else(|| beside(panel, bar.rect.top(), vec2(width, height), screen));
 
@@ -240,7 +261,7 @@ impl PropertySheet<'_> {
             (pick, face, drag.dragged().then(|| drag.drag_delta()), closed.clicked(), resize)
         });
         let (pick, face, dragged, closed, resize) = shown.inner;
-        ctx.data_mut(|data| data.insert_temp(height_id, face.height()));
+        state.height = Some(face.height());
         if (state.space, state.model) != shown_in {
             ctx.data_mut(|data| data.insert_temp(Id::unique(PREFERENCES_KEY), (state.space, state.model)));
         }
@@ -265,7 +286,7 @@ impl PropertySheet<'_> {
                 && input.pointer.interact_pos().is_some_and(|at| !face.contains(at) && !bar.rect.contains(at) && !eyedropper.contains(at))
         });
 
-        // The app leaves Escape to an open picker (menus.rs); Escape in the hex field ends the typing first (egui drops the field's focus before it hears the key)
+        // Escape ends hex editing first even when egui has already dropped the field's focus
         let escape = ctx.input(|input| input.key_pressed(egui::Key::Escape))
             && ctx.memory(|memory| memory.focused().is_none_or(|focused| focused == bar.id))
             && !hex_took_escape(&ctx);

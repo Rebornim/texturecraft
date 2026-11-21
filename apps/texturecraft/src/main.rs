@@ -165,8 +165,7 @@ impl eframe::App for Shell {
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
-        // winit gives the window its caption back when it changes the window's flags (maximize,
-        // restore, …): take it off again before the frame is laid out.
+        // Restore the frameless style after winit changes the window flags
         if let Some(guard) = self.window_frame.as_mut() {
             guard();
         }

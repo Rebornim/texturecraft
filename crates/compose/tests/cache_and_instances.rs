@@ -217,12 +217,14 @@ fn mask_with_height_follows_the_layer_height() {
     let row = TILE * 2;
     let (left, right) = (16, RES - 16);
     let v = |c: &Composite, x| c.value(Channel::BaseColor, x, row)[0];
+
     assert!((v(&plain, left) - 0.75).abs() < 0.01 && (v(&plain, right) - 0.75).abs() < 0.01, "plain mask: 50 % white over gray");
     assert!(v(&hm, left) > 0.84, "high parts show first: {}", v(&hm, left));
     assert!(v(&hm, right) < 0.66, "low parts later: {}", v(&hm, right));
 
     // Without a mask there is nothing to combine
     f.project.layer_mut(id).unwrap().mask.as_mut().unwrap().enabled = false;
+
     assert!((v(&reference(&f, 0), left) - 1.0).abs() < 1e-3);
 }
 
@@ -547,11 +549,13 @@ fn anchors_inside_a_content_stack_record_the_content_up_to_them() {
     f.project.layer_mut(low).unwrap().content_effects.insert(0, blur);
     let blurred = reference(&f, 0);
     assert!((blurred.value(Channel::Roughness, 128, 128)[0] - 0.2).abs() < 2e-3, "a flat height stays flat");
+
     let mut one_by_one = Composite::new(&f.project.texture_sets[0].channel_list(), RES);
     let (images, baked) = (Default::default(), Default::default());
     for t in all_tiles(RES, RES) {
         composite_tiles(&inputs(&f, 0, &images, &baked), &mut one_by_one, &[t]);
     }
+
     assert!(one_by_one == blurred);
 }
 
@@ -587,7 +591,9 @@ fn gathering_filters_composite_identically_in_any_grouping_and_cached() {
     for t in all_tiles(RES, RES) {
         composite_tiles(&inputs(&f, 0, &images, &baked), &mut one_by_one, &[t]);
     }
+
     assert!(one_by_one == want, "per-tile composites differ from one pass");
+
     for hot in [top, streaks] {
         assert!(!check_cached(&f, 0, hot).is_empty());
     }
@@ -669,6 +675,7 @@ fn kept_filter_fields_are_not_used_after_an_edit_or_under_a_live_stroke() {
     let (images, baked) = (Default::default(), Default::default());
     cache.ahead = Vec::new();
     composite_tiles_cached(&inputs(&fixture, 0, &images, &baked), &mut out, &all, Some(&mut cache));
+
     assert!(out == reference(&fixture, 0), "fields kept from before an edit were used after it");
     assert!(!cache.holds_fields());
 
@@ -681,6 +688,7 @@ fn kept_filter_fields_are_not_used_after_an_edit_or_under_a_live_stroke() {
     let mut inp = inputs(&fixture, 0, &images, &baked);
     inp.preview = Some(&preview);
     composite_tiles_cached(&inp, &mut live, rest, Some(&mut cache));
+
     assert!(live == run_with(&fixture, 0, &all, None, Some(&preview)), "a live stroke over a sliced pass differs");
 }
 
@@ -723,7 +731,9 @@ fn tiles_the_cache_drops_during_a_kept_run_are_filtered_again() {
     cache.set_hot(Some(hot));
     let mut out = Composite::new(&channels, SIZE);
     composite_tiles_cached(&inputs(&fixture, 0, &images, &baked), &mut out, bottom, Some(&mut cache));
+
     assert_eq!(cache.len(), bottom.len());
+
     cache.budget = cache.bytes();
 
     // Cache eviction during the run must rebuild missing lower-layer fields
@@ -735,6 +745,7 @@ fn tiles_the_cache_drops_during_a_kept_run_are_filtered_again() {
             assert!(cache.holds_fields());
         }
     }
+
     assert!(above.len() > bottom.len());
     assert!(out == expected, "a tile dropped from the cache was composited with fields that lack the layers off the hot path");
 }
@@ -794,13 +805,17 @@ fn cached_stack_tracks_the_images_a_tile_generator_reads() {
         fixture.pixels.layer_mut(hot_layer, Channel::BaseColor, (RES, RES)).set(5, 5, &[stage.len() as u16, 0, 0, u16::MAX]);
         let input = inputs(&fixture, 0, &images, &baked);
         composite_tiles_cached(&input, &mut output, &tiles[..1], Some(&mut cache));
+
         assert!(!cache.is_empty(), "{stage}: first tile should be cached");
+
         let retained = cache.len() - 1;
         composite_tiles_cached(&input, &mut output, &tiles[1..], Some(&mut cache));
+
         assert_eq!(retained, 0, "{stage}: the layers below are drawn again with the new image");
 
         let mut expected = Composite::new(&fixture.project.texture_sets[0].channel_list(), RES);
         composite_tiles(&input, &mut expected, &tiles);
+
         assert!(output == expected, "{stage}");
     }
 }
@@ -836,11 +851,14 @@ fn cached_stack_tracks_referenced_images_only() {
                 let replacement = image_with_value(0.4);
                 let replacement_weak = Arc::downgrade(&replacement);
                 images.insert("used".into(), replacement);
+
                 assert!(previous_image.as_ref().is_some_and(|old| old.upgrade().is_none()), "cached key must not retain replaced image pixels");
+
                 previous_image = Some(replacement_weak);
             }
             "remove" => {
                 images.remove("used");
+
                 assert!(previous_image.as_ref().is_some_and(|old| old.upgrade().is_none()), "cached key must not retain removed image pixels");
             }
             "cold" => {}
@@ -852,13 +870,17 @@ fn cached_stack_tracks_referenced_images_only() {
         fixture.pixels.layer_mut(hot_layer, Channel::BaseColor, (RES, RES)).set(5, 5, &[stage.len() as u16, 0, 0, u16::MAX]);
         let input = inputs(&fixture, 0, &images, &baked);
         composite_tiles_cached(&input, &mut output, &tiles[..1], Some(&mut cache));
+
         assert!(!cache.is_empty(), "{stage}: first tile should be cached");
+
         let retained = cache.len() - 1;
         composite_tiles_cached(&input, &mut output, &tiles[1..], Some(&mut cache));
+
         assert_eq!(retained, if stage.starts_with("unused") { tiles.len() - 1 } else { 0 }, "{stage}");
 
         let mut expected = Composite::new(&fixture.project.texture_sets[0].channel_list(), RES);
         composite_tiles(&input, &mut expected, &tiles);
+
         assert!(output == expected, "{stage}");
     }
 }
@@ -885,14 +907,17 @@ fn generator_input_image_changes_invalidate_stack_key() {
     let original = key(&images);
 
     images.insert("unrelated".into(), image(0.5));
+
     assert_eq!(key(&images), original, "an unrelated image leaves the key unchanged");
 
     let old_image = Arc::downgrade(&images["used"]);
     images.insert("used".into(), image(0.9));
+
     assert!(old_image.upgrade().is_none(), "the cache must not retain the old image pixels");
     assert!(key(&images) != original, "replacing a generator input must invalidate the cache");
 
     images.remove("used");
+
     assert!(key(&images) != original, "removing a generator input must invalidate the cache");
 }
 
@@ -954,6 +979,7 @@ fn filter_input_and_id_map_image_changes_invalidate_stack_key() {
     for name in ["input", "id"] {
         let original = stack_key(&fixture, &images);
         images.insert(name.into(), flat_image(0.9));
+
         assert!(stack_key(&fixture, &images) != original, "replacing the {name} image must invalidate the cache");
     }
 }
@@ -969,6 +995,7 @@ fn the_environment_keys_the_stack_only_while_environment_lighting_reads_it() {
     let unlit = stack_key(&fixture, &images);
 
     fixture.project.display.env_rotation += 90.0;
+
     assert_eq!(stack_key(&fixture, &images), unlit, "without Baked Lighting Environment the turn changes nothing");
 
     let lighting =
@@ -982,5 +1009,6 @@ fn the_environment_keys_the_stack_only_while_environment_lighting_reads_it() {
     assert_eq!(lit.changed_tiles(&turned), None, "and recomposites every tile");
 
     images.insert("sky".into(), flat_image(0.9));
+
     assert!(stack_key(&fixture, &images) != turned, "replacing the environment image invalidates the cache");
 }

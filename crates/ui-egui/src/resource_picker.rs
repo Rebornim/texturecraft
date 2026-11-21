@@ -1,5 +1,6 @@
 //! A popup hanging under a slot that picks a resource (a filter, a channel's source) from tiles under bright group headers, behind edge tabs and a search field
 
+use egui::text_edit::TextEditState;
 use egui::{Align, Align2, Color32, CornerRadius, FontId, Frame, Id, Rect, Response, Sense, Shadow, Stroke, StrokeKind, Ui, pos2, vec2};
 use egui_phosphor::regular as ic;
 
@@ -10,6 +11,8 @@ use crate::resource_picker_item::{ResourcePickerItem, search_query};
 use crate::theme::{HARD_SHADOW, Tokens, semibold};
 use crate::thumbs::Thumbs;
 use crate::tile_picture::TilePicture;
+
+type PickerSearches = egui::cache::FramePublisher<Id, (String, TextEditState)>;
 
 /// Columns of tiles in the grid
 const COLUMNS: usize = 4;
@@ -84,10 +87,8 @@ pub(crate) fn toggle(ctx: &egui::Context, popup_id: Id) {
     }
 
     egui::Popup::open_id(ctx, popup_id);
-    ctx.data_mut(|data| {
-        data.insert_temp(search_id(popup_id), String::new());
-        data.insert_temp(opened_id(popup_id), true);
-    });
+    ctx.memory_mut(|memory| memory.caches.cache::<PickerSearches>().set(popup_id, (String::new(), TextEditState::default())));
+    ctx.data_mut(|data| data.insert_temp(opened_id(popup_id), true));
 }
 
 /// Draws picker `popup_id` under `slot` (above it where the window ends first) at its width while open, on the tab holding `current` (scrolled to it when `reveal_current`, else at the top); returns the id clicked, and runs `tabs` only while open
@@ -130,20 +131,22 @@ pub(crate) fn show<K: Clone + PartialEq>(
         .show(|ui| {
             ui.set_width(width);
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+
             let just_opened = !ui.is_sizing_pass() && ui.data_mut(|data| data.remove_temp::<bool>(opened_id(popup_id))).unwrap_or(false);
             let current_tab = || current.and_then(|current| tabs.iter().position(|tab| tab.items().any(|item| &item.id == current)));
             let stored_tab = ui.data(|data| data.get_temp::<usize>(tab_id(popup_id)));
             let mut open_tab =
                 if just_opened { current_tab().or(stored_tab) } else { stored_tab.or_else(current_tab) }.unwrap_or(0).min(tabs.len().saturating_sub(1));
 
-            let query = search_query(&ui.data(|data| data.get_temp::<String>(search_id(popup_id))).unwrap_or_default());
+            let (search, editor) = ui.memory_mut(|memory| memory.caches.cache::<PickerSearches>().get(&popup_id).cloned()).unwrap_or_default();
             if tabs.len() > 1
-                && let Some(clicked) = tab_strip(ui, &tabs, open_tab, &query)
+                && let Some(clicked) = tab_strip(ui, &tabs, open_tab, &search_query(&search))
             {
                 open_tab = clicked;
             }
+
             ui.data_mut(|data| data.insert_temp(tab_id(popup_id), open_tab));
-            let query = search_field(ui, popup_id, just_opened);
+            let query = search_field(ui, popup_id, just_opened, search, editor);
 
             if let Some(tab) = tabs.get(open_tab) {
                 let reveal = just_opened && reveal_current;
@@ -153,6 +156,7 @@ pub(crate) fn show<K: Clone + PartialEq>(
                 if just_opened && !reveal {
                     scroll = scroll.vertical_scroll_offset(0.0);
                 }
+
                 scroll.show(ui, |ui| {
                     // A search that leaves few tiles must not shrink the popup, or egui moves it
                     ui.set_min_height(grid_height);
@@ -165,6 +169,7 @@ pub(crate) fn show<K: Clone + PartialEq>(
     if picked.is_some() {
         egui::Popup::close_id(&ctx, popup_id);
     }
+
     picked
 }
 
@@ -219,9 +224,8 @@ fn tab_strip<K>(ui: &mut Ui, tabs: &[PickerTab<K>], open: usize, query: &str) ->
 }
 
 /// The neutral search field (no accent outline, focused or not), focused the frame the picker opens, × clearing it; returns the lowercase query
-fn search_field(ui: &mut Ui, popup_id: Id, just_opened: bool) -> String {
+fn search_field(ui: &mut Ui, popup_id: Id, just_opened: bool, mut search: String, editor: TextEditState) -> String {
     let tokens = Tokens::get(ui.ctx());
-    let mut search: String = ui.data(|data| data.get_temp(search_id(popup_id))).unwrap_or_default();
     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), SEARCH_ROW), Sense::hover());
     let field = Rect::from_center_size(row.center(), vec2(row.width() - 2.0 * SIDE, FIELD_HEIGHT));
     let painter = ui.painter();
@@ -236,7 +240,11 @@ fn search_field(ui: &mut Ui, popup_id: Id, just_opened: bool) -> String {
 
     let text_rect = Rect::from_min_max(pos2(field.left() + SEARCH_TEXT_X, field.top()), pos2(field.right() - 2.0 * CLEAR_X, field.bottom()));
     let hint = egui::RichText::new(tr("Search")).color(tokens.text_dim).size(SEARCH_TEXT_SIZE);
+    let field_id = popup_id.with("search_field");
+    editor.store(ui.ctx(), field_id);
+
     let edit = egui::TextEdit::singleline(&mut search)
+        .id(field_id)
         .frame(Frame::NONE)
         .hint_text(hint)
         .font(semibold(SEARCH_TEXT_SIZE))
@@ -261,7 +269,12 @@ fn search_field(ui: &mut Ui, popup_id: Id, just_opened: bool) -> String {
     }
 
     let query = search_query(&search);
-    ui.data_mut(|data| data.insert_temp(search_id(popup_id), search));
+    let state = TextEditState::load(ui.ctx(), field_id).unwrap_or_default();
+
+    // Keep the text and undo history only while the picker is drawn
+    ui.data_mut(|data| data.remove::<TextEditState>(field_id));
+    ui.memory_mut(|memory| memory.caches.cache::<PickerSearches>().set(popup_id, (search, state)));
+
     query
 }
 
@@ -272,9 +285,11 @@ fn grid<K: Clone + PartialEq>(ui: &mut Ui, thumbs: &mut Thumbs, tab: &PickerTab<
     let cell = (ui.available_width() - SIDE - SCROLL_ROOM) / COLUMNS as f32;
     let mut picked = None;
     let mut place = 0;
+    let mut row = Vec::new();
+
     for group in &tab.groups {
-        let shown: Vec<&ResourcePickerItem<K>> = group.items.iter().filter(|item| item.matches(query)).collect();
-        if shown.is_empty() {
+        let mut matching_items = group.items.iter().filter(|item| item.matches(query)).peekable();
+        if matching_items.peek().is_none() {
             continue;
         }
 
@@ -282,10 +297,10 @@ fn grid<K: Clone + PartialEq>(ui: &mut Ui, thumbs: &mut Thumbs, tab: &PickerTab<
         if let Some(header) = group.header {
             caption_row(ui, left, HEADER_HEIGHT, header, semibold(HEADER_SIZE), tokens.text);
         }
+
         let mut caption_top = group_top;
-        let mut row: Vec<(usize, &ResourcePickerItem<K>)> = Vec::new();
         let mut last_caption = None;
-        for (index, item) in shown.iter().enumerate() {
+        for item in matching_items {
             if item.caption != last_caption {
                 flush_row(ui, thumbs, &mut row, left, cell, current, &mut picked);
                 if let Some(caption) = item.caption {
@@ -294,6 +309,7 @@ fn grid<K: Clone + PartialEq>(ui: &mut Ui, thumbs: &mut Thumbs, tab: &PickerTab<
                 }
                 last_caption = item.caption;
             }
+
             row.push((place, item));
             place += 1;
             if let Some(grid_height) = reveal_in
@@ -305,10 +321,11 @@ fn grid<K: Clone + PartialEq>(ui: &mut Ui, thumbs: &mut Thumbs, tab: &PickerTab<
                 let from = if row_top + ROW_HEIGHT - label_top <= grid_height { label_top } else { row_top };
                 ui.scroll_to_rect(Rect::from_min_max(pos2(left, from), pos2(left + cell, row_top + ROW_HEIGHT)), Some(Align::TOP));
             }
-            if row.len() == COLUMNS || index + 1 == shown.len() {
+            if row.len() == COLUMNS {
                 flush_row(ui, thumbs, &mut row, left, cell, current, &mut picked);
             }
         }
+        flush_row(ui, thumbs, &mut row, left, cell, current, &mut picked);
     }
 
     picked
@@ -437,11 +454,6 @@ fn name_lines(ui: &Ui, rect: Rect, label: &str, bright: bool, bold: bool) {
         let center = pos2(rect.center().x, rect.top() + NAME_CENTER + index as f32 * NAME_LINE);
         painter.galley(center - galley.size() / 2.0, galley, color);
     }
-}
-
-/// Where the picker keeps its search text
-fn search_id(popup_id: Id) -> Id {
-    popup_id.with("search")
 }
 
 /// Set while the picker waits for its first frame open

@@ -67,7 +67,7 @@ pub(crate) fn scene_overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect) -> Vec<O
 
     let symmetry = app.session.tool.brush.symmetry;
     let display = app.ui.symmetry;
-    let (lo, hi) = app.session.mesh.bounds();
+    let (lo, hi) = app.viewport_mesh_bounds.get(&app.session.mesh);
     let origin = symmetry.origin((lo + hi) * 0.5);
     let ribbon = Ribbons::new(app, rect);
     let mut quads = Vec::new();
@@ -123,10 +123,10 @@ pub(crate) fn overlay(app: &TextureCraftApp, ui: &Ui, rect: Rect, cursor: Option
 
     let symmetry = app.session.tool.brush.symmetry;
     let display = app.ui.symmetry;
-    let (lo, hi) = app.session.mesh.bounds();
+    let (lo, hi) = app.viewport_mesh_bounds.get(&app.session.mesh);
     let origin = symmetry.origin((lo + hi) * 0.5);
 
-    // Bounds scan the mesh's vertices; every cursor copy shares these measurements
+    // Every cursor copy uses the same scale and visibility tolerance
     let diagonal = (hi - lo).length();
     let tolerance = diagonal * VISIBILITY_TOLERANCE;
     let brush_radius = app.session.tool.brush.size * diagonal;
@@ -292,7 +292,7 @@ pub(crate) fn manipulator_input(app: &mut TextureCraftApp, ui: &Ui, response: &R
     };
 
     if let Some(pointer) = response.interact_pointer_pos() {
-        let (lo, hi) = app.session.mesh.bounds();
+        let (lo, hi) = app.viewport_mesh_bounds.get(&app.session.mesh);
         let half_extent = (hi - lo) * 0.5;
         let moved = Vec3::from(drag.start_offset) + manipulator.world_delta(drag.axes, pointer - drag.from);
         let offset = moved.clamp(-half_extent, half_extent).to_array();

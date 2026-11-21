@@ -5,7 +5,7 @@ use texturecraft_geom::glam::{Vec2, Vec3};
 
 use crate::frame_placement::warp_reach;
 use crate::organic::smoothstep;
-use crate::pattern::{Coords, depth_fade, frame_crop, frame_facing, frame_local, placed_uv, projector_local};
+use crate::pattern::{Coords, depth_fade, frame_crop, frame_local, frame_sample, placed_uv, projector_local};
 use crate::warp::warp_uv;
 
 /// Nearer a cylinder's axis than this a texel has no outward direction, so it counts as facing out
@@ -94,8 +94,13 @@ pub fn backface_cover(backface: &Backface, facing: f32) -> f32 {
 
 /// A planar projection placed on the surface at world point `p` with normal `nrm`: its texture coordinates and how much its backface culling and shape crop let through (None when the frame is degenerate)
 pub fn placed_cover(frame: &Decal, projector: &Projector, p: Vec3, nrm: Vec3) -> Option<(Vec2, f32)> {
-    let local = frame_local(frame, projector, p)?;
-    let mut cover = if projector.backface.on { backface_cover(&projector.backface, frame_facing(frame, projector, nrm)) } else { 1.0 };
+    let (local, mut cover) = if projector.backface.on {
+        let (local, facing) = frame_sample(frame, projector, p, nrm)?;
+        (local, backface_cover(&projector.backface, facing))
+    } else {
+        (frame_local(frame, projector, p)?, 1.0)
+    };
+
     if projector.crop == ShapeCrop::Cropped {
         cover *= frame_crop(frame, local);
     }
@@ -273,8 +278,10 @@ mod tests {
                 let now = placed_cover_symmetric(&placed, &projector, p, nrm, center).filter(|(_, cover)| *cover > 0.0);
                 let before = symmetric_before(&frame, p, nrm, center);
                 mirrored += usize::from(before.is_some() && decal_before(&frame, p, nrm).is_none());
+
                 assert_eq!(before, now, "{p} {nrm}");
             }
+
             assert!(frame.symmetry.is_none() || mirrored > 0, "the mirrored copy covers points the frame does not");
         }
     }

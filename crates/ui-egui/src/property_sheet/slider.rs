@@ -285,12 +285,12 @@ impl PropertySheet<'_> {
     pub(super) fn value_text_field(&mut self, id: Id, value_text: ValueText<'_>, value: f32, range: &RangeInclusive<f32>, decimals: usize) -> Option<f32> {
         let ValueText { label, right, width, center_y, shown, suffix } = value_text;
         let rect = Rect::from_min_max(pos2(right - width, center_y - ROW_HIT_HALF_HEIGHT), pos2(right, center_y + ROW_HIT_HALF_HEIGHT));
-        let field_id = id.with("typed");
-        let editing = self.ui.data(|data| data.get_temp::<String>(field_id));
+        let field_id = id.with((self.id, "typed"));
+        let editing = self.typing_draft(field_id);
         let seeded = || shown_number(value, decimals);
 
         let tokens = self.tokens;
-        let Some(mut typed_text) = editing else {
+        let Some(mut draft) = editing else {
             self.skip_typing_edit();
             let response = self.ui.interact(rect, id.with("value"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
             response.widget_info(|| WidgetInfo::labeled(egui::Role::Label, true, crate::i18n::trf("{label} value", &[("label", label)])));
@@ -306,25 +306,25 @@ impl PropertySheet<'_> {
         };
 
         // Typing happens on the value's own line: no box, the line under it goes accent
-        let edit = egui::TextEdit::singleline(&mut typed_text).id(field_id).font(semibold(TEXT_SIZE)).align(egui::Align2::RIGHT_CENTER);
-        let response = self.typing_edit(rect.left(), right, center_y, edit);
+        let response = self.typing_edit(rect.left(), right, center_y, field_id, &mut draft);
         self.value_line(rect.left(), right, center_y, tokens.accent);
         if !response.lost_focus() {
-            self.ui.data_mut(|data| data.insert_temp(field_id, typed_text));
+            self.keep_typing(field_id, draft);
             return None;
         }
 
-        let untouched = self.end_typing(field_id, &typed_text);
+        let untouched = self.end_typing(field_id, &draft);
+        let typed_text = draft.text.trim();
         if self.ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             return None;
         }
 
         // Leaving the field as it opened changes nothing: no undo step, no rounding to the shown decimals, no overwriting a value changed meanwhile
-        if untouched || typed_text.trim() == seeded() {
+        if untouched || typed_text == seeded() {
             return None;
         }
 
-        let typed: f32 = typed_text.trim().trim_end_matches(suffix).trim_start_matches(['×', 'x']).trim().parse().ok()?;
+        let typed: f32 = typed_text.trim_end_matches(suffix).trim_start_matches(['×', 'x']).trim().parse().ok()?;
 
         // A typed value that lands on the current one (a clamp, "0.750" for 0.75) is no edit either
         typed.is_finite().then(|| kept_in(typed, range)).filter(|kept| *kept != value)

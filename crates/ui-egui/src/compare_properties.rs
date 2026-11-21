@@ -84,10 +84,9 @@ pub(crate) fn compare_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: 
         }
 
         if sheet.band(tr("Source histograms"), true, None, None).open {
-            let histograms = histogram_counts(app, sheet.ui, effect_id);
-
             // A constant has no spread: it shows as a line at its value in its side's colour
             let constants = [left, right].map(|side| (side == CompareSource::Constant).then_some(constant));
+            let histograms = if constants.contains(&None) { histogram_counts(app, sheet.ui, effect_id) } else { None };
             sheet.embed(|ui| source_histograms(ui, histograms.as_deref(), constants));
         }
     });

@@ -22,13 +22,18 @@ pub struct Sample {
 /// The view-space normal (= position on the unit sphere) of each pixel of a `size²` image,
 /// row-major, None outside the sphere.
 pub fn sphere_normals(size: usize) -> impl Iterator<Item = Option<Vec3>> {
-    let r = (size as f32 * 0.5 - 1.0).max(0.5);
-    (0..size * size).map(move |i| {
-        let (x, y) = ((i % size) as f32 + 0.5 - size as f32 * 0.5, size as f32 * 0.5 - (i / size) as f32 - 0.5);
-        let (dx, dy) = (x / r, y / r);
-        let d2 = dx * dx + dy * dy;
-        (d2 <= 1.0).then(|| Vec3::new(dx, dy, (1.0 - d2).max(0.0).sqrt()))
-    })
+    (0..size * size).map(sphere_normal_at(size))
+}
+
+fn sphere_normal_at(size: usize) -> impl Fn(usize) -> Option<Vec3> {
+    let center_px = size as f32 * 0.5;
+    let radius_px = (center_px - 1.0).max(0.5);
+    move |pixel_index| {
+        let (x, y) = ((pixel_index % size) as f32 + 0.5 - center_px, center_px - (pixel_index / size) as f32 - 0.5);
+        let (dx, dy) = (x / radius_px, y / radius_px);
+        let length_squared = dx * dx + dy * dy;
+        (length_squared <= 1.0).then(|| Vec3::new(dx, dy, (1.0 - length_squared).max(0.0).sqrt()))
+    }
 }
 
 fn coords(n: Vec3) -> Coords {
@@ -56,11 +61,11 @@ pub fn material(id: &str, size: usize) -> Option<Vec<Option<Sample>>> {
     let layers = build(&mut Builder { p: &mut project, channels: CHANNELS.to_vec() }, plain.id).ok()?;
 
     // Pixels evaluate independently and big previews take long on one core
-    let normals: Vec<_> = sphere_normals(size).collect();
-    let samples = normals
+    let normal_at = sphere_normal_at(size);
+    let samples = (0..size * size)
         .into_par_iter()
-        .map(|normal| {
-            let at = coords(normal?);
+        .map(|pixel_index| {
+            let at = coords(normal_at(pixel_index)?);
             let mut values = CHANNELS.map(Channel::default_value);
             for layer in layers.iter().filter(|layer| layer.visible) {
                 // Plain materials are unmasked fills
@@ -116,6 +121,10 @@ pub fn filter(id: &str, size: usize) -> Option<Vec<Option<Sample>>> {
 
     // The filters that shape a mask's edge read where values cross 0.5: they get black and white shapes, where the clouds would leave them black
     let shapes = matches!(kind, EffectKind::Filter(Filter::BevelSmooth(_) | Filter::DirectionalDistance(_)));
+    render_filter_preview(kind, size, res, shapes)
+}
+
+fn render_filter_preview(kind: EffectKind, size: usize, res: u32, shapes: bool) -> Option<Vec<Option<Sample>>> {
     let mesh = texturecraft_geom::primitives::plane(2.0, 2);
     let gbuf = texturecraft_geom::UvGBuffer::new(&mesh, 0, res, res);
     let mut p = Project::new("preview", "");
@@ -205,9 +214,11 @@ mod tests {
 
     #[test]
     fn the_edge_shaping_filters_show_their_shapes_not_black() {
-        let size = 32;
-        // A neutral filter shows the checker as it is; an edge filter must change it
-        let checker = filter("levels", size).unwrap();
+        const SIDE_PX: u32 = 32;
+        let size = SIDE_PX as usize;
+
+        // Use the same checker input with an inactive filter
+        let checker = render_filter_preview(EffectKind::Filter(Filter::InvertOff), size, SIDE_PX, true).unwrap();
         for id in ["bevelSmooth", "directionalDistance"] {
             let pixels = filter(id, size).unwrap();
             assert!(pixels != checker, "{id}: the preview shows the unchanged checker");

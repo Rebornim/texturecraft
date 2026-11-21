@@ -16,10 +16,12 @@ fn invert_switch_turns_it_off_and_on() {
     let switch = harness.get_by_role_and_label(Role::CheckBox, "Invert").rect();
 
     click_at(&mut harness, switch.center());
+
     assert_eq!(filter_of(&harness, effect), Filter::InvertOff);
 
     let switch = harness.get_by_role_and_label(Role::CheckBox, "Invert").rect();
     click_at(&mut harness, switch.center());
+
     assert_eq!(filter_of(&harness, effect), Filter::Invert);
 }
 
@@ -122,6 +124,7 @@ fn simple_sliders_set_their_own_setting() {
 
         let after = filter_of(&harness, effect);
         let value = read(&after).unwrap();
+
         assert!((value - expected).abs() < SLIDER_TOLERANCE, "{filter} {label}: {value}, expected {expected}");
         assert_ne!(read(&before), read(&after), "{filter} {label} changed");
     }
@@ -140,6 +143,7 @@ fn a_slider_drag_is_one_undo_step() {
     assert_eq!(undo_depth(&harness), depth + 1);
 
     undo(&mut harness);
+
     assert_eq!(filter_of(&harness, effect), Filter::Sharpen { amount: 1.0 });
 }
 
@@ -149,11 +153,13 @@ fn pixelate_rows() {
     let (mut harness, effect) = app_with("pixelate", "mask", WINDOW_HEIGHT);
     let amount = harness.get_by_role_and_label(Role::Slider, "Pixels Amount");
     assert_eq!(amount.accesskit_node().numeric_value().map(f64::round), Some(32.0));
+
     let amount = amount.rect();
     let alpha = harness.get_by_role_and_label(Role::CheckBox, "Apply To Alpha").rect();
     assert!(alpha.center().y > amount.center().y);
 
     click_at(&mut harness, alpha.center());
+
     assert!(matches!(filter_of(&harness, effect), Filter::Mosaic { alpha: false, .. }));
 
     click_at(&mut harness, along(amount, 1.0));
@@ -198,6 +204,7 @@ fn highpass_rows() {
     let (mut harness, effect) = app_with("highPass", "mask", WINDOW_HEIGHT);
     let radius = harness.get_by_role_and_label(Role::Slider, "Radius");
     assert_eq!(radius.accesskit_node().numeric_value().map(|value| (value * 100.0).round()), Some(300.0));
+
     let radius = radius.rect();
     let space = harness.get_by_role_and_label(Role::ComboBox, "Working space / Mask").rect();
     let alpha = harness.get_by_role_and_label(Role::CheckBox, "Apply To Alpha").rect();
@@ -205,9 +212,11 @@ fn highpass_rows() {
 
     pick(&mut harness, "Working space / Mask", "sRGB (from ACEScg)");
     click_at(&mut harness, alpha.center());
+
     assert_eq!(filter_of(&harness, effect), Filter::HighPass { radius: 48.0, space: HighpassSpace::SrgbFromAcescg, alpha: true });
 
     click_at(&mut harness, along(radius, 1.0));
+
     assert!(matches!(filter_of(&harness, effect), Filter::HighPass { radius, .. } if radius > 250.0), "Radius 16 = 256 texels at 2K");
 }
 
@@ -218,6 +227,7 @@ fn grayscale_conversion_rows() {
     let invert = harness.get_by_role_and_label(Role::CheckBox, "Invert").rect().center().y;
     let sliders = ["Balance", "Contrast", "Red", "Green", "Blue", "Alpha"].map(|label| harness.get_by_role_and_label(Role::Slider, label).rect().center().y);
     let rows: Vec<f32> = std::iter::once(invert).chain(sliders).collect();
+
     assert!(rows.windows(2).all(|pair| pair[0] < pair[1]), "the reference's order: {rows:?}");
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Custom Input").is_none(), "no slot for the current channel");
 

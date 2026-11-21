@@ -73,6 +73,7 @@ mod tests {
     fn a_threshold_saved_before_the_modes_reads_and_saves_as_before() {
         let saved = r#"{"Threshold":{"level":0.5}}"#;
         let filter: Filter = serde_json::from_str(saved).unwrap();
+
         assert_eq!(filter, Filter::Threshold { level: 0.5, mode: ThresholdMode::GreaterOrEqual });
         assert_eq!(serde_json::to_string(&filter).unwrap(), saved);
         assert_eq!(filter.point(ChannelKind::Scalar, [0.5; 3]), Some([1.0; 3]), "a value at the level turns white as before");
@@ -84,7 +85,9 @@ mod tests {
         assert_eq!([0.4, 0.5, 0.6].map(|value| at(ThresholdMode::Greater, value)), [Some(0.0), Some(0.0), Some(1.0)]);
         assert_eq!([0.4, 0.5, 0.6].map(|value| at(ThresholdMode::Lower, value)), [Some(1.0), Some(0.0), Some(0.0)]);
         assert_eq!([0.4, 0.5, 0.6].map(|value| at(ThresholdMode::LowerOrEqual, value)), [Some(1.0), Some(1.0), Some(0.0)]);
+
         let saved = serde_json::to_string(&Filter::Threshold { level: 0.01, mode: ThresholdMode::LowerOrEqual }).unwrap();
+
         assert!(saved.contains(r#""mode":"lowerOrEqual""#), "{saved}");
     }
 }

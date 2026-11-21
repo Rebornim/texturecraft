@@ -53,6 +53,7 @@ fn environment_cache_retains_source_identity_until_replaced() {
 
     assert!(original_source.upgrade().is_none(), "replacing the resource releases its decoded pixels immediately");
     assert_ne!(first_key, gpu_scene_key(&app.session), "a new source restarts tracing under the same environment name");
+
     let second = super::trace_scene(&app).env;
     assert!(!Arc::ptr_eq(&first, &second));
     assert_ne!(first.data, second.data, "replacing the image changes the lighting");
@@ -60,6 +61,7 @@ fn environment_cache_retains_source_identity_until_replaced() {
 
     app.session.images.insert("renamed".into(), replacement);
     app.session.doc.project.display.environment = "resource:renamed".into();
+
     assert!(!Arc::ptr_eq(&second, &super::trace_scene(&app).env), "the environment name is also part of the key");
 }
 

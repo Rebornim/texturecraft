@@ -41,6 +41,7 @@ fn new_simple_filters_start_where_the_reference_does() {
     add_filter(&mut s, json!({"filter": "heightAdjust"}));
     add_filter(&mut s, json!({"filter": "histogramScan"}));
     add_filter(&mut s, json!({"filter": "histogramShift"}));
+
     assert!(close(roughness(&mut s, TEXEL), 0.25), "Clamp, Height Adjust, Histogram Scan and Shift at their defaults change nothing");
 }
 
@@ -52,12 +53,15 @@ fn smoothstep_eases_between_minimum_and_maximum() {
     assert!(close(roughness(&mut s, TEXEL), 0.15625), "0.25 eased: 3t² − 2t³");
 
     set(&mut s, effect, json!({"min": 0.25, "max": 0.75}));
+
     assert!(close(roughness(&mut s, TEXEL), 0.0), "at the minimum");
 
     set(&mut s, effect, json!({"min": 0.0, "max": 0.2}));
+
     assert!(close(roughness(&mut s, TEXEL), 1.0), "past the maximum");
 
     set(&mut s, effect, json!({"min": 0.25, "max": 0.25}));
+
     assert!(close(roughness(&mut s, TEXEL), 1.0), "equal bounds are a step, the bound itself white");
 }
 
@@ -69,6 +73,7 @@ fn invert_switches_off_and_on() {
     assert!(close(roughness(&mut s, TEXEL), 0.75));
 
     set(&mut s, effect, json!({"invert": false}));
+
     assert_eq!(filter_of(&s, effect), Filter::InvertOff);
     assert!(close(roughness(&mut s, TEXEL), 0.25), "off changes nothing");
     assert_eq!(filter_of(&s, effect).label(), "Invert", "still named Invert");
@@ -76,14 +81,17 @@ fn invert_switches_off_and_on() {
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "invert": "yes"})).is_err());
 
     execute(&mut s, "edit.undo", &json!({})).unwrap();
+
     assert_eq!(filter_of(&s, effect), Filter::Invert, "one undo step");
 
     set(&mut s, effect, json!({"invert": false}));
     execute(&mut s, "effect.filter.restoreDefaults", &json!({"effect": effect.0})).unwrap();
+
     assert_eq!(filter_of(&s, effect), Filter::Invert);
 
     // An old project's Invert still reads as before
     let old: Filter = serde_json::from_value(json!("Invert")).unwrap();
+
     assert_eq!(old, Filter::Invert);
 }
 
@@ -94,15 +102,19 @@ fn height_adjust_flips_scales_and_raises() {
     let effect = add_filter(&mut s, json!({"filter": "heightAdjust"}));
 
     set(&mut s, effect, json!({"multiply": 2.0}));
+
     assert!(close(roughness(&mut s, TEXEL), 0.0), "(0.25 − 0.5) × 2 + 0.5");
 
     set(&mut s, effect, json!({"invert": true, "offset": 0.1}));
+
     assert!(close(roughness(&mut s, TEXEL), 1.0), "flipped to 0.75, (0.75 − 0.5) × 2 + 0.5 + 0.1 clamped");
 
     set(&mut s, effect, json!({"multiply": 1.0, "offset": -0.2}));
+
     assert!(close(roughness(&mut s, TEXEL), 0.55));
 
     set(&mut s, effect, json!({"multiply": 50.0}));
+
     assert_eq!(filter_of(&s, effect), Filter::HeightAdjust { invert: true, offset: -0.2, multiply: 10.0 }, "Multiply caps at 10");
 }
 
@@ -127,12 +139,15 @@ fn histogram_scan_inverts_its_position() {
     let effect = add_filter(&mut s, json!({"filter": "histogramScan"}));
 
     set(&mut s, effect, json!({"position": 0.2, "contrast": 1.0}));
+
     assert!(close(roughness(&mut s, TEXEL), 1.0), "0.25 is above 0.2");
 
     set(&mut s, effect, json!({"invertPosition": true}));
+
     assert!(close(roughness(&mut s, TEXEL), 0.0), "0.25 is below 1 − 0.2");
 
     let old: Filter = serde_json::from_value(json!({"HistogramScan": {"position": 0.5, "contrast": 0.5}})).unwrap();
+
     assert_eq!(old, Filter::HistogramScan { position: 0.5, contrast: 0.5, invert_position: false });
     assert_eq!(serde_json::to_value(&old).unwrap(), json!({"HistogramScan": {"position": 0.5, "contrast": 0.5}}), "saved as before");
 }
@@ -144,6 +159,7 @@ fn histogram_shift_takes_a_position() {
     let effect = add_filter(&mut s, json!({"filter": "histogramShift"}));
 
     set(&mut s, effect, json!({"position": 0.5}));
+
     assert_eq!(filter_of(&s, effect), Filter::HistogramShift { offset: -0.5 });
     assert!(close(roughness(&mut s, TEXEL), 0.75), "0.25 − 0.5 wraps to 0.75");
 
@@ -159,12 +175,14 @@ fn posterize_takes_apply_to_alpha() {
     let effect = add_filter(&mut s, json!({"filter": "posterize"}));
 
     set(&mut s, effect, json!({"levels": 2, "applyToAlpha": true}));
+
     assert_eq!(filter_of(&s, effect), Filter::Posterize { levels: 2.0, alpha: true });
     assert!(close(roughness(&mut s, TEXEL), 0.0));
 
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "applyToAlpha": 1})).is_err());
 
     let old: Filter = serde_json::from_value(json!({"Posterize": {"levels": 4.0}})).unwrap();
+
     assert_eq!(old, Filter::Posterize { levels: 4.0, alpha: false });
     assert_eq!(serde_json::to_value(&old).unwrap(), json!({"Posterize": {"levels": 4.0}}), "saved as before");
 }
@@ -184,9 +202,11 @@ fn pixelate_takes_pixels_amount_and_apply_to_alpha() {
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "applyToAlpha": "no"})).is_err());
 
     let inspect = execute(&mut s, "project.inspect", &json!({})).unwrap().to_string();
+
     assert!(inspect.contains("Pixelate"), "named after the reference workflow");
 
     let old: Filter = serde_json::from_value(json!({"Mosaic": {"size": 32.0}})).unwrap();
+
     assert_eq!(old, Filter::Mosaic { size: 32.0, alpha: true });
     assert_eq!(serde_json::to_value(&old).unwrap(), json!({"Mosaic": {"size": 32.0}}), "saved as before");
 }
@@ -199,12 +219,14 @@ fn fxaa_takes_affect_alpha_channel() {
     assert_eq!(filter_of(&s, effect), Filter::Fxaa { alpha: false });
 
     set(&mut s, effect, json!({"affectAlphaChannel": true}));
+
     assert_eq!(filter_of(&s, effect), Filter::Fxaa { alpha: true });
     assert!(close(roughness(&mut s, TEXEL), 0.3), "nothing to smooth on a flat fill");
 
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "affectAlphaChannel": 2})).is_err());
 
     execute(&mut s, "edit.undo", &json!({})).unwrap();
+
     assert_eq!(filter_of(&s, effect), Filter::Fxaa { alpha: false }, "one undo step");
 }
 
@@ -216,17 +238,21 @@ fn blurs_take_intensity() {
     assert_eq!(filter_of(&s, blur), Filter::Blur { radius: 4.8, wrap: false }, "a new Blur starts at Blur Intensity 0.30");
 
     set(&mut s, blur, json!({"intensity": 2.0}));
+
     assert_eq!(filter_of(&s, blur), Filter::Blur { radius: 32.0, wrap: false });
 
     set(&mut s, blur, json!({"intensity": 1000.0}));
+
     assert_eq!(filter_of(&s, blur), Filter::Blur { radius: 256.0, wrap: false }, "capped as radius is");
 
     let directional = add_filter(&mut s, json!({"filter": "blurDirectional"}));
 
     set(&mut s, directional, json!({"intensity": 0.5, "angle": 90}));
+
     assert_eq!(filter_of(&s, directional), Filter::DirectionalBlur { radius: 8.0, angle: 90.0 });
 
     set(&mut s, directional, json!({"radius": 4.0}));
+
     assert_eq!(filter_of(&s, directional), Filter::DirectionalBlur { radius: 4.0, angle: 90.0 }, "radius in texels at 2K still sets it");
 }
 
@@ -239,15 +265,18 @@ fn highpass_takes_radius_color_space_and_apply_to_alpha() {
     assert!(close(roughness(&mut s, TEXEL), 0.5), "a flat fill has no detail: mid gray");
 
     set(&mut s, effect, json!({"intensity": 0.5, "colorSpace": "srgbFromAcescg", "applyToAlpha": true}));
+
     assert_eq!(filter_of(&s, effect), Filter::HighPass { radius: 8.0, space: HighpassSpace::SrgbFromAcescg, alpha: true });
 
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "colorSpace": "rec2020"})).is_err());
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "applyToAlpha": "yes"})).is_err());
 
     execute(&mut s, "edit.undo", &json!({})).unwrap();
+
     assert_eq!(filter_of(&s, effect), Filter::HighPass { radius: 48.0, space: HighpassSpace::Working, alpha: false }, "one undo step");
 
     let old: Filter = serde_json::from_value(json!({"HighPass": {"radius": 8.0}})).unwrap();
+
     assert_eq!(old, Filter::HighPass { radius: 8.0, space: HighpassSpace::Working, alpha: false });
     assert_eq!(serde_json::to_value(&old).unwrap(), json!({"HighPass": {"radius": 8.0}}), "saved as before");
 }
@@ -271,16 +300,20 @@ fn grayscale_conversion_takes_its_settings_and_keeps_saved_grayscales() {
     assert!(saved.iter().all(|v| close(*v, saved[0])) && close(saved[0], lum([0.8, 0.2, 0.1])), "{saved:?}");
 
     set(&mut s, effect, json!({"balance": 0.5}));
+
     assert_eq!(filter_of(&s, effect), Filter::GrayscaleConversion(GrayscaleConversion::of_luminance()), "the luminance weights");
     assert!(close(base_color(&mut s)[0], saved[0]), "looks the same after its first edit");
 
     set(&mut s, effect, json!({"red": 1.0, "green": 0.0, "blue": 0.0, "invert": true}));
+
     assert!(close(base_color(&mut s)[0], 1.0 - 0.8), "Red only, inverted");
 
     set(&mut s, effect, json!({"mode": "min", "invert": false}));
+
     assert!(close(base_color(&mut s)[0], 0.1), "the darkest component");
 
     set(&mut s, effect, json!({"channelInput": "customInput", "mode": "max"}));
+
     assert!(close(base_color(&mut s)[0], 0.5), "the Custom Input reads mid gray until set");
 
     let Filter::GrayscaleConversion(conversion) = filter_of(&s, effect) else { panic!("converted") };
@@ -290,6 +323,7 @@ fn grayscale_conversion_takes_its_settings_and_keeps_saved_grayscales() {
     assert!(execute(&mut s, "effect.set", &json!({"effect": effect.0, "mode": "luma"})).is_err(), "Luma is the gradients' mode");
 
     let inspect = execute(&mut s, "project.inspect", &json!({})).unwrap().to_string();
+
     assert!(inspect.contains("Grayscale Conversion"));
     assert_eq!(serde_json::to_value(Filter::Grayscale).unwrap(), json!("Grayscale"), "saved as before");
 }

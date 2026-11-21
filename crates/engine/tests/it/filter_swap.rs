@@ -109,6 +109,7 @@ fn asking_a_saved_warp_for_another_mode_replaces_it_with_a_warp_in_that_mode() {
 
     let edited = effect(&s, warp).kind;
     assert!(matches!(edited, EffectKind::Filter(Filter::SourceWarp(warp)) if warp.mode == WarpMode::Directional && warp.angle == 90.0), "{edited:?}");
+
     let edited = effect(&s, directional).kind;
     assert!(matches!(edited, EffectKind::Filter(Filter::SourceWarp(warp)) if warp.mode == WarpMode::MultiDirectional), "{edited:?}");
 }
@@ -135,6 +136,7 @@ fn swapping_to_a_gradient_given_colors_ramps_evenly_through_them() {
 
     let EffectKind::Filter(gradient) = effect(&s, id).kind else { panic!("still a filter") };
     let halfway = gradient.ramp_at(0.5).unwrap();
+
     assert!((halfway[0] - 0.5).abs() < 1e-3, "black to white is mid gray halfway: {halfway:?}");
 }
 
@@ -188,8 +190,10 @@ fn a_mask_filter_swaps_in_place_on_the_mask() {
     let blur = effect(&s, swapped);
     assert!(matches!(blur.kind, EffectKind::Filter(Filter::Blur { .. })), "{:?}", blur.kind);
     assert_eq!((blur.name.as_str(), blur.blend, blur.opacity), ("Blur", BlendMode::Multiply, 0.4));
+
     let layer = s.selected_layer().unwrap();
     let mask_order: Vec<LayerId> = s.doc.project.layer(layer).unwrap().mask.as_ref().unwrap().effects.iter().map(|effect| effect.id).collect();
+
     assert_eq!(mask_order, vec![below, swapped, above]);
 }
 
@@ -234,8 +238,10 @@ fn a_refused_swap_changes_nothing_and_adds_no_undo_step() {
     }
 
     assert_eq!(effect(&s, id), before);
+
     // The last step is still the blend, opacity and name edit
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
+
     assert_eq!(effect(&s, id).name, "Invert");
 }
 
@@ -284,6 +290,7 @@ fn filters_carry_the_workflows_names_and_former_names_still_follow_a_swap() {
     let mut s = session();
     let slope = add(&mut s, "effect.add.filter", json!({"filter": "slopeBlur", "target": "content"}));
     assert_eq!(effect(&s, slope).name, "Blur Slope");
+
     let names: Vec<Value> = execute(&mut s, "filter.list", &Value::Null).unwrap().as_array().unwrap().iter().map(|def| def["label"].clone()).collect();
     for name in ["Contrast Luminosity", "Blur Slope", "Highpass", "Grayscale Conversion"] {
         assert!(names.contains(&json!(name)), "{name} in {names:?}");
@@ -292,5 +299,6 @@ fn filters_carry_the_workflows_names_and_former_names_still_follow_a_swap() {
     // A project saved before the rename holds the former name: a swap still renames it, and the former name still finds the filter
     let old = add(&mut s, "effect.add.filter", json!({"filter": "Slope Blur", "target": "content", "name": "Slope Blur"}));
     set(&mut s, old, json!({"filter": "blur"}));
+
     assert_eq!(effect(&s, old).name, "Blur");
 }

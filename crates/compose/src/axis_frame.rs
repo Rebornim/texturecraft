@@ -151,6 +151,7 @@ mod tests {
     fn only_axis_planars_are_placed() {
         let bounds = (Vec3::NEG_ONE, Vec3::ONE);
         assert!(placed_from_axis(&Projection::default(), bounds).is_none());
+
         let frame = axis_frame(1.0, 2, Vec3::ZERO, &Projector::default(), bounds).expect("a frame");
         assert!(placed_from_axis(&Projection::decal(frame), bounds).is_none());
         assert!(axis_frame(f32::NAN, 2, Vec3::ZERO, &Projector::default(), bounds).is_none());

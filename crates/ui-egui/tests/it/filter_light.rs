@@ -57,6 +57,7 @@ fn drop_shadow_angle_drag_is_one_undo_step() {
     assert_eq!(undo_depth(&harness), depth + 1, "one undo step for the drag");
 
     undo(&mut harness);
+
     assert!(matches!(filter_of(&harness, effect), Filter::DropShadow { angle, .. } if angle == 90.0), "{:?}", filter_of(&harness, effect));
 }
 
@@ -91,6 +92,7 @@ fn baked_lighting_stylized_cards_set_the_sun_a_light_and_the_output() {
 
     let filter = filter_of(&harness, effect);
     let (stylized, light) = filter.stylized_lighting().unwrap();
+
     assert!(light.sun.intensity > 9.5, "{}", light.sun.intensity);
     assert!(stylized.lights[0].intensity > 1.9 && stylized.lights[1].intensity == 0.0, "{:?}", stylized.lights);
     assert_eq!(stylized.output, LightingOutput::Specular);

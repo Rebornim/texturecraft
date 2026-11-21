@@ -513,17 +513,23 @@ mod tests {
         let (mut service, jobs, results) = held_worker();
         service.begin_frame(&session, 0.0);
         service.get(&session, target);
+
         assert!(service.poll(&session));
+
         let job = jobs.try_recv().unwrap();
         results.send(Done { generation: job.generation, target, image: job.snapshot.render(target) }).unwrap();
 
         service.begin_frame(&session, 0.1);
+
         assert!(service.get(&session, target).image.is_none());
+
         let repaint = service.poll(&session);
 
         assert!(service.is_fresh(target));
         assert!(repaint, "the frame drew before collecting the final thumbnail");
+
         service.begin_frame(&session, 0.2);
+
         assert!(service.get(&session, target).image.is_some());
         assert!(!service.poll(&session), "an idle cache must stop repainting");
     }
@@ -539,6 +545,7 @@ mod tests {
 
         service.begin_frame(&session, 0.1);
         service.poll(&session);
+
         assert_eq!(jobs.try_recv().map(|job| job.target).ok(), Some(target), "the late request is dispatched, not dropped");
     }
 

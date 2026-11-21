@@ -138,6 +138,7 @@ fn id_color_at(session: &Session, params: &Value, owner: LayerId, id_map: Option
             if material != set.material {
                 return Err(bad(CMD, "that surface belongs to another texture set"));
             }
+
             uv
         }
     };
@@ -148,6 +149,7 @@ fn id_color_at(session: &Session, params: &Value, owner: LayerId, id_map: Option
     if !texel.iter().zip([size.0, size.1]).all(|(position, extent)| (0.0..extent as f32).contains(position)) {
         return Err(bad(CMD, "that point is outside the texture set's UV space"));
     }
+
     let (x, y) = (texel[0] as u32, texel[1] as u32);
     let color = match (image, baked) {
         (Some(image), _) => {

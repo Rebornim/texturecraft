@@ -46,6 +46,7 @@ impl PropertySheet<'_> {
         let response = self.ui.interact(Rect::from_center_size(center, CAPTION_SWITCH_HIT), id, Sense::click());
         response.widget_info(|| WidgetInfo::selected(Role::CheckBox, true, on, title));
         self.pill(center, on, true);
+        self.paint_control_focus(&response);
         response
     }
 

@@ -73,8 +73,11 @@ fn importing_the_id_map_a_selection_reads_again_redraws_its_mask() {
     let mut session = session();
     let id_map = session.import_resource_bytes("id.png", white_png()).unwrap();
     selecting_layer(&mut session, &id_map);
+
     assert!(red_in_the_view(&mut session), "white is selected");
+
     execute(&mut session, "resource.remove", &json!({"name": id_map})).unwrap();
+
     assert!(!red_in_the_view(&mut session), "no ID map, nothing selected");
 
     let imported = session.import_resource_bytes("id.png", white_png()).unwrap();

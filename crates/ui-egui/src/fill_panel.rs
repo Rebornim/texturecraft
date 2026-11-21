@@ -362,7 +362,7 @@ fn placement_rows(
         None => PreviewLower::Offset { values: &mut lower_offset, range: OFFSET_TRACK, typed: OFFSET_TYPED },
     };
     let placement = Placement { tiling, rotation, offset };
-    let bounds = app.session.mesh.bounds();
+    let bounds = app.viewport_mesh_bounds.get(&app.session.mesh);
 
     // A warp shows its frame's size and turn as its gizmo leaves them
     let warp = match &fill.projection {
@@ -430,7 +430,7 @@ fn world_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &F
     let edited = |fields: &[NumberField]| -> Vec<f32> { fields.iter().map(|field| field.value).collect() };
 
     // A placed planar or a warp: the frame, its projector folded in
-    if let Some(shown) = frame_placement::placement(&fill.projection, app.session.mesh.bounds()) {
+    if let Some(shown) = frame_placement::placement(&fill.projection, app.viewport_mesh_bounds.get(&app.session.mesh)) {
         let run = |app: &mut TextureCraftApp, key: &str, values: Vec<f32>, merge: bool| {
             app.run("layer.decal.set", with(base, json!({key: values, "merge": merge})));
         };

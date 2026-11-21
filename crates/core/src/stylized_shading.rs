@@ -101,6 +101,8 @@ impl StylizedShading {
             let kept = if self.output.specular() { 1.0 - metal } else { 1.0 };
             (finite_unit(channel(Channel::Roughness)[0]), f0, albedo.map(|x| x * kept))
         };
+        let compute_diffuse = self.output.diffuse();
+        let compute_specular = self.output.specular();
         let roughness = roughness.max(MIN_ROUGHNESS);
         let sky = self.ambient(normal);
 
@@ -109,7 +111,7 @@ impl StylizedShading {
         let diffuse_cavity = 1.0 - cavity * self.diffuse_cavity;
         let specular_cavity = 1.0 - cavity * self.specular_cavity;
 
-        let mut diffuse = sky.map(|sky_light| sky_light * self.sky_intensity * diffuse_ao * diffuse_cavity);
+        let mut diffuse = if compute_diffuse { sky.map(|sky_light| sky_light * self.sky_intensity * diffuse_ao * diffuse_cavity) } else { [0.0; 3] };
         let mut specular = [0.0f32; 3];
         for &(direction, intensity, color) in &self.lights {
             let facing = dot(normal, direction);
@@ -117,21 +119,29 @@ impl StylizedShading {
                 continue;
             }
 
-            let half = normalize([normal[0] + direction[0], normal[1] + direction[1], normal[2] + direction[2]]);
-            let normal_dot_half = dot(normal, half).max(0.0);
-            let highlight = ggx(normal_dot_half, roughness) / COOK_TORRANCE_DENOMINATOR * facing * specular_cavity;
-            for (((diffuse, specular), color), f0) in diffuse.iter_mut().zip(&mut specular).zip(color).zip(f0) {
-                *diffuse += color * intensity * facing * diffuse_cavity;
-                *specular += color * intensity * highlight * schlick(f0, normal_dot_half);
+            if compute_diffuse {
+                for (diffuse, color) in diffuse.iter_mut().zip(color) {
+                    *diffuse += color * intensity * facing * diffuse_cavity;
+                }
+            }
+            if compute_specular {
+                let half = normalize([normal[0] + direction[0], normal[1] + direction[1], normal[2] + direction[2]]);
+                let normal_dot_half = dot(normal, half).max(0.0);
+                let highlight = ggx(normal_dot_half, roughness) / COOK_TORRANCE_DENOMINATOR * facing * specular_cavity;
+                for ((specular, color), f0) in specular.iter_mut().zip(color).zip(f0) {
+                    *specular += color * intensity * highlight * schlick(f0, normal_dot_half);
+                }
             }
         }
-        for ((specular, f0), sky_light) in specular.iter_mut().zip(f0).zip(sky) {
-            *specular += f0 * sky_light * self.sky_intensity * specular_ao * specular_cavity;
+        if compute_specular {
+            for ((specular, f0), sky_light) in specular.iter_mut().zip(f0).zip(sky) {
+                *specular += f0 * sky_light * self.sky_intensity * specular_ao * specular_cavity;
+            }
         }
 
-        std::array::from_fn(|k| {
-            let lit = if self.output.diffuse() { diffuse_albedo[k] * diffuse[k] } else { 0.0 };
-            let shine = if self.output.specular() { specular[k] } else { 0.0 };
+        std::array::from_fn(|channel| {
+            let lit = if compute_diffuse { diffuse_albedo[channel] * diffuse[channel] } else { 0.0 };
+            let shine = specular[channel];
             let shaded = finite_unit(lit + shine);
             finite_unit(shaded + (1.0 - shaded) * edge * self.edges_intensity)
         })

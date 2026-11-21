@@ -1,6 +1,6 @@
 //! The viewport environment's diffuse light as spherical harmonics, worked out once per environment, and Baked Lighting Environment's shading with it
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use texturecraft_core::project::DisplaySettings;
 use texturecraft_core::{Channel, DIELECTRIC_REFLECTANCE, finite_unit, mix3};
@@ -16,33 +16,33 @@ pub struct EnvironmentSh {
     rotation: f32,
 }
 
-/// The environment the last coefficients were worked out for: a built-in by name, or an imported image (held, so it is not a different image at the same address)
-type CacheEntry = (String, Option<Arc<ImageRes>>, Arc<[[f32; 3]; 9]>);
+/// The last coefficients, keyed by a built-in name or the identity of an imported image
+type CacheEntry = (String, Option<Weak<ImageRes>>, [[f32; 3]; 9]);
 
 static CACHE: Mutex<Option<CacheEntry>> = Mutex::new(None);
 
 impl EnvironmentSh {
     /// The diffuse light of the environment `display` shows (an imported image from `images`), worked out once per environment
     pub fn of(display: &DisplaySettings, images: &ImageStore) -> EnvironmentSh {
-        let image = display.environment_resource().and_then(|name| images.get(name)).cloned();
+        let image = display.environment_resource().and_then(|name| images.get(name));
         let same = |entry: &CacheEntry| match (&entry.1, &image) {
-            (Some(held), Some(image)) => Arc::ptr_eq(held, image),
+            (Some(identity), Some(image)) => std::ptr::eq(identity.as_ptr(), Arc::as_ptr(image)),
             (None, None) => entry.0 == display.environment,
             _ => false,
         };
         let rotation = display.env_rotation.to_radians();
 
-        let cached = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().filter(|entry| same(entry)).map(|entry| entry.2.clone());
+        let cached = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().filter(|entry| same(entry)).map(|entry| entry.2);
         if let Some(coefficients) = cached {
-            return EnvironmentSh { coefficients: *coefficients, rotation };
+            return EnvironmentSh { coefficients, rotation };
         }
 
-        // Worked out with the cache unlocked: the averaging runs on the thread pool, where a worker holding the lock could take another tile's task that waits for it
-        let coefficients = match &image {
+        // Average outside the lock so a Rayon worker can take another tile that needs the cache
+        let coefficients = match image {
             Some(image) => image_sh(image),
             None => built_in_sh(&display.environment),
         };
-        *CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((display.environment.clone(), image, Arc::new(coefficients)));
+        *CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((display.environment.clone(), image.map(Arc::downgrade), coefficients));
         EnvironmentSh { coefficients, rotation }
     }
 
@@ -111,6 +111,24 @@ mod tests {
         assert!((here - turned).abs().max_element() > 0.05, "{here} vs {turned}");
         let night = EnvironmentSh::of(&DisplaySettings { environment: "Night".into(), ..DisplaySettings::default() }, &ImageStore::default());
         assert!(night.irradiance(Vec3::Y, 0.0, 0.0).element_sum() < sh.irradiance(Vec3::Y, 0.0, 0.0).element_sum(), "the cache follows the environment");
+    }
+
+    #[test]
+    fn replacing_an_imported_environment_releases_its_image() {
+        let display = DisplaySettings { environment: "resource:lighting".into(), ..DisplaySettings::default() };
+
+        for color in [[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]] {
+            let image = Arc::new(ImageRes::new(32, 16, vec![color; 32 * 16], false));
+            let image_identity = Arc::downgrade(&image);
+            let images = ImageStore::from([("lighting".into(), image)]);
+
+            let lighting = EnvironmentSh::of(&display, &images);
+            drop(images);
+            let irradiance = lighting.irradiance(Vec3::Y, 0.0, 0.0);
+
+            assert!(irradiance.distance(Vec3::new(color[0], color[1], color[2])) < 0.02);
+            assert!(image_identity.upgrade().is_none(), "lighting should release the decoded image with its store");
+        }
     }
 
     /// Tiles on the thread pool that ask for a new light finish: the light is worked out with the cache unlocked, so a worker that steals another tile while it waits for its share of the averaging never waits for its own lock

@@ -30,6 +30,7 @@ fn picking_from_the_slot_swaps_the_filter() {
     // The picker's search field has the focus as it opens
     harness.event(egui::Event::Text("sharp".into()));
     harness.run_steps(3);
+
     assert_eq!(harness.query_all_by_label("Blur").count(), 0, "the search hides filters that don't match");
 
     let at = harness.get_by_label("Sharpen").rect().center();
@@ -78,6 +79,7 @@ fn add_filter_adds_a_filter_selects_it_and_opens_its_picker() {
     harness.run_steps(3);
     let at = harness.get_by_label("Sharpen").rect().center();
     click_at(&mut harness, at);
+
     assert!(matches!(filter_of(&harness, added), Filter::Sharpen { .. }), "{:?}", filter_of(&harness, added));
 }
 
@@ -85,6 +87,7 @@ fn add_filter_adds_a_filter_selects_it_and_opens_its_picker() {
 fn escape_after_add_filter_keeps_the_empty_filter() {
     let (mut harness, _) = app_with_invert();
     add_filter_from_the_wand(&mut harness);
+
     assert!(harness.query_by_label("Sharpen").is_some(), "Add filter opened the picker");
 
     harness.key_press(egui::Key::Escape);
@@ -95,6 +98,7 @@ fn escape_after_add_filter_keeps_the_empty_filter() {
     assert!(matches!(filter_of(&harness, added), Filter::Empty), "{:?}", filter_of(&harness, added));
 
     harness.state_mut().run("edit.undo", Value::Null);
+
     assert!(harness.state().session.doc.project.effect(added).is_none(), "one undo removes the empty filter");
 }
 
@@ -111,6 +115,7 @@ fn add_filter_on_a_mask_adds_it_to_the_mask() {
 
     let StackTarget::Effect(added) = harness.state().session.target else { panic!("the new filter is selected") };
     let mask = harness.state().session.doc.project.layer(layer).unwrap().mask.clone().unwrap();
+
     assert!(mask.effects.iter().any(|effect| effect.id == added), "the filter went on the mask");
     assert!(matches!(filter_of(&harness, added), Filter::Empty), "{:?}", filter_of(&harness, added));
     assert!(harness.query_by_label("Sharpen").is_some(), "the mask filter's picker is open");
@@ -123,6 +128,7 @@ fn add_filter_reopens_closed_properties_to_show_its_picker() {
     let (mut harness, _) = app_with_invert();
     harness.state_mut().ui.dock.close(texturecraft_ui_egui::docking::Panel::Properties);
     harness.run_steps(3);
+
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Invert").is_none());
 
     add_filter_from_the_wand(&mut harness);
@@ -138,6 +144,7 @@ fn keyboard_opens_the_slot_and_outside_click_closes_it() {
         harness.get_by_role_and_label(Role::ComboBox, "Invert").focus();
         harness.key_press(key);
         harness.run_steps(3);
+
         assert!(egui::Popup::is_any_open(&harness.ctx));
 
         let position = harness.state().viewport_rect.center();
@@ -147,6 +154,7 @@ fn keyboard_opens_the_slot_and_outside_click_closes_it() {
             harness.run_steps(1);
         }
         harness.run_steps(3);
+
         assert!(!egui::Popup::is_any_open(&harness.ctx));
         assert!(matches!(filter_of(&harness, effect), Filter::Invert));
     }

@@ -877,8 +877,8 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     let popup = app.properties_popup.is_some() || rail_popup;
 
     // A pending ID color pick takes the next click instead of the brush
-    let picking_id_color = app.picking_id_color.is_some();
-    if picking_id_color {
+    let picking = app.picking_id_color.is_some();
+    if picking {
         crate::id_color_pick::IdColorPick::draw_cursor(ui, rect);
         if !alt
             && response.clicked_by(PointerButton::Primary)

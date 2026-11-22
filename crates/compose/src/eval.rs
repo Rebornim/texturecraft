@@ -10,9 +10,9 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 use texturecraft_core::{
-    BakedMap, BlendMode, BlockScales, Channel, ChannelKind, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter, Generator,
-    GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, MicroDetail, NormalFormat, Project, Projection, Source, TextureSet, TileGrid,
-    blend1, blend3, lum, mix3, per_unit,
+    BakedMap, BlendMode, BlockScales, Channel, ChannelKind, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter, Filtering, Generator,
+    GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, MicroDetail, NormalFormat, Project, Projection, Sampling, ShapeCrop, Source,
+    TextureSet, TileGrid, blend1, blend3, lum, mix3, per_unit,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, Surface, UvGBuffer};
@@ -1097,7 +1097,7 @@ struct Node<'a> {
 
 /// Plans of the visible effects of a stack: mask effects (`channel` None) or the content
 /// effects of one channel (paint effects then read that channel's pixels).
-fn effect_plans<'a>(inp: &Inputs<'a>, effects: &'a [Effect], tile_x: u32, tile_y: u32, channel: Option<Channel>) -> Vec<EffectPlan<'a>> {
+fn effect_plans<'a>(inp: &EvaluationInputs<'a>, effects: &'a [Effect], tile_x: u32, tile_y: u32, channel: Option<Channel>) -> Vec<EffectPlan<'a>> {
     effects
         .iter()
         .filter(|effect| effect.visible)
@@ -1155,7 +1155,7 @@ fn tile_of<'a>(inp: &Inputs, img: Option<&'a TileImage>, tx: u32, ty: u32, chann
     img.resampled_tile(w, h, tx, ty, &empty).map(Cow::Owned)
 }
 
-fn mask_plan<'a>(inp: &Inputs<'a>, id: LayerId, mask: &'a Mask, tx: u32, ty: u32, fields: Option<&'a Fields>) -> Option<MaskPlan<'a>> {
+fn mask_plan<'a>(inp: &EvaluationInputs<'a>, id: LayerId, mask: &'a Mask, tx: u32, ty: u32, fields: Option<&'a Fields>) -> Option<MaskPlan<'a>> {
     if !mask.enabled {
         return None;
     }
@@ -1179,8 +1179,7 @@ fn plan<'a>(inp: &Inputs<'a>, list: &[LayerId], channels: &[Channel], tx: u32, t
     list.iter().filter_map(|id| plan_node(inp, *id, channels, tx, ty, depth, fields, true)).collect()
 }
 
-/// The plan of layer `id` at `depth` (None where it draws nothing); a folder's children are
-/// planned when `kids`.
+/// The plan of layer `id` at `depth` (None where it draws nothing); a folder's children are planned when `kids`
 #[allow(clippy::too_many_arguments)]
 fn plan_node<'a>(
     inp: &Inputs<'a>,
@@ -1219,7 +1218,10 @@ fn plan_node<'a>(
         .collect::<Vec<_>>();
     let content = match &layer.kind {
         LayerKind::Paint => Content::Paint { preview: previews(inp, PaintTarget::Layer(layer.id)) },
-        LayerKind::Fill(f) => Content::Fill(f),
+        LayerKind::Fill(f) => {
+            let (depth, covers_all) = fill_coverage(inp, &f.projection, f.sampling);
+            Content::Fill { fill: Box::new(Cow::Borrowed(f)), depth, covers_all }
+        }
         LayerKind::Group { children, .. } => Content::Group(if kids { plan(inp, children, channels, tx, ty, depth + 1, fields) } else { Vec::new() }),
 
         // `content_layer` already followed instance links
@@ -1371,7 +1373,7 @@ impl<'t> Tape<'t> {
 
 impl<'a, 'b> Texel<'a, 'b> {
     fn new(inp: &'b Inputs<'a>, x: u32, y: u32, o: usize, stroke: f32) -> Self {
-        Texel { inp, x, y, o, res: inp.gbuf.width, coords: None, stroke, stop: None, anchors: Vec::new(), tape: Tape::Off }
+        Texel { inp, x, y, o, res: inp.gbuf.width, coords: None, stroke, stop: None, anchors: Vec::new(), tape: Tape::Off, copy: None }
     }
 
     /// Run `f` with `tape` as this texel's tape.
@@ -2219,13 +2221,13 @@ impl<'a, 'b> Texel<'a, 'b> {
                 }
                 None => (value, coverage),
             },
-            EffectKind::Levels(l) => (mix3(v, per_unit(c.kind, v, |x| l.apply(x)), o), cov),
-            // Baked lighting reads the texel's normal and occlusion, and lights the base color only.
-            EffectKind::Filter(f @ Filter::BakedLighting { .. }) => match Channel::ALL.get(c.ch) {
+            EffectKind::Levels(levels) => (mix3(value, per_unit(chan_plan.kind, value, |x| levels.apply(x)), opacity), coverage),
+            // Baked lighting reads the texel's normal and occlusion, and lights the base color only
+            EffectKind::Filter(filter @ Filter::BakedLighting { .. }) => match Channel::ALL.get(chan_plan.ch) {
                 Some(Channel::BaseColor) => {
                     let nrm = self.coords().nrm.to_array();
-                    let k = f.baked_light(nrm, self.baked(BakedMap::AmbientOcclusion).unwrap_or(1.0)).unwrap_or(1.0);
-                    (mix3(v, v.map(|x| (x * k).clamp(0.0, 1.0)), o), cov)
+                    let factor = filter.baked_light(nrm, self.baked(BakedMap::AmbientOcclusion).unwrap_or(1.0)).unwrap_or(1.0);
+                    (mix3(value, value.map(|x| (x * factor).clamp(0.0, 1.0)), opacity), coverage)
                 }
                 _ => (value, coverage),
             },
@@ -2904,7 +2906,7 @@ pub fn effect_histogram(inp: &Inputs, effect: LayerId, channel: Channel, bins: u
     let tiles = histogram_tiles(inp.gbuf.width, inp.gbuf.height);
     // A field covers the bounding box of the tiles it is built for, which for a scattered sample
     // is the whole set: with a neighbourhood filter below, each tile gets its own.
-    let probe = neighbourhood_fields(&cut_inp, &channels, tiles.get(..1).unwrap_or_default());
+    let probe = evaluation_fields(&cut_inp, &channels, tiles.get(..1).unwrap_or_default());
     let shared = probe.is_empty().then_some(probe);
     let bin = |v: f32| ((v.clamp(0.0, 1.0) * bins as f32) as usize).min(bins - 1);
     let hist = tiles
@@ -2914,7 +2916,7 @@ pub fn effect_histogram(inp: &Inputs, effect: LayerId, channel: Channel, bins: u
             let fields = match &shared {
                 Some(f) => f,
                 None => {
-                    own = neighbourhood_fields(&cut_inp, &channels, &[(tx, ty)]);
+                    own = evaluation_fields(&cut_inp, &channels, &[(tx, ty)]);
                     &own
                 }
             };

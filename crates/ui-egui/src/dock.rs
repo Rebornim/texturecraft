@@ -6,8 +6,8 @@ use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::compose::ThumbTarget;
 use texturecraft_engine::core::{
-    BakedMap, BlendMode, Channel, ChannelBlend, ChannelKind, Decal, DecalFlip, Effect, EffectKind, Fill, Filter, Layer, LayerId, LayerKind, LinkParam,
-    MaterialLink, Projection, Source,
+    BakedMap, BlendMode, Channel, ChannelBlend, ChannelKind, Effect, EffectKind, Fill, Filter, Layer, LayerId, LayerKind, LinkParam, MaterialLink, Projection,
+    Source,
 };
 use texturecraft_engine::filter_lib::scalar_params;
 use texturecraft_engine::paint::alpha_params::MAX_ALPHA_CONTRAST;
@@ -1885,7 +1885,12 @@ fn effect_type_label(kind: &EffectKind) -> &'static str {
 pub(crate) fn properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     // A floating scroll bar would cover the right-aligned slider values and section reset icons
     ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
-    egui::ScrollArea::vertical().id_salt(("props", properties_place(app))).auto_shrink([false, false]).show(ui, |ui| properties_contents(app, ui));
+    let scope = SectionScope::Docked;
+    if let Some(tabs) = properties_fill_tabs(app) {
+        crate::property_sheet::section_tabs(ui, scope, 0, &tabs);
+    }
+    let area = egui::ScrollArea::vertical().id_salt(("props", properties_place(app))).auto_shrink([false, false]);
+    crate::property_sheet::in_scope(ui, scope, |ui| properties_scrolled(app, ui, area, PastEnd::Always));
 }
 
 /// What the docked Properties list keeps its own scroll place for: the selected layer and the part of it edited, none for the tool
@@ -1896,6 +1901,38 @@ fn properties_place(app: &TextureCraftApp) -> Option<(LayerId, StackTarget)> {
     }
 
     app.session.selected_layer().map(|layer| (layer, app.session.target))
+}
+
+/// The sections in `area`, leaving the solid bar's room even without it, so the bar coming in refits no row (flipped it every frame)
+pub(crate) fn properties_scrolled(app: &mut TextureCraftApp, ui: &mut Ui, area: egui::ScrollArea, past_end: PastEnd) {
+    let sheet_width = (ui.available_width() - ui.spacing().scroll.allocated_width()).max(0.0);
+    area.show(ui, |ui| {
+        ui.set_max_width(sheet_width);
+        crate::property_sheet::forget_sections(ui);
+        properties_contents(app, ui);
+
+        // Blank space under the rows lets the last section's top reach the top of the list, as the reference panel scrolls
+        let scrolls = ui.min_rect().height() > ui.clip_rect().height();
+        if past_end == PastEnd::Always || scrolls {
+            ui.add_space(crate::property_sheet::room_past_end(ui));
+        }
+    });
+}
+
+/// The tabs over the panel when it shows a fill layer's sections, which they jump between
+pub(crate) fn properties_fill_tabs(app: &TextureCraftApp) -> Option<[(&'static str, &'static str); 2]> {
+    if app.session.tool.tool == Tool::PolygonFill && app.session.tool_usable(Tool::PolygonFill) {
+        return None;
+    }
+
+    let project = &app.session.doc.project;
+    match app.session.target {
+        StackTarget::Content => {
+            let layer = app.session.selected_layer().and_then(|id| project.layers.get(&id))?;
+            matches!(&layer.kind, LayerKind::Fill(fill) if fill.projection.placed().is_none()).then(crate::fill_panel::fill_tabs)
+        }
+        _ => None,
+    }
 }
 
 /// Room around the Properties rows not yet laid out by the property sheet: the sheet's side padding, so both start under the panel's name
@@ -1921,8 +1958,8 @@ pub(crate) fn properties_contents(app: &mut TextureCraftApp, ui: &mut Ui) {
     match (&selected, app.session.target) {
         // Polygon fill shows its own settings and says what it fills into, wherever it can fill
         _ if tool == Tool::PolygonFill && tool_usable => legacy_body(ui, |ui| polygon_fill_properties(app, ui)),
-        (Some(layer), StackTarget::Effect(effect)) => legacy_body(ui, |ui| effect_properties(app, ui, layer, effect)),
-        (Some(layer), StackTarget::Content) if matches!(layer.kind, LayerKind::Fill(_)) => legacy_body(ui, |ui| fill_properties(app, ui, layer)),
+        (Some(layer), StackTarget::Effect(effect)) => effect_properties(app, ui, layer, effect),
+        (Some(layer), StackTarget::Content) if matches!(layer.kind, LayerKind::Fill(_)) => fill_properties(app, ui, layer),
         (Some(layer), StackTarget::Content) if layer.is_group() => legacy_body(ui, |ui| {
             ui.label(RichText::new(tr("A folder blends its children (pass-through). Set per-channel opacity in the layer rows.")).color(tokens.text_dim));
         }),
@@ -2029,10 +2066,10 @@ fn tool_properties(app: &mut TextureCraftApp, ui: &mut Ui) {
 
     let stroke_width = (brush.size / PREVIEW_SIZE_UNIT * PREVIEW_STROKE_WIDTH_SCALE).clamp(*PREVIEW_STROKE_WIDTH.start(), *PREVIEW_STROKE_WIDTH.end());
     let alpha = (brush.flow * brush.opacity * 255.0) as u8;
-    painter.add(egui::Shape::line(points, Stroke::new(stroke_width, Color32::from_white_alpha(alpha.max(30)))));
-    let base_color = app.session.tool.values.get(&Channel::BaseColor).copied().unwrap_or([0.8; 3]);
-    crate::thumbs::paint_sphere(painter, pos2(rect.left() + half_width * 1.5, rect.center().y), 36.0, base_color);
-    ui.add_space(4.0);
+    painter.add(egui::Shape::line(points, Stroke::new(stroke_width, Color32::from_white_alpha(alpha.max(PREVIEW_STROKE_MIN_ALPHA)))));
+    let base_color = app.session.tool.values.get(&Channel::BaseColor).copied().unwrap_or(PREVIEW_FALLBACK_BASE_COLOR);
+    crate::thumbs::paint_sphere(painter, pos2(rect.left() + half_width * 1.5, rect.center().y), PREVIEW_SPHERE_RADIUS, base_color);
+    ui.add_space(BRUSH_PREVIEW_GAP);
 
     ui.horizontal(|ui| {
         let button_size = ui.spacing().interact_size.y;
@@ -2684,8 +2721,16 @@ fn material_controls(app: &mut TextureCraftApp, ui: &mut Ui) {
 fn fill_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer) {
     let LayerKind::Fill(fill) = &layer.kind else { return };
     let on: Vec<Channel> = layer.channels.keys().copied().collect();
-    ui.label(caption(tr("Fill")));
-    fill_editor(app, ui, fill, &json!({"layer": layer.id.0}), &on, layer.id);
+    PropertySheet::show(ui, ("fill_sheet", layer.id.0), |sheet| {
+        crate::fill_panel::placement_sections(app, sheet, fill, &json!({"layer": layer.id.0}), layer.id);
+    });
+    legacy_body(ui, |ui| {
+        if let Some(link) = &fill.link {
+            link_properties(app, ui, layer.id, link);
+            ui.add_space(6.0);
+        }
+        fill_editor(app, ui, fill, &json!({"layer": layer.id.0}), &on, layer.id);
+    });
 }
 
 /// A MaterialCraft material's presets and exposed inputs; edits store the value and re-cook the
@@ -2902,7 +2947,7 @@ const FILL_MATERIAL_GAP: f32 = 6.0;
 /// Space between a fill's channel chips and its channel sources
 const FILL_CHANNELS_GAP: f32 = 4.0;
 
-/// Projection and sources of a fill layer or fill effect (`base`) for its enabled channels; `reader` owns it
+/// Sources of a fill layer or fill effect (`base`) for its enabled channels; `reader` owns it
 fn fill_editor(app: &mut TextureCraftApp, ui: &mut Ui, fill: &Fill, base: &Value, enabled_channels: &[Channel], reader: LayerId) {
     let salt = base.to_string();
     ui.add_space(FILL_MATERIAL_GAP);
@@ -3261,9 +3306,9 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, effe
 
     // Property sheets keep the panel's own edges; only the rows not yet laid out by one get the legacy margin
     match &effect.kind {
-        EffectKind::Generator(generator) => crate::generator_panel::generator_properties(app, ui, layer.id, id, generator),
-        EffectKind::Levels(levels) => crate::levels_properties::levels_properties(app, ui, layer, effect_id, levels),
-        EffectKind::Fill { source, projection } => {
+        EffectKind::Generator(generator) => legacy_body(ui, |ui| crate::generator_panel::generator_properties(app, ui, layer.id, id, generator)),
+        EffectKind::Levels(levels) => legacy_body(ui, |ui| crate::levels_properties::levels_properties(app, ui, layer, effect_id, levels)),
+        EffectKind::Fill { source, projection, .. } => legacy_body(ui, |ui| {
             ui.label(caption(tr("Fill")));
             let anchors = effect_anchors_below(app, layer.id, effect_id);
             let target = crate::fill_source_target::FillSourceTarget::Mask { effect: id };
@@ -3310,9 +3355,12 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, effe
         }),
         EffectKind::Material(fill) => {
             let enabled: Vec<Channel> = fill.sources.keys().copied().collect();
-            fill_editor(app, ui, fill, &json!({"effect": id}), &enabled, layer.id);
+            PropertySheet::show(ui, ("fill_effect_sheet", id), |sheet| {
+                crate::fill_panel::placement_sections(app, sheet, fill, &json!({"effect": id}), layer.id);
+            });
+            legacy_body(ui, |ui| fill_editor(app, ui, fill, &json!({"effect": id}), &enabled, layer.id));
         }
-        EffectKind::Anchor => {
+        EffectKind::Anchor => legacy_body(ui, |ui| {
             ui.label(caption(tr("Anchor point")));
             let text = if anchor_in_mask(app, effect_id) {
                 tr("Records the mask value at this point. Fill effects and generators in masks above can read it.")
@@ -3356,10 +3404,12 @@ fn effect_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, effe
             if app.session.tool_usable(app.session.tool.tool) {
                 tool_properties(app, ui);
             }
+        }),
+        EffectKind::Filter(filter) => legacy_body(ui, |ui| filter_properties(app, ui, id, filter)),
+        EffectKind::ColorSelection { colors, tolerance } => {
+            legacy_body(ui, |ui| crate::color_selection_editor::color_selection_properties(app, ui, effect_id, colors, *tolerance))
         }
-        EffectKind::Filter(filter) => filter_properties(app, ui, id, filter),
-        EffectKind::ColorSelection { colors, tolerance } => crate::color_selection_editor::color_selection_properties(app, ui, effect_id, colors, *tolerance),
-        other => {
+        other => legacy_body(ui, |ui| {
             ui.label(RichText::new(tr(other.name())).color(tokens.text_dim));
         }),
     }

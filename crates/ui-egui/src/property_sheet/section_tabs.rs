@@ -1,6 +1,29 @@
-use egui::{CornerRadius, Painter, Rect, pos2};
+use egui::{Align2, Color32, CornerRadius, FontId, Id, Painter, Rect, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 
-use crate::theme::Tokens;
+use super::row::SECTION_RULE_TO_CAPTION;
+use super::{PAD, SMALL_TEXT_SIZE};
+use crate::theme::{Tokens, semibold};
+
+mod section_scope;
+mod section_tops;
+
+pub(crate) use section_scope::SectionScope;
+pub(super) use section_tops::SectionTops;
+
+/// Height of the tab strip
+const STRIP_HEIGHT: f32 = 30.0;
+
+/// How far the first tab reaches left of the rows' side padding
+const FIRST_TAB_OUTDENT: f32 = 4.0;
+
+/// From the panel's left edge to the first tab
+const FIRST_TAB: f32 = PAD - FIRST_TAB_OUTDENT;
+
+/// A tab's width beyond its name: icon and air (the resource picker's tabs share these measures)
+pub(crate) const TAB_PADDING: f32 = 38.0;
+
+/// Air between tabs
+pub(crate) const TAB_GAP: f32 = 2.0;
 
 /// The chosen tab starts this far below the strip's top and reaches this far into the panel
 pub(crate) const TAB_TOP: f32 = 4.0;

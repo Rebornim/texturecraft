@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BakedMap, BlendMode, Channel, ChannelKind, lum};
+use crate::{Backface, BakedMap, BlendMode, Channel, ChannelKind, DepthCulling, Projector, ShapeCrop, lum};
 
 mod curvature_detail;
 mod curvature_mode;

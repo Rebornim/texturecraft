@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use texturecraft_core::{
     BakedMap, BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask,
-    MaskBackground, MicroDetail, Procedural, ProceduralKind, Project, Source,
+    MaskBackground, MicroDetail, Procedural, ProceduralKind, Project, Sampling, Source,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};

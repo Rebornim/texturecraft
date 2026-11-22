@@ -184,6 +184,41 @@ fn it_shows_what_the_properties_panel_shows() {
     assert!(!in_popup("Minimum size (%)"), "not the brush's");
 }
 
+/// Whether the jump tab `name` inside `area` is the lit one
+fn tab_lit(harness: &Harness<'_, TextureCraftApp>, area: egui::Rect, name: &str) -> bool {
+    let tab = harness.get_all_by_role_and_label(Role::Tab, name).find(|tab| area.contains_rect(tab.rect()));
+    tab.unwrap_or_else(|| panic!("a {name} tab in {area:?}")).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+}
+
+#[test]
+fn its_jump_tabs_scroll_to_a_section_and_light_it_without_moving_the_docked_panel() {
+    let mut harness = harness_sized(JUMP_TAB_WINDOW);
+    let fill = harness.state().session.doc.project.layers.values().find(|layer| matches!(layer.kind, LayerKind::Fill(_))).map(|layer| layer.id.0).unwrap();
+    texturecraft_engine::execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": fill})).unwrap();
+    texturecraft_engine::execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": fill, "projection": "uv"})).unwrap();
+    harness.run_steps(SELECT_FRAMES);
+
+    let center = view_center(&harness);
+    click(&mut harness, PointerButton::Secondary, center);
+    let popup = harness.ctx.memory(|memory| memory.area_rect(properties_popup::area_id())).unwrap();
+    let docked_fill = harness.get_all_by_role_and_label(Role::Tab, "Fill").map(|tab| tab.rect()).find(|tab| !popup.contains_rect(*tab)).unwrap();
+
+    let docked = egui::Rect::from_min_max(docked_fill.min, docked_fill.max + vec2(DOCKED_STRIP_WIDTH, 0.0));
+    let in_popup = |harness: &Harness<'_, TextureCraftApp>, label: &str| harness.query_all_by_label(label).any(|node| popup.contains_rect(node.rect()));
+    assert!(tab_lit(&harness, popup, "Fill"), "it opens on Fill");
+    assert!(in_popup(&harness, "UV projection"));
+
+    let symmetry = harness.get_all_by_role_and_label(Role::Tab, "Symmetry").find(|tab| popup.contains_rect(tab.rect())).unwrap().rect().center();
+    click(&mut harness, PointerButton::Primary, symmetry);
+    harness.run_steps(JUMP_FRAMES);
+
+    assert!(is_open(&harness), "a tab click keeps it open");
+    assert!(!in_popup(&harness, "UV projection"), "the list jumped down to SYMMETRY");
+    assert!(tab_lit(&harness, popup, "Symmetry"), "the section in view is lit");
+    assert!(!tab_lit(&harness, popup, "Fill"));
+    assert!(tab_lit(&harness, docked, "Fill"), "the docked panel keeps its own place");
+}
+
 #[test]
 fn bake_and_render_modes_never_open_it() {
     let mut harness = harness();

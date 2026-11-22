@@ -30,6 +30,16 @@ const DIAL_ZERO_DEGREES: f32 = 90.0;
 const DIAL_AIR: f32 = 6.0;
 
 impl PropertySheet<'_> {
+    /// A bounded number; `Some(merge)` when `value` changed, `merge` true for a drag's later steps
+    pub(crate) fn slider(&mut self, label: &str, value: &mut f32, range: RangeInclusive<f32>, decimals: usize) -> Option<bool> {
+        self.slider_with_suffix(label, value, range, decimals, "")
+    }
+
+    /// [`Self::slider`] with a unit after the value ("°", "%")
+    pub(crate) fn slider_with_suffix(&mut self, label: &str, value: &mut f32, range: RangeInclusive<f32>, decimals: usize, suffix: &str) -> Option<bool> {
+        self.slider_led(RowLead::label(label), value, range, decimals, suffix)
+    }
+
     /// [`Self::slider_with_suffix`] led by `lead` (a picture row, a child setting)
     pub(crate) fn slider_led(&mut self, lead: RowLead<'_>, value: &mut f32, range: RangeInclusive<f32>, decimals: usize, suffix: &str) -> Option<bool> {
         let (control, center_y) = self.row_with(lead);
@@ -37,6 +47,21 @@ impl PropertySheet<'_> {
         let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, zero: None, ramp: false };
         let dragged = self.track(id, lead.text(), &track, value, &range);
         let typed = self.value_field(id, lead.text(), center_y, *value, &range, decimals, suffix);
+        Self::apply_typed(value, typed, dragged)
+    }
+
+    /// A signed range: fills from zero and marks it with a tick
+    pub(crate) fn signed_slider(&mut self, label: &str, value: &mut f32, range: RangeInclusive<f32>, decimals: usize) -> Option<bool> {
+        self.centered_slider(label, value, range, 0.0, decimals)
+    }
+
+    /// A range whose middle `centre` leaves things as they are: fills from it and marks it with a tick, like a signed range
+    pub(crate) fn centered_slider(&mut self, label: &str, value: &mut f32, range: RangeInclusive<f32>, centre: f32, decimals: usize) -> Option<bool> {
+        let (control, center_y) = self.row(label);
+        let id = self.next_id();
+        let track = Track { start: control.left() + KNOB_RADIUS, end: self.track_end(), center_y, zero: Some(centre), ramp: false };
+        let dragged = self.track(id, label, &track, value, &range);
+        let typed = self.value_field(id, label, center_y, *value, &range, decimals, "");
         Self::apply_typed(value, typed, dragged)
     }
 

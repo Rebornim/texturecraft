@@ -16,22 +16,23 @@ pub mod bake_presets;
 mod bake_report;
 mod bake_scene;
 mod color_management;
+mod color_picker;
 mod color_selection_editor;
 pub mod control;
 mod decal_drop;
 mod display_settings;
 pub mod dock;
 pub mod docking;
+mod drawn_icon;
 mod environment_picker;
 mod export_panel;
 pub mod export_templates;
 mod export_window;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_dialogs;
+mod fill_material_panel;
 mod fill_panel;
 mod fill_pictures;
-mod fill_source_slot;
-mod fill_source_target;
 mod fill_symmetry_panel;
 mod filter_slot;
 pub mod fonts;
@@ -55,6 +56,7 @@ mod line_snap;
 mod list_action;
 pub mod log_panel;
 mod mask_preview_image;
+mod material_orb;
 mod material_preview_image;
 pub mod menus;
 mod mesh_export_options;
@@ -67,6 +69,9 @@ mod nav_button;
 pub mod nav_buttons;
 mod nav_view;
 pub mod new_project_advanced;
+mod orb_environment;
+mod orb_material;
+pub mod orb_previews;
 mod orb_shape;
 pub mod parity;
 mod past_end;
@@ -75,6 +80,8 @@ mod path_surface_cache;
 mod pattern_panel;
 mod pattern_target;
 pub mod pbr_import;
+mod picker_group;
+mod picker_tab;
 mod placement;
 mod pointer_lock;
 mod popup_drag;
@@ -95,17 +102,15 @@ mod property_sheet;
 mod query_field;
 mod rail_popup;
 pub mod render_mode;
+mod resolution_band;
 mod resource_panel;
 mod resource_picker;
-mod resource_picker_anchor;
-mod resource_picker_choice;
 mod resource_picker_item;
-mod resource_picker_tab;
-mod resource_picker_tile;
 mod round_gizmo;
 mod running_bake;
 pub mod saved_search;
 mod screen_color_pick;
+pub mod screen_pick;
 mod section_page;
 pub mod settings_window;
 pub mod shader_settings;
@@ -117,15 +122,19 @@ pub mod shelf_preview;
 mod shelf_tabs;
 mod shelf_toolbar;
 pub mod shelf_view;
+mod slot_thumbnail;
 #[cfg(not(target_arch = "wasm32"))]
 mod smart_mask_menu;
 mod soft_box;
+mod source_choice;
+mod source_slot;
 pub mod state;
 mod surface_paint_point;
 pub mod symmetry;
 pub mod theme;
 pub mod thumbs;
 mod tile_edits;
+mod tile_picture;
 pub mod titlebar;
 pub mod toolbar;
 pub mod ui_state_store;
@@ -262,6 +271,12 @@ pub struct TextureCraftApp {
     pub picking_id_color: Option<id_color_pick::IdColorPick>,
     /// Whether the next click on the model places the symmetry planes (Pick point in the symmetry settings)
     pub picking_symmetry_plane: bool,
+    /// The colour bar whose eyedropper waits for a click on the model or, outside the app, on the screen
+    pub picking_color: Option<egui::Id>,
+    /// That eyedropper pick's wait for a click outside the app
+    pub screen_pick: Option<screen_pick::ScreenPick>,
+    /// Whether an eyedropper pick also takes a click outside the app (only with a real window: never in tests)
+    pub screen_picking: bool,
     /// The wgpu state (screenshots read the renderer's targets).
     pub render_state: Option<eframe::egui_wgpu::RenderState>,
     /// CJK fallback fonts for the UI language.
@@ -367,6 +382,12 @@ impl TextureCraftApp {
             properties_popup: None,
             picking_id_color: None,
             picking_symmetry_plane: false,
+            picking_color: None,
+            screen_pick: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            screen_picking: raw_window_handle::HasWindowHandle::window_handle(cc).is_ok(),
+            #[cfg(target_arch = "wasm32")]
+            screen_picking: false,
             render_state: cc.wgpu_render_state.clone(),
             fonts: fonts::UiFonts::default(),
             banner: None,
@@ -612,7 +633,8 @@ impl TextureCraftApp {
                     return false;
                 };
 
-                let resized = self.session.doc.project.texture_set(set).is_ok_and(|set| set.resolution != c.size);
+                // A cook for another size than the layer's picked or texture set resolution is redone
+                let resized = self.session.link_size(c.layer).is_ok_and(|now| now != c.size);
                 let baked = self.session.baked(set);
                 let stale = resized || c.baked_inputs.iter().any(|input| !input.is_current(baked));
                 done.push((c.layer, c.values.clone(), stale, result));
@@ -1066,6 +1088,7 @@ impl eframe::App for TextureCraftApp {
 
         self.bindings.sync(&self.ui.keymap, craft_keymap::egui::platform(ctx));
         menus::shortcuts(self, ctx);
+        screen_pick::sync(self, ctx);
         move_on_model::end_when_gone(self, ctx);
 
         // The Path tool's curve repaints (a preview while placed) as its points, brush or material change
@@ -1124,6 +1147,10 @@ impl eframe::App for TextureCraftApp {
         #[cfg(not(target_arch = "wasm32"))]
         self.file_dialogs.show_pending(frame);
 
+        // Last, so no widget's pointer replaces it: an armed eyedropper is the pointer over the whole window
+        if self.picking_color.is_some() {
+            screen_pick::paint_cursor(&ctx, None, screen_pick::SwatchColor::shown(&ctx));
+        }
         pointer_lock::settle(&ctx);
 
         let end_ms = now_ms();

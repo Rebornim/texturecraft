@@ -47,11 +47,16 @@ fn pattern(harness: &Harness<'_, TextureCraftApp>, effect: LayerId) -> Procedura
     }
 }
 
-/// Opens the mask fill's source picker from its Grayscale slot and clicks the tile labelled `tile`
+/// Frames for a scroll to bring a control into view (it animates)
+const SCROLL_FRAMES: usize = 25;
+
+/// Opens the mask fill's source picker from its Grayscale slot and clicks the tile labelled `tile`, scrolled into view first
 fn pick(harness: &mut Harness<'_, TextureCraftApp>, tile: &str) {
     harness.get_by_role_and_label(Role::ComboBox, "Grayscale").click();
     harness.run_steps(3);
-    harness.get_by_label(tile).click();
+    harness.get_by_role_and_label(Role::ListBoxOption, tile).scroll_to_me();
+    harness.run_steps(SCROLL_FRAMES);
+    harness.get_by_role_and_label(Role::ListBoxOption, tile).click();
     harness.run_steps(3);
 }
 

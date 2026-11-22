@@ -107,6 +107,12 @@ fn mesh_size(app: &TextureCraftApp, ctx: &egui::Context) -> MeshSize {
     size
 }
 
+/// A fill's whole Properties: the Fill section, the Symmetry section, then the Material section with one slot per channel that is on
+pub(crate) fn fill_sheet(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, on: &[Channel], reader: LayerId) {
+    placement_sections(app, sheet, fill, base, reader);
+    crate::fill_material_panel::material_section(app, sheet, fill, base, on, reader);
+}
+
 /// The Fill section (with its reset) and the Symmetry section of the fill at `base`: a fill layer's, a content fill effect's or a mask fill's
 pub(crate) fn placement_sections(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, fill: &Fill, base: &Value, reader: LayerId) {
     // The section reset: projection, placement, sampling and culling back to a new fill's in one undo step

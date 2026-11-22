@@ -111,6 +111,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         let mut v = Vec::new();
         v.extend(crate::view_cmds::edit_specs());
         v.extend(crate::layer_cmds::specs());
+        v.extend(crate::fill_material_cmds::specs());
         v.extend(crate::fill_reset_cmds::specs());
         v.extend(crate::layer_ops::specs());
         v.extend(crate::instance_cmds::specs());
@@ -124,6 +125,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(crate::view_cmds::specs());
         v.extend(crate::solo::specs());
         v.extend(crate::camera_cmds::specs());
+        v.extend(crate::swatch_cmds::specs());
         v.extend(crate::quick_mask::specs());
         v.extend(crate::set_cmds::specs());
         v.extend(crate::meshmap_cmds::specs());

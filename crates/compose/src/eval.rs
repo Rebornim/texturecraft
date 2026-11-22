@@ -230,6 +230,7 @@ enum Content<'a> {
     Paint {
         preview: bool,
     },
+    /// A fill (with the Scale and Rotation of the folders around it laid on)
     Fill {
         fill: Box<Cow<'a, Fill>>,
         /// Its projector's depth map when it culls by depth
@@ -321,13 +322,14 @@ enum Op {
     Slope { scale: f32, seed: u32 },
 }
 
-/// The last neighbourhood filter of an effect stack (see [`neighbourhood_filters`]).
+/// The last neighbourhood filter of an effect stack (see [`neighbourhood_filters`])
 fn neighbourhood(effects: &[Effect], res: u32) -> Option<(usize, f32, Op)> {
     neighbourhood_filters(effects, res).last()
 }
 
 /// Below this a coverage weight counts as no coverage at all.
 const MIN_COVERAGE_WEIGHT: f32 = 1e-6;
+
 /// Filter sizes are texels at this many texels per side (2K), scaled to the resolution they run at.
 const FILTER_SIZE_RESOLUTION: f32 = 2048.0;
 /// The smallest radius a filter runs at, in texels.
@@ -1098,9 +1100,10 @@ struct Node<'a> {
     content: Content<'a>,
     chans: Vec<ChanPlan<'a>>,
     mask: Option<MaskPlan<'a>>,
-    /// Visible anchor points of the layer: recorded after it is applied, or (`Some(k)`, an anchor with visible effects above it) with its content cut after `k` visible effects
+    /// Visible anchor points of the layer: recorded after it is applied, or (`Some(k)`, an
+    /// anchor with visible effects above it) with its content cut after `k` visible effects.
     anchors: Vec<(LayerId, Option<usize>)>,
-    /// The node or one of its children records an anchor
+    /// The node or one of its children records an anchor.
     has_anchor: bool,
     height_mask: HeightMask,
     /// Geometry mask: whether the layer shows on each mesh submesh (None: everywhere).
@@ -1188,7 +1191,6 @@ fn plan<'a>(inp: &EvaluationInputs<'a>, list: &[LayerId], channels: &[Channel], 
     if depth > texturecraft_core::project::MAX_DEPTH {
         return Vec::new();
     }
-
     list.iter().filter_map(|id| plan_node(inp, *id, channels, tx, ty, depth, fields, true)).collect()
 }
 

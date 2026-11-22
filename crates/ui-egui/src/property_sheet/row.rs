@@ -56,6 +56,12 @@ const RESET_AT_DEFAULT_OPACITY: f32 = 0.4;
 const SECTION_RESET_INSET: f32 = RESET_ICON_SIZE / 2.0;
 
 impl PropertySheet<'_> {
+    /// A section caption in capitals, a hairline above a later one; `menu` adds the ≡ button
+    pub(crate) fn section(&mut self, title: &str, menu: bool) -> Option<Response> {
+        let text = self.tokens.text;
+        self.section_in(title, menu, text)
+    }
+
     /// [`Self::section`] with the round section reset at the caption's right end: faint and inert at the defaults (`changed` false); returns whether it was clicked
     pub(crate) fn section_reset(&mut self, title: &str, changed: bool) -> bool {
         let text = self.tokens.text;

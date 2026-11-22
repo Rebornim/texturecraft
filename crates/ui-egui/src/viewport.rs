@@ -874,18 +874,35 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
 
     crate::properties_popup::open_on_right_click(app, ui, &response, rect, s_held || v_held);
 
-    let popup = app.properties_popup.is_some() || rail_popup;
+    // A press that closes an open colour picker only closes it: it neither paints nor moves a projection
+    let picker = crate::color_picker::blocks_view_press(ui.ctx());
+    let popup = app.properties_popup.is_some() || rail_popup || picker;
 
     // A pending ID color pick takes the next click instead of the brush
     let picking = app.picking_id_color.is_some();
     if picking {
-        crate::id_color_pick::IdColorPick::draw_cursor(ui, rect);
+        // The eyedropper's own pointer is drawn over the whole window (screen_pick)
+        if app.picking_color.is_none() {
+            crate::id_color_pick::IdColorPick::draw_cursor(ui, rect);
+        }
+
+        // The eyedropper's disc shows the colour a click here would pick
+        if app.picking_color.is_some()
+            && let Some(hover) = response.hover_pos()
+            && let Ok(values) = app.session.color_at(local(hover), app.session.viewport)
+            && let Some(color) = values.get(&texturecraft_engine::core::Channel::BaseColor)
+        {
+            crate::screen_pick::SwatchColor::over_model(ui.ctx(), *color);
+        }
         if !alt
             && response.clicked_by(PointerButton::Primary)
             && let Some(position) = response.interact_pointer_pos()
         {
             let (pixel, viewport) = (local(position), app.session.viewport);
-            crate::id_color_pick::IdColorPick::pick_at(app, json!({"x": pixel.x, "y": pixel.y, "viewport": [viewport.x, viewport.y]}));
+            match app.picking_color {
+                Some(bar) => eyedrop(app, ui.ctx(), bar, pixel, viewport),
+                None => crate::id_color_pick::IdColorPick::pick_at(app, json!({"x": pixel.x, "y": pixel.y, "viewport": [viewport.x, viewport.y]})),
+            }
         }
     }
 
@@ -1025,6 +1042,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && (app.session.tool.tool != Tool::Path || adjusting)
         && !crate::symmetry::manipulator_hovered(app, ui, rect)
         && app.picking_id_color.is_none()
+        && app.picking_color.is_none()
         && app.moving_on_model.is_none()
         && !ShownGizmo::hovered(ui, rect, gizmo.as_ref())
         && let Some(hover_pos) = if adjusting { ui.input(|input| input.pointer.press_origin()) } else { response.hover_pos() }
@@ -2121,11 +2139,13 @@ fn view_2d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !projection_hint
         && app.properties_popup.is_none()
         && !crate::rail_popup::blocks_paint_input(app, ui.ctx())
+        && !crate::color_picker::blocks_view_press(ui.ctx())
         && !alt
         && !adjusting
         && !v_held
         && !picking_id_color
         && !app.picking_symmetry_plane
+        && app.picking_color.is_none()
         && !DecalDrop::blocks_input(ui.ctx());
     let mut fill_box = None;
     if painting && path_tool {
@@ -2230,7 +2250,7 @@ fn view_2d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     }
 
     // Match the 3D view's stamp size and hardness
-    let show_brush_cursor = tool_acts(app) && !alt && !v_held;
+    let show_brush_cursor = tool_acts(app) && !alt && !v_held && app.picking_color.is_none();
     let pointer_in_view = ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| rect.contains(p));
     if show_brush_cursor
         && !path_tool
@@ -2422,6 +2442,16 @@ fn bake_paint_overlay(app: &TextureCraftApp, ui: &Ui, painter: &egui::Painter, t
     painter.add(egui::Shape::mesh(mesh));
 }
 
+/// Hands the base colour on the model at `pixel` to the colour bar `bar` and ends its eyedropper pick; a click off the model ends it too
+fn eyedrop(app: &mut TextureCraftApp, ctx: &egui::Context, bar: egui::Id, pixel: Vec2, viewport: Vec2) {
+    app.picking_color = None;
+    let Ok(values) = app.session.color_at(pixel, viewport) else { return };
+
+    if let Some(color) = values.get(&texturecraft_engine::core::Channel::BaseColor) {
+        crate::color_picker::ColorPick::deliver(ctx, bar, *color);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2591,6 +2621,41 @@ mod tests {
         app.session.quick_mask.editing = false;
 
         assert_eq!(mask_view_layer(app), Some(LayerId(7)), "the label returns with the mask view");
+    }
+
+    /// A click in the 2D view while a colour bar's eyedropper waits paints nothing: the pick keeps waiting, as over the 3D view
+    #[test]
+    fn a_waiting_eyedropper_keeps_a_2d_view_click_from_painting() {
+        let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let session = texturecraft_engine::sample_session(256, 64).unwrap();
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1600.0, 960.0)).build_eframe(|context| TextureCraftApp::new(context, session));
+        harness.state_mut().ui.layout = ViewLayout::Only2D;
+        harness.state_mut().session.tool.tool = Tool::PolygonFill;
+        harness.run_steps(4);
+
+        // The 2D view fills the window's middle: there the sample's UV islands are (the shelf drop tests click the same point)
+        let on_the_uvs = pos2(700.0, 420.0);
+        let steps = harness.state().session.history_labels().len();
+        let bar = egui::Id::unique("a colour bar");
+        harness.state_mut().picking_color = Some(bar);
+
+        click(&mut harness, on_the_uvs);
+        assert_eq!(harness.state().session.history_labels().len(), steps, "the click painted nothing");
+        assert_eq!(harness.state().picking_color, Some(bar), "the eyedropper still waits");
+
+        harness.state_mut().picking_color = None;
+        click(&mut harness, on_the_uvs);
+        assert_eq!(harness.state().session.undo_label(), Some("Polygon fill"), "without a pick the same click paints");
+    }
+
+    /// Press and release the primary button at `at`
+    fn click(harness: &mut egui_kittest::Harness<'_, TextureCraftApp>, at: Pos2) {
+        harness.hover_at(at);
+        harness.run_steps(1);
+        harness.event(egui::Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        harness.run_steps(1);
+        harness.event(egui::Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        harness.run_steps(2);
     }
 
     #[test]

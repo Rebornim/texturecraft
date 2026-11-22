@@ -1,4 +1,4 @@
-//! A fill channel takes an image resource from its source picker
+//! A fill channel takes an image resource from its slot's source picker
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -11,13 +11,14 @@ fn roughness<'a>(harness: &'a Harness<'_, TextureCraftApp>) -> egui_kittest::Nod
     harness.get_by_role_and_label(egui::Role::ComboBox, "Roughness")
 }
 
-/// Opens the source picker of the Roughness channel from its slot
-fn open_roughness_source_picker(harness: &mut Harness<'_, TextureCraftApp>) {
-    // Allow the scroll animation to finish before the click
-    roughness(harness).scroll_to_me();
-    harness.run_steps(30);
-    roughness(harness).click();
+/// Opens the Roughness slot's source picker on the Material tab and types `search` into its search field, which has the focus
+fn open_roughness_source_menu(harness: &mut Harness<'_, TextureCraftApp>, search: &str) {
+    click_node(harness, egui::Role::Tab, "Material");
     harness.run_steps(3);
+    click_node(harness, egui::Role::ComboBox, "Roughness");
+    harness.run_steps(2);
+    harness.event(egui::Event::Text(search.into()));
+    harness.run_steps(2);
 }
 
 #[test]
@@ -34,8 +35,8 @@ fn a_fill_channel_takes_an_image_from_its_source_picker() {
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(4);
 
-    open_roughness_source_picker(&mut harness);
-    harness.get_by_role_and_label(egui::Role::Button, &name).click();
+    open_roughness_source_menu(&mut harness, "rough");
+    click_node(&mut harness, egui::Role::ListBoxOption, &name);
     harness.run_steps(3);
 
     let LayerKind::Fill(fill) = &harness.state().session.doc.project.layers[&layer].kind else { panic!("a fill layer") };
@@ -59,7 +60,8 @@ fn the_source_picker_offers_only_images_that_were_decoded() {
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(4);
 
-    open_roughness_source_picker(&mut harness);
+    // Both names match the search, so only the decoded one may show
+    open_roughness_source_menu(&mut harness, "png");
 
     assert!(harness.query_by_label(&name).is_some(), "a decoded image is offered");
     assert!(harness.query_by_label("broken.png").is_none(), "an image that did not decode is not");
@@ -155,7 +157,7 @@ fn a_mask_fill_selects_an_image_edits_projection_and_returns_to_uniform() {
     assert!(matches!(effect, EffectKind::Fill { source: Source::Uniform(_), .. }));
 }
 
-/// An image on a fill's Normal channel offers a DirectX toggle that flips its green.
+/// An image on a fill's Normal channel offers OpenGL | DirectX in its Attributes; DirectX flips its green
 #[test]
 fn a_normal_image_can_be_marked_directx() {
     let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
@@ -169,9 +171,17 @@ fn a_normal_image_can_be_marked_directx() {
     h.state_mut().ui.prefs.language = "en".into();
     h.run_steps(4);
 
-    h.get_by_label("DirectX normal map").scroll_to_me();
+    click_node(&mut h, egui::Role::Tab, "Material");
+    h.run_steps(3);
+
+    // The normal image's convention sits in the slot's folded Attributes
+    h.get_by_role_and_label(egui::Role::Button, "Attributes").scroll_to_me();
+
+    // The scroll animates for about twenty frames
     h.run_steps(30);
-    h.get_by_label("DirectX normal map").click();
+    click_node(&mut h, egui::Role::Button, "Attributes");
+    h.run_steps(3);
+    click_node(&mut h, egui::Role::RadioButton, "DirectX");
     h.run_steps(3);
 
     let LayerKind::Fill(fill) = &h.state().session.doc.project.layers[&layer].kind else { panic!("a fill layer") };

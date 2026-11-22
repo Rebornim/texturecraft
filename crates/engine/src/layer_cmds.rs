@@ -512,8 +512,17 @@ fn blending_set(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(Value::Null)
 }
 
+/// Which fill `layer.fill.*` edits: a fill layer's (`layer`), a content fill effect's (`effect`) or a mask fill effect's (`effect`: one grayscale source, no channels or material)
+#[derive(Clone, Copy)]
+pub(crate) enum FillTarget {
+    Layer(LayerId),
+    Effect(LayerId),
+    Mask(LayerId),
+}
+
 pub(crate) fn fill_target(s: &Session, p: &Value, cmd: &str) -> Result<FillTarget> {
     match u64p(p, "effect").map(LayerId) {
+/// The material of the fill at `target`
         Some(e) => match s.doc.project.effect(e) {
             Some((_, x)) if matches!(x.kind, EffectKind::Material(_)) => Ok(FillTarget::Effect(e)),
             _ => Err(bad(cmd, format!("{} is not a content fill effect", e.0))),
@@ -522,7 +531,6 @@ pub(crate) fn fill_target(s: &Session, p: &Value, cmd: &str) -> Result<FillTarge
     }
 }
 
-/// The material of the fill at `target`
 pub(crate) fn fill_mut(s: &mut Session, target: FillTarget) -> Result<&mut Fill> {
     match target {
         FillTarget::Layer(id) => match &mut s.doc.project.layer_mut(id)?.kind {
@@ -544,6 +552,7 @@ pub(crate) fn placement_mut(s: &mut Session, target: FillTarget) -> Result<(&mut
 
 fn fill_set(session: &mut Session, params: &Value) -> Result<Value> {
     let target = fill_target(session, params, FILL_SET)?;
+
     let channel = channel_param(FILL_SET, params, "channel")?.ok_or_else(|| bad(FILL_SET, "`channel` is required"))?;
 
     // `solo`: this channel on, every other one off
@@ -557,10 +566,15 @@ fn fill_set(session: &mut Session, params: &Value) -> Result<Value> {
     }
 
     let source = fill_source_from(session, params, (target, channel), normal_format)?;
+    // A library alpha that became the source joins the project's images
+    let library_alpha = match &source {
+        Some(Source::Image { name, .. }) => crate::fill_alpha::library_alpha_of(name).filter(|_| strp(params, "image").is_none()),
+        _ => None,
+    };
     if source.is_none() && enabled.is_none() && normal_format.is_none() && colors.is_none() && !init_ramp {
         return Err(bad(
             FILL_SET,
-            "give `color`, `value`, `procedural`, `image`, `anchor`, pattern settings (`tile`, `resolution`…), `colors`, `gradientMap`, `normalFormat`, `enabled` or `solo`",
+            "give `color`, `value`, `procedural`, `image`, `alpha`, `anchor`, pattern settings (`tile`, `resolution`…), `colors`, `gradientMap`, `normalFormat`, `enabled` or `solo`",
         ));
     }
 
@@ -571,6 +585,9 @@ fn fill_set(session: &mut Session, params: &Value) -> Result<Value> {
     // Changing only the normal format or gradient stops leaves the layer channel on or off
     let touches_channel = source.is_some() || enabled.is_some();
     session.edit("Set fill", |session| {
+        if let Some(alpha) = library_alpha {
+            session.add_library_alpha(alpha)?;
+        }
         let fill = fill_mut(session, target)?;
 
         // `normalFormat` alone: the convention of the channel's image
@@ -579,6 +596,11 @@ fn fill_set(session: &mut Session, params: &Value) -> Result<Value> {
                 Some(Source::Image { normal_format, .. }) => *normal_format = format,
                 _ => return Err(bad(FILL_SET, "`normalFormat` needs an image on the channel")),
             }
+        }
+
+        // A channel set on its own (its source or its gradient map): the sources are no longer one whole material
+        if source.is_some() || colors.is_some() || init_ramp {
+            fill.material = None;
         }
 
         let current = fill.sources.get(&channel);
@@ -656,6 +678,11 @@ fn fill_source_from(
 
     if let Some(name) = strp(params, "image") {
         return Ok(Some(Source::Image { name: name.to_string(), normal_format: normal_format.unwrap_or_default() }));
+    }
+
+    if let Some(name) = strp(params, "alpha") {
+        let alpha = alphas::find(name).ok_or_else(|| bad(FILL_SET, format!("unknown alpha `{name}`")))?;
+        return Ok(Some(Source::Image { name: crate::fill_alpha::resource_name(alpha), normal_format: normal_format.unwrap_or_default() }));
     }
 
     if let Some(anchor) = u64p(params, "anchor") {

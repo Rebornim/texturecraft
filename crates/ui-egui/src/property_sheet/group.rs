@@ -33,10 +33,18 @@ const BAND_PICTURE_AIR: f32 = 8.0;
 /// A band's reset button click square
 const BAND_RESET_TARGET: f32 = 20.0;
 
+/// How far a title's text reaches below its centre
+const TITLE_HALF_LINE: f32 = 7.0;
+
 impl PropertySheet<'_> {
     /// A top-level group across the whole panel with a caret and a reset (`Some(changed)`) or a value; a click folds it
     pub(crate) fn band(&mut self, title: &str, default_open: bool, reset: Option<bool>, value: Option<&str>) -> BandResponse {
         self.band_drawn(title, default_open, reset, value, None)
+    }
+
+    /// [`Self::band`] whose value is led by a picture (Resolution: the size against the texture set's)
+    pub(crate) fn band_pictured(&mut self, title: &str, default_open: bool, value: &str, picture: BandPicture<'_>) -> BandResponse {
+        self.band_drawn(title, default_open, None, Some(value), Some(picture))
     }
 
     fn band_drawn(&mut self, title: &str, default_open: bool, reset: Option<bool>, value: Option<&str>, picture: Option<BandPicture<'_>>) -> BandResponse {
@@ -109,10 +117,65 @@ impl PropertySheet<'_> {
         BandResponse { open, reset: reset_clicked }
     }
 
+    /// A group's fold state kept under `id`, flipped by a click on `hit` (answering as `title`); returns whether it is open
+    fn fold_toggle(&mut self, id: egui::Id, hit: Rect, title: &str, default_open: bool) -> bool {
+        let mut open = self.ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
+        let response = self.ui.interact(hit, id, Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, title));
+        if response.clicked() {
+            open = !open;
+            self.ui.data_mut(|data| data.insert_temp(id, open));
+        }
+        open
+    }
+
+    /// A row of `rect`'s height across the open card, out to its bled edges
+    pub(super) fn bled_row(&self, rect: Rect) -> Rect {
+        Rect::from_min_max(pos2(self.left - CARD_BLEED, rect.top()), pos2(self.right + CARD_BLEED, rect.bottom()))
+    }
+
     /// Ends [`Self::hold_card`] and closes the held card
     pub(crate) fn release_card(&mut self) {
         self.held = false;
         self.close_card();
+    }
+
+    /// Starts a card with no name row: a slot card, whose slot is its top row; inside a held card it joins that card
+    pub(crate) fn open_card(&mut self) {
+        if self.held && self.card.is_some() {
+            return;
+        }
+
+        if self.card.is_none() && self.air_at != Some(self.cursor_y()) && !self.empty {
+            self.space(GROUP_GAP);
+        }
+        self.close_card();
+        let face = self.ui.painter().add(Shape::Noop);
+        self.card = Some(OpenCard { top: self.cursor_y(), face });
+        self.drawn_bottom = self.cursor_y();
+    }
+
+    /// A folded group inside a card: its bold name, the value it holds (dim) and a caret. Returns whether it is open
+    pub(crate) fn fold(&mut self, title: &str, value: Option<&str>, default_open: bool) -> bool {
+        let id = self.named_id("fold", title);
+        let rect = self.take(ROW_HEIGHT);
+        let open = self.fold_toggle(id, Rect::from_x_y_ranges(self.left..=self.right, rect.y_range()), title, default_open);
+
+        let tokens = self.tokens;
+        let center_y = rect.center().y;
+        self.ui.painter().text(pos2(self.left, center_y), Align2::LEFT_CENTER, title, semibold(TEXT_SIZE), tokens.text);
+        if let Some(value) = value {
+            self.ui.painter().text(
+                pos2(self.right - BAND_VALUE_INSET, center_y),
+                Align2::RIGHT_CENTER,
+                value,
+                FontId::proportional(TEXT_SIZE),
+                tokens.text_dim,
+            );
+        }
+        self.caret(pos2(self.right - EDGE_GLYPH_INSET, center_y), open, tokens.text_dim);
+        self.drawn(center_y + TITLE_HALF_LINE);
+        open
     }
 
     /// Ends the open card (not a held one: [`Self::release_card`] ends that): its face reaches [`CARD_PADDING`] below what its rows painted

@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use texturecraft_engine::core::Channel;
+use texturecraft_engine::geom::glam::Vec2;
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, command_specs, execute};
 
@@ -181,6 +182,24 @@ fn polygon_fill_and_color_picker() {
     execute(&mut s, "tool.colorPicker", &Value::Null).unwrap();
     let r = execute(&mut s, "tool.click", &json!({"x": 200, "y": 200})).unwrap();
     assert!((r["roughness"][0].as_f64().unwrap() - 0.9).abs() < 0.01, "{r}");
+}
+
+#[test]
+fn color_at_reads_the_surface_without_changing_the_brush() {
+    let mut s = session();
+    execute(&mut s, "tool.material", &json!({"channel": "roughness", "value": 0.9})).unwrap();
+    execute(&mut s, "tool.polygonFill", &Value::Null).unwrap();
+    execute(&mut s, "tool.fillMode", &json!({"mode": "mesh"})).unwrap();
+    execute(&mut s, "tool.click", &json!({"x": 200, "y": 200})).unwrap();
+    execute(&mut s, "tool.material", &json!({"channel": "roughness", "value": 0.2})).unwrap();
+    let viewport = s.viewport;
+
+    let read = s.color_at(Vec2::new(200.0, 200.0), viewport).unwrap();
+
+    let surface = read.get(&Channel::Roughness).unwrap();
+    assert!((surface[0] - 0.9).abs() < 0.01, "{surface:?}");
+    let brush = s.tool.values.get(&Channel::Roughness).unwrap();
+    assert!((brush[0] - 0.2).abs() < 0.01, "the brush keeps its own value: {brush:?}");
 }
 
 #[test]
@@ -871,4 +890,20 @@ fn blending_set_gives_each_channel_its_own_mode_and_opacity_in_one_undo_step() {
     }
     execute(&mut s, "layer.blending.set", &json!({"layer": layer, "channels": {"baseColor": {"opacity": 2.0}, "roughness": {"opacity": -1.0}}})).unwrap();
     assert_eq!((read(&s)[&Channel::BaseColor].opacity, read(&s)[&Channel::Roughness].opacity), (1.0, 0.0), "opacity is clamped");
+}
+
+#[test]
+fn a_new_session_forgets_the_projector_depth_maps_built_before_it() {
+    use texturecraft_engine::compose::projector_depth::ProjectorDepth;
+    use texturecraft_engine::core::{Projection, Projector, UvTransform};
+
+    let mesh = primitives::sphere(1.0, 16, 8);
+    let projection =
+        Projection::Planar { scale: 1.0, axis: 2, offset: [0.0; 3], uv: UvTransform::default(), projector: Projector::depth_culled(), placed: None };
+    let built = ProjectorDepth::of(&mesh, mesh.bounds(), &projection).unwrap();
+
+    Session::new_project("t", primitives::sphere(1.0, 16, 8), "builtin:sphere", None, 128).unwrap();
+
+    let after = ProjectorDepth::of(&mesh, mesh.bounds(), &projection).unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&built, &after), "a mesh sharing the old one's fingerprint must not take its map");
 }

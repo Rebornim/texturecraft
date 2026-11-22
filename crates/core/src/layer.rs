@@ -710,6 +710,9 @@ pub struct Fill {
     /// Set when the sources are maps cooked from a MaterialCraft material.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<Box<MaterialLink>>,
+    /// The built-in material (shelf id) the sources were set from as one whole material; cleared when a channel's source changes on its own
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<String>,
 }
 
 /// A MaterialCraft material behind a fill (from a `.mcmat` portable material): its channel
@@ -730,6 +733,22 @@ pub struct MaterialLink {
     pub inputs: Vec<String>,
     /// Size the maps were cooked at (pixels across).
     pub size: u32,
+    /// Size to cook at; `None` cooks at the texture set's resolution
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<crate::CookResolution>,
+    /// The output a channel reads, where it is not the output named like the channel
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub mapping: BTreeMap<Channel, String>,
+    /// The image resource of each output of the last cook, by output id. Empty in projects saved before channels could be mapped: there each channel's source is its own output
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub outputs: BTreeMap<String, String>,
+}
+
+impl MaterialLink {
+    /// The output channel `c` reads
+    pub fn output_of(&self, c: Channel) -> &str {
+        self.mapping.get(&c).map_or(c.id(), String::as_str)
+    }
 }
 
 /// An exposed input of a linked material. Values keep MaterialCraft's typed form,
@@ -766,6 +785,22 @@ impl Fill {
     /// Value used for `c` when the fill has no source for it: the channel default.
     pub fn source(&self, c: Channel) -> Source {
         self.sources.get(&c).cloned().unwrap_or_else(|| Source::uniform_of(c))
+    }
+
+    /// The image resource of each output of the linked material's last cook, by output id (empty without a link). Links saved before channels could be mapped list their channels' own outputs
+    pub fn link_outputs(&self) -> BTreeMap<String, String> {
+        let Some(link) = &self.link else { return BTreeMap::new() };
+        if !link.outputs.is_empty() {
+            return link.outputs.clone();
+        }
+
+        self.sources
+            .iter()
+            .filter_map(|(c, s)| match s {
+                Source::Image { name, .. } => Some((link.output_of(*c).to_string(), name.clone())),
+                _ => None,
+            })
+            .collect()
     }
 }
 
@@ -1327,10 +1362,9 @@ impl Filter {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum EffectKind {
-    /// Painted grayscale (mask) or material (content) pixels keyed by the effect id.
+    /// Painted grayscale (mask) or material (content) pixels keyed by the effect id
     Paint,
-    /// A path sublayer: pixels keyed by the effect id like [`EffectKind::Paint`], but painted
-    /// only from its stored paths and repainted whenever one is added, edited or removed.
+    /// A path sublayer: pixels keyed by the effect id like [`EffectKind::Paint`], but painted only from its stored paths and repainted whenever one is added, edited or removed
     Path(Vec<PathShape>),
     /// A uniform or procedural grayscale fill.
     Fill {
@@ -1626,6 +1660,33 @@ mod tests {
     }
 
     #[test]
+    fn fills_and_effects_in_the_shape_older_projects_saved_save_unchanged() {
+        let fills = [
+            r#"{"sources":{"BaseColor":{"Uniform":[0.5,0.5,0.5]}},"projection":{"Uv":{"scale":[1.0,1.0],"rotation":0.0,"offset":[0.0,0.0]}}}"#,
+            r#"{"sources":{},"projection":{"Triplanar":{"scale":1.0,"sharpness":0.5,"offset":[0.0,0.0,0.0]}}}"#,
+            r#"{"sources":{},"projection":{"Planar":{"scale":2.0,"axis":2,"offset":[0.0,1.0,0.0]}}}"#,
+            r#"{"sources":{},"projection":{"Spherical":{"scale":1.0}}}"#,
+            r#"{"sources":{},"projection":{"Cylindrical":{"scale":1.0,"axis":1}}}"#,
+            r#"{"sources":{},"projection":{"Decal":{"center":[0.0,0.0,0.0],"normal":[0.0,0.0,1.0],"up":[0.0,1.0,0.0],"size":[1.0,1.0],"rotation":0.0,"offset":[0.0,0.0],"depth":1.0}}}"#,
+        ];
+        for saved in fills {
+            let loaded: Fill = serde_json::from_str(saved).unwrap();
+
+            assert_eq!(serde_json::to_string(&loaded).unwrap(), saved, "a fill saves as it was saved");
+        }
+
+        let effects = [
+            r#"{"Fill":{"source":{"Uniform":[0.5,0.5,0.5]},"projection":{"Triplanar":{"scale":1.0,"sharpness":0.5,"offset":[0.0,0.0,0.0]}}}}"#,
+            r#"{"Material":{"sources":{},"projection":{"Spherical":{"scale":2.0}}}}"#,
+        ];
+        for saved in effects {
+            let loaded: EffectKind = serde_json::from_str(saved).unwrap();
+
+            assert_eq!(serde_json::to_string(&loaded).unwrap(), saved, "an effect saves as it was saved");
+        }
+    }
+
+    #[test]
     fn hsl_adjust_shifts_hue_saturation_and_lightness() {
         let close = |a: [f32; 3], b: [f32; 3]| (0..3).all(|i| (a[i] - b[i]).abs() < 1e-4);
         let c = [0.8, 0.3, 0.1];
@@ -1658,12 +1719,17 @@ mod tests {
         assert!(close(scan(0.4, 1.0), [0.0, 1.0, 1.0]), "full contrast is a step at the position");
         assert!(close(scan(0.5, 1.0), [0.0, 1.0, 1.0]), "the position itself goes to white");
         assert!(close(scan(0.7, 0.5), [0.0, 0.1, 0.9]));
+
         let range = |range, position| Filter::HistogramRange { range, position }.point(c, [0.2, 0.5, 0.9]).unwrap();
+
         assert!(close(range(1.0, 0.3), [0.2, 0.5, 0.9]) && close(range(0.0, 0.3), [0.3; 3]));
         assert!(close(range(0.5, 0.5), [0.35, 0.5, 0.7]));
+
         let shift = |offset| Filter::HistogramShift { offset }.point(c, [0.0, 0.5, 1.0]).unwrap();
+
         assert!(close(shift(0.0), [0.0, 0.5, 1.0]), "no offset keeps white white");
         assert!(close(shift(0.25), [0.25, 0.75, 0.25]) && close(shift(-0.25), [0.75, 0.25, 0.75]));
+
         let cb = Filter::ColorBalance { shadows: [0.2, 0.0, 0.0], midtones: [0.0; 3], highlights: [0.0, 0.0, 0.2] };
         assert!(cb.point(c, [0.05; 3]).unwrap()[0] > 0.2 && cb.point(c, [0.95; 3]).unwrap()[2] > 0.99);
         assert!(close(Filter::Invert.point(ChannelKind::Signed, [0.5; 3]).unwrap(), [-0.5; 3]));
@@ -1721,7 +1787,6 @@ mod tests {
         generator.micro = Some(MicroDetail { anchor: LayerId(9), amount: 0.5 });
 
         assert_eq!(EffectKind::Generator(generator.clone()).anchors_read(), [(LayerId(9), Channel::Height)]);
-
         generator_layer.mask = Some(Mask { effects: vec![Effect::new(LayerId(4), EffectKind::Generator(generator))], ..Mask::new(MaskBackground::Black) });
 
         assert!(generator_layer.reads_anchor());
@@ -1764,33 +1829,6 @@ mod tests {
     fn generator_kinds_parse() {
         for kind in GeneratorKind::ALL {
             assert_eq!(GeneratorKind::parse(&format!("{kind:?}")), Some(kind));
-        }
-    }
-
-    #[test]
-    fn fills_and_effects_in_the_shape_older_projects_saved_save_unchanged() {
-        let fills = [
-            r#"{"sources":{"BaseColor":{"Uniform":[0.5,0.5,0.5]}},"projection":{"Uv":{"scale":[1.0,1.0],"rotation":0.0,"offset":[0.0,0.0]}}}"#,
-            r#"{"sources":{},"projection":{"Triplanar":{"scale":1.0,"sharpness":0.5,"offset":[0.0,0.0,0.0]}}}"#,
-            r#"{"sources":{},"projection":{"Planar":{"scale":2.0,"axis":2,"offset":[0.0,1.0,0.0]}}}"#,
-            r#"{"sources":{},"projection":{"Spherical":{"scale":1.0}}}"#,
-            r#"{"sources":{},"projection":{"Cylindrical":{"scale":1.0,"axis":1}}}"#,
-            r#"{"sources":{},"projection":{"Decal":{"center":[0.0,0.0,0.0],"normal":[0.0,0.0,1.0],"up":[0.0,1.0,0.0],"size":[1.0,1.0],"rotation":0.0,"offset":[0.0,0.0],"depth":1.0}}}"#,
-        ];
-        for saved in fills {
-            let loaded: Fill = serde_json::from_str(saved).unwrap();
-
-            assert_eq!(serde_json::to_string(&loaded).unwrap(), saved, "a fill saves as it was saved");
-        }
-
-        let effects = [
-            r#"{"Fill":{"source":{"Uniform":[0.5,0.5,0.5]},"projection":{"Triplanar":{"scale":1.0,"sharpness":0.5,"offset":[0.0,0.0,0.0]}}}}"#,
-            r#"{"Material":{"sources":{},"projection":{"Spherical":{"scale":2.0}}}}"#,
-        ];
-        for saved in effects {
-            let loaded: EffectKind = serde_json::from_str(saved).unwrap();
-
-            assert_eq!(serde_json::to_string(&loaded).unwrap(), saved, "an effect saves as it was saved");
         }
     }
 

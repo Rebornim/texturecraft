@@ -12,12 +12,14 @@ pub mod bake;
 pub mod blend;
 mod block_scales;
 pub mod channel;
+pub mod cook_resolution;
 pub mod depth_culling;
 mod env_alignment;
 pub mod fill_symmetry;
 pub mod layer;
 pub mod project;
 pub mod projector;
+pub mod randomized_seed;
 mod saved_decal;
 mod saved_projection;
 mod shadow_mode;
@@ -37,6 +39,7 @@ pub use bake::{
 };
 pub use blend::{BlendMode, blend1, blend3, lum, mix3};
 pub use channel::{Channel, ChannelFormat, ChannelKind};
+pub use cook_resolution::CookResolution;
 pub use depth_culling::DepthCulling;
 pub use fill_symmetry::FillSymmetry;
 pub use layer::{
@@ -46,10 +49,11 @@ pub use layer::{
     TileInputDistribution, TileShape, TileSizeMode, TileSymmetry, UvTransform, UvWrap, gradient, hsl_adjust, per_unit,
 };
 pub use project::{
-    AoMixing, BlockScales, Camera, DepthOfField, DisplaySettings, EnvAlignment, FORMAT_VERSION, MAX_RESOLUTION, MIN_RESOLUTION, NormalFormat, NormalMixing,
-    Project, ShadowMode, TANGENT_BENT_NORMAL_VERSION, TextureSet, TileGrid, ToneMapping, UDIM_RANGE, udim_at,
+    AoMixing, BlockScales, Camera, DepthOfField, DisplaySettings, EnvAlignment, FORMAT_VERSION, MAX_RESOLUTION, MAX_SWATCHES, MIN_RESOLUTION, NormalFormat,
+    NormalMixing, Project, ShadowMode, TANGENT_BENT_NORMAL_VERSION, TextureSet, TileGrid, ToneMapping, UDIM_RANGE, udim_at,
 };
 pub use projector::Projector;
+pub use randomized_seed::RandomizedSeed;
 pub use shape_crop::ShapeCrop;
 pub use symmetry_kind::SymmetryKind;
 

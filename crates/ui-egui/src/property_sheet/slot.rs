@@ -1,6 +1,57 @@
-use egui::{CornerRadius, FontId, Sense, Stroke, StrokeKind, pos2};
+use egui::{Align2, CornerRadius, FontId, Painter, Rect, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};
+use egui_phosphor::regular as ic;
 
-use super::{ButtonIcon, CONTROL_RADIUS, PropertySheet, ROW_HEIGHT, TEXT_SIZE};
+use super::switch_control::PILL_SIZE;
+use super::{ButtonIcon, CONTROL_RADIUS, PropertySheet, ROW_HEIGHT, SlotResponse, TEXT_SIZE};
+use crate::theme::semibold;
+
+/// Air between a slot card's top and its slot row
+const SLOT_CARD_TOP: f32 = 6.0;
+
+/// Height of a slot row
+const SLOT_HEIGHT: f32 = 36.0;
+
+/// Size of a slot's thumbnail
+pub(super) const THUMB_SIZE: f32 = 26.0;
+
+/// Air between the thumbnail and the slot's name
+const THUMB_TO_NAME: f32 = 10.0;
+
+/// Size of a slot's source line
+const SOURCE_TEXT_SIZE: f32 = 10.0;
+
+/// The slot's name line above its centre and its source line below it
+const NAME_ABOVE_CENTER: f32 = 7.0;
+const SOURCE_BELOW_CENTER: f32 = 8.0;
+
+/// The square a slot's end glyph sits in
+const SLOT_GLYPH_BOX: f32 = 18.0;
+
+/// The extra margin the on/off pill answers clicks in
+const TOGGLE_HIT_MARGIN: f32 = 3.0;
+
+/// The seed's dice glyph size
+const DICE_ICON_SIZE: f32 = 14.0;
+
+/// From the right edge to the slot toggle's centre
+const SLOT_TOGGLE_INSET: f32 = 11.0;
+
+/// From the right edge to the × with a toggle beside it, and without
+const CLEAR_INSET_WITH_TOGGLE: f32 = 40.0;
+const CLEAR_INSET: f32 = 6.0;
+
+/// Distance between the × and the ⟲ left of it
+const RESET_STEP: f32 = 22.0;
+
+/// Size of the slot's × and ⟲ glyphs
+const SLOT_ICON_SIZE: f32 = 12.0;
+
+/// From the seed field's right edge to its value's right end
+const SEED_VALUE_INSET: f32 = 8.0;
+
+/// Room the seed's dice button takes at the row's end, and the button's width
+const DICE_ROOM: f32 = 34.0;
+const DICE_WIDTH: f32 = 28.0;
 
 /// Air between a full-width button's icon and its words
 const BUTTON_ICON_GAP: f32 = 8.0;
@@ -164,4 +215,78 @@ impl PropertySheet<'_> {
         self.drawn(button.bottom());
         response
     }
+
+    /// A seed: its field (click to type) and the dice button, which picks a new one. Returns true when the seed changed
+    pub(crate) fn seed(&mut self, label: &str, seed: &mut u32) -> bool {
+        let (control, center_y) = self.row(label);
+        let field = Rect::from_min_max(control.min, pos2(self.right - DICE_ROOM, control.bottom()));
+        let dice = Rect::from_min_max(pos2(self.right - DICE_WIDTH, control.top()), control.max);
+
+        let id = self.next_id();
+        let typing_id = id.with("typed");
+        let tokens = self.tokens;
+        let painter = self.ui.painter().clone();
+        painter.rect(field, CornerRadius::same(CONTROL_RADIUS), tokens.field, Stroke::new(1.0, tokens.field_border), StrokeKind::Inside);
+
+        // The value sits right like every number; the box lights on hover and goes accent while typing
+        let mut changed = false;
+        if let Some(mut text) = self.ui.data(|data| data.get_temp::<String>(typing_id)) {
+            let edit = egui::TextEdit::singleline(&mut text).id(typing_id).font(semibold(TEXT_SIZE)).align(egui::Align2::RIGHT_CENTER);
+            let response = self.typing_edit(field.left() + SEED_VALUE_INSET, field.right() - SEED_VALUE_INSET, center_y, edit);
+            painter.rect_stroke(field, CornerRadius::same(CONTROL_RADIUS), Stroke::new(1.0, tokens.accent), StrokeKind::Inside);
+
+            if response.lost_focus() {
+                let untouched = self.end_typing(typing_id, &text);
+                if let Ok(typed) = text.trim().parse::<u32>()
+                    && !untouched
+                    && typed != *seed
+                    && !self.ui.input(|input| input.key_pressed(egui::Key::Escape))
+                {
+                    *seed = typed;
+                    changed = true;
+                }
+            } else {
+                self.ui.data_mut(|data| data.insert_temp(typing_id, text));
+            }
+        } else {
+            self.skip_typing_edit();
+            let response = self.ui.interact(field, id, Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, crate::i18n::trf("{label} value", &[("label", &label)])));
+            painter.text(pos2(field.right() - SEED_VALUE_INSET, center_y), Align2::RIGHT_CENTER, seed.to_string(), semibold(TEXT_SIZE), tokens.text);
+
+            if response.hovered() {
+                painter.rect_stroke(field, CornerRadius::same(CONTROL_RADIUS), Stroke::new(1.0, tokens.button_border), StrokeKind::Inside);
+            }
+            if response.clicked() {
+                self.start_typing(typing_id, seed.to_string());
+            }
+        }
+
+        // The dice picks the next seed
+        let dice_id = self.next_id();
+        let dice_response = self.tip(self.ui.interact(dice, dice_id, Sense::click()), crate::i18n::tr("Random"));
+        painter.rect(
+            dice,
+            CornerRadius::same(CONTROL_RADIUS),
+            if dice_response.hovered() { tokens.row_hover } else { tokens.button },
+            Stroke::new(1.0, tokens.button_border),
+            StrokeKind::Inside,
+        );
+        painter.text(dice.center(), Align2::CENTER_CENTER, ic::DICE_FIVE, FontId::proportional(DICE_ICON_SIZE), tokens.text);
+        dice_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr("Random")));
+
+        if dice_response.clicked() {
+            *seed = next_seed(*seed);
+            changed = true;
+        }
+        changed
+    }
+}
+
+/// A new seed that looks random but follows from the old one (SplitMix32's mixing step), so tests and replays get the same sequence
+pub(crate) fn next_seed(seed: u32) -> u32 {
+    let mut z = seed.wrapping_add(0x9e37_79b9);
+    z = (z ^ (z >> 16)).wrapping_mul(0x85eb_ca6b);
+    z = (z ^ (z >> 13)).wrapping_mul(0xc2b2_ae35);
+    z ^ (z >> 16)
 }

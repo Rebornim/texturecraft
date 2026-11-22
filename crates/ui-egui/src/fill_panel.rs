@@ -7,7 +7,7 @@ use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::compose::frame_placement;
 use texturecraft_engine::compose::tile_length::{MeshSize, tile_length, tiling_for_length};
-use texturecraft_engine::core::{Backface, Fill, Filtering, LayerId, Projection, Projector, ScaleMode, ShapeCrop, UvWrap};
+use texturecraft_engine::core::{Backface, Channel, Fill, Filtering, LayerId, Projection, Projector, ScaleMode, ShapeCrop, UvWrap};
 use texturecraft_engine::layer_cmds::{MAX_PLACEMENT, MIN_SCALE};
 use texturecraft_engine::paint::FULL_TURN_DEGREES;
 
@@ -75,9 +75,10 @@ const ROTATION_FIELD_SPEED: f32 = 0.5;
 /// Change per pixel dragged on a 3D scale field
 const SCALE_FIELD_SPEED: f32 = 0.01;
 
-/// The tabs over a fill's Properties, each jumping to its section
-pub(crate) fn fill_tabs() -> [(&'static str, &'static str); 2] {
-    [(ic::SLIDERS_HORIZONTAL, tr("Fill")), (ic::FLIP_HORIZONTAL, tr("Symmetry"))]
+/// The tabs over a fill's Properties, each jumping to its section: a mask fill's last section is its Grayscale, a fill layer's its Material
+pub(crate) fn fill_tabs(grayscale: bool) -> [(&'static str, &'static str); 3] {
+    let last = if grayscale { (ic::SQUARE_HALF, tr("Grayscale")) } else { (ic::CIRCLE_HALF, tr("Material")) };
+    [(ic::SLIDERS_HORIZONTAL, tr("Fill")), (ic::FLIP_HORIZONTAL, tr("Symmetry")), last]
 }
 
 /// Which fill a `base` addresses, (layer, effect), as the salt of its rows' widget state

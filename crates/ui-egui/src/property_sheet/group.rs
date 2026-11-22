@@ -2,7 +2,7 @@ use egui::{Align2, CornerRadius, FontId, Rect, Sense, Shape, Stroke, pos2, vec2}
 use egui_phosphor::regular as ic;
 
 use super::row::{EDGE_GLYPH_INSET, RESET_ICON_SIZE};
-use super::{BandResponse, GROUP_GAP, PropertySheet, TEXT_SIZE};
+use super::{BandResponse, GROUP_GAP, OpenCard, PropertySheet, ROW_HEIGHT, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Draws a band's picture in its rect

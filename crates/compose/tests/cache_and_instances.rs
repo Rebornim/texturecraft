@@ -667,7 +667,8 @@ fn kept_filter_fields_are_not_used_after_an_edit_or_under_a_live_stroke() {
 
     // Changing the hot mask must invalidate the retained fields
     let mask = fixture.project.layer_mut(top).unwrap().mask.as_mut().unwrap();
-    mask.effects[1].kind = EffectKind::Filter(Filter::Blur { radius: 6.0 });
+    let blur = mask.effects.iter_mut().find(|effect| matches!(effect.kind, EffectKind::Filter(Filter::Blur { .. }))).unwrap();
+    blur.kind = EffectKind::Filter(Filter::Blur { radius: 6.0 });
     let (images, baked) = (Default::default(), Default::default());
     cache.ahead = Vec::new();
     composite_tiles_cached(&inputs(&fixture, 0, &images, &baked), &mut out, &all, Some(&mut cache));

@@ -52,14 +52,19 @@ pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui, effect: u64, filter: 
     let highlighted = response.hovered() || egui::Popup::is_id_open(&ctx, popup);
     paint(ui, rect, (highlighted, response.has_focus()), thumbnail.as_ref().map(egui::TextureHandle::id), (tr("Filter"), name));
 
-    let items = |thumbs: &mut Thumbs| {
-        filter_effects()
-            .iter()
-            .filter(|def| def.mask || !on_mask)
-            .map(|def| ResourcePickerItem { id: def.id, label: tr(def.label), group: tr(def.group), thumbnail: thumbs.filter(&ctx, def.id) })
-            .collect()
+    let tabs = |thumbs: &mut Thumbs| {
+        let mut groups: Vec<PickerGroup<&'static str>> = Vec::new();
+        for def in filter_effects().iter().filter(|def| def.mask || !on_mask) {
+            let item =
+                ResourcePickerItem { id: def.id, label: tr(def.label).to_owned(), caption: None, picture: TilePicture::Texture(thumbs.filter(&ctx, def.id)) };
+            match groups.last_mut() {
+                Some(group) if group.header == Some(tr(def.group)) => group.items.push(item),
+                _ => groups.push(PickerGroup { header: Some(tr(def.group)), items: vec![item] }),
+            }
+        }
+        vec![PickerTab { icon: ic::FUNNEL, name: tr("Filter"), groups }]
     };
-    let picked = resource_picker::show(&response, popup, &mut app.thumbs, current, items, ShelfPreview::Filter);
+    let picked = resource_picker::show(&response, popup, &mut app.thumbs, current.as_ref(), current.is_some(), tabs);
     if let Some(id) = picked.filter(|id| Some(*id) != current) {
         app.run("effect.set", json!({"effect": effect, "filter": id}));
     }

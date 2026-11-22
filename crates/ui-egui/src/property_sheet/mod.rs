@@ -41,7 +41,11 @@ pub(crate) use number_field::NumberField;
 pub(crate) use preview_lower::PreviewLower;
 pub(crate) use preview_size::PreviewSize;
 pub(crate) use row_lead::RowLead;
-pub(crate) use section_tabs::{SectionScope, forget_sections, full_height_tab_rect, in_scope, room_past_end, section_tabs, shown_tab_box};
+pub(crate) use section_tabs::{
+    SectionScope, TAB_GAP, TAB_ICON_CENTER, TAB_ICON_SIZE, TAB_NAME_LEFT, TAB_PADDING, TAB_ROUNDING, TAB_TEXT_SIZE, TAB_TOP, forget_sections,
+    full_height_tab_rect, in_scope, room_past_end, section_tabs, shown_tab_box,
+};
+pub(crate) use slot_response::SlotResponse;
 pub(crate) use stack_slider::StackSlider;
 
 use egui::{Color32, FontId, Id, Rect, Ui, pos2, vec2};

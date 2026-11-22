@@ -218,12 +218,12 @@ fn its_jump_tabs_scroll_to_a_section_and_light_it_without_moving_the_docked_pane
     assert!(tab_lit(&harness, popup, "Fill"), "it opens on Fill");
     assert!(in_popup(&harness, "UV projection"));
 
-    let symmetry = harness.get_all_by_role_and_label(Role::Tab, "Symmetry").find(|tab| popup.contains_rect(tab.rect())).unwrap().rect().center();
-    click(&mut harness, PointerButton::Primary, symmetry);
+    let material = harness.get_all_by_role_and_label(Role::Tab, "Material").find(|tab| popup.contains_rect(tab.rect())).unwrap().rect().center();
+    click(&mut harness, PointerButton::Primary, material);
     harness.run_steps(JUMP_FRAMES);
     assert!(is_open(&harness), "a tab click keeps it open");
-    assert!(!in_popup(&harness, "UV projection"), "the list jumped down to SYMMETRY");
-    assert!(tab_lit(&harness, popup, "Symmetry"), "the section in view is lit");
+    assert!(!in_popup(&harness, "UV projection"), "the list jumped down to MATERIAL");
+    assert!(tab_lit(&harness, popup, "Material"), "the section in view is lit");
     assert!(!tab_lit(&harness, popup, "Fill"));
     assert!(tab_lit(&harness, docked, "Fill"), "the docked panel keeps its own place");
 }

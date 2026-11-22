@@ -117,7 +117,7 @@ fn the_anchor_points_tab_picks_an_anchor() {
     let project = &harness.state().session.doc.project;
     let owner = project.layers.values().find(|layer| layer.content_effects.iter().any(|effect| effect.name == "Height")).unwrap();
     let label = format!("{} / Height", owner.name);
-    harness.get_by_role_and_label(Role::Button, &label).click();
+    harness.get_by_role_and_label(Role::ListBoxOption, &label).click();
     harness.run_steps(3);
     assert!(source(&harness, effect).anchor().is_some());
 }

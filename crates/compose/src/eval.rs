@@ -1194,7 +1194,8 @@ fn plan<'a>(inp: &EvaluationInputs<'a>, list: &[LayerId], channels: &[Channel], 
     list.iter().filter_map(|id| plan_node(inp, *id, channels, tx, ty, depth, fields, true)).collect()
 }
 
-/// The plan of layer `id` at `depth` (None where it draws nothing); a folder's children are planned when `kids`
+/// The plan of layer `id` at `depth` (None where it draws nothing); a folder's children are
+/// planned when `kids`.
 #[allow(clippy::too_many_arguments)]
 fn plan_node<'a>(
     inp: &EvaluationInputs<'a>,
@@ -2245,8 +2246,8 @@ impl<'a, 'b> Texel<'a, 'b> {
             // Baked lighting reads the texel's normal and occlusion, and lights the base color only
             EffectKind::Filter(filter @ Filter::BakedLighting { .. }) => match Channel::ALL.get(chan_plan.ch) {
                 Some(Channel::BaseColor) => {
-                    let nrm = self.coords().nrm.to_array();
-                    let factor = filter.baked_light(nrm, self.baked(BakedMap::AmbientOcclusion).unwrap_or(1.0)).unwrap_or(1.0);
+                    let ao = self.baked(BakedMap::AmbientOcclusion).unwrap_or(1.0);
+                    let factor = filter.baked_light(self.coords().nrm.to_array(), ao).unwrap_or(1.0);
                     (mix3(value, value.map(|x| (x * factor).clamp(0.0, 1.0)), opacity), coverage)
                 }
                 _ => (value, coverage),

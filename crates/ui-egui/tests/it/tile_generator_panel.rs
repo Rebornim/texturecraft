@@ -118,11 +118,8 @@ fn the_anchor_points_tab_picks_an_anchor() {
     harness.get_by_label("Anchor points").click();
     harness.run_steps(3);
 
-    // An anchor tile is labelled "<layer> / <anchor>", as the anchors below a layer are listed
-    let project = &harness.state().session.doc.project;
-    let owner = project.layers.values().find(|layer| layer.content_effects.iter().any(|effect| effect.name == "Height")).unwrap();
-    let label = format!("{} / Height", owner.name);
-    harness.get_by_role_and_label(Role::ListBoxOption, &label).click();
+    // An anchor tile is labelled with the anchor's name; its layer is named only where two anchors share a name
+    harness.get_by_role_and_label(Role::ListBoxOption, "Height").click();
     harness.run_steps(3);
     assert!(source(&harness, effect).anchor().is_some());
 }

@@ -156,7 +156,7 @@ impl EnvImage {
             let v = if v.is_finite() { v.clamp(0.0, 65_000.0) } else { 0.0 };
             if srgb { texturecraft_texel::srgb_to_linear(v.min(1.0)) } else { v }
         };
-        let data = rgba.par_iter().map(|p| [lin(p[0]), lin(p[1]), lin(p[2])]).collect();
+        let data = pixels.par_iter().map(|p| [lin(p[0]), lin(p[1]), lin(p[2])]).collect();
         let mut img = EnvImage { width, height, data };
         while img.width > MAX_IMPORT_WIDTH || img.height > MAX_IMPORT_WIDTH {
             img = img.half();

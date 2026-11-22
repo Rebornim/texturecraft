@@ -6,7 +6,7 @@ use serde_json::json;
 use texturecraft_engine::core::{Channel, LayerId, LayerKind, Source};
 use texturecraft_ui_egui::TextureCraftApp;
 
-use crate::fill_support::click_node;
+use crate::fill_support::{click_label, click_node};
 
 /// Opens the Roughness slot's source picker on the Material tab and types `search` into its search field, which has the focus
 fn open_roughness_source_menu(harness: &mut Harness<'_, TextureCraftApp>, search: &str) {
@@ -126,15 +126,12 @@ fn a_mask_fill_selects_an_image_edits_projection_and_returns_to_uniform() {
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(4);
 
-    // The mask fill's slot opens the source picker
-    harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").scroll_to_me();
-    harness.run_steps(30);
-    harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").click();
-    harness.run_steps(3);
-    // The search field has the focus: it brings the tile into the grid's view
+    // The mask fill's Grayscale slot opens the source picker; its search finds the image
+    click_node(&mut harness, egui::Role::ComboBox, "Grayscale");
+    harness.run_steps(2);
     harness.event(egui::Event::Text("mask".into()));
     harness.run_steps(2);
-    harness.get_by_role_and_label(egui::Role::ListBoxOption, &image_name).click();
+    click_node(&mut harness, egui::Role::ListBoxOption, &image_name);
     harness.run_steps(3);
 
     let effect = &harness.state().session.doc.project.effect(effect_id).unwrap().1.kind;
@@ -148,13 +145,8 @@ fn a_mask_fill_selects_an_image_edits_projection_and_returns_to_uniform() {
     let effect = &harness.state().session.doc.project.effect(effect_id).unwrap().1.kind;
     assert!(matches!(effect, EffectKind::Fill { projection: Projection::Triplanar { .. }, .. }));
 
-    assert_eq!(harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").value().as_deref(), Some(image_name.as_str()), "the slot names the image");
-    harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").click();
-    harness.run_steps(3);
-    // The search field has the focus: it brings the tile into the grid's view
-    harness.event(egui::Event::Text("uniform".into()));
-    harness.run_steps(2);
-    harness.get_by_role_and_label(egui::Role::ListBoxOption, "Uniform value").click();
+    // The slot's × puts the mask fill back to a uniform value
+    click_node(&mut harness, egui::Role::Button, "Clear");
     harness.run_steps(3);
 
     let effect = &harness.state().session.doc.project.effect(effect_id).unwrap().1.kind;

@@ -2,8 +2,8 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    BakedMap, BlendMode, Channel, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator, GeneratorKind, LayerId, Levels, Mask,
-    MaskBackground, MicroDetail, Procedural, ProceduralKind, Project, Sampling, Source,
+    BakedMap, BlendMode, Channel, ChannelKind, ColorSelection, CompareOp, CompareSource, CurvatureDetail, CurvatureMode, Effect, EffectKind, Filter, Generator,
+    GeneratorKind, LayerId, Levels, Mask, MaskBackground, MicroDetail, Procedural, ProceduralKind, Project, Sampling, Source,
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
@@ -95,7 +95,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), generator?: kind (a generator effect only: changes kind in place), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, microAnchor?: id|null, microAmount?, value?, uniform?: 0..1 (a mask fill reads that value, whatever its source), procedural?: kind (a mask fill) with scale?, seed?, contrast?, balance?, invert?, resolution?, tile?, tileDefaults? (alone, they edit its pattern), image?: resource name (a fill's source), projection?: uv|triplanar|planar|spherical|cylindrical, scale?, rotation?, offset?, axis?, sharpness? (a fill effect's projection; while it reads a pattern, scale is the pattern's), anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, tolerance?, colors?: [[r,g,b] linear, ...] (a color selection's ID colors), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, channel?: the content channel blend and opacity set (default: every channel), name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), generator?: kind (a generator effect only: changes kind in place), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, microAnchor?: id|null, microAmount?, value?, uniform?: 0..1 (a mask fill reads that value, whatever its source), procedural?: kind (a mask fill) with scale?, seed?, contrast?, balance?, invert?, resolution?, tile?, tileDefaults? (alone, they edit its pattern), image?: resource name (a fill's source), projection?: uv|triplanar|planar|spherical|cylindrical, scale?, rotation?, offset?, axis?, sharpness? (a fill effect's projection; while it reads a pattern, scale is the pattern's), anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, affects?, clamp? (levels), tolerance?, left?, op?, right?, compareChannel?, hardness? (compare; value is its constant), colors?: [[r,g,b] linear, ...] (a color selection's ID colors, may be empty), output?, background?: transparent | black | white | gray, idMap?: an image resource name read as the ID map, null for the texture set's ID mesh map (a color selection; tolerance and hardness too), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),

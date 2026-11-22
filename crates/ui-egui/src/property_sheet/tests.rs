@@ -4,7 +4,6 @@ use egui_kittest::kittest::Queryable as _;
 use egui_phosphor::regular as ic;
 
 use super::number_field::shown_number;
-use super::slot::next_seed;
 use super::{NumberField, PropertySheet};
 use crate::theme::{Accent, Brightness, Tokens};
 use texturecraft_engine::folder_cmds::next_seed;
@@ -250,6 +249,40 @@ fn culling_rows_keep_their_switches_in_one_column_when_a_name_is_long() {
     let long = harness.get_by_label("Backface culling past the column").rect();
 
     assert_eq!(short.right(), long.right(), "both switches end at one x: {short:?} vs {long:?}");
+}
+
+/// Under a section caption, an instance card (`instance` true) or a slot card; records where its thumbnail was painted
+fn card_under_caption(ui: &mut egui::Ui, state: &mut (bool, std::cell::Cell<Option<Rect>>)) {
+    let (instance, thumbnail) = state;
+    let record = |_: &Painter, rect: Rect| thumbnail.set(Some(rect));
+    let panel = Tokens::get(ui.ctx()).panel;
+    egui::Frame::NONE.fill(panel).show(ui, |ui| {
+        ui.set_width(PANEL_WIDTH);
+        PropertySheet::show(ui, "card", |sheet| {
+            sheet.section("Caption", false);
+            if *instance {
+                sheet.source_card(&record, "Layer", "Set", false);
+            } else {
+                sheet.slot(&record, "Layer", "Set", None, true, false);
+            }
+        });
+    });
+}
+
+/// Where the card under a caption paints its thumbnail
+fn thumbnail_under_caption(instance: bool) -> Rect {
+    let mut harness = builder(Brightness::MediumDark).build_ui_state(card_under_caption, (instance, std::cell::Cell::new(None)));
+    harness.run_steps(3);
+    harness.state().1.get().unwrap_or_else(|| panic!("the card (instance: {instance}) paints no thumbnail"))
+}
+
+/// The instance card keeps a card's air under its caption and above its thumbnail, as a slot card does (it sat 6 px higher)
+#[test]
+fn an_instance_card_sits_under_its_caption_as_a_slot_card_does() {
+    let slot = thumbnail_under_caption(false);
+    let instance = thumbnail_under_caption(true);
+
+    assert_eq!(instance.top(), slot.top(), "the thumbnails start at one y: {instance:?} vs {slot:?}");
 }
 
 /// A gray slider in a panel-wide column; records the column's right edge

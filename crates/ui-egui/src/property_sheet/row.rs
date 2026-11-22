@@ -168,8 +168,8 @@ impl PropertySheet<'_> {
         let center_y = self.cursor_y() + ROW_HEIGHT / 2.0;
         let shift = self.lead_shift();
         let label_x = self.left + shift + ROW_PICTURE_SIZE + ROW_PICTURE_AIR;
-        let (label, stack, text_color) = match lead {
-            RowLead::Label { text, stack } => (text, stack, self.tokens.text),
+        let (label, stack) = match lead {
+            RowLead::Label { text, stack } => (text, stack),
             RowLead::Loose(text) if shift + self.text_width(text, font.clone()) <= self.column() - self.left - LOOSE_LABEL_AIR => {
                 self.paint_info(center_y);
                 self.ui.painter().text(pos2(self.left + shift, center_y), Align2::LEFT_CENTER, text, font, self.tokens.text);
@@ -198,7 +198,7 @@ impl PropertySheet<'_> {
         let text = self.tokens.text;
         if width <= self.column() - self.left - LABEL_MIN_AIR && !stack {
             self.paint_info(center_y);
-            self.ui.painter().text(pos2(self.left + shift, center_y), Align2::LEFT_CENTER, label, font, text_color);
+            self.ui.painter().text(pos2(self.left + shift, center_y), Align2::LEFT_CENTER, label, font, text);
             return self.column();
         }
 

@@ -14,14 +14,14 @@ use crate::orb_previews::{OrbJob, OrbPreviews};
 use crate::preview_image::aces;
 use crate::theme::Tokens;
 
-/// The reflectance of non-metals at normal incidence
-const DIELECTRIC_REFLECTANCE: f32 = 0.04;
-
 /// Largest orb rendered, in physical pixels
 const MAX_SIDE_PX: usize = 512;
 
 /// The sphere's radius in halves of the square
 const SPHERE_RADIUS: f32 = 0.84;
+
+/// Reflectance of a non-metal seen face on
+const DIELECTRIC_F0: f32 = 0.04;
 
 /// The lowest roughness shaded (a perfect mirror aliases at orb sizes)
 const MIN_ROUGHNESS: f32 = 0.03;
@@ -124,7 +124,7 @@ fn shade(material: &OrbMaterial, env: &OrbEnvironment, direction: Vec3, pixel: f
     let mut out = [0.0; 3];
     for (channel, value) in out.iter_mut().enumerate() {
         let base = sample.base[channel].clamp(0.0, 1.0);
-        let f0 = DIELECTRIC_REFLECTANCE + (base - DIELECTRIC_REFLECTANCE) * metallic;
+        let f0 = DIELECTRIC_F0 + (base - DIELECTRIC_F0) * metallic;
         let specular = f0 * scale + bias;
         *value = diffuse_light[channel] * base * (1.0 - metallic) * (1.0 - specular) + specular_light[channel] * specular + sample.emissive[channel].max(0.0);
     }

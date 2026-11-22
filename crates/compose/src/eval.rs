@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 use texturecraft_core::{
-    BakedMap, BlendMode, BlockScales, Channel, ChannelKind, CompareOp, CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter, Filtering, Generator,
-    GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, MicroDetail, NormalFormat, Project, Projection, Sampling, ShapeCrop, Source,
-    TextureSet, TileGrid, blend1, blend3, lum, mix3, per_unit,
+    BakedMap, BlendMode, BlockScales, Channel, ChannelKind, CompareSource, ContentsOffset, CurvatureDetail, CurvatureMode, Effect, EffectKind, Fill, Filter,
+    Filtering, Generator, GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground, MicroDetail, NormalFormat, Project, Projection, Sampling,
+    ShapeCrop, Source, TextureSet, TileGrid, blend1, blend3, lum, mix3, per_unit,
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, Surface, UvGBuffer};
@@ -752,7 +752,7 @@ fn filter_region(
     };
 
     let filter_effect = effects.iter().filter(|effect| effect.visible).nth(index);
-    let opacity = filter_effect.map(|effect| effect.opacity.clamp(0.0, 1.0)).unwrap_or(1.0);
+    let opacity = filter_effect.map(|effect| effect.blend_of(channel).opacity.clamp(0.0, 1.0)).unwrap_or(1.0);
     let (radius_texels, _) = filter_extent(radius, op, inputs.gbuf.width.max(inputs.gbuf.height));
 
     // Generator stages keep their ramp beside the mask stack below
@@ -1155,7 +1155,14 @@ struct Node<'a> {
 
 /// Plans of the visible effects of a stack: mask effects (`channel` None) or the content
 /// effects of one channel (paint effects then read that channel's pixels).
-fn effect_plans<'a>(inp: &EvaluationInputs<'a>, effects: &'a [Effect], tile_x: u32, tile_y: u32, channel: Option<Channel>) -> Vec<EffectPlan<'a>> {
+fn effect_plans<'a>(
+    inp: &Inputs<'a>,
+    effects: &'a [Effect],
+    tile_x: u32,
+    tile_y: u32,
+    channel: Option<Channel>,
+    around: ContentsOffset,
+) -> Vec<EffectPlan<'a>> {
     effects
         .iter()
         .filter(|effect| effect.visible)
@@ -1174,6 +1181,7 @@ fn effect_plans<'a>(inp: &EvaluationInputs<'a>, effects: &'a [Effect], tile_x: u
                 }
                 _ => (None, false),
             };
+            let blend = effect.blend_of(channel);
             EffectPlan {
                 id: effect.id,
                 kind: offset_effect(&effect.kind, around),
@@ -1234,7 +1242,8 @@ fn tile_of<'a>(inp: &Inputs, img: Option<&'a TileImage>, tx: u32, ty: u32, chann
     img.resampled_tile(w, h, tx, ty, &empty).map(Cow::Owned)
 }
 
-fn mask_plan<'a>(inp: &EvaluationInputs<'a>, id: LayerId, mask: &'a Mask, tx: u32, ty: u32, fields: Option<&'a Fields>) -> Option<MaskPlan<'a>> {
+/// The plan of layer `id`'s `mask` for tile (tx, ty), its fills under the Scale and Rotation `around` of the folders holding the layer
+fn mask_plan<'a>(inp: &Inputs<'a>, id: LayerId, mask: &'a Mask, tx: u32, ty: u32, fields: Option<&'a Fields>, around: ContentsOffset) -> Option<MaskPlan<'a>> {
     if !mask.enabled {
         return None;
     }
@@ -1365,7 +1374,10 @@ fn plan_content<'a>(
         LayerKind::Paint => Content::Paint { preview: previews(inp, PaintTarget::Layer(layer.id)) },
         LayerKind::Fill(f) => {
             let (depth, covers_all) = fill_coverage(inp, &f.projection, f.sampling);
-            Content::Fill { fill: Box::new(Cow::Borrowed(f)), depth, covers_all }
+            Content::Fill { fill: Box::new(offset_fill(f, around)), depth, covers_all }
+        }
+        LayerKind::Group { children, contents, .. } => {
+            Content::Group(if kids { plan_in(inp, children, channels, tx, ty, depth + 1, fields, around.then(*contents)) } else { Vec::new() })
         }
 
         // `content_layer` already followed instance links
@@ -1498,7 +1510,7 @@ impl<'t> Tape<'t> {
 
 impl<'a, 'b> Texel<'a, 'b> {
     fn new(inp: &'b Inputs<'a>, x: u32, y: u32, o: usize, stroke: f32) -> Self {
-        Texel { inp, x, y, o, res: inp.gbuf.width, coords: None, stroke, stop: None, anchors: Vec::new(), tape: Tape::Off, copy: None }
+        Texel { inp, x, y, o, res: inp.gbuf.width, coords: None, stroke, stop: None, anchors: Vec::new(), below: None, tape: Tape::Off, copy: None }
     }
 
     /// Run `f` with `tape` as this texel's tape.
@@ -2386,7 +2398,10 @@ impl<'a, 'b> Texel<'a, 'b> {
                 }
                 None => (value, coverage),
             },
-            EffectKind::Levels(levels) => (mix3(value, per_unit(chan_plan.kind, value, |x| levels.apply(x)), opacity), coverage),
+            EffectKind::Levels(levels) => match Channel::ALL.get(chan_plan.ch) {
+                Some(&channel) if levels.remaps(channel) => (mix3(value, per_unit(chan_plan.kind, value, |x| levels.apply(x)), opacity), coverage),
+                _ => (value, coverage),
+            },
             // Baked lighting reads the texel's normal and occlusion, and lights the base color only
             EffectKind::Filter(filter @ Filter::BakedLighting { .. }) => match Channel::ALL.get(chan_plan.ch) {
                 Some(Channel::BaseColor) => {
@@ -3247,21 +3262,20 @@ pub fn compare_histograms(inp: &Inputs, effect: LayerId, bins: usize) -> Option<
     }
     let reads_stack = found.kind.reads_stack();
     let tiles = histogram_tiles(inp.gbuf.width, inp.gbuf.height);
-    // A field covers the bounding box of the tiles it is built for, which for a scattered sample
-    // is the whole set: with a neighbourhood filter below, each tile gets its own.
-    let probe = evaluation_fields(&cut_inp, &channels, tiles.get(..1).unwrap_or_default());
-    let shared = probe.is_empty().then_some(probe);
-    let bin = |v: f32| ((v.clamp(0.0, 1.0) * bins as f32) as usize).min(bins - 1);
-    let hist = tiles
+    let shared = shared_histogram_fields(&cut_inp, &channels, &tiles);
+    let empty = || [EffectHistogram::new(bins, false), EffectHistogram::new(bins, false)];
+
+    let [left_counts, right_counts] = tiles
         .par_iter()
         .map(|&(tx, ty)| {
-            let own;
-            let fields = match &shared {
-                Some(f) => f,
-                None => {
-                    own = evaluation_fields(&cut_inp, &channels, &[(tx, ty)]);
-                    &own
-                }
+            let mut own = None;
+            let fields = histogram_tile_fields(shared.as_ref(), &mut own, &cut_inp, &channels, (tx, ty));
+            let mut sides = empty();
+
+            // The mask under the compare, and (sides reading layers) the layer's content and the stack below it
+            let Some(mut mask) = layer_mask(&cut, owner).and_then(|mask| mask_plan(&cut_inp, owner, mask, tx, ty, Some(fields), cut.contents_around(owner)))
+            else {
+                return sides;
             };
 
             // Every channel, so the content also serves the compares under this one
@@ -3368,7 +3382,7 @@ pub fn flatten_layer(inputs: &Inputs, id: LayerId, tiles: &[(u32, u32)]) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
-    use texturecraft_core::{ChannelBlend, Effect, Layer, OutputResolution, Procedural, ProceduralKind, ResolutionMode, TextureSet};
+    use texturecraft_core::{ChannelBlend, CompareOp, Effect, Layer, OutputResolution, Procedural, ProceduralKind, ResolutionMode, TextureSet};
     use texturecraft_geom::primitives;
 
     struct Fixture {
@@ -4374,6 +4388,90 @@ soft {soft:?}"
         let f = Filter::BakedLighting { azimuth: 0.0, elevation: 0.0, light: 0.0, ambient: 1.0, occlusion: 0.5 };
         assert_eq!(f.baked_light([0.0, 1.0, 0.0], 0.2), Some(0.6), "half the occlusion");
         assert_eq!(Filter::Invert.baked_light([0.0; 3], 1.0), None);
+    }
+
+    #[test]
+    fn a_compares_histogram_reads_the_compares_under_it_against_the_stack() {
+        let mut f = fixture();
+        fill_layer(&mut f.project, [0.5; 3], 0.8);
+        let top = fill_layer(&mut f.project, [1.0; 3], 0.2);
+        let compare = |left, right| EffectKind::Compare {
+            op: CompareOp::GreaterThan,
+            value: 0.5,
+            tolerance: 0.0,
+            left,
+            right,
+            channel: Channel::Roughness,
+            hardness: 1.0,
+        };
+        let mut mask = Mask::new(MaskBackground::Black);
+        mask.effects.push(Effect::new(f.project.alloc_id(), compare(CompareSource::LayersBelow, CompareSource::Constant)));
+        let reader = Effect::new(f.project.alloc_id(), compare(CompareSource::ThisMask, CompareSource::Constant));
+        let reader_id = reader.id;
+        mask.effects.push(reader);
+        f.project.layer_mut(top).unwrap().mask = Some(mask);
+        let images = ImageStore::default();
+
+        let [mask_so_far, _] = compare_histograms(&inputs(&f, &images, None), reader_id, 4).unwrap();
+
+        // The roughness below (0.8) passes the first compare everywhere: the mask so far is white
+        let white = *mask_so_far.last().unwrap();
+
+        assert!(white > 0 && mask_so_far.iter().sum::<u32>() == white, "{mask_so_far:?}");
+    }
+
+    #[test]
+    fn a_filtered_mask_compares_the_layers_filtered_content() {
+        let mut f = fixture();
+        fill_layer(&mut f.project, [0.5; 3], 0.5);
+        let top = fill_layer(&mut f.project, [1.0; 3], 0.9);
+        content_fx(&mut f, top, EffectKind::Filter(Filter::EdgeDetect { width: 64.0 }));
+        let compare = EffectKind::Compare {
+            op: CompareOp::GreaterThan,
+            value: 0.7,
+            tolerance: 0.0,
+            left: CompareSource::ThisLayer,
+            right: CompareSource::Constant,
+            channel: Channel::Roughness,
+            hardness: 1.0,
+        };
+        let mut mask = Mask::new(MaskBackground::Black);
+        mask.effects.push(Effect::new(f.project.alloc_id(), compare));
+        mask.effects.push(Effect::new(f.project.alloc_id(), EffectKind::Filter(Filter::Blur { radius: 2.0 })));
+        f.project.layer_mut(top).unwrap().mask = Some(mask);
+
+        let color = run(&f, None).value(Channel::BaseColor, 30, 30);
+
+        // Uniform roughness 0.9 has no edges: black after the edge detection, it fails the compare and the layer below shows
+        assert!(close(color, [0.5; 3]), "{color:?}");
+    }
+
+    #[test]
+    fn a_compare_mask_blends_onto_the_mask_with_its_blend_mode() {
+        let mut f = fixture();
+        fill_layer(&mut f.project, [0.5; 3], 0.8);
+        let top = fill_layer(&mut f.project, [1.0; 3], 0.2);
+
+        // The roughness below (0.8) passes everywhere, but a white compare multiplied onto a black mask stays black
+        let mut compare = Effect::new(
+            f.project.alloc_id(),
+            EffectKind::Compare {
+                op: CompareOp::GreaterThan,
+                value: 0.5,
+                tolerance: 0.0,
+                left: CompareSource::LayersBelow,
+                right: CompareSource::Constant,
+                channel: Channel::Roughness,
+                hardness: 1.0,
+            },
+        );
+        compare.blend = BlendMode::Multiply;
+        let mut mask = Mask::new(MaskBackground::Black);
+        mask.effects.push(compare);
+        f.project.layer_mut(top).unwrap().mask = Some(mask);
+
+        let color = run(&f, None).value(Channel::BaseColor, 30, 30);
+        assert!(close(color, [0.5; 3]), "the layer under shows: {color:?}");
     }
 
     #[test]

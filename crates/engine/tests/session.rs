@@ -279,7 +279,7 @@ fn gray_png() -> Vec<u8> {
 
 /// Frame edits and frame and Fill section resets on the fills they act on (a planar, a warp and a decal mask) meet hostile values without panicking; a refused edit changes nothing and adds no undo step
 #[test]
-fn panic_hunt_frames_and_transforms() {
+fn panic_hunt_frames() {
     let mut s = session();
     let image = s.import_resource_bytes("gray.png", gray_png()).unwrap();
     let planar = execute(&mut s, "layer.add.fill", &Value::Null).unwrap()["layer"].as_u64().unwrap();

@@ -131,7 +131,7 @@ pub fn build(id: &str, p: &Value) -> Result<EffectKind> {
         "bakedLighting" => Filter::BakedLighting { azimuth: 45.0, elevation: 45.0, light: 0.8, ambient: 0.4, occlusion: 1.0 },
         "levels" => {
             let mut l = Levels::default();
-            crate::mask_cmds::levels_from(p, &mut l);
+            crate::mask_cmds::levels_from(cmd, p, &mut l)?;
             return Ok(EffectKind::Levels(l));
         }
         finish => return mat_finish(finish).map(EffectKind::Material).ok_or_else(|| bad(cmd, format!("unknown filter `{id}`"))),

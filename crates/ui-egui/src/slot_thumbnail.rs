@@ -1,6 +1,6 @@
 //! The picture a slot card shows of a fill channel's source
 
-use egui::{Align2, Color32, CornerRadius, FontId, Painter, Rect, TextureHandle, TextureId, pos2};
+use egui::{Align2, Color32, CornerRadius, FontId, Painter, Rect, Stroke, StrokeKind, TextureHandle, TextureId, pos2};
 use egui_phosphor::regular as ic;
 use texturecraft_engine::compose::ThumbTarget;
 use texturecraft_engine::core::Source;

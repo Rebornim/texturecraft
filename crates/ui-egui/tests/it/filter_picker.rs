@@ -68,10 +68,10 @@ fn escape_closes_the_picker_without_changes() {
 
 /// Opens the wand's Add effect menu and clicks Filter
 fn add_filter_from_the_wand(harness: &mut Harness<'_, TextureCraftApp>) {
-    harness.get_by_label(egui_phosphor::regular::MAGIC_WAND).click();
+    harness.get_by_role_and_label(Role::Button, "Add effect").click();
     harness.run_steps(3);
 
-    harness.get_by_label("Add filter").click();
+    harness.get_by_role_and_label(Role::Button, "Filter").click();
     harness.run_steps(3);
 }
 

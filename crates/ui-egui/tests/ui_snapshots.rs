@@ -2278,7 +2278,7 @@ fn properties_min_width_snapshot() {
         save(&mut harness, &output_dir, &format!("properties-min-width-planar-{name}"));
     }
     harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
-    execute(&mut harness.state_mut().session, "effect.add.filter", &json!({"target": "content", "filter": "colorMatch"})).unwrap();
+    execute(&mut harness.state_mut().session, "effect.add.filter", &json!({"target": "content", "filter": "hsl"})).unwrap();
     save(&mut harness, &output_dir, "properties-min-width-filter");
 }
 

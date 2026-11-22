@@ -8,8 +8,8 @@ use texturecraft_compose::{
     BelowCache, Composite, Inputs, MaskGray, PaintTarget, PixelStore, StrokePreview, all_tiles, composite_tiles, composite_tiles_cached,
 };
 use texturecraft_core::{
-    BakedMap, BlendMode, Channel, Effect, EffectKind, Fill, Filter, Generator, GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground,
-    Procedural, ProceduralKind, Project, Projection, Source, TextureSet,
+    BakedMap, BlendMode, Channel, ColorSelection, CompareOp, CompareSource, Effect, EffectKind, Fill, Filter, Generator, GeneratorKind, HeightMask, Layer,
+    LayerId, LayerKind, Mask, MaskBackground, Procedural, ProceduralKind, Project, Projection, Source, TextureSet,
 };
 use texturecraft_geom::{Mesh, UvGBuffer, primitives};
 use texturecraft_texel::{TILE, TileImage, to_u16};
@@ -915,4 +915,60 @@ fn generator_input_image_changes_invalidate_stack_key() {
 
     images.remove("used");
     assert!(key(&images) != original, "removing a generator input must invalidate the cache");
+}
+
+#[test]
+fn compare_masks_reading_layers_fall_back_to_full_evaluation() {
+    let mut f = fixture();
+    let n = nested_stack(&mut f);
+    let compare = effect(
+        &mut f,
+        EffectKind::Compare {
+            op: CompareOp::GreaterThan,
+            value: 0.5,
+            tolerance: 0.0,
+            left: CompareSource::LayersBelow,
+            right: CompareSource::ThisLayer,
+            channel: Channel::Roughness,
+            hardness: 1.0,
+        },
+    );
+
+    // A mask above the hot layer compares the stack below it
+    f.project.layer_mut(n.g2_above).unwrap().mask.as_mut().unwrap().effects.push(compare);
+
+    for hot in [n.deep, n.top] {
+        assert!(check_cached(&f, 0, hot).is_empty(), "compare masks read the stack: nothing cached");
+    }
+}
+
+/// The key of set 0's whole stack over `images`
+fn stack_key(fixture: &Fixture, images: &texturecraft_compose::ImageStore) -> texturecraft_compose::StackKey {
+    let roots = &fixture.project.texture_sets[0].stack;
+    texturecraft_compose::StackKey::new(&fixture.project, &fixture.pixels, &Default::default(), images, 0, roots).unwrap()
+}
+
+/// A flat image resource of `value`
+fn flat_image(value: f32) -> std::sync::Arc<texturecraft_compose::ImageRes> {
+    std::sync::Arc::new(texturecraft_compose::ImageRes::new(RES, RES, vec![[value; 4]; (RES * RES) as usize], false))
+}
+
+#[test]
+fn id_map_image_changes_invalidate_stack_key() {
+    let mut fixture = fixture();
+    heavy_stack(&mut fixture);
+    let bottom_layer = fixture.project.texture_sets[0].stack[0];
+    let mut selection = ColorSelection::new(vec![[1.0, 0.0, 0.0]], 0.1);
+    selection.id_map = Some("id".into());
+    let selection = effect(&mut fixture, EffectKind::ColorSelection(selection));
+    let layer = fixture.project.layer_mut(bottom_layer).unwrap();
+    layer.mask = Some(Mask::new(MaskBackground::White));
+    layer.mask.as_mut().unwrap().effects.push(selection);
+    let mut images = texturecraft_compose::ImageStore::default();
+    images.insert("id".into(), flat_image(0.1));
+
+    let original = stack_key(&fixture, &images);
+    images.insert("id".into(), flat_image(0.9));
+
+    assert!(stack_key(&fixture, &images) != original, "replacing the id image must invalidate the cache");
 }

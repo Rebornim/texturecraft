@@ -1,4 +1,4 @@
-//! What the filter tests share: their sessions, adding, setting and refusing a filter, and reading the composite
+//! What the filter tests share: their sessions and reading the composite
 
 use texturecraft_engine::Session;
 use texturecraft_engine::core::Channel;

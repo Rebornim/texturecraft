@@ -221,6 +221,7 @@ fn its_jump_tabs_scroll_to_a_section_and_light_it_without_moving_the_docked_pane
     let material = harness.get_all_by_role_and_label(Role::Tab, "Material").find(|tab| popup.contains_rect(tab.rect())).unwrap().rect().center();
     click(&mut harness, PointerButton::Primary, material);
     harness.run_steps(JUMP_FRAMES);
+
     assert!(is_open(&harness), "a tab click keeps it open");
     assert!(!in_popup(&harness, "UV projection"), "the list jumped down to MATERIAL");
     assert!(tab_lit(&harness, popup, "Material"), "the section in view is lit");
@@ -248,6 +249,7 @@ fn the_colour_picker_opened_in_the_popup_takes_its_presses_and_the_first_escape(
     harness.run_steps(SETTLE_FRAMES);
     let center = view_center(&harness);
     click(&mut harness, PointerButton::Secondary, center);
+
     assert!(is_open(&harness));
 
     let popup = harness.ctx.memory(|memory| memory.area_rect(properties_popup::area_id())).unwrap();
@@ -260,15 +262,19 @@ fn the_colour_picker_opened_in_the_popup_takes_its_presses_and_the_first_escape(
     let title = harness.get_by_role_and_label(Role::TitleBar, "Base color").rect();
 
     click(&mut harness, PointerButton::Primary, title.center());
+
     assert!(is_open(&harness), "a press in the picker window stays in the popup");
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_some(), "and keeps the picker open");
 
     harness.key_press(Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.query_by_role_and_label(Role::TitleBar, "Base color").is_none(), "the first Escape closes the picker");
     assert!(is_open(&harness), "and leaves the popup open");
+
     harness.key_press(Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(!is_open(&harness), "the next Escape closes the popup");
 }
 
@@ -286,11 +292,13 @@ fn an_eyedropper_pick_from_the_popup_keeps_the_popup_open_for_its_colour() {
     harness.run_steps(SCROLL_FRAMES);
     let button = harness.get_all_by_role_and_label(Role::Button, "Pick color").find(|node| in_popup(node.rect())).unwrap().rect();
     click(&mut harness, PointerButton::Primary, button.center());
+
     assert!(harness.state().picking_color.is_some(), "the eyedropper waits for a click on the model");
 
     // The model's middle, left of the popup
     let model = egui::pos2(popup.left() - MODEL_LEFT_OF_POPUP, center.y);
     click(&mut harness, PointerButton::Primary, model);
+
     assert!(harness.state().picking_color.is_none(), "the click on the model picks");
     assert!(is_open(&harness), "and leaves the popup open for the picked colour");
 }

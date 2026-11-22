@@ -139,12 +139,14 @@ fn a_list_whose_sections_all_fit_still_scrolls_its_last_section_to_the_top() {
     assert!(last_row_bottom(&harness) < TALL_WINDOW.y, "every section fits in the list");
 
     wheel_to_end(&mut harness);
+
     assert!(tab_lit(&harness, "Material"), "the wheel brought MATERIAL to the top");
     assert!(!tab_lit(&harness, "Fill"));
     assert!(combo_top(&harness, "UV projection") < list_top, "FILL scrolled out above the list");
 
     select_row(&mut harness, "Folder");
     select_row(&mut harness, "Fill A");
+
     assert!(tab_lit(&harness, "Material"), "coming back keeps the place past the rows' end");
 }
 
@@ -155,6 +157,7 @@ fn a_last_section_taller_than_the_list_scrolls_to_its_real_end() {
     let strip = harness.get_by_role_and_label(Role::Tab, "Fill").rect();
     let bar = harness.get_all_by_role(Role::ScrollBar).map(|bar| bar.rect()).find(|bar| bar.top() >= strip.top() && bar.left() > strip.left());
     let list_bottom = bar.unwrap().bottom();
+
     assert!(last_row_bottom(&harness) > SHORT_WINDOW.y, "the list's rows run below the window");
 
     wheel_to_end(&mut harness);

@@ -874,15 +874,19 @@ pub(crate) mod tests {
         harness.run_steps(25);
         harness.get_by_role_and_label(egui::Role::Button, "Base color").click();
         harness.run_steps(2);
+
         assert!(crate::color_picker::open_window(&harness.ctx).is_some(), "the picker is open");
+
         let steps = harness.state().session.history_labels().len();
 
         drag(&mut harness, from, from + vec2(40.0, 0.0), Modifiers::NONE);
+
         assert!(crate::color_picker::open_window(&harness.ctx).is_none(), "the press closed the picker");
         assert_eq!(projection(&harness, layer), before, "and slid nothing");
         assert_eq!(harness.state().session.history_labels().len(), steps, "nor made an undo step");
 
         drag(&mut harness, from, from + vec2(40.0, 0.0), Modifiers::NONE);
+
         assert_ne!(projection(&harness, layer), before, "the next press slides again");
     }
 

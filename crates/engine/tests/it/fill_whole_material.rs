@@ -30,6 +30,7 @@ fn a_fill_takes_one_whole_material_names_it_and_forgets_it_once_a_channel_is_set
     execute(&mut s, "layer.fill.set", &json!({"layer": id, "channel": "opacity", "value": 0.5})).unwrap();
     let projection = fill(&s, id).projection;
     let saved: Value = serde_json::to_value(fill(&s, id)).unwrap();
+
     assert!(saved.get("material").is_none(), "a fill without a whole material saves as before");
 
     execute(&mut s, "layer.fill.material", &json!({"layer": id, "material": "copper_hammered"})).unwrap();
@@ -42,16 +43,22 @@ fn a_fill_takes_one_whole_material_names_it_and_forgets_it_once_a_channel_is_set
     assert_eq!(execute(&mut s, "project.inspect", &json!({})).unwrap().to_string().matches("\"material\":\"copper_hammered\"").count(), 1);
 
     let reopened = Session::from_project_bytes(&s.to_project_bytes().unwrap()).unwrap();
+
     assert_eq!(fill(&reopened, id).material.as_deref(), Some("copper_hammered"), "saved with the project");
 
     execute(&mut s, "edit.undo", &json!({})).unwrap();
+
     assert_eq!(fill(&s, id).material, None, "one undo step");
     assert_eq!(fill(&s, id).source(Channel::BaseColor), Source::Uniform([1.0, 0.0, 0.0]));
+
     execute(&mut s, "edit.redo", &json!({})).unwrap();
 
     execute(&mut s, "layer.fill.set", &json!({"layer": id, "channel": "metallic", "enabled": false})).unwrap();
+
     assert!(fill(&s, id).material.is_some(), "turning a channel off keeps the material");
+
     execute(&mut s, "layer.fill.set", &json!({"layer": id, "channel": "roughness", "value": 0.3})).unwrap();
+
     assert_eq!(fill(&s, id).material, None, "a channel set on its own is no longer the whole material");
 
     execute(&mut s, "layer.fill.material", &json!({"layer": id, "material": "Steel"})).unwrap();
@@ -63,10 +70,12 @@ fn a_fill_takes_one_whole_material_names_it_and_forgets_it_once_a_channel_is_set
     let effect = execute(&mut s, "effect.add.fill", &json!({"target": "content", "roughness": 0.7})).unwrap()["effect"].as_u64().unwrap();
     execute(&mut s, "layer.fill.material", &json!({"effect": effect, "material": "gold_polished"})).unwrap();
     let inspect = execute(&mut s, "project.inspect", &json!({})).unwrap().to_string();
+
     assert!(inspect.contains("\"material\":\"gold_polished\""));
 
     // The shelf names a plain material's fill; a smart one is no whole material
     let shelf = layer(execute(&mut s, "material.apply", &json!({"material": "brass"})).unwrap());
+
     assert_eq!(fill(&s, shelf).material.as_deref(), Some("brass"));
     assert!(execute(&mut s, "layer.fill.material", &json!({"layer": id, "material": "steel_painted_worn"})).is_err(), "smart");
     assert!(execute(&mut s, "layer.fill.material", &json!({"layer": id, "material": "nope"})).is_err());
@@ -110,6 +119,7 @@ fn clearing_a_content_fill_effects_material_lays_its_channels_defaults() {
     assert_eq!(cleared.material, None);
     assert_eq!(cleared.sources.keys().copied().collect::<Vec<_>>(), material_channels, "the material's channels stay on");
     assert!(cleared.sources.iter().all(|(channel, source)| *source == Source::uniform_of(*channel)), "at their defaults");
+
     let roughness = crate::filter_support::center(&mut s, Channel::Roughness)[0];
     assert!((roughness - Channel::Roughness.default_value()[0]).abs() < 0.01, "the effect still lays the default roughness: {roughness}");
 }
@@ -146,6 +156,7 @@ fn setting_the_material_again_brings_back_a_content_fill_effects_channel_turned_
         for enabled in off_and_on {
             execute(&mut s, "layer.fill.set", &json!({"effect": effect, "channel": "roughness", "enabled": enabled})).unwrap();
         }
+
         assert_ne!(effect_fill(&s, effect).sources, whole, "roughness is off or back at its default");
 
         execute(&mut s, "layer.fill.material", &gold).unwrap();

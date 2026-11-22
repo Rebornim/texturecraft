@@ -156,9 +156,13 @@ fn parameters_are_checked_stored_and_recooked_in_one_undo_step() {
     assert!(set(&mut session, json!({"id": "nope", "value": 1, "cook": false})).is_err());
     assert!(set(&mut session, json!({"id": "wear", "value": "soft", "cook": false})).is_err());
     assert!(set(&mut session, json!({"id": "wear", "value": f64::NAN, "cook": false})).is_err());
+
     set(&mut session, json!({"id": "tint", "value": "#ff0000", "cook": false})).unwrap();
+
     assert_eq!(link(&session, id).params[1].value, json!({"t": "color", "v": [1.0, 0.0, 0.0, 1.0]}));
+
     set(&mut session, json!({"id": "wear", "value": 0.9, "cook": false})).unwrap();
+
     assert_eq!(link(&session, id).params[0].value, json!({"t": "float", "v": 0.9}));
 
     // Cooks follow the texture set resolution
@@ -175,15 +179,19 @@ fn parameters_are_checked_stored_and_recooked_in_one_undo_step() {
     assert!(!session.doc.resources.contains_key(&old), "old maps are dropped");
 
     execute(&mut session, "edit.undo", &Value::Null).unwrap();
+
     assert!((roughness(&mut session) - 0.25).abs() < 2e-3, "undo restores the earlier maps");
     assert_eq!(link(&session, id).params[0].value, json!({"t": "float", "v": 0.5}));
 
     execute(&mut session, "edit.redo", &Value::Null).unwrap();
+
     assert!((roughness(&mut session) - 0.75).abs() < 2e-3);
 
     // Presets skip unsupported inputs and reject unknown names
     assert!(execute(&mut session, "material.link.preset", &json!({"name": "Nope", "cook": false})).is_err());
+
     execute(&mut session, "material.link.preset", &json!({"name": "Worn", "cook": false})).unwrap();
+
     assert_eq!(link(&session, id).params[0].value, json!({"t": "float", "v": 1.0}));
 }
 
@@ -193,21 +201,31 @@ fn channels_read_the_output_they_are_mapped_to() {
     let mut s = session();
     let id = install(&mut s);
     let map = |s: &mut Session, output: &str| execute(s, "material.link.map", &json!({"layer": id.0, "channel": "roughness", "output": output}));
+
     assert!(map(&mut s, "curvature").is_err(), "outputs the material lacks are errors");
     assert!(execute(&mut s, "material.link.map", &json!({"layer": id.0, "output": "roughness"})).is_err());
 
     // Roughness reads the ambient occlusion output (all white)
     map(&mut s, "ambientOcclusion").unwrap();
+
     assert!((roughness(&mut s) - 1.0).abs() < 2e-3);
     assert_eq!(link(&s, id).output_of(Channel::Roughness), "ambientOcclusion");
+
     let saved = Session::from_project_bytes(&s.to_project_bytes().unwrap()).unwrap();
+
     assert_eq!(link(&saved, id), link(&s, id));
+
     s.apply_link_cook(id, &cooked(0.75, 0.5), false).unwrap();
+
     assert!((roughness(&mut s) - 1.0).abs() < 2e-3, "a re-cook keeps the mapping");
+
     map(&mut s, "roughness").unwrap();
+
     assert!((roughness(&mut s) - 0.75).abs() < 2e-3);
     assert!(link(&s, id).mapping.is_empty(), "a channel's own output is no mapping");
+
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
+
     assert!((roughness(&mut s) - 1.0).abs() < 2e-3);
 
     // A link saved before mappings (no outputs list) maps from its channels' maps
@@ -217,13 +235,17 @@ fn channels_read_the_output_they_are_mapped_to() {
         let link = fill.link.as_mut().unwrap();
         link.outputs.clear();
         let saved = serde_json::to_value(&**link).unwrap();
+
         assert!(saved.get("outputs").is_none() && saved.get("mapping").is_none() && saved.get("resolution").is_none(), "{saved}");
     }
     execute(&mut old, "material.link.map", &json!({"layer": id.0, "channel": "roughness", "output": "ambientOcclusion"})).unwrap();
+
     assert!((roughness(&mut old) - 1.0).abs() < 2e-3);
     assert!(link(&old, id).outputs.contains_key("roughness"), "the unmapped output stays listed");
+
     let kept = old.doc.resources.len();
     execute(&mut old, "file.removeUnused", &Value::Null).unwrap();
+
     assert_eq!(old.doc.resources.len(), kept, "outputs no channel reads are kept");
 }
 
@@ -238,14 +260,22 @@ fn materials_cook_at_their_picked_resolution() {
         size["cook"] = json!(false);
         execute(s, "material.link.resolution", &size)
     };
+
     assert_eq!(size(&s), 128);
+
     pick(&mut s, json!({"fixed": 1024})).unwrap();
+
     assert_eq!((link(&s, id).resolution, size(&s)), (Some(CookResolution::Fixed(1024)), 1024));
+
     pick(&mut s, json!({"relative": 2})).unwrap();
+
     assert_eq!(size(&s), 512);
+
     let steps = s.history_labels().len();
     pick(&mut s, json!({"relative": 2})).unwrap();
+
     assert_eq!(s.history_labels().len(), steps, "the size it already has adds no step");
+
     for bad in [
         json!({"fixed": 300}),
         json!({"fixed": 64}),
@@ -254,12 +284,21 @@ fn materials_cook_at_their_picked_resolution() {
         json!({"relative": "x"}),
         json!({}),
         json!({"relative": 1, "fixed": 256}),
+        json!({"relative": "x", "fixed": 256}),
+        json!({"relative": 1, "fixed": null}),
     ] {
         assert!(pick(&mut s, bad.clone()).is_err(), "{bad}");
     }
+
+    assert_eq!(size(&s), 512, "rejected options keep the current resolution");
+    assert_eq!(s.history_labels().len(), steps, "rejected options add no undo step");
+
     pick(&mut s, json!({"relative": 0})).unwrap();
+
     assert_eq!((link(&s, id).resolution, size(&s)), (None, 128));
+
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
+
     assert_eq!(size(&s), 512);
 
     // A hostile project's size falls back to the texture set's

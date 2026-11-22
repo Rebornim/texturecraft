@@ -32,6 +32,7 @@ fn an_alpha_becomes_the_channels_image_once_and_its_set_is_one_undo_step() {
 
     assert_eq!(source(&session, layer, Channel::Roughness), Source::image(name.clone()));
     assert!(session.doc.resources.contains_key(&name), "the alpha's picture is a project resource, so the project saves it");
+
     let image = session.images.get(&name).expect("the channel's image is decoded");
     assert_eq!((image.width, image.height), (alphas::BASE as u32, alphas::BASE as u32));
     assert_eq!(library_alpha_of(&name).map(|alpha| alpha.id.as_str()), Some("scratches"), "the slot can name the alpha it came from");
@@ -39,6 +40,7 @@ fn an_alpha_becomes_the_channels_image_once_and_its_set_is_one_undo_step() {
 
     // One undo takes the source and the resource back together
     execute(&mut session, "edit.undo", &Value::Null).unwrap();
+
     assert_eq!(source(&session, layer, Channel::Roughness), Source::uniform_of(Channel::Roughness));
     assert!(!session.doc.resources.contains_key(&name), "undo takes the resource back with the source");
 
@@ -62,5 +64,6 @@ fn an_unknown_alpha_changes_nothing() {
 
     // No undo step either: the next undo takes back the added layer
     execute(&mut session, "edit.undo", &Value::Null).unwrap();
+
     assert!(session.doc.project.layer(layer).is_err(), "the refused set added no undo step");
 }

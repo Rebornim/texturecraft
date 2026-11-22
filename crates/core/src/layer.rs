@@ -1652,9 +1652,11 @@ mod tests {
         assert!((l.apply(0.4) - 0.5).abs() < 1e-6);
         assert_eq!(l.apply(0.0), 0.0);
         assert_eq!(l.apply(1.0), 1.0);
+
         let g = Levels { gamma: 2.0, ..Levels::default() };
         assert!((g.apply(0.25) - 0.5).abs() < 1e-6);
-        // Degenerate ranges never divide by zero.
+
+        // Degenerate ranges never divide by zero
         let d = Levels { in_low: 0.5, in_high: 0.5, ..Levels::default() };
         assert!(d.apply(0.7).is_finite());
     }
@@ -1693,9 +1695,10 @@ mod tests {
         assert!(close(hsl_adjust(c, 0.0, 0.0, 0.0), c), "identity");
         assert!(close(hsl_adjust([1.0, 0.0, 0.0], 1.0 / 3.0, 0.0, 0.0), [0.0, 1.0, 0.0]), "red → green");
         assert!(close(hsl_adjust([1.0, 0.0, 0.0], -1.0 / 3.0, 0.0, 0.0), [0.0, 0.0, 1.0]), "red → blue");
+
         let gray = hsl_adjust(c, 0.0, -1.0, 0.0);
         assert!((gray[0] - gray[1]).abs() < 1e-6 && (gray[1] - gray[2]).abs() < 1e-6);
-        // Grays only change lightness, whatever the hue and saturation.
+        // Grays only change lightness, whatever the hue and saturation
         assert!(close(hsl_adjust([0.4; 3], 0.3, 1.0, 0.5), [0.7; 3]));
         assert!(close(hsl_adjust([0.4; 3], 0.0, 0.0, -0.5), [0.2; 3]));
         assert!(hsl_adjust([f32::NAN, 2.0, -1.0], f32::NAN, 5.0, -5.0).iter().all(|v| v.is_finite()));

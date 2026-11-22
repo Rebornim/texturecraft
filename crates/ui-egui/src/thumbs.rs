@@ -183,6 +183,7 @@ impl Thumbs {
         if self.received_in_pass == pass {
             return;
         }
+
         self.received_in_pass = pass;
 
         for (key, image) in self.worker.poll() {
@@ -440,6 +441,7 @@ mod tests {
 
         let old_preview = thumbs.saved_brush_preview(&path, &images);
         assert!(thumbs.big(&ctx, old_preview, 8).is_none());
+
         images.insert("alpha.png".into(), image(0.8));
         let current_preview = thumbs.saved_brush_preview(&path, &images);
         assert!(thumbs.big(&ctx, current_preview.clone(), 8).is_none());
@@ -451,6 +453,7 @@ mod tests {
 
         let mut output = ctx.run_pass(Default::default(), |_| {});
         output.textures_delta.clear();
+
         assert!(thumbs.rendered_big(&ctx, &current_preview, 8).is_some(), "the current completion must survive an old failure");
     }
 
@@ -537,6 +540,7 @@ mod tests {
         drop(thumbs.saved_brush_preview(&second_path, &images));
         drop(old_image);
         drop(other_image);
+
         assert!(old_weak.upgrade().is_none(), "cached settings do not retain a replaced image");
         assert!(other_weak.upgrade().is_some(), "the project still owns its current image");
         eprintln!(
@@ -547,10 +551,12 @@ mod tests {
         let replacement = Arc::new(ImageRes::new(IMAGE_SIDE, IMAGE_SIDE, vec![[0.0; 4]; IMAGE_TEXELS], false));
         images.insert("alpha.png".into(), replacement);
         drop(thumbs.saved_brush_preview(&first_path, &images));
+
         assert!(other_weak.upgrade().is_none(), "another saved brush does not retain the old project image");
         eprintln!("saved brush cache after second replacement: 0 of {IMAGE_BYTES} previous image bytes retained");
 
         thumbs.forget_saved_files();
+
         assert!(thumbs.saved_brush_previews.is_empty(), "refresh releases parsed brush settings");
     }
 
@@ -598,6 +604,7 @@ mod tests {
         images.insert("image-3".into(), Arc::new(ImageRes::new(2, 2, vec![[0.7; 4]; 4], false)));
         drop(thumbs.image(&context, "image-3", &images["image-3"]));
         thumbs.sync_images(&images, 2);
+
         assert_eq!(thumbs.images.len(), 2);
 
         images.clear();

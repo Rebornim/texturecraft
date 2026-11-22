@@ -2640,11 +2640,13 @@ mod tests {
         harness.state_mut().picking_color = Some(bar);
 
         click(&mut harness, on_the_uvs);
+
         assert_eq!(harness.state().session.history_labels().len(), steps, "the click painted nothing");
         assert_eq!(harness.state().picking_color, Some(bar), "the eyedropper still waits");
 
         harness.state_mut().picking_color = None;
         click(&mut harness, on_the_uvs);
+
         assert_eq!(harness.state().session.undo_label(), Some("Polygon fill"), "without a pick the same click paints");
     }
 

@@ -746,6 +746,14 @@ impl Session {
         // Removed or replaced resources may change any set's rendered content
         let removed_or_replaced_resource =
             previous_document.resources.iter().any(|(name, previous)| !self.doc.resources.get(name).is_some_and(|current| Arc::ptr_eq(previous, current)));
+        if removed_or_replaced_resource {
+            for cache in &mut self.caches {
+                cache.invalidate_all();
+            }
+
+            return;
+        }
+
         let added_resource_names: BTreeSet<_> = self.doc.resources.keys().filter(|name| !previous_document.resources.contains_key(*name)).collect();
         let uses_added_resource = |texture_set_index: usize| {
             use texturecraft_core::{EffectKind, Fill, Source};
@@ -779,19 +787,14 @@ impl Session {
                 stack,
             )
         };
-        for texture_set_index in 0..self.caches.len() {
-            let before = stack_key(previous_document, texture_set_index);
-            let after = stack_key(&self.doc, texture_set_index);
-            let resource_changed = removed_or_replaced_resource || uses_added_resource(texture_set_index);
-            let Some(cache) = self.caches.get_mut(texture_set_index) else {
-                continue;
-            };
-
-            if resource_changed {
+        for (texture_set_index, cache) in self.caches.iter_mut().enumerate() {
+            if uses_added_resource(texture_set_index) {
                 cache.invalidate_all();
                 continue;
             }
 
+            let before = stack_key(previous_document, texture_set_index);
+            let after = stack_key(&self.doc, texture_set_index);
             if before == after {
                 continue;
             }

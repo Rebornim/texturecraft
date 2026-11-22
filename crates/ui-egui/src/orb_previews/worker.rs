@@ -24,6 +24,7 @@ impl Worker {
                     // Idle, the thread holds no context: the context owns the job sender, so a held one would keep both alive
                     drop(repaint.take());
                     let Ok((job, ctx)) = job_rx.recv() else { break };
+
                     waiting.push(job);
                     repaint = Some(ctx);
                 }

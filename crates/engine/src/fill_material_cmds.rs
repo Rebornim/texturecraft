@@ -53,10 +53,12 @@ fn set_material(s: &mut Session, p: &Value) -> Result<Value> {
     };
 
     s.edit(&format!("Set fill material {}", found.label), |s| {
-        let sources = material_sources(&mut s.doc.project, set, found)?;
+        let channels = s.doc.project.texture_set(set)?.channel_list();
+        let sources = material_sources(&mut s.doc.project, &channels, found)?;
         let edited = fill_mut(s, target)?;
         edited.sources = sources;
         edited.material = Some(found.id.to_string());
+
         let written: Vec<Channel> = edited.sources.keys().copied().collect();
         if let FillTarget::Layer(id) = target {
             let layer = s.doc.project.layer_mut(id)?;
@@ -104,10 +106,15 @@ fn holds(s: &Session, target: FillTarget, set: usize, material: Option<&SmartMat
         return Ok(false);
     }
 
-    // A channel set on its own clears the material; one turned off or back on keeps it, so an effect (whose sources are its channels) compares them whole
+    // Turning a channel off keeps the material name, so compare every source on content effects
     Ok(match (material, layer_channels) {
         (Some(_), Some(channels)) => channels.len() == fill.sources.len() && fill.sources.keys().all(|channel| channels.contains_key(channel)),
-        (Some(found), None) => fill.sources == material_sources(&mut s.doc.project.clone(), set, found)?,
+        (Some(found), None) => {
+            let channels = s.doc.project.texture_set(set)?.channel_list();
+            // The recipe allocates a layer ID, but comparing its sources must leave the project alone
+            let mut scratch = Project::new("", "");
+            fill.sources == material_sources(&mut scratch, &channels, found)?
+        }
         (None, Some(_)) => fill.sources.is_empty(),
         (None, None) => fill.sources.iter().all(|(channel, source)| *source == Source::uniform_of(*channel)),
     })
@@ -122,10 +129,9 @@ fn target_set(s: &Session, target: FillTarget) -> Result<usize> {
     s.doc.project.locate(owner).map(|(set, ..)| set).ok_or_else(|| bad(CMD, format!("layer {} is in no texture set", owner.0)))
 }
 
-/// The sources `material` writes in texture set `set`: its fill's channels the set has (the built fill's ids are taken from `project`)
-fn material_sources(project: &mut Project, set: usize, material: &SmartMaterial) -> Result<BTreeMap<Channel, Source>> {
-    let channels = project.texture_set(set)?.channel_list();
-    let fill = whole_fill(project, material, &channels)?;
+/// The material's sources for the enabled channels. The recipe allocates layer IDs in `project`.
+fn material_sources(project: &mut Project, channels: &[Channel], material: &SmartMaterial) -> Result<BTreeMap<Channel, Source>> {
+    let fill = whole_fill(project, material, channels)?;
     Ok(fill.sources.into_iter().filter(|(channel, _)| channels.contains(channel)).collect())
 }
 

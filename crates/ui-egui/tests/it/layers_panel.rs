@@ -413,6 +413,7 @@ fn alt_click_on_the_content_thumbnail_leaves_the_view_alone() {
     let (mut h, _) = harness();
     let at = thumb(&h, "Masked fill", false);
     alt_click(&mut h, at);
+
     assert_eq!(h.state().session.view, texturecraft_engine::ViewMode::Material);
 }
 

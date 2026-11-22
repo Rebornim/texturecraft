@@ -89,6 +89,7 @@ fn switching_projects_releases_image_previews_with_equal_revisions() {
 
         // Freshly loaded projects can have equal revisions despite different resources
         assert_eq!(loaded.revision, 1);
+
         session.switch_to(loaded);
         thumbnails.sync_images(&session.images, session.revision);
         let image = &session.images[&name];

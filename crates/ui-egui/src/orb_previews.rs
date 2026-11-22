@@ -227,6 +227,7 @@ mod tests {
                 }
                 break;
             }
+
             std::thread::sleep(Duration::from_millis(5));
         }
         sizes
@@ -239,7 +240,9 @@ mod tests {
         let job = OrbJob::new(copper(0.3), 200, Color32::BLACK);
         let mut first = None;
         run(&ctx, |ctx| first = OrbPreviews::texture(ctx, place, job.key, || job.clone()));
+
         assert!(first.is_none(), "the first pass does not wait for the render");
+
         let sizes = draw_until_settled(&ctx, place, &job);
 
         // A fast render can bring both pictures between two frames, so only the full one is sure to show; the quick one never comes after it
@@ -250,6 +253,7 @@ mod tests {
         // The same look again: drawn at once from the cache, nothing new to render
         let mut again = None;
         run(&ctx, |ctx| again = OrbPreviews::texture(ctx, place, job.key, || job.clone()));
+
         assert_eq!(again.map(|texture| texture.size()), Some([200, 200]));
         assert!(OrbPreviews::settled(&ctx), "a cached look renders nothing");
 
@@ -257,9 +261,12 @@ mod tests {
         let rougher = OrbJob::new(copper(0.8), 200, Color32::BLACK);
         let mut meanwhile = None;
         run(&ctx, |ctx| meanwhile = OrbPreviews::texture(ctx, place, rougher.key, || rougher.clone()));
+
         assert!(meanwhile.is_some(), "the last picture stays while the new one renders");
         assert!(!OrbPreviews::settled(&ctx), "the new look is rendering");
+
         draw_until_settled(&ctx, place, &rougher);
+
         assert!(OrbPreviews::settled(&ctx));
     }
 
@@ -337,6 +344,7 @@ mod tests {
 
         // The cached picture holds the image weakly, so its address stays taken however the allocator reuses blocks
         assert!(Arc::weak_count(&image) >= 1, "the cached picture keeps the image's address");
+
         drop(image);
 
         // Same name and size: the freed image's address must not come back to the cached picture's key

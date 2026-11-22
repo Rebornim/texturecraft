@@ -14,6 +14,8 @@ pub(crate) struct PickerState {
     pub(crate) hsv: [f32; 3],
     pub(crate) space: ColorSpace,
     pub(crate) model: ColorModel,
+    /// Height measured while the picker is visible, in points
+    pub(crate) height: Option<f32>,
     /// Where its title bar's drag left the window's top left corner; None while it stands beside the panel
     pub(crate) moved_to: Option<egui::Pos2>,
 }
@@ -79,7 +81,9 @@ mod tests {
         let blue = 2.0 / 3.0;
         state.set_hsv([blue, 1.0, 0.0]);
         state.set_space(ColorSpace::Linear);
+
         assert_eq!(state.hsv, [blue, 1.0, 0.0], "black keeps the field's hue and saturation");
+
         state.set_hsv([state.hsv[0], state.hsv[1], 1.0]);
         let [red, green, blue_part] = state.linear;
         assert!(blue_part > 0.9 && red < 0.01 && green < 0.01, "raising Value brings blue back: {:?}", state.linear);
@@ -87,9 +91,12 @@ mod tests {
         // A gray keeps its hue but takes its own saturation; a colour is read again
         state.set_hsv([0.25, 0.0, 0.5]);
         state.set_space(ColorSpace::Srgb);
+
         assert_eq!((state.hsv[0], state.hsv[1]), (0.25, 0.0));
+
         state.set_hsv([0.0, 1.0, 1.0]);
         state.set_space(ColorSpace::Linear);
+
         assert!(state.hsv[0].abs() < 1e-4 && (state.hsv[1] - 1.0).abs() < 1e-4, "red reads as red: {:?}", state.hsv);
     }
 }

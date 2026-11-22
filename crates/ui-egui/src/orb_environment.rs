@@ -7,7 +7,7 @@ use texturecraft_engine::geom::glam::Vec3;
 use texturecraft_render::ibl::{self, EnvImage};
 
 /// The bundled environment: a small photo studio with soft boxes, 512 x 256 equirect Radiance HDR
-const STUDIO_HDR: &[u8] = include_bytes!("../../../assets/environments/studio_small_09_512.hdr");
+const STUDIO_HDR: &[u8] = include_bytes!("../../../assets/hdr/studio_small_09_512.hdr");
 
 /// Prefiltered levels from mirror (0) to fully rough (last)
 const LEVELS: u32 = 6;
@@ -57,8 +57,10 @@ impl OrbEnvironment {
         let turned = turn(direction);
         let level = roughness.clamp(0.0, 1.0) * (self.levels.len().saturating_sub(1)) as f32;
         let below = level.floor() as usize;
+
         let sample = |index: usize| self.levels.get(index).or(self.levels.last()).map_or(Vec3::ZERO, |env| env.sample(turned));
         let fraction = level - level.floor();
+
         if fraction <= 0.0 { sample(below) } else { sample(below).lerp(sample(below + 1), fraction) }
     }
 
@@ -66,9 +68,11 @@ impl OrbEnvironment {
     pub(crate) fn diffuse(&self, normal: Vec3) -> Vec3 {
         let basis = ibl::sh_basis(turn(normal));
         let mut light = Vec3::ZERO;
+
         for (coefficient, weight) in self.irradiance.iter().zip(basis) {
             light += Vec3::from(*coefficient) * weight;
         }
+
         light.max(Vec3::ZERO)
     }
 }

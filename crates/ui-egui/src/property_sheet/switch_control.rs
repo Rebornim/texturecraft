@@ -55,12 +55,26 @@ const CHANNEL_STRIP_AIR: f32 = 6.0;
 /// The least air around a channel pill's name before the names shrink a point
 const PILL_TEXT_AIR: f32 = 10.0;
 
+/// Width of a focused control's outline in points
+const FOCUS_OUTLINE_WIDTH: f32 = 2.0;
+
 /// No tint for any segment: the chosen word keeps the text colour
 pub(super) fn untinted(_index: usize) -> &'static [Color32] {
     &[]
 }
 
 impl PropertySheet<'_> {
+    pub(super) fn paint_control_focus(&self, response: &Response) {
+        if response.has_focus() {
+            self.ui.painter().rect_stroke(
+                response.rect,
+                CornerRadius::same(CONTROL_RADIUS),
+                Stroke::new(FOCUS_OUTLINE_WIDTH, self.tokens.text_strong),
+                StrokeKind::Inside,
+            );
+        }
+    }
+
     /// Two to four short choices as a boxed switch, or a dropdown when one doesn't fit; returns the picked index
     pub(crate) fn switch(&mut self, label: &str, options: &[&str], selected: usize) -> Option<usize> {
         self.switch_tinted(label, options, selected, &[])
@@ -292,6 +306,7 @@ impl PropertySheet<'_> {
                 StrokeKind::Inside,
             );
             painter.text(pill.center(), Align2::CENTER_CENTER, *name, font, color);
+            self.paint_control_focus(&response);
         }
         self.drawn(rect.bottom());
         self.space(CHANNEL_STRIP_AIR);

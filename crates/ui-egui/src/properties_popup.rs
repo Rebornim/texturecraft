@@ -52,6 +52,7 @@ pub(crate) fn open_on_right_click(app: &mut TextureCraftApp, ui: &Ui, response: 
 /// Draws the open popup and closes it on a press outside it (but not an eyedropper pick's) or when the app leaves Painting
 pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     let (any_down, pressed_at) = ctx.input(|input| (input.pointer.any_down(), input.pointer.press_origin().filter(|_| input.pointer.any_pressed())));
+
     match app.properties_popup {
         _ if app.ui.mode != Mode::Painting => app.properties_popup = None,
         Some(PropertiesPopup::Closing) if !any_down => app.properties_popup = None,

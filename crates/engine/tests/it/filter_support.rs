@@ -29,6 +29,7 @@ pub(crate) fn facing_session() -> Session {
     s.viewport = Vec2::splat(VIEWPORT_SIDE);
     s.camera.yaw = 0.0;
     s.camera.pitch = 0.0;
+
     s.update();
     s
 }

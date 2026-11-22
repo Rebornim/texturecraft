@@ -49,12 +49,27 @@ pub(crate) fn material_orb(painter: &Painter, rect: Rect, material: &OrbMaterial
 /// The orb `side` pixels square, on `backdrop`
 pub(crate) fn render(material: &OrbMaterial, side: usize, backdrop: Color32) -> ColorImage {
     let side = side.clamp(1, MAX_SIDE_PX);
-    let env = OrbEnvironment::get();
-    let back = [backdrop.r(), backdrop.g(), backdrop.b()].map(|component| f32::from(component) / 255.0);
-
     // One pixel in orb radii: the step for the height slope and the reach of the anti-aliased outline
     let pixel = 2.0 / (side as f32 * SPHERE_RADIUS);
-    let uniform = (!material.varies()).then(|| material.sample(&orb_coords(Vec3::Y), 1.0));
+
+    match material.alone() {
+        Some(channel) => {
+            let footprint = pixel * std::f32::consts::FRAC_1_PI;
+            render_pixels(side, backdrop, pixel, |normal, coverage| (channel_view(channel, material.value(channel, &orb_coords(normal), footprint)), coverage))
+        }
+        None => {
+            let studio = OrbEnvironment::get();
+            let uniform = (!material.varies()).then(|| material.sample(&orb_coords(Vec3::Y), 1.0));
+            render_pixels(side, backdrop, pixel, |normal, coverage| {
+                let (linear, opacity) = shade(material, studio, normal, pixel, uniform);
+                (linear.map(|component| linear_to_srgb(aces(component * EXPOSURE))), coverage * opacity)
+            })
+        }
+    }
+}
+
+fn render_pixels(side: usize, backdrop: Color32, pixel: f32, shade_pixel: impl Fn(Vec3, f32) -> ([f32; 3], f32) + Sync) -> ColorImage {
+    let back = [backdrop.r(), backdrop.g(), backdrop.b()].map(|component| f32::from(component) / 255.0);
     let mut pixels = vec![Color32::TRANSPARENT; side * side];
     pixels.par_chunks_mut(side).enumerate().for_each(|(y, row)| {
         for (x, out) in row.iter_mut().enumerate() {
@@ -70,16 +85,7 @@ pub(crate) fn render(material: &OrbMaterial, side: usize, backdrop: Color32) -> 
             // Pixels on the outline shade the sphere's rim
             let (u, v) = if distance > 1.0 { (u / distance, v / distance) } else { (u, v) };
             let normal = Vec3::new(u, v, (1.0 - u * u - v * v).max(0.0).sqrt());
-            let (shown, alpha) = match material.alone() {
-                Some(channel) => {
-                    let footprint = pixel * std::f32::consts::FRAC_1_PI;
-                    (channel_view(channel, material.value(channel, &orb_coords(normal), footprint)), coverage)
-                }
-                None => {
-                    let (linear, opacity) = shade(material, env, normal, pixel, uniform);
-                    (linear.map(|component| linear_to_srgb(aces(component * EXPOSURE))), coverage * opacity)
-                }
-            };
+            let (shown, alpha) = shade_pixel(normal, coverage);
             let [r, g, b] = [0, 1, 2].map(|channel| ((back[channel] + (shown[channel] - back[channel]) * alpha) * 255.0).round().clamp(0.0, 255.0) as u8);
             *out = Color32::from_rgb(r, g, b);
         }
@@ -173,6 +179,7 @@ mod tests {
     fn the_orb_sits_on_its_backdrop_and_shows_its_colour() {
         let image = render(&copper(), 64, BACKDROP);
         assert_eq!(image.pixels[0], BACKDROP, "the corner is off the sphere");
+
         let middle = at(&image, 32, 32);
         assert!(middle.r() > middle.b(), "copper is warm: {middle:?}");
     }
@@ -228,6 +235,7 @@ mod tests {
             let shown = render(&OrbMaterial::of_fill(&fill, &on, &Default::default()), 64, BACKDROP);
             let changed = shown.pixels.iter().zip(&flat.pixels).filter(|(a, b)| a != b).count();
             assert!(changed > 64 * 64 / 4, "{channel:?} changes the orb: {changed} pixels");
+
             let off = render(&OrbMaterial::of_fill(&fill, &[], &Default::default()), 64, BACKDROP);
             let flat_off = render(&OrbMaterial::of_fill(&Fill::default(), &[], &Default::default()), 64, BACKDROP);
             assert_eq!(off.pixels, flat_off.pixels, "{channel:?} switched off shows its default");
@@ -247,6 +255,7 @@ mod tests {
         let lightness: Vec<u8> = image.pixels.iter().filter(|pixel| **pixel != BACKDROP).map(|pixel| pixel.g()).collect();
         let (darkest, brightest) = (lightness.iter().min().copied().unwrap_or(0), lightness.iter().max().copied().unwrap_or(0));
         assert!(brightest - darkest > 100, "the black and white halves both show: {darkest}..{brightest}");
+
         let missing = render(&OrbMaterial::of_fill(&fill, &[Channel::BaseColor], &Default::default()), 64, BACKDROP);
         assert_ne!(missing.pixels, image.pixels, "a missing image reads the default");
     }
@@ -283,6 +292,7 @@ mod tests {
                 output.textures_delta.clear();
                 std::thread::sleep(Duration::from_millis(5));
             }
+
             assert_eq!(OrbPreviews::shown_size(&ctx, "hidpi"), Some([expected, expected]), "at {scale}x");
         }
     }

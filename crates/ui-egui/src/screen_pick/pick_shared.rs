@@ -1,5 +1,7 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(all(unix, not(target_os = "macos")))]
+use std::task::Waker;
 
 /// What the frame loop tells the thread that waits for a click outside the app
 #[derive(Default)]
@@ -11,11 +13,17 @@ pub(crate) struct PickShared {
     /// The pointer is over none of the app's windows
     #[cfg(all(unix, not(target_os = "macos")))]
     pointer_outside: AtomicBool,
+    #[cfg(all(unix, not(target_os = "macos")))]
+    portal_waker: Mutex<Option<Waker>>,
 }
 
 impl PickShared {
     pub(crate) fn stop(&self) {
         self.stop.store(true, Ordering::Relaxed);
+        #[cfg(all(unix, not(target_os = "macos")))]
+        if let Some(waker) = self.take_portal_waker() {
+            waker.wake();
+        }
     }
 
     #[cfg(any(windows, all(unix, not(target_os = "macos"))))]
@@ -43,6 +51,25 @@ impl PickShared {
     #[cfg(all(unix, not(target_os = "macos")))]
     pub(crate) fn pointer_outside(&self) -> bool {
         self.pointer_outside.load(Ordering::Relaxed)
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    pub(super) fn watch_portal_stop(&self, waker: &Waker) -> bool {
+        let mut waiting = self.portal_waker.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.stopped() {
+            return true;
+        }
+
+        if waiting.as_ref().is_none_or(|registered| !registered.will_wake(waker)) {
+            *waiting = Some(waker.clone());
+        }
+
+        false
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    pub(super) fn take_portal_waker(&self) -> Option<Waker> {
+        self.portal_waker.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take()
     }
 }
 

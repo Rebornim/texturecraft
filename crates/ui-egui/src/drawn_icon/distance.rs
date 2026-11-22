@@ -11,26 +11,23 @@ pub(crate) fn convex_polygon(point: Point, corners: &[Point]) -> f32 {
     let centre = corners.iter().fold([0.0, 0.0], |sum, corner| [sum[0] + corner[0] / count, sum[1] + corner[1] / count]);
     let next = corners.iter().skip(1).chain(std::iter::once(&first));
 
-    // A repeated corner (a list that closes on its first corner) has no edge, and its zero normal would read as on the outline
-    let edges: Vec<(Point, Point, f32)> = corners
-        .iter()
-        .zip(next)
-        .map(|(from, to)| (*from, [to[0] - from[0], to[1] - from[1]]))
-        .map(|(from, edge)| (from, edge, edge[0].hypot(edge[1])))
-        .filter(|(_, _, length)| *length > f32::EPSILON)
-        .collect();
-    if edges.len() < POLYGON_MIN_EDGES {
-        return f32::INFINITY;
+    let mut edge_count = 0;
+    let mut greatest_distance = f32::NEG_INFINITY;
+    for (from, to) in corners.iter().zip(next) {
+        let edge = sub(*to, *from);
+        let length = edge[0].hypot(edge[1]);
+
+        // Repeated corners contribute no edge
+        if length > f32::EPSILON {
+            let normal = [edge[1] / length, -edge[0] / length];
+            let side = dot(sub(point, *from), normal);
+            let signed = if dot(sub(centre, *from), normal) > 0.0 { -side } else { side };
+            greatest_distance = greatest_distance.max(signed);
+            edge_count += 1;
+        }
     }
 
-    edges
-        .into_iter()
-        .map(|(from, edge, length)| {
-            let normal = [edge[1] / length, -edge[0] / length];
-            let side = dot(sub(point, from), normal);
-            if dot(sub(centre, from), normal) > 0.0 { -side } else { side }
-        })
-        .fold(f32::NEG_INFINITY, f32::max)
+    if edge_count < POLYGON_MIN_EDGES { f32::INFINITY } else { greatest_distance }
 }
 
 /// Fewer edges than a triangle's enclose nothing

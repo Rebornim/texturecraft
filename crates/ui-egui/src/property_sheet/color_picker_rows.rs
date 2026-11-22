@@ -1,12 +1,16 @@
 //! The colour picker's rows: its colour space, the saturation/value field beside the hue strip, before | after with the hex code and eyedropper, the model's three sliders, the working-space values and the project's swatches
 
 use egui::ecolor::{hsv_from_rgb, rgb_from_hsv};
-use egui::{Align2, Color32, CornerRadius, FontId, Painter, Rect, Response, Role, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
+use egui::text_edit::TextEditState;
+use egui::{
+    Align2, Color32, CornerRadius, Direction, FontId, Layout, Painter, Rect, Response, Role, Sense, Stroke, StrokeKind, UiBuilder, WidgetInfo, pos2, vec2,
+};
 use egui_phosphor::regular as ic;
 
 use texturecraft_engine::core::MAX_SWATCHES;
 
 use super::slider::KNOB_RADIUS;
+use super::value_text_draft::ValueTextDraft;
 use super::{CONTROL_HEIGHT, CONTROL_RADIUS, GLYPH_SIZE, GLYPH_TARGET, PAD, PropertySheet, ROW_HEIGHT, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::color_picker::{ColorModel, ColorPick, ColorSpace, PickerState, SwatchEdit, eight_bit, hex, parse_hex};
 use crate::drawn_icon::DrawnIcon;
@@ -50,9 +54,6 @@ const HEX_RIGHT_INSET: f32 = HUE_STRIP_WIDTH + FIELD_TO_STRIP;
 /// From the hex field's left edge to its `#`, and to its digits
 const HASH_INSET: f32 = 8.0;
 const DIGITS_INSET: f32 = 20.0;
-
-/// Passes after the hex field last had focus that a typed code still applies (egui reports a lost focus up to two passes late)
-const FOCUS_LOOKBACK_PASSES: u64 = 2;
 
 /// Where the hex field notes the pass in which Escape ended its typing (that Escape does not close the picker)
 const HEX_ESCAPE_KEY: &str = "color_picker_hex_escape";
@@ -259,56 +260,40 @@ impl PropertySheet<'_> {
         painter.rect(field, CornerRadius::same(CONTROL_RADIUS), tokens.field, Stroke::new(1.0, tokens.field_border), StrokeKind::Inside);
         painter.text(pos2(field.left() + HASH_INSET, field.center().y), Align2::LEFT_CENTER, "#", FontId::proportional(TEXT_SIZE), tokens.text_dim);
         let digits = Rect::from_min_max(pos2(field.left() + DIGITS_INSET, field.top()), field.right_bottom());
-        let text_id = id.with("typed");
-        let opened_id = text_id.with("opened");
-        let editing = self.ui.data(|data| data.get_temp::<String>(text_id));
-
-        // Text left by a picker that closed mid-edit (its field no longer drawn, so never told it lost focus) is not shown again
-        let focused_pass_id = text_id.with("focused pass");
-        let pass = self.ui.ctx().cumulative_pass_nr();
-        if self.ui.memory(|memory| memory.has_focus(text_id)) {
-            self.ui.data_mut(|data| data.insert_temp(focused_pass_id, pass));
-        }
-        let focused_pass = self.ui.data(|data| data.get_temp::<u64>(focused_pass_id));
-        let focused = focused_pass.is_some_and(|focused_pass| pass.saturating_sub(focused_pass) <= FOCUS_LOOKBACK_PASSES);
-        if editing.is_some() && !focused {
-            self.ui.data_mut(|data| {
-                data.remove::<String>(text_id);
-                data.remove::<String>(opened_id);
-            });
-        }
-        let editing = editing.filter(|_| focused);
-
-        let Some(mut text) = editing else {
+        let text_id = id.with((self.id, "hex_typed"));
+        let Some(mut draft) = self.typing_draft(text_id) else {
+            self.skip_typing_edit();
             let response = self.ui.interact(digits, id, Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
             response.widget_info(|| WidgetInfo::labeled(Role::TextInput, true, tr("Hex color")));
-            self.ui.painter().text(pos2(digits.left(), digits.center().y), Align2::LEFT_CENTER, hex(shown), semibold(TEXT_SIZE), tokens.text);
+            let text = hex(shown);
+            self.ui.painter().text(pos2(digits.left(), digits.center().y), Align2::LEFT_CENTER, text.as_str(), semibold(TEXT_SIZE), tokens.text);
             if response.clicked() {
-                self.ui.data_mut(|data| {
-                    data.insert_temp(opened_id, hex(shown));
-                    data.insert_temp(text_id, hex(shown));
-                });
+                self.keep_typing(text_id, ValueTextDraft { original: text.clone(), text, editor: TextEditState::default() });
                 self.ui.memory_mut(|memory| memory.request_focus(text_id));
             }
+
             return None;
         };
 
-        let edit = egui::TextEdit::singleline(&mut text)
+        draft.editor.store(self.ui.ctx(), text_id);
+        let edit = egui::TextEdit::singleline(&mut draft.text)
             .id(text_id)
             .font(semibold(TEXT_SIZE))
             .frame(egui::Frame::NONE)
             .align(Align2::LEFT_CENTER)
-            .margin(vec2(0.0, 0.0));
-        let response = self.ui.put(digits, edit);
-        if !response.lost_focus() {
-            self.ui.data_mut(|data| data.insert_temp(text_id, text));
+            .margin(egui::Margin::ZERO);
+        let layout = Layout::centered_and_justified(Direction::TopDown);
+        let output = self.ui.scope_builder(UiBuilder::new().max_rect(digits).layout(layout), |ui| edit.show(ui)).inner;
+
+        // Keep undo and selection history with the draft
+        self.ui.data_mut(|data| data.remove::<TextEditState>(text_id));
+        draft.editor = output.state;
+        if !output.response.lost_focus() {
+            self.keep_typing(text_id, draft);
             return None;
         }
 
-        let opened = self.ui.data_mut(|data| {
-            data.remove::<String>(text_id);
-            data.remove_temp::<String>(opened_id)
-        });
+        self.end_typing(text_id, &draft);
         if self.ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             // Escape ends the typing only: the picker stays open
             let pass = self.ui.ctx().cumulative_pass_nr();
@@ -316,10 +301,10 @@ impl PropertySheet<'_> {
             return None;
         }
 
-        // Left as it opened, the code is no edit: reading it back would round the colour to what the code shows, or write it over a colour changed meanwhile
-        let typed = parse_hex(&text)?;
+        // An unchanged code must preserve newer or higher precision colour values
+        let typed = parse_hex(&draft.text)?;
         let code = hex(typed);
-        (Some(&code) != opened.as_ref() && code != hex(shown)).then_some(typed)
+        (code != draft.original && code != hex(shown)).then_some(typed)
     }
 
     /// The model dropdown, sized to its value, and the ⋯ menu at the right edge; a click in its list picks, a hover changes nothing

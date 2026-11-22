@@ -168,9 +168,11 @@ fn a_waiting_eyedropper_hides_the_2d_brush_outline() {
     let pointer = egui::pos2(800.0, 480.0);
     harness.hover_at(pointer);
     harness.run_steps(3);
+
     assert!(rings_at(&harness, pointer).is_empty(), "no brush outline under the eyedropper (its own pointer is drawn instead)");
 
     harness.state_mut().picking_color = None;
     harness.run_steps(3);
+
     assert_eq!(rings_at(&harness, pointer).len(), 1, "without a pick the outline is back");
 }

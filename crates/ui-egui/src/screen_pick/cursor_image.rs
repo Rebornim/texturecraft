@@ -186,6 +186,7 @@ mod tests {
 
             assert!(image.alpha(hx, hy).is_some_and(|alpha| alpha >= INK_ALPHA), "{size}: the hotspot pixel is ink");
             assert!(hx < size / 4 && hy >= size * 3 / 4, "{size}: the tip is at the bottom left: {:?}", image.hotspot);
+
             for y in 0..size {
                 for x in 0..size {
                     let ink = image.alpha(x, y).is_some_and(|alpha| alpha >= INK_ALPHA);
@@ -204,6 +205,7 @@ mod tests {
         let [bulb_x, bulb_y] = pipette::square(0.85, 0.0).map(|edge| (edge * 20.0) as u32);
         assert_eq!(pixel(bulb_x, bulb_y + 12), Some(vec![255, 255, 255, 255]), "the bulb is white");
         assert_eq!(pixel(31, 31).and_then(|pixel| pixel.get(3).copied()), Some(0), "the bottom-right corner is clear");
+
         let [hx, hy] = image.hotspot;
         assert!(pixel(hx, hy).and_then(|pixel| pixel.first().copied()).is_some_and(|grey| grey < 128), "the tip's edge is the dark outline");
         assert_eq!(CursorImage::eyedropper(0).size, 8, "a degenerate size is clamped");
@@ -244,6 +246,7 @@ mod tests {
         assert!(grey(tube).is_some_and(|grey| grey < 64), "the tube's inside is dark, as the glyph leaves it clear");
         assert!(image.alpha(at(tube).1, at(tube).0).is_some_and(|alpha| alpha == u8::MAX), "and still opaque, so the pointer reads");
         assert_eq!(grey(pipette::square(0.85, 0.0)), Some(u8::MAX), "the bulb is white");
+
         for (index, coverage) in glyph.iter().enumerate() {
             let (row, column) = (index as u32 / glyph_px + top, index as u32 % glyph_px);
             let alpha = image.alpha(column, row).unwrap_or(0);
@@ -260,6 +263,7 @@ mod tests {
         assert_eq!([word(2), word(4)], [Some(CUR_TYPE), Some(1)], "one cursor picture");
         assert_eq!([word(10), word(12)], [Some(image.hotspot[0] as u16), Some(image.hotspot[1] as u16)], "the hotspot is the tip");
         assert_eq!(file.len(), (CUR_HEADER_BYTES + BITMAP_HEADER_BYTES) as usize + 32 * 32 * 4 + 4 * 32, "header, bitmap header, colour rows and mask rows");
+
         let [hx, hy] = image.hotspot;
         let bottom_up_row = (31 - hy) as usize;
         let alpha = file.get((CUR_HEADER_BYTES + BITMAP_HEADER_BYTES) as usize + (bottom_up_row * 32 + hx as usize) * 4 + 3).copied();

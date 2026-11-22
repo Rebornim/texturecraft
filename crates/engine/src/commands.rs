@@ -113,12 +113,15 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(crate::layer_cmds::specs());
         v.extend(crate::fill_material_cmds::specs());
         v.extend(crate::fill_reset_cmds::specs());
+        v.extend(crate::folder_cmds::specs());
         v.extend(crate::layer_ops::specs());
         v.extend(crate::instance_cmds::specs());
         v.extend(crate::mask_cmds::specs());
         v.extend(crate::mask_export::specs());
+        v.extend(crate::add_mask_cmds::specs());
         v.extend(crate::color_selection_cmds::specs());
         v.extend(crate::effect_clipboard::specs());
+        v.extend(crate::effect_blending_cmds::specs());
         v.extend(crate::tool_cmds::specs());
         v.extend(crate::brush_preset_cmds::specs());
         v.extend(crate::path_tool::specs());

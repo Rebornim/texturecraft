@@ -519,7 +519,7 @@ fn layer_tree(app: &mut TextureCraftApp, ui: &mut Ui, id: LayerId, depth: usize,
         effect_group(app, ui, &layer, depth, true, false);
     }
 
-    // A line under the layer and its effects separates it from the next layer.
+    // A line under the layer and its effects separates it from the next layer
     let tokens = Tokens::get(ui.ctx());
     let available = ui.available_rect_before_wrap();
     ui.painter().hline(available.x_range(), available.top() - 0.5, Stroke::new(1.0, tokens.separator));
@@ -567,7 +567,6 @@ fn layer_row(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, depth: usize
 
     // One of several selected layers (Shift/Ctrl+click) is highlighted like the active one
     let highlighted = selected || app.session.is_layer_selected(layer.id);
-    let several = selection_with(app, layer.id);
     let content_target = selected && targets_content(app);
     let preferred_size = layer_preview_size(app);
     let row_height = layer_row_height(preferred_size);
@@ -849,8 +848,10 @@ fn layer_row(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, depth: usize
     let shelf = row.dnd_hover_payload::<ShelfDrag>().map(|drag| drag.asset.clone());
 
     // Several selected layers move together, so none of them is a place to drop them
-    let in_drag = |dragged: u64| dragged == layer.id.0 || several.as_ref().is_some_and(|layers| layers.contains(&dragged));
-    let moving = row.dnd_hover_payload::<u64>().is_some_and(|dragged| !in_drag(*dragged));
+    let in_drag = |app: &TextureCraftApp, dragged: u64| {
+        dragged == layer.id.0 || (app.session.is_layer_selected(layer.id) && app.session.is_layer_selected(LayerId(dragged)))
+    };
+    let moving = row.dnd_hover_payload::<u64>().is_some_and(|dragged| !in_drag(app, *dragged));
     let drop_stroke = Stroke::new(DROP_LINE_WIDTH, tokens.accent);
     let shelf_material = shelf.as_ref().is_some_and(Asset::is_material);
     if moving || shelf_material {
@@ -867,7 +868,7 @@ fn layer_row(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, depth: usize
         painter.rect_stroke(rect, THUMBNAIL_ROUNDING, drop_stroke, egui::StrokeKind::Inside);
     }
     if let Some(dragged) = dnd_release::<u64>(&row)
-        && !in_drag(*dragged)
+        && !in_drag(app, *dragged)
     {
         match selection_with(app, LayerId(*dragged)) {
             Some(layers) => app.run("layer.move", json!({"layers": layers, "above": layer.id.0, "inside": inside})),
@@ -1812,6 +1813,7 @@ mod image_menu_tests {
         harness.run_steps(30);
 
         assert!(preview_stats(&harness.ctx).0 > initial_previews, "scrolling creates newly visible previews");
+
         harness.get_by_label(&last_name).click();
         harness.run_steps(2);
 

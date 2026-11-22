@@ -829,6 +829,7 @@ fn mask_fill_image_snapshot() {
     let EffectKind::Fill { source, .. } = &harness.state().session.doc.project.effect(LayerId(effect)).unwrap().1.kind else { panic!("fill effect") };
     assert_eq!(*source, Source::image(name));
     assert!(harness.query_by_label("UV projection").is_some(), "image projection is editable");
+
     save(&mut harness, &output_dir, "mask-fill-image-selected");
 }
 

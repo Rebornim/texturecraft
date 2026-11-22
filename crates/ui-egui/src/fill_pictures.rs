@@ -386,6 +386,7 @@ mod tests {
         let placement = |offset: [f32; 2]| Placement { tiling: [2.0, 2.0], rotation: 30.0, offset };
         let (still, rest) = slid_window(placement([0.0, 0.0]));
         assert_eq!(rest, [0.5, 0.5], "at Offset 0 the dot sits in the ring");
+
         let slid = placement([-0.25, 0.0]);
         let (columns, dot) = slid_window(slid);
         assert_eq!(columns, still, "the view never zooms or turns for the Offset");

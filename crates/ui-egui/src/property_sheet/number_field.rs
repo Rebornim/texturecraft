@@ -92,7 +92,7 @@ impl PropertySheet<'_> {
     /// One field: its tag on the left, the value on the right; drag or click to type. Named "`label` `tag`" ("Scale X")
     fn number_field(&mut self, rect: Rect, label: &str, field: &mut NumberField) -> Option<bool> {
         let id = self.next_id();
-        let typing_id = id.with("typed");
+        let typing_id = id.with((self.id, "typed"));
         let tokens = self.tokens;
         let painter = self.ui.painter().clone();
         painter.rect(rect, CornerRadius::same(CONTROL_RADIUS), tokens.field, Stroke::new(1.0, tokens.field_border), StrokeKind::Inside);
@@ -112,26 +112,27 @@ impl PropertySheet<'_> {
         }
 
         let decimals = field.decimals;
-        if let Some(mut text) = self.ui.data(|data| data.get_temp::<String>(typing_id)) {
-            let edit = egui::TextEdit::singleline(&mut text).id(typing_id).font(semibold(TEXT_SIZE)).align(egui::Align2::RIGHT_CENTER);
-            let response = self.typing_edit(rect.left() + 2.0 * TAG_LETTER_INSET + TAG_TO_TYPING, rect.right() - VALUE_INSET, rect.center().y, edit);
+        if let Some(mut draft) = self.typing_draft(typing_id) {
+            let response =
+                self.typing_edit(rect.left() + 2.0 * TAG_LETTER_INSET + TAG_TO_TYPING, rect.right() - VALUE_INSET, rect.center().y, typing_id, &mut draft);
             painter.rect_stroke(rect, CornerRadius::same(CONTROL_RADIUS), Stroke::new(1.0, tokens.accent), StrokeKind::Inside);
             if !response.lost_focus() {
-                self.ui.data_mut(|data| data.insert_temp(typing_id, text));
+                self.keep_typing(typing_id, draft);
                 return None;
             }
 
-            let untouched = self.end_typing(typing_id, &text);
+            let untouched = self.end_typing(typing_id, &draft);
+            let text = draft.text.trim();
             if self.ui.input(|input| input.key_pressed(egui::Key::Escape)) {
                 return None;
             }
 
             // Leaving the field as it opened changes nothing: no undo step, no rounding to the shown decimals, no overwriting a value changed meanwhile
-            if untouched || text.trim() == shown_number(field.value, decimals) {
+            if untouched || text == shown_number(field.value, decimals) {
                 return None;
             }
 
-            let typed: f32 = text.trim().trim_end_matches(field.suffix).trim().parse().ok()?;
+            let typed: f32 = text.trim_end_matches(field.suffix).trim().parse().ok()?;
             if !typed.is_finite() || typed == field.value {
                 return None;
             }

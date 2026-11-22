@@ -202,6 +202,7 @@ fn an_external_anchor_cannot_be_saved_or_rebound_in_another_project() {
     }
 
     assert!(s.smart_mask_bytes(source, "Preset").unwrap_err().to_string().contains("outside this mask"));
+
     let bytes = texturecraft_engine::formats::save_project_bytes(&file).unwrap();
     let before = s.doc.project.clone();
     let history = s.history_labels();

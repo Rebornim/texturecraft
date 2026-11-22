@@ -247,6 +247,7 @@ fn remove(s: &mut Session, p: &Value) -> Result<Value> {
     if !s.doc.resources.contains_key(&name) {
         return Err(bad("resource.remove", format!("no resource `{name}`")));
     }
+
     s.edit("Remove resource", |s| {
         s.doc.resources.remove(&name);
         Ok(())

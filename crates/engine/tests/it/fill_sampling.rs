@@ -71,10 +71,12 @@ fn filtering_decides_how_a_shrunk_image_reads() {
             let red = cache.composite.value(Channel::BaseColor, x, y)[0];
             !(0.01..=0.99).contains(&red)
         });
+
     assert!(pure, "Nearest reads one image texel: black or white only");
 
     let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap();
     let row = inspect["layers"].as_array().unwrap().iter().find(|l| l["id"] == layer.0).unwrap().clone();
+
     assert_eq!(row["fill"]["filtering"], json!("nearest"));
     assert!(execute(&mut s, "layer.fill.projection", &json!({"layer": layer.0, "filtering": "trilinear"})).is_err());
 }
@@ -90,6 +92,7 @@ fn fills_saved_before_filtering_keep_their_look() {
     let mut saved = serde_json::to_value(fill).unwrap();
     saved.as_object_mut().unwrap().remove("sampling");
     let loaded: Fill = serde_json::from_value(saved).unwrap();
+
     assert_eq!(loaded.sampling, Sampling::SAVED_BEFORE);
     assert_eq!(loaded.sampling.filtering, Filtering::BilinearSharp);
 }
@@ -126,18 +129,22 @@ fn uv_wrap_repeats_the_tile_or_stops_at_its_edge() {
     let near = |got: f32, want: f32| (got - want).abs() < 0.05;
     let repeat = shown(&mut s);
     assert!(near(repeat, 1.0), "Repeat covers the band: {repeat}");
+
     set(&mut s, json!({"wrap": "none"})).unwrap();
     let none = shown(&mut s);
     assert!(near(none, 0.125), "None: a quarter across, half down: {none}");
+
     set(&mut s, json!({"wrap": "repeatHorizontally"})).unwrap();
     let across = shown(&mut s);
     assert!(near(across, 0.5), "repeating across: the whole width, half down: {across}");
+
     set(&mut s, json!({"wrap": "repeatVertically"})).unwrap();
     let down = shown(&mut s);
     assert!(near(down, 0.25), "repeating down: a quarter across, the whole height: {down}");
 
     let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap();
     let row = inspect["layers"].as_array().unwrap().iter().find(|l| l["id"] == layer.0).unwrap().clone();
+
     assert_eq!(row["fill"]["wrap"], json!("repeatVertically"));
     assert!(set(&mut s, json!({"wrap": "mirror"})).is_err());
 
@@ -187,12 +194,16 @@ fn three_d_projections_take_uv_transformations() {
     let mut saved = serde_json::to_value(projection(&s)).unwrap();
     saved["Triplanar"].as_object_mut().unwrap().remove("uv");
     let loaded: Projection = serde_json::from_value(saved).unwrap();
+
     assert!(matches!(loaded, Projection::Triplanar { uv, .. } if uv == UvTransform::default()));
+
     set(&mut s, json!({"tiling": 1, "rotation": 0, "uvOffset": [0, 0]})).unwrap();
+
     assert_eq!(snapshot(&mut s), plain, "the identity transform changes nothing");
 
     // On a UV projection, tiling is its scale
     set(&mut s, json!({"projection": "uv", "tiling": [2, 4]})).unwrap();
+
     assert!(matches!(projection(&s), Projection::Uv { scale, .. } if scale == [2.0, 4.0]));
 }
 
@@ -208,11 +219,13 @@ fn scale_mode_is_stored_without_changing_the_tiling() {
 
     let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap();
     let row = inspect["layers"].as_array().unwrap().iter().find(|l| l["id"] == layer.0).unwrap().clone();
+
     assert_eq!(row["fill"]["scaleMode"], json!("physicalSize"));
     assert!(execute(&mut s, "layer.fill.projection", &json!({"layer": layer.0, "scaleMode": "inches"})).is_err());
 
     let mut saved = serde_json::to_value(&fill).unwrap();
     saved["sampling"].as_object_mut().unwrap().remove("scale");
     let loaded: Fill = serde_json::from_value(saved).unwrap();
+
     assert_eq!(loaded.sampling.scale, ScaleMode::Tiling);
 }

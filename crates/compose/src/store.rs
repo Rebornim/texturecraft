@@ -124,6 +124,7 @@ impl ImageRes {
         if !u.is_finite() || !v.is_finite() {
             return [0.0; 4];
         }
+
         bilinear(&self.rgba, self.width, self.height, u, v, (true, true))
     }
 

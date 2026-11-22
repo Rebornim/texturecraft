@@ -2,6 +2,7 @@
 //! tile by tile in parallel. This is the reference implementation (the oracle) for the viewport
 //! and for export.
 
+mod evaluation_inputs;
 pub(crate) mod thumbnail;
 
 use std::borrow::Cow;
@@ -18,6 +19,7 @@ use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, Surface, UvGBuffer};
 use texturecraft_texel::{DilationMap, TILE, TILE_AREA, TileImage, from_u16, noise, to_u16, to_u16_signed};
 
+use crate::ProjectorDepthCache;
 use crate::below::{Band, BelowCache, Level, StackKey};
 use crate::curvature_sizes::CurvatureSizes;
 use crate::fill_copies::FillCopies;
@@ -29,6 +31,7 @@ use crate::pattern_context::PatternContext;
 use crate::projector_cover::{framed_cover, projector_cover, projector_covers_all};
 use crate::projector_depth::ProjectorDepth;
 use crate::store::{BakedMaps, ImageRes, ImageStore, PixelStore, decode};
+use evaluation_inputs::EvaluationInputs;
 
 const NCH: usize = Channel::ALL.len();
 
@@ -71,6 +74,7 @@ impl Stencil {
         if c.w <= 1e-6 {
             return None;
         }
+
         let (dx, dy) = (c.x / c.w - self.center[0], c.y / c.w - self.center[1]);
         let (sn, cs) = (-self.rotation).sin_cos();
         let lx = (dx * cs - dy * sn) / self.half[0].max(1e-6);
@@ -78,6 +82,7 @@ impl Stencil {
         if !self.tile && (lx.abs() > 1.0 || ly.abs() > 1.0) {
             return None;
         }
+
         let s = self.image.sample(lx * 0.5 + 0.5, 0.5 - ly * 0.5);
         let rgb = if self.image.srgb { [s[0], s[1], s[2]].map(texturecraft_texel::srgb_to_linear) } else { [s[0], s[1], s[2]] };
         Some((rgb, s[3].clamp(0.0, 1.0)))
@@ -279,6 +284,7 @@ impl Field {
         if x < self.x0 || y < self.y0 || x >= self.x0 + self.w || y >= self.y0 + self.h {
             return None;
         }
+
         let i = ((y - self.y0) * self.w + (x - self.x0)) as usize * self.comps;
         self.data.get(i..i + self.comps)
     }
@@ -600,7 +606,7 @@ fn stroke_at(preview: Option<&[u16]>, o: usize) -> f32 {
 
 /// The full stack of tile (tx, ty) when `layer` reads anchor points (empty otherwise): evaluated
 /// up to the layer, it records the anchors below it.
-fn anchor_plan<'a>(inp: &Inputs<'a>, id: LayerId, channels: &[Channel], tx: u32, ty: u32, fields: Option<&'a Fields>) -> Vec<Node<'a>> {
+fn anchor_plan<'a>(inp: &EvaluationInputs<'a>, id: LayerId, channels: &[Channel], tx: u32, ty: u32, fields: Option<&'a Fields>) -> Vec<Node<'a>> {
     match inp.project.texture_set(inp.ts) {
         Ok(set) if reads_anchor(inp.project, id) => plan(inp, &set.stack, channels, tx, ty, 0, fields),
         _ => Vec::new(),
@@ -639,7 +645,7 @@ enum Job<'a> {
 }
 
 /// A layer's mask or content channel after every neighbourhood filter of its stack, over `tiles`.
-fn field(inp: &Inputs, channels: &[Channel], below: &Fields, id: LayerId, job: Job, tiles: &[(u32, u32)]) -> Option<Field> {
+fn field(inp: &EvaluationInputs, channels: &[Channel], below: &Fields, id: LayerId, job: Job, tiles: &[(u32, u32)]) -> Option<Field> {
     let effects = match job {
         Job::Mask(mask) => &mask.effects,
         Job::Content(_) => &inp.project.content_layer(id)?.content_effects,
@@ -709,7 +715,7 @@ fn is_box_blur(op: Op) -> bool {
 /// The stack up to and including neighbourhood filter `filter` over texel `region`, continued from `start` (the filter below's field) when given.
 #[allow(clippy::too_many_arguments)]
 fn filter_region(
-    inputs: &Inputs,
+    inputs: &EvaluationInputs,
     channels: &[Channel],
     below: &Fields,
     id: LayerId,
@@ -1021,13 +1027,19 @@ fn unpremultiply(data: &mut [f32], comps: usize) {
 /// Precompute the neighbourhood-filtered masks and content channels of every layer that needs
 /// one, over `tiles` plus the filter's reach. Walks bottom → top so each field sees the fields
 /// (and anchors) below it. Cheap when no layer has a blur or sharpen.
-pub fn neighbourhood_fields(inp: &Inputs, channels: &[Channel], tiles: &[(u32, u32)]) -> Fields {
+pub fn neighbourhood_fields(inputs: &Inputs, channels: &[Channel], tiles: &[(u32, u32)]) -> Fields {
+    let projectors = ProjectorDepthCache::default();
+    let inputs = EvaluationInputs::new(inputs, &projectors);
+    evaluation_fields(&inputs, channels, tiles)
+}
+
+fn evaluation_fields(inp: &EvaluationInputs, channels: &[Channel], tiles: &[(u32, u32)]) -> Fields {
     let stack = inp.project.texture_set(inp.ts).map(|s| s.stack.as_slice()).unwrap_or_default();
     fields_of(inp, channels, stack, tiles)
 }
 
 /// [`neighbourhood_fields`] of the layers drawn by `list` only.
-fn fields_of(inp: &Inputs, channels: &[Channel], list: &[LayerId], tiles: &[(u32, u32)]) -> Fields {
+fn fields_of(inp: &EvaluationInputs, channels: &[Channel], list: &[LayerId], tiles: &[(u32, u32)]) -> Fields {
     let mut out = Fields::new();
     if tiles.is_empty() || inp.gbuf.width == 0 {
         return out;
@@ -1147,7 +1159,8 @@ fn tile_of<'a>(inp: &Inputs, img: Option<&'a TileImage>, tx: u32, ty: u32, chann
     if (img.width(), img.height()) == (w, h) {
         return img.tile(tx, ty).map(Cow::Borrowed);
     }
-    // Empty texels of signed channels hold a signed zero.
+
+    // Empty texels of signed channels hold a signed zero
     let empty: Vec<u16> = match channel {
         Some(c) if c.kind() == ChannelKind::Signed => [vec![to_u16_signed(0.0); c.components()], vec![0]].concat(),
         _ => Vec::new(),
@@ -1171,7 +1184,7 @@ fn mask_plan<'a>(inp: &EvaluationInputs<'a>, id: LayerId, mask: &'a Mask, tx: u3
     Some(MaskPlan { background, effects, start })
 }
 
-fn plan<'a>(inp: &Inputs<'a>, list: &[LayerId], channels: &[Channel], tx: u32, ty: u32, depth: usize, fields: Option<&'a Fields>) -> Vec<Node<'a>> {
+fn plan<'a>(inp: &EvaluationInputs<'a>, list: &[LayerId], channels: &[Channel], tx: u32, ty: u32, depth: usize, fields: Option<&'a Fields>) -> Vec<Node<'a>> {
     if depth > texturecraft_core::project::MAX_DEPTH {
         return Vec::new();
     }
@@ -1182,7 +1195,7 @@ fn plan<'a>(inp: &Inputs<'a>, list: &[LayerId], channels: &[Channel], tx: u32, t
 /// The plan of layer `id` at `depth` (None where it draws nothing); a folder's children are planned when `kids`
 #[allow(clippy::too_many_arguments)]
 fn plan_node<'a>(
-    inp: &Inputs<'a>,
+    inp: &EvaluationInputs<'a>,
     id: LayerId,
     channels: &[Channel],
     tx: u32,
@@ -1271,7 +1284,7 @@ struct LevelPlan<'a> {
 
 /// Plan the path to the hot layer for tile (tx, ty); the layers before the path are left out
 /// on tiles the cache holds (`warm`).
-fn plan_levels<'a>(inp: &Inputs<'a>, levels: &[Level], channels: &[Channel], tx: u32, ty: u32, fields: &'a Fields, warm: bool) -> Vec<LevelPlan<'a>> {
+fn plan_levels<'a>(inp: &EvaluationInputs<'a>, levels: &[Level], channels: &[Channel], tx: u32, ty: u32, fields: &'a Fields, warm: bool) -> Vec<LevelPlan<'a>> {
     let last = levels.len().saturating_sub(1);
     levels
         .iter()
@@ -1294,6 +1307,7 @@ fn over(c: &ChanPlan, mode: BlendMode, v: [f32; 3], cov: f32, p: [f32; 3], a: f3
     if a <= 0.0 {
         return (v, cov);
     }
+
     let b = if cov > 0.0 { blend_chan(c, mode, v, p) } else { p };
     let nc = a + cov * (1.0 - a);
     (mix3(v, b, a / nc.max(1e-5)), nc)
@@ -1312,8 +1326,8 @@ fn covers_every_texel(proj: &Projection, sampling: Sampling, depth: Option<&Proj
 }
 
 /// A fill's projector depth (None: not culled by depth) and whether it covers every texel
-fn fill_coverage(inp: &Inputs, projection: &Projection, sampling: Sampling) -> (Option<Arc<ProjectorDepth>>, bool) {
-    let depth = ProjectorDepth::of(inp.mesh, inp.bounds, projection);
+fn fill_coverage(inp: &EvaluationInputs, projection: &Projection, sampling: Sampling) -> (Option<Arc<ProjectorDepth>>, bool) {
+    let depth = inp.projectors.get(inp.mesh, inp.bounds, projection);
     let covers_all = covers_every_texel(projection, sampling, depth.as_deref());
     (depth, covers_all)
 }
@@ -1523,7 +1537,7 @@ impl<'a, 'b> Texel<'a, 'b> {
 
     /// A fill's value and coverage through `proj`, from `one` (which samples it once): with `sampling`'s symmetry on, every copy of the projection is sampled and the copies are laid over each other, the texel's own copy on top
     fn symmetric(&mut self, proj: &Projection, sampling: Sampling, mut one: impl FnMut(&mut Self) -> ([f32; 3], f32)) -> ([f32; 3], f32) {
-        // Most fills have no symmetry: they are sampled directly and never pay for the surface lookup
+        // Skip the world-space lookup when no symmetry copies are needed
         if !takes_symmetry(proj, sampling) {
             return one(self);
         }
@@ -1589,7 +1603,7 @@ impl<'a, 'b> Texel<'a, 'b> {
     /// `place`'s fill at this texel in channel `ch`, every symmetric copy laid over each other when its symmetry is on
     #[inline(always)]
     fn fill_place_texel(&mut self, place: FillPlace, source: Option<&Source>, ch: Channel) -> ([f32; 3], f32) {
-        // Without symmetry the fill is sampled directly: through `symmetric`'s closure a plain fill composites about 8% slower
+        // Sample directly without symmetry to keep the common path free of the copy search
         if takes_symmetry(&place.fill.projection, place.fill.sampling) {
             self.symmetric(&place.fill.projection, place.fill.sampling, |texel| texel.fill_texel(place, source, ch))
         } else {
@@ -1646,7 +1660,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         let samples = self.image_uvs(proj, &c);
         let [(uv, _), ..] = samples;
 
-        // The shape is read over the footprint the image's colour is, so a shrunk image's coverage matches its averaged colour
+        // Use the image's sampling footprint so minified color and coverage agree
         let alpha = image.map_or(1.0, |img| {
             let [footprint, ..] = match sampling.filtering {
                 Filtering::BilinearHq => self.footprints(proj, &samples, img),
@@ -1818,7 +1832,7 @@ impl<'a, 'b> Texel<'a, 'b> {
     /// Generator input `map` at this texel: what replaces the mesh map in the generator's inputs, else the mesh map (None when not baked).
     fn generator_input(&mut self, generator: &Generator, map: BakedMap) -> Option<f32> {
         match generator.inputs.get(&map) {
-            // Generator inputs have no sampling setting: they read as projects saved before sampling choices did
+            // Keep legacy sampling for generator inputs without a sampling setting
             Some(source) => Some(self.source(source, &Projection::default(), Sampling::SAVED_BEFORE, ChannelKind::Scalar)[0]),
             None => self.baked(map),
         }
@@ -2026,8 +2040,8 @@ impl<'a, 'b> Texel<'a, 'b> {
     /// is identical.
     fn eval_split(&mut self, mut acc: Acc, levels: &[LevelPlan], accs: &mut [Acc], masks: &mut [f32], warm: bool, tape: &mut Tape<'b>) -> Acc {
         let last = levels.len().saturating_sub(1);
-        // Down the path: the deepest level the stack reaches (a folder masked out or not drawn
-        // here stops it).
+
+        // A hidden or masked folder limits how far the evaluator descends
         let mut reach = last;
         for (d, lv) in levels.iter().enumerate() {
             if !warm {
@@ -2039,6 +2053,7 @@ impl<'a, 'b> Texel<'a, 'b> {
             if d == last {
                 break;
             }
+
             let m = match &lv.at {
                 Some(g) => self.taped(tape, |t| t.tape_mask(g)),
                 None => 0.0,
@@ -2049,6 +2064,7 @@ impl<'a, 'b> Texel<'a, 'b> {
             if m > 0.0 {
                 continue;
             }
+
             reach = d;
             break;
         }
@@ -2058,7 +2074,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         {
             self.eval(std::slice::from_ref(hot), &mut acc);
         }
-        // Back up: the layers after the path, then each folder's mix over the stack outside it.
+        // Back up: the layers after the path, then each folder's mix over the stack outside it
         for d in (0..=reach).rev() {
             if let Some(lv) = levels.get(d) {
                 self.taped(tape, |t| t.eval(&lv.above, &mut acc));
@@ -2100,10 +2116,11 @@ impl<'a, 'b> Texel<'a, 'b> {
         if tri == NO_TRI {
             return true;
         }
+
         let first = tri.saturating_mul(3);
         let subs = &self.inp.mesh.submeshes;
         let holds = |k: usize| subs.get(k).is_some_and(|s| s.start <= first && first < s.start.saturating_add(s.count));
-        // Submeshes are in index order; anything else is searched.
+        // Submeshes are in index order; anything else is searched
         let k = subs.partition_point(|s| s.start <= first).checked_sub(1).filter(|k| holds(*k)).or_else(|| (0..subs.len()).find(|k| holds(*k)));
         k.and_then(|k| allowed.get(k).copied()).unwrap_or(true)
     }
@@ -2154,7 +2171,7 @@ impl<'a, 'b> Texel<'a, 'b> {
     fn painted(&mut self, data: Option<&[u16]>, c: &ChanPlan, preview: bool) -> ([f32; 3], f32) {
         let pv = if preview { self.inp.preview } else { None };
         let mut sa = pv.map(|p| (self.stroke * p.opacity).clamp(0.0, 1.0)).unwrap_or(0.0);
-        // Projection: the stencil's alpha shapes the stroke and its color is the base color.
+        // Projection: the stencil's alpha shapes the stroke and its color is the base color
         let stencil = match pv.and_then(|p| p.stencil.as_ref()) {
             Some(st) if sa > 0.0 => {
                 let s = self.world().and_then(|w| st.sample_world(w));
@@ -2200,6 +2217,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         if cov <= 0.0 {
             return ([0.0; 3], 0.0);
         }
+
         let inv = 1.0 / cov.max(1e-5);
         let v = if c.comps == 3 { val.map(|x| x * inv) } else { [val[0] * inv; 3] };
         (v, cov.min(1.0))
@@ -2272,7 +2290,37 @@ pub const BLOCK: u32 = 16;
 
 /// [`composite_tiles`], serving everything but the hot layer from `below` where it can (and
 /// filling it). Results are identical to [`composite_tiles`].
-pub fn composite_tiles_cached(inp: &Inputs, out: &mut Composite, tiles: &[(u32, u32)], mut below: Option<&mut BelowCache>) {
+pub fn composite_tiles_cached(inputs: &Inputs, out: &mut Composite, tiles: &[(u32, u32)], below: Option<&mut BelowCache>) {
+    let projectors = ProjectorDepthCache::default();
+    let inputs = EvaluationInputs::new(inputs, &projectors);
+    composite_evaluation_tiles(&inputs, out, tiles, below);
+}
+
+/// Composite tile batches with a reusable cache for the mesh owned by the caller.
+pub fn composite_tiles_with_projectors(
+    inputs: &Inputs,
+    mesh: &Arc<Mesh>,
+    projectors: &mut ProjectorDepthCache,
+    out: &mut Composite,
+    tiles: &[(u32, u32)],
+    mut below: Option<&mut BelowCache>,
+) {
+    if !std::ptr::eq(inputs.mesh, mesh.as_ref()) {
+        composite_tiles_cached(inputs, out, tiles, None);
+        return;
+    }
+
+    if projectors.bind(mesh)
+        && let Some(cache) = below.as_deref_mut()
+    {
+        cache.clear();
+    }
+
+    let inputs = EvaluationInputs::new(inputs, projectors);
+    composite_evaluation_tiles(&inputs, out, tiles, below);
+}
+
+fn composite_evaluation_tiles(inp: &EvaluationInputs, out: &mut Composite, tiles: &[(u32, u32)], mut below: Option<&mut BelowCache>) {
     let Ok(set) = inp.project.texture_set(inp.ts) else { return };
     if (inp.gbuf.width, inp.gbuf.height) != (out.resolution, out.height) {
         return;
@@ -2378,7 +2426,7 @@ fn has_neighbourhood(inp: &Inputs, stack: &[LayerId]) -> bool {
 
 /// The neighbourhood fields compositing `tiles` reads: those of every layer of `stack` over the tiles the cache lacks (`fresh`),
 /// and off the path to the `hot` layer only there; the hot layer's over all of `tiles`.
-fn block_fields(inp: &Inputs, channels: &[Channel], stack: &[LayerId], hot: Option<&Level>, fresh: &[(u32, u32)], tiles: &[(u32, u32)]) -> Fields {
+fn block_fields(inp: &EvaluationInputs, channels: &[Channel], stack: &[LayerId], hot: Option<&Level>, fresh: &[(u32, u32)], tiles: &[(u32, u32)]) -> Fields {
     match hot {
         Some(hot) if fresh.len() < tiles.len() => {
             let mut fields = fields_of(inp, channels, stack, fresh);
@@ -2402,7 +2450,7 @@ type Joined = (Vec<Option<std::sync::Arc<Vec<u16>>>>, bool);
 /// Composite one block of tiles, split along the path to the hot layer when `below` holds it;
 /// returns what to cache (for at most `quota` tiles).
 fn composite_block(
-    inp: &Inputs,
+    inp: &EvaluationInputs,
     stack: &[LayerId],
     out: &mut Composite,
     tiles: &[(u32, u32)],
@@ -2421,7 +2469,7 @@ fn composite_block(
     let level_count = split.map_or(0, <[Level]>::len);
     let defaults: Acc = Channel::ALL.map(Channel::default_value);
 
-    // Tiles split into bands of rows, so a handful of tiles still keeps every thread busy.
+    // Tiles split into bands of rows, so a handful of tiles still keeps every thread busy
     let bands = TILE / BAND;
     let tasks: Vec<((u32, u32), u32)> = tiles.iter().flat_map(|t| (0..bands).map(move |b| (*t, b))).collect();
     let mut results: Vec<BandResult> = tasks
@@ -2459,11 +2507,13 @@ fn composite_block(
                 if y >= h {
                     break;
                 }
+
                 for lx in 0..TILE {
                     let x = tx * TILE + lx;
                     if x >= w {
                         break;
                     }
+
                     let gbuffer_index = (y * w + x) as usize;
                     let tile_offset = (ly * TILE + lx) as usize;
                     let band_offset = ((ly - band * BAND) * TILE + lx) as usize;
@@ -2473,11 +2523,11 @@ fn composite_block(
                         any = true;
                         let mut texel = Texel::new(inp, x, y, tile_offset, stroke_at(preview_tile, tile_offset));
 
-                        // Reuse one anchor buffer per band.
+                        // Reuse one anchor buffer per band
                         texel.anchors = std::mem::take(&mut anchors);
                         match &levels {
                             Some(levels) => {
-                                // The texel's stream starts with the stack at each level.
+                                // The texel's stream starts with the stack at each level
                                 let start = match &mut tape {
                                     Tape::Record(t) => {
                                         t.resize(t.len() + slots, 0.0);
@@ -2518,7 +2568,7 @@ fn composite_block(
         })
         .collect();
 
-    // Join the bands of each tile (in parallel; uncovered tiles are freed).
+    // Join the bands of each tile (in parallel; uncovered tiles are freed)
     let joined: Vec<Joined> = results
         .par_chunks(bands as usize)
         .map(|parts| {
@@ -2545,7 +2595,7 @@ fn composite_block(
             }
         }
 
-        // Tiles without covered texels cost nothing to composite: not worth caching.
+        // Tiles without covered texels cost nothing to composite: not worth caching
         if any && let Some(bands) = parts.iter_mut().map(|p| p.1.take()).collect::<Option<Vec<Band>>>() {
             records.push(((tx, ty), bands));
         }
@@ -2676,6 +2726,8 @@ pub fn pad_tiles(out: &mut Composite, dmap: &DilationMap, tiles: &[(u32, u32)]) 
 /// orientation of the exported maps), `gbuf.width × gbuf.height` of them; black outside the mesh
 /// Returns None without an enabled mask
 pub fn mask_texels(inputs: &Inputs, id: LayerId) -> Option<Vec<f32>> {
+    let projectors = ProjectorDepthCache::default();
+    let inputs = &EvaluationInputs::new(inputs, &projectors);
     let mask = layer_mask(inputs.project, id).filter(|mask| mask.enabled)?;
     let channels = inputs.project.texture_set(inputs.ts).map(|set| set.channel_list()).unwrap_or_default();
     let (width, height) = (inputs.gbuf.width, inputs.gbuf.height);
@@ -2684,7 +2736,7 @@ pub fn mask_texels(inputs: &Inputs, id: LayerId) -> Option<Vec<f32>> {
     // A hidden layer's mask is left out of the stack's preparation
     prepare_mask_curvature_sizes(inputs, std::iter::once(mask));
 
-    let fields = neighbourhood_fields(inputs, &channels, &coordinates);
+    let fields = evaluation_fields(inputs, &channels, &coordinates);
     let width_usize = width as usize;
     let tile_side = TILE as usize;
     let mut output = vec![0.0f32; width_usize * height as usize];
@@ -2709,6 +2761,8 @@ pub fn mask_texels(inputs: &Inputs, id: LayerId) -> Option<Vec<f32>> {
 /// Keep preview tiles at 8 bits instead of retaining the export's full float atlas
 /// Returns None without an enabled mask
 pub fn mask_image(inputs: &Inputs, id: LayerId, size: u32) -> Option<Vec<u8>> {
+    let projectors = ProjectorDepthCache::default();
+    let inputs = &EvaluationInputs::new(inputs, &projectors);
     let mask = layer_mask(inputs.project, id).filter(|mask| mask.enabled)?;
     let channels = inputs.project.texture_set(inputs.ts).map(|set| set.channel_list()).unwrap_or_default();
     let (width, height) = (inputs.gbuf.width, inputs.gbuf.height);
@@ -2717,7 +2771,12 @@ pub fn mask_image(inputs: &Inputs, id: LayerId, size: u32) -> Option<Vec<u8>> {
     // A hidden layer's mask is left out of the stack's preparation
     prepare_mask_curvature_sizes(inputs, std::iter::once(mask));
 
-    let fields = neighbourhood_fields(inputs, &channels, &coordinates);
+    let fields = evaluation_fields(inputs, &channels, &coordinates);
+    let size = size.max(1);
+    if size <= width.min(height) && (width != size || height != size) {
+        return Some(downsample_mask(inputs, id, mask, &channels, &fields, size));
+    }
+
     let width_usize = width as usize;
     let tile_side = TILE as usize;
     let mut atlas = vec![0u8; width_usize * height as usize];
@@ -2736,7 +2795,6 @@ pub fn mask_image(inputs: &Inputs, id: LayerId, size: u32) -> Option<Vec<u8>> {
         }
     });
 
-    let size = size.max(1);
     if width == size && height == size {
         return Some(atlas);
     }
@@ -2756,6 +2814,49 @@ pub fn mask_image(inputs: &Inputs, id: LayerId, size: u32) -> Option<Vec<u8>> {
     Some(output)
 }
 
+/// Sample a smaller mask image directly into disjoint output row groups
+fn downsample_mask(inputs: &EvaluationInputs, id: LayerId, mask: &Mask, channels: &[Channel], fields: &Fields, size: u32) -> Vec<u8> {
+    let (width, height) = (inputs.gbuf.width, inputs.gbuf.height);
+    let source_at = |pixel, span| ((u64::from(pixel) * u64::from(span)) / u64::from(size)) as u32;
+    let first_output = |source, span| (u64::from(source) * u64::from(size)).div_ceil(u64::from(span)).min(u64::from(size)) as u32;
+    let mut output = vec![0; size as usize * size as usize];
+    let mut destination = output.as_mut_slice();
+    let mut bands = Vec::with_capacity(height.div_ceil(TILE) as usize);
+
+    // Partition rows by the tile that contains each row's source texels
+    for tile_y in 0..height.div_ceil(TILE) {
+        let first_row = first_output(tile_y * TILE, height);
+        let past_row = first_output((tile_y + 1) * TILE, height);
+        if past_row > first_row {
+            let (rows, rest) = destination.split_at_mut((past_row - first_row) as usize * size as usize);
+            bands.push((tile_y, first_row, past_row, rows));
+            destination = rest;
+        }
+    }
+
+    bands.into_par_iter().for_each(|(tile_y, first_row, past_row, rows)| {
+        for tile_x in 0..width.div_ceil(TILE) {
+            let first_column = first_output(tile_x * TILE, width);
+            let past_column = first_output((tile_x + 1) * TILE, width);
+            if first_column == past_column {
+                continue;
+            }
+
+            let offsets = (first_row..past_row).flat_map(|row| {
+                let y = source_at(row, height) % TILE;
+                (first_column..past_column).map(move |column| (y * TILE + source_at(column, width) % TILE) as usize)
+            });
+            let texels = mask_tile(inputs, id, mask, channels, fields, (tile_x, tile_y), offsets);
+            let pixels = rows.chunks_exact_mut(size as usize).flat_map(|row| &mut row[first_column as usize..past_column as usize]);
+            for (pixel, (_, value)) in pixels.zip(texels) {
+                *pixel = (value * 255.0 + 0.5) as u8;
+            }
+        }
+    });
+
+    output
+}
+
 /// The layer mask as one-component values at the texture set's full resolution over `tiles`
 /// (uncovered texels read zero). Clone and smudge read it. Unlike [`mask_image`] it also reads a
 /// disabled mask; None when the layer has no mask.
@@ -2767,11 +2868,13 @@ pub fn mask_values(inputs: &Inputs, id: LayerId, tiles: &[(u32, u32)]) -> Option
 
 /// Evaluate requested tiles directly into the stroke's mask image.
 pub fn mask_values_into(inputs: &Inputs, id: LayerId, tiles: &[(u32, u32)], image: &mut TileImage) -> Option<()> {
+    let projectors = ProjectorDepthCache::default();
+    let inputs = &EvaluationInputs::new(inputs, &projectors);
     let mask = layer_mask(inputs.project, id)?;
     let channels = inputs.project.texture_set(inputs.ts).ok()?.channel_list();
     prepare_mask_curvature_sizes(inputs, std::iter::once(mask));
 
-    let fields = neighbourhood_fields(inputs, &channels, tiles);
+    let fields = evaluation_fields(inputs, &channels, tiles);
     let computed: Vec<((u32, u32), Vec<u16>)> = tiles
         .par_iter()
         .map(|&tile| {
@@ -2794,6 +2897,8 @@ pub fn mask_values_into(inputs: &Inputs, id: LayerId, tiles: &[(u32, u32)], imag
 /// Mask values at texture-set coordinates, in request order; None without an enabled mask
 /// Uncovered and out-of-range texels read zero; neighbourhood filters also evaluate surrounding texels
 pub fn mask_at(inputs: &Inputs, id: LayerId, texels: &[(u32, u32)]) -> Option<Vec<f32>> {
+    let projectors = ProjectorDepthCache::default();
+    let inputs = &EvaluationInputs::new(inputs, &projectors);
     let mask = layer_mask(inputs.project, id).filter(|mask| mask.enabled)?;
     let mut output = vec![0.0; texels.len()];
 
@@ -2818,7 +2923,7 @@ pub fn mask_at(inputs: &Inputs, id: LayerId, texels: &[(u32, u32)]) -> Option<Ve
     prepare_mask_curvature_sizes(inputs, std::iter::once(mask));
 
     // Filters and anchors can depend on texels outside the requested tiles
-    let fields = neighbourhood_fields(inputs, &channels, &all_tiles(inputs.gbuf.width, inputs.gbuf.height));
+    let fields = evaluation_fields(inputs, &channels, &all_tiles(inputs.gbuf.width, inputs.gbuf.height));
     let values: Vec<(usize, f32)> = requested
         .par_iter_mut()
         .flat_map_iter(|(&tile, requests)| {
@@ -2841,7 +2946,7 @@ pub fn mask_at(inputs: &Inputs, id: LayerId, texels: &[(u32, u32)]) -> Option<Ve
 
 /// Mask values in offset order, including zeros for uncovered texels so request groups stay aligned
 fn mask_tile<'a>(
-    inputs: &'a Inputs<'a>,
+    inputs: &'a EvaluationInputs<'a>,
     id: LayerId,
     mask: &'a Mask,
     channels: &[Channel],
@@ -2902,6 +3007,8 @@ pub fn effect_histogram(inp: &Inputs, effect: LayerId, channel: Channel, bins: u
         }
     };
     let cut_inp = Inputs { project: &cut, preview: None, block_scales: inp.block_scales.clone(), ..*inp };
+    let projectors = ProjectorDepthCache::default();
+    let cut_inp = EvaluationInputs::new(&cut_inp, &projectors);
     let channels = cut.texture_set(inp.ts).map(|t| t.channel_list()).unwrap_or_default();
     let tiles = histogram_tiles(inp.gbuf.width, inp.gbuf.height);
     // A field covers the bounding box of the tiles it is built for, which for a scattered sample
@@ -2981,7 +3088,9 @@ pub fn flatten_layer(inputs: &Inputs, id: LayerId, tiles: &[(u32, u32)]) -> Opti
         l.visible = true;
     }
     let visible_inputs = Inputs { project: &solo, preview: None, block_scales: inputs.block_scales.clone(), ..*inputs };
-    let fields = neighbourhood_fields(&visible_inputs, &channels, tiles);
+    let projectors = ProjectorDepthCache::default();
+    let visible_inputs = EvaluationInputs::new(&visible_inputs, &projectors);
+    let fields = evaluation_fields(&visible_inputs, &channels, tiles);
 
     let out: Vec<Vec<FlatTile>> = tiles
         .par_iter()
@@ -3155,6 +3264,7 @@ mod tests {
         // Not repeating, it crops to its tile, so it has to know where each texel lands
         let Ok(LayerKind::Fill(fill)) = f.project.layer_mut(id).map(|layer| &mut layer.kind) else { panic!("fill layer") };
         fill.sampling.wrap = texturecraft_core::UvWrap::None;
+
         assert!(coords_lookups(&f) > 0);
     }
 
@@ -3173,6 +3283,7 @@ mod tests {
         // Not repeating, it crops to its tile, so each texel works its coverage out
         let Ok(LayerKind::Fill(fill)) = f.project.layer_mut(id).map(|layer| &mut layer.kind) else { panic!("fill layer") };
         fill.sampling.wrap = texturecraft_core::UvWrap::None;
+
         assert!(cover_calls(&f) > 0);
     }
 
@@ -3229,17 +3340,20 @@ mod tests {
 
                 cache.ahead.clear();
                 composite_tiles_cached(&input, &mut output, &[(1, 0)], Some(&mut cache));
+
                 assert!(weak_fields.upgrade().is_none(), "the last tile must release retained field buffers");
 
                 cache.ahead = all_tiles(resolution, resolution).into_iter().skip(1).collect();
                 composite_tiles_cached(&input, &mut output, &[(0, 0)], Some(&mut cache));
                 let weak_fields = Arc::downgrade(&cache.held.as_ref().unwrap().fields);
                 cache.clear();
+
                 assert!(weak_fields.upgrade().is_none(), "invalidating the cache releases intermediate anchor stages too");
 
                 composite_tiles_cached(&input, &mut output, &[(0, 0)], Some(&mut cache));
                 let weak_fields = Arc::downgrade(&cache.held.as_ref().unwrap().fields);
                 drop(cache);
+
                 assert!(weak_fields.upgrade().is_none(), "dropping the cache releases a cancelled run's fields");
             }
         }
@@ -3334,6 +3448,7 @@ mod tests {
         f.project.layer_mut(id).unwrap().mask = Some(mask);
         let out = run(&f, None);
         let vals: Vec<f32> = (0..64).map(|x| out.value(Channel::BaseColor, x, 20)[0]).collect();
+
         assert!(vals.iter().any(|v| *v > 0.99) && vals.iter().any(|v| *v < 0.51), "{vals:?}");
     }
 
@@ -3390,13 +3505,17 @@ mod tests {
         // Cross tile boundaries and include duplicates, a UV hole and invalid coordinates
         let texels = [(0, 0), (0, 40), (63, 63), (64, 64), (127, 127), (0, 40), (90, 30), (128, 0), (0, 128), (u32::MAX, u32::MAX)];
         let values = assert_sparse_mask_matches_image(&fixture, layer, &texels).unwrap();
+
         assert!(values.iter().any(|value| *value > 0.99) && values.iter().take(6).any(|value| *value < 0.01));
         assert_eq!(&values[6..], &[0.0; 4]);
         assert_eq!(assert_sparse_mask_matches_image(&fixture, layer, &[]), Some(Vec::new()));
         assert!(assert_sparse_mask_matches_image(&fixture, maskless, &texels).is_none());
+
         let missing = fixture.project.alloc_id();
         assert!(assert_sparse_mask_matches_image(&fixture, missing, &texels).is_none());
+
         fixture.project.layer_mut(layer).unwrap().mask.as_mut().unwrap().enabled = false;
+
         assert!(assert_sparse_mask_matches_image(&fixture, layer, &texels).is_none());
     }
 
@@ -3440,6 +3559,7 @@ mod tests {
         assert_eq!(atlas.len(), 128 * 64);
         assert!(preview.contains(&0));
         assert!(preview.contains(&255));
+
         for ((&preview_value, &sparse_value), &(x, y)) in preview.iter().zip(&sparse).zip(&sampled_texels) {
             assert!((f32::from(preview_value) / 255.0 - sparse_value).abs() <= 0.5 / 255.0 + 1e-6);
             assert!((atlas[(y * 128 + x) as usize] - sparse_value).abs() <= 1e-6);
@@ -3497,6 +3617,7 @@ mod tests {
             filtered.effects.push(Effect::new(fixture.project.alloc_id(), EffectKind::Filter(filter)));
             fixture.project.layer_mut(upper).unwrap().mask = Some(filtered);
             let values = assert_sparse_mask_matches_image(&fixture, upper, &texels).unwrap();
+
             assert!(values.iter().zip(&original).any(|(value, original)| (value - original).abs() > 0.1), "the filter changes the anchor values");
         }
     }
@@ -3650,6 +3771,7 @@ mod tests {
         assert!(sharp[ridge] > 0.99 && sharp[five_texels_away] < 0.01, "unblurred, the ridge is one texel: {sharp:?}");
         assert!(blurred[ridge] < 0.99 && blurred[ridge] > blurred[five_texels_away], "the blur spreads the ridge: {blurred:?}");
         assert!(blurred[five_texels_away] > 0.01, "and reaches texels away from it: {blurred:?}");
+
         for texel in far {
             assert_eq!(blurred[texel], sharp[texel], "the checker below keeps its hard edges at texel {texel}");
         }
@@ -3852,10 +3974,12 @@ soft {soft:?}"
         let out = run(&f, None);
         assert!(close(out.value(Channel::BaseColor, 5, 5), [0.0, 1.0, 0.0]), "{:?}", out.value(Channel::BaseColor, 5, 5));
         assert!(close(out.value(Channel::Roughness, 5, 5), [0.2; 3]), "a hue shift leaves scalars alone");
+
         content_fx(&mut f, id, EffectKind::Filter(Filter::Invert));
         let out = run(&f, None);
         assert!(close(out.value(Channel::BaseColor, 5, 5), [1.0, 0.0, 1.0]));
         assert!(close(out.value(Channel::Roughness, 5, 5), [0.8; 3]));
+
         // Hidden effects are skipped and opacity fades an effect
         let fx = &mut f.project.layer_mut(id).unwrap().content_effects;
         fx[0].visible = false;
@@ -3907,8 +4031,10 @@ soft {soft:?}"
         let out = run(&f, None);
         assert!(close(out.value(Channel::BaseColor, 30, 30), [0.5; 3]), "{:?}", out.value(Channel::BaseColor, 30, 30));
         assert!(close(out.value(Channel::Roughness, 30, 30), [0.5; 3]));
+
         f.project.layer_mut(id).unwrap().content_effects.retain(|e| e.id != hp);
         content_fx(&mut f, id, EffectKind::Filter(Filter::EdgeDetect { width: 64.0 }));
+
         assert!(close(run(&f, None).value(Channel::Roughness, 30, 30), [0.0; 3]));
 
         // A checker's borders light up while cell interiors stay black
@@ -3945,7 +4071,9 @@ soft {soft:?}"
         let rc = Filter::ReplaceColor { from: [0.8, 0.1, 0.1], to: [0.1, 0.1, 0.8], tolerance: 0.1, softness: 0.1 };
         assert!(close(rc.point(ChannelKind::Color, [0.85, 0.1, 0.1]).unwrap(), [0.15, 0.1, 0.8]));
         assert!(close(rc.point(ChannelKind::Color, [0.1, 0.8, 0.1]).unwrap(), [0.1, 0.8, 0.1]));
+
         let half = rc.point(ChannelKind::Color, [0.8, 0.1 + 0.15 * 3f32.sqrt(), 0.1]).unwrap();
+
         assert!((half[2] - 0.45).abs() < 0.02, "halfway through the softness: {half:?}");
         assert_eq!(rc.point(ChannelKind::Scalar, [0.8; 3]), Some([0.8; 3]));
     }
@@ -3990,6 +4118,7 @@ soft {soft:?}"
         let mut f = fixture();
         let id = fill_layer(&mut f.project, [0.1; 3], 0.2);
         content_fx(&mut f, id, EffectKind::Filter(Filter::Glow { radius: 32.0, amount: 1.0 }));
+
         assert!(close(run(&f, None).value(Channel::Roughness, 30, 30), [0.4; 3]));
     }
 
@@ -4063,7 +4192,9 @@ soft {soft:?}"
         let images = ImageStore::default();
         let inp = inputs(&f, &images, None);
         let flat = flatten_layer(&inp, id, &all_tiles(64, 64)).unwrap();
+
         assert!(flat.iter().all(|(c, _, _)| *c == Channel::Roughness));
+
         let (_, _, data) = flat.iter().find(|(_, t, _)| *t == (0, 0)).unwrap();
         let o = 3 * TILE as usize + 3;
         assert!((from_u16(data[o * 2]) - 0.55).abs() < 1e-3 && (from_u16(data[o * 2 + 1]) - 1.0).abs() < 1e-3);
@@ -4508,6 +4639,7 @@ soft {soft:?}"
             composite_tiles(&inp, &mut out, &all_tiles(64, 64));
             out.value(Channel::BaseColor, 32, 32)
         };
+
         assert!(close(texel(&f, [false, false]), [1.0, 0.0, 0.0]), "the left half shows red");
         assert!(close(texel(&f, [true, false]), [0.0, 0.0, 1.0]), "Flip U shows the right half there");
         assert!(close(texel(&f, [false, true]), [1.0, 0.0, 0.0]), "Flip V leaves the left half");
@@ -4533,12 +4665,13 @@ soft {soft:?}"
     fn a_shrunk_cropped_frames_coverage_averages_its_image_alpha_as_its_colour_does() {
         let f = decal_fixture(|fill| fill.sampling.filtering = Filtering::BilinearHq);
 
-        // Red columns a texel wide, opaque and see-through in turn, far finer than the frame's texels; not a power of two, so a full-size read lands anywhere between two columns
+        // Odd-width alternating alpha stripes exercise minification between source texels
         const SIZE: u32 = 1000;
         let stripes = (0..SIZE * SIZE).map(|i| [1.0, 0.0, 0.0, if i % 2 == 0 { 1.0 } else { 0.0 }]).collect();
         let shown = decal_texels(&composite_with_decal(&f, crate::store::ImageRes::new(SIZE, SIZE, stripes, false)));
 
         assert!(!shown.is_empty(), "the frame shows");
+
         let half = [0.75, 0.25, 0.25];
         assert!(
             shown.iter().all(|v| v.iter().zip(half).all(|(got, want)| (got - want).abs() < 0.05)),

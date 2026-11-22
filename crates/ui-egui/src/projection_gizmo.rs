@@ -4,6 +4,8 @@ mod gizmo;
 mod gizmo_drag;
 mod shown_gizmo;
 
+use std::sync::Arc;
+
 use egui::{PointerButton, Rect};
 use serde_json::{Value, json};
 use texturecraft_engine::Session;
@@ -32,10 +34,10 @@ pub(crate) fn input<G: Gizmo>(app: &mut TextureCraftApp, ctx: &egui::Context, re
         && let (Some(gizmo), Some(from)) = (gizmo, ctx.input(|input| input.pointer.press_origin()))
         && let Some(grab) = gizmo.grab(from)
     {
-        drag = Some(GizmoDrag { grab, from, start: gizmo.clone(), edited_revision: None });
+        drag = Some(GizmoDrag { grab, from, start: Arc::new(gizmo.clone()), edited_revision: None });
     }
 
-    // A window that lost the focus gets no release: the drag ends there. A release still applies a move that came in the same frame
+    // Apply a final move on release and let focus loss end a drag without one
     let released = response.drag_stopped_by(PointerButton::Primary);
     let pressed = response.dragged_by(PointerButton::Primary) || response.drag_started_by(PointerButton::Primary) || released;
     let Some(mut drag) = drag.filter(|_| pressed && !focus_lost(ctx)) else {

@@ -57,6 +57,7 @@ fn a_pattern_parameter_given_alone_keeps_every_other_one() {
     }
 
     let inspected = execute(&mut session, "project.inspect", &Value::Null).unwrap().to_string();
+
     assert!(inspected.contains("\"balance\":-0.5") && inspected.contains("\"invert\":false"), "inspect shows the balance and invert");
 }
 
@@ -65,5 +66,6 @@ fn a_pattern_parameter_given_alone_keeps_every_other_one() {
 fn another_pattern_kind_starts_from_its_defaults() {
     let (mut session, layer) = clouds_fill();
     execute(&mut session, "layer.fill.set", &json!({"layer": layer.0, "channel": "roughness", "procedural": "Cells"})).unwrap();
+
     assert_eq!(roughness(&session, layer), (Procedural::new(ProceduralKind::Cells), [0.0; 3], [1.0; 3]));
 }

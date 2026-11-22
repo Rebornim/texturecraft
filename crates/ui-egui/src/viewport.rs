@@ -895,7 +895,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     let gizmo = ShownGizmo::of(app, rect);
     let frame_drag = gizmo_free && ShownGizmo::input(app, ui, &response, rect, gizmo.as_ref());
 
-    // Alt (or another mode) taking the pointer mid-drag ends the drag: let go of Alt, it must not resume from where it began before the camera moved
+    // End the gizmo drag when navigation takes over because the camera may have moved
     if !gizmo_free {
         ShownGizmo::let_go(ui.ctx());
     }
@@ -1031,7 +1031,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && let Some(hit) = app.session.pick(local(hover_pos), app.session.viewport)
     {
         ui.ctx().set_cursor_icon(egui::CursorIcon::None);
-        let (bounds_min, bounds_max) = app.session.mesh.bounds();
+        let (bounds_min, bounds_max) = app.viewport_mesh_bounds.get(&app.session.mesh);
         let radius = app.session.tool.brush.size * (bounds_max - bounds_min).length();
         brush_cursor(app, ui, rect, hit.pos, hit.nrm, radius);
         symmetry_cursor = Some((hit.pos, hit.nrm));
@@ -2542,7 +2542,7 @@ mod tests {
 
     #[test]
     fn unavailable_tools_finish_strokes_and_box_fills() {
-        // The harness draws the UI, and the i18n tests switch the process-wide language to ones its fonts cannot draw
+        // Hold the language lock while drawing the harness
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         use texturecraft_engine::{StackTarget, core::LayerId, geom::primitives};
 
@@ -2580,17 +2580,22 @@ mod tests {
         let app = harness.state_mut();
         app.ui.mode = crate::state::Mode::Painting;
         app.session.view = ViewMode::Mask(LayerId(7));
+
         assert_eq!(mask_view_layer(app), Some(LayerId(7)));
+
         app.session.quick_mask.editing = true;
+
         assert!(quick_mask_shown(app));
         assert_eq!(mask_view_layer(app), None, "the quick mask is on screen, not the layer mask");
+
         app.session.quick_mask.editing = false;
+
         assert_eq!(mask_view_layer(app), Some(LayerId(7)), "the label returns with the mask view");
     }
 
     #[test]
     fn stored_surfaces_release_after_a_frame_without_paths() {
-        // The harness draws the UI, and the i18n tests switch the process-wide language to ones its fonts cannot draw
+        // Hold the language lock while drawing the harness
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         use texturecraft_engine::{core::EffectKind, execute, geom::primitives};
 
@@ -2678,7 +2683,7 @@ mod tests {
 
     #[test]
     fn decal_frame_rejects_a_stale_effect_after_failed_layer_selection() {
-        // The harness draws the UI, and the i18n tests switch the process-wide language to ones its fonts cannot draw
+        // Hold the language lock while drawing the harness
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         use texturecraft_engine::{StackTarget, execute};
 
@@ -2703,6 +2708,7 @@ mod tests {
             drag_decal_handle(&mut harness, original.center, original.center + vec2(40.0, 0.0));
 
             let effect = &harness.state().session.doc.project.effect(effect).unwrap().1.kind;
+
             assert!(
                 matches!(effect, texturecraft_engine::core::EffectKind::Fill { projection: texturecraft_engine::core::Projection::Planar { placed: Some(decal), .. }, .. } if *decal == original.decal)
             );
@@ -2711,7 +2717,7 @@ mod tests {
 
     #[test]
     fn decal_frame_keeps_an_instances_inherited_mask_effect_editable() {
-        // The harness draws the UI, and the i18n tests switch the process-wide language to ones its fonts cannot draw
+        // Hold the language lock while drawing the harness
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         use texturecraft_engine::execute;
 
@@ -2726,18 +2732,21 @@ mod tests {
 
         assert_eq!(session.ts(), 1);
         assert_eq!(session.selected_layer().unwrap().0, instance.as_u64().unwrap());
+
         let inherited = crate::frame_gizmo::FrameGizmo::of(harness.state(), harness.state().viewport_rect).unwrap();
+
         assert_eq!((inherited.layer, inherited.effect, inherited.decal), (original.layer, original.effect, original.decal));
 
         drag_decal_handle(&mut harness, inherited.corners[1], inherited.center + (inherited.corners[1] - inherited.center) * 1.5);
 
         let edited = crate::frame_gizmo::FrameGizmo::of(harness.state(), harness.state().viewport_rect).unwrap();
+
         assert!(edited.decal.size[0] > original.decal.size[0], "scaling an inherited decal edits its source");
     }
 
     #[test]
     fn decal_frame_rejects_a_source_mask_overridden_by_the_selected_instance() {
-        // The harness draws the UI, and the i18n tests switch the process-wide language to ones its fonts cannot draw
+        // Hold the language lock while drawing the harness
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         use texturecraft_engine::execute;
 
@@ -2757,7 +2766,7 @@ mod tests {
     #[test]
     #[ignore = "requires an offscreen GPU adapter and TC_UI_SNAPSHOTS"]
     fn decal_frame_selection_snapshots() {
-        // The harness draws the UI, and the i18n tests switch the process-wide language to ones its fonts cannot draw
+        // Hold the language lock while drawing the harness
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         use texturecraft_engine::execute;
 
@@ -2769,25 +2778,31 @@ mod tests {
         let effect = original.effect.unwrap();
         let session = &mut harness.state_mut().session;
         let instance = execute(session, "layer.instance", &json!({"layer": original.layer.0, "ts": 1})).unwrap()["layer"].clone();
+
         assert!(execute(session, "layer.select", &json!({"layer": instance, "target": effect.0})).is_err());
+
         harness.run_steps(6);
 
         assert!(crate::frame_gizmo::FrameGizmo::of(harness.state(), harness.state().viewport_rect).is_some());
+
         harness.render().unwrap().save(directory.join("decal-frame-inherited.png")).unwrap();
 
         let session = &mut harness.state_mut().session;
         let other = execute(session, "layer.add.paint", &json!({"name": "Other layer"})).unwrap()["layer"].clone();
         execute(session, "layer.select", &json!({"layer": original.layer.0, "target": effect.0})).unwrap();
+
         assert!(execute(session, "layer.select", &json!({"layer": other, "target": effect.0})).is_err());
+
         harness.run_steps(6);
 
         assert!(crate::frame_gizmo::FrameGizmo::of(harness.state(), harness.state().viewport_rect).is_none());
+
         harness.render().unwrap().save(directory.join("decal-frame-stale.png")).unwrap();
     }
 
     #[test]
     fn live_bake_preview_hides_setup_overlays_and_restores_their_preferences() {
-        // The harness draws the UI, and the i18n tests switch the process-wide language to ones its fonts cannot draw
+        // Hold the language lock while drawing the harness
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let session = texturecraft_engine::sample_session(256, 64).unwrap();
         let mut harness = egui_kittest::Harness::builder().build_eframe(|context| TextureCraftApp::new(context, session));

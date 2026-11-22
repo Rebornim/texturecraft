@@ -48,24 +48,32 @@ fn the_symmetry_switch_shows_its_rows_and_each_row_changes_the_symmetry() {
     assert!(harness.query_by_label("Mirror symmetry").is_none(), "off, the section is the caption alone");
 
     click_node(&mut harness, Role::CheckBox, "Symmetry");
+
     assert!(symmetry(&harness, layer).on);
     assert!(harness.query_by_label("Axis position X").is_some(), "a mirror across X moves along X");
     assert!(harness.query_by_label("Count").is_none(), "a mirror has no radial rows");
 
     click_node(&mut harness, Role::RadioButton, "Y");
+
     assert_eq!(symmetry(&harness, layer).axis, 1);
+
     click_node(&mut harness, Role::CheckBox, "Flip copy U");
+
     assert_eq!(symmetry(&harness, layer).flip, [true, false]);
 
     click_node(&mut harness, Role::ComboBox, "Mirror symmetry");
     click_node(&mut harness, Role::ListBoxOption, "Radial symmetry");
+
     assert_eq!(symmetry(&harness, layer).kind, SymmetryKind::Radial);
+
     for label in ["Count", "Angle span", "Axis position X", "Axis position Z"] {
         assert!(harness.query_by_label(label).is_some(), "radial round Y: {label}");
     }
+
     assert!(harness.query_by_label("Axis position Y").is_none(), "the turning axis does not move along itself");
 
     click_node(&mut harness, Role::CheckBox, "Symmetry");
+
     assert!(!symmetry(&harness, layer).on);
     assert_eq!(symmetry(&harness, layer).kind, SymmetryKind::Radial, "switched off, the settings stay");
 }
@@ -74,7 +82,9 @@ fn the_symmetry_switch_shows_its_rows_and_each_row_changes_the_symmetry() {
 fn a_uv_fill_says_why_in_place_of_the_symmetry_switch() {
     let (mut harness, layer) = app_with_fill("uv");
     assert!(harness.query_by_role_and_label(Role::CheckBox, "Symmetry").is_none(), "no switch to click");
+
     click_label(&mut harness, "Not available with UV projection");
+
     assert!(!symmetry(&harness, layer).on, "a UV projection has no symmetry to switch on");
     assert!(harness.query_by_label("Type").is_none(), "its settings stay hidden, not greyed");
 }
@@ -87,11 +97,13 @@ fn a_count_click_that_keeps_the_count_adds_no_undo_step_and_a_drag_to_the_next_a
 
     let inside = count_at(&harness, 6.2);
     click_at(&mut harness, inside);
+
     assert_eq!(symmetry(&harness, layer).count, 6);
     assert_eq!(undo_depth(&harness), steps, "a count that stays six is no edit");
 
     let (from, to) = (count_at(&harness, 6.0), count_at(&harness, 7.3));
     drag(&mut harness, from, to);
+
     assert_eq!(symmetry(&harness, layer).count, 7);
     assert_eq!(undo_depth(&harness), steps + 1, "the drag's frames merge into one step");
 }

@@ -10,31 +10,41 @@ mod curvature_detail;
 mod curvature_mode;
 mod decal_flip;
 mod decal_symmetry;
+mod filtering;
 mod generator_global;
 mod micro_detail;
 mod output_resolution;
 mod resolution_mode;
+mod sampling;
+mod scale_mode;
 mod tile_blending;
 mod tile_generator;
 mod tile_input_distribution;
 mod tile_shape;
 mod tile_size_mode;
 mod tile_symmetry;
+mod uv_transform;
+mod uv_wrap;
 
 pub use curvature_detail::CurvatureDetail;
 pub use curvature_mode::CurvatureMode;
 pub use decal_flip::DecalFlip;
 pub use decal_symmetry::DecalSymmetry;
+pub use filtering::Filtering;
 pub use generator_global::GeneratorGlobal;
 pub use micro_detail::MicroDetail;
 pub use output_resolution::OutputResolution;
 pub use resolution_mode::ResolutionMode;
+pub use sampling::Sampling;
+pub use scale_mode::ScaleMode;
 pub use tile_blending::TileBlending;
 pub use tile_generator::TileGenerator;
 pub use tile_input_distribution::TileInputDistribution;
 pub use tile_shape::TileShape;
 pub use tile_size_mode::TileSizeMode;
 pub use tile_symmetry::TileSymmetry;
+pub use uv_transform::UvTransform;
+pub use uv_wrap::UvWrap;
 
 /// Id of a layer or effect (one id space per project).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -103,6 +113,7 @@ impl HeightMask {
         if !self.enabled || !h.is_finite() {
             return m;
         }
+
         (m + self.contrast * 4.0 * m * (1.0 - m) * (h + self.offset)).clamp(0.0, 1.0)
     }
 }
@@ -242,27 +253,6 @@ pub enum Projection {
         uv: UvTransform,
         projector: Projector,
     },
-}
-
-/// Tiling, rotation (degrees) and offset a 3D projection lays on the surface; the default changes nothing
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct UvTransform {
-    pub tiling: [f32; 2],
-    pub rotation: f32,
-    pub offset: [f32; 2],
-}
-
-impl Default for UvTransform {
-    fn default() -> Self {
-        UvTransform { tiling: [1.0, 1.0], rotation: 0.0, offset: [0.0, 0.0] }
-    }
-}
-
-impl UvTransform {
-    /// Whether it changes nothing, as projections saved before it existed did (not saved then)
-    pub fn is_default(&self) -> bool {
-        *self == UvTransform::default()
-    }
 }
 
 /// The frame a planar projection placed on the surface (a decal) projects from, in world space
@@ -1789,6 +1779,7 @@ mod tests {
         ];
         for saved in fills {
             let loaded: Fill = serde_json::from_str(saved).unwrap();
+
             assert_eq!(serde_json::to_string(&loaded).unwrap(), saved, "a fill saves as it was saved");
         }
 
@@ -1798,6 +1789,7 @@ mod tests {
         ];
         for saved in effects {
             let loaded: EffectKind = serde_json::from_str(saved).unwrap();
+
             assert_eq!(serde_json::to_string(&loaded).unwrap(), saved, "an effect saves as it was saved");
         }
     }

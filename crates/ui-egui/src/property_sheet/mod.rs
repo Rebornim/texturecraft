@@ -25,6 +25,7 @@ mod switch_control;
 mod tooltip;
 mod track;
 mod value_text;
+mod value_text_draft;
 
 #[cfg(test)]
 mod tests;
@@ -43,6 +44,8 @@ use egui::{Color32, FontId, Id, Rect, Ui, pos2, vec2};
 use crate::theme::{Tokens, semibold};
 use open_card::OpenCard;
 use sheet_measure::SheetMeasure;
+
+type SheetMeasures = egui::cache::FramePublisher<Id, SheetMeasure>;
 
 /// Side padding: every row starts and ends this far inside the panel
 pub(crate) const PAD: f32 = 12.0;
@@ -124,7 +127,7 @@ impl<'u> PropertySheet<'u> {
     /// Lays out `body` as one panel; when its measured columns change, egui reruns the frame unseen
     pub(crate) fn show<R>(ui: &'u mut Ui, id_salt: impl egui::AsIdSalt, body: impl FnOnce(&mut PropertySheet<'_>) -> R) -> R {
         let id = ui.make_persistent_id(id_salt);
-        let used = ui.data(|data| data.get_temp::<SheetMeasure>(id)).unwrap_or_default();
+        let used = ui.memory_mut(|memory| memory.caches.cache::<SheetMeasures>().get(&id).copied()).unwrap_or_default();
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         let rect = ui.available_rect_before_wrap();
         let mut sheet = PropertySheet {
@@ -153,11 +156,13 @@ impl<'u> PropertySheet<'u> {
             section_tabs::remember(sheet.ui, section_tabs::SectionTops { tops: std::mem::take(&mut sheet.sections), view_top });
         }
 
+        // Refresh visible sheets so measurements of closed sheets expire
         let seen = sheet.seen;
+        sheet.ui.memory_mut(|memory| memory.caches.cache::<SheetMeasures>().set(id, seen));
         if seen != used {
-            sheet.ui.data_mut(|data| data.insert_temp(id, seen));
             sheet.ui.ctx().request_discard("Properties columns changed");
         }
+
         result
     }
 

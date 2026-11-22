@@ -258,7 +258,9 @@ fn the_click_that_closes_the_drop_menu_paints_nothing_and_adds_no_undo_step() {
     let image = import_white_image(&mut harness);
     drop_asset(&mut harness, Asset::Texture(image), position);
     harness.run_steps(2);
+
     assert!(menu_open(&harness, position));
+
     let history = harness.state().session.history_labels().len();
 
     // A point on the same set, away from the menu

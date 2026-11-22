@@ -34,6 +34,7 @@ fn each_projection_shows_its_own_rows() {
     for label in ["Depth culling", "Backface culling", "Angle", "Extends Outside Shape", "Offset X", "Rotation Y", "Scale Z"] {
         assert!(shows(&harness, label), "planar: {label}");
     }
+
     assert!(!shows(&harness, "Reset frame"), "planar has no frame to reset");
 
     let (harness, _) = app_with_fill("warp");
@@ -42,12 +43,14 @@ fn each_projection_shows_its_own_rows() {
     for label in ["Depth", "Reset frame", "Depth culling", "Offset X", "Rotation X", "Scale X"] {
         assert!(shows(&harness, label), "warp: {label}");
     }
+
     assert!(!shows(&harness, "Backface culling"), "a warp has no backface culling");
 
     let (harness, _) = app_with_fill("cylindrical");
     for label in ["Angle", "Backface culling", "Extends Outside Shape", "Offset X"] {
         assert!(shows(&harness, label), "cylindrical: {label}");
     }
+
     assert!(!shows(&harness, "Depth culling"));
 
     let (harness, _) = app_with_fill("triplanar");
@@ -111,6 +114,7 @@ fn the_culling_rows_i_explains_the_row_on_hover_without_covering_its_values() {
     let before = projection(&harness, layer);
     let info = harness.get_by_label(DEPTH_CULLING_TIP).rect().center();
     click_at(&mut harness, info);
+
     assert_eq!(projection(&harness, layer), before);
 }
 
@@ -173,7 +177,9 @@ fn reset_frame_puts_a_warps_corners_back() {
 fn the_3d_projection_settings_fold_away() {
     let (mut harness, _) = app_with_fill("spherical");
     assert!(harness.query_by_label("Scale X").is_some(), "the band starts open");
+
     click_label(&mut harness, "3D projection settings");
+
     assert!(harness.query_by_label("Scale X").is_none());
     assert!(harness.query_by_label("Spherical projection").is_some(), "the rows above it stay");
 }
@@ -205,10 +211,13 @@ fn the_fill_caption_resets_the_whole_fill_section_to_its_projections_defaults_in
     );
     assert_eq!(after.sampling, Sampling { symmetry: changed.sampling.symmetry, ..Sampling::default() }, "the symmetry stays");
     assert!(harness.get_by_label("Fill: Reset to defaults").accesskit_node().is_disabled(), "at the defaults it is faint and inert");
+
     click_at(&mut harness, reset);
+
     assert_eq!(fill(&harness, layer), after, "a click at the defaults changes nothing");
 
     harness.state_mut().run("edit.undo", json!({}));
+
     assert_eq!(fill(&harness, layer), after_band, "one undo step brings the whole section back");
 }
 

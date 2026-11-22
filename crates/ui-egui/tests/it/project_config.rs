@@ -188,7 +188,9 @@ fn the_window_follows_the_reference_layout() {
     for labels in order.windows(2) {
         assert!(top(labels[0]) < top(labels[1]), "{} comes before {}", labels[0], labels[1]);
     }
+
     assert!(h.query_by_label("Custom unit scale").is_none(), "Physical size starts collapsed");
+
     let disabled = |role: Role, label: &str| h.get_by_role_and_label(role, label).accesskit_node().is_disabled();
     for (role, label) in [
         (Role::CheckBox, "Compute tangent space per fragment"),
@@ -205,6 +207,7 @@ fn the_window_follows_the_reference_layout() {
     let center = h.get_by_role_and_label(Role::CheckBox, "Compute tangent space per fragment").rect().center();
     h.hover_at(center);
     h.run_steps(30);
+
     assert!(h.query_by_label("Not available yet").is_some(), "the hint of a setting TextureCraft does not have yet");
 }
 

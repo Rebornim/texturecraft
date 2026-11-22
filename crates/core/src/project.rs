@@ -841,6 +841,7 @@ mod tests {
             l.as_object_mut().unwrap().remove("content_effects");
         }
         let old: Project = serde_json::from_value(v).unwrap();
+
         assert!(old.layers.values().all(|l| l.content_effects.is_empty()));
     }
 

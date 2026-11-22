@@ -499,10 +499,14 @@ mod tests {
     #[test]
     fn hdr_resources_become_the_environment() {
         let mut s = Session::new_project("t", texturecraft_geom::primitives::sphere(1.0, 16, 8), "builtin:sphere", None, 128).unwrap();
+
         assert!(execute(&mut s, "display.set", &json!({"environment": "resource:sky.hdr"})).is_err(), "unknown resources are rejected");
+
         let e = execute(&mut s, "display.set", &json!({"environment": "nonexistent"})).unwrap_err().to_string();
+
         assert!(e.contains("Studio Soft"), "unknown environments are rejected with the valid names: {e}");
         assert_eq!(s.doc.project.display.environment, "Studio Soft");
+
         execute(&mut s, "display.set", &json!({"environment": "Night"})).unwrap();
         let img = image::Rgb32FImage::from_fn(64, 32, |_, y| image::Rgb([if y < 8 { 40.0 } else { 0.5 }; 3]));
         let mut hdr = Vec::new();
@@ -510,6 +514,7 @@ mod tests {
         let name = s.import_resource_bytes("sky.hdr", hdr).unwrap();
         let res = &s.images[&name];
         assert!(!res.srgb && res.rgba[0][0] > 30.0, "HDR keeps values above 1");
+
         let env = format!("resource:{name}");
         let r = execute(
             &mut s,
@@ -517,12 +522,16 @@ mod tests {
             &json!({"environment": env, "specGloss": true, "parallax": true, "displacement": true, "taa": false, "scatterColor": [2.0, 0.5, 0.25], "scatterRadius": 0.3}),
         )
         .unwrap();
+
         assert_eq!(r["environment"], json!(env));
+
         let d = &s.doc.project.display;
         assert!(d.spec_gloss && d.parallax && d.displacement && !d.taa);
         assert_eq!((d.scatter_color, d.scatter_radius), ([1.0, 0.5, 0.25], 0.3), "scatter settings (clamped)");
         assert_eq!(d.environment_resource(), Some(name.as_str()));
+
         execute(&mut s, "file.removeUnused", &Value::Null).unwrap();
+
         assert!(s.doc.resources.contains_key(&name), "the environment's image counts as used");
     }
 
@@ -530,16 +539,21 @@ mod tests {
     fn the_projection_gizmos_hide_per_project_and_old_projects_show_them() {
         let mut s = Session::new_project("t", texturecraft_geom::primitives::sphere(1.0, 16, 8), "builtin:sphere", None, 128).unwrap();
         let shown = serde_json::to_value(&s.doc.project.display).unwrap();
+
         assert!(s.doc.project.display.projection_gizmos && shown.get("projection_gizmos").is_none(), "shown by default and saved as before: {shown}");
 
         let hidden = execute(&mut s, "display.set", &json!({"projectionGizmos": false})).unwrap();
+
         assert!(!s.doc.project.display.projection_gizmos);
         assert_eq!(hidden["projection_gizmos"], json!(false), "hidden is saved with the project");
         assert!(s.history_labels().is_empty(), "a view flag is no undo step");
 
         let reopened: texturecraft_core::project::DisplaySettings = serde_json::from_value(hidden).unwrap();
+
         assert!(!reopened.projection_gizmos, "a saved project opens with its gizmos hidden");
+
         let old: texturecraft_core::project::DisplaySettings = serde_json::from_value(shown).unwrap();
+
         assert!(old.projection_gizmos, "a project saved before the flag shows them");
     }
 }

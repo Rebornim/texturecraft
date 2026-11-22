@@ -678,6 +678,25 @@ pub fn frame_local(frame: &Decal, projector: &Projector, point: Vec3) -> Option<
         local = projector_local(projector, &Coords { uv: Vec2::ZERO, pos: local, nrm: Vec3::Z }).pos;
     }
 
+    frame_position(frame, local)
+}
+
+/// Read the position and facing of one sample when a placed frame culls by angle
+pub(crate) fn frame_sample(frame: &Decal, projector: &Projector, position: Vec3, surface_normal: Vec3) -> Option<(Vec3, f32)> {
+    let (origin, right, up, normal) = decal_axes(frame)?;
+    let from_origin = position - origin;
+    let local = Vec3::new(from_origin.dot(right), from_origin.dot(up), from_origin.dot(normal));
+
+    if !projector.turns() {
+        return Some((frame_position(frame, local)?, surface_normal.dot(normal)));
+    }
+
+    let normal = Vec3::new(surface_normal.dot(right), surface_normal.dot(up), surface_normal.dot(normal));
+    let sample = projector_local(projector, &Coords { uv: Vec2::ZERO, pos: local, nrm: normal });
+    Some((frame_position(frame, sample.pos)?, sample.nrm.z))
+}
+
+fn frame_position(frame: &Decal, local: Vec3) -> Option<Vec3> {
     let local = Vec3::new(local.x / frame.size[0].max(MIN_FRAME_EXTENT), local.y / frame.size[1].max(MIN_FRAME_EXTENT), local.z);
     local.is_finite().then_some(local)
 }
@@ -750,6 +769,7 @@ mod tests {
 
         // Coarse reads are exact at cell centers and blend between them
         assert!((at(0.375, &coarse) - at(0.375, &exact)).abs() < 1e-5);
+
         let blended = (at(0.125, &exact) + at(0.375, &exact)) * 0.5;
         assert!((at(0.25, &coarse) - blended).abs() < 1e-5, "{} vs {blended}", at(0.25, &coarse));
         assert!((at(0.25, &exact) - blended).abs() > 1e-3, "the exact pattern is not the blend, so the coarse read shows");
@@ -823,6 +843,7 @@ mod tests {
         }
         let corner = sample(90.0, [1.0; 2], [0.0; 2], Vec2::ZERO);
         assert!((corner - Vec2::new(1.0, 0.0)).length() < 1e-5, "a quarter turn brings the top left to the top right: {corner}");
+
         let placed = Projection::Planar {
             scale: 1.0,
             axis: 2,
@@ -832,6 +853,7 @@ mod tests {
             placed: Some(frame),
         };
         assert!((image_samples(&placed, &at(FRAME_UV_CENTER))[0].0 - FRAME_UV_CENTER).length() < 1e-5, "a placed planar frame turns the same way");
+
         for (tiling, offset, uv) in [([2.0, 3.0], [0.25, -0.5], Vec2::new(0.1, 0.8)), ([1.0, 1.0], [0.0, 0.0], Vec2::new(0.7, 0.2))] {
             let before = uv * Vec2::from(tiling) + Vec2::from(offset);
             assert!((sample(0.0, tiling, offset, uv) - before).length() < 1e-6, "unturned: as before");
@@ -909,6 +931,7 @@ mod tests {
         }
 
         assert!(largest_difference < 1.0 / 65535.0, "worst difference {largest_difference}");
+
         let near_axis = triplanar_weights(Vec3::new(0.2, 1.0, 0.1).normalize(), 8.0, 1.0);
         assert_eq!((near_axis.x, near_axis.z), (0.0, 0.0), "{near_axis}");
 

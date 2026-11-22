@@ -101,7 +101,8 @@ impl FrameGizmo {
         if unplaced && placing_moves_pattern(sources.into_iter()) {
             return None;
         }
-        let placed = placed_from_axis(projection, app.session.mesh.bounds());
+
+        let placed = placed_from_axis(projection, app.viewport_mesh_bounds.get(&app.session.mesh));
 
         // Where the projection lands: a projector's own turn and scale moved into the frame, as the panel's 3D projection settings show it
         let landed = folded(placed.as_ref().unwrap_or(projection))?;
@@ -290,7 +291,7 @@ impl Gizmo for FrameGizmo {
                 json!({"size": size})
             }
             FrameGrab::Turn => {
-                // The sweep round the centre on the frame's own plane (across turning towards up is a positive turn), so a tilted or off-centre frame follows the pointer too
+                // Measure the turn in the frame's own plane so a tilted frame follows the pointer
                 let angle = |p: Pos2| self.on_plane(app, rect, p).map(|[across, up]| (up * self.decal.size[1]).atan2(across * self.decal.size[0]).to_degrees());
                 let swept = angle(to)? - angle(from)?;
                 let swept = (swept + HALF_TURN).rem_euclid(2.0 * HALF_TURN) - HALF_TURN;
@@ -537,6 +538,7 @@ pub(crate) mod tests {
         assert!(slid.offset[0] > 0.0 && slid.offset[1].abs() < slid.offset[0] * 0.2, "the centre square slides it right: {slid:?}");
         assert_eq!(slid.size, axis.decal.size, "sliding keeps its size");
         assert_eq!(harness.state().session.history_labels().last().map(String::as_str), Some("Edit decal"));
+
         let steps = harness.state().session.history_labels().len();
 
         let placed = gizmo(&harness);
@@ -557,6 +559,7 @@ pub(crate) mod tests {
         let (mut harness, layer) = fill_app("warp");
         let warp = gizmo(&harness);
         assert_eq!(warp.warp, Some(Projection::FRAME_CORNERS));
+
         let to = warp.corners[1] + vec2(-40.0, 30.0);
         drag(&mut harness, warp.corners[1], to, Modifiers::NONE);
         let Projection::Warp { corners, frame, .. } = projection(&harness, layer) else { panic!("still a warp") };
@@ -646,6 +649,7 @@ pub(crate) mod tests {
         let (mut harness, layer) = fill_app("warp");
         let warp = gizmo(&harness);
         assert_eq!(warp.grab(warp.sides[1]), Some(FrameGrab::Side(1)));
+
         drag(&mut harness, warp.sides[1], warp.center + (warp.sides[1] - warp.center) * 0.5, Modifiers::NONE);
         let Projection::Warp { frame, corners, .. } = projection(&harness, layer) else { panic!("still a warp") };
         assert!(frame.size[0] < warp.decal.size[0] * 0.75 && (frame.size[1] - warp.decal.size[1]).abs() < 1e-4, "the right edge dot narrows it: {frame:?}");
@@ -661,6 +665,7 @@ pub(crate) mod tests {
         let center = gizmo(&harness).center;
         let to = center + vec2(40.0, 0.0);
         press_and_move(&mut harness, center, to, Modifiers::NONE);
+
         assert!(frame_dragging(&harness), "the centre square is held");
 
         harness.event(egui::Event::WindowFocused(false));
@@ -673,9 +678,12 @@ pub(crate) mod tests {
             harness.event(egui::Event::PointerMoved(to + vec2(20.0, 10.0) * step as f32));
             harness.run_steps(1);
         }
+
         assert_eq!(projection(&harness, layer), left, "moves after it leave the frame where it was");
+
         harness.event(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
         harness.run_steps(2);
+
         assert_eq!(harness.state().session.history_labels().len(), steps + 1, "and add no step");
     }
 
@@ -693,6 +701,7 @@ pub(crate) mod tests {
 
         harness.event_modifiers(egui::Event::PointerMoved(to + vec2(20.0, 0.0)), Modifiers::ALT);
         harness.run_steps(1);
+
         assert_ne!(harness.state().session.camera, camera, "Alt turns the camera");
         assert!(!frame_dragging(&harness), "and ends the frame drag");
 
@@ -700,9 +709,12 @@ pub(crate) mod tests {
             harness.event(egui::Event::PointerMoved(to + vec2(20.0, 5.0) * step as f32));
             harness.run_steps(1);
         }
+
         assert_eq!(projection(&harness, layer), slid, "Alt let go, the frame stays where the drag left it");
+
         harness.event(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
         harness.run_steps(2);
+
         assert_eq!(harness.state().session.history_labels().len(), steps + 1, "one undo step");
     }
 
@@ -722,7 +734,7 @@ pub(crate) mod tests {
         let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (mut harness, layer) = fill_app("warp");
 
-        // The frame waits at its left limit, a mesh diagonal off the ball's centre, clear of the panels on the right; the camera backs off so it shows with its arrows
+        // Offset the frame from the panels and back the camera up to expose its arrows
         harness.state_mut().run("layer.decal.set", json!({"layer": layer.0, "offset": [-100.0, 0.0]})).unwrap();
         harness.state_mut().session.camera.distance *= 3.0;
         harness.run_steps(2);
@@ -735,12 +747,14 @@ pub(crate) mod tests {
         press_and_move(&mut harness, tip, tip - inward * 25.0, Modifiers::NONE);
 
         assert_eq!(projection(&harness, layer), at_limit, "past the limit the frame stays where it is");
+
         move_and_let_go(&mut harness, tip - inward * 25.0, tip + inward * 25.0);
 
         assert_ne!(projection(&harness, layer), at_limit, "back inside the frame moves");
         assert_eq!(harness.state().session.history_labels().len(), steps + 1, "the drag made its own undo step");
 
         harness.state_mut().session.undo().unwrap();
+
         assert_eq!(projection(&harness, layer), at_limit, "undo takes back the drag only");
     }
 
@@ -752,6 +766,7 @@ pub(crate) mod tests {
 
         harness.state_mut().run("layer.fill.set", json!({"layer": layer.0, "channel": "roughness", "procedural": "Checker"})).unwrap();
         harness.run_steps(2);
+
         assert!(FrameGizmo::of(harness.state(), harness.state().viewport_rect).is_none(), "placing would move the pattern");
     }
 
@@ -769,11 +784,15 @@ pub(crate) mod tests {
         press_and_move(&mut harness, center, center + vec2(0.0, 30.0), Modifiers::NONE);
         harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
         harness.run_steps(1);
+
         assert_eq!(projection(&harness, layer), first, "Ctrl+Z undid the drag so far");
+
         move_and_let_go(&mut harness, center + vec2(0.0, 30.0), center + vec2(0.0, 40.0));
+
         assert_eq!(harness.state().session.history_labels().len(), steps + 1, "the drag's later edits made a step of their own");
 
         harness.state_mut().session.undo().unwrap();
+
         assert_eq!(projection(&harness, layer), first, "undo goes back to where the first drag left the frame");
     }
 
@@ -797,21 +816,28 @@ pub(crate) mod tests {
         assert!(eye.left() > projection_row.right() && (eye.center().y - projection_row.center().y).abs() < 0.5, "the eye ends the Projection row");
 
         click(&mut harness, eye.center());
+
         assert!(!harness.state().session.doc.project.display.projection_gizmos, "the eye hides the gizmos");
         assert!(FrameGizmo::shown(harness.state(), harness.state().viewport_rect).is_none(), "the 3D view has no frame to draw or grab");
+
         let before = projection(&harness, layer);
         drag(&mut harness, shown.center, shown.center + vec2(30.0, 0.0), Modifiers::NONE);
+
         assert_eq!(projection(&harness, layer), before, "a drag where the centre square was moves nothing");
 
         let eye = harness.get_by_label("Show projection gizmos").rect();
         click(&mut harness, eye.center());
+
         assert!(harness.state().session.doc.project.display.projection_gizmos, "the eye shows them again");
+
         drag(&mut harness, shown.center, shown.center + vec2(30.0, 0.0), Modifiers::NONE);
+
         assert_ne!(projection(&harness, layer), before, "shown, the centre square slides it again");
 
         // A UV projection has no gizmo: its row keeps the whole width for the dropdown
         harness.state_mut().run("layer.fill.projection", json!({"layer": layer.0, "projection": "uv"})).unwrap();
         harness.run_steps(2);
+
         assert!(harness.query_by_label("Hide projection gizmos").is_none(), "no eye without a gizmo");
     }
 
@@ -957,6 +983,7 @@ pub(crate) mod tests {
         let side = gizmo(&harness);
         drag_frames(&mut harness, layer, side.sides[0], side.center + (side.sides[0] - side.center) * 0.5, Modifiers::NONE, true, check(layer));
         let narrowed = placement(&projection(&harness, layer), harness.state().session.mesh.bounds()).unwrap();
+
         assert!(narrowed.scale[1] < slid.scale[1] * 0.75 && (narrowed.scale[0] - slid.scale[0]).abs() < 1e-4, "{slid:?} -> {narrowed:?}");
 
         // The view steps back so a corner shows beside the panels
@@ -967,6 +994,7 @@ pub(crate) mod tests {
         let inside = *corner.corners.iter().find(|at| view.contains(**at)).expect("a corner in the view");
         drag_frames(&mut harness, layer, inside, corner.center + (inside - corner.center) * 0.6, Modifiers::NONE, true, check(layer));
         let scaled = placement(&projection(&harness, layer), harness.state().session.mesh.bounds()).unwrap();
+
         assert!(scaled.scale[1] < narrowed.scale[1] * 0.8 && scaled.scale[0] < narrowed.scale[0] * 0.8, "a corner scales it: {scaled:?}");
 
         // Move on model held with Shift turns the frame round its normal
@@ -974,6 +1002,7 @@ pub(crate) mod tests {
         let button = harness.get_by_label("Move on model").rect().center();
         drag_frames(&mut harness, layer, button, button + vec2(-60.0, 0.0), Modifiers::SHIFT, true, check(layer));
         let turned = placement(&projection(&harness, layer), harness.state().session.mesh.bounds()).unwrap();
+
         assert!((turned.rotation[2] - before.rotation[2]).abs() > 10.0, "turned: {before:?} -> {turned:?}");
         assert_eq!(harness.state().session.history_labels().len(), steps + 4, "one undo step per drag");
 

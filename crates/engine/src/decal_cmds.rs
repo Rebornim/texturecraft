@@ -238,7 +238,7 @@ fn framed(session: &Session, command: &str, id: LayerId, effect: Option<LayerId>
         return Err(bad(command, "an axis planar reading a procedural pattern keeps its axis: placing its frame would move the pattern"));
     }
 
-    // A frame faces one way: culling read through an uneven or mirrored scale would hide other faces once the scale is in the frame (a placed frame keeps its edits that move no frame)
+    // Keep the active projection while folding scaling would change which faces cull
     if matches!(projection, Projection::Planar { placed: None, .. }) && !culling_keeps_facing(projection) {
         return Err(bad(command, UNFOLDABLE_CULLING));
     }

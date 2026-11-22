@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use egui::Pos2;
 
 use super::Gizmo;
@@ -6,9 +8,10 @@ use super::Gizmo;
 #[derive(Clone, Debug)]
 pub(crate) struct GizmoDrag<G: Gizmo> {
     pub(crate) grab: G::Grab,
-    /// Where the drag started and the gizmo then
+    /// Where the drag started
     pub(crate) from: Pos2,
-    pub(crate) start: G,
+    /// The starting gizmo shared by the pointer, edit and overlay paths
+    pub(crate) start: Arc<G>,
     /// The session revision the drag's last edit left: later updates merge into its undo step while the history is still there
     pub(crate) edited_revision: Option<u64>,
 }

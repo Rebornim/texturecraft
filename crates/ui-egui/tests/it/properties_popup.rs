@@ -171,9 +171,13 @@ fn it_shows_what_the_properties_panel_shows() {
     let mut harness = harness();
     let fill = harness.state().session.doc.project.layers.values().find(|layer| matches!(layer.kind, LayerKind::Fill(_))).map(|layer| layer.id.0).unwrap();
     let selected = texturecraft_engine::execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": fill}));
+
     assert!(selected.is_ok(), "{selected:?}");
+
     let projected = texturecraft_engine::execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": fill, "projection": "uv"}));
+
     assert!(projected.is_ok(), "{projected:?}");
+
     harness.run_steps(3);
 
     let center = view_center(&harness);
@@ -227,6 +231,7 @@ fn bake_and_render_modes_never_open_it() {
         harness.state_mut().ui.mode = mode;
         harness.run_steps(3);
         click(&mut harness, PointerButton::Secondary, center);
+
         assert_eq!(harness.state().properties_popup, None, "{mode:?}");
     }
 }

@@ -6,12 +6,9 @@ use texturecraft_core::{FULL_TURN_DEGREES, Projection};
 
 use crate::pattern::{MIN_CYLINDER_ANGLE, cylinder_axis_index, projector_stretch};
 
-/// The mesh's size as the projections see it: the bounds radius (3D projections) and the mesh units one UV unit covers (UV)
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MeshSize {
-    pub radius: f32,
-    pub uv_density: f32,
-}
+mod mesh_size;
+
+pub use mesh_size::MeshSize;
 
 /// Mesh units one tile covers across and down at a tiling of 1, the projector's stretch included; None without a physical size (per UV tile, spherical, or a stretch uneven across the planes a tile wraps round)
 fn unit_tile(projection: &Projection, size: MeshSize) -> Option<[f32; 2]> {

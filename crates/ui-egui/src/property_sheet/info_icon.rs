@@ -50,6 +50,7 @@ impl<'u> PropertySheet<'u> {
     /// Paints the pending i at `glyph_x` in its slot from `slot_left`
     fn paint_info_in(&mut self, slot_left: f32, glyph_x: f32, center_y: f32) {
         let Some(tip) = self.info.take() else { return };
+
         let row_top = center_y - ROW_HEIGHT / 2.0;
         let slot = Rect::from_min_size(pos2(slot_left, row_top), vec2(INFO_SLOT, ROW_HEIGHT));
         let id = self.next_id();
@@ -69,6 +70,7 @@ impl<'u> PropertySheet<'u> {
             .inner_margin(TIP_MARGIN)
             .shadow(TIP_SHADOW);
         let text_width = anchor.width() - TIP_MARGIN.sum().x;
+
         let mut tooltip = egui::Tooltip::for_enabled(&response);
         tooltip.popup = tooltip
             .popup

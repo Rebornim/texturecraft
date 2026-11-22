@@ -1,4 +1,4 @@
-use egui::{Align2, Color32, CornerRadius, FontId, Painter, Rect, Role, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, FontId, Painter, Rect, Response, Role, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
 
 use super::{CONTROL_RADIUS, PropertySheet, ROW_HEIGHT, ROW_PICTURE_AIR, ROW_PICTURE_SIZE, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
@@ -36,7 +36,21 @@ const TOGGLE_KNOB_TRAVEL: f32 = 4.5;
 const PAIR_PITCH: f32 = 76.0;
 const PAIR_NAME_TO_PILL: f32 = 32.0;
 
+/// Width of a focused control's outline in points
+const FOCUS_OUTLINE_WIDTH: f32 = 2.0;
+
 impl PropertySheet<'_> {
+    pub(super) fn paint_control_focus(&self, response: &Response) {
+        if response.has_focus() {
+            self.ui.painter().rect_stroke(
+                response.rect,
+                CornerRadius::same(CONTROL_RADIUS),
+                Stroke::new(FOCUS_OUTLINE_WIDTH, self.tokens.text_strong),
+                StrokeKind::Inside,
+            );
+        }
+    }
+
     /// Two to four short choices as a boxed switch, or a dropdown when one doesn't fit; returns the picked index
     pub(crate) fn switch(&mut self, label: &str, options: &[&str], selected: usize) -> Option<usize> {
         self.switch_tinted(label, options, selected, &[])
@@ -96,6 +110,8 @@ impl PropertySheet<'_> {
             } else if response.hovered() {
                 painter.rect_filled(rect.shrink(SEGMENT_INSET), CornerRadius::same(CONTROL_RADIUS), tokens.row_hover);
             }
+
+            self.paint_control_focus(&response);
             let runs = tints(index);
             let tint = runs.first().copied().unwrap_or(tokens.text);
             let (font, color) = if on { (semibold(SMALL_TEXT_SIZE), tint) } else { (FontId::proportional(SMALL_TEXT_SIZE), tokens.text_dim) };
@@ -150,7 +166,9 @@ impl PropertySheet<'_> {
         if response.clicked() {
             *on = !*on;
         }
+
         response.widget_info(|| WidgetInfo::selected(Role::CheckBox, true, *on, label));
+        self.paint_control_focus(&response);
         response.clicked()
     }
 
@@ -165,14 +183,16 @@ impl PropertySheet<'_> {
             let hit = Rect::from_min_max(pos2(x, control.top()), pos2(pill.x + PILL_SIZE.x / 2.0, control.bottom()));
             let id = self.next_id();
             let response = self.ui.interact(hit, id, Sense::click());
-            response.widget_info(|| WidgetInfo::selected(Role::CheckBox, true, *state, format!("{label} {name}")));
             if response.clicked() {
                 *state = !*state;
                 clicked = Some(index);
             }
+
+            response.widget_info(|| WidgetInfo::selected(Role::CheckBox, true, *state, format!("{label} {name}")));
             let tokens = self.tokens;
             self.ui.painter().text(pos2(x, center_y), Align2::LEFT_CENTER, name, font.clone(), if *state { tokens.text } else { tokens.text_dim });
             self.pill(pill, *state, true);
+            self.paint_control_focus(&response);
         }
         clicked
     }

@@ -30,11 +30,13 @@ const SPAN_SLIDER: usize = 1;
 pub(crate) fn symmetry_section(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, projection: &Projection, sampling: Sampling, base: &Value) {
     let symmetry = sampling.symmetry;
     let run = |app: &mut TextureCraftApp, fields: Value| run_projection(app, base, fields);
+
     if !projection.takes_symmetry() {
         let reason = match projection {
             Projection::UvTile => tr("Not available with Fill (Match per UV Tile)"),
             _ => tr("Not available with UV projection"),
         };
+
         sheet.section_unavailable(tr("Symmetry"), reason);
         return;
     }
@@ -51,10 +53,12 @@ pub(crate) fn symmetry_section(app: &mut TextureCraftApp, sheet: &mut PropertySh
     if let Some(kind) = picked {
         run(app, json!({"symmetryType": kind.id()}));
     }
+
     let axis = symmetry.axis_index();
     if let Some(picked) = sheet.switch_tinted(tr("Axis"), &AXIS_NAMES, axis, &AXIS_COLORS) {
         run(app, json!({"symmetryAxis": picked}));
     }
+
     if symmetry.kind == SymmetryKind::Radial {
         radial_rows(app, sheet, &symmetry, base);
     }
@@ -86,10 +90,12 @@ fn radial_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, symmetr
     let picture = |painter: &Painter, rect: Rect| ring_picture(painter, rect, symmetry, axis_color, &tokens);
     let count = symmetry.copies();
     let (mut count_value, mut span_value) = (count as f32, symmetry.span);
+
     let mut sliders = [
         StackSlider { label: tr("Count"), value: &mut count_value, range: COUNT_TRACK, typed: COUNT_TYPED, decimals: 0, suffix: "" },
         StackSlider { label: tr("Angle span"), value: &mut span_value, range: FillSymmetry::SPANS, typed: FillSymmetry::SPANS, decimals: 0, suffix: "°" },
     ];
+
     let edited = sheet.picture_sliders(&picture, &mut sliders);
     if let Some((SPAN_SLIDER, merge)) = edited {
         run_projection(app, base, json!({"angleSpan": span_value, "merge": merge}));

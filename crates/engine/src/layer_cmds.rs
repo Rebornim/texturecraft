@@ -13,6 +13,10 @@ use crate::commands::{
 use crate::layer_selection::{batch_param, ids_json};
 use crate::{EngineError, Result, Session, cmd, session::StackTarget};
 
+mod fill_target;
+
+pub(crate) use fill_target::FillTarget;
+
 /// One full turn, in degrees (the brush's, so every angle wraps on the same turn)
 pub(crate) use texturecraft_paint::FULL_TURN_DEGREES;
 

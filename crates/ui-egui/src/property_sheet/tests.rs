@@ -177,6 +177,7 @@ fn dropdown_list_hangs_from_its_button_at_its_width_and_picks() {
     let at = harness.get_by_label("Nearest").rect().center();
     click_at(&mut harness, at);
     harness.run_steps(2);
+
     assert_eq!(harness.state().filtering, Filtering::Nearest);
 }
 
@@ -206,6 +207,7 @@ fn a_cut_unavailable_reason_reads_whole_in_its_tooltip() {
 
     harness.hover_at(reason.center());
     harness.run_steps(TOOLTIP_WAIT_FRAMES);
+
     assert!(harness.get_all_by_label(REASON).count() > 1, "its tooltip reads it whole");
 }
 

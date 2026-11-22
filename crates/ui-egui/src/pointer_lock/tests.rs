@@ -44,11 +44,14 @@ fn a_put_back_pointer_never_reaches_the_edge_and_comes_back_where_the_press_bega
 
     pointer.button(&mut harness, PointerButton::Primary, false, Modifiers::NONE);
     pointer.frame(&mut harness);
+
     assert!(!pointer.hidden, "let go, the pointer shows again");
     assert_eq!(pointer.at, PRESS, "where the press began");
     assert_eq!(harness.ctx.input(|input| input.pointer.latest_pos()), Some(PRESS), "egui sees it there too");
+
     let moved = *harness.state();
     pointer.moves(&mut harness, vec2(30.0, 0.0), Modifiers::NONE);
+
     assert_eq!(pointer.at, PRESS + vec2(30.0, 0.0), "a free pointer moves again");
     assert_eq!(*harness.state(), moved, "and drags nothing");
 }
@@ -61,11 +64,13 @@ fn a_folded_put_back_counts_every_move_from_the_press() {
     pointer.folds = true;
     pointer.button(&mut harness, PointerButton::Primary, true, Modifiers::NONE);
     pointer.drags(&mut harness, vec2(1500.0, -40.0), 30, Modifiers::NONE);
+
     assert!(pointer.hidden && pointer.put_backs >= 30, "hidden, and put back after every move: {pointer:?}");
     assert!((*harness.state() - vec2(1500.0, -40.0)).length() < 0.01, "every move counts: {:?}", harness.state());
 
     pointer.button(&mut harness, PointerButton::Primary, false, Modifiers::NONE);
     pointer.frame(&mut harness);
+
     assert!(!pointer.hidden && pointer.at == PRESS, "let go, it shows again where the press began: {pointer:?}");
 }
 
@@ -78,6 +83,7 @@ fn a_locked_pointer_reads_raw_motion_and_is_let_go_where_the_press_began() {
 
     pointer.button(&mut harness, PointerButton::Primary, false, Modifiers::NONE);
     pointer.frame(&mut harness);
+
     assert!(!pointer.locked && !pointer.hidden, "let go, the pointer is free and shows");
     assert_eq!(harness.ctx.input(|input| input.pointer.latest_pos()), Some(PRESS), "egui sees it where the press began");
 }
@@ -88,6 +94,7 @@ fn a_browser_pointer_is_not_held() {
     let mut pointer = SystemPointer::at(&mut harness, PRESS);
     pointer.button(&mut harness, PointerButton::Primary, true, Modifiers::NONE);
     pointer.drags(&mut harness, vec2(100.0, 0.0), 10, Modifiers::NONE);
+
     assert!(!pointer.hidden && pointer.put_backs == 0, "the pointer moves and shows");
     assert_eq!(*harness.state(), vec2(100.0, 0.0), "the drag reads it as it moves");
 }
@@ -103,9 +110,12 @@ fn a_number_field_scrubs_past_the_edge_with_the_pointer_held() {
     pointer.button(&mut harness, PointerButton::Primary, true, Modifiers::NONE);
     let window = harness.ctx.content_rect().width();
     pointer.drags(&mut harness, vec2(2.0 * window, 0.0), 40, Modifiers::NONE);
+
     assert!(pointer.hidden && pointer.at.distance(press) < 1.0, "the pointer is hidden and kept on the field: {pointer:?}");
+
     pointer.button(&mut harness, PointerButton::Primary, false, Modifiers::NONE);
     pointer.frame(&mut harness);
+
     assert!(!pointer.hidden && pointer.at == press, "let go, it shows again on the field: {pointer:?}");
 
     let texturecraft_engine::core::Projection::Triplanar { offset, .. } = crate::frame_gizmo::tests::projection(&harness, layer) else {

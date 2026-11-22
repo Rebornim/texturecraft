@@ -51,6 +51,7 @@ pub fn at_defaults(projection: &Projection, sampling: Sampling) -> bool {
 fn reset_projection(s: &mut Session, p: &Value) -> Result<Value> {
     let target = fill_target(s, p, "layer.fill.resetProjection")?;
     let (projection, sampling) = placement_mut(s, target)?;
+
     if at_defaults(projection, *sampling) {
         return Ok(Value::Null);
     }
@@ -61,6 +62,7 @@ fn reset_projection(s: &mut Session, p: &Value) -> Result<Value> {
         *sampling = reset_sampling(*sampling);
         Ok(())
     })?;
+
     Ok(Value::Null)
 }
 
@@ -84,6 +86,7 @@ mod tests {
             flip: [false; 2],
         };
         let mut kinds: Vec<Projection> = UNFRAMED_PROJECTION_IDS.iter().filter_map(|id| new_unframed_projection(id)).collect();
+
         assert_eq!(kinds.len(), UNFRAMED_PROJECTION_IDS.len(), "every listed id makes a projection");
 
         kinds.extend([Projection::warp(frame), Projection::decal(frame)]);
@@ -94,7 +97,9 @@ mod tests {
                 }
                 other => other,
             };
+
             let reset = reset_projection_of(&turned);
+
             assert_eq!(std::mem::discriminant(&reset), std::mem::discriminant(&kind), "{kind:?}");
             assert_eq!(reset.frame(), kind.frame(), "the frame stays where it is placed");
         }

@@ -323,17 +323,21 @@ mod tests {
         let mut pointer = press_the_button(&mut harness);
         let from = pointer.at;
         assert_eq!(harness.state().moving_on_model, Some(MoveOnModel::layer(layer)), "a press starts the hold");
+
         let moved = vec2(-300.0, -20.0);
         pointer.drags(&mut harness, moved, 30, Modifiers::NONE);
         let after = RoundGizmo::of(harness.state(), rect).unwrap();
+
         assert!((after.center - (before.center + moved)).length() < 2.0, "the projector follows the mouse: {:?} -> {:?}", before.center, after.center);
         assert!(pointer.hidden, "the pointer hides while held");
         assert!(pointer.at.distance(from) < 1.0, "and stays on the pad, so no screen edge stops the drag: {:?}", pointer.at);
+
         let slid = projection(&harness, layer);
         assert_ne!(projector_offset(&slid), [0.0; 3], "the projector itself moved: {slid:?}");
         assert_eq!(uv_of(&slid), UvTransform::default(), "not only the image inside it");
 
         let_go(&mut harness, &mut pointer);
+
         assert_eq!(harness.state().moving_on_model, None, "letting go ends it");
         assert!(!pointer.hidden && pointer.at == from, "the pointer shows again where the press began: {:?}", pointer.at);
         assert_eq!(harness.state().session.history_labels().len(), steps + 1, "one undo step per hold");
@@ -342,6 +346,7 @@ mod tests {
         // The 3D view has its drags back: a drag on the model off the projector's handles moves nothing
         let off = on_the_model_off_the_handles(&harness);
         drag(&mut harness, off, off + vec2(60.0, 0.0), Modifiers::NONE);
+
         assert_eq!(projection(&harness, layer), slid, "no mode is left on");
     }
 
@@ -363,6 +368,7 @@ mod tests {
 
         let mut pointer = press_the_button(&mut harness);
         assert_eq!(harness.state().moving_on_model, Some(MoveOnModel { layer, effect: Some(LayerId(effect)) }), "a press starts the hold");
+
         pointer.drags(&mut harness, vec2(-60.0, 0.0), 10, Modifiers::NONE);
         let_go(&mut harness, &mut pointer);
 
@@ -379,6 +385,7 @@ mod tests {
         let steps = harness.state().session.history_labels().len();
         let mut pointer = press_the_button(&mut harness);
         pointer.drags(&mut harness, vec2(-60.0, 0.0), 10, Modifiers::NONE);
+
         assert_eq!(harness.state().moving_on_model, Some(MoveOnModel::layer(layer)), "the hold is under way");
 
         harness.input_mut().events.push(egui::Event::WindowFocused(false));
@@ -389,6 +396,7 @@ mod tests {
         assert_eq!(harness.state().session.history_labels().len(), steps + 1, "one undo step, as letting go makes");
 
         pointer.drags(&mut harness, vec2(-60.0, 0.0), 10, Modifiers::NONE);
+
         assert_eq!(harness.state().moving_on_model, None, "the button still down in egui starts no new hold");
         assert_eq!(projection(&harness, layer), left, "moves after it leave the projection alone");
     }
@@ -403,10 +411,12 @@ mod tests {
             harness.run_steps(2);
             let mut pointer = press_the_button(&mut harness);
             pointer.drags(&mut harness, vec2(-60.0, 0.0), 10, Modifiers::NONE);
+
             assert_eq!(harness.state().moving_on_model, Some(MoveOnModel::layer(layer)), "{layout:?}: the hold is under way");
 
             harness.state_mut().run("layer.remove", json!({"layer": layer.0})).unwrap();
             pointer.frame(&mut harness);
+
             assert_eq!(harness.state().moving_on_model, None, "{layout:?}: the hold ended with its fill");
             assert!(!pointer.hidden, "{layout:?}: the pointer shows again");
         }
@@ -419,13 +429,19 @@ mod tests {
         let (mut harness, layer) = fill_app("triplanar");
         let pad = harness.get_by_label("Move on model").rect();
         assert!((pad.width() - pad.height()).abs() < 1.0 && pad.width() > 60.0, "Move on model is the preview square, no row of its own: {pad:?}");
+
         let before = projection(&harness, layer);
         let mut pointer = SystemPointer::at(&mut harness, pad.left_top() + vec2(4.0, 4.0));
         pointer.button(&mut harness, PointerButton::Primary, true, Modifiers::NONE);
+
         assert_eq!(harness.state().moving_on_model, Some(MoveOnModel::layer(layer)), "a press at its corner starts the hold");
+
         pointer.drags(&mut harness, vec2(40.0, 0.0), 10, Modifiers::NONE);
+
         assert!(pointer.hidden, "the pointer is held");
+
         let_go(&mut harness, &mut pointer);
+
         assert_ne!(projection(&harness, layer), before, "the drag moved the projection");
         assert_eq!(harness.state().moving_on_model, None);
     }
@@ -454,6 +470,7 @@ mod tests {
         let turned = projection(&harness, layer);
         assert!(uv_of(&turned).rotation < shifted.rotation, "the right button turns it: {shifted:?} -> {turned:?}");
         assert_eq!(projector_offset(&turned), projector_offset(&slid), "without sliding");
+
         pointer.button(&mut harness, PointerButton::Secondary, false, Modifiers::NONE);
 
         wheel(&mut harness, &mut pointer);
@@ -463,10 +480,13 @@ mod tests {
         assert!(harness.state().properties_popup.is_none(), "the right click opened no Properties popup");
 
         let_go(&mut harness, &mut pointer);
+
         assert_eq!(harness.state().session.history_labels().len(), steps + 1, "the whole hold is one undo step");
+
         let back = pointer.at;
         pointer.moves(&mut harness, over_view - back, Modifiers::NONE);
         wheel(&mut harness, &mut pointer);
+
         assert_ne!(harness.state().session.camera, camera, "let go, the wheel zooms the camera");
         assert_eq!(uv_of(&projection(&harness, layer)), scaled, "and leaves the projection alone");
     }
@@ -483,13 +503,17 @@ mod tests {
 
         let mut pointer = press_the_button(&mut harness);
         pointer.drags(&mut harness, vec2(0.0, -40.0), 10, Modifiers::SHIFT);
+
         assert_eq!(projection(&harness, layer), turned, "an up and down turn changes nothing");
+
         pointer.drags(&mut harness, vec2(0.0, -40.0), 10, Modifiers::NONE);
         let_go(&mut harness, &mut pointer);
+
         assert_ne!(projection(&harness, layer), turned, "the slide moved the frame");
         assert_eq!(harness.state().session.history_labels().len(), steps + 1, "the hold made its own undo step");
 
         harness.state_mut().session.undo().unwrap();
+
         assert_eq!(projection(&harness, layer), turned, "undo takes back the hold only");
     }
 
@@ -502,9 +526,11 @@ mod tests {
         let mut pointer = press_the_button(&mut harness);
         let from = pointer.at;
         wheel(&mut harness, &mut pointer);
+
         assert_eq!(harness.get_by_label("Move on model").rect().center(), from, "a wheel step over the panel while held scales, it does not scroll the panel");
         let Projection::Uv { scale, .. } = projection(&harness, layer) else { panic!("still UV") };
         assert!(scale[0] < 1.0, "the wheel up makes the image bigger: {scale:?}");
+
         let far = vec2(-3.0 * from.x, 0.0);
         pointer.drags(&mut harness, far, 60, Modifiers::NONE);
         let_go(&mut harness, &mut pointer);

@@ -86,17 +86,6 @@ fn open_picker(ctx: &egui::Context, state_id: Id, state: &mut PickerState, linea
 }
 
 impl PropertySheet<'_> {
-    /// Opens the picker of the colour bar `bar` (its [`ColorPick::id`]) on `linear` from the next frame, as a click on the bar does
-    pub(crate) fn open_color_picker(&self, bar: Id, linear: [f32; 3]) {
-        let ctx = self.ui.ctx();
-        let state_id = bar.with("picker");
-        let mut state = picker_state(ctx, state_id);
-        if !state.open {
-            open_picker(ctx, state_id, &mut state, linear);
-            ctx.memory_mut(|memory| memory.caches.cache::<VisiblePickers>().set(state_id, state));
-        }
-    }
-
     /// A uniform colour (linear): a bar across the card that opens the picker (with the project's `swatches`), and the eyedropper; `eyedropping` is the bar whose pick waits for its click
     pub(crate) fn color_bar(&mut self, label: &str, linear: [f32; 3], eyedropping: Option<Id>, swatches: &[[f32; 3]]) -> ColorPick {
         let center_y = self.take(super::ROW_HEIGHT).center().y;

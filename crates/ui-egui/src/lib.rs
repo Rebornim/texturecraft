@@ -7,7 +7,6 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-mod anchor_properties;
 mod angle_dial;
 mod ask;
 mod bake_job;
@@ -19,8 +18,6 @@ mod bake_scene;
 mod color_management;
 mod color_picker;
 mod color_selection_editor;
-mod compare_properties;
-mod compare_settings;
 pub mod control;
 mod decal_drop;
 mod display_settings;
@@ -28,7 +25,6 @@ pub mod dock;
 pub mod docking;
 mod drawn_icon;
 mod environment_picker;
-mod exact_entry_open;
 mod export_panel;
 pub mod export_templates;
 mod export_window;
@@ -38,38 +34,28 @@ mod fill_material_panel;
 mod fill_panel;
 mod fill_pictures;
 mod fill_symmetry_panel;
-mod filter_properties;
 mod filter_slot;
-mod filter_transform_rows;
-mod folder_properties;
 pub mod fonts;
 mod frame_gizmo;
 mod generator_panel;
 pub mod gpu;
 mod gray_slider;
 mod grid_tile;
-mod histogram_cache;
 pub mod i18n;
 pub mod id_color_pick;
 #[cfg(not(target_arch = "wasm32"))]
 mod import_resources;
 mod inactive_set_hint;
-mod instance_properties;
 pub mod keymap;
 pub mod layer_panel;
-mod layer_toolbar;
 mod layout_dialog;
-mod levels_display;
 mod levels_editor;
 mod levels_handle;
 mod levels_properties;
 mod line_snap;
 mod list_action;
 pub mod log_panel;
-mod mask_fill_panel;
-mod mask_paint_panel;
 mod mask_preview_image;
-mod mask_source_choice;
 mod material_orb;
 mod material_preview_image;
 pub mod menus;
@@ -115,7 +101,6 @@ pub mod properties_popup;
 mod property_sheet;
 mod query_field;
 mod rail_popup;
-mod reference;
 pub mod render_mode;
 mod resolution_band;
 mod resource_panel;
@@ -1076,7 +1061,7 @@ impl eframe::App for TextureCraftApp {
         self.poll_link_cooks(ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.poll_link_imports(ctx);
-        self.thumbs.sync_project_previews(&self.session);
+        self.thumbs.sync_images(&self.session.images, self.session.revision);
 
         // The library shelf rescans when the window comes back (MaterialCraft may have sent a material)
         let focused = ctx.input(|input| input.viewport().focused).unwrap_or(true);

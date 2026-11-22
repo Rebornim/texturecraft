@@ -257,10 +257,10 @@ fn panic_hunt() {
         if spec.id == "project.sample" {
             continue; // slow (bakes); covered elsewhere
         }
-
         for p in &hostile {
             let mut s = session();
-            // Match the 256px fixture so empty bake options cannot launch a 2048px bake
+            // Match the 256px fixture: otherwise empty/irrelevant bake.run params perform
+            // repeated 2048px default bakes. Keep every input, ray count and fresh session.
             for texture_set in &mut s.doc.project.texture_sets {
                 texture_set.bake.common.resolution = texturecraft_engine::core::BakeResolution::R256;
             }
@@ -268,8 +268,6 @@ fn panic_hunt() {
             s.update();
         }
     }
-
-    hunt_filters(&hostile);
 }
 
 /// A 4 × 4 gray PNG, the image the hunted decals project
@@ -279,7 +277,7 @@ fn gray_png() -> Vec<u8> {
     out
 }
 
-/// Frame edits, frame and Fill section resets and Transform filter settings on the fills they act on (a planar, a warp, a decal mask and a Transform filter) meet hostile values without panicking; a refused edit changes nothing and adds no undo step
+/// Frame edits and frame and Fill section resets on the fills they act on (a planar, a warp and a decal mask) meet hostile values without panicking; a refused edit changes nothing and adds no undo step
 #[test]
 fn panic_hunt_frames_and_transforms() {
     let mut s = session();
@@ -290,7 +288,6 @@ fn panic_hunt_frames_and_transforms() {
     execute(&mut s, "layer.fill.projection", &json!({"layer": warp, "projection": "warp"})).unwrap();
     let decal = execute(&mut s, "layer.add.decal", &json!({"image": image, "channel": "mask", "position": [0, 0, 1], "normal": [0, 0, 1]})).unwrap();
     let mask_effect = decal["maskEffect"].as_u64().unwrap();
-    let transform = execute(&mut s, "effect.add.filter", &json!({"filter": "transform", "target": "content"})).unwrap()["effect"].as_u64().unwrap();
     s.update();
 
     let hostile_values =
@@ -313,15 +310,6 @@ fn panic_hunt_frames_and_transforms() {
             s.update();
         }
     }
-
-    let transform_keys = ["repeatMode", "flipMode", "scaling", "offset", "rotation", "tileSafeRotation"];
-    for key in transform_keys {
-        for value in &hostile_values {
-            let mut params = json!({"effect": transform});
-            params[key] = value.clone();
-            hunt_refused_changes_nothing(&mut s, "effect.set", &params);
-        }
-    }
 }
 
 /// Run `command` with `params` and render; refused, it must leave the project and the undo history as they were
@@ -331,166 +319,6 @@ fn hunt_refused_changes_nothing(s: &mut Session, command: &str, params: &Value) 
         assert!(s.doc.project == before && s.history_labels().len() == steps, "a refused {command} {params} changes nothing");
     }
     s.update();
-}
-
-/// The number parameters library filters read, all set at once to one hostile value
-const FILTER_NUMBER_KEYS: &[&str] = &[
-    "radius",
-    "intensity",
-    "amount",
-    "level",
-    "hue",
-    "saturation",
-    "lightness",
-    "contrast",
-    "luminosity",
-    "levels",
-    "min",
-    "max",
-    "position",
-    "range",
-    "offset",
-    "multiply",
-    "scale",
-    "angle",
-    "width",
-    "distance",
-    "smoothing",
-    "size",
-    "spread",
-    "opacity",
-    "blur",
-    "balance",
-    "quality",
-    "sourceBlur",
-    "sourceBalance",
-    "sourceContrast",
-    "sourceTiling",
-    "tolerance",
-    "softness",
-    "light",
-    "ambient",
-    "occlusion",
-    "azimuth",
-    "elevation",
-    "horizontalRotation",
-    "verticalRotation",
-    "exposure",
-    "heightIntensity",
-    "ambientOcclusion",
-    "specularOcclusion",
-    "pixelsAmount",
-    "curveOffset",
-    "curveShape",
-    "maskThreshold",
-    "distanceMapMultiplier",
-    "threshold",
-    "axisXOffset",
-    "axisYOffset",
-    "surfaceSize",
-    "heightDepth",
-    "normalIntensity",
-    "chroma",
-    "luma",
-    "red",
-    "green",
-    "blue",
-    "alpha",
-    "tensorSmoothness",
-    "anisotropy",
-    "sharpness",
-    "smoothness",
-    "rotation",
-    "scaling",
-    "diffuseCavity",
-    "specularAo",
-    "specularCavity",
-    "cavitySmoothness",
-    "edgesIntensity",
-    "edgesSmoothness",
-    "dielectricReflectance",
-    "heightToNormal",
-];
-
-/// The objects library filters read numbers from (Baked Lighting Stylized's two lights)
-const FILTER_LIGHT_KEYS: &[&str] = &["light1", "light2"];
-
-/// Every filter number parameter set to `number`, with seeds, switches and choices at their ends
-fn filter_extreme(number: f64) -> Value {
-    let mut params = json!({"seed": u64::MAX, "wrap": true, "applyToAlpha": true, "invert": true, "directions": 4, "divider": 1000});
-    for key in FILTER_NUMBER_KEYS {
-        params[*key] = json!(number);
-    }
-    for key in FILTER_LIGHT_KEYS {
-        params[*key] = json!({"azimuth": number, "elevation": number, "intensity": number});
-    }
-    params
-}
-
-/// Every library filter added on the content and on a mask with `hostile` and extreme parameters, edited to extremes, and rendered; then swapped to the same way
-fn hunt_filters(hostile: &[Value]) {
-    let extremes: Vec<Value> = [3.0e38, -3.0e38, 0.0].into_iter().map(filter_extreme).collect();
-
-    for def in texturecraft_engine::filter_lib::FILTERS {
-        let mut s = session();
-        execute(&mut s, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1], "roughness": 0.4})).unwrap();
-        for target in ["content", "mask"] {
-            if target == "mask" {
-                execute(&mut s, "mask.add.black", &Value::Null).unwrap();
-            }
-
-            for given in hostile.iter().chain(&extremes) {
-                let mut params = if given.is_object() { given.clone() } else { json!({}) };
-                params["filter"] = json!(def.id);
-                params["target"] = json!(target);
-                let added = execute(&mut s, "effect.add.filter", &params).ok().and_then(|reply| reply["effect"].as_u64());
-                s.update();
-
-                // Extreme values are clamped, not refused, so every filter meets them on the content
-                if target == "content" && extremes.contains(given) {
-                    assert!(added.is_some(), "{} takes extreme values: {params}", def.id);
-                }
-                if let Some(effect) = added {
-                    for edit in &extremes {
-                        let mut edit = edit.clone();
-                        edit["effect"] = json!(effect);
-                        // Each accepted value reaches the compositor before the next edit replaces it
-                        if execute(&mut s, "effect.set", &edit).is_ok() {
-                            s.update();
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    hunt_filter_swaps(hostile, &extremes);
-}
-
-/// An empty filter effect on the content and on a mask swapped through `effect.set` to every library filter with each of `hostile` and `extremes`, and rendered
-fn hunt_filter_swaps(hostile: &[Value], extremes: &[Value]) {
-    let mut s = session();
-    execute(&mut s, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1], "roughness": 0.4})).unwrap();
-    for target in ["content", "mask"] {
-        if target == "mask" {
-            execute(&mut s, "mask.add.black", &Value::Null).unwrap();
-        }
-        let added = execute(&mut s, "effect.add.filter", &json!({"filter": "none", "target": target})).unwrap();
-        let effect = added["effect"].as_u64().unwrap();
-
-        for def in texturecraft_engine::filter_lib::FILTERS {
-            for given in hostile.iter().chain(extremes) {
-                let mut params = if given.is_object() { given.clone() } else { json!({}) };
-                params["effect"] = json!(effect);
-                params["filter"] = json!(def.id);
-
-                // Emptied first, so each swap builds the filter anew rather than editing it in place
-                execute(&mut s, "effect.set", &json!({"effect": effect, "filter": "none"})).unwrap();
-                let _ = execute(&mut s, "effect.set", &params);
-                s.update();
-            }
-        }
-    }
 }
 
 /// A colour param is `[r, g, b]` in linear 0..1 or `"#rrggbb"` in sRGB, and the same digits differ

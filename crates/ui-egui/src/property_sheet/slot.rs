@@ -75,13 +75,6 @@ impl PropertySheet<'_> {
         self.slot_row(thumbnail, name, source, on, clear, reset.then_some(true))
     }
 
-    /// [`Self::slot`] whose ⟲ always shows beside the ×, faint and inert while what it restores is at its defaults (`changed` false)
-    pub(crate) fn slot_restorable(&mut self, thumbnail: &dyn Fn(&Painter, Rect), name: &str, source: &str, changed: bool) -> SlotResponse {
-        self.open_card();
-        self.space(SLOT_CARD_TOP);
-        self.slot_row(thumbnail, name, source, None, true, Some(changed))
-    }
-
     /// [`Self::slot`]'s row inside the card open now (an input a mode adds, under that mode), not a card of its own
     pub(crate) fn slot_in_card(&mut self, thumbnail: &dyn Fn(&Painter, Rect), name: &str, source: &str, clear: bool) -> SlotResponse {
         self.slot_row(thumbnail, name, source, None, clear, None)
@@ -282,9 +275,17 @@ impl PropertySheet<'_> {
         dice_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr("Random")));
 
         if dice_response.clicked() {
-            *seed = texturecraft_engine::folder_cmds::next_seed(*seed);
+            *seed = next_seed(*seed);
             changed = true;
         }
         changed
     }
+}
+
+/// A new seed that looks random but follows from the old one (SplitMix32's mixing step), so tests and replays get the same sequence
+pub(crate) fn next_seed(seed: u32) -> u32 {
+    let mut z = seed.wrapping_add(0x9e37_79b9);
+    z = (z ^ (z >> 16)).wrapping_mul(0x85eb_ca6b);
+    z = (z ^ (z >> 13)).wrapping_mul(0xc2b2_ae35);
+    z ^ (z >> 16)
 }

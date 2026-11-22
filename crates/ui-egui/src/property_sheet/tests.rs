@@ -4,9 +4,9 @@ use egui_kittest::kittest::Queryable as _;
 use egui_phosphor::regular as ic;
 
 use super::number_field::shown_number;
+use super::slot::next_seed;
 use super::{NumberField, PropertySheet};
 use crate::theme::{Accent, Brightness, Tokens};
-use texturecraft_engine::folder_cmds::next_seed;
 
 mod filtering;
 mod gallery;
@@ -99,13 +99,11 @@ fn gallery(ui: &mut egui::Ui, state: &mut Gallery) {
                 }
             }
 
-            if sheet.card("Edges", Some(true)) {
-                sheet.toggle("Wrap", &mut state.wrap);
-                sheet.toggle("Shape Crop", &mut state.crop);
-                sheet.info(DEPTH_CULLING_TIP);
-                sheet.picture_toggle(&swatch(Color32::from_gray(160)), "Depth Culling", &mut state.depth_culling);
-                sheet.picture_toggle(&swatch(Color32::from_gray(100)), "Backface Culling", &mut state.backface_culling);
-            }
+            sheet.toggle("Wrap", &mut state.wrap);
+            sheet.toggle("Shape Crop", &mut state.crop);
+            sheet.info(DEPTH_CULLING_TIP);
+            sheet.picture_toggle(&swatch(Color32::from_gray(160)), "Depth Culling", &mut state.depth_culling);
+            sheet.picture_toggle(&swatch(Color32::from_gray(100)), "Backface Culling", &mut state.backface_culling);
             sheet.slot(&swatch(Color32::from_rgb(0xb0, 0x5a, 0x3a)), "Base color", "Uniform color", Some(&mut state.channel_on), false, false);
             sheet.slider("Value", &mut state.channel_value, 0.0..=1.0, 2);
 
@@ -115,14 +113,8 @@ fn gallery(ui: &mut egui::Ui, state: &mut Gallery) {
             {
                 *on = !*on;
             }
-            let (_, chip) = sheet.slider_with_chip("Intensity", &mut state.intensity, 0.0..=1.0, 2, &format!("÷{}", state.divider), "÷1000");
-            let dividers = ["1", "10", "100", "1000"];
-            if let Some(picked) = sheet.hanging_list(&chip, state.divider, &dividers, &|divider: &str| format!("÷{divider}"), None).0 {
-                state.divider = picked;
-            }
             let band = sheet.band("Parameters", true, None, Some("3"));
             if band.open {
-                sheet.caption("Offset");
                 sheet.signed_slider("Horizontal", &mut state.offset, -1.0..=1.0, 2);
                 if sheet.fold("Attributes", Some("Default"), false) {
                     sheet.button(ic::DOT, "No attributes");
@@ -199,35 +191,6 @@ fn keyboard_focus_is_visible_on_switches_toggles_and_channel_pills() {
     }
 }
 
-#[test]
-fn keyboard_can_remove_an_id_color_without_hovering_the_row() {
-    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut harness = builder(Brightness::MediumDark).build_ui_state(
-        |ui, removed| {
-            ui.set_width(PANEL_WIDTH);
-            PropertySheet::show(ui, "keyboard", |sheet| {
-                if !*removed {
-                    *removed = sheet.id_color_row([10, 20, 30], false, true).remove;
-                }
-            });
-        },
-        false,
-    );
-    harness.run_steps(3);
-
-    for label in ["Pick color R 10 G 20 B 30", "Remove R 10 G 20 B 30"] {
-        harness.key_press(egui::Key::Tab);
-        harness.run_steps(2);
-
-        assert!(harness.get_by_label(label).is_focused(), "{label} receives keyboard focus");
-    }
-    harness.key_press(egui::Key::Space);
-    harness.run_steps(2);
-
-    assert!(*harness.state(), "Space activates the focused Remove button");
-    assert!(harness.query_by_label("Remove R 10 G 20 B 30").is_none());
-}
-
 /// A toggle's pill starts on the controls column, where a dropdown's button starts (it sat 3 px in)
 #[test]
 fn a_toggles_pill_starts_where_a_dropdown_starts() {
@@ -271,40 +234,6 @@ fn culling_rows(ui: &mut egui::Ui, on: &mut [bool; 2]) {
     });
 }
 
-/// A section caption's switch and an action row's toggle over a dropdown
-fn right_end_switches(ui: &mut egui::Ui, mirror: &mut bool) {
-    let panel = Tokens::get(ui.ctx()).panel;
-    egui::Frame::NONE.fill(panel).show(ui, |ui| {
-        ui.set_width(PANEL_WIDTH);
-        PropertySheet::show(ui, "right end", |sheet| {
-            sheet.section_switch("Symmetry", true);
-            sheet.action_row(&[("Reset", true)], "Mirror", mirror);
-            sheet.dropdown("Filtering", Filtering::Nearest, &[Filtering::Nearest], Filtering::name, None);
-        });
-    });
-}
-
-/// A switch at a caption's or a row's right end ends on the right padding, where a dropdown ends (they sat 3 px in)
-#[test]
-fn right_end_switches_end_where_a_dropdown_ends() {
-    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut harness = builder(Brightness::MediumDark).build_ui_state(right_end_switches, false);
-    harness.run_steps(3);
-
-    let dropdown_right = harness.get_by_label("Nearest").rect().right();
-    let pill_rights: Vec<f32> = harness
-        .output()
-        .shapes
-        .iter()
-        .filter_map(|clipped| match &clipped.shape {
-            egui::Shape::Rect(rect) if rect.rect.size() == super::switch_control::PILL_SIZE => Some(rect.rect.right()),
-            _ => None,
-        })
-        .collect();
-
-    assert_eq!(pill_rights, [dropdown_right; 2], "the pills end at {pill_rights:?}, the dropdown at {dropdown_right}");
-}
-
 /// A culling name too long for the label column moves every culling row's picture and switch, so the switches stay one column
 #[test]
 fn culling_rows_keep_their_switches_in_one_column_when_a_name_is_long() {
@@ -315,40 +244,6 @@ fn culling_rows_keep_their_switches_in_one_column_when_a_name_is_long() {
     let long = harness.get_by_label("Backface culling past the column").rect();
 
     assert_eq!(short.right(), long.right(), "both switches end at one x: {short:?} vs {long:?}");
-}
-
-/// Under a section caption, an instance card (`instance` true) or a slot card; records where its thumbnail was painted
-fn card_under_caption(ui: &mut egui::Ui, state: &mut (bool, std::cell::Cell<Option<Rect>>)) {
-    let (instance, thumbnail) = state;
-    let record = |_: &Painter, rect: Rect| thumbnail.set(Some(rect));
-    let panel = Tokens::get(ui.ctx()).panel;
-    egui::Frame::NONE.fill(panel).show(ui, |ui| {
-        ui.set_width(PANEL_WIDTH);
-        PropertySheet::show(ui, "card", |sheet| {
-            sheet.section("Caption", false);
-            if *instance {
-                sheet.source_card(&record, "Layer", "Set", false);
-            } else {
-                sheet.slot_restorable(&record, "Layer", "Set", false);
-            }
-        });
-    });
-}
-
-/// Where the card under a caption paints its thumbnail
-fn thumbnail_under_caption(instance: bool) -> Rect {
-    let mut harness = builder(Brightness::MediumDark).build_ui_state(card_under_caption, (instance, std::cell::Cell::new(None)));
-    harness.run_steps(3);
-    harness.state().1.get().unwrap_or_else(|| panic!("the card (instance: {instance}) paints no thumbnail"))
-}
-
-/// The instance card keeps a card's air under its caption and above its thumbnail, as a slot card does (it sat 6 px higher)
-#[test]
-fn an_instance_card_sits_under_its_caption_as_a_slot_card_does() {
-    let slot = thumbnail_under_caption(false);
-    let instance = thumbnail_under_caption(true);
-
-    assert_eq!(instance.top(), slot.top(), "the thumbnails start at one y: {instance:?} vs {slot:?}");
 }
 
 /// A gray slider in a panel-wide column; records the column's right edge
@@ -642,42 +537,6 @@ fn a_number_field_held_still_then_dragged_starts_an_undo_step_with_its_first_cha
     assert!(merges.iter().skip(1).all(|merge| *merge), "later moves continue it: {merges:?}");
 }
 
-/// A ramp with one marker at `state.0`, recording each marker drag's merge in `state.1`
-fn one_marker_ramp(ui: &mut egui::Ui, state: &mut (f32, Vec<bool>)) {
-    ui.set_width(PANEL_WIDTH);
-    PropertySheet::show(ui, "ramp", |sheet| {
-        if let Some(drag) = sheet.gradient_ramp(&[[1.0, 0.0, 0.0]], &[state.0], &|_| [0.5; 3]) {
-            state.0 = drag.position;
-            state.1.push(drag.merge);
-        }
-    });
-}
-
-/// A marker pressed past the ramp's end changes nothing at first; its first move inward still starts its own undo step
-#[test]
-fn a_gradient_marker_pressed_past_the_ramps_end_starts_an_undo_step_with_its_first_change() {
-    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut harness = builder(Brightness::MediumDark).build_ui_state(one_marker_ramp, (1.0, Vec::new()));
-    harness.run_steps(2);
-    let marker = harness.get_by_label("Color 1").rect();
-    let past_end = marker.right_center() - egui::vec2(1.0, 0.0);
-    harness.drag_at(past_end);
-    harness.run();
-    harness.hover_at(past_end + egui::vec2(20.0, 0.0));
-    harness.run();
-    harness.hover_at(past_end - egui::vec2(40.0, 0.0));
-    harness.run();
-    harness.hover_at(past_end - egui::vec2(60.0, 0.0));
-    harness.run();
-    harness.drop_at(past_end - egui::vec2(60.0, 0.0));
-    harness.run();
-
-    let merges = &harness.state().1;
-    assert!(merges.len() >= 2, "the drag changes the value more than once: {merges:?}");
-    assert_eq!(merges.first(), Some(&false), "the first real change starts an undo step: {merges:?}");
-    assert!(merges.iter().skip(1).all(|merge| *merge), "later changes continue it: {merges:?}");
-}
-
 #[test]
 fn the_label_column_fits_the_widest_short_label_and_long_labels_stack() {
     let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -903,34 +762,6 @@ fn the_pickers_hex_field_ends_on_the_colour_fields_right_edge() {
     let field = harness.get_by_role_and_label(egui::Role::Slider, "Saturation and value").rect();
     let hex = harness.get_by_role_and_label(egui::Role::TextInput, "Hex color").rect();
     assert_eq!(hex.right(), field.right(), "the hex field ends at {}, the colour field at {}", hex.right(), field.right());
-}
-
-/// A comparison's two sources, its operators beside the first
-fn compare_rows(ui: &mut egui::Ui) {
-    let panel = Tokens::get(ui.ctx()).panel;
-    egui::Frame::NONE.fill(panel).show(ui, |ui| {
-        ui.set_width(PANEL_WIDTH);
-        PropertySheet::show(ui, "compare", |sheet| {
-            let names = ["Left source", "Right source", "Other source"];
-            let name = |index: usize| names.get(index).copied().unwrap_or_default().to_owned();
-            sheet.compare_rows((0, 1), &[0, 1, 2], name, [Color32::RED, Color32::BLUE], (&["Min", "Max"], 0));
-        });
-    });
-}
-
-/// A compare source's tagged button shows its value where its open list's options start, a dropdown's value x (it sat 2 px right)
-#[test]
-fn a_compare_sources_value_starts_where_its_lists_options_do() {
-    let mut harness = builder(Brightness::MediumDark).build_ui(compare_rows);
-    harness.run_steps(3);
-    let button = harness.get_by_role_and_label(egui::Role::ComboBox, "Left source").rect();
-
-    click_at(&mut harness, button.center());
-    harness.run_steps(2);
-
-    let button_word = painted_at(&harness, "Left source").into_iter().find(|at| button.contains(*at)).map(|at| at.x);
-    let option_word = painted_at(&harness, "Other source").first().map(|at| at.x);
-    assert!(button_word.is_some() && option_word == button_word, "the option's word at {option_word:?}, the button's at {button_word:?}");
 }
 
 /// A linked Tiling and Offset block over a ramp

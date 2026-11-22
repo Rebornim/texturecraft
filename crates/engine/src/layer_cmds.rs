@@ -3,10 +3,10 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    Backface, BlendMode, Channel, ChannelBlend, ChannelKind, Decal, EffectKind, Fill, FillSymmetry, Filtering, ImageInput, Layer, LayerId, LayerKind,
-    NormalFormat, Procedural, ProceduralKind, Project, Projection, Projector, Sampling, ScaleMode, ShapeCrop, Source, SymmetryKind, UvTransform, UvWrap,
+    Backface, BlendMode, Channel, ChannelBlend, ChannelKind, Decal, EffectKind, Fill, FillSymmetry, Filtering, Layer, LayerId, LayerKind, NormalFormat,
+    Procedural, ProceduralKind, Project, Projection, Projector, Sampling, ScaleMode, ShapeCrop, Source, SymmetryKind, UvTransform, UvWrap,
 };
-use texturecraft_paint::alphas::{self, LibraryAlpha};
+use texturecraft_paint::alphas;
 
 use crate::commands::{
     CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, content_param, f32p, has_layer, layer_param, normal_format_param, strp, u64p,
@@ -34,9 +34,6 @@ const MAX_CORNER_REACH: f32 = 100.0;
 
 /// The largest Projection Depth, in lengths of the frame's longer side
 pub(crate) const MAX_PROJECTION_DEPTH: f32 = 100.0;
-
-/// The `layer.fill.set` keys a one-source grayscale fill (a mask fill or a filter's image input) has no use for
-const GRAY_REFUSED_KEYS: [&str; 4] = ["channel", "enabled", "solo", "normalFormat"];
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -121,7 +118,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill source",
             [],
             None,
-            "{layer? | effect?: content fill effect id | mask fill effect id (one grayscale source: no channel, enabled, solo or normalFormat), channel, color?: ([r,g,b] linear or \"#rrggbb\" sRGB)|value?|procedural?: kind, scale?, seed?, contrast?, balance?, invert?, low?, high? (the same kind keeps what is not given), resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3, tile?: {Tile Generator settings in camelCase, as project.inspect shows them}, tileDefaults?: true (alone, they edit the channel's pattern)|image?|alpha?: library alpha id or name (its picture becomes the image resource alpha_<id>.png), normalFormat?: openGl|directX (the image's normal map convention; alone, it changes the channel's image)|anchor?: anchor effect id, anchorChannel?, colors?: gradient map of a color channel's procedural or anchor, 1 to 16 colors dark to light ([r, g, b] linear or \"#rrggbb\" sRGB; [] removes it; absent keeps it; alone, it changes the channel's source)|gradientMap?: true (turns the color stops on from the channel's current procedural or anchor: a procedural's low, their midpoint and high; an anchor's black, gray and white; stops already there stay), enabled?, solo?: true (this channel on, every other one off)} | {effect: filter effect id, input: image input id (distanceMap, customNoise), value?|procedural?|image?|alpha?|anchor? as a mask fill's source, or clear: true (back to its default gray)}",
+            "{layer? | effect?: content fill effect id, channel, color?: ([r,g,b] linear or \"#rrggbb\" sRGB)|value?|procedural?: kind, scale?, seed?, contrast?, balance?, invert?, low?, high? (the same kind keeps what is not given), resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3, tile?: {Tile Generator settings in camelCase, as project.inspect shows them}, tileDefaults?: true (alone, they edit the channel's pattern)|image?|alpha?: library alpha id or name (its picture becomes the image resource alpha_<id>.png), normalFormat?: openGl|directX (the image's normal map convention; alone, it changes the channel's image)|anchor?: anchor effect id, anchorChannel?, colors?: gradient map of a color channel's procedural or anchor, 1 to 16 colors dark to light ([r, g, b] linear or \"#rrggbb\" sRGB; [] removes it; absent keeps it; alone, it changes the channel's source)|gradientMap?: true (turns the color stops on from the channel's current procedural or anchor: a procedural's low, their midpoint and high; an anchor's black, gray and white; stops already there stay), enabled?, solo?: true (this channel on, every other one off)}",
             has_layer,
             fill_set
         ),
@@ -130,7 +127,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill projection",
             [],
             None,
-            "{layer? | effect?: content or mask fill effect id, projection?: uvTile (Fill (Match per UV Tile))|uv|triplanar|planar|spherical|cylindrical|warp (default: the current one; a new warp's frame sits around the mesh, seen from the front), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections but warp: one number), offset?: [u, v] (uv) | [x, y, z] (3D projections but warp; a warp is placed by its frame with layer.decal.set, and refuses either), projectorRotation?: [x, y, z] degrees, projectorScale?: number | [x, y, z] (3D projection settings; a negative axis mirrors it), shapeCrop?: cropped|extendsOutside (3D projections), backfaceCulling?: bool, backfaceAngle?: degrees, backfaceHardness?: 0..1 (planar, cylindrical), depthCulling?: bool, depthCullingHardness?: 0..1 (planar, warp; surfaces hidden from the projector behind others get none of it; new planar and warp projections start with it on at 0.75), sharpness?: 1..64 (triplanar), warpCorners?: [[x, y] × 4] (warp: top left, top right, bottom right, bottom left, across and up in frame sizes from its centre; unpulled = ±0.5), projectionDepth?: lengths of the frame's longer side it reaches in front of and behind it when cropped (warp), angle?: 1..360 degrees one repeat spans (cylindrical), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar), symmetry?: bool (copies of a 3D projection; UV projections have none), symmetryType?: mirror|radial, symmetryAxis?: 0|1|2 or x|y|z (the mirror plane's normal or the turning axis), flipCopy?: [u, v] (turn the copies' images over), axisPosition?: number | [x, y, z] (where the plane or axis passes, -1..1 mesh radii from the mesh's centre), symmetryCount?: 2..64 (radial copies, the original included), angleSpan?: 1..360 degrees (radial copies spread over it; 360 spaces them evenly)} — what is not given keeps its value",
+            "{layer? | effect?: content fill effect id, projection?: uvTile (Fill (Match per UV Tile))|uv|triplanar|planar|spherical|cylindrical|warp (default: the current one; a new warp's frame sits around the mesh, seen from the front), tiling?: number | [u, v] (UV transformations, every projection; uv: same as scale), rotation?: degrees (UV transformations), uvOffset?: [u, v] (UV transformations of a 3D projection), scale?: number | [u, v] (uv: the tiling; 3D projections but warp: one number), offset?: [u, v] (uv) | [x, y, z] (3D projections but warp; a warp is placed by its frame with layer.decal.set, and refuses either), projectorRotation?: [x, y, z] degrees, projectorScale?: number | [x, y, z] (3D projection settings; a negative axis mirrors it), shapeCrop?: cropped|extendsOutside (3D projections), backfaceCulling?: bool, backfaceAngle?: degrees, backfaceHardness?: 0..1 (planar, cylindrical), depthCulling?: bool, depthCullingHardness?: 0..1 (planar, warp; surfaces hidden from the projector behind others get none of it; new planar and warp projections start with it on at 0.75), sharpness?: 1..64 (triplanar), warpCorners?: [[x, y] × 4] (warp: top left, top right, bottom right, bottom left, across and up in frame sizes from its centre; unpulled = ±0.5), projectionDepth?: lengths of the frame's longer side it reaches in front of and behind it when cropped (warp), angle?: 1..360 degrees one repeat spans (cylindrical), axis?: 0|1|2 (planar, cylindrical), filtering?: bilinearHq|bilinearSharp|nearest (how images are read), wrap?: repeat|repeatHorizontally|repeatVertically|none (past the 0..1 tile; not tri-planar), symmetry?: bool (copies of a 3D projection; UV projections have none), symmetryType?: mirror|radial, symmetryAxis?: 0|1|2 or x|y|z (the mirror plane's normal or the turning axis), flipCopy?: [u, v] (turn the copies' images over), axisPosition?: number | [x, y, z] (where the plane or axis passes, -1..1 mesh radii from the mesh's centre), symmetryCount?: 2..64 (radial copies, the original included), angleSpan?: 1..360 degrees (radial copies spread over it; 360 spaces them evenly)} — what is not given keeps its value",
             has_layer,
             fill_projection
         ),
@@ -194,8 +191,11 @@ fn add_group(s: &mut Session, p: &Value) -> Result<Value> {
     let name = strp(p, "name").map(str::to_string).unwrap_or_else(|| s.doc.project.next_layer_name(ts, "Folder"));
     let id = s.edit("Add folder", |s| {
         let id = s.doc.project.alloc_id();
-        let channels = channels_of(s);
-        insert_selected(s, new_folder(id, name, &channels))
+        let mut l = Layer::new(id, name, LayerKind::Group { children: Vec::new(), collapsed: false }, &channels_of(s));
+        for b in l.channels.values_mut() {
+            b.mode = BlendMode::Passthrough;
+        }
+        insert_selected(s, l)
     })?;
     Ok(json!({ "layer": id.0 }))
 }
@@ -258,28 +258,23 @@ fn duplicate(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let ids = batch_param(s, "layer.group", p, true)?;
-    let folder = s.edit("Group layers", |s| {
+    let g = s.edit("Group layers", |s| {
         // The folder takes the top layer's place and parent; the others follow it in, in stack order
         let id = ids.first().copied().ok_or_else(|| bad("layer.group", "no layer to group"))?;
         let (ts, _, _) = s.doc.project.locate(id).ok_or(EngineError::Other("layer not in a stack".into()))?;
-        let folder = s.doc.project.alloc_id();
+        let gid = s.doc.project.alloc_id();
         let name = s.doc.project.next_layer_name(ts, "Folder");
         let channels = s.doc.project.texture_set(ts)?.channel_list();
-        s.doc.project.insert_layer(ts, new_folder(folder, name, &channels), Some(id), false)?;
-        move_stacked(&mut s.doc.project, &ids, Some(folder), true)?;
-        s.select_one(ts, folder);
-        Ok(folder)
+        let mut gl = Layer::new(gid, name, LayerKind::Group { children: Vec::new(), collapsed: false }, &channels);
+        for b in gl.channels.values_mut() {
+            b.mode = BlendMode::Passthrough;
+        }
+        s.doc.project.insert_layer(ts, gl, Some(id), false)?;
+        move_stacked(&mut s.doc.project, &ids, Some(gid), true)?;
+        s.select_one(ts, gid);
+        Ok(gid)
     })?;
-    Ok(json!({ "layer": folder.0 }))
-}
-
-/// An empty folder `id` whose channels pass the blending of its contents through
-fn new_folder(id: LayerId, name: String, channels: &[Channel]) -> Layer {
-    let mut folder = Layer::new(id, name, LayerKind::folder(), channels);
-    for blend in folder.channels.values_mut() {
-        blend.mode = BlendMode::Passthrough;
-    }
-    folder
+    Ok(json!({ "layer": g.0 }))
 }
 
 fn select(s: &mut Session, p: &Value) -> Result<Value> {
@@ -522,14 +517,12 @@ pub(crate) fn fill_target(s: &Session, p: &Value, cmd: &str) -> Result<FillTarge
     match u64p(p, "effect").map(LayerId) {
         Some(effect) => match s.doc.project.effect(effect).map(|(_, found)| &found.kind) {
             Some(EffectKind::Material(_)) => Ok(FillTarget::Effect(effect)),
-            Some(EffectKind::Fill { .. }) => Ok(FillTarget::Mask(effect)),
-            _ => Err(bad(cmd, format!("{} is not a fill effect", effect.0))),
+            _ => Err(bad(cmd, format!("{} is not a content fill effect", effect.0))),
         },
         None => Ok(FillTarget::Layer(content_param(s, cmd, p)?)),
     }
 }
 
-/// The material of the fill at `target`; a mask fill has none
 pub(crate) fn fill_mut(s: &mut Session, target: FillTarget) -> Result<&mut Fill> {
     match target {
         FillTarget::Layer(id) => match &mut s.doc.project.layer_mut(id)?.kind {
@@ -540,40 +533,17 @@ pub(crate) fn fill_mut(s: &mut Session, target: FillTarget) -> Result<&mut Fill>
             Some(EffectKind::Material(f)) => Ok(f),
             _ => Err(EngineError::Other("not a content fill effect".into())),
         },
-        FillTarget::Mask(_) => Err(EngineError::Other("a mask fill has one grayscale source and no channels or material".into())),
     }
 }
 
 /// How the fill at `target` is projected and sampled: every fill has both
 pub(crate) fn placement_mut(s: &mut Session, target: FillTarget) -> Result<(&mut Projection, &mut Sampling)> {
-    if let FillTarget::Mask(effect) = target {
-        return match s.doc.project.effect_mut(effect).map(|found| &mut found.kind) {
-            Some(EffectKind::Fill { projection, sampling, .. }) => Ok((projection, sampling)),
-            _ => Err(EngineError::Other("not a mask fill effect".into())),
-        };
-    }
-
     let fill = fill_mut(s, target)?;
     Ok((&mut fill.projection, &mut fill.sampling))
 }
 
-/// The grayscale source of the mask fill effect `effect`
-fn mask_source_mut(s: &mut Session, effect: LayerId) -> Result<&mut Source> {
-    match s.doc.project.effect_mut(effect).map(|found| &mut found.kind) {
-        Some(EffectKind::Fill { source, .. }) => Ok(source),
-        _ => Err(EngineError::Other("not a mask fill effect".into())),
-    }
-}
-
 fn fill_set(session: &mut Session, params: &Value) -> Result<Value> {
-    if let Some(input) = strp(params, "input") {
-        return input_set(session, params, input);
-    }
-
     let target = fill_target(session, params, FILL_SET)?;
-    if let FillTarget::Mask(effect) = target {
-        return mask_fill_set(session, params, effect);
-    }
 
     let channel = channel_param(FILL_SET, params, "channel")?.ok_or_else(|| bad(FILL_SET, "`channel` is required"))?;
 
@@ -630,7 +600,6 @@ fn fill_set(session: &mut Session, params: &Value) -> Result<Value> {
         let source = with_ramp(channel, current, source, colors)?;
 
         match target {
-            FillTarget::Mask(_) => return Err(bad(FILL_SET, "a mask fill has no channels")),
             // A fill effect's channel is on while it has a source
             FillTarget::Effect(_) if enabled == Some(false) => {
                 fill.sources.remove(&channel);
@@ -663,118 +632,6 @@ fn fill_set(session: &mut Session, params: &Value) -> Result<Value> {
         Ok(())
     })?;
     Ok(Value::Null)
-}
-
-/// `layer.fill.set` on mask fill effect `effect`: its one grayscale source (no `channel`, `enabled`, `solo` or `normalFormat`)
-fn mask_fill_set(s: &mut Session, p: &Value, effect: LayerId) -> Result<Value> {
-    refuse_gray_keys(p, "a mask fill")?;
-
-    let current = mask_source_mut(s, effect)?.clone();
-    let (source, library_alpha) = gray_source(s, p, effect, current.clone())?;
-
-    // Setting what the fill already reads adds no undo step
-    if source == current && library_alpha_present(s, library_alpha) {
-        return Ok(Value::Null);
-    }
-
-    s.edit("Set fill", |s| {
-        if let Some(alpha) = library_alpha {
-            s.add_library_alpha(alpha)?;
-        }
-        *mask_source_mut(s, effect)? = source;
-        Ok(())
-    })?;
-    Ok(Value::Null)
-}
-
-/// `layer.fill.set {effect, input}`: the source of a filter effect's image input `id`, or its default gray back (`clear`)
-fn input_set(s: &mut Session, p: &Value, id: &str) -> Result<Value> {
-    let effect = u64p(p, "effect").map(LayerId).ok_or_else(|| bad(FILL_SET, "`input` goes with a filter `effect`"))?;
-    let found = s.doc.project.effect(effect).map(|(_, found)| found).ok_or_else(|| bad(FILL_SET, format!("no effect {}", effect.0)))?;
-    let EffectKind::Filter(filter) = &found.kind else { return Err(bad(FILL_SET, format!("{} is not a filter effect", effect.0))) };
-    let input = ImageInput::named(filter, id).ok_or_else(|| bad(FILL_SET, format!("the {} filter has no image input `{id}`", filter.label())))?;
-    refuse_gray_keys(p, "an image input")?;
-
-    let (source, library_alpha) = if p.get("clear").and_then(Value::as_bool) == Some(true) {
-        (None, None)
-    } else {
-        let (source, alpha) = gray_source(s, p, effect, found.input(&input))?;
-        (Some(source), alpha)
-    };
-
-    // Its default gray is not stored, so a project that never set the input saves as before
-    let stored = source.filter(|source| *source != input.default_source());
-
-    // Setting what the input already reads adds no undo step
-    if found.inputs.get(input.id) == stored.as_ref() && library_alpha_present(s, library_alpha) {
-        return Ok(Value::Null);
-    }
-
-    s.edit("Set image input", |s| {
-        if let Some(alpha) = library_alpha {
-            s.add_library_alpha(alpha)?;
-        }
-        let found = s.doc.project.effect_mut(effect).ok_or_else(|| bad(FILL_SET, "the effect is gone"))?;
-        match stored {
-            Some(source) => found.inputs.insert(input.id.to_string(), source),
-            None => found.inputs.remove(input.id),
-        };
-        Ok(())
-    })?;
-    Ok(Value::Null)
-}
-
-/// Refuses the [`GRAY_REFUSED_KEYS`] for `subject`, a fill with one grayscale source
-fn refuse_gray_keys(p: &Value, subject: &str) -> Result<()> {
-    if GRAY_REFUSED_KEYS.iter().any(|key| p.get(key).is_some()) {
-        let keys = GRAY_REFUSED_KEYS.map(|key| format!("`{key}`")).join(", ");
-        return Err(bad(FILL_SET, format!("{subject} has one grayscale source: leave out {keys}")));
-    }
-
-    Ok(())
-}
-
-/// Whether the project already holds `library_alpha`'s image (true when there is none to add)
-fn library_alpha_present(s: &Session, library_alpha: Option<&LibraryAlpha>) -> bool {
-    library_alpha.is_none_or(|alpha| s.doc.resources.contains_key(&crate::fill_alpha::resource_name(alpha)))
-}
-
-/// The grayscale source `p` asks for in place of `current` (read by a mask or filter effect `effect`), and the library alpha it needs added
-fn gray_source(s: &Session, p: &Value, effect: LayerId, current: Source) -> Result<(Source, Option<&'static LibraryAlpha>)> {
-    let low = color_param(FILL_SET, p, "low")?;
-    let high = color_param(FILL_SET, p, "high")?;
-    let color = color_param(FILL_SET, p, "color")?;
-    let value = color_param(FILL_SET, p, "value")?;
-    if let Some(kind) = strp(p, "procedural") {
-        let kind = ProceduralKind::parse(kind).ok_or_else(|| bad(FILL_SET, format!("unknown procedural `{kind}`")))?;
-        Ok((procedural_from(p, kind, Some(&current), [low, high])?, None))
-    } else if let Some(gray) = color.or(value) {
-        Ok((Source::Uniform(gray.map(|component| component.clamp(0.0, 1.0))), None))
-    } else if let Some(name) = strp(p, "image") {
-        Ok((Source::image(name.to_string()), None))
-    } else if let Some(name) = strp(p, "alpha") {
-        let alpha = alphas::find(name).ok_or_else(|| bad(FILL_SET, format!("unknown alpha `{name}`")))?;
-        Ok((Source::image(crate::fill_alpha::resource_name(alpha)), Some(alpha)))
-    } else if let Some(anchor) = u64p(p, "anchor") {
-        let reader = s.doc.project.effect(effect).map(|(owner, _)| owner).ok_or_else(|| bad(FILL_SET, "the effect is not in a layer"))?;
-
-        // A gray reads one channel of the anchor's stack: the one it read, else Height
-        let kept = match current {
-            Source::Anchor { channel, .. } => channel,
-            _ => Channel::Height,
-        };
-        let channel = channel_param(FILL_SET, p, "anchorChannel")?.unwrap_or(kept);
-        Ok((crate::mask_cmds::anchor_source(s, FILL_SET, reader, LayerId(anchor), channel)?, None))
-    } else if crate::procedural_params::has_pattern_settings(p) {
-        // Pattern settings alone edit the current pattern
-        let Source::Procedural { pattern, .. } = &current else {
-            return Err(bad(FILL_SET, "the source has no pattern: give `procedural` with its settings"));
-        };
-
-        Ok((procedural_from(p, pattern.kind, Some(&current), [None, None])?, None))
-    } else {
-        Err(bad(FILL_SET, "give `value`, `procedural`, `image`, `alpha` or `anchor`"))
-    }
 }
 
 /// The procedural source `params` ask for with `low`/`high` already parsed: a pattern of the same kind as `current` keeps what `params` do not give; another kind starts from its defaults
@@ -823,7 +680,7 @@ fn fill_source_from(
     if let Some(anchor) = u64p(params, "anchor") {
         let reader = match target {
             FillTarget::Layer(id) => Some(id),
-            FillTarget::Effect(effect) | FillTarget::Mask(effect) => session.doc.project.effect(effect).map(|(owner, _)| owner),
+            FillTarget::Effect(effect) => session.doc.project.effect(effect).map(|(owner, _)| owner),
         };
         let reader = reader.ok_or_else(|| bad(FILL_SET, "the fill is not in a layer"))?;
         let anchor_channel = channel_param(FILL_SET, params, "anchorChannel")?.unwrap_or(channel);

@@ -1,6 +1,6 @@
 use egui::{Align2, Color32, CornerRadius, FontId, Painter, Rect, Response, Role, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
 
-use super::{CONTROL_RADIUS, PropertySheet, ROW_HEIGHT, ROW_PICTURE_AIR, ROW_PICTURE_SIZE, RowLead, SMALL_TEXT_SIZE, TEXT_SIZE};
+use super::{CONTROL_RADIUS, PropertySheet, ROW_HEIGHT, ROW_PICTURE_AIR, ROW_PICTURE_SIZE, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Draws a picture row's picture into its square
@@ -93,16 +93,6 @@ impl PropertySheet<'_> {
         self.segments(control, options, selected, runs, None)
     }
 
-    /// [`Self::switch`] with its label always above it, the switch across the whole panel (long choices in a set of such switches); returns the picked index
-    pub(crate) fn stacked_switch(&mut self, label: &str, options: &[&str], selected: usize) -> Option<usize> {
-        if !self.switch_fits(options, self.left) {
-            return self.switch_dropdown(label, options, selected);
-        }
-
-        let (control, _) = self.row_with(RowLead::Label { text: label, stack: true });
-        self.segments(control, options, selected, untinted, None)
-    }
-
     /// Whether every option's word fits its share of a switch from `left` to the panel's right edge
     fn switch_fits(&self, options: &[&str], left: f32) -> bool {
         let segment = (self.right - left) / options.len().max(1) as f32;
@@ -113,12 +103,6 @@ impl PropertySheet<'_> {
     fn switch_dropdown(&mut self, label: &str, options: &[&str], selected: usize) -> Option<usize> {
         let name = |index: usize| options.get(index).copied().unwrap_or_default().to_owned();
         self.dropdown_built(label, selected, || 0..options.len(), name, None).0
-    }
-
-    /// A boxed switch across the whole panel; the chosen word takes its colours from `tints` (several colours split the word between them)
-    pub(crate) fn wide_switch(&mut self, options: &[&str], selected: usize, tints: &[&[Color32]]) -> Option<usize> {
-        let control = self.wide_row();
-        self.segments(control, options, selected, |index| tints.get(index).copied().unwrap_or_default(), None)
     }
 
     /// A row's control box, `CONTROL_HEIGHT` tall, from the left padding to the right one

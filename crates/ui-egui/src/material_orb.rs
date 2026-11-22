@@ -4,7 +4,7 @@
 
 use egui::{Color32, ColorImage, Painter, Rect, pos2};
 use rayon::prelude::*;
-use texturecraft_engine::core::{Channel, DIELECTRIC_REFLECTANCE};
+use texturecraft_engine::core::Channel;
 use texturecraft_engine::geom::glam::Vec3;
 use texturecraft_engine::texel::linear_to_srgb;
 
@@ -13,6 +13,9 @@ use crate::orb_material::{OrbMaterial, OrbSample, orb_coords};
 use crate::orb_previews::{OrbJob, OrbPreviews};
 use crate::preview_image::aces;
 use crate::theme::Tokens;
+
+/// The reflectance of non-metals at normal incidence
+const DIELECTRIC_REFLECTANCE: f32 = 0.04;
 
 /// Largest orb rendered, in physical pixels
 const MAX_SIDE_PX: usize = 512;

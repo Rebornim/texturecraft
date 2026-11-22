@@ -45,7 +45,7 @@ fn set_material(s: &mut Session, p: &Value) -> Result<Value> {
             match target {
                 // A fill effect changes a channel while it has a source: its channels stay on, at their defaults
                 FillTarget::Effect(_) => edited.sources.iter_mut().for_each(|(channel, source)| *source = Source::uniform_of(*channel)),
-                FillTarget::Layer(_) | FillTarget::Mask(_) => edited.sources.clear(),
+                FillTarget::Layer(_) => edited.sources.clear(),
             }
             Ok(())
         })?;
@@ -101,7 +101,6 @@ fn holds(s: &Session, target: FillTarget, set: usize, material: Option<&SmartMat
             Some(EffectKind::Material(fill)) => (fill, None),
             _ => return Err(bad(CMD, "not a content fill effect")),
         },
-        FillTarget::Mask(_) => return Err(bad(CMD, "a mask fill has one grayscale source and no channels or material")),
     };
     if fill.material.as_deref() != material.map(|found| found.id) {
         return Ok(false);
@@ -125,9 +124,7 @@ fn holds(s: &Session, target: FillTarget, set: usize, material: Option<&SmartMat
 fn target_set(s: &Session, target: FillTarget) -> Result<usize> {
     let owner = match target {
         FillTarget::Layer(id) => id,
-        FillTarget::Effect(id) | FillTarget::Mask(id) => {
-            s.doc.project.effect(id).map(|(owner, _)| owner).ok_or_else(|| bad(CMD, format!("no effect {}", id.0)))?
-        }
+        FillTarget::Effect(id) => s.doc.project.effect(id).map(|(owner, _)| owner).ok_or_else(|| bad(CMD, format!("no effect {}", id.0)))?,
     };
     s.doc.project.locate(owner).map(|(set, ..)| set).ok_or_else(|| bad(CMD, format!("layer {} is in no texture set", owner.0)))
 }

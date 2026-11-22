@@ -841,7 +841,7 @@ pub fn apply_at(s: &mut Session, id: &str, place: Place) -> Result<LayerId> {
             crate::layer_cmds::insert_selected(s, layer)?
         } else {
             let folder_id = s.doc.project.alloc_id();
-            let mut folder = Layer::new(folder_id, material.label, LayerKind::folder(), &channels);
+            let mut folder = Layer::new(folder_id, material.label, LayerKind::Group { children: Vec::new(), collapsed: false }, &channels);
             for blend in folder.channels.values_mut() {
                 *blend = ChannelBlend { mode: BlendMode::Passthrough, opacity: 1.0 };
             }

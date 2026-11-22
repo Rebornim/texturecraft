@@ -178,7 +178,7 @@ pub(crate) fn source_line(app: &TextureCraftApp, source: &Source) -> String {
     }
 }
 
-/// One source's card (a channel's, a mask fill's grayscale or a filter's image input): its slot (the row opens the source picker), then the source's own settings; `in_card`: only its slot row, inside the card open now
+/// One source's card (a channel's): its slot (the row opens the source picker), then the source's own settings; `in_card`: only its slot row, inside the card open now
 pub(crate) fn source_card(
     app: &mut TextureCraftApp,
     sheet: &mut PropertySheet<'_>,
@@ -260,21 +260,9 @@ pub(crate) fn source_card(
                 }
             }
         }
-        Source::Anchor { anchor, channel, .. } if slot_of == SourceSlot::Grayscale && !crate::dock::anchor_in_mask(app, anchor) => {
-            anchor_channel_row(app, sheet, base, reader, channel);
-        }
         Source::Image { .. } | Source::Anchor { .. } => {}
     }
     sheet.close_card();
-}
-
-/// The channel a mask fill reads from a content anchor point as gray (a mask anchor point reads its mask's one gray)
-fn anchor_channel_row(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, base: &Value, reader: LayerId, channel: Channel) {
-    let project = &app.session.doc.project;
-    let channels = project.locate(reader).and_then(|(set, _, _)| project.texture_set(set).ok()).map(|set| set.channel_list()).unwrap_or_default();
-    if let (Some(picked), _) = sheet.dropdown(tr("Channel"), channel, &channels, |option| tr(option.label()).to_string(), None) {
-        app.run("effect.set", with(base, json!({"anchorChannel": picked.id()})));
-    }
 }
 
 /// Runs the fill command `choice` asks for on the slot (Import opens the import dialog)
@@ -301,7 +289,7 @@ fn pick_source(app: &mut TextureCraftApp, ctx: &egui::Context, slot_of: SourceSl
 }
 
 /// The picker's choice `source` is: a library alpha's image is its alpha
-fn source_choice(source: &Source) -> SourceChoice {
+pub(crate) fn source_choice(source: &Source) -> SourceChoice {
     match source {
         Source::Uniform(_) => SourceChoice::Uniform,
         Source::Procedural { pattern, .. } => SourceChoice::Procedural(pattern.kind),
@@ -311,7 +299,13 @@ fn source_choice(source: &Source) -> SourceChoice {
 }
 
 /// The source picker's tabs: Resources (Procedurals, Textures with Import... first, Alphas in their shelf groups, Uniform) and the stack's Anchor points
-fn source_tabs(thumbs: &mut Thumbs, ctx: &egui::Context, images: &ImageStore, anchors: &[(LayerId, String)], uniform: Color32) -> Vec<PickerTab<SourceChoice>> {
+pub(crate) fn source_tabs(
+    thumbs: &mut Thumbs,
+    ctx: &egui::Context,
+    images: &ImageStore,
+    anchors: &[(LayerId, String)],
+    uniform: Color32,
+) -> Vec<PickerTab<SourceChoice>> {
     let procedurals =
         ProceduralKind::ALL.into_iter().map(|kind| tile(SourceChoice::Procedural(kind), tr(kind.label()), None, TilePicture::Procedural(kind))).collect();
     let textures = ResourcePickerItem::textures(images, SourceChoice::Import, |name| SourceChoice::Image(name.to_owned()));
@@ -425,16 +419,8 @@ fn procedural_rows(
 
     let mut edited = pattern.clone();
     let mut edit = scale_and_contrast(sheet, &mut edited);
-
-    // A grayscale's card (a mask fill's, a filter input's) shows its Balance and Seed with Scale and Contrast; a material channel's keeps them in Attributes
-    let gray = matches!(slot_of, SourceSlot::Grayscale | SourceSlot::Input(_));
-    if gray {
-        edit = edit.or(balance_and_seed(sheet, &mut edited));
-    }
     if sheet.fold(tr("Attributes"), None, false) {
-        if !gray {
-            edit = edit.or(balance_and_seed(sheet, &mut edited));
-        }
+        edit = edit.or(balance_and_seed(sheet, &mut edited));
         if sheet.toggle(tr("Invert"), &mut edited.invert) {
             edit = edit.or(Some(("invert", json!(edited.invert), false)));
         }

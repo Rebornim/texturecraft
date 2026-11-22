@@ -16,6 +16,7 @@ pub(super) const HEADER_RISE: f32 = crate::theme::GUTTER as f32 - PANEL_SEPARATI
 /// Whether `panel`'s docked group sits under another panel, a gutter above its header; floating groups and the top row have none
 pub(super) fn under_a_panel(layout: &Layout<Panel>, panel: Panel) -> bool {
     let Some(root) = &layout.root else { return false };
+
     let mut nodes: Vec<(&Node<Panel>, bool)> = vec![(root, false)];
     while let Some((node, below)) = nodes.pop() {
         match node {
@@ -55,6 +56,7 @@ pub(super) fn header_name(ui: &Ui, name: &str, font: FontId, color: Color32, lif
     {
         section.format.valign = Align::BOTTOM;
     }
+
     job.first_row_min_height = galley.size().y + 2.0 * shift.abs();
     job
 }

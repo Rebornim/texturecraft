@@ -122,6 +122,7 @@ fn deeply_nested_effect_visibility_is_reachable_in_a_narrow_panel() {
 
     let row = h.get_by_label("Effect A").rect();
     assert!(row.width() < 180.0, "the test must use a compact panel: {row:?}");
+
     let indent = (row.width() - 7.0 - 22.0 - 21.6 - 8.0 - 20.0 - 6.0).max(0.0);
     click(&mut h, egui::pos2(row.left() + 15.0 + indent, row.center().y));
 

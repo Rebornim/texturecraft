@@ -39,6 +39,7 @@ fn set_column_width(harness: &mut Harness<'_, TextureCraftApp>, width: f32) {
     let mut workspace = harness.state().ui.dock.workspace().clone();
     let Some(Node::Split { second, .. }) = workspace.layout.root.as_mut() else { panic!("the assets column and the rest") };
     let Node::Split { size, .. } = second.as_mut() else { panic!("the 3D view and the right column") };
+
     *size = SplitSize::FixedSecond(width);
     harness.state_mut().ui.dock = Dock::from_value(serde_json::to_value(workspace).unwrap());
     harness.run_steps(SETTLE_FRAMES);
@@ -86,12 +87,14 @@ fn dragging_the_right_column_narrow_stops_at_the_properties_minimum_width() {
 
     set_column_width(&mut harness, WIDE_COLUMN);
     let before = properties_title(&harness).min.x;
+
     assert!(properties_header_width(&harness) > at_minimum, "a wide column gives Properties more than its minimum");
 
     let y = properties_title(&harness).max.y + DIVIDER_GRAB_BELOW_HEADER;
     drag(&mut harness, pos2(before - DIVIDER_OFFSET, y), pos2(WINDOW_SIZE.x - WINDOW_RIGHT_INSET, y));
 
     assert!(properties_title(&harness).min.x > before, "the divider moved right");
+
     let width = properties_header_width(&harness);
     assert!((width - at_minimum).abs() < 0.5, "Properties stopped at its minimum: header {width}, {at_minimum} at the minimum");
 }
@@ -104,5 +107,6 @@ fn a_layout_saved_narrower_draws_properties_at_its_minimum_width() {
 
     set_column_width(&mut harness, PROPERTIES_MIN_WIDTH * 0.5);
     let width = properties_header_width(&harness);
+
     assert!((width - at_minimum).abs() < 0.5, "a narrow saved column opens at the minimum: header {width}, {at_minimum} at the minimum");
 }

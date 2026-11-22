@@ -26,6 +26,7 @@ fn group_of(layout: &Layout<Panel>, panel: Panel) -> Option<(&[Panel], bool)> {
     let docked = layout.root.iter().map(|root| (root, false));
     let floating = layout.floating.iter().map(|window| (&window.root, true));
     let mut nodes: Vec<(&Node<Panel>, bool)> = docked.chain(floating).collect();
+
     while let Some((node, floats)) = nodes.pop() {
         match node {
             Node::Split { first, second, .. } => {
@@ -42,6 +43,7 @@ fn group_of(layout: &Layout<Panel>, panel: Panel) -> Option<(&[Panel], bool)> {
             _ => {}
         }
     }
+
     None
 }
 
@@ -59,6 +61,7 @@ impl Panels<'_> {
     /// Over the tab the dock drew for `panel`, the panel shown in its group, paints the section tabs' raised box and the name again; a panel alone keeps its plain header. `ui` is the panel's body, right under the strip
     pub(super) fn paint_shown_group_tab(&self, ui: &Ui, panel: Panel) {
         let Some((panels, floating)) = group_of(&self.app.ui.dock.workspace.layout, panel) else { return };
+
         if panels.len() < 2 {
             return;
         }
@@ -76,6 +79,7 @@ impl Panels<'_> {
         let header = self.group_header_width(panels, &panel, floating, strip.width()).clamp(0.0, strip.width());
         let available = (strip.width() - header - self.style.drag_bar_width).max(0.0);
         let fit = craft_ui::tabs::fit(&natural, shown, available, self.style.min_tab_width, OVERFLOW_WIDTH);
+
         let mut left = strip.left();
         for (index, width) in fit.shown {
             if index != shown {

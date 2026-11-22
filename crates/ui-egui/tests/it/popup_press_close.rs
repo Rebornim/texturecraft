@@ -133,6 +133,7 @@ fn a_stroke_on_the_model_closes_the_symmetry_settings() {
     harness.run_steps(SETTLE_FRAMES);
     harness.get_by_label("Symmetry settings").click();
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.query_by_label("Radial symmetry").is_some(), "the settings open");
 
     stroke_on_model(&mut harness, Modifiers::NONE);

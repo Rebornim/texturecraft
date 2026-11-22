@@ -52,6 +52,7 @@ fn every_docked_panel_header_ends_in_its_own_close_button() {
 fn the_header_close_button_closes_its_panel() {
     let mut harness = app();
     assert!(harness.state().ui.dock.is_visible(Panel::Properties));
+
     let close = panel_close_button(&harness, tab_rect(&harness, "Properties - "));
     click_at(&mut harness, close.center());
 
@@ -230,6 +231,7 @@ fn a_tab_menus_panel_names_keep_their_plain_layout() {
             _ => None,
         })
         .collect();
+
     assert!(!padded.is_empty(), "the menu paints the Layers entry");
     assert!(padded.iter().all(|height| *height == 0.0), "the Layers entry is padded to {padded:?}");
 }

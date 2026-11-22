@@ -332,10 +332,23 @@ impl Field {
     }
 }
 
+/// A layer's mask or content channel field, filtered under the folders' Scale and Rotation (as bits) its traversal lays on its fills
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FieldKey {
-    Mask(LayerId),
-    Content(LayerId, Channel),
+    Mask(LayerId, [u32; 2]),
+    Content(LayerId, Channel, [u32; 2]),
+}
+
+impl FieldKey {
+    /// The key of layer `id`'s mask field under the folders' offset `around`
+    pub fn mask(id: LayerId, around: ContentsOffset) -> FieldKey {
+        FieldKey::Mask(id, [around.scale.to_bits(), around.rotation.to_bits()])
+    }
+
+    /// The key of layer `id`'s `channel` content field under the folders' offset `around`
+    pub fn content(id: LayerId, channel: Channel, around: ContentsOffset) -> FieldKey {
+        FieldKey::Content(id, channel, [around.scale.to_bits(), around.rotation.to_bits()])
+    }
 }
 
 pub type Fields = HashMap<FieldKey, Field>;
@@ -1300,14 +1313,14 @@ fn layer_mask(p: &Project, id: LayerId) -> Option<&Mask> {
 
 /// Layers of `list` in drawing order (bottom → top, folder and instanced folder contents after
 /// their folder).
-fn draw_order(p: &Project, list: &[LayerId], depth: usize, out: &mut Vec<LayerId>) {
+fn draw_order(p: &Project, list: &[LayerId], depth: usize, around: ContentsOffset, out: &mut Vec<(LayerId, ContentsOffset)>) {
     if depth > texturecraft_core::project::MAX_DEPTH {
         return;
     }
     for id in list {
-        out.push(*id);
+        out.push((*id, around));
         if let Some(l) = p.content_layer(*id) {
-            draw_order(p, l.children(), depth + 1, out);
+            draw_order(p, l.children(), depth + 1, around.then(p.contents_offset(l.id)), out);
         }
     }
 }
@@ -1320,7 +1333,14 @@ enum Job<'a> {
 }
 
 /// A layer's mask or content channel after every neighbourhood filter of its stack, over `tiles`.
-fn field(inp: &EvaluationInputs, channels: &[Channel], below: &Fields, id: LayerId, job: Job, tiles: &[(u32, u32)]) -> Option<Field> {
+fn field(
+    inp: &EvaluationInputs,
+    channels: &[Channel],
+    below: &Fields,
+    (id, around): (LayerId, ContentsOffset),
+    job: Job,
+    tiles: &[(u32, u32)],
+) -> Option<Field> {
     let effects = match job {
         Job::Mask(mask) => &mask.effects,
         Job::Content(_) => &inp.project.content_layer(id)?.content_effects,
@@ -1346,7 +1366,7 @@ fn field(inp: &EvaluationInputs, channels: &[Channel], below: &Fields, id: Layer
     for (((&filter, &margin), &wrap), &own_wrap) in filters.iter().zip(&margins).zip(&wrapping).zip(&own_wraps) {
         let region = region_around(inp, tiles, margin, wrap)?;
         let start = previous.as_ref().map(|(index, field)| (*index, field));
-        let filtered = filter_region(inp, channels, below, id, job, effects, filter, own_wrap, region, start)?;
+        let filtered = filter_region(inp, channels, below, (id, around), job, effects, filter, own_wrap, region, start)?;
 
         // Preserve only stages with anchors before the next filter overwrites their value
         if let Some((previous_index, previous_field)) = previous.take()
@@ -1452,7 +1472,7 @@ fn filter_region(
     inputs: &EvaluationInputs,
     channels: &[Channel],
     below: &Fields,
-    id: LayerId,
+    (id, around): (LayerId, ContentsOffset),
     job: Job,
     effects: &[Effect],
     (index, radius, op): (usize, f32, Op),
@@ -1512,17 +1532,18 @@ fn filter_region(
         .par_iter()
         .map(|&(tile_x, tile_y)| {
             // A base colour lit by its material below the filter lights it as the full render does
-            let lit_layer = if lit_prefix { plan(inputs, &[id], channels, tile_x, tile_y, 0, Some(below)).into_iter().find(|node| node.lights) } else { None };
+            let lit_layer =
+                if lit_prefix { plan_in(inputs, &[id], channels, tile_x, tile_y, 0, Some(below), around).into_iter().find(|node| node.lights) } else { None };
             let anchor_nodes = below_plan(inputs, id, channels, (tile_x, tile_y), Some(below), lit_layer.is_some());
             let preview_tile = inputs.preview.and_then(|preview| preview.alpha.tile(tile_x, tile_y));
-            let height_nodes = if heights { plan(inputs, &[id], &[Channel::Height], tile_x, tile_y, 0, Some(below)) } else { Vec::new() };
+            let height_nodes = if heights { plan_in(inputs, &[id], &[Channel::Height], tile_x, tile_y, 0, Some(below), around) } else { Vec::new() };
             let mut mask = None;
             let mut nodes = Vec::new();
             let mut generator_sizes = None;
             match job {
                 Job::Mask(layer_mask) => {
                     // The layer's own filtered content, for a compare of it (this mask's field is not built yet)
-                    let Some(mut mask_stack) = mask_plan(inputs, id, layer_mask, tile_x, tile_y, Some(below), inputs.project.contents_around(id)) else {
+                    let Some(mut mask_stack) = mask_plan(inputs, id, layer_mask, tile_x, tile_y, Some(below), around) else {
                         return Vec::new();
                     };
 
@@ -1532,7 +1553,7 @@ fn filter_region(
                     mask = Some(mask_stack);
                 }
                 Job::Content(channel) => {
-                    nodes = plan(inputs, &[id], &[channel], tile_x, tile_y, 0, Some(below));
+                    nodes = plan_in(inputs, &[id], &[channel], tile_x, tile_y, 0, Some(below), around);
                     if let Some(channel_plan) = nodes.first_mut().and_then(|node| node.chans.first_mut()) {
                         channel_plan.effects.truncate(index);
                         channel_plan.start = start;
@@ -2085,11 +2106,11 @@ pub fn neighbourhood_fields(inputs: &Inputs, channels: &[Channel], tiles: &[(u32
 
 fn evaluation_fields(inp: &EvaluationInputs, channels: &[Channel], tiles: &[(u32, u32)]) -> Fields {
     let stack = inp.project.texture_set(inp.ts).map(|s| s.stack.as_slice()).unwrap_or_default();
-    fields_of(inp, channels, stack, tiles)
+    fields_of(inp, channels, (stack, ContentsOffset::NONE), tiles)
 }
 
-/// [`neighbourhood_fields`] of the layers drawn by `list` only.
-fn fields_of(inp: &EvaluationInputs, channels: &[Channel], list: &[LayerId], tiles: &[(u32, u32)]) -> Fields {
+/// [`neighbourhood_fields`] of the layers drawn by `list` only, held by folders whose Scale and Rotation make `around`
+fn fields_of(inp: &EvaluationInputs, channels: &[Channel], (list, around): (&[LayerId], ContentsOffset), tiles: &[(u32, u32)]) -> Fields {
     let mut out = Fields::new();
     if tiles.is_empty() || inp.gbuf.width == 0 {
         return out;
@@ -2097,29 +2118,30 @@ fn fields_of(inp: &EvaluationInputs, channels: &[Channel], list: &[LayerId], til
 
     let working_width = inp.gbuf.width;
     let mut order = Vec::new();
-    draw_order(inp.project, list, 0, &mut order);
-    prepare_curvature_sizes(inp, &order);
+    draw_order(inp.project, list, 0, around, &mut order);
+    let ids: Vec<LayerId> = order.iter().map(|(id, _)| *id).collect();
+    prepare_curvature_sizes(inp, &ids);
 
-    for id in order {
+    for (id, around) in order {
         let Some(layer) = inp.project.content_layer(id) else { continue };
         let mask = layer_mask(inp.project, id).filter(|mask| mask.enabled && neighbourhood(&mask.effects, working_width).is_some());
 
         // A mask comparing the layer's own content reads it filtered, so its field comes after the content's
         let compares_content = mask.is_some_and(|mask| mask.effects.iter().any(|effect| effect.visible && compares_this_layer(&effect.kind)));
         if !compares_content {
-            insert_mask_field(inp, channels, &mut out, id, mask, tiles);
+            insert_mask_field(inp, channels, &mut out, (id, around), mask, tiles);
         }
 
         if !layer.is_group() && neighbourhood(&layer.content_effects, working_width).is_some() {
             for channel in channels.iter().filter(|channel| layer.channels.contains_key(channel)) {
-                if let Some(filtered) = field(inp, channels, &out, id, Job::Content(*channel), tiles) {
-                    out.insert(FieldKey::Content(id, *channel), filtered);
+                if let Some(filtered) = field(inp, channels, &out, (id, around), Job::Content(*channel), tiles) {
+                    out.insert(FieldKey::content(id, *channel, around), filtered);
                 }
             }
         }
 
         if compares_content {
-            insert_mask_field(inp, channels, &mut out, id, mask, tiles);
+            insert_mask_field(inp, channels, &mut out, (id, around), mask, tiles);
         }
     }
 
@@ -2127,11 +2149,18 @@ fn fields_of(inp: &EvaluationInputs, channels: &[Channel], list: &[LayerId], til
 }
 
 /// Layer `id`'s filtered `mask` field put into `fields` (nothing without a mask or a field)
-fn insert_mask_field(inp: &EvaluationInputs, channels: &[Channel], fields: &mut Fields, id: LayerId, mask: Option<&Mask>, tiles: &[(u32, u32)]) {
+fn insert_mask_field(
+    inp: &EvaluationInputs,
+    channels: &[Channel],
+    fields: &mut Fields,
+    (id, around): (LayerId, ContentsOffset),
+    mask: Option<&Mask>,
+    tiles: &[(u32, u32)],
+) {
     if let Some(mask) = mask
-        && let Some(filtered) = field(inp, channels, fields, id, Job::Mask(mask), tiles)
+        && let Some(filtered) = field(inp, channels, fields, (id, around), Job::Mask(mask), tiles)
     {
-        fields.insert(FieldKey::Mask(id), filtered);
+        fields.insert(FieldKey::mask(id, around), filtered);
     }
 }
 
@@ -2299,7 +2328,7 @@ fn mask_plan<'a>(
 
     let background = if mask.background == MaskBackground::White { 1.0 } else { 0.0 };
     let mut effects = effect_plans(inp, &mask.effects, tx, ty, None, around);
-    let filtered = fields.and_then(|fields| fields.get(&FieldKey::Mask(id)));
+    let filtered = fields.and_then(|fields| fields.get(&FieldKey::mask(id, around)));
     for effect in &mut effects {
         effect.filtered_mask = filtered.and_then(|field| field.anchor_stages.iter().find(|(id, _)| *id == effect.id).map(|(_, field)| field));
     }
@@ -2427,7 +2456,7 @@ fn plan_content<'a>(
 
             let data = if paint { tile_of(inp, inp.pixels.layer(layer.id, *c), tx, ty, Some(*c)) } else { None };
             let effects = if fx { effect_plans(inp, &layer.content_effects, tx, ty, Some(*c), around) } else { Vec::new() };
-            let start = fx_start.zip(fields.and_then(|f| f.get(&FieldKey::Content(id, *c))));
+            let start = fx_start.zip(fields.and_then(|f| f.get(&FieldKey::content(id, *c, around))));
             Some(ChanPlan { ch: c.index(), kind: c.kind(), comps: c.components(), blend: b.mode, opacity: b.opacity.clamp(0.0, 1.0), data, effects, start })
         })
         .collect::<Vec<_>>();
@@ -2470,11 +2499,25 @@ fn plan_levels<'a>(inp: &EvaluationInputs<'a>, levels: &[Level], channels: &[Cha
     let last = levels.len().saturating_sub(1);
     levels
         .iter()
+        .zip(level_offsets(inp.project, levels))
         .enumerate()
-        .map(|(d, l)| LevelPlan {
-            below: if warm { Vec::new() } else { plan(inp, &l.below, channels, tx, ty, d, Some(fields)) },
-            at: plan_node(inp, l.at, channels, tx, ty, d, Some(fields), d == last, inp.project.contents_around(l.at)),
-            above: plan(inp, &l.above, channels, tx, ty, d, Some(fields)),
+        .map(|(d, (l, around))| LevelPlan {
+            below: if warm { Vec::new() } else { plan_in(inp, &l.below, channels, tx, ty, d, Some(fields), around) },
+            at: plan_node(inp, l.at, channels, tx, ty, d, Some(fields), d == last, around),
+            above: plan_in(inp, &l.above, channels, tx, ty, d, Some(fields), around),
+        })
+        .collect()
+}
+
+/// The Scale and Rotation the folders (instanced ones included) above each level of the path to the hot layer lay on its fills
+fn level_offsets(p: &Project, levels: &[Level]) -> Vec<ContentsOffset> {
+    let mut around = ContentsOffset::NONE;
+    levels
+        .iter()
+        .map(|level| {
+            let held = around;
+            around = around.then(p.content_layer(level.at).map_or(ContentsOffset::NONE, |layer| p.contents_offset(layer.id)));
+            held
         })
         .collect()
 }
@@ -3756,7 +3799,7 @@ fn composite_evaluation_tiles(inp: &EvaluationInputs, out: &mut Composite, tiles
                 // Filter the current and following tiles as one run
                 let planned_tiles: Vec<(u32, u32)> = block.iter().chain(&ahead).copied().collect();
                 let uncached_planned_tiles: Vec<(u32, u32)> = planned_tiles.iter().copied().filter(uncached).collect();
-                let fields = Arc::new(block_fields(inp, &channels, &set.stack, hot, &uncached_planned_tiles, &planned_tiles));
+                let fields = Arc::new(block_fields(inp, &channels, &set.stack, split.as_deref(), &uncached_planned_tiles, &planned_tiles));
                 let hot_tiles: std::collections::BTreeSet<(u32, u32)> = planned_tiles.iter().copied().collect();
                 let stack_tiles = if hot.is_some() && uncached_planned_tiles.len() < planned_tiles.len() {
                     uncached_planned_tiles.into_iter().collect()
@@ -3768,7 +3811,7 @@ fn composite_evaluation_tiles(inp: &EvaluationInputs, out: &mut Composite, tiles
                 }
                 fields
             }
-            _ => Arc::new(block_fields(inp, &channels, &set.stack, hot, &fresh, block)),
+            _ => Arc::new(block_fields(inp, &channels, &set.stack, split.as_deref(), &fresh, block)),
         };
 
         let quota = match below.as_deref() {
@@ -3799,8 +3842,8 @@ fn composite_evaluation_tiles(inp: &EvaluationInputs, out: &mut Composite, tiles
 fn has_neighbourhood(inp: &Inputs, stack: &[LayerId]) -> bool {
     let working_width = inp.gbuf.width;
     let mut order = Vec::new();
-    draw_order(inp.project, stack, 0, &mut order);
-    order.into_iter().any(|id| {
+    draw_order(inp.project, stack, 0, ContentsOffset::NONE, &mut order);
+    order.into_iter().any(|(id, _)| {
         let masked = layer_mask(inp.project, id).is_some_and(|mask| mask.enabled && neighbourhood(&mask.effects, working_width).is_some());
         masked || inp.project.content_layer(id).is_some_and(|layer| !layer.is_group() && neighbourhood(&layer.content_effects, working_width).is_some())
     })
@@ -3808,14 +3851,22 @@ fn has_neighbourhood(inp: &Inputs, stack: &[LayerId]) -> bool {
 
 /// The neighbourhood fields compositing `tiles` reads: those of every layer of `stack` over the tiles the cache lacks (`fresh`),
 /// and off the path to the `hot` layer only there; the hot layer's over all of `tiles`.
-fn block_fields(inp: &EvaluationInputs, channels: &[Channel], stack: &[LayerId], hot: Option<&Level>, fresh: &[(u32, u32)], tiles: &[(u32, u32)]) -> Fields {
+fn block_fields(
+    inp: &EvaluationInputs,
+    channels: &[Channel],
+    stack: &[LayerId],
+    split: Option<&[Level]>,
+    fresh: &[(u32, u32)],
+    tiles: &[(u32, u32)],
+) -> Fields {
+    let hot = split.and_then(|levels| levels.last().zip(level_offsets(inp.project, levels).last().copied()));
     match hot {
-        Some(hot) if fresh.len() < tiles.len() => {
-            let mut fields = fields_of(inp, channels, stack, fresh);
-            fields.extend(fields_of(inp, channels, &[hot.at], tiles));
+        Some((hot, around)) if fresh.len() < tiles.len() => {
+            let mut fields = fields_of(inp, channels, (stack, ContentsOffset::NONE), fresh);
+            fields.extend(fields_of(inp, channels, (&[hot.at], around), tiles));
             fields
         }
-        _ => fields_of(inp, channels, stack, tiles),
+        _ => fields_of(inp, channels, (stack, ContentsOffset::NONE), tiles),
     }
 }
 
@@ -5989,7 +6040,10 @@ soft {soft:?}"
 
         let shared = shared_histogram_fields(&inputs, &channels, &all_tiles(64, 64));
 
-        assert!(shared.is_some_and(|fields| fields.contains_key(&FieldKey::Content(id, Channel::BaseColor))), "every sampled tile reads one field");
+        assert!(
+            shared.is_some_and(|fields| fields.contains_key(&FieldKey::content(id, Channel::BaseColor, ContentsOffset::NONE))),
+            "every sampled tile reads one field"
+        );
     }
 
     #[test]

@@ -235,3 +235,28 @@ fn a_tab_menus_panel_names_keep_their_plain_layout() {
     assert!(!padded.is_empty(), "the menu paints the Layers entry");
     assert!(padded.iter().all(|height| *height == 0.0), "the Layers entry is padded to {padded:?}");
 }
+
+/// Where the label on `name`'s row and to its right ends, for each label named `name`
+fn row_ends(harness: &Harness<'_, TextureCraftApp>, name: &str) -> Vec<f32> {
+    let names = harness.get_all_by_role_and_label(Role::Label, name).map(|node| node.rect());
+    names
+        .filter_map(|name| {
+            let on_row = harness.get_all_by_role(Role::Label).map(|node| node.rect());
+            on_row.filter(|rect| rect.left() > name.right() && (rect.center().y - name.center().y).abs() < 1.0).map(|rect| rect.right()).reduce(f32::max)
+        })
+        .collect()
+}
+
+/// Texture Set Settings keeps Base color's remove room, so its format ends where the other channels' formats do (it ended 24 px right)
+#[test]
+fn every_channels_format_ends_on_one_column() {
+    let mut harness = app();
+    let settings = tab_rect(&harness, "Texture Set Settings");
+    click_at(&mut harness, settings.center());
+    harness.run_steps(SETTLE_FRAMES);
+
+    let base_color = row_ends(&harness, "Base color");
+    let roughness = row_ends(&harness, "Roughness");
+
+    assert!(base_color.len() == 1 && base_color == roughness, "Base color's format ends at {base_color:?}, Roughness's at {roughness:?}");
+}

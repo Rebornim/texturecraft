@@ -3,6 +3,7 @@
 use egui::{PointerButton, Pos2, Rect, Ui};
 
 use crate::TextureCraftApp;
+use crate::property_sheet::SectionScope;
 use crate::state::Mode;
 use crate::theme::Tokens;
 
@@ -34,7 +35,7 @@ pub(crate) fn open_on_right_click(app: &mut TextureCraftApp, ui: &Ui, response: 
     let free = app.ui.mode == Mode::Painting
         && app.properties_popup.is_none()
         && !app.session.stroke_active()
-        && app.placing_decal.is_none()
+        && app.moving_on_model.is_none()
         && !gesture_key_held
         && !crate::viewport::focus_picking(ui.ctx())
         && ui.input(|input| input.modifiers.is_none());
@@ -50,6 +51,7 @@ pub(crate) fn open_on_right_click(app: &mut TextureCraftApp, ui: &Ui, response: 
 /// Draws the open popup and closes it on a press outside it or when the app leaves Painting
 pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     let (any_down, pressed_at) = ctx.input(|input| (input.pointer.any_down(), input.pointer.press_origin().filter(|_| input.pointer.any_pressed())));
+
     match app.properties_popup {
         _ if app.ui.mode != Mode::Painting => app.properties_popup = None,
         Some(PropertiesPopup::Closing) if !any_down => app.properties_popup = None,
@@ -73,7 +75,17 @@ pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
             ui.set_max_height(bounds.height() * PROPERTIES_POPUP_MAX_HEIGHT_SHARE);
             // A floating bar would cover the sliders' right-aligned values
             ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
-            egui::ScrollArea::vertical().id_salt("properties_popup_scroll").show(ui, |ui| crate::dock::properties_contents(app, ui));
+
+            // The docked panel's jump tabs on the top edge stay put while the sections scroll under them
+            let scope = SectionScope::Popup;
+            if let Some(tabs) = crate::dock::properties_fill_tabs(app) {
+                crate::property_sheet::section_tabs(ui, scope, ui.style().visuals.menu_corner_radius.nw, &tabs);
+            }
+            crate::property_sheet::in_scope(ui, scope, |ui| {
+                // A popup that fits its rows keeps its size; one that scrolls goes on until its last section's top
+                let area = egui::ScrollArea::vertical().id_salt("properties_popup_scroll");
+                crate::dock::properties_scrolled(app, ui, area, crate::past_end::PastEnd::WhenScrolling);
+            });
         });
     });
 }

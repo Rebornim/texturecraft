@@ -285,7 +285,7 @@ mod tests {
         mesh.append(&texturecraft_engine::geom::primitives::plane(2.0, 1));
         let mut session = Session::new_project("Test", mesh, "two-planes", None, 128).unwrap();
         assert_eq!(session.caches.len(), 2);
-        session.images.insert("red".into(), Arc::new(ImageRes { width: 1, height: 1, rgba: vec![[1.0, 0.0, 0.0, 1.0]], srgb: true }));
+        session.images.insert("red".into(), Arc::new(ImageRes::new(1, 1, vec![[1.0, 0.0, 0.0, 1.0]], true)));
         execute(&mut session, "viewport.view", &json!({"mode": "image", "image": "red"})).unwrap();
         let camera = session.camera;
         let uv = |ts| ViewKind::Uv { ts, zoom: 1.0, pan: [0.0, 0.0], rotation: 0.0 };

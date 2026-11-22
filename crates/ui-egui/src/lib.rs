@@ -28,10 +28,14 @@ pub mod export_templates;
 mod export_window;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_dialogs;
+mod fill_panel;
+mod fill_pictures;
 mod fill_source_slot;
 mod fill_source_target;
+mod fill_symmetry_panel;
 mod filter_slot;
 pub mod fonts;
+mod frame_gizmo;
 mod generator_panel;
 pub mod gpu;
 mod gray_slider;
@@ -54,6 +58,8 @@ mod mask_preview_image;
 mod material_preview_image;
 pub mod menus;
 mod mesh_export_options;
+mod move_hold;
+pub mod move_on_model;
 mod name_error;
 mod named_layout;
 pub mod named_layouts;
@@ -63,12 +69,16 @@ mod nav_view;
 pub mod new_project_advanced;
 mod orb_shape;
 pub mod parity;
+mod past_end;
 mod path_hit;
 mod path_surface_cache;
 mod pattern_panel;
 mod pattern_target;
 pub mod pbr_import;
+mod placement;
+mod pointer_lock;
 mod popup_drag;
+mod preview_dots;
 mod preview_image;
 mod preview_request;
 mod preview_worker;
@@ -76,6 +86,10 @@ pub mod profile;
 #[cfg(not(target_arch = "wasm32"))]
 mod project_config;
 pub mod project_form;
+mod projection_gizmo;
+mod projection_kind;
+mod projection_preview;
+mod projector_outline;
 pub mod properties_popup;
 mod property_sheet;
 mod query_field;
@@ -88,6 +102,7 @@ mod resource_picker_choice;
 mod resource_picker_item;
 mod resource_picker_tab;
 mod resource_picker_tile;
+mod round_gizmo;
 mod running_bake;
 pub mod saved_search;
 mod screen_color_pick;
@@ -122,6 +137,7 @@ mod uv_tile_grid;
 mod uv_view_map;
 mod view_mode_picker;
 pub mod viewport;
+mod warp_checker;
 pub mod web_files;
 pub mod widgets;
 pub mod windows;
@@ -236,8 +252,8 @@ pub struct TextureCraftApp {
     pub last_paint_point: Option<uv_paint_point::SurfacePaintPoint>,
     /// The last finished 2D stroke's endpoint, scoped to its mesh and texture set for Shift+click lines
     pub last_paint_uv: Option<uv_paint_point::UvPaintPoint>,
-    /// The decal layer the next click in the 3D view places.
-    pub placing_decal: Option<texturecraft_engine::core::LayerId>,
+    /// The fill whose Move on model button is held down: dragging slides its projection, Shift or the right button turns it, the wheel scales it
+    pub moving_on_model: Option<move_on_model::MoveOnModel>,
     /// The Properties popup a right click in a view opens.
     pub properties_popup: Option<properties_popup::PropertiesPopup>,
     /// The color selection the next click in the 3D or 2D view picks an ID color for
@@ -344,7 +360,7 @@ impl TextureCraftApp {
             render: render_mode::RenderView::default(),
             last_paint_point: None,
             last_paint_uv: None,
-            placing_decal: None,
+            moving_on_model: None,
             properties_popup: None,
             picking_id_color: None,
             picking_symmetry_plane: false,
@@ -925,6 +941,13 @@ struct CameraGlide {
 
 const GLIDE_SECONDS: f64 = 0.35;
 
+/// The share of the running frame rate and frame time averages each frame keeps (an average over about ten frames)
+const FRAME_AVERAGE_KEEP: f32 = 0.9;
+/// The interface scale applied: wider than the Settings slider, so a scale set elsewhere still applies within reason
+const UI_SCALE_APPLIED: std::ops::RangeInclusive<f32> = 0.5..=3.0;
+/// Zoom factors closer than this are the same zoom (float noise), so the zoom is not set again each frame
+const SAME_ZOOM_TOLERANCE: f32 = 1e-3;
+
 impl TextureCraftApp {
     /// Advance the camera glide by one frame.
     fn step_camera_glide(&mut self, ctx: &egui::Context) {
@@ -953,6 +976,11 @@ impl TextureCraftApp {
 }
 
 impl eframe::App for TextureCraftApp {
+    /// A drag that holds the pointer reads the pointer's moves as moves of a pointer no screen edge stops
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        pointer_lock::rewrite(ctx, raw_input);
+    }
+
     /// The browser never tells eframe the page is closing, so save often there.
     fn auto_save_interval(&self) -> std::time::Duration {
         std::time::Duration::from_secs(if cfg!(target_arch = "wasm32") { 5 } else { 30 })
@@ -966,13 +994,14 @@ impl eframe::App for TextureCraftApp {
     }
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let t0 = now_ms();
-        let now = ctx.input(|i| i.time);
-        let dt = (now - self.last_time) as f32;
-        if dt > 0.0 {
-            self.fps = self.fps * 0.9 + (1.0 / dt) * 0.1;
+        let logic_start_ms = now_ms();
+        let now = ctx.input(|input| input.time);
+        let frame_seconds = (now - self.last_time) as f32;
+        if frame_seconds > 0.0 {
+            self.fps = self.fps * FRAME_AVERAGE_KEEP + (1.0 / frame_seconds) * (1.0 - FRAME_AVERAGE_KEEP);
         }
         self.last_time = now;
+
         let style = (self.ui.prefs.brightness, self.ui.prefs.accent);
         if self.styled != Some(style) {
             theme::apply(ctx, style.0, style.1);
@@ -980,16 +1009,17 @@ impl eframe::App for TextureCraftApp {
         }
         self.step_camera_glide(ctx);
         self.ui.prefs.apply_resource_limits();
+
         control::poll(self, ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.run_file_dialog_answers();
         web_files::poll(self);
-        let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+        let dropped = ctx.input(|input| input.raw.dropped_files.clone());
 
         // A folder, a zip or several PBR maps dropped together open the PBR import dialog
         #[cfg(not(target_arch = "wasm32"))]
         let consumed = if !dropped.is_empty() {
-            let paths: Vec<std::path::PathBuf> = dropped.iter().map(|f| f.path().to_path_buf()).collect();
+            let paths: Vec<std::path::PathBuf> = dropped.iter().map(|file| file.path().to_path_buf()).collect();
             pbr_import::dropped(self, &paths)
         } else {
             Vec::new()
@@ -1009,13 +1039,14 @@ impl eframe::App for TextureCraftApp {
         self.thumbs.sync_images(&self.session.images, self.session.revision);
 
         // The library shelf rescans when the window comes back (MaterialCraft may have sent a material)
-        let focused = ctx.input(|i| i.viewport().focused).unwrap_or(true);
+        let focused = ctx.input(|input| input.viewport().focused).unwrap_or(true);
         if focused && !self.focused {
             self.library = None;
         }
         self.focused = focused;
-        let scale = self.ui.prefs.ui_scale.clamp(0.5, 3.0);
-        if (ctx.zoom_factor() - scale).abs() > 1e-3 {
+
+        let scale = self.ui.prefs.ui_scale.clamp(*UI_SCALE_APPLIED.start(), *UI_SCALE_APPLIED.end());
+        if (ctx.zoom_factor() - scale).abs() > SAME_ZOOM_TOLERANCE {
             ctx.set_zoom_factor(scale);
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -1029,17 +1060,19 @@ impl eframe::App for TextureCraftApp {
         self.fonts.update(ctx, i18n::current().code, self.ui.windows.settings);
         #[cfg(not(target_arch = "wasm32"))]
         updates_ui::tick(self, ctx);
+
         self.bindings.sync(&self.ui.keymap, craft_keymap::egui::platform(ctx));
         menus::shortcuts(self, ctx);
+        move_on_model::end_when_gone(self, ctx);
 
         // The Path tool's curve repaints (a preview while placed) as its points, brush or material change
-        if let Err(e) = self.session.path_live() {
+        if let Err(error) = self.session.path_live() {
             self.session.cancel_path();
-            self.toast(e.to_string(), true);
+            self.toast(error.to_string(), true);
         }
         profile::drive(self, ctx);
-        self.toasts.retain(|t| t.until > now);
-        self.profiler.logic_ms = (now_ms() - t0) as f32;
+        self.toasts.retain(|toast| toast.until > now);
+        self.profiler.logic_ms = (now_ms() - logic_start_ms) as f32;
 
         // Last, so it sees every close request this frame's work made
         windows::close_request(self, ctx);
@@ -1048,7 +1081,7 @@ impl eframe::App for TextureCraftApp {
     #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        let started_ms = now_ms();
+        let ui_start_ms = now_ms();
 
         // Baking and rendering need a project (a saved layout may start in one of them)
         if !self.session.project_open {
@@ -1088,10 +1121,12 @@ impl eframe::App for TextureCraftApp {
         #[cfg(not(target_arch = "wasm32"))]
         self.file_dialogs.show_pending(frame);
 
-        let ended_ms = now_ms();
-        let elapsed_ms = (ended_ms - started_ms) as f32;
-        self.ui_ms = if self.ui_ms == 0.0 { elapsed_ms } else { self.ui_ms * 0.9 + elapsed_ms * 0.1 };
-        self.profiler.end_frame(ended_ms, elapsed_ms);
+        pointer_lock::settle(&ctx);
+
+        let end_ms = now_ms();
+        let ui_frame_ms = (end_ms - ui_start_ms) as f32;
+        self.ui_ms = if self.ui_ms == 0.0 { ui_frame_ms } else { self.ui_ms * FRAME_AVERAGE_KEEP + ui_frame_ms * (1.0 - FRAME_AVERAGE_KEEP) };
+        self.profiler.end_frame(end_ms, ui_frame_ms);
     }
 }
 

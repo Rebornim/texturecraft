@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod axis_frame;
 mod baked_maps;
 pub mod below;
 mod curvature_size_level;
@@ -14,18 +15,28 @@ pub mod curvature_sizes;
 pub mod display;
 pub mod eval;
 mod fabric;
+pub mod fill_copies;
+pub mod fill_copy;
+mod fill_place;
+pub mod frame_placement;
 mod fur_lock;
 mod held_fields;
 mod image_identity;
+pub mod mip_level;
 mod organic;
 pub mod pattern;
 mod pattern_context;
+pub mod projector_cover;
+pub mod projector_depth;
+pub mod projector_view;
 pub mod solo;
 pub mod store;
 pub mod thumb;
+pub mod tile_length;
 mod tile_pattern;
 mod tile_random_stream;
 mod timber;
+pub mod warp;
 
 pub use below::{BelowCache, StackKey};
 pub use display::{DisplayKind, kinds_for, tile_bytes};

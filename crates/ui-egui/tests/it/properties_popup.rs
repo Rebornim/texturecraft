@@ -1,18 +1,46 @@
 //! A plain right click in a view opens the Properties panel's contents at the cursor; right drags keep their gestures
 
-use egui::{Event, Key, Modifiers, PointerButton, Pos2, vec2};
+use egui::{Event, Key, Modifiers, PointerButton, Pos2, Role, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::json;
 use texturecraft_engine::core::LayerKind;
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::properties_popup::{self, PropertiesPopup};
 use texturecraft_ui_egui::state::{Mode, ViewLayout};
 
+use crate::{BAKE_RESOLUTION, DRAG_STEP_FRAMES, SETTLE_FRAMES, STARTUP_FRAMES, TEXTURE_RESOLUTION};
+
+/// A common laptop window
+const WINDOW_SIZE: egui::Vec2 = egui::vec2(1600.0, 960.0);
+
+/// Tall enough that the docked list ends before a fill's MATERIAL caption reaches its top
+const JUMP_TAB_WINDOW: egui::Vec2 = egui::vec2(1600.0, 1300.0);
+
+/// Width of the docked jump tab strip, from its Fill tab across its other two
+const DOCKED_STRIP_WIDTH: f32 = 300.0;
+
+/// Frames for a jump tab's scroll to land
+const JUMP_FRAMES: usize = 4;
+
+/// Frames for a selection made through the engine to show
+const SELECT_FRAMES: usize = 3;
+
+/// Pointer moves a drag makes between its press and its release
+const DRAG_MOVES: usize = 4;
+
 fn harness() -> Harness<'static, TextureCraftApp> {
-    let session = texturecraft_engine::sample_session(256, 64).unwrap();
-    let mut harness = Harness::builder().with_size(vec2(1600.0, 960.0)).build_eframe(|cc| TextureCraftApp::new(cc, session));
-    harness.run_steps(4);
+    harness_sized(WINDOW_SIZE)
+}
+
+/// The sample project's app in a window of `size`, speaking English
+fn harness_sized(size: egui::Vec2) -> Harness<'static, TextureCraftApp> {
+    let session = texturecraft_engine::sample_session(TEXTURE_RESOLUTION, BAKE_RESOLUTION).unwrap();
+    let mut harness = Harness::builder().with_size(size).build_eframe(|cc| TextureCraftApp::new(cc, session));
+
+    // The labels below are English; a first run would speak the system's language
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(STARTUP_FRAMES);
     harness
 }
 
@@ -30,7 +58,7 @@ fn click(harness: &mut Harness<'_, TextureCraftApp>, button: PointerButton, at: 
     harness.event(Event::PointerButton { pos: at, button, pressed: true, modifiers: Modifiers::NONE });
     harness.run_steps(1);
     harness.event(Event::PointerButton { pos: at, button, pressed: false, modifiers: Modifiers::NONE });
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
 }
 
 /// Drag with `button` from `from` by `by` in a few moves while `modifiers` are held
@@ -38,14 +66,14 @@ fn drag(harness: &mut Harness<'_, TextureCraftApp>, button: PointerButton, from:
     harness.event(Event::ModifiersChanged(modifiers));
     harness.hover_at(from);
     harness.event(Event::PointerButton { pos: from, button, pressed: true, modifiers });
-    harness.run_steps(2);
-    for step in 1..=4 {
-        harness.hover_at(from + by * (step as f32 / 4.0));
+    harness.run_steps(DRAG_STEP_FRAMES);
+    for step in 1..=DRAG_MOVES {
+        harness.hover_at(from + by * (step as f32 / DRAG_MOVES as f32));
         harness.run_steps(1);
     }
     harness.event(Event::PointerButton { pos: from + by, button, pressed: false, modifiers });
     harness.event(Event::ModifiersChanged(Modifiers::NONE));
-    harness.run_steps(3);
+    harness.run_steps(SETTLE_FRAMES);
 }
 
 #[test]
@@ -144,13 +172,15 @@ fn it_shows_what_the_properties_panel_shows() {
     let fill = harness.state().session.doc.project.layers.values().find(|layer| matches!(layer.kind, LayerKind::Fill(_))).map(|layer| layer.id.0).unwrap();
     let selected = texturecraft_engine::execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": fill}));
     assert!(selected.is_ok(), "{selected:?}");
+    let projected = texturecraft_engine::execute(&mut harness.state_mut().session, "layer.fill.projection", &json!({"layer": fill, "projection": "uv"}));
+    assert!(projected.is_ok(), "{projected:?}");
     harness.run_steps(3);
 
     let center = view_center(&harness);
     click(&mut harness, PointerButton::Secondary, center);
     let popup = harness.ctx.memory(|memory| memory.area_rect(properties_popup::area_id())).unwrap();
     let in_popup = |label: &str| harness.query_all_by_label(label).any(|node| popup.contains_rect(node.rect()));
-    assert!(in_popup("Projection"), "a selected fill shows its fill settings");
+    assert!(in_popup("UV projection"), "a selected fill shows its fill settings");
     assert!(!in_popup("Minimum size (%)"), "not the brush's");
 }
 

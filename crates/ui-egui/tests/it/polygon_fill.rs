@@ -158,3 +158,22 @@ fn polygon_fill_snapshots() {
     harness.run_steps(6);
     harness.render().unwrap().save(directory.join("polygon-fill-mask-2d.png")).unwrap();
 }
+
+/// A Properties body not yet on the property sheet starts under the panel's name, at the sheet's side padding (it started 4 px left of it)
+#[test]
+fn the_polygon_fill_body_starts_under_the_properties_name() {
+    let mut harness = polygon_fill_app();
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(2);
+
+    let painted_left = |wanted: &dyn Fn(&str) -> bool| {
+        harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if wanted(text.galley.text()) => Some(text.pos.x),
+            _ => None,
+        })
+    };
+    let caption = painted_left(&|text| text == "POLYGON FILL");
+    let header = painted_left(&|text| text.starts_with("PROPERTIES"));
+
+    assert!(caption.is_some() && caption == header, "the body starts at {caption:?}, the header name at {header:?}");
+}

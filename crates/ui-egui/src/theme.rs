@@ -293,6 +293,9 @@ pub fn semibold(size: f32) -> FontId {
 /// The semibold family: Inter SemiBold, the regular font without it.
 pub(crate) const SEMIBOLD: &str = "ui-semibold";
 
+/// Colour of the hard, unblurred shadow under the panel's own popups (pickers, menus, tips)
+pub(crate) const HARD_SHADOW: Color32 = Color32::from_rgb(12, 14, 18);
+
 /// The app's fonts: Inter (regular and semibold) when built with craft-fonts, egui's defaults
 /// otherwise, egui's monospace face for values, and the Phosphor icon font (`fonts::UiFonts`
 /// adds CJK).
@@ -382,6 +385,23 @@ pub fn apply(ctx: &egui::Context, b: Brightness, accent: Accent) {
         v.striped = false;
         s.visuals = v;
     });
+}
+
+/// X, Y and Z as the view corner, the symmetry manipulator and the 3D fields show them
+pub const AXIS_COLORS: [Color32; 3] = [Color32::from_rgb(0xd8, 0x60, 0x4f), Color32::from_rgb(0x6c, 0xbc, 0x5a), Color32::from_rgb(0x5a, 0x8c, 0xe0)];
+
+/// An axis arrow's shaft as the symmetry manipulator and the projection gizmos draw it: its width, the dark halo under it and the halo's extra width (points at the default size)
+pub const SHAFT_WIDTH: f32 = 2.2;
+pub const SHAFT_HALO: Color32 = Color32::from_black_alpha(128);
+pub const SHAFT_HALO_EXTRA_WIDTH: f32 = 3.0;
+
+/// The axes' letters, as the Axis switches and the 3D fields' tags show them
+pub const AXIS_NAMES: [&str; 3] = ["X", "Y", "Z"];
+
+/// `from` moved `amount` of the way to `to` in gamma space, opaque
+pub(crate) fn lerp_color(from: Color32, to: Color32, amount: f32) -> Color32 {
+    let mix = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * amount).round().clamp(0.0, 255.0) as u8;
+    Color32::from_rgb(mix(from.r(), to.r()), mix(from.g(), to.g()), mix(from.b(), to.b()))
 }
 
 /// A section caption inside a panel: semibold in the strong colour, as written (no capitals).

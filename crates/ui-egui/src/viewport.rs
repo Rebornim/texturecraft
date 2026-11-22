@@ -18,6 +18,7 @@ use crate::gpu::ViewCallback;
 use crate::i18n::{tr, trf};
 use crate::path_hit::PathHit;
 use crate::path_surface_cache::{PathSurfaceCache, SurfaceCurve};
+use crate::projection_gizmo::ShownGizmo;
 use crate::state::ViewLayout;
 use crate::theme::Tokens;
 use crate::toolbar::{MAX_BRUSH_SIZE, MIN_BRUSH_SIZE};
@@ -731,7 +732,10 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     let local = |pointer: egui::Pos2| Vec2::new(pointer.x - rect.left(), pointer.y - rect.top());
     let adjusting = brush_drag(app, ui, &response);
     let ctrl = ui.input(|input| input.modifiers.ctrl);
-    let navigating = !adjusting && (alt || ui.input(|input| input.pointer.middle_down() || input.pointer.secondary_down()));
+
+    // A held Move on model button owns the pointer and the wheel until it lets go: the camera, brush and gizmos keep still
+    let holding = crate::move_on_model::holding(app, ui.ctx());
+    let navigating = !adjusting && !holding && (alt || ui.input(|input| input.pointer.middle_down() || input.pointer.secondary_down()));
 
     // Navigation; S + drag moves the projection stencil instead, below
     let delta = ui.input(|input| input.pointer.delta());
@@ -740,8 +744,8 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     // Only an equipped Projection tool that can act moves its stencil: it isn't drawn otherwise
     let stencil_moves = tool_acts(app) && app.session.tool.tool == Tool::Projection;
     let stencil_drag = s_held && stencil_moves && app.session.tool.stencil.is_some();
-    if stencil_drag || adjusting {
-        // The stencil or the brush changes instead of the camera
+    if stencil_drag || adjusting || holding {
+        // The stencil, the brush or the held Move on model button changes instead of the camera
     } else if response.dragged_by(PointerButton::Middle) {
         app.camera_glide = None;
         app.session.camera.pan(delta.x / size.y, delta.y / size.y);
@@ -774,7 +778,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         app.orbit_snap = None;
     }
 
-    if response.hovered() {
+    if response.hovered() && !holding {
         size_brush_by_ctrl_wheel(app, ui);
         if ui.input(|input| input.multi_touch().is_none()) {
             let pinch = trackpad_pinch(ui);
@@ -868,27 +872,8 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     // A dismissing click cannot paint or place a decal through the rail popup
     let rail_popup = crate::rail_popup::blocks_paint_input(app, ui.ctx());
 
-    // Decal placement: a click moves the decal being placed there, unless it dismisses a waiting image drop's menu
-    let placing = app.placing_decal.filter(|_| app.ui.mode == crate::state::Mode::Painting);
-    if let Some(target) = placing {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
-        if !alt
-            && !rail_popup
-            && !DecalDrop::blocks_input(ui.ctx())
-            && response.clicked_by(PointerButton::Primary)
-            && let Some(pointer) = response.interact_pointer_pos()
-        {
-            let (at, viewport) = (local(pointer), app.session.viewport);
-            let mut params = json!({"x": at.x, "y": at.y, "viewport": [viewport.x, viewport.y]});
-
-            // The id is a decal layer's or a mask fill effect's
-            params[if app.session.doc.project.effect(target).is_some() { "effect" } else { "layer" }] = json!(target.0);
-            app.run("layer.decal.set", params);
-            app.placing_decal = None;
-        }
-    }
-
     crate::properties_popup::open_on_right_click(app, ui, &response, rect, s_held || v_held);
+
     let popup = app.properties_popup.is_some() || rail_popup;
 
     // A pending ID color pick takes the next click instead of the brush
@@ -904,26 +889,29 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         }
     }
 
-    // The selected decal's frame and handles: drag to move, scale or turn it
-    let decal_drag = !alt
-        && !s_held
-        && !v_held
-        && !focus_pick
-        && !popup
-        && placing.is_none()
-        && !picking_id_color
-        && touch.is_none()
-        && !DecalDrop::blocks_input(ui.ctx())
-        && decal_input(app, ui, &response, rect);
+    // The selected fill's frame (planar, warp) or round projector (tri-planar, spherical, cylindrical): only a press on one of its handles moves it
+    let gizmo_free =
+        !adjusting && !alt && !holding && !s_held && !v_held && !focus_pick && !popup && !picking && touch.is_none() && !DecalDrop::blocks_input(ui.ctx());
+    let gizmo = ShownGizmo::of(app, rect);
+    let frame_drag = gizmo_free && ShownGizmo::input(app, ui, &response, rect, gizmo.as_ref());
+
+    // Alt (or another mode) taking the pointer mid-drag ends the drag: let go of Alt, it must not resume from where it began before the camera moved
+    if !gizmo_free {
+        ShownGizmo::let_go(ui.ctx());
+    }
+
+    // A drag moved the projection: its handles and outline show where it is now
+    let gizmo = if frame_drag { ShownGizmo::of(app, rect) } else { gizmo };
+
+    let projection_drag = frame_drag || holding;
     let plane_pick = !popup
         && !s_held
         && !v_held
         && !focus_pick
-        && placing.is_none()
-        && !picking_id_color
+        && !picking
         && touch.is_none()
         && !DecalDrop::blocks_input(ui.ctx())
-        && !decal_drag
+        && !projection_drag
         && crate::symmetry::plane_pick_input(app, ui, &response, rect);
     let symmetry_drag = !alt
         && !plane_pick
@@ -932,15 +920,18 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !v_held
         && !focus_pick
         && !popup
-        && placing.is_none()
-        && !picking_id_color
+        && !picking
         && touch.is_none()
         && !DecalDrop::blocks_input(ui.ctx())
-        && !decal_drag
+        && !projection_drag
         && crate::symmetry::manipulator_input(app, ui, &response, rect);
 
     // A handle owns a new click, but a stroke already under way must still finish over it
     let symmetry_handle = !app.session.stroke_active() && crate::symmetry::manipulator_hovered(app, ui, rect);
+
+    // A projection gizmo's handle owns a press that began on it through its release (the pointer may have left it by then)
+    let began_on_handle = handle_press(ui.ctx(), |at| gizmo.as_ref().is_some_and(|gizmo| gizmo.on_handle(rect, at)));
+    let gizmo_handle = gizmo_free && !app.session.stroke_active() && began_on_handle;
 
     // Painting
     let painting = tool_acts(app)
@@ -950,13 +941,13 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !s_held
         && !v_held
         && !focus_pick
-        && placing.is_none()
-        && !picking_id_color
+        && !picking
         && touch.is_none()
-        && !decal_drag
+        && !projection_drag
         && !plane_pick
         && !symmetry_drag
         && !symmetry_handle
+        && !gizmo_handle
         && !DecalDrop::blocks_input(ui.ctx());
     let path_tool = app.session.tool.tool == Tool::Path;
     let viewport = app.session.viewport;
@@ -1034,6 +1025,8 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && (app.session.tool.tool != Tool::Path || adjusting)
         && !crate::symmetry::manipulator_hovered(app, ui, rect)
         && app.picking_id_color.is_none()
+        && app.moving_on_model.is_none()
+        && !ShownGizmo::hovered(ui, rect, gizmo.as_ref())
         && let Some(hover_pos) = if adjusting { ui.input(|input| input.pointer.press_origin()) } else { response.hover_pos() }
         && let Some(hit) = app.session.pick(local(hover_pos), app.session.viewport)
     {
@@ -1063,7 +1056,9 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     }
     crate::symmetry::overlay(app, ui, rect, symmetry_cursor);
     stencil_overlay(app, ui, rect);
-    decal_overlay(app, ui, rect);
+    if let Some(gizmo) = &gizmo {
+        gizmo.overlay(app, ui, rect);
+    }
     brush_readout(app, ui, &response, adjusting);
     if app.session.quick_mask.editing && app.picking_id_color.is_none() {
         ui.painter_at(rect).text(
@@ -1097,237 +1092,6 @@ fn bake_visualization(app: &TextureCraftApp) -> Option<texturecraft_render::Bake
     }
 
     Some(app.ui.bake_visualization.visualization(app.session.ts()))
-}
-
-/// What a drag on the selected decal's frame does.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum DecalGrab {
-    /// Inside the frame: slide it over the surface.
-    Move,
-    /// A corner: scale it about its center.
-    Scale,
-    /// The round handle above its top edge: turn it.
-    Rotate,
-}
-
-impl DecalGrab {
-    fn cursor(self, dragging: bool) -> egui::CursorIcon {
-        match self {
-            DecalGrab::Move => egui::CursorIcon::Move,
-            DecalGrab::Scale => egui::CursorIcon::ResizeNwSe,
-            DecalGrab::Rotate if dragging => egui::CursorIcon::Grabbing,
-            DecalGrab::Rotate => egui::CursorIcon::Grab,
-        }
-    }
-}
-
-/// A decal handle being dragged (kept in egui's memory between frames)
-#[derive(Clone, Copy, Debug)]
-struct DecalDrag {
-    layer: texturecraft_engine::core::LayerId,
-    /// The mask fill effect holding the decal, when it was placed as a mask
-    effect: Option<texturecraft_engine::core::LayerId>,
-    grab: DecalGrab,
-    /// Where the drag started, the decal's center on screen and the decal then
-    from: Pos2,
-    center: Pos2,
-    start: texturecraft_engine::core::Decal,
-    /// The drag made its undo step: later updates merge into it
-    stepped: bool,
-}
-
-fn decal_drag_id() -> egui::Id {
-    egui::Id::unique("tc_decal_drag")
-}
-
-/// Screen distance from the top edge to the rotation handle (points).
-const DECAL_KNOB: f32 = 24.0;
-
-/// The selected decal (a decal layer's content, or a mask decal effect) as the 3D view shows it
-struct DecalFrame {
-    layer: texturecraft_engine::core::LayerId,
-    /// The selected mask fill effect holding the decal, when it was placed as a mask
-    effect: Option<texturecraft_engine::core::LayerId>,
-    decal: texturecraft_engine::core::Decal,
-    /// Top left, top right, bottom right, bottom left
-    corners: [Pos2; 4],
-    center: Pos2,
-    /// The middle of the top edge and the rotation handle above it
-    top: Pos2,
-    knob: Pos2,
-}
-
-impl DecalFrame {
-    /// The selected decal: its layer (the mask's owner for an effect), the mask fill effect holding it when placed as a mask, and the decal
-    fn selected(
-        app: &TextureCraftApp,
-    ) -> Option<(texturecraft_engine::core::LayerId, Option<texturecraft_engine::core::LayerId>, texturecraft_engine::core::Decal)> {
-        use texturecraft_engine::StackTarget;
-        use texturecraft_engine::core::{EffectKind, Fill, LayerKind, Projection};
-
-        if app.ui.mode != crate::state::Mode::Painting {
-            return None;
-        }
-
-        let layers = &app.session.doc.project;
-        let selected = app.session.selected_layer()?;
-        match app.session.target {
-            StackTarget::Content => {
-                let layer = layers.content_layer(selected)?;
-                let LayerKind::Fill(Fill { projection: Projection::Decal(decal), .. }) = &layer.kind else { return None };
-
-                Some((layer.id, None, *decal))
-            }
-            StackTarget::Effect(effect) => {
-                // Only the selected layer's effective mask may supply a decal frame, including an instance's inherited mask
-                let owner = layers.mask_owner(selected);
-                let mask = layers.layer(owner).ok()?.mask.as_ref()?;
-                let mask_effect = mask.effects.iter().find(|candidate| candidate.id == effect)?;
-                let EffectKind::Fill { projection: Projection::Decal(decal), .. } = &mask_effect.kind else { return None };
-
-                Some((owner, Some(effect), *decal))
-            }
-            StackTarget::Mask => None,
-        }
-    }
-
-    fn of(app: &TextureCraftApp, rect: Rect) -> Option<DecalFrame> {
-        use texturecraft_engine::compose::pattern::{decal_axes, decal_corners};
-
-        let (layer, effect, decal) = Self::selected(app)?;
-        let decal = &decal;
-        let [top_left, top_right, bottom_right, bottom_left] = decal_corners(decal)?.map(|corner| project(app, rect, corner));
-        let corners = [top_left?, top_right?, bottom_right?, bottom_left?];
-        let center = project(app, rect, decal_axes(decal)?.0)?;
-        let top = corners[0].lerp(corners[1], 0.5);
-        let knob = top + (top - center).normalized() * DECAL_KNOB;
-        Some(DecalFrame { layer, effect, decal: *decal, corners, center, top, knob })
-    }
-
-    /// The handle under screen point `p`.
-    fn grab(&self, p: Pos2) -> Option<DecalGrab> {
-        if self.knob.distance(p) <= HANDLE_GRAB {
-            return Some(DecalGrab::Rotate);
-        }
-        if self.corners.iter().any(|c| c.distance(p) <= HANDLE_GRAB) {
-            return Some(DecalGrab::Scale);
-        }
-        // Inside the (convex) frame: on the same side of every edge.
-        let side = |i: usize| {
-            let (a, b) = (self.corners[i], self.corners[(i + 1) % 4]);
-            (b - a).x * (p - a).y - (b - a).y * (p - a).x
-        };
-        let s = [side(0), side(1), side(2), side(3)];
-        (s.iter().all(|v| *v >= 0.0) || s.iter().all(|v| *v <= 0.0)).then_some(DecalGrab::Move)
-    }
-}
-
-/// Drags on the selected decal's frame and handles (one undo step per drag, the decal updates live); returns whether a decal drag owns the pointer
-fn decal_input(app: &mut TextureCraftApp, ui: &Ui, resp: &egui::Response, rect: Rect) -> bool {
-    let ctx = ui.ctx();
-    let frame = DecalFrame::of(app, rect);
-    let on_frame = |drag: &DecalDrag| frame.as_ref().is_some_and(|frame| frame.layer == drag.layer && frame.effect == drag.effect);
-    let mut drag = ctx.data(|data| data.get_temp::<DecalDrag>(decal_drag_id())).filter(on_frame);
-    if resp.drag_started_by(PointerButton::Primary)
-        && let (Some(frame), Some(from)) = (&frame, ctx.input(|input| input.pointer.press_origin()))
-        && let Some(grab) = frame.grab(from)
-    {
-        drag = Some(DecalDrag { layer: frame.layer, effect: frame.effect, grab, from, center: frame.center, start: frame.decal, stepped: false });
-    }
-
-    let Some(mut drag) = drag.filter(|_| resp.dragged_by(PointerButton::Primary) || resp.drag_started_by(PointerButton::Primary)) else {
-        ctx.data_mut(|data| data.remove::<DecalDrag>(decal_drag_id()));
-        if let (Some(frame), Some(hover)) = (&frame, resp.hover_pos())
-            && let Some(grab) = frame.grab(hover)
-        {
-            ctx.set_cursor_icon(grab.cursor(false));
-        }
-        return false;
-    };
-
-    ctx.set_cursor_icon(drag.grab.cursor(true));
-    if let Some(pointer) = resp.interact_pointer_pos().filter(|_| ctx.input(|input| input.pointer.delta() != egui::Vec2::ZERO)) {
-        let mut params = match drag.grab {
-            DecalGrab::Move => {
-                let target = drag.center + (pointer - drag.from) - rect.left_top();
-                let viewport = app.session.viewport;
-                json!({"x": target.x, "y": target.y, "viewport": [viewport.x, viewport.y]})
-            }
-            DecalGrab::Scale => {
-                let scale = (pointer - drag.center).length() / (drag.from - drag.center).length().max(1.0);
-                json!({"size": [drag.start.size[0] * scale, drag.start.size[1] * scale]})
-            }
-            DecalGrab::Rotate => {
-                // Screen y points down: counter-clockwise angles turn the decal's right toward its up
-                let angle = |offset: egui::Vec2| (-offset.y).atan2(offset.x).to_degrees();
-                json!({"rotation": drag.start.rotation + angle(pointer - drag.center) - angle(drag.from - drag.center)})
-            }
-        };
-        params["layer"] = json!(drag.layer.0);
-        if let Some(effect) = drag.effect {
-            params["effect"] = json!(effect.0);
-        }
-        params["merge"] = json!(drag.stepped);
-        // Off the mesh while moving: the decal waits where it is
-        drag.stepped |= texturecraft_engine::execute(&mut app.session, "layer.decal.set", &params).is_ok();
-    }
-    ctx.data_mut(|data| data.insert_temp(decal_drag_id(), drag));
-    true
-}
-
-/// The frame of the selected decal layer over the 3D view with its handles (and a hint while
-/// placing it): outline, corner handles, the rotation handle and the projection direction.
-fn decal_overlay(app: &mut TextureCraftApp, ui: &Ui, rect: Rect) {
-    if app.ui.mode != crate::state::Mode::Painting {
-        return;
-    }
-
-    let tk = Tokens::get(ui.ctx());
-
-    // Placing follows the selection: another layer or effect selected stops it
-    let selected_decal = DecalFrame::selected(app).map(|(layer, effect, _)| effect.unwrap_or(layer));
-    if app.placing_decal.is_some() && app.placing_decal != selected_decal {
-        app.placing_decal = None;
-    }
-    let painter = ui.painter_at(rect);
-    let hint_at = rect.left_top() + vec2(12.0, 40.0);
-    if app.placing_decal.is_some() {
-        let hint = tr("Click the mesh to place the decal");
-        painter.text(hint_at, egui::Align2::LEFT_TOP, hint, egui::FontId::proportional(12.0), tk.viewport_accent);
-    }
-    let Some(f) = DecalFrame::of(app, rect) else { return };
-    let active = ui.ctx().data(|d| d.get_temp::<DecalDrag>(decal_drag_id())).map(|d| d.grab);
-    let hovered = ui.ctx().pointer_hover_pos().filter(|h| rect.contains(*h)).and_then(|h| f.grab(h));
-    if app.placing_decal.is_none() && (hovered.is_some() || active.is_some()) {
-        let hint = tr("Drag the frame to move the decal, a corner to scale it, the round handle to turn it");
-        painter.text(hint_at, egui::Align2::LEFT_TOP, hint, egui::FontId::proportional(12.0), tk.viewport_text);
-    }
-    let shadow = Stroke::new(3.0, Color32::from_black_alpha(140));
-    let mut outline = f.corners.to_vec();
-    outline.push(f.corners[0]);
-    let frame_color = if active == Some(DecalGrab::Move) || hovered == Some(DecalGrab::Move) { tk.viewport_accent } else { Color32::from_white_alpha(220) };
-    for stroke in [shadow, Stroke::new(1.2, frame_color)] {
-        painter.add(egui::Shape::dashed_line(&outline, stroke, 6.0, 4.0));
-    }
-
-    // The projection direction from the center
-    if let Some((o, _, _, n)) = texturecraft_engine::compose::pattern::decal_axes(&f.decal)
-        && let Some(tip) = project(app, rect, o + n * f.decal.size[0].max(f.decal.size[1]) * 0.25)
-    {
-        painter.line_segment([f.center, tip], shadow);
-        painter.line_segment([f.center, tip], Stroke::new(1.4, tk.viewport_accent));
-    }
-    painter.circle(f.center, 3.5, tk.viewport_accent, Stroke::new(1.0, Color32::from_black_alpha(180)));
-
-    // Handles: white, the one under the pointer or being dragged in the accent color
-    let fill = |g: DecalGrab| if active == Some(g) || (active.is_none() && hovered == Some(g)) { tk.viewport_accent } else { Color32::WHITE };
-    let edge = Stroke::new(1.0, Color32::from_black_alpha(200));
-    painter.line_segment([f.top, f.knob], shadow);
-    painter.line_segment([f.top, f.knob], Stroke::new(1.4, Color32::from_white_alpha(220)));
-    painter.circle(f.knob, 5.0, fill(DecalGrab::Rotate), edge);
-    for c in f.corners {
-        painter.rect(Rect::from_center_size(c, vec2(8.0, 8.0)), 1.0, fill(DecalGrab::Scale), edge, egui::StrokeKind::Middle);
-    }
 }
 
 /// Draw the projection stencil in Paint Mode
@@ -1367,6 +1131,17 @@ fn stencil_overlay(app: &mut TextureCraftApp, ui: &Ui, rect: Rect) {
 pub(crate) fn project(app: &TextureCraftApp, rect: Rect, point: Vec3) -> Option<Pos2> {
     let ndc = app.session.camera.project(point, rect.width() / rect.height().max(1.0))?;
     Some(pos2(rect.left() + (ndc.x * 0.5 + 0.5) * rect.width(), rect.top() + (0.5 - ndc.y * 0.5) * rect.height()))
+}
+
+/// The camera ray through screen point `p` of the 3D view `rect`
+pub(crate) fn view_ray(app: &TextureCraftApp, rect: Rect, p: Pos2) -> texturecraft_engine::geom::Ray {
+    let ndc = Vec2::new((p.x - rect.left()) / rect.width() * 2.0 - 1.0, 1.0 - (p.y - rect.top()) / rect.height() * 2.0);
+    app.session.camera.ray(ndc, rect.width() / rect.height().max(1.0))
+}
+
+/// Whether the window lost the focus (Alt+Tab): egui keeps a held button down with no release to come, so a drag ends here as on a release
+pub(crate) fn focus_lost(ctx: &egui::Context) -> bool {
+    ctx.input(|input| input.viewport().focused == Some(false) || input.events.iter().any(|event| matches!(event, egui::Event::WindowFocused(false))))
 }
 
 /// Control point and curve grab radius (points)
@@ -1967,6 +1742,30 @@ fn scale_brush_by_wheel(app: &mut TextureCraftApp, scroll: f32) {
     brush.size = (brush.size * (1.0 + scroll * WHEEL_BRUSH_SIZE_PER_POINT)).clamp(MIN_BRUSH_SIZE, MAX_BRUSH_SIZE);
 }
 
+/// Whether the press under way, or released this frame, began on a projection handle (`on_handle`); with no press, whether the pointer is on one
+fn handle_press(ctx: &egui::Context, on_handle: impl Fn(Pos2) -> bool) -> bool {
+    let id = egui::Id::unique(HANDLE_PRESS_ID);
+    let (pressed, down, released, origin, hover) = ctx.input(|input| {
+        let pointer = &input.pointer;
+        (pointer.any_pressed(), pointer.any_down(), pointer.any_released(), pointer.press_origin(), pointer.hover_pos())
+    });
+
+    // Kept from the press frame: egui forgets the press origin on the release frame, where a short drift still makes a click
+    if pressed {
+        let on = origin.is_some_and(&on_handle);
+        ctx.data_mut(|data| data.insert_temp(id, on));
+    }
+    let kept = ctx.data(|data| data.get_temp::<bool>(id)).filter(|_| down || released);
+    if !down {
+        ctx.data_mut(|data| data.remove::<bool>(id));
+    }
+
+    kept.unwrap_or_else(|| (if down { origin } else { hover }).is_some_and(on_handle))
+}
+
+/// Where [`handle_press`] keeps whether the press began on a handle
+const HANDLE_PRESS_ID: &str = "projection_handle_press";
+
 /// Ctrl (Cmd on macOS) + drag changes the brush instead of painting: true while it applies (see `adjust_brush`)
 fn brush_drag(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response) -> bool {
     // Ctrl+Shift+left is not a brush change: it is left to the snapped straight line
@@ -2253,7 +2052,9 @@ fn view_2d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         }
         app.ui.uv_zoom = new_zoom;
     }
-    if response.hovered() {
+
+    // A held Move on model button takes the wheel
+    if response.hovered() && app.moving_on_model.is_none() {
         size_brush_by_ctrl_wheel(app, ui);
         let scroll = wheel_scroll(ui, shift);
         if scroll != 0.0 && shift && wheel_sizes_brush(app) {
@@ -2857,7 +2658,7 @@ mod tests {
         harness.state_mut().run("layer.add.decal", json!({"image": image, "channel": "mask", "size": 0.5})).unwrap();
         harness.run_steps(2);
         assert_eq!(harness.state().session.ts(), 0);
-        assert!(DecalFrame::of(harness.state(), harness.state().viewport_rect).is_some());
+        assert!(crate::frame_gizmo::FrameGizmo::of(harness.state(), harness.state().viewport_rect).is_some());
         harness
     }
 
@@ -2883,7 +2684,7 @@ mod tests {
 
         for texture_set in [0, 1] {
             let mut harness = decal_frame_app(false);
-            let original = DecalFrame::of(harness.state(), harness.state().viewport_rect).unwrap();
+            let original = crate::frame_gizmo::FrameGizmo::of(harness.state(), harness.state().viewport_rect).unwrap();
             let effect = original.effect.unwrap();
             let session = &mut harness.state_mut().session;
             execute(session, "textureSet.select", &json!({"ts": texture_set})).unwrap();
@@ -2896,14 +2697,14 @@ mod tests {
             assert_eq!(session.ts(), texture_set);
             assert_eq!(session.selected_layer().unwrap().0, other.as_u64().unwrap());
             assert_eq!(session.target, StackTarget::Effect(effect), "the failed selection leaves the previous effect target");
-            assert!(DecalFrame::of(harness.state(), harness.state().viewport_rect).is_none(), "a stale effect must not show a decal frame");
+            assert!(crate::frame_gizmo::FrameGizmo::of(harness.state(), harness.state().viewport_rect).is_none(), "a stale effect must not show a decal frame");
 
             drag_decal_handle(&mut harness, original.corners[1], original.center + (original.corners[1] - original.center) * 1.5);
-            drag_decal_handle(&mut harness, original.knob, original.knob + vec2(40.0, 0.0));
+            drag_decal_handle(&mut harness, original.center, original.center + vec2(40.0, 0.0));
 
             let effect = &harness.state().session.doc.project.effect(effect).unwrap().1.kind;
             assert!(
-                matches!(effect, texturecraft_engine::core::EffectKind::Fill { projection: texturecraft_engine::core::Projection::Decal(decal), .. } if *decal == original.decal)
+                matches!(effect, texturecraft_engine::core::EffectKind::Fill { projection: texturecraft_engine::core::Projection::Planar { placed: Some(decal), .. }, .. } if *decal == original.decal)
             );
         }
     }
@@ -2915,7 +2716,7 @@ mod tests {
         use texturecraft_engine::execute;
 
         let mut harness = decal_frame_app(false);
-        let original = DecalFrame::of(harness.state(), harness.state().viewport_rect).unwrap();
+        let original = crate::frame_gizmo::FrameGizmo::of(harness.state(), harness.state().viewport_rect).unwrap();
         let effect = original.effect.unwrap();
         let session = &mut harness.state_mut().session;
         let instance = execute(session, "layer.instance", &json!({"layer": original.layer.0, "ts": 1})).unwrap()["layer"].clone();
@@ -2925,12 +2726,12 @@ mod tests {
 
         assert_eq!(session.ts(), 1);
         assert_eq!(session.selected_layer().unwrap().0, instance.as_u64().unwrap());
-        let inherited = DecalFrame::of(harness.state(), harness.state().viewport_rect).unwrap();
+        let inherited = crate::frame_gizmo::FrameGizmo::of(harness.state(), harness.state().viewport_rect).unwrap();
         assert_eq!((inherited.layer, inherited.effect, inherited.decal), (original.layer, original.effect, original.decal));
 
         drag_decal_handle(&mut harness, inherited.corners[1], inherited.center + (inherited.corners[1] - inherited.center) * 1.5);
 
-        let edited = DecalFrame::of(harness.state(), harness.state().viewport_rect).unwrap();
+        let edited = crate::frame_gizmo::FrameGizmo::of(harness.state(), harness.state().viewport_rect).unwrap();
         assert!(edited.decal.size[0] > original.decal.size[0], "scaling an inherited decal edits its source");
     }
 
@@ -2941,7 +2742,7 @@ mod tests {
         use texturecraft_engine::execute;
 
         let mut harness = decal_frame_app(false);
-        let original = DecalFrame::of(harness.state(), harness.state().viewport_rect).unwrap();
+        let original = crate::frame_gizmo::FrameGizmo::of(harness.state(), harness.state().viewport_rect).unwrap();
         let effect = original.effect.unwrap();
         let session = &mut harness.state_mut().session;
         let instance = execute(session, "layer.instance", &json!({"layer": original.layer.0, "ts": 1})).unwrap()["layer"].clone();
@@ -2950,7 +2751,7 @@ mod tests {
 
         assert!(execute(session, "layer.select", &json!({"layer": instance, "target": effect.0})).is_err());
 
-        assert!(DecalFrame::of(harness.state(), harness.state().viewport_rect).is_none(), "an override hides the source's mask decal");
+        assert!(crate::frame_gizmo::FrameGizmo::of(harness.state(), harness.state().viewport_rect).is_none(), "an override hides the source's mask decal");
     }
 
     #[test]
@@ -2964,14 +2765,14 @@ mod tests {
 
         std::fs::create_dir_all(&directory).unwrap();
         let mut harness = decal_frame_app(true);
-        let original = DecalFrame::of(harness.state(), harness.state().viewport_rect).unwrap();
+        let original = crate::frame_gizmo::FrameGizmo::of(harness.state(), harness.state().viewport_rect).unwrap();
         let effect = original.effect.unwrap();
         let session = &mut harness.state_mut().session;
         let instance = execute(session, "layer.instance", &json!({"layer": original.layer.0, "ts": 1})).unwrap()["layer"].clone();
         assert!(execute(session, "layer.select", &json!({"layer": instance, "target": effect.0})).is_err());
         harness.run_steps(6);
 
-        assert!(DecalFrame::of(harness.state(), harness.state().viewport_rect).is_some());
+        assert!(crate::frame_gizmo::FrameGizmo::of(harness.state(), harness.state().viewport_rect).is_some());
         harness.render().unwrap().save(directory.join("decal-frame-inherited.png")).unwrap();
 
         let session = &mut harness.state_mut().session;
@@ -2980,7 +2781,7 @@ mod tests {
         assert!(execute(session, "layer.select", &json!({"layer": other, "target": effect.0})).is_err());
         harness.run_steps(6);
 
-        assert!(DecalFrame::of(harness.state(), harness.state().viewport_rect).is_none());
+        assert!(crate::frame_gizmo::FrameGizmo::of(harness.state(), harness.state().viewport_rect).is_none());
         harness.render().unwrap().save(directory.join("decal-frame-stale.png")).unwrap();
     }
 

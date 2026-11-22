@@ -3,8 +3,8 @@
 
 use serde_json::{Value, json};
 use texturecraft_core::{
-    Backface, BlendMode, Channel, ChannelBlend, ChannelKind, Decal, EffectKind, Fill, FillSymmetry, Filtering, ImageInput, Layer, LayerId, LayerKind,
-    NormalFormat, Procedural, ProceduralKind, Project, Projection, Projector, Sampling, ScaleMode, ShapeCrop, Source, SymmetryKind, UvTransform, UvWrap,
+    Backface, BlendMode, Channel, ChannelBlend, ChannelKind, Decal, EffectKind, Fill, FillSymmetry, Filtering, Layer, LayerId, LayerKind, NormalFormat,
+    Procedural, ProceduralKind, Project, Projection, Projector, Sampling, ScaleMode, ShapeCrop, Source, SymmetryKind, UvTransform, UvWrap,
 };
 use texturecraft_paint::alphas::{self, LibraryAlpha};
 
@@ -121,7 +121,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set fill source",
             [],
             None,
-            "{layer? | effect?: content fill effect id | mask fill effect id (one grayscale source: no channel, enabled, solo or normalFormat), channel, color?: ([r,g,b] linear or \"#rrggbb\" sRGB)|value?|procedural?: kind, scale?, seed?, contrast?, balance?, invert?, low?, high? (the same kind keeps what is not given), resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3, tile?: {Tile Generator settings in camelCase, as project.inspect shows them}, tileDefaults?: true (alone, they edit the channel's pattern)|image?|alpha?: library alpha id or name (its picture becomes the image resource alpha_<id>.png), normalFormat?: openGl|directX (the image's normal map convention; alone, it changes the channel's image)|anchor?: anchor effect id, anchorChannel?, colors?: gradient map of a color channel's procedural or anchor, 1 to 16 colors dark to light ([r, g, b] linear or \"#rrggbb\" sRGB; [] removes it; absent keeps it; alone, it changes the channel's source)|gradientMap?: true (turns the color stops on from the channel's current procedural or anchor: a procedural's low, their midpoint and high; an anchor's black, gray and white; stops already there stay), enabled?, solo?: true (this channel on, every other one off)} | {effect: filter effect id, input: image input id (distanceMap, customNoise), value?|procedural?|image?|alpha?|anchor? as a mask fill's source, or clear: true (back to its default gray)}",
+            "{layer? | effect?: content fill effect id | mask fill effect id (one grayscale source: no channel, enabled, solo or normalFormat), channel, color?: ([r,g,b] linear or \"#rrggbb\" sRGB)|value?|procedural?: kind, scale?, seed?, contrast?, balance?, invert?, low?, high? (the same kind keeps what is not given), resolution?: auto|textureSet|uvTile|custom, customResolution?, resolutionFactor?: -3..3, tile?: {Tile Generator settings in camelCase, as project.inspect shows them}, tileDefaults?: true (alone, they edit the channel's pattern)|image?|alpha?: library alpha id or name (its picture becomes the image resource alpha_<id>.png), normalFormat?: openGl|directX (the image's normal map convention; alone, it changes the channel's image)|anchor?: anchor effect id, anchorChannel?, colors?: gradient map of a color channel's procedural or anchor, 1 to 16 colors dark to light ([r, g, b] linear or \"#rrggbb\" sRGB; [] removes it; absent keeps it; alone, it changes the channel's source)|gradientMap?: true (turns the color stops on from the channel's current procedural or anchor: a procedural's low, their midpoint and high; an anchor's black, gray and white; stops already there stay), enabled?, solo?: true (this channel on, every other one off)}",
             has_layer,
             fill_set
         ),
@@ -566,10 +566,6 @@ fn mask_source_mut(s: &mut Session, effect: LayerId) -> Result<&mut Source> {
 }
 
 fn fill_set(session: &mut Session, params: &Value) -> Result<Value> {
-    if let Some(input) = strp(params, "input") {
-        return input_set(session, params, input);
-    }
-
     let target = fill_target(session, params, FILL_SET)?;
     if let FillTarget::Mask(effect) = target {
         return mask_fill_set(session, params, effect);
@@ -682,43 +678,6 @@ fn mask_fill_set(s: &mut Session, p: &Value, effect: LayerId) -> Result<Value> {
             s.add_library_alpha(alpha)?;
         }
         *mask_source_mut(s, effect)? = source;
-        Ok(())
-    })?;
-    Ok(Value::Null)
-}
-
-/// `layer.fill.set {effect, input}`: the source of a filter effect's image input `id`, or its default gray back (`clear`)
-fn input_set(s: &mut Session, p: &Value, id: &str) -> Result<Value> {
-    let effect = u64p(p, "effect").map(LayerId).ok_or_else(|| bad(FILL_SET, "`input` goes with a filter `effect`"))?;
-    let found = s.doc.project.effect(effect).map(|(_, found)| found).ok_or_else(|| bad(FILL_SET, format!("no effect {}", effect.0)))?;
-    let EffectKind::Filter(filter) = &found.kind else { return Err(bad(FILL_SET, format!("{} is not a filter effect", effect.0))) };
-    let input = ImageInput::named(filter, id).ok_or_else(|| bad(FILL_SET, format!("the {} filter has no image input `{id}`", filter.label())))?;
-    refuse_gray_keys(p, "an image input")?;
-
-    let (source, library_alpha) = if p.get("clear").and_then(Value::as_bool) == Some(true) {
-        (None, None)
-    } else {
-        let (source, alpha) = gray_source(s, p, effect, found.input(&input))?;
-        (Some(source), alpha)
-    };
-
-    // Its default gray is not stored, so a project that never set the input saves as before
-    let stored = source.filter(|source| *source != input.default_source());
-
-    // Setting what the input already reads adds no undo step
-    if found.inputs.get(input.id) == stored.as_ref() && library_alpha_present(s, library_alpha) {
-        return Ok(Value::Null);
-    }
-
-    s.edit("Set image input", |s| {
-        if let Some(alpha) = library_alpha {
-            s.add_library_alpha(alpha)?;
-        }
-        let found = s.doc.project.effect_mut(effect).ok_or_else(|| bad(FILL_SET, "the effect is gone"))?;
-        match stored {
-            Some(source) => found.inputs.insert(input.id.to_string(), source),
-            None => found.inputs.remove(input.id),
-        };
         Ok(())
     })?;
     Ok(Value::Null)

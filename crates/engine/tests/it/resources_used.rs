@@ -1,4 +1,4 @@
-//! The images a project reads beyond fill sources: a colour selection's ID map, a filter's image input, the mask brush and its paths
+//! The images a project reads beyond fill sources: a colour selection's ID map, the mask brush and its paths
 
 use serde_json::{Value, json};
 use texturecraft_engine::core::{Channel, LayerId};
@@ -27,20 +27,11 @@ fn selecting_layer(session: &mut Session, id_map: &str) -> LayerId {
     layer
 }
 
-/// [`selecting_layer`] with a Bevel Smooth that reads `input` as its Distance Map
-fn layer_reading(session: &mut Session, id_map: &str, input: &str) -> LayerId {
-    let layer = selecting_layer(session, id_map);
-    let filter = execute(session, "effect.add.filter", &json!({"filter": "bevelSmooth", "target": "content"})).unwrap()["effect"].as_u64().unwrap();
-    execute(session, "layer.fill.set", &json!({"effect": filter, "input": "distanceMap", "image": input})).unwrap();
-    layer
-}
-
 #[test]
-fn removing_unused_resources_keeps_the_images_a_selection_a_filter_input_the_mask_brush_and_a_path_read() {
+fn removing_unused_resources_keeps_the_images_a_selection_the_mask_brush_and_a_path_read() {
     let mut session = session();
-    let [id_map, input, path, brush, unused] =
-        ["id.png", "input.png", "path.png", "brush.png", "unused.png"].map(|name| session.import_resource_bytes(name, white_png()).unwrap());
-    let layer = layer_reading(&mut session, &id_map, &input);
+    let [id_map, path, brush, unused] = ["id.png", "path.png", "brush.png", "unused.png"].map(|name| session.import_resource_bytes(name, white_png()).unwrap());
+    let layer = selecting_layer(&mut session, &id_map);
 
     // A path on the mask is painted with one image, then the brush moves on to another
     execute(&mut session, "layer.select", &json!({"layer": layer.0, "target": "mask"})).unwrap();
@@ -54,18 +45,16 @@ fn removing_unused_resources_keeps_the_images_a_selection_a_filter_input_the_mas
 }
 
 #[test]
-fn a_smart_material_carries_the_images_its_selection_and_filter_input_read() {
+fn a_smart_material_carries_the_image_its_selection_reads() {
     let mut session = session();
     let id_map = session.import_resource_bytes("id.png", white_png()).unwrap();
-    let input = session.import_resource_bytes("input.png", white_png()).unwrap();
-    let layer = layer_reading(&mut session, &id_map, &input);
+    let layer = selecting_layer(&mut session, &id_map);
     let bytes = session.smart_material_bytes(layer, "Parts").unwrap();
 
     let mut other = self::session();
     other.add_smart_material_bytes(&bytes).unwrap();
 
     assert!(other.doc.resources.contains_key(&id_map), "the ID map comes along");
-    assert!(other.doc.resources.contains_key(&input), "the filter input comes along");
 }
 
 #[test]

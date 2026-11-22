@@ -12,9 +12,6 @@ use crate::mask_owner::MaskOwner;
 use crate::session::StackTarget;
 use crate::{EngineError, Result, Session, cmd};
 
-/// The `filter` id of a filter effect with no filter picked
-pub const EMPTY_FILTER: &str = "none";
-
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!("mask.add.white", "Add white mask", ["Layers", "Mask"], None, "{layer?}", has_layer, |s, p| add_mask(s, p, MaskBackground::White)),
@@ -71,7 +68,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add filter",
             ["Layers", "Effects"],
             None,
-            "{layer?, target?: mask|content, name?, filter?: any id or label from filter.list (warpDirectional adds Warp in its Directional mode) or \"none\" for an empty filter that changes nothing, level?, radius?, amount?, hue?: turns -1..1, saturation?, lightness?, contrast?, luminosity?, shadows?|midtones?|highlights?: [r,g,b] -1..1, colors?: [[r,g,b] linear or \"#rrggbb\" sRGB, ...], positions?: [0..1, ...], quantity?: 2..10, grayscaleMode?: desaturation|luma|average|max|min, blur?, balance?, invert?, linear?, debug?, preset?: round|pinch|stairs|easeOut|ease|easeIn|peakOut|peak|peakIn|bump|doubleBump|triangular, orientation?: horizontal|vertical, color?, levels?, min?, max?, position?, range?, offset?, intensity?, scale?, seed?, angle?} — material finishes go on the content",
+            "{layer?, target?: mask|content, name?, filter?: id from filter.list (invert, threshold, blur, sharpen, hsl, levels, contrastLuminosity, colorBalance, gradientMap, posterize, clamp, histogramScan|Range|Shift, warp, blurDirectional, slopeBlur, matFinishGrind|Raw|Sanded|Hammered), level?, radius?, amount?, hue?: turns -1..1, saturation?, lightness?, contrast?, luminosity?, shadows?|midtones?|highlights?: [r,g,b] -1..1, colors?: [[r,g,b] linear or \"#rrggbb\" sRGB, ...], levels?, min?, max?, position?, range?, offset?, intensity?, scale?, seed?, angle?} — material finishes go on the content",
             has_layer,
             add_filter
         ),
@@ -98,7 +95,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit effect",
             [],
             None,
-            "{effect, visible?, blend?, opacity?, channel?: the content channel blend and opacity set (default: every channel), name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place; \"none\" empties it), channels?: {channelId: bool} a content effect's channels on or off, divider?: 1|10|100|1000 (warp, slope blur: divides the intensity), generator?: kind (a generator effect only: changes kind in place), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, microAnchor?: id|null, microAmount?, value?, uniform?: 0..1 (a mask fill reads that value, whatever its source), procedural?: kind (a mask fill) with scale?, seed?, contrast?, balance?, invert?, resolution?, tile?, tileDefaults? (alone, they edit its pattern), image?: resource name (a fill's source), projection?: uv|triplanar|planar|spherical|cylindrical, scale?, rotation?, offset?, axis?, sharpness? (a fill effect's projection; while it reads a pattern, scale is the pattern's), anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, affects?, clamp? (levels), tolerance?, left?, op?, right?, compareChannel?, hardness? (compare; value is its constant), colors?: [[r,g,b] linear, ...] (a color selection's ID colors, may be empty), output?, background?: transparent | black | white | gray, idMap?: an image resource name read as the ID map, null for the texture set's ID mesh map (a color selection; tolerance and hardness too), filter parameters (see effect.add.filter)}",
+            "{effect, visible?, blend?, opacity?, channel?: the content channel blend and opacity set (default: every channel), name?, filter?: id from filter.list (a filter effect only: swaps its type, keeping position, blend and opacity; its current id edits it in place), generator?: kind (a generator effect only: changes kind in place), level?, softness?, noise?, noiseScale?, offset?, invert?, blur?, balance?, contrast?, resolution?, customResolution?, resolutionFactor?, input?: mesh map id + one of inputImage?, inputValue?, inputAnchor?, inputBaked?: true (a generator), mode?, sizes?, microAnchor?: id|null, microAmount?, value?, uniform?: 0..1 (a mask fill reads that value, whatever its source), procedural?: kind (a mask fill) with scale?, seed?, contrast?, balance?, invert?, resolution?, tile?, tileDefaults? (alone, they edit its pattern), image?: resource name (a fill's source), projection?: uv|triplanar|planar|spherical|cylindrical, scale?, rotation?, offset?, axis?, sharpness? (a fill effect's projection; while it reads a pattern, scale is the pattern's), anchor?, anchorChannel?, inLow?, inHigh?, gamma?, outLow?, outHigh?, affects?, clamp? (levels), tolerance?, left?, op?, right?, compareChannel?, hardness? (compare; value is its constant), colors?: [[r,g,b] linear, ...] (a color selection's ID colors, may be empty), output?, background?: transparent | black | white | gray, idMap?: an image resource name read as the ID map, null for the texture set's ID mesh map (a color selection; tolerance and hardness too), filter parameters (see effect.add.filter)}",
             has_layer,
             set
         ),
@@ -295,14 +292,6 @@ fn push_effect_in(
         effect.blend = blend;
         if let Some(name) = name_param(p) {
             effect.name = name.to_string();
-        }
-
-        // A filter that changes only some channels (lighting, validation) starts with the other channels' pills off
-        if content
-            && let EffectKind::Filter(filter) = &effect.kind
-            && let Some(on) = filter.starts_on()
-        {
-            effect.off_channels = Channel::ALL.into_iter().filter(|channel| !on.contains(channel)).collect();
         }
         if !content {
             layer.mask.get_or_insert_with(|| Mask::new(background)).effects.push(effect);
@@ -597,9 +586,7 @@ fn add_levels(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn add_filter(s: &mut Session, p: &Value) -> Result<Value> {
     let id = strp(p, "filter").unwrap_or("invert");
-
-    // An empty filter changes nothing until one is picked into it
-    let kind = if id == EMPTY_FILTER { EffectKind::Filter(Filter::Empty) } else { crate::filter_lib::build(id, p)? };
+    let kind = crate::filter_lib::build(id, p)?;
 
     // Library filters are named after their shelf entry (material finishes are fill effects)
     let mut p = p.clone();
@@ -731,11 +718,6 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         return Err(bad(CMD, "a mask's levels remap its one value: leave out `affects`"));
     }
 
-    let switched = switched_channels(params)?;
-    if !switched.is_empty() && on_mask {
-        return Err(bad(CMD, "a mask effect has one value: leave out `channels`"));
-    }
-
     // `anchor` picks a fill's anchor point, `anchorChannel` alone re-targets the current one
     let anchor = match session.doc.project.effect(effect) {
         Some((owner, Effect { kind: EffectKind::Fill { source, .. }, .. })) => {
@@ -773,15 +755,9 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         _ => None,
     };
 
-    // Update matching filter variants in place and rebuild when the legacy filter lacks the requested mode
-    let changes_saved_warp_mode = |filter: &str| matches!(session.doc.project.effect(effect), Some((_, Effect { kind: EffectKind::Filter(saved), .. })) if crate::filter_lib::changes_saved_warp_mode(filter, params, saved));
+    // Naming the filter the effect already is edits its parameters like a plain effect.set
     let swapped = match strp(params, "filter") {
-        Some(EMPTY_FILTER) => Some(emptied_filter(session, effect)?),
-        Some(filter)
-            if crate::filter_lib::find(filter).is_some_and(|def| current_filter_id(session, effect) == Some(def.id)) && !changes_saved_warp_mode(filter) =>
-        {
-            None
-        }
+        Some(filter) if crate::filter_lib::find(filter).is_some_and(|def| current_filter_id(session, effect) == Some(def.id)) => None,
         Some(filter) => Some(swapped_filter(session, effect, filter, params)?),
         None => None,
     };
@@ -793,7 +769,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
         let edited = session.doc.project.effect_mut(effect).ok_or_else(|| bad(CMD, format!("no effect {}", effect.0)))?;
         if let Some((kind, label)) = swapped {
             if let EffectKind::Filter(old) = &edited.kind
-                && (edited.name == old.label() || Some(edited.name.as_str()) == old.former_label())
+                && edited.name == old.label()
             {
                 edited.name = label.to_string();
             }
@@ -802,13 +778,6 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
 
         if let Some(visible) = boolp(params, "visible") {
             edited.visible = visible;
-        }
-        for (channel, on) in &switched {
-            if *on {
-                edited.off_channels.remove(channel);
-            } else {
-                edited.off_channels.insert(*channel);
-            }
         }
         crate::effect_blending_cmds::set_blending(edited, channel, blend, f32p(params, "opacity"));
         if let Some(name) = name_param(params) {
@@ -844,7 +813,7 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
 
             // The swapped filter was built with the parameters already
             EffectKind::Filter(_) if swaps_filter => {}
-            EffectKind::Filter(filter) => crate::filter_lib::apply_named(strp(params, "filter"), params, filter, CMD)?,
+            EffectKind::Filter(filter) => crate::filter_lib::apply(params, filter, CMD)?,
             EffectKind::Fill { source, projection, .. } => {
                 // `uniform` picks the source, so it outranks settings that would edit the current pattern
                 let uniform = f32p(params, "uniform").filter(|_| strp(params, "procedural").is_none());
@@ -914,30 +883,6 @@ fn fill_pattern(command: &str, params: &Value, current: &Source) -> Result<Optio
     Ok(Some(Source::Procedural { pattern, low: range.0, high: range.1, ramp: Vec::new() }))
 }
 
-/// The content channels `channels` switches on (true) or off for an effect, e.g. {"roughness": false}
-fn switched_channels(params: &Value) -> Result<Vec<(Channel, bool)>> {
-    const CMD: &str = "effect.set";
-    let Some(given) = params.get("channels") else { return Ok(Vec::new()) };
-    let given = given.as_object().ok_or_else(|| bad(CMD, "`channels` must be an object of channel ids to true (on) or false (off)"))?;
-    given
-        .iter()
-        .map(|(id, on)| {
-            let channel = Channel::parse(id).ok_or_else(|| bad(CMD, format!("unknown channel `{id}`")))?;
-            let on = on.as_bool().ok_or_else(|| bad(CMD, format!("`channels.{id}` must be true or false")))?;
-            Ok((channel, on))
-        })
-        .collect()
-}
-
-/// An empty filter and its label, to replace filter effect `effect`'s
-fn emptied_filter(s: &Session, effect: LayerId) -> Result<(EffectKind, &'static str)> {
-    match s.doc.project.effect(effect) {
-        Some((_, Effect { kind: EffectKind::Filter(_), .. })) => Ok((EffectKind::Filter(Filter::Empty), Filter::Empty.label())),
-        Some((_, other)) => Err(bad("effect.set", format!("`filter` changes filter effects only, not {}", other.kind.name().to_ascii_lowercase()))),
-        None => Err(bad("effect.set", format!("no effect {}", effect.0))),
-    }
-}
-
 /// The library id of the filter effect `effect` is, if it is one
 fn current_filter_id(s: &Session, effect: LayerId) -> Option<&'static str> {
     match &s.doc.project.effect(effect)?.1.kind {
@@ -955,9 +900,10 @@ fn swapped_filter(s: &Session, effect: LayerId, id: &str, p: &Value) -> Result<(
     }
 
     let def = crate::filter_lib::find(id).ok_or_else(|| bad(CMD, format!("unknown filter `{id}` (see filter.list)")))?;
-    if !def.is_filter_effect() {
+    let mut kind = crate::filter_lib::build(def.id, &Value::Null)?;
+    let EffectKind::Filter(filter) = &mut kind else {
         return Err(bad(CMD, format!("{} is its own effect type: add it with effect.add.filter", def.label)));
-    }
+    };
 
     let mask = s.doc.project.layer(owner)?.mask.as_ref();
     let on_mask = mask.is_some_and(|mask| mask.effects.iter().any(|masked| masked.id == effect));
@@ -965,8 +911,7 @@ fn swapped_filter(s: &Session, effect: LayerId, id: &str, p: &Value) -> Result<(
         return Err(bad(CMD, format!("{} goes on layer content, not on masks", def.label)));
     }
 
-    // Resolve legacy IDs the same way as effect.add.filter to preserve their modes
-    let kind = crate::filter_lib::build_for(CMD, id, p)?;
+    crate::filter_lib::apply(p, filter, CMD)?;
     Ok((kind, def.label))
 }
 

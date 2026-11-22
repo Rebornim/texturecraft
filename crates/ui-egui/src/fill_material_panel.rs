@@ -427,7 +427,7 @@ fn procedural_rows(
     let mut edit = scale_and_contrast(sheet, &mut edited);
 
     // A grayscale's card (a mask fill's, a filter input's) shows its Balance and Seed with Scale and Contrast; a material channel's keeps them in Attributes
-    let gray = matches!(slot_of, SourceSlot::Grayscale | SourceSlot::Input(_));
+    let gray = matches!(slot_of, SourceSlot::Grayscale);
     if gray {
         edit = edit.or(balance_and_seed(sheet, &mut edited));
     }

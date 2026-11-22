@@ -99,7 +99,7 @@ fn gallery(ui: &mut egui::Ui, state: &mut Gallery) {
                 }
             }
 
-            if sheet.card("Edges", Some(true)) {
+            if sheet.fold("Edges", None, true) {
                 sheet.toggle("Wrap", &mut state.wrap);
                 sheet.toggle("Shape Crop", &mut state.crop);
                 sheet.info(DEPTH_CULLING_TIP);
@@ -114,11 +114,6 @@ fn gallery(ui: &mut egui::Ui, state: &mut Gallery) {
                 && let Some(on) = state.channels.get_mut(index)
             {
                 *on = !*on;
-            }
-            let (_, chip) = sheet.slider_with_chip("Intensity", &mut state.intensity, 0.0..=1.0, 2, &format!("÷{}", state.divider), "÷1000");
-            let dividers = ["1", "10", "100", "1000"];
-            if let Some(picked) = sheet.hanging_list(&chip, state.divider, &dividers, &|divider: &str| format!("÷{divider}"), None).0 {
-                state.divider = picked;
             }
             let band = sheet.band("Parameters", true, None, Some("3"));
             if band.open {
@@ -329,7 +324,7 @@ fn card_under_caption(ui: &mut egui::Ui, state: &mut (bool, std::cell::Cell<Opti
             if *instance {
                 sheet.source_card(&record, "Layer", "Set", false);
             } else {
-                sheet.slot_restorable(&record, "Layer", "Set", false);
+                sheet.slot(&record, "Layer", "Set", None, true, false);
             }
         });
     });
@@ -640,42 +635,6 @@ fn a_number_field_held_still_then_dragged_starts_an_undo_step_with_its_first_cha
     assert!(merges.len() >= 2, "the drag changes the value more than once: {merges:?}");
     assert_eq!(merges.first(), Some(&false), "the first move starts an undo step: {merges:?}");
     assert!(merges.iter().skip(1).all(|merge| *merge), "later moves continue it: {merges:?}");
-}
-
-/// A ramp with one marker at `state.0`, recording each marker drag's merge in `state.1`
-fn one_marker_ramp(ui: &mut egui::Ui, state: &mut (f32, Vec<bool>)) {
-    ui.set_width(PANEL_WIDTH);
-    PropertySheet::show(ui, "ramp", |sheet| {
-        if let Some(drag) = sheet.gradient_ramp(&[[1.0, 0.0, 0.0]], &[state.0], &|_| [0.5; 3]) {
-            state.0 = drag.position;
-            state.1.push(drag.merge);
-        }
-    });
-}
-
-/// A marker pressed past the ramp's end changes nothing at first; its first move inward still starts its own undo step
-#[test]
-fn a_gradient_marker_pressed_past_the_ramps_end_starts_an_undo_step_with_its_first_change() {
-    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut harness = builder(Brightness::MediumDark).build_ui_state(one_marker_ramp, (1.0, Vec::new()));
-    harness.run_steps(2);
-    let marker = harness.get_by_label("Color 1").rect();
-    let past_end = marker.right_center() - egui::vec2(1.0, 0.0);
-    harness.drag_at(past_end);
-    harness.run();
-    harness.hover_at(past_end + egui::vec2(20.0, 0.0));
-    harness.run();
-    harness.hover_at(past_end - egui::vec2(40.0, 0.0));
-    harness.run();
-    harness.hover_at(past_end - egui::vec2(60.0, 0.0));
-    harness.run();
-    harness.drop_at(past_end - egui::vec2(60.0, 0.0));
-    harness.run();
-
-    let merges = &harness.state().1;
-    assert!(merges.len() >= 2, "the drag changes the value more than once: {merges:?}");
-    assert_eq!(merges.first(), Some(&false), "the first real change starts an undo step: {merges:?}");
-    assert!(merges.iter().skip(1).all(|merge| *merge), "later changes continue it: {merges:?}");
 }
 
 #[test]

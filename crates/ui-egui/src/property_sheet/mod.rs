@@ -2,7 +2,6 @@
 
 mod action_row;
 mod action_row_response;
-mod attribute_rows;
 mod axis_rows;
 mod band_response;
 mod button_icon;
@@ -13,13 +12,11 @@ mod compare_row;
 mod compare_row_response;
 mod eye_toggle;
 mod factor_slider;
-mod gradient_rows;
 mod group;
 mod hold_pad;
 mod id_color_row;
 mod id_color_row_response;
 mod info_icon;
-mod marker_drag;
 mod material_rows;
 mod name_field;
 mod number_field;

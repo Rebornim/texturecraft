@@ -1,6 +1,6 @@
 use egui::{Align2, Color32, CornerRadius, FontId, Painter, Rect, Response, Role, Sense, Stroke, StrokeKind, WidgetInfo, pos2, vec2};
 
-use super::{CONTROL_RADIUS, PropertySheet, ROW_HEIGHT, ROW_PICTURE_AIR, ROW_PICTURE_SIZE, RowLead, SMALL_TEXT_SIZE, TEXT_SIZE};
+use super::{CONTROL_RADIUS, PropertySheet, ROW_HEIGHT, ROW_PICTURE_AIR, ROW_PICTURE_SIZE, SMALL_TEXT_SIZE, TEXT_SIZE};
 use crate::theme::semibold;
 
 /// Draws a picture row's picture into its square
@@ -91,16 +91,6 @@ impl PropertySheet<'_> {
         let (control, _) = self.row(label);
         let runs = |index: usize| tints.get(index).map(std::slice::from_ref).unwrap_or_default();
         self.segments(control, options, selected, runs, None)
-    }
-
-    /// [`Self::switch`] with its label always above it, the switch across the whole panel (long choices in a set of such switches); returns the picked index
-    pub(crate) fn stacked_switch(&mut self, label: &str, options: &[&str], selected: usize) -> Option<usize> {
-        if !self.switch_fits(options, self.left) {
-            return self.switch_dropdown(label, options, selected);
-        }
-
-        let (control, _) = self.row_with(RowLead::Label { text: label, stack: true });
-        self.segments(control, options, selected, untinted, None)
     }
 
     /// Whether every option's word fits its share of a switch from `left` to the panel's right edge

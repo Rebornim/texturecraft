@@ -78,25 +78,3 @@ fn reader_glyph(kind: &EffectKind) -> &'static str {
         EffectKind::Fill { .. } | EffectKind::Material(_) => ic::PAINT_BUCKET,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use serde_json::{Value, json};
-    use texturecraft_engine::core::LayerId;
-    use texturecraft_engine::execute;
-
-    use super::*;
-
-    #[test]
-    fn a_reference_shows_the_icon_of_what_reads_the_anchor() {
-        let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
-        execute(&mut session, "layer.add.fill", &json!({"roughness": 0.5})).unwrap();
-        let anchor = execute(&mut session, "effect.add.anchor", &Value::Null).unwrap()["effect"].as_u64().unwrap();
-        execute(&mut session, "layer.add.fill", &Value::Null).unwrap();
-        let filter = execute(&mut session, "effect.add.filter", &json!({"target": "content", "filter": "bevelSmooth"})).unwrap()["effect"].clone();
-        execute(&mut session, "layer.fill.set", &json!({"effect": filter, "input": "distanceMap", "anchor": anchor})).unwrap();
-
-        let glyphs: Vec<&str> = references(&session.doc.project, LayerId(anchor)).iter().map(|reference| reference.glyph).collect();
-        assert_eq!(glyphs, [ic::FUNNEL], "a filter reading the anchor shows the filter icon, not a fill's");
-    }
-}

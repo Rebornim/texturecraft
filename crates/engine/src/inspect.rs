@@ -74,12 +74,6 @@ fn effect_json(session: &Session, effect: &Effect, content: bool) -> Value {
             effect.channel_blends.iter().map(|(channel, blend)| (channel.id().to_string(), json!({ "blend": blend.mode.label(), "opacity": blend.opacity })));
         out["channelBlends"] = Value::Object(channels.collect());
     }
-    if !effect.off_channels.is_empty() {
-        out["offChannels"] = json!(effect.off_channels.iter().map(|channel| channel.id()).collect::<Vec<_>>());
-    }
-    if !effect.inputs.is_empty() {
-        out["inputs"] = Value::Object(effect.inputs.iter().map(|(id, source)| (id.clone(), source_json(source))).collect());
-    }
     let mask_tiles = || session.doc.pixels.masks.get(&effect.id).map_or(0, |image| image.allocated_count());
     let content_tiles = || session.doc.pixels.layers.iter().filter(|((id, _), _)| *id == effect.id).map(|(_, image)| image.allocated_count()).sum::<usize>();
 
@@ -125,8 +119,8 @@ fn effect_json(session: &Session, effect: &Effect, content: bool) -> Value {
         EffectKind::Filter(filter) => {
             out["filter"] = json!(filter);
             match filter {
-                Filter::Hsl { hue, saturation, lightness, .. } => out["hsl"] = json!([hue, saturation, lightness]),
-                Filter::Blur { radius, .. } => out["radius"] = json!(radius),
+                Filter::Hsl { hue, saturation, lightness } => out["hsl"] = json!([hue, saturation, lightness]),
+                Filter::Blur { radius } => out["radius"] = json!(radius),
                 _ => {}
             }
         }

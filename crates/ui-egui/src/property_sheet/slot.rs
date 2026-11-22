@@ -75,13 +75,6 @@ impl PropertySheet<'_> {
         self.slot_row(thumbnail, name, source, on, clear, reset.then_some(true))
     }
 
-    /// [`Self::slot`] whose ⟲ always shows beside the ×, faint and inert while what it restores is at its defaults (`changed` false)
-    pub(crate) fn slot_restorable(&mut self, thumbnail: &dyn Fn(&Painter, Rect), name: &str, source: &str, changed: bool) -> SlotResponse {
-        self.open_card();
-        self.space(SLOT_CARD_TOP);
-        self.slot_row(thumbnail, name, source, None, true, Some(changed))
-    }
-
     /// [`Self::slot`]'s row inside the card open now (an input a mode adds, under that mode), not a card of its own
     pub(crate) fn slot_in_card(&mut self, thumbnail: &dyn Fn(&Painter, Rect), name: &str, source: &str, clear: bool) -> SlotResponse {
         self.slot_row(thumbnail, name, source, None, clear, None)

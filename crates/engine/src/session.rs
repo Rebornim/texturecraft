@@ -775,25 +775,23 @@ impl Session {
         let added_resource_names: BTreeSet<&str> =
             self.doc.resources.keys().filter(|name| !previous_document.resources.contains_key(*name)).map(String::as_str).collect();
         let is_added = |name: &str| added_resource_names.contains(name);
-        let added_environment = self.doc.project.display.environment_resource().is_some_and(is_added);
-        let uses_added_resource = |texture_set_index: usize| {
-            use texturecraft_core::{EffectKind, Fill, Filter};
+        let uses_added_resource =
+            |texture_set_index: usize| {
+                use texturecraft_core::{EffectKind, Fill};
 
-            let uses_link = |fill: &Fill| fill.link.as_ref().is_some_and(|link| is_added(&link.package));
-            let uses_fill = |fill: &Fill| fill.sources.values().any(|source| source.images().into_iter().any(is_added)) || uses_link(fill);
-            let project = &self.doc.project;
-            !added_resource_names.is_empty()
-                && project.texture_sets.get(texture_set_index).is_some_and(|set| {
-                    project.render_tree(&set.stack).iter().filter_map(|id| project.layers.get(id)).any(|layer| {
-                        matches!(&layer.kind, LayerKind::Fill(fill) if uses_fill(fill))
-                            || layer.mask.iter().flat_map(|mask| &mask.effects).chain(&layer.content_effects).any(|effect| {
-                                effect.images_read().any(is_added)
-                                    || matches!(&effect.kind, EffectKind::Material(fill) if uses_link(fill))
-                                    || (added_environment && matches!(effect.kind, EffectKind::Filter(Filter::EnvironmentLighting { .. })))
-                            })
+                let uses_link = |fill: &Fill| fill.link.as_ref().is_some_and(|link| is_added(&link.package));
+                let uses_fill = |fill: &Fill| fill.sources.values().any(|source| source.images().into_iter().any(is_added)) || uses_link(fill);
+                let project = &self.doc.project;
+                !added_resource_names.is_empty()
+                    && project.texture_sets.get(texture_set_index).is_some_and(|set| {
+                        project.render_tree(&set.stack).iter().filter_map(|id| project.layers.get(id)).any(|layer| {
+                            matches!(&layer.kind, LayerKind::Fill(fill) if uses_fill(fill))
+                                || layer.mask.iter().flat_map(|mask| &mask.effects).chain(&layer.content_effects).any(|effect| {
+                                    effect.kind.images_read().any(is_added) || matches!(&effect.kind, EffectKind::Material(fill) if uses_link(fill))
+                                })
+                        })
                     })
-                })
-        };
+            };
         let (empty_baked_maps, empty_images) = (BakedMaps::default(), Default::default());
         let stack_key = |document: &Document, texture_set_index: usize| {
             let stack = document.project.texture_sets.get(texture_set_index).map(|set| set.stack.as_slice()).unwrap_or_default();

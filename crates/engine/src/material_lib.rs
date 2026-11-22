@@ -53,7 +53,7 @@ pub(crate) fn images_used(project: &Project, id: LayerId, out: &mut Vec<String>,
     }
 
     for effect in layer.mask.iter().flat_map(|mask| mask.effects.iter()).chain(&layer.content_effects) {
-        out.extend(effect.images_read().map(str::to_string));
+        out.extend(effect.kind.images_read().map(str::to_string));
         out.extend(crate::path_tool::path_images(&effect.kind));
     }
 

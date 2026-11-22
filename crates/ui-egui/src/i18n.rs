@@ -249,10 +249,6 @@ mod tests {
         keys.extend(texturecraft_engine::geom::primitives::BUILTINS.iter().map(|(_, label)| *label));
         for filter in FILTERS {
             keys.extend([filter.label, filter.group]);
-            if let Some(about) = filter.about() {
-                keys.push(about.description);
-                keys.extend(about.tags);
-            }
             if let Ok(EffectKind::Filter(effect)) = build(filter.id, &serde_json::Value::Null) {
                 keys.push(effect.label());
                 keys.extend(scalar_params(&effect).into_iter().map(|parameter| parameter.1));

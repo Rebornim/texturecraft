@@ -652,7 +652,7 @@ impl Project {
                 out.push((layer.id, None));
             }
             let effects = layer.mask.iter().flat_map(|m| m.effects.iter()).chain(layer.content_effects.iter());
-            out.extend(effects.filter(|e| e.reads(Some(anchor))).map(|e| (layer.id, Some(e.id))));
+            out.extend(effects.filter(|e| e.kind.reads(Some(anchor))).map(|e| (layer.id, Some(e.id))));
         }
         out
     }
@@ -868,7 +868,7 @@ mod tests {
         material.sources.insert(Channel::Roughness, Source::Uniform([0.2; 3]));
         l.content_effects = vec![
             Effect::new(fill, EffectKind::Material(material)),
-            Effect::new(hsl, EffectKind::Filter(Filter::Hsl { hue: 0.25, saturation: -0.5, lightness: 0.1, perceptive: false })),
+            Effect::new(hsl, EffectKind::Filter(Filter::Hsl { hue: 0.25, saturation: -0.5, lightness: 0.1 })),
             Effect::new(anchor, EffectKind::Anchor),
         ];
         let id = p.insert_layer(0, l, None, false).unwrap();

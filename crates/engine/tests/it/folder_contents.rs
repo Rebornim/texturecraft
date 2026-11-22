@@ -138,7 +138,7 @@ fn fill_seeds(s: &Session, id: LayerId) -> (u32, u32, u32) {
         other => panic!("not a pattern: {other:?}"),
     };
     let warp = layer.mask.as_ref().unwrap().effects.iter().find_map(|effect| match effect.kind {
-        EffectKind::Filter(Filter::SourceWarp(warp)) => Some(warp.seed),
+        EffectKind::Filter(Filter::Warp { seed, .. }) => Some(seed),
         _ => None,
     });
     (pattern(Channel::BaseColor), pattern(Channel::Roughness), warp.unwrap())

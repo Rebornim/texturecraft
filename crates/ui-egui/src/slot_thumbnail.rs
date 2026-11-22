@@ -38,6 +38,12 @@ pub(crate) fn thumbnail(app: &mut TextureCraftApp, ctx: &egui::Context, source: 
 /// The glyph size of a slot without a picture
 const GLYPH_SIZE: f32 = 14.0;
 
+/// Corner radius of a rounded slot picture and of the empty square
+pub(crate) const THUMB_RADIUS: u8 = 3;
+
+/// How far the empty square's outline sits inside the slot's square
+const EMPTY_SLOT_INSET: f32 = 1.0;
+
 /// The whole of a texture, as the part of it a picture shows
 pub(crate) const FULL_UV: Rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
 
@@ -59,4 +65,9 @@ pub(crate) fn paint_thumbnail(painter: &Painter, rect: Rect, thumbnail: &SlotThu
             painter.text(rect.center(), Align2::CENTER_CENTER, *glyph, FontId::proportional(GLYPH_SIZE), tokens.text_dim);
         }
     }
+}
+
+/// A slot without a picture (no ID map, a missing source): an empty outlined square
+pub(crate) fn paint_empty_slot(painter: &Painter, rect: Rect, tokens: &Tokens) {
+    painter.rect_stroke(rect.shrink(EMPTY_SLOT_INSET), CornerRadius::same(THUMB_RADIUS), Stroke::new(1.0, tokens.text_dim), StrokeKind::Inside);
 }

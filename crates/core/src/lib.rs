@@ -12,6 +12,9 @@ pub mod bake;
 pub mod blend;
 mod block_scales;
 pub mod channel;
+pub mod color_selection;
+pub mod compare_source;
+pub mod contents_offset;
 pub mod cook_resolution;
 pub mod depth_culling;
 mod env_alignment;
@@ -22,6 +25,7 @@ pub mod projector;
 pub mod randomized_seed;
 mod saved_decal;
 mod saved_projection;
+pub mod selection_background;
 mod shadow_mode;
 pub mod shape_crop;
 pub mod symmetry_kind;
@@ -39,6 +43,9 @@ pub use bake::{
 };
 pub use blend::{BlendMode, blend1, blend3, lum, mix3};
 pub use channel::{Channel, ChannelFormat, ChannelKind};
+pub use color_selection::ColorSelection;
+pub use compare_source::CompareSource;
+pub use contents_offset::ContentsOffset;
 pub use cook_resolution::CookResolution;
 pub use depth_culling::DepthCulling;
 pub use fill_symmetry::FillSymmetry;
@@ -54,6 +61,7 @@ pub use project::{
 };
 pub use projector::Projector;
 pub use randomized_seed::RandomizedSeed;
+pub use selection_background::SelectionBackground;
 pub use shape_crop::ShapeCrop;
 pub use symmetry_kind::SymmetryKind;
 

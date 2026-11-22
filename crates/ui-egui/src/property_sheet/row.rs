@@ -195,6 +195,7 @@ impl PropertySheet<'_> {
             self.seen.label_width = self.seen.label_width.max(width);
         }
 
+        let text = self.tokens.text;
         if width <= self.column() - self.left - LABEL_MIN_AIR && !stack {
             self.paint_info(center_y);
             self.ui.painter().text(pos2(self.left + shift, center_y), Align2::LEFT_CENTER, label, font, text_color);
@@ -213,6 +214,14 @@ impl PropertySheet<'_> {
         let text = self.tokens.text;
         self.ui.painter().text(pos2(self.left + shift, center_y), Align2::LEFT_CENTER, label, FontId::proportional(TEXT_SIZE), text);
         self.left
+    }
+
+    /// A dim caption line above its control (Offset, Size…)
+    pub(crate) fn caption(&mut self, text: &str) {
+        let rect = self.take(CAPTION_LINE);
+        let dim = self.tokens.text_dim;
+        self.ui.painter().text(pos2(self.left, rect.top() + CAPTION_LINE / 2.0), Align2::LEFT_CENTER, text, FontId::proportional(SMALL_TEXT_SIZE), dim);
+        self.drawn(rect.bottom());
     }
 
     /// A caret pointing down (open) or right (folded), centred on `center`

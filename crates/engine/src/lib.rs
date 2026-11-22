@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod add_mask_cmds;
 pub mod bake;
 pub mod bake_preview;
 pub mod brush_preset_cmds;
@@ -15,6 +16,7 @@ pub mod camera_cmds;
 pub mod color_selection_cmds;
 pub mod commands;
 pub mod decal_cmds;
+pub mod effect_blending_cmds;
 pub mod effect_clipboard;
 pub mod file_cmds;
 pub mod fill_alpha;
@@ -23,7 +25,9 @@ pub mod fill_material_cmds;
 pub mod fill_mode;
 pub mod fill_reset_cmds;
 pub mod filter_lib;
+pub mod folder_cmds;
 mod frame_target;
+pub mod id_mask_view;
 pub mod inspect;
 pub mod instance_cmds;
 pub mod layer_cmds;
@@ -36,6 +40,7 @@ mod log_level;
 mod mask_bitmap;
 pub mod mask_cmds;
 pub mod mask_export;
+mod mask_owner;
 mod mask_preview_pixel;
 pub mod material_lib;
 mod material_preview_pixel;

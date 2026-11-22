@@ -75,6 +75,11 @@ impl PropertySheet<'_> {
         self.angle_shown(lead, degrees, range, false)
     }
 
+    /// An angle added to others: a signed track over `range` with its zero tick, the dial, and the value with its sign ("+30°")
+    pub(crate) fn relative_angle(&mut self, label: &str, degrees: &mut f32, range: RangeInclusive<f32>) -> Option<bool> {
+        self.angle_shown(RowLead::label(label), degrees, range, true)
+    }
+
     /// [`Self::angle_led`], the value shown with its sign when `plus`
     fn angle_shown(&mut self, lead: RowLead<'_>, degrees: &mut f32, range: RangeInclusive<f32>, plus: bool) -> Option<bool> {
         let (control, center_y) = self.row_with(lead);

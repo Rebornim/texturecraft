@@ -66,7 +66,7 @@ fn escape_closes_the_picker_without_changes() {
     assert!(matches!(kind(&harness, effect), EffectKind::Filter(Filter::Invert)));
 }
 
-/// Opens the wand's Add effect menu and clicks Add filter
+/// Opens the wand's Add effect menu and clicks Filter
 fn add_filter_from_the_wand(harness: &mut Harness<'_, TextureCraftApp>) {
     harness.get_by_label(egui_phosphor::regular::MAGIC_WAND).click();
     harness.run_steps(3);

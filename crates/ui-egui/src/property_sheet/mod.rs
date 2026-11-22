@@ -1,16 +1,24 @@
 //! The Properties panel's rows, groups and controls, shared by every panel so they line up
 
+mod action_row;
+mod action_row_response;
 mod axis_rows;
 mod band_response;
 mod button_icon;
 mod choice;
 mod color_bar;
 mod color_picker_rows;
+mod compare_row;
+mod compare_row_response;
 mod eye_toggle;
+mod factor_slider;
 mod group;
 mod hold_pad;
+mod id_color_row;
+mod id_color_row_response;
 mod info_icon;
 mod material_rows;
+mod name_field;
 mod number_field;
 mod open_card;
 mod preview_block;
@@ -18,6 +26,7 @@ mod preview_edit;
 mod preview_lower;
 mod preview_size;
 mod ramp_edit;
+mod reference_row;
 mod row;
 mod row_lead;
 mod section_tabs;
@@ -25,6 +34,7 @@ mod sheet_measure;
 mod slider;
 mod slot;
 mod slot_response;
+mod source_card;
 mod stack_slider;
 mod switch_control;
 mod tooltip;
@@ -35,8 +45,11 @@ mod value_text_draft;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use action_row_response::ActionRowResponse;
 pub(crate) use band_response::BandResponse;
 pub(crate) use button_icon::ButtonIcon;
+pub(crate) use compare_row_response::CompareRowResponse;
+pub(crate) use id_color_row_response::IdColorRowResponse;
 pub(crate) use number_field::NumberField;
 pub(crate) use preview_lower::PreviewLower;
 pub(crate) use preview_size::PreviewSize;
@@ -110,6 +123,9 @@ const ROW_HIT_HALF_HEIGHT: f32 = 10.0;
 
 /// Size of a row's glyph button glyphs (eyedropper, remove, arrow)
 const GLYPH_SIZE: f32 = 13.0;
+
+/// Corner radius of a hovered row's face
+const ROW_RADIUS: u8 = 6;
 
 /// Corner radius of dropdowns, fields and buttons
 const CONTROL_RADIUS: u8 = 4;

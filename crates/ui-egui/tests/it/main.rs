@@ -2,6 +2,7 @@
 //! Keep feature tests in their own modules; the standalone ui_snapshots.rs target remains available.
 
 mod alpha_parameters;
+mod anchor_point;
 mod bake_job_mesh;
 mod bake_mode;
 mod bake_presets;
@@ -12,6 +13,7 @@ mod clone_source_view;
 mod close_unsaved;
 mod color_picker;
 mod color_selection_editor;
+mod compare_mask_rows;
 mod curvature_generator;
 mod display_environment;
 mod display_post_effects;
@@ -32,20 +34,25 @@ mod fill_support;
 mod fill_symmetry_rows;
 mod filter_picker;
 mod filter_support;
+mod folder_properties;
 mod frame_selection;
 mod generator_panel;
 mod help_menu_664;
 mod history_panel;
 mod import_resources;
 mod inactive_set_hint;
+mod instance_properties;
 mod layer_blending_options;
 mod layer_clipboard;
 mod layer_multi_select;
 mod layer_rename;
+mod layer_toolbar;
 mod layers_panel;
 mod levels_editor;
 mod log_panel_680;
 mod mask_export;
+mod mask_fill_rows;
+mod mask_paint_grayscale;
 mod mask_value_swap;
 mod named_layouts;
 mod nav_buttons;
@@ -85,7 +92,6 @@ mod split_divider;
 mod temp_dir;
 mod template_invert;
 mod templates_681;
-mod tile_generator_panel;
 mod tool_availability;
 mod tool_settings_saved;
 mod toolbar;
@@ -98,6 +104,7 @@ mod window_menu_684;
 mod stencil;
 mod symmetry;
 mod symmetry_2d;
+mod tile_generator_panel;
 
 /// eframe's in-memory storage, shared by the tests that save and restore the UI state
 #[path = "../../src/ui_state_store/memory_storage.rs"]
@@ -114,6 +121,9 @@ const PROPERTIES_WINDOW: egui::Vec2 = egui::vec2(1600.0, 1400.0);
 const TEXTURE_RESOLUTION: u32 = 256;
 const BAKE_RESOLUTION: u32 = 64;
 
+/// One frame at 60 Hz, so timed steps run as on a common display
+const FRAME_SECONDS: f32 = 1.0 / 60.0;
+
 /// Frames for the first layout and fonts to settle
 const STARTUP_FRAMES: usize = 4;
 
@@ -122,6 +132,9 @@ const SETTLE_FRAMES: usize = 3;
 
 /// Frames between the moves of a drag, and between a press and its release
 const DRAG_STEP_FRAMES: usize = 2;
+
+/// How far in from a slider track's ends a drag's points stay, so they land on the track
+const SLIDER_END_INSET: f32 = 5.0;
 
 /// Frames for an input that redraws Properties (another selection, source or operator) to show
 const REDRAW_FRAMES: usize = 4;

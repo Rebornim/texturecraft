@@ -13,6 +13,7 @@ pub mod below;
 mod curvature_size_level;
 pub mod curvature_sizes;
 pub mod display;
+mod effect_histogram;
 pub mod eval;
 mod fabric;
 pub mod fill_copies;
@@ -22,6 +23,7 @@ pub mod frame_placement;
 mod fur_lock;
 mod held_fields;
 mod image_identity;
+mod mask_gray;
 pub mod mip_level;
 mod organic;
 pub mod pattern;
@@ -41,13 +43,14 @@ pub mod warp;
 
 pub use below::{BelowCache, StackKey};
 pub use display::{DisplayKind, kinds_for, tile_bytes};
+pub use effect_histogram::EffectHistogram;
 pub use eval::{
     BLOCK, Composite, Inputs, MASK_CHANNEL, PaintTarget, Stencil, StrokePreview, all_tiles, composite_tiles, composite_tiles_cached,
     composite_tiles_with_projectors, covered_tiles, effect_histogram, flatten_layer, mask_at, mask_image, mask_texels, mask_values, pad_tiles,
     stack_reads_neighbours,
 };
+pub use mask_gray::MaskGray;
 pub use pattern_context::PatternContext;
-pub use projector_depth_cache::ProjectorDepthCache;
 pub use solo::solo_project;
 pub use store::{BakedMaps, ImageRes, ImageStore, PixelStore};
 pub use thumb::{THUMB_TEXELS, ThumbImage, ThumbTarget};

@@ -236,6 +236,9 @@ pub struct ToolState {
     pub material: Option<String>,
     /// Gray painted into masks.
     pub mask_value: f32,
+    /// Image resource whose gray is painted into masks in place of `mask_value`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_image: Option<String>,
     pub fill_mode: FillMode,
     /// How a polygon fill box decides which polygons it selects
     #[serde(default)]
@@ -310,6 +313,7 @@ impl Default for ToolState {
             enabled: [Channel::BaseColor, Channel::Metallic, Channel::Roughness, Channel::Height, Channel::Normal].into_iter().collect(),
             material: None,
             mask_value: 1.0,
+            mask_image: None,
             fill_mode: FillMode::Triangle,
             fill_hit_test: Default::default(),
             fill_visible_only: default_fill_visible_only(),
@@ -351,6 +355,8 @@ pub(crate) struct ActiveStroke {
     pub camera: OrbitCamera,
     pub viewport: Vec2,
     pub values: BTreeMap<Channel, [f32; 3]>,
+    /// What a mask stroke paints, resolved once so staging, preview and commit read one image
+    pub mask_gray: texturecraft_compose::MaskGray,
     pub erase: bool,
     /// Projection tool: the stencil captured with the stroke's camera.
     pub stencil: Option<texturecraft_compose::Stencil>,
@@ -449,6 +455,8 @@ pub struct Session {
     pub(crate) stroke: Option<ActiveStroke>,
     /// Layer clipboard: a document snapshot and the copied layer (or effect).
     pub clipboard: Option<(Document, LayerId)>,
+    /// Channel blending copied from an effect (see [`crate::effect_blending_cmds`])
+    pub blending_clipboard: Option<crate::effect_blending_cmds::CopiedBlending>,
     /// Decoded image resources (rebuilt from `doc.resources` by `Session::sync_images`).
     pub images: texturecraft_compose::ImageStore,
     /// Temporary texel mask limiting paint strokes (not saved, not in the history).
@@ -533,6 +541,7 @@ impl Session {
             viewport: Vec2::new(1280.0, 800.0),
             stroke: None,
             clipboard: None,
+            blending_clipboard: None,
             images: Default::default(),
             quick_mask: Default::default(),
             painting_paths: false,
@@ -743,6 +752,15 @@ impl Session {
             self.path_cache = None;
         }
 
+        // Cached path pixels were painted with the mask images their paths name
+        let resource_changed = |name: &str| match (previous_document.resources.get(name), self.doc.resources.get(name)) {
+            (Some(previous), Some(current)) => !Arc::ptr_eq(previous, current),
+            (previous, current) => previous.is_some() != current.is_some(),
+        };
+        if self.path_cache.as_ref().is_some_and(|cache| cache.images().any(|name| resource_changed(&name))) {
+            self.path_cache = None;
+        }
+
         // Removed or replaced resources may change any set's rendered content
         let removed_or_replaced_resource =
             previous_document.resources.iter().any(|(name, previous)| !self.doc.resources.get(name).is_some_and(|current| Arc::ptr_eq(previous, current)));
@@ -773,8 +791,7 @@ impl Session {
                                 _ => false,
                             })
                     })
-                })
-        };
+            };
         let (empty_baked_maps, empty_images) = (BakedMaps::default(), Default::default());
         let stack_key = |document: &Document, texture_set_index: usize| {
             let stack = document.project.texture_sets.get(texture_set_index).map(|set| set.stack.as_slice()).unwrap_or_default();
@@ -1012,7 +1029,7 @@ impl Session {
                 opacity: stroke.stroke.settings.opacity,
                 erase: stroke.erase,
                 values: stroke.values.clone(),
-                mask_value: self.tool.mask_value,
+                mask_gray: stroke.mask_gray.clone(),
                 stencil: stroke.stencil.clone(),
                 carried_mask: stroke.canvas.pickup.as_ref().and_then(|pickup| pickup.mask_values()).cloned(),
                 carried: stroke.canvas.pickup.as_ref().map(|pickup| pickup.values.clone()).unwrap_or_default(),
@@ -1223,10 +1240,17 @@ impl Session {
 
     /// Histogram (`bins` buckets over 0..1) of the values entering effect `effect`: its layer's
     /// mask, or for a content effect the layer's `channel` (None for an unknown effect).
-    pub fn effect_histogram(&self, effect: LayerId, channel: Channel, bins: usize) -> Option<Vec<u32>> {
+    pub fn effect_histogram(&self, effect: LayerId, channel: Channel, bins: usize) -> Option<texturecraft_compose::EffectHistogram> {
         let (owner, _) = self.doc.project.effect(effect)?;
         let (ts, _, _) = self.doc.project.locate(owner)?;
         self.with_inputs(ts, |inp| texturecraft_compose::effect_histogram(inp, effect, channel, bins))
+    }
+
+    /// Histograms (`bins` buckets over 0..1) of what the two sides of compare mask `effect` read, left then right (None for an unknown effect or one that is no compare mask)
+    pub fn compare_histograms(&self, effect: LayerId, bins: usize) -> Option<[Vec<u32>; 2]> {
+        let (owner, _) = self.doc.project.effect(effect)?;
+        let (ts, _, _) = self.doc.project.locate(owner)?;
+        self.with_inputs(ts, |inp| texturecraft_compose::compare_histograms(inp, effect, bins))
     }
 
     pub fn baked(&self, ts: usize) -> Option<&BakedMaps> {

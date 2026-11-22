@@ -101,6 +101,7 @@ fn holds(s: &Session, target: FillTarget, set: usize, material: Option<&SmartMat
             Some(EffectKind::Material(fill)) => (fill, None),
             _ => return Err(bad(CMD, "not a content fill effect")),
         },
+        FillTarget::Mask(_) => return Err(bad(CMD, "a mask fill has one grayscale source and no channels or material")),
     };
     if fill.material.as_deref() != material.map(|found| found.id) {
         return Ok(false);

@@ -798,6 +798,52 @@ fn i18n_snapshots() {
     texturecraft_ui_egui::i18n::set_language("en");
 }
 
+/// The merged effect panel selects an image and exposes its projection controls
+#[test]
+#[ignore]
+fn mask_fill_image_snapshot() {
+    use serde_json::json;
+    use texturecraft_engine::{
+        core::{EffectKind, LayerId, Source},
+        execute,
+    };
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let mut png_bytes = Vec::new();
+    image::RgbaImage::from_fn(16, 16, |x, y| {
+        let value = if (x / 4 + y / 4) % 2 == 0 { 255 } else { 32 };
+        image::Rgba([value, value, value, 255])
+    })
+    .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+    .unwrap();
+    let name = session.import_resource_bytes("Mask checker.png", png_bytes).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({"color": [0.8, 0.2, 0.1]})).unwrap()["layer"].as_u64().unwrap();
+    execute(&mut session, "mask.add.black", &json!({})).unwrap();
+    let effect = execute(&mut session, "effect.add.fill", &json!({"target": "mask", "value": 1.0})).unwrap()["effect"].as_u64().unwrap();
+    execute(&mut session, "layer.select", &json!({"layer": layer, "target": effect})).unwrap();
+    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1100.0)).wgpu().build_eframe(|context| TextureCraftApp::new(context, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+
+    // The Grayscale slot opens the source picker; its search finds the image
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").click();
+    harness.run_steps(3);
+    harness.event(egui::Event::Text("checker".into()));
+    harness.run_steps(3);
+    save(&mut harness, &output_dir, "mask-fill-image-menu");
+
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, &name).click();
+    harness.run_steps(4);
+
+    let EffectKind::Fill { source, .. } = &harness.state().session.doc.project.effect(LayerId(effect)).unwrap().1.kind else { panic!("fill effect") };
+    assert_eq!(*source, Source::image(name));
+    assert!(harness.query_by_label("UV projection").is_some(), "image projection is editable");
+    save(&mut harness, &output_dir, "mask-fill-image-selected");
+}
+
 /// Every docked panel's header bar (names in capitals, a close × at the right), then the Properties × hovered
 #[test]
 #[ignore]
@@ -1653,6 +1699,510 @@ fn popup_tabs_snapshots() {
             harness.state_mut().ui.prefs.brightness = brightness;
             harness.run_steps(6);
             save(&mut harness, &output_dir, &format!("popup-tabs-symmetry-{name}"));
+        }
+    }
+}
+
+/// Screen 07: a mask fill effect's Grayscale section from each kind of source (Uniform, image, procedural, anchor), its picker open with a tile hovered, and its Fill section; `TC_UI_THEMES` set adds the dark and light themes
+#[test]
+#[ignore]
+fn mask_fill_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let mut png = Vec::new();
+    let scratches = image::RgbaImage::from_fn(64, 64, |x, y| {
+        let gray = 90 + ((x * 13 + y * 7) % 90) as u8;
+        image::Rgba([gray, gray, gray, 255])
+    });
+    scratches.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let scratches = session.import_resource_bytes("scratches.png", png).unwrap();
+    let below = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    let anchor = execute(&mut session, "effect.add.anchor", &json!({"layer": below, "name": "Cavity Dirt"})).unwrap()["effect"].clone();
+    let layer = execute(&mut session, "layer.add.paint", &json!({})).unwrap()["layer"].clone();
+    let effect = execute(&mut session, "effect.add.fill", &json!({"layer": layer, "target": "mask"})).unwrap()["effect"].clone();
+    execute(&mut session, "layer.select", &json!({"layer": layer, "target": effect})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "mask-fill-fill");
+    harness.get_by_role_and_label(egui::Role::Tab, "Grayscale").click();
+    harness.run_steps(30);
+
+    let shot = |harness: &mut Harness<'_, TextureCraftApp>, mut source: serde_json::Value, name: &str| {
+        source["effect"] = effect.clone();
+        execute(&mut harness.state_mut().session, "layer.fill.set", &source).unwrap();
+        harness.run_steps(3);
+        settle_thumbnails(harness);
+        save(harness, &output_dir, name);
+    };
+    shot(&mut harness, json!({"value": 1.0}), "mask-fill-uniform");
+    shot(&mut harness, json!({"image": scratches}), "mask-fill-image");
+    shot(&mut harness, json!({"procedural": "Clouds", "scale": 4.0, "seed": 12}), "mask-fill-procedural");
+
+    // The procedural's Resolution list open (Relative factors and Fixed sizes) with a size hovered
+    let click_in_view = |harness: &mut Harness<'_, TextureCraftApp>, role: egui::Role, label: &str| {
+        harness.get_by_role_and_label(role, label).scroll_to_me();
+        harness.run_steps(3);
+        harness.get_by_role_and_label(role, label).click();
+        harness.run_steps(3);
+    };
+    click_in_view(&mut harness, egui::Role::ComboBox, "Texture set  ·  256");
+    let hovered = harness.get_by_role_and_label(egui::Role::ListBoxOption, "×2  ·  512").rect().center();
+    harness.hover_at(hovered);
+    save(&mut harness, &output_dir, "mask-fill-resolution-list");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+
+    // The picker opened from the slot in view (Properties still scrolled to the card), a tile hovered
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").click();
+    harness.run_steps(3);
+    settle_thumbnails(&mut harness);
+    let hovered = harness.get_by_role_and_label(egui::Role::ListBoxOption, "Clouds").rect().center();
+    harness.hover_at(hovered);
+    save(&mut harness, &output_dir, "mask-fill-picker");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("mask-fill-picker-{name}"));
+        }
+    }
+    harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+    shot(&mut harness, json!({"anchor": anchor}), "mask-fill-anchor");
+
+    // Again once the anchored stack's picture has rendered
+    settle_thumbnails(&mut harness);
+    save(&mut harness, &output_dir, "mask-fill-anchor");
+
+    shot(&mut harness, json!({"value": 1.0}), "mask-fill-uniform-again");
+}
+
+/// Screen 09: a compare mask at its defaults, within tolerance, its right source's list open with Constant hovered, then Constant picked
+#[test]
+#[ignore]
+fn compare_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let mut layer = json!(null);
+    for (low, high) in [(-0.7, 0.1), (-0.2, 0.6)] {
+        layer = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+        let (low, high) = (json!([low, low, low]), json!([high, high, high]));
+        execute(&mut session, "layer.fill.set", &json!({"layer": layer, "channel": "height", "procedural": "Clouds", "scale": 3.0, "low": low, "high": high}))
+            .unwrap();
+    }
+    let compare = execute(&mut session, "effect.add.compare", &json!({"layer": layer})).unwrap()["effect"].clone();
+    execute(&mut session, "layer.select", &json!({"layer": layer, "target": compare})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "compare-default");
+
+    harness.get_by(|node| node.role() == egui::Role::RadioButton && node.label().as_deref() == Some("≈")).click();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "compare-within");
+    harness.get_by(|node| node.role() == egui::Role::RadioButton && node.label().as_deref() == Some(">")).click();
+    harness.run_steps(4);
+
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Layers below").click();
+    harness.run_steps(3);
+    let hovered = harness.get_by_role_and_label(egui::Role::ListBoxOption, "Constant").rect().center();
+    harness.hover_at(hovered);
+    save(&mut harness, &output_dir, "compare-source-list");
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, "Constant").click();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "compare-constant");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("compare-constant-{name}"));
+        }
+    }
+}
+
+/// Screen 11: a new anchor point on a fill's content being renamed, then a mask anchor point read by two layers above (a reference hovered)
+#[test]
+#[ignore]
+fn anchor_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let low = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.rename", &json!({"layer": low, "name": "Cavity Dirt"})).unwrap();
+    execute(&mut session, "effect.add.generator", &json!({"layer": low, "generator": "dirt"})).unwrap();
+    let anchor = execute(&mut session, "effect.add.anchor", &json!({"layer": low, "target": "mask"})).unwrap()["effect"].clone();
+    for name in ["Fill layer 2", "Rust"] {
+        let reader = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+        execute(&mut session, "layer.rename", &json!({"layer": reader, "name": name})).unwrap();
+        execute(&mut session, "mask.add.black", &json!({"layer": reader})).unwrap();
+        execute(&mut session, "effect.add.fill", &json!({"layer": reader, "anchor": anchor})).unwrap();
+    }
+    let fresh = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    let content = execute(&mut session, "effect.add.anchor", &json!({"layer": fresh})).unwrap()["effect"].clone();
+    execute(&mut session, "layer.select", &json!({"layer": fresh, "target": content})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    harness.get_by_role_and_label(egui::Role::TextInput, "Anchor point name").click();
+    harness.run_steps(3);
+    save(&mut harness, &output_dir, "anchor-new-renaming");
+
+    harness.key_press(egui::Key::Escape);
+    harness.state_mut().session.target = texturecraft_engine::StackTarget::Content;
+    execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": low, "target": anchor})).unwrap();
+    harness.run_steps(6);
+    let row = harness.get_by_role_and_label(egui::Role::Button, "Rust Mask fill").rect().center();
+    harness.hover_at(row);
+    save(&mut harness, &output_dir, "anchor-mask-references");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("anchor-mask-references-{name}"));
+        }
+    }
+}
+
+/// Screen 15: a folder of fills at rest, scaled x1.5 and turned +30 with the reset hovered, and an empty folder
+#[test]
+#[ignore]
+fn folder_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let empty = execute(&mut session, "layer.add.group", &json!({})).unwrap()["layer"].clone();
+    let fill = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.move", &json!({"layer": fill, "above": empty, "inside": false})).unwrap();
+    execute(&mut session, "layer.fill.set", &json!({"layer": fill, "channel": "baseColor", "procedural": "Clouds"})).unwrap();
+    let folder = execute(&mut session, "layer.group", &json!({"layer": fill})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.select", &json!({"layer": folder, "target": "content"})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "folder-rest");
+
+    execute(&mut harness.state_mut().session, "folder.contents.set", &json!({"layer": folder, "scale": 1.5, "rotation": 30.0})).unwrap();
+    harness.run_steps(4);
+    let reset = harness.get_by_role_and_label(egui::Role::Button, "Contents: Reset to defaults").rect().center();
+    harness.hover_at(reset);
+    save(&mut harness, &output_dir, "folder-offset-reset-hovered");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("folder-offset-{name}"));
+        }
+        harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    }
+
+    execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": empty, "target": "content"})).unwrap();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "folder-empty");
+}
+
+/// Screen 16: an instance of an orange fill named Steel (at rest, its card hovered), then one whose source is gone
+#[test]
+#[ignore]
+fn instance_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::core::{LayerId, LayerKind};
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let source = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.rename", &json!({"layer": source, "name": "Steel"})).unwrap();
+    execute(&mut session, "layer.fill.set", &json!({"layer": source, "channel": "baseColor", "color": [0.78, 0.29, 0.09]})).unwrap();
+    let instance = execute(&mut session, "layer.instance", &json!({"layer": source})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.select", &json!({"layer": instance, "target": "content"})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "instance-rest");
+    let set = harness.state().session.doc.project.texture_sets[0].name.clone();
+    let card = harness.get_by_role_and_label(egui::Role::Button, &format!("Steel {set}")).rect().center();
+    harness.hover_at(card);
+    save(&mut harness, &output_dir, "instance-hovered");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("instance-{name}"));
+        }
+        harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    }
+
+    let id = LayerId(instance.as_u64().unwrap());
+    harness.state_mut().session.doc.project.layers.get_mut(&id).unwrap().kind = LayerKind::Instance { source: LayerId(999_999) };
+    harness.hover_at(egui::pos2(10.0, 10.0));
+    save(&mut harness, &output_dir, "instance-missing");
+}
+
+/// Screen 17: a folder's mask selected with the paint tool's Grayscale tab open: painting white, black, then an image (the slot hovered), then the slot's picker open
+#[test]
+#[ignore]
+fn folder_mask_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let scratches = image::RgbaImage::from_fn(64, 64, |x, y| {
+        let value = (((x * 7 + y * 13) ^ (x * y)) % 200 + 40) as u8;
+        image::Rgba([value, value, value, 255])
+    });
+    let mut bytes = Vec::new();
+    scratches.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).unwrap();
+    let image = session.import_resource_bytes("scratches.png", bytes).unwrap();
+    let folder = execute(&mut session, "layer.add.group", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "mask.add.white", &json!({"layer": folder})).unwrap();
+    execute(&mut session, "layer.select", &json!({"layer": folder, "target": "mask"})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.state_mut().ui.props_tab = texturecraft_ui_egui::state::PropsTab::Material;
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "foldermask-white");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("foldermask-{name}"));
+        }
+        harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    }
+    execute(&mut harness.state_mut().session, "tool.material", &json!({"maskValue": 0.0})).unwrap();
+    save(&mut harness, &output_dir, "foldermask-black");
+    execute(&mut harness.state_mut().session, "tool.material", &json!({"maskImage": image})).unwrap();
+    let slot = harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").rect().center();
+    harness.hover_at(slot);
+    save(&mut harness, &output_dir, "foldermask-image");
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Grayscale").click();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "foldermask-picker");
+}
+
+/// Screen 10: a new color selection without an ID map, then three colors on the ID mesh map (a row hovered, a row picking again, the Background list open)
+#[test]
+#[ignore]
+fn color_selection_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let shoot = |with_id_map: bool| {
+        let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+        if !with_id_map {
+            execute(&mut session, "textureSet.meshMap.clear", &json!({"map": "id"})).unwrap();
+        }
+        let layer = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+        let added = execute(&mut session, "mask.add.colorSelection", &json!({"layer": layer})).unwrap();
+        let effect = texturecraft_engine::core::LayerId(added["effect"].as_u64().unwrap());
+        if with_id_map {
+            let colors = json!([[214.0 / 255.0, 1.0, 0.0], [1.0, 49.0 / 255.0, 0.0], [1.0, 0.0, 247.0 / 255.0]]);
+            execute(&mut session, "effect.set", &json!({"effect": effect.0, "colors": colors})).unwrap();
+        }
+        execute(&mut session, "layer.select", &json!({"layer": layer, "target": effect.0})).unwrap();
+        let mut harness =
+            Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+        harness.state_mut().ui.prefs.language = "en".into();
+        harness.run_steps(6);
+        harness
+    };
+
+    let mut harness = shoot(false);
+    save(&mut harness, &output_dir, "colorsel-new");
+
+    // Picking with an ID Mask image chosen by hand and nothing baked: the model shows that image
+    let quarters = image::RgbaImage::from_fn(8, 8, |x, y| match (x < 4, y < 4) {
+        (true, true) => image::Rgba([214, 255, 0, 255]),
+        (false, true) => image::Rgba([255, 49, 0, 255]),
+        (true, false) => image::Rgba([255, 0, 247, 255]),
+        (false, false) => image::Rgba([20, 90, 255, 255]),
+    });
+    let mut png = Vec::new();
+    quarters.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let mut harness = shoot(false);
+    let effect = match harness.state().session.target {
+        texturecraft_engine::StackTarget::Effect(effect) => effect,
+        other => panic!("the color selection is selected, not {other:?}"),
+    };
+    harness.state_mut().session.doc.baked.clear();
+    let name = harness.state_mut().session.import_resource_bytes("parts.png", png).unwrap();
+    harness.state_mut().run("effect.set", json!({"effect": effect.0, "idMap": name}));
+    harness.run_steps(4);
+    harness.get_by_label("Pick color").click();
+    harness.run_steps(8);
+    save(&mut harness, &output_dir, "colorsel-image-pick");
+
+    let mut harness = shoot(true);
+    let row = harness.get_by_label("Pick color R 255 G 49 B 0").rect().center();
+    harness.hover_at(row);
+    harness.run_steps(2);
+    save(&mut harness, &output_dir, "colorsel-hover");
+    let first = harness.get_by_label("Pick color R 214 G 255 B 0").rect().center();
+    harness.get_by_label("Pick color R 214 G 255 B 0").click();
+    harness.run_steps(4);
+    harness.hover_at(first);
+    harness.run_steps(2);
+    save(&mut harness, &output_dir, "colorsel-repick");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(4);
+
+    harness.get_by_role_and_label(egui::Role::ComboBox, "Black").click();
+    harness.run_steps(3);
+    let hovered = harness.get_by_role_and_label(egui::Role::ListBoxOption, "Transparent").rect().center();
+    harness.hover_at(hovered);
+    save(&mut harness, &output_dir, "colorsel-background-list");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(3);
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("colorsel-{name}"));
+        }
+    }
+}
+
+/// Screen 08: a mask's levels, then a content levels on Base color (Colors, red only with Clamp on, its Affects list open with an option hovered) and on Roughness
+#[test]
+#[ignore]
+fn levels_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = execute(&mut session, "layer.add.fill", &json!({"roughness": 0.5})).unwrap()["layer"].clone();
+    for (channel, low, high) in
+        [("baseColor", json!([0.1, 0.2, 0.45]), json!([0.85, 0.5, 0.2])), ("roughness", json!([0.25, 0.25, 0.25]), json!([0.7, 0.7, 0.7]))]
+    {
+        execute(&mut session, "layer.fill.set", &json!({"layer": layer, "channel": channel, "procedural": "Clouds", "scale": 3.0, "low": low, "high": high}))
+            .unwrap();
+    }
+    execute(&mut session, "mask.add.black", &json!({"layer": layer})).unwrap();
+    execute(&mut session, "effect.add.fill", &json!({"layer": layer, "target": "mask", "procedural": "clouds"})).unwrap();
+    let mask_levels = execute(&mut session, "effect.add.levels", &json!({"layer": layer, "target": "mask"})).unwrap()["effect"].clone();
+    let content_levels = execute(&mut session, "effect.add.levels", &json!({"layer": layer, "target": "content"})).unwrap()["effect"].clone();
+    execute(&mut session, "layer.select", &json!({"layer": layer, "target": mask_levels})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "levels-mask");
+
+    execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": layer, "target": content_levels})).unwrap();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "levels-colors");
+    let switch = |harness: &mut Harness<'_, TextureCraftApp>, view: &str| {
+        harness.get_by(|node| node.role() == egui::Role::RadioButton && node.label().as_deref() == Some(view)).click();
+        harness.run_steps(3);
+    };
+    switch(&mut harness, "R");
+    harness.get_by_role_and_label(egui::Role::CheckBox, "Clamp").click();
+    harness.run_steps(3);
+    save(&mut harness, &output_dir, "levels-red-clamp");
+    harness.get_by_role_and_label(egui::Role::CheckBox, "Clamp").click();
+    switch(&mut harness, "Colors");
+    lowest_list(&harness, "Base color").click();
+    harness.run_steps(3);
+    let hovered = harness.get_by_role_and_label(egui::Role::ListBoxOption, "Roughness").rect().center();
+    harness.hover_at(hovered);
+    save(&mut harness, &output_dir, "levels-affects-list");
+    harness.get_by_role_and_label(egui::Role::ListBoxOption, "Roughness").click();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "levels-roughness");
+    harness.get_by_role_and_label(egui::Role::Slider, "Gamma").focus();
+    harness.run_steps(2);
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(3);
+    save(&mut harness, &output_dir, "levels-exact-entry");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("levels-roughness-{name}"));
+        }
+    }
+}
+
+/// Screen 14: the Layers panel's top row (Add fill layer hovered), Add effect on a layer and on its mask, Add mask, and Bitmap's texture picker; the panel's left edge goes to stderr for cropping
+#[test]
+#[ignore]
+fn layer_toolbar_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let dirt = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.rename", &json!({"layer": dirt, "name": "Dirt"})).unwrap();
+    execute(&mut session, "effect.add.generator", &json!({"layer": dirt, "generator": "dirt"})).unwrap();
+    let fill = execute(&mut session, "layer.add.fill", &json!({})).unwrap()["layer"].clone();
+    execute(&mut session, "layer.select", &json!({"layer": fill})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.run_steps(6);
+    harness.state_mut().ui.dock.focus(Panel::Layers);
+    harness.run_steps(3);
+    eprintln!("toolbar at {:?}", harness.get_by_role_and_label(egui::Role::Button, "Add effect").rect());
+    let hover = |harness: &mut Harness<'_, TextureCraftApp>, label: &str| {
+        let at = harness.get_by_role_and_label(egui::Role::Button, label).rect().center();
+        harness.hover_at(at);
+    };
+    let open = |harness: &mut Harness<'_, TextureCraftApp>, menu: &str| {
+        harness.get_by_role_and_label(egui::Role::Button, menu).click();
+        harness.run_steps(3);
+    };
+    hover(&mut harness, "Add fill layer");
+    save(&mut harness, &output_dir, "toolbar-rest");
+    open(&mut harness, "Add effect");
+    hover(&mut harness, "Filter");
+    save(&mut harness, &output_dir, "toolbar-effect-content");
+    harness.key_press(egui::Key::Escape);
+    execute(&mut harness.state_mut().session, "mask.add.white", &json!({"layer": fill})).unwrap();
+    harness.run_steps(3);
+    open(&mut harness, "Add effect");
+    hover(&mut harness, "Compare mask");
+    save(&mut harness, &output_dir, "toolbar-effect-mask");
+    harness.key_press(egui::Key::Escape);
+    execute(&mut harness.state_mut().session, "edit.undo", &json!({})).unwrap();
+    harness.run_steps(3);
+    open(&mut harness, "Add mask");
+    hover(&mut harness, "Height combination");
+    save(&mut harness, &output_dir, "toolbar-mask");
+    harness.get_by_role_and_label(egui::Role::Button, "Bitmap").click();
+    harness.run_steps(3);
+    save(&mut harness, &output_dir, "toolbar-bitmap");
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        harness.key_press(egui::Key::Escape);
+        open(&mut harness, "Add effect");
+        hover(&mut harness, "Filter");
+        for (brightness, name) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+            harness.state_mut().ui.prefs.brightness = brightness;
+            save(&mut harness, &output_dir, &format!("toolbar-effect-content-{name}"));
         }
     }
 }

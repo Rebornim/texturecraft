@@ -370,6 +370,7 @@ mod tests {
 
     use super::*;
 
+    /// A hand-edited span past a full turn spaces the ring's dots as the engine spaces the copies: six copies 60° apart, none on top of another
     #[test]
     fn the_ring_spaces_its_copies_as_the_engine_does() {
         let symmetry = FillSymmetry { on: true, kind: SymmetryKind::Radial, count: 6, span: 720.0, ..FillSymmetry::OFF };

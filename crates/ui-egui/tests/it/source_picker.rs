@@ -145,6 +145,20 @@ fn the_anchor_points_tab_lists_the_stacks_anchors() {
 }
 
 #[test]
+fn the_anchor_points_tab_lists_mask_anchor_points_by_name() {
+    let (mut harness, _) = app_with_fill(|session, layer| {
+        texturecraft_engine::execute(session, "effect.add.anchor", &json!({"layer": layer.0, "target": "mask", "name": "Dirt mask"})).unwrap();
+        texturecraft_engine::execute(session, "layer.add.fill", &json!({})).unwrap();
+    });
+    let reader = harness.state().session.selected_layer().unwrap();
+    click_slot(&mut harness, "Roughness");
+    click_widget(&mut harness, Role::Tab, "Anchor points");
+    let anchor = harness.get_all_by_role(Role::ListBoxOption).find_map(|node| node.accesskit_node().label().filter(|label| label.starts_with("Dirt mask")));
+    click_tile(&mut harness, &anchor.expect("the mask anchor point below is offered under its own name"));
+    assert!(matches!(source(&harness, reader, Channel::Roughness), Source::Anchor { .. }));
+}
+
+#[test]
 fn escape_or_a_click_outside_closes_it_and_the_wheel_still_zooms_the_view() {
     let (mut harness, layer) = app_with_fill(|_, _| {});
     assert_list_leaves_the_wheel_and_closes(&mut harness, |harness| {

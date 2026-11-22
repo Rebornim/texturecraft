@@ -140,9 +140,9 @@ fn a_mask_fill_selects_an_image_edits_projection_and_returns_to_uniform() {
     let effect = &harness.state().session.doc.project.effect(effect_id).unwrap().1.kind;
     assert!(matches!(effect, EffectKind::Fill { source: Source::Image { name, .. }, .. } if name == &image_name));
 
-    harness.get_all_by_role(egui::Role::ComboBox).find(|node| node.value().as_deref() == Some("UV projection")).unwrap().click();
+    click_node(&mut harness, egui::Role::ComboBox, "UV projection");
     harness.run_steps(2);
-    harness.get_by_label("Tri-planar projection").click();
+    click_label(&mut harness, "Tri-planar projection");
     harness.run_steps(3);
 
     let effect = &harness.state().session.doc.project.effect(effect_id).unwrap().1.kind;

@@ -1,6 +1,7 @@
 //! One integration-test executable avoids linking the same dependencies for every feature.
 //! Keep feature tests in their own modules; the standalone session.rs target remains available.
 
+mod add_mask_items;
 mod bake;
 mod bake_checks;
 mod bake_resolution;
@@ -9,7 +10,9 @@ mod bake_tiles;
 mod brush_material;
 mod closed_session;
 mod color_selection;
+mod compare_mask;
 mod content_effects;
+mod effect_blending;
 mod export_colour_space;
 mod export_file_types;
 mod export_maps;
@@ -21,6 +24,7 @@ mod fill_whole_material;
 mod filter_support;
 mod filter_swap;
 mod filters;
+mod folder_contents;
 mod frame_selection;
 mod generator_inputs;
 mod gradient_map;
@@ -29,6 +33,8 @@ mod instances;
 mod layer_multi_select;
 mod mask_clone_smudge;
 mod mask_export;
+mod mask_fill_source;
+mod mask_paint_image;
 mod materialcraft_link;
 mod materialx;
 mod materialx_import;
@@ -40,6 +46,7 @@ mod pbr_import;
 mod perf;
 mod polygon_fill;
 mod project_recovery;
+mod resources_used;
 mod sample;
 mod solo;
 mod swatches;

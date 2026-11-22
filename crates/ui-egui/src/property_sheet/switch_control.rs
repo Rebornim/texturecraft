@@ -105,6 +105,12 @@ impl PropertySheet<'_> {
         self.dropdown_built(label, selected, || 0..options.len(), name, None).0
     }
 
+    /// A boxed switch across the whole panel; the chosen word takes its colours from `tints` (several colours split the word between them)
+    pub(crate) fn wide_switch(&mut self, options: &[&str], selected: usize, tints: &[&[Color32]]) -> Option<usize> {
+        let control = self.wide_row();
+        self.segments(control, options, selected, |index| tints.get(index).copied().unwrap_or_default(), None)
+    }
+
     /// A row's control box, `CONTROL_HEIGHT` tall, from the left padding to the right one
     pub(super) fn wide_row(&mut self) -> Rect {
         let row = self.take(ROW_HEIGHT);

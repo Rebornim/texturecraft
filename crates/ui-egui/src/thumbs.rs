@@ -8,7 +8,7 @@ use std::sync::{Arc, Weak};
 
 use egui::{Color32, ColorImage, Painter, Pos2, Rect, TextureHandle, TextureOptions};
 use texturecraft_engine::compose::{ImageRes, ImageStore};
-use texturecraft_engine::core::ProceduralKind;
+use texturecraft_engine::core::{BakedMap, ProceduralKind};
 use texturecraft_engine::paint::presets::BrushPreset;
 use texturecraft_engine::paint::{BrushAlpha, BrushSettings, alphas};
 use texturecraft_engine::texel::linear_to_srgb;
@@ -50,6 +50,8 @@ pub struct Thumbs {
     saved_files_epoch: u64,
     images: HashMap<String, (Weak<ImageRes>, TextureHandle)>,
     images_revision: Option<u64>,
+    /// Each texture set's ID mesh map preview, with the map it shows (a rebake's new map replaces it)
+    id_maps: HashMap<usize, (Weak<Vec<f32>>, TextureHandle)>,
     /// (frame, thumbnails rendered in it)
     budget: (u64, usize),
     /// Renders the orb thumbnails and the big previews
@@ -89,6 +91,30 @@ impl Thumbs {
         let texture = ctx.load_texture(key.clone(), color_image, TextureOptions::LINEAR);
         self.images.insert(key, (Arc::downgrade(image), texture.clone()));
         texture
+    }
+
+    /// Cached preview of texture set `set_index`'s ID mesh map, its colors as stored (the ID view's); a rebake makes a new one
+    pub fn id_mesh_map(&mut self, ctx: &egui::Context, set_index: usize, baked: &texturecraft_engine::compose::BakedMaps) -> Option<TextureHandle> {
+        let data = baked.maps.get(&BakedMap::Id)?;
+
+        // The weak reference keeps the shown map's allocation, so a new map never takes its address
+        if let Some((shown, texture)) = self.id_maps.get(&set_index)
+            && std::ptr::eq(shown.as_ptr(), Arc::as_ptr(data))
+        {
+            return Some(texture.clone());
+        }
+
+        let mut image = ColorImage::filled([IMAGE_PX, IMAGE_PX], Color32::TRANSPARENT);
+        for (index, pixel) in image.pixels.iter_mut().enumerate() {
+            let uv = [((index % IMAGE_PX) as f32 + 0.5) / IMAGE_PX as f32, ((index / IMAGE_PX) as f32 + 0.5) / IMAGE_PX as f32];
+            if let Some(color) = baked.sample_uv(BakedMap::Id, uv) {
+                let [red, green, blue] = color.map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8);
+                *pixel = Color32::from_rgb(red, green, blue);
+            }
+        }
+        let texture = ctx.load_texture(format!("mesh_id_{set_index}"), image, TextureOptions::NEAREST);
+        self.id_maps.insert(set_index, (Arc::downgrade(data), texture.clone()));
+        Some(texture)
     }
 
     /// Cached preview of an image resource (64 px, letterboxed)
@@ -403,7 +429,10 @@ pub fn paint_alpha(p: &Painter, rect: Rect, a: BrushAlpha, hardness: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use texturecraft_engine::compose::BakedMaps;
 
     use crate::orb_shape::OrbShape;
 
@@ -611,5 +640,25 @@ mod tests {
         thumbs.sync_images(&images, 3);
         eprintln!("cached previews after clearing resources: {}", thumbs.images.len());
         assert!(thumbs.images.is_empty());
+    }
+
+    /// A 2 × 2 ID map of one red, in a map of its own
+    fn id_map() -> BakedMaps {
+        BakedMaps { resolution: 2, maps: BTreeMap::from([(BakedMap::Id, Arc::new([1.0, 0.0, 0.0].repeat(4)))]) }
+    }
+
+    #[test]
+    fn an_id_map_preview_is_kept_while_its_map_lives_and_a_rebaked_map_gets_a_new_one() {
+        let ctx = egui::Context::default();
+        let mut thumbs = Thumbs::default();
+        let baked = id_map();
+
+        let first = thumbs.id_mesh_map(&ctx, 0, &baked).map(|texture| texture.id());
+        let shared = thumbs.id_mesh_map(&ctx, 0, &baked.clone()).map(|texture| texture.id());
+        let rebaked = thumbs.id_mesh_map(&ctx, 0, &id_map()).map(|texture| texture.id());
+
+        assert!(first.is_some());
+        assert_eq!(shared, first, "the same map keeps its cached preview");
+        assert_ne!(rebaked, first, "a new map of the same texture set, even of equal texels, gets a new preview");
     }
 }

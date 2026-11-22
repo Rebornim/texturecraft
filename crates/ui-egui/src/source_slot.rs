@@ -9,6 +9,8 @@ use crate::i18n::tr;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum SourceSlot {
     Channel(Channel),
+    /// A mask fill's source, read as gray 0..1
+    Grayscale,
 }
 
 impl SourceSlot {
@@ -16,6 +18,7 @@ impl SourceSlot {
     pub(crate) fn name(self) -> &'static str {
         match self {
             SourceSlot::Channel(channel) => tr(channel.label()),
+            SourceSlot::Grayscale => tr("Grayscale"),
         }
     }
 
@@ -30,6 +33,7 @@ impl SourceSlot {
     pub(crate) fn default_value(self) -> [f32; 3] {
         match self {
             SourceSlot::Channel(channel) => channel.default_value(),
+            SourceSlot::Grayscale => [1.0; 3],
         }
     }
 
@@ -60,6 +64,7 @@ impl SourceSlot {
     pub(crate) fn fields(self) -> Value {
         match self {
             SourceSlot::Channel(channel) => json!({"channel": channel.id()}),
+            SourceSlot::Grayscale => json!({}),
         }
     }
 
@@ -67,6 +72,7 @@ impl SourceSlot {
     pub(crate) fn key(self) -> &'static str {
         match self {
             SourceSlot::Channel(channel) => channel.id(),
+            SourceSlot::Grayscale => "grayscale",
         }
     }
 }

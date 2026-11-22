@@ -4,7 +4,9 @@
 
 use std::collections::BTreeMap;
 
-use texturecraft_compose::{BelowCache, Composite, Inputs, PaintTarget, PixelStore, StrokePreview, all_tiles, composite_tiles, composite_tiles_cached};
+use texturecraft_compose::{
+    BelowCache, Composite, Inputs, MaskGray, PaintTarget, PixelStore, StrokePreview, all_tiles, composite_tiles, composite_tiles_cached,
+};
 use texturecraft_core::{
     BakedMap, BlendMode, Channel, Effect, EffectKind, Fill, Filter, Generator, GeneratorKind, HeightMask, Layer, LayerId, LayerKind, Mask, MaskBackground,
     Procedural, ProceduralKind, Project, Projection, Source, TextureSet,
@@ -69,7 +71,7 @@ fn heavy_stack(f: &mut Fixture) -> LayerId {
     mask.effects.push(effect(f, EffectKind::Generator(Generator::new(GeneratorKind::Position))));
     mask.effects.push(effect(f, EffectKind::Filter(Filter::Blur { radius: 40.0 })));
     add(f, 0, fill(&[(Channel::Roughness, procedural(ProceduralKind::Grunge, 0.0, 1.0))]), Some(mask));
-    let group = add(f, 0, LayerKind::Group { children: vec![], collapsed: false }, None);
+    let group = add(f, 0, LayerKind::Group { children: vec![], collapsed: false, contents: Default::default(), randomized: Vec::new() }, None);
     for b in f.project.layer_mut(group).unwrap().channels.values_mut() {
         b.mode = BlendMode::Passthrough;
     }
@@ -226,7 +228,7 @@ fn mask_with_height_follows_the_layer_height() {
 }
 
 fn group(f: &mut Fixture, folder: Option<LayerId>, mode: BlendMode, opacity: f32, mask: Option<Mask>) -> LayerId {
-    let id = put(f, 0, folder, LayerKind::Group { children: vec![], collapsed: false }, mask);
+    let id = put(f, 0, folder, LayerKind::Group { children: vec![], collapsed: false, contents: Default::default(), randomized: Vec::new() }, mask);
     blend(f, id, mode, opacity);
     id
 }
@@ -338,7 +340,7 @@ fn stroke(target: LayerId) -> StrokePreview {
         opacity: 0.9,
         erase: false,
         values: [(Channel::BaseColor, [1.0, 0.1, 0.1]), (Channel::Roughness, [0.2; 3])].into_iter().collect(),
-        mask_value: 1.0,
+        mask_gray: MaskGray::Value(1.0),
         stencil: None,
         carried: BTreeMap::new(),
         carried_mask: None,
@@ -904,16 +906,13 @@ fn generator_input_image_changes_invalidate_stack_key() {
     let original = key(&images);
 
     images.insert("unrelated".into(), image(0.5));
-
     assert_eq!(key(&images), original, "an unrelated image leaves the key unchanged");
 
     let old_image = Arc::downgrade(&images["used"]);
     images.insert("used".into(), image(0.9));
-
     assert!(old_image.upgrade().is_none(), "the cache must not retain the old image pixels");
     assert!(key(&images) != original, "replacing a generator input must invalidate the cache");
 
     images.remove("used");
-
     assert!(key(&images) != original, "removing a generator input must invalidate the cache");
 }

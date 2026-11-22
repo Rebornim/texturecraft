@@ -67,7 +67,7 @@ pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     let Some(PropertiesPopup::Open { at, bounds }) = app.properties_popup else { return };
     let tokens = Tokens::get(ctx);
     egui::Area::new(area_id()).order(egui::Order::Foreground).fixed_pos(at).constrain_to(bounds.shrink(PROPERTIES_POPUP_VIEW_MARGIN)).show(ctx, |ui| {
-        egui::Frame::popup(ui.style()).fill(tokens.panel).show(ui, |ui| {
+        egui::Frame::popup(ui.style()).fill(tokens.panel).inner_margin(egui::Margin::ZERO).show(ui, |ui| {
             ui.set_width(PROPERTIES_POPUP_WIDTH);
             // The area's remembered size would otherwise cap the scroll height
             ui.set_max_height(bounds.height() * PROPERTIES_POPUP_MAX_HEIGHT_SHARE);

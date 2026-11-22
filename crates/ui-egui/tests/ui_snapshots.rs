@@ -858,6 +858,35 @@ fn tile_generator_gradient_map_snapshot() {
     save(&mut harness, &output_dir, "tile-generator-gradient-map");
 }
 
+/// Every docked panel's header bar (names in capitals, a close × at the right), then the Properties × hovered
+#[test]
+#[ignore]
+fn panel_header_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    execute(&mut session, "layer.add.fill", &json!({"color": [0.8, 0.3, 0.1]})).unwrap();
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 960.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    for (brightness, name) in [(Brightness::MediumDark, "medium"), (Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+        harness.state_mut().ui.prefs.brightness = brightness;
+        save(&mut harness, &output_dir, &format!("panel-header-{name}"));
+    }
+    harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    let close = harness
+        .get_all_by_label("Close Panel")
+        .map(|node| node.rect())
+        .filter(|rect| rect.min.x > 1200.0)
+        .max_by(|a, b| a.min.y.total_cmp(&b.min.y))
+        .expect("the Properties header's close button");
+    harness.hover_at(close.center());
+    save(&mut harness, &output_dir, "panel-header-close-hovered");
+}
+
 /// Edit > Settings: the three pages and a compact window at 150% scale
 #[test]
 #[ignore]
@@ -897,4 +926,34 @@ fn settings_pages_snapshot() {
     harness.state_mut().ui.prefs.ui_scale = 1.5;
     harness.state_mut().ui.windows.settings_draft.as_mut().unwrap().page = SettingsPage::General;
     save(&mut harness, &output_dir, "settings-compact");
+}
+
+#[test]
+#[ignore]
+fn default_layout_snapshots() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    for color in [[0.2, 0.4, 0.7], [0.5, 0.5, 0.5], [0.8, 0.3, 0.1]] {
+        execute(&mut session, "layer.add.fill", &json!({ "color": color })).unwrap();
+    }
+    let mut harness =
+        Harness::builder().with_size(egui::vec2(1600.0, 960.0)).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    for (brightness, name) in [(Brightness::MediumDark, "medium"), (Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+        harness.state_mut().ui.prefs.brightness = brightness;
+        save(&mut harness, &output_dir, &format!("default-layout-{name}"));
+    }
+    harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+    let properties_close = harness
+        .get_all_by_label("Close Panel")
+        .map(|node| node.rect())
+        .filter(|rect| rect.min.x > 1200.0)
+        .max_by(|a, b| a.min.y.total_cmp(&b.min.y))
+        .expect("the Properties header's close button");
+    harness.hover_at(egui::pos2(properties_close.center().x - 120.0, properties_close.min.y - 6.0));
+    save(&mut harness, &output_dir, "default-layout-split-hovered");
 }

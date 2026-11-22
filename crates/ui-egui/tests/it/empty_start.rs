@@ -105,8 +105,8 @@ fn the_empty_views_keep_the_view_picker_and_drop_the_camera_picker() {
 
     assert!(!has_camera_picker(&empty), "no camera picker");
 
-    // The picker shows "Material" right of the tool shelf and the Assets panel: one per view in the split layout
-    let pickers = painted(&empty).iter().filter(|(text, x)| text == "Material" && *x > 400.0).count();
+    // The picker shows "Material" right of the tool shelf and the Assets panel and left of the right column: one per view in the split layout
+    let pickers = painted(&empty).iter().filter(|(text, x)| text == "Material" && (300.0..1200.0).contains(x)).count();
 
     assert_eq!(pickers, 2, "each of the two views keeps its view picker");
 
@@ -392,4 +392,13 @@ fn close_releases_the_layer_thumbnail_snapshot() {
             tracked_bytes
         );
     }
+}
+
+#[test]
+fn the_empty_properties_note_starts_at_its_header_names_left_edge() {
+    let harness = empty();
+    let texts = painted(&harness);
+    let left_of = |wanted: &str| texts.iter().find(|(text, _)| text == wanted).map(|(_, left)| *left).unwrap_or_else(|| panic!("{wanted} is painted"));
+
+    assert_eq!(left_of("No properties found"), left_of("PROPERTIES"));
 }

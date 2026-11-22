@@ -68,6 +68,7 @@ mod path_surface_cache;
 mod pattern_panel;
 mod pattern_target;
 pub mod pbr_import;
+mod popup_drag;
 mod preview_image;
 mod preview_request;
 mod preview_worker;
@@ -76,6 +77,7 @@ pub mod profile;
 mod project_config;
 pub mod project_form;
 pub mod properties_popup;
+mod property_sheet;
 mod query_field;
 mod rail_popup;
 pub mod render_mode;
@@ -1052,6 +1054,9 @@ impl eframe::App for TextureCraftApp {
         if !self.session.project_open {
             self.ui.mode = state::Mode::Painting;
         }
+
+        // Before any popup draws, so one a drag closes is gone from this frame
+        popup_drag::close_on_drag_outside(&ctx);
 
         if !self.ui.hide_ui {
             titlebar::show(self, ui);

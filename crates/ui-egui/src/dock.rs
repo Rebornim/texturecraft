@@ -1798,7 +1798,8 @@ pub(crate) fn properties_title(app: &TextureCraftApp) -> String {
     let what = match (app.session.selected_layer().and_then(|id| project.layers.get(&id)), app.session.target) {
         // Polygon fill keeps its own properties wherever it can fill
         _ if tool == Tool::PolygonFill && tool_usable => tr(tool.label()).to_string(),
-        (Some(_), StackTarget::Effect(effect)) => project.effect(effect).map(|(_, found)| found.name.clone()).unwrap_or_default(),
+        // The effect's type, not its own name (every filter reads "Filter")
+        (Some(_), StackTarget::Effect(effect)) => project.effect(effect).map(|(_, found)| tr(effect_type_label(&found.kind)).to_string()).unwrap_or_default(),
         (Some(layer), StackTarget::Content) if matches!(layer.kind, LayerKind::Fill(_)) => tr("Fill").to_string(),
         (Some(layer), StackTarget::Content) if layer.is_group() => tr("Folder").to_string(),
         (Some(layer), StackTarget::Content) if layer.instance_source().is_some() => tr("Instance").to_string(),
@@ -1809,44 +1810,70 @@ pub(crate) fn properties_title(app: &TextureCraftApp) -> String {
     format!("{} - {what}", tr("Properties"))
 }
 
+/// The name of effect type `kind` in the Properties title
+fn effect_type_label(kind: &EffectKind) -> &'static str {
+    match kind {
+        EffectKind::Filter(_) => n_("Filter"),
+        other => other.name(),
+    }
+}
+
 pub(crate) fn properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     // A floating scroll bar would cover the right-aligned slider values and section reset icons
     ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
-    egui::ScrollArea::vertical().id_salt("props").auto_shrink([false, false]).show(ui, |ui| properties_contents(app, ui));
+    egui::ScrollArea::vertical().id_salt(("props", properties_place(app))).auto_shrink([false, false]).show(ui, |ui| properties_contents(app, ui));
+}
+
+/// What the docked Properties list keeps its own scroll place for: the selected layer and the part of it edited, none for the tool
+fn properties_place(app: &TextureCraftApp) -> Option<(LayerId, StackTarget)> {
+    // A short panel in between would clamp a shared place back to the top; a greyed tool shows the layer's own sheet
+    if app.session.tool.tool == Tool::PolygonFill && app.session.tool_usable(Tool::PolygonFill) {
+        return None;
+    }
+
+    app.session.selected_layer().map(|layer| (layer, app.session.target))
+}
+
+/// Room around the Properties rows not yet laid out by the property sheet: the sheet's side padding, so both start under the panel's name
+const LEGACY_BODY_MARGIN: egui::Margin = egui::Margin::symmetric(crate::property_sheet::PAD as i8, 4);
+
+/// Lays out `body` with the other panels' margin
+fn legacy_body(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
+    egui::Frame::new().inner_margin(LEGACY_BODY_MARGIN).show(ui, body);
 }
 
 /// What the Properties panel edits: polygon fill's own settings, the selected effect, fill, folder, instance or mask, else the tool (or a hint to select a layer when it can't act)
 pub(crate) fn properties_contents(app: &mut TextureCraftApp, ui: &mut Ui) {
-    let tokens = Tokens::get(ui.ctx());
     if !app.session.project_open {
-        ui.label(RichText::new(tr("No properties found")).color(tokens.text_dim));
+        crate::widgets::empty_note(ui, tr("No properties found"));
         return;
     }
 
     let selected = app.session.selected_layer().and_then(|id| app.session.doc.project.layers.get(&id).cloned());
     let tool = app.session.tool.tool;
     let tool_usable = app.session.tool_usable(tool);
+    let tokens = Tokens::get(ui.ctx());
 
     match (&selected, app.session.target) {
         // Polygon fill shows its own settings and says what it fills into, wherever it can fill
-        _ if tool == Tool::PolygonFill && tool_usable => polygon_fill_properties(app, ui),
-        (Some(layer), StackTarget::Effect(effect)) => effect_properties(app, ui, layer, effect),
-        (Some(layer), StackTarget::Content) if matches!(layer.kind, LayerKind::Fill(_)) => fill_properties(app, ui, layer),
-        (Some(layer), StackTarget::Content) if layer.is_group() => {
+        _ if tool == Tool::PolygonFill && tool_usable => legacy_body(ui, |ui| polygon_fill_properties(app, ui)),
+        (Some(layer), StackTarget::Effect(effect)) => legacy_body(ui, |ui| effect_properties(app, ui, layer, effect)),
+        (Some(layer), StackTarget::Content) if matches!(layer.kind, LayerKind::Fill(_)) => legacy_body(ui, |ui| fill_properties(app, ui, layer)),
+        (Some(layer), StackTarget::Content) if layer.is_group() => legacy_body(ui, |ui| {
             ui.label(RichText::new(tr("A folder blends its children (pass-through). Set per-channel opacity in the layer rows.")).color(tokens.text_dim));
-        }
-        (Some(layer), StackTarget::Content) if layer.instance_source().is_some() => instance_properties(app, ui, layer),
-        (Some(layer), StackTarget::Mask) => {
+        }),
+        (Some(layer), StackTarget::Content) if layer.instance_source().is_some() => legacy_body(ui, |ui| instance_properties(app, ui, layer)),
+        (Some(layer), StackTarget::Mask) => legacy_body(ui, |ui| {
             height_mask_section(app, ui, layer);
             if tool_usable {
                 ui.separator();
                 tool_properties(app, ui);
             }
-        }
-        (None, _) if !tool_usable => {
+        }),
+        (None, _) if !tool_usable => legacy_body(ui, |ui| {
             ui.label(RichText::new(tr("Select a layer to paint on")).color(tokens.text_dim));
-        }
-        _ => tool_properties(app, ui),
+        }),
+        _ => legacy_body(ui, |ui| tool_properties(app, ui)),
     }
 }
 

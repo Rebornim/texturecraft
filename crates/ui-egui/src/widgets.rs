@@ -495,6 +495,22 @@ fn gradient(painter: &egui::Painter, rect: egui::Rect, rgb: impl Fn(f32, f32) ->
     painter.add(mesh);
 }
 
+/// From a panel body's top to its empty note's lettering: the reference's gap under the header's name
+const EMPTY_NOTE_TOP: f32 = 9.0;
+
+/// The line an empty panel shows instead of its contents ("No properties found"): under the header at its name's left edge, greyed as the disabled toolbar icons are
+pub(crate) fn empty_note(ui: &mut Ui, text: &str) {
+    let tokens = Tokens::get(ui.ctx());
+    ui.add_enabled_ui(false, |ui| {
+        let font = egui::TextStyle::Body.resolve(ui.style());
+        let galley = ui.painter().layout_no_wrap(text.to_owned(), font, tokens.text);
+        let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), EMPTY_NOTE_TOP + galley.size().y), Sense::hover());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, false, text));
+        let at = egui::pos2(rect.left() + crate::docking::HEADER_TITLE_LEFT, rect.top() + EMPTY_NOTE_TOP);
+        ui.painter().galley(at, galley, tokens.text);
+    });
+}
+
 /// Panel title row with optional trailing content.
 pub fn panel_header(ui: &mut Ui, title: &str, trailing: impl FnOnce(&mut Ui)) {
     ui.horizontal(|ui| {

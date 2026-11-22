@@ -906,14 +906,17 @@ fn generator_input_image_changes_invalidate_stack_key() {
     let original = key(&images);
 
     images.insert("unrelated".into(), image(0.5));
+
     assert_eq!(key(&images), original, "an unrelated image leaves the key unchanged");
 
     let old_image = Arc::downgrade(&images["used"]);
     images.insert("used".into(), image(0.9));
+
     assert!(old_image.upgrade().is_none(), "the cache must not retain the old image pixels");
     assert!(key(&images) != original, "replacing a generator input must invalidate the cache");
 
     images.remove("used");
+
     assert!(key(&images) != original, "removing a generator input must invalidate the cache");
 }
 

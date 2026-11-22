@@ -51,35 +51,47 @@ fn a_folders_scale_and_rotation_lay_on_its_fills_without_changing_them_and_reset
     let steps = s.history_labels().len();
 
     let set = execute(&mut s, "folder.contents.set", &json!({"layer": folder.0, "scale": 1.5, "rotation": 30.0})).unwrap();
+
     assert_eq!(set, json!({"scale": 1.5, "rotation": 30.0}));
     assert_eq!(s.history_labels().len(), steps + 1, "one undo step");
     assert_eq!(s.doc.project.contents_around(fill), ContentsOffset::new(1.5, 30.0));
     assert_eq!(projection(&s, fill), own, "the fill keeps its own values");
+
     s.update();
     let turned = base_colors(&s);
     assert_ne!(turned, before, "the fill renders scaled and turned");
+
     let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap().to_string();
+
     assert!(inspect.contains(r#""contents":{"rotation":30.0,"scale":1.5}"#), "{inspect}");
 
     // A drag continues its step; one value given keeps the other
     execute(&mut s, "folder.contents.set", &json!({"layer": folder.0, "rotation": 400.0, "merge": true})).unwrap();
+
     assert_eq!(s.history_labels().len(), steps + 1);
     assert_eq!(s.doc.project.contents_offset(folder), ContentsOffset::new(1.5, 40.0));
 
     // The values it already has add no step
     let unchanged = execute(&mut s, "folder.contents.set", &json!({"layer": folder.0, "scale": 1.5, "rotation": 40.0})).unwrap();
+
     assert_eq!(unchanged, json!({"scale": 1.5, "rotation": 40.0}));
     assert_eq!(s.history_labels().len(), steps + 1, "no step for the same values");
 
     execute(&mut s, "folder.contents.reset", &json!({"layer": folder.0})).unwrap();
+
     assert!(s.doc.project.contents_offset(folder).is_none());
+
     s.update();
+
     assert_eq!(base_colors(&s), before, "reset gives every fill its own back");
+
     let steps = s.history_labels().len();
     execute(&mut s, "folder.contents.reset", &json!({"layer": folder.0})).unwrap();
+
     assert_eq!(s.history_labels().len(), steps, "nothing to drop, no step");
 
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
+
     assert_eq!(s.doc.project.contents_offset(folder), ContentsOffset::new(1.5, 40.0));
 
     // Only folders take an offset, and it needs a value
@@ -98,13 +110,16 @@ fn randomize_seeds_gives_every_pattern_inside_a_new_seed_in_one_undo_step() {
     let steps = s.history_labels().len();
 
     let out = execute(&mut s, "folder.randomizeSeeds", &json!({"layer": outer.0})).unwrap();
+
     assert_eq!(out["seeds"], 3);
     assert_eq!(s.history_labels().len(), steps + 1, "one undo step");
+
     let after = fill_seeds(&s, fill);
     assert!(after.0 != before.0 && after.2 != before.2, "{before:?} -> {after:?}");
     assert_eq!(after.0, after.1, "channels on one seed stay on one seed");
 
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
+
     assert_eq!(fill_seeds(&s, fill), before, "one undo takes every seed back");
 
     // A folder with nothing seeded inside adds no step
@@ -146,18 +161,23 @@ fn the_contents_reset_puts_back_the_seeds_randomize_seeds_changed_in_one_undo_st
 
     // Old projects: the record is saved with the folder and read back
     let saved = serde_json::to_value(&s.doc.project).unwrap();
+
     assert!(saved.to_string().contains("randomized"), "the folder keeps its seeds from before in the project");
 
     let steps = s.history_labels().len();
     execute(&mut s, "folder.contents.reset", &json!({"layer": folder.0})).unwrap();
+
     assert_eq!(s.history_labels().len(), steps + 1, "one undo step");
     assert_eq!(fill_seeds(&s, fill), before, "every seed is back");
     assert!(s.doc.project.contents_offset(folder).is_none(), "the Scale is dropped too");
     assert!(!texturecraft_engine::folder_cmds::contents_changed(&s.doc.project, folder), "nothing left to reset");
+
     s.update();
+
     assert_eq!(base_colors(&s), pictured, "the fill looks as it did before Randomize seeds");
 
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
+
     assert_eq!(fill_seeds(&s, fill), randomized, "one undo brings the random seeds and the Scale back");
     assert_eq!(s.doc.project.contents_offset(folder).scale, 2.0);
 
@@ -173,8 +193,11 @@ fn the_contents_reset_puts_back_the_seeds_randomize_seeds_changed_in_one_undo_st
 fn a_folder_saved_without_randomized_seeds_opens_and_saves_unchanged() {
     let (s, folder, _) = folder_with_fill();
     let saved = serde_json::to_value(&s.doc.project.layers[&folder]).unwrap();
+
     assert!(saved.to_string().contains("\"children\"") && !saved.to_string().contains("randomized"), "nothing new is written: {saved}");
+
     let read: texturecraft_engine::core::Layer = serde_json::from_value(saved.clone()).unwrap();
+
     assert!(matches!(&read.kind, LayerKind::Group { randomized, .. } if randomized.is_empty()));
     assert_eq!(serde_json::to_value(&read).unwrap(), saved);
 }

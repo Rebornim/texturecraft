@@ -33,9 +33,13 @@ impl OrbEnvironment {
     fn from_hdr(bytes: &[u8]) -> Option<OrbEnvironment> {
         let decoded =
             image::load_from_memory_with_format(bytes, image::ImageFormat::Hdr).inspect_err(|e| log::warn!("the orb studio did not load: {e}")).ok()?;
-        let rgb = decoded.to_rgb32f();
-        let rgba: Vec<[f32; 4]> = rgb.pixels().map(|pixel| [pixel[0], pixel[1], pixel[2], 1.0]).collect();
-        EnvImage::from_rgba(rgb.width(), rgb.height(), &rgba, false).map(|env| OrbEnvironment::of(&env))
+
+        let rgb = decoded.into_rgb32f();
+        let (pixels, _) = rgb.as_raw().as_chunks::<3>();
+        let env = EnvImage::from_linear_rgb(rgb.width(), rgb.height(), pixels)?;
+        drop(rgb);
+
+        Some(OrbEnvironment::of(&env))
     }
 
     /// The built-in procedural studio, should the bundled one ever fail to decode

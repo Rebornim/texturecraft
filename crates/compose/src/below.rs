@@ -204,6 +204,7 @@ impl StackKey {
             if !same_shape || (left_image.width(), left_image.height()) != size {
                 return None;
             }
+
             if left_image.same_tiles(right_image) {
                 continue;
             }

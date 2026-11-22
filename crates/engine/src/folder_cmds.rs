@@ -104,21 +104,31 @@ fn reset_contents(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(Value::Null);
     }
 
-    let mut descended = Vec::new();
-    descendants(&s.doc.project, id, 0, &mut descended);
-    let inside: HashSet<LayerId> = descended.into_iter().collect();
+    let mut inside = Vec::new();
+    descendants(&s.doc.project, id, 0, &mut inside);
+    let inside: HashSet<LayerId> = inside.into_iter().collect();
+
     s.edit("Reset folder contents", |s| {
         let contents = contents_mut(&mut s.doc.project, id).ok_or_else(|| bad(CMD, format!("layer {} is not a folder", id.0)))?;
         *contents = ContentsOffset::NONE;
-        let randomized = randomized_mut(&mut s.doc.project, id).map(std::mem::take).unwrap_or_default();
-        for record in randomized.iter().filter(|record| inside.contains(&record.layer)) {
-            let Some(layer) = s.doc.project.layers.get_mut(&record.layer) else { continue };
 
-            // Only a seed still at the value Randomize seeds gave it goes back: one changed since keeps the artist's pick
-            if let Some(seed) = layer_seeds(layer).into_iter().nth(record.index as usize).filter(|seed| **seed == record.after) {
-                *seed = record.before;
+        let randomized = randomized_mut(&mut s.doc.project, id).map(std::mem::take).unwrap_or_default();
+        let mut records_by_layer = HashMap::<LayerId, Vec<&RandomizedSeed>>::new();
+        for record in randomized.iter().filter(|record| inside.contains(&record.layer)) {
+            records_by_layer.entry(record.layer).or_default().push(record);
+        }
+
+        for (layer_id, records) in records_by_layer {
+            let Some(layer) = s.doc.project.layers.get_mut(&layer_id) else { continue };
+            let mut seeds = layer_seeds(layer);
+            for record in records {
+                // Preserve seeds edited since randomization
+                if let Some(seed) = seeds.get_mut(record.index as usize).filter(|seed| ***seed == record.after) {
+                    **seed = record.before;
+                }
             }
         }
+
         Ok(())
     })?;
     Ok(Value::Null)
@@ -186,7 +196,8 @@ fn descendants(project: &Project, id: LayerId, depth: usize, out: &mut Vec<Layer
         return;
     }
 
-    for child in project.layers.get(&id).map(|folder| folder.children().to_vec()).unwrap_or_default() {
+    let Some(layer) = project.layers.get(&id) else { return };
+    for &child in layer.children() {
         out.push(child);
         descendants(project, child, depth + 1, out);
     }

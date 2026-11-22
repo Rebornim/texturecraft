@@ -1074,7 +1074,7 @@ impl eframe::App for TextureCraftApp {
         self.poll_link_cooks(ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.poll_link_imports(ctx);
-        self.thumbs.sync_images(&self.session.images, self.session.revision);
+        self.thumbs.sync_project_previews(&self.session);
 
         // The library shelf rescans when the window comes back (MaterialCraft may have sent a material)
         let focused = ctx.input(|input| input.viewport().focused).unwrap_or(true);

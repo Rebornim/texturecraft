@@ -45,14 +45,17 @@ fn dragging_an_effect_row_reorders_its_stack() {
 
     // Rows show C, B, A; dropping A above C moves it to the top
     drag(&mut harness, "Effect A", "Effect C", false);
+
     assert_eq!(order(&harness), [b, c, a]);
 
     // Dropping A below B returns it to the bottom
     drag(&mut harness, "Effect A", "Effect B", true);
+
     assert_eq!(order(&harness), [a, b, c]);
 
     // Dropping C above A places it between A and B
     drag(&mut harness, "Effect C", "Effect A", false);
+
     assert_eq!(order(&harness), [a, c, b]);
 }
 
@@ -66,7 +69,9 @@ fn an_effect_row_sets_its_blend_mode_and_opacity() {
     let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).build_eframe(|creation_context| TextureCraftApp::new(creation_context, session));
     harness.run_steps(4);
     let effect_of = |harness: &Harness<'_, TextureCraftApp>| harness.state().session.doc.project.layers[&layer].content_effects[0].clone();
+
     assert_eq!(effect, effect_of(&harness).id.0);
+
     harness.state_mut().ui.layer_material_view = false;
     harness.run_steps(2);
 
@@ -80,7 +85,9 @@ fn an_effect_row_sets_its_blend_mode_and_opacity() {
     harness.run_steps(2);
     harness.get_by_label("Multiply").click();
     harness.run_steps(3);
+
     assert_eq!(base_color_blend(&effect_of(&harness)).mode, texturecraft_engine::core::BlendMode::Multiply, "the row sets the displayed channel's");
+
     let roughness = effect_of(&harness).blend_of(Some(texturecraft_engine::core::Channel::Roughness)).mode;
     assert_eq!(roughness, texturecraft_engine::core::BlendMode::Normal, "the other channels keep theirs");
 
@@ -116,7 +123,9 @@ fn an_opacity_drag_starting_without_a_change_is_its_own_undo_step() {
     harness.run_steps(2);
     harness.hover_at(opacity_at + egui::vec2(8.0, 8.0));
     harness.run_steps(2);
+
     assert_eq!(base_color_blend(&effect_of(&harness)).opacity, 1.0, "the drag started without changing the opacity");
+
     harness.hover_at(opacity_at - egui::vec2(100.0, 0.0));
     harness.run_steps(2);
     harness.drop_at(opacity_at - egui::vec2(100.0, 0.0));
@@ -124,7 +133,9 @@ fn an_opacity_drag_starting_without_a_change_is_its_own_undo_step() {
     let opacity = base_color_blend(&effect_of(&harness)).opacity;
     assert!(opacity < 0.9, "the drag lowered the opacity: {opacity}");
     assert_eq!(harness.state().session.history_labels().len(), history + 1, "the drag is one new undo step");
+
     harness.state_mut().session.undo().unwrap();
+
     assert_eq!(base_color_blend(&effect_of(&harness)).opacity, 1.0);
     assert_eq!(base_color_blend(&effect_of(&harness)).mode, texturecraft_engine::core::BlendMode::Multiply, "undo leaves the earlier blend change");
 }
@@ -142,6 +153,7 @@ fn an_effect_rows_blending_options_reach_every_channel() {
     let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).build_eframe(|creation_context| TextureCraftApp::new(creation_context, session));
     harness.run_steps(4);
     let effect_of = |harness: &Harness<'_, TextureCraftApp>| harness.state().session.doc.project.layers[&layer].content_effects[0].clone();
+
     assert_eq!(effect_of(&harness).blend_of(Some(Channel::Roughness)).mode, BlendMode::Normal);
 
     let open_blending_options = |harness: &mut Harness<'_, TextureCraftApp>| {
@@ -151,8 +163,10 @@ fn an_effect_rows_blending_options_reach_every_channel() {
         harness.run_steps(3);
     };
     open_blending_options(&mut harness);
+
     assert!(harness.get_by_label("Use this blend mode on every channel").accesskit_node().is_disabled(), "the Material view shows no channel to lend");
     assert!(harness.get_by_label("Paste channel blending").accesskit_node().is_disabled(), "nothing is copied yet");
+
     harness.key_press(egui::Key::Escape);
     harness.run_steps(3);
 
@@ -162,11 +176,13 @@ fn an_effect_rows_blending_options_reach_every_channel() {
     open_blending_options(&mut harness);
     harness.get_by_label("Use this blend mode on every channel").click();
     harness.run_steps(3);
+
     assert_eq!(effect_of(&harness).blend_of(Some(Channel::Roughness)).mode, BlendMode::Multiply);
 
     open_blending_options(&mut harness);
     harness.get_by_label("Copy channel blending").click();
     harness.run_steps(3);
     open_blending_options(&mut harness);
+
     assert!(!harness.get_by_label("Paste channel blending").accesskit_node().is_disabled(), "a copy can be pasted");
 }

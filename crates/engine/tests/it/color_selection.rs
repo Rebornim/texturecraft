@@ -92,11 +92,15 @@ fn a_uv_pick_adds_the_color_there_or_replaces_one() {
     assert_close(picked, stored(TOP_LEFT_ID));
 
     let replaced = execute(&mut session, "effect.colorSelection.pick", &json!({"effect": effect.0, "uv": [0.75, 0.75], "index": 0})).unwrap();
+
     assert_eq!(replaced["index"], json!(0));
+
     let picked = colors(&session, effect);
     assert_eq!(picked.len(), 2);
+
     assert_close(picked[0], stored(BOTTOM_ID));
     execute(&mut session, "edit.undo", &Value::Null).unwrap();
+
     assert_eq!(colors(&session, effect)[0], NO_PART, "one undo step");
 }
 
@@ -107,11 +111,13 @@ fn the_colors_param_replaces_the_list_in_one_undo_step() {
     let edited = [stored(TOP_LEFT_ID), stored(TOP_RIGHT_ID)];
 
     execute(&mut session, "effect.set", &json!({"effect": effect.0, "colors": edited, "tolerance": 0.2})).unwrap();
+
     assert_eq!(colors(&session, effect), edited.to_vec());
     let Some((_, found)) = session.doc.project.effect(effect) else { panic!("effect gone") };
     assert!(matches!(&found.kind, EffectKind::ColorSelection(selection) if selection.tolerance == 0.2));
 
     execute(&mut session, "edit.undo", &Value::Null).unwrap();
+
     assert_eq!(colors(&session, effect), vec![NO_PART]);
 }
 
@@ -124,8 +130,11 @@ fn bad_colors_are_refused_and_change_nothing() {
     for colors_param in &refused {
         assert!(execute(&mut session, "effect.set", &json!({"effect": effect.0, "colors": colors_param})).is_err(), "{colors_param}");
     }
+
     assert_eq!(colors(&session, effect), vec![NO_PART]);
+
     execute(&mut session, "effect.set", &json!({"effect": effect.0, "colors": [[1e300, 0.5, 0.5]]})).unwrap();
+
     assert_eq!(colors(&session, effect), vec![[1.0, 0.5, 0.5]], "out-of-range values clamp to 0..1");
 }
 
@@ -315,10 +324,12 @@ fn a_new_color_selection_selects_nothing_until_a_color_is_picked() {
     execute(&mut session, "layer.add.fill", &json!({"color": [0.9, 0.1, 0.1]})).unwrap();
     let added = execute(&mut session, "mask.add.colorSelection", &Value::Null).unwrap();
     let effect = LayerId(added["effect"].as_u64().unwrap());
+
     assert_eq!(colors(&session, effect), Vec::<[f32; 3]>::new());
 
     execute(&mut session, "effect.set", &json!({"effect": effect.0, "colors": [[1.0, 0.0, 0.0]]})).unwrap();
     execute(&mut session, "effect.set", &json!({"effect": effect.0, "colors": []})).unwrap();
+
     assert_eq!(colors(&session, effect), Vec::<[f32; 3]>::new(), "the last color can be removed");
 }
 
@@ -342,6 +353,7 @@ fn an_image_resource_can_be_the_id_map_without_a_mesh_map() {
     assert_eq!(execute(&mut session, "project.inspect", &Value::Null).unwrap().to_string().matches(&format!("\"idMap\":\"{image}\"")).count(), 1);
 
     execute(&mut session, "effect.set", &json!({"effect": effect.0, "idMap": null})).unwrap();
+
     assert_eq!(session.mask_at(layer, &[top_right]).unwrap(), vec![0.0], "back on the missing mesh map");
 }
 
@@ -355,20 +367,28 @@ fn output_hardness_and_background_shape_the_mask_in_one_undo_step_each() {
     assert_eq!(session.mask_at(layer, &texels).unwrap(), vec![1.0, 0.0], "selected part, background");
 
     execute(&mut session, "effect.set", &json!({"effect": effect.0, "output": 0.5, "background": "white"})).unwrap();
+
     assert_eq!(session.mask_at(layer, &texels).unwrap(), vec![0.5, 1.0]);
+
     execute(&mut session, "effect.set", &json!({"effect": effect.0, "background": "gray"})).unwrap();
+
     assert_eq!(session.mask_at(layer, &texels).unwrap(), vec![0.5, 0.5]);
+
     execute(&mut session, "edit.undo", &Value::Null).unwrap();
+
     assert_eq!(session.mask_at(layer, &texels).unwrap(), vec![0.5, 1.0], "one undo step");
 
     // A transparent background leaves the mask below it: the black mask background here
     execute(&mut session, "effect.set", &json!({"effect": effect.0, "output": 1.0, "background": "transparent"})).unwrap();
+
     assert_eq!(session.mask_at(layer, &texels).unwrap(), vec![1.0, 0.0]);
 
     // The bottom part is far from the picked color: a soft edge reaches it only when wide enough
     execute(&mut session, "effect.set", &json!({"effect": effect.0, "background": "black", "tolerance": 0.0, "hardness": 0.0})).unwrap();
     let soft = session.mask_at(layer, &texels).unwrap();
+
     assert_eq!(soft[0], 1.0);
+
     let far = (200.0f32 - 10.0) / 255.0;
     assert!((soft[1] - (1.0 - far)).abs() < 1e-2, "{soft:?}");
     assert!(execute(&mut session, "effect.set", &json!({"effect": effect.0, "background": "purple"})).is_err());
@@ -387,9 +407,13 @@ fn the_id_mask_view_shows_the_chosen_image_where_the_mask_reads_it() {
 
     let image = session.import_resource_bytes("parts.png", id_map_png()).unwrap();
     execute(&mut session, "effect.set", &json!({"effect": effect.0, "idMap": image})).unwrap();
+
     assert_eq!(session.id_mask_image(effect).map(|(texture_set, _)| texture_set), Some(0));
+
     let rgba = session.id_mask_view_rgba(effect, 16).unwrap();
+
     assert_eq!(rgba.len(), 16 * 16 * 4);
+
     let pixel = |x: usize, y: usize| -> [u8; 3] {
         let start = (y * 16 + x) * 4;
         [rgba[start], rgba[start + 1], rgba[start + 2]]

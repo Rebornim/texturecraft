@@ -13,6 +13,7 @@ use crate::reference::Reference;
 /// The properties of anchor point `anchor` named `name`; renaming goes through `effect.set`, a reference's click through `layer.select`
 pub(crate) fn anchor_properties(app: &mut TextureCraftApp, ui: &mut Ui, anchor: LayerId, name: &str) {
     let references = references(&app.session.doc.project, anchor);
+
     PropertySheet::show(ui, ("anchor_sheet", anchor.0), |sheet| {
         sheet.section(tr("Anchor point"), false);
         if let Some(renamed) = sheet.name_field(tr("Anchor point name"), name) {
@@ -44,13 +45,18 @@ fn references(project: &Project, anchor: LayerId) -> Vec<Reference> {
             let (kind, glyph) = match effect {
                 None if matches!(layer.kind, LayerKind::Fill(_)) => (n_("Fill"), ic::PAINT_BUCKET),
                 None => return None,
-                Some(effect) => {
-                    let in_content = layer.content_effects.iter().any(|content_effect| content_effect.id == effect);
-                    match project.effect(effect).map(|(_, found)| &found.kind) {
-                        Some(EffectKind::Fill { .. } | EffectKind::Material(_)) if in_content => (n_("Fill"), ic::PAINT_BUCKET),
-                        Some(EffectKind::Fill { .. }) => (n_("Mask fill"), ic::PAINT_BUCKET),
-                        Some(other) => (other.name(), reader_glyph(other)),
-                        None => return None,
+                Some(effect_id) => {
+                    let in_mask = layer.mask.iter().flat_map(|mask| &mask.effects).find(|effect| effect.id == effect_id);
+                    let (found, in_content) = if let Some(mask_effect) = in_mask {
+                        (mask_effect, false)
+                    } else {
+                        (layer.content_effects.iter().find(|effect| effect.id == effect_id)?, true)
+                    };
+
+                    match &found.kind {
+                        EffectKind::Fill { .. } | EffectKind::Material(_) if in_content => (n_("Fill"), ic::PAINT_BUCKET),
+                        EffectKind::Fill { .. } => (n_("Mask fill"), ic::PAINT_BUCKET),
+                        other => (other.name(), reader_glyph(other)),
                     }
                 }
             };

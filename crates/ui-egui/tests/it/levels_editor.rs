@@ -157,6 +157,7 @@ fn output_handles_keep_their_side_once_inverted() {
 fn reset_and_invert_are_one_undo_step_each() {
     let (mut harness, effect) = levels_harness("effect.add.levels", json!({"target": "mask"}));
     assert!(button(&harness, "Reset").accesskit_node().is_disabled(), "nothing to reset at the defaults");
+
     set_levels(&mut harness, effect, json!({"inLow": 0.1, "inHigh": 0.9, "gamma": 2.0, "outLow": 0.2, "outHigh": 0.7}));
 
     let steps = undo_steps(&harness);
@@ -181,6 +182,7 @@ fn auto_fits_the_input_range_to_the_histogram() {
     let holds = |count: &u32| f64::from(*count) > f64::from(total) * AUTO_MIN_SHARE;
     let low = counts.iter().position(holds).unwrap() as f32 / HISTOGRAM_BUCKETS as f32;
     let high = (counts.iter().rposition(holds).unwrap() + 1) as f32 / HISTOGRAM_BUCKETS as f32;
+
     assert!(low > 0.0 || high < 1.0, "the clouds don't fill the whole range: {low}..{high}");
 
     button(&harness, "Auto").click();
@@ -246,11 +248,13 @@ fn exact_entry_opens_on_a_double_click_and_closes_with_typing() {
     assert_eq!(open_fields(&harness), 0, "no number fields until a handle asks for them");
 
     type_value(&mut harness, "Output low", "");
+
     assert!(harness.query_all(by().role(Role::TextInput)).any(|node| node.is_focused()), "the number field has focus");
     assert_eq!(open_fields(&harness), HANDLE_LABELS.len());
 
     harness.key_press(egui::Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
+
     assert_eq!(open_fields(&harness), 0, "Escape closes the fields");
     assert_eq!(buttons(&harness), before, "the buttons go back where they were");
 }
@@ -479,6 +483,7 @@ fn a_content_levels_picks_the_channel_it_affects() {
     assert_eq!(levels(&harness, effect).affects, Some(Channel::BaseColor));
     assert!(painted_text(&harness, "LEVELS - BASE COLOR"), "the caption names the channel");
     assert!(harness.query_by_label("Blending").is_none(), "levels have no blending");
+
     for view in ["Colors", "RGB", "R", "G", "B", "Lum"] {
         assert!(harness.query_by(|node| node.role() == Role::RadioButton && node.label().as_deref() == Some(view)).is_some(), "{view} on the display switch");
     }
@@ -487,6 +492,7 @@ fn a_content_levels_picks_the_channel_it_affects() {
     let steps = undo_steps(&harness);
     harness.get_by(|node| node.role() == Role::RadioButton && node.label().as_deref() == Some("R")).click();
     harness.run_steps(SETTLE_FRAMES);
+
     assert_eq!(undo_steps(&harness), steps);
     assert!(
         harness.get_by(|node| node.role() == Role::RadioButton && node.label().as_deref() == Some("R")).accesskit_node().toggled()
@@ -495,14 +501,18 @@ fn a_content_levels_picks_the_channel_it_affects() {
     );
 
     assert_eq!(affects_list(&harness).and_then(|list| list.accesskit_node().label()).as_deref(), Some("Base color"));
+
     affects_list(&harness).unwrap().click();
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(
         harness.query_by(|node| node.role() == Role::ListBoxOption && node.label().as_deref() == Some("Normal")).is_none(),
         "levels pass normal maps through"
     );
+
     harness.get_by(|node| node.role() == Role::ListBoxOption && node.label().as_deref() == Some("Roughness")).click();
     harness.run_steps(REDRAW_FRAMES);
+
     assert_eq!(levels(&harness, effect).affects, Some(Channel::Roughness));
     assert_eq!(undo_steps(&harness), steps + 1);
     assert!(painted_text(&harness, "LEVELS - ROUGHNESS"));
@@ -515,9 +525,11 @@ fn clamp_is_one_undo_step() {
     assert!(painted_text(&harness, "LEVELS - MASK"));
     assert!(affects_list(&harness).is_none() && !painted_text(&harness, "Affects"), "a mask has no channel to pick");
     assert!(!levels(&harness, effect).clamp, "new levels carry on past their handles");
+
     let steps = undo_steps(&harness);
     harness.get_by_role_and_label(Role::CheckBox, "Clamp").click();
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(levels(&harness, effect).clamp);
     assert_eq!(undo_steps(&harness), steps + 1);
 }
@@ -532,5 +544,6 @@ fn the_affects_list_leaves_the_view_its_wheel_and_closes_on_escape_or_a_click_ou
         harness.run_steps(SETTLE_FRAMES);
         button
     });
+
     assert_eq!(levels(&harness, effect).affects, Some(Channel::BaseColor), "nothing changed");
 }

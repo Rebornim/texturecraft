@@ -801,17 +801,23 @@ mod tests {
         let gid = p.alloc_id();
         let g = Layer::new(gid, "g", LayerKind::folder(), &Channel::DEFAULT_SET);
         p.insert_layer(0, g, Some(a), false).unwrap();
+
         assert_eq!(p.texture_sets[0].stack, vec![a, gid, b]);
+
         p.move_above(b, Some(gid), true).unwrap();
+
         assert_eq!(p.texture_sets[0].stack, vec![a, gid]);
         assert_eq!(p.layer(gid).unwrap().children(), &[b]);
         assert_eq!(p.locate(b), Some((0, Some(gid), 0)));
         assert!(p.move_above(gid, Some(b), true).is_err(), "a group cannot go inside itself");
+
         p.validate().unwrap();
         let removed = p.remove_layer(gid).unwrap();
+
         assert_eq!(removed, vec![gid, b]);
         assert_eq!(p.texture_sets[0].stack, vec![a]);
         assert!(p.layer(b).is_err());
+
         p.validate().unwrap();
     }
 
@@ -875,12 +881,14 @@ mod tests {
         p.insert_layer(0, top, Some(id), false).unwrap();
         let json = serde_json::to_string(&p).unwrap();
         let back: Project = serde_json::from_str(&json).unwrap();
+
         assert_eq!(back, p);
         assert_eq!(back.effect(anchor).map(|(owner, _)| owner), Some(id));
 
         // The mask fill of the layer above reads it
         let top = back.layers.values().find(|l| l.name == "y").unwrap();
         let reader = top.mask.as_ref().unwrap().effects[0].id;
+
         assert_eq!(back.anchor_readers(anchor), vec![(top.id, Some(reader))]);
         assert!(back.anchor_readers(LayerId(999)).is_empty());
 
@@ -902,15 +910,18 @@ mod tests {
         let a = p.insert_layer(0, a, None, false).unwrap();
         let inst = Layer::new(p.alloc_id(), "a", LayerKind::Instance { source: a }, &[]);
         let inst = p.insert_layer(1, inst, None, false).unwrap();
+
         assert_eq!(p.content_layer(inst).map(|l| l.id), Some(a));
         assert_eq!(p.sets_drawing(a), vec![0, 1]);
         assert_eq!(p.sets_drawing(inst), vec![1]);
+
         p.validate().unwrap();
-        // A folder holding an instance of itself draws itself.
+        // A folder holding an instance of itself draws itself
         let gid = p.alloc_id();
         p.insert_layer(1, Layer::new(gid, "g", LayerKind::folder(), &[]), None, false).unwrap();
         let loop_id = p.alloc_id();
         p.insert_layer(1, Layer::new(loop_id, "g", LayerKind::Instance { source: gid }, &[]), Some(gid), true).unwrap();
+
         assert_eq!(p.instance_cycle(), Some(loop_id));
         assert!(p.validate().is_err());
         assert!(p.content_layer(LayerId(999)).is_none());
@@ -930,6 +941,7 @@ mod tests {
         let a = p.insert_layer(0, a, Some(inner), true).unwrap();
         let top = paint(&mut p, "top");
         let top = p.insert_layer(0, top, None, false).unwrap();
+
         assert_eq!(p.contents_around(a), ContentsOffset { scale: 3.0, rotation: 20.0 });
         assert_eq!(p.contents_around(inner), ContentsOffset::new(2.0, 30.0));
         assert_eq!(
@@ -939,9 +951,12 @@ mod tests {
 
         // A folder saved before folders had an offset has none, and one without an offset saves as before
         let old: LayerKind = serde_json::from_str(r#"{"Group":{"children":[],"collapsed":true}}"#).unwrap();
+
         assert_eq!(old, LayerKind::Group { children: vec![], collapsed: true, contents: ContentsOffset::NONE, randomized: Vec::new() });
         assert_eq!(serde_json::to_string(&old).unwrap(), r#"{"Group":{"children":[],"collapsed":true}}"#);
+
         let saved = serde_json::to_string(&p).unwrap();
+
         assert_eq!(serde_json::from_str::<Project>(&saved).unwrap().contents_around(a), p.contents_around(a));
     }
 

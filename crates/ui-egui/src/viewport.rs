@@ -2644,8 +2644,11 @@ mod tests {
         harness.run_steps(2);
 
         crate::id_color_pick::IdColorPick::start(harness.state_mut(), effect, None);
+
         assert_eq!(aux_view(harness.state()), Some(crate::gpu::AuxView::IdMask(effect)), "the pick's own ID mask");
+
         crate::id_color_pick::IdColorPick::end(harness.state_mut());
+
         assert_eq!(aux_view(harness.state()), None, "the earlier view");
     }
 

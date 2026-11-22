@@ -59,16 +59,20 @@ fn a_mask_fill_has_fill_symmetry_and_grayscale_tabs_and_its_slot_picks_the_sourc
     for tab in ["Fill", "Symmetry", "Grayscale"] {
         assert!(harness.query_by_role_and_label(Role::Tab, tab).is_some(), "the {tab} tab");
     }
+
     assert!(harness.query_by_role_and_label(Role::Tab, "Material").is_none(), "a mask fill has no material");
     assert!(harness.query_by_label("Move on model").is_some(), "the Fill section's projection rows");
 
     click(&mut harness, Role::ComboBox, "Grayscale");
+
     assert!(harness.query_by_role_and_label(Role::Tab, "Anchor points").is_some(), "the slot opens the source picker");
+
     click(&mut harness, Role::ListBoxOption, "Clouds");
     let (Source::Procedural { pattern, low, high, .. }, _) = mask_fill(&harness, effect) else { panic!("a procedural") };
     assert_eq!((pattern.kind, low, high), (ProceduralKind::Clouds, [0.0; 3], [1.0; 3]), "a gray pattern spans black to white");
     assert!(!egui::Popup::is_any_open(&harness.ctx), "a pick closes the picker");
     assert!(harness.query_by_label("Scale").is_some(), "the pattern's own rows follow the slot");
+
     for shown in ["Contrast", "Balance", "Random"] {
         assert!(harness.query_by_label(shown).is_some(), "a grayscale's {shown} (Seed's dice) shows with Scale, Attributes folded");
     }
@@ -83,13 +87,17 @@ fn a_mask_fill_has_fill_symmetry_and_grayscale_tabs_and_its_slot_picks_the_sourc
         assert!(harness.query_by_role_and_label(Role::Label, caption).is_some(), "one list holds the {caption} sizes under their caption");
     }
     click(&mut harness, Role::ListBoxOption, "1024 × 1024");
+
     assert_eq!(resolution(&harness), (ResolutionMode::Custom, 1024, 0));
+
     click_below(&mut harness, Role::ComboBox, "1024 × 1024");
     click(&mut harness, Role::ListBoxOption, "×4  ·  1024");
+
     assert_eq!(resolution(&harness), (ResolutionMode::Auto, 1024, 2), "1024 is the texture set's ×4");
 
     // The slot's × puts the mask fill back to white
     click(&mut harness, Role::Button, "Clear");
+
     assert_eq!(mask_fill(&harness, effect).0, Source::Uniform([1.0; 3]));
 }
 
@@ -117,12 +125,14 @@ fn a_mask_fills_projection_moves_on_the_model_and_resets_with_its_section() {
     let button = harness.get_by_role_and_label(Role::Button, "Move on model").rect().center();
     let mut held = None;
     mouse_drag_watching(&mut harness, button, button + MOVE_DRAG, |harness| held = held.or(harness.state().moving_on_model));
+
     assert_eq!(held, Some(MoveOnModel { layer, effect: Some(effect) }));
     assert_eq!(harness.state().moving_on_model, None, "letting go ends it");
     let Projection::Uv { offset, .. } = mask_fill(&harness, effect).1 else { panic!("still UV") };
     assert!(offset[0] != 0.0 && offset[1] == 0.0, "a drag across slides the image across: {offset:?}");
 
     click(&mut harness, Role::Button, "Fill: Reset to defaults");
+
     assert_eq!(mask_fill(&harness, effect).1, Projection::default(), "the Fill section's reset reaches the mask fill");
 }
 

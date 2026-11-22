@@ -56,19 +56,23 @@ fn the_rows_show_and_edit_the_comparison_one_undo_step_each() {
 
     let steps = undo_steps(&harness);
     pick_source(&mut harness, "Layers below", "Constant");
+
     assert_eq!(compare(&harness, effect).2, CompareSource::Constant);
     assert_eq!(undo_steps(&harness), steps + 1, "one undo step");
     assert!(has_slider(&harness, "Constant"), "a constant side shows its value");
 
     pick_source(&mut harness, "This layer", "This mask");
+
     assert_eq!(compare(&harness, effect).0, CompareSource::ThisMask);
 
     harness.get_by(|node| node.role() == Role::RadioButton && node.label().as_deref() == Some("≈")).click();
     harness.run_steps(REDRAW_FRAMES);
+
     assert_eq!(compare(&harness, effect).1, CompareOp::WithinTolerance);
     assert!(has_slider(&harness, "Tolerance"), "within tolerance shows its tolerance");
 
     pick_source(&mut harness, "Height", "Roughness");
+
     assert_eq!(compare(&harness, effect).3, Channel::Roughness);
     assert_eq!(undo_steps(&harness), steps + 4);
 }
@@ -81,5 +85,6 @@ fn a_source_list_leaves_the_view_its_wheel_and_closes_on_escape_or_a_click_outsi
         harness.run_steps(SETTLE_FRAMES);
         harness.get_by_role_and_label(Role::ComboBox, "Layers below").rect()
     });
+
     assert_eq!(compare(&harness, effect).2, CompareSource::LayersBelow, "nothing changed");
 }

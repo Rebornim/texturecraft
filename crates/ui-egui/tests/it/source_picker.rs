@@ -155,6 +155,7 @@ fn the_anchor_points_tab_lists_mask_anchor_points_by_name() {
     click_widget(&mut harness, Role::Tab, "Anchor points");
     let anchor = harness.get_all_by_role(Role::ListBoxOption).find_map(|node| node.accesskit_node().label().filter(|label| label.starts_with("Dirt mask")));
     click_tile(&mut harness, &anchor.expect("the mask anchor point below is offered under its own name"));
+
     assert!(matches!(source(&harness, reader, Channel::Roughness), Source::Anchor { .. }));
 }
 

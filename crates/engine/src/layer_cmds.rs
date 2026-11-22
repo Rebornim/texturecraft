@@ -552,6 +552,7 @@ pub(crate) fn placement_mut(s: &mut Session, target: FillTarget) -> Result<(&mut
             _ => Err(EngineError::Other("not a mask fill effect".into())),
         };
     }
+
     let fill = fill_mut(s, target)?;
     Ok((&mut fill.projection, &mut fill.sampling))
 }

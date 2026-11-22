@@ -574,6 +574,7 @@ fn levels_target(levels: &mut Levels, content: bool) -> Result<()> {
     } else if levels.affects.is_some() {
         return Err(bad("effect.add", "a mask's levels remap its one value: leave out `affects`"));
     }
+
     Ok(())
 }
 

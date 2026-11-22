@@ -1,4 +1,4 @@
-//! One ID color of a color selection: its swatch (the eyedropper that picks it again), its R G B, and a × while hovered
+//! One ID color of a color selection: its swatch, its RGB values, and a Remove button
 
 use egui::{Align2, Color32, CornerRadius, FontId, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use egui_phosphor::regular as ic;
@@ -63,6 +63,7 @@ impl PropertySheet<'_> {
         let color = Color32::from_rgb(red, green, blue);
         let painter = self.ui.painter().clone();
         painter.rect_filled(swatch, CornerRadius::same(SWATCH_RADIUS), color);
+
         if enabled && (hovered || repicking) {
             // Rec. 709 luminance
             let luminance = (0.2126 * f32::from(red) + 0.7152 * f32::from(green) + 0.0722 * f32::from(blue)) / 255.0;
@@ -77,14 +78,14 @@ impl PropertySheet<'_> {
             painter.text(pos2(x + LETTER_TO_VALUE, center_y), Align2::LEFT_CENTER, value.to_string(), FontId::proportional(TEXT_SIZE), tokens.text);
         }
 
-        // The × answers only while the row is hovered, so it never takes a click meant for the row under a moving pointer
+        // Keep Remove in the focus order even while the pointer is outside the row
         let remove = Rect::from_center_size(pos2(self.right - REMOVE_INSET, center_y), vec2(GLYPH_TARGET, GLYPH_TARGET));
         let remove_id = self.next_id();
         let remove_tip = crate::i18n::tr("Remove");
-        let remove_response = self.ui.interact(remove, remove_id, if hovered { Sense::click() } else { Sense::hover() });
-        remove_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, hovered, format!("{remove_tip} {}", readout())));
+        let remove_response = self.ui.interact(remove, remove_id, Sense::click());
+        remove_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, format!("{remove_tip} {}", readout())));
         let remove_response = self.tip(remove_response, remove_tip);
-        if hovered {
+        if hovered || remove_response.has_focus() {
             painter.text(
                 remove.center(),
                 Align2::CENTER_CENTER,
@@ -93,7 +94,11 @@ impl PropertySheet<'_> {
                 if remove_response.hovered() { tokens.text } else { tokens.text_dim },
             );
         }
+
+        self.paint_control_focus(&swatch_response);
+        self.paint_control_focus(&remove_response);
         self.drawn(swatch.bottom());
-        IdColorRowResponse { repick: swatch_response.clicked(), remove: hovered && remove_response.clicked() }
+
+        IdColorRowResponse { repick: swatch_response.clicked(), remove: remove_response.clicked() }
     }
 }

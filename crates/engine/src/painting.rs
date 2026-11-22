@@ -560,10 +560,11 @@ impl Session {
         let Some(mut st) = self.stroke.take() else { return Ok(()) };
         let size = (st.canvas.alpha.width(), st.canvas.alpha.height());
         if st.canvas.dirty.is_empty() {
-            // Nothing painted: drop any mask effect the stroke created.
+            // Nothing painted: drop any mask effect the stroke created
             self.doc = st.before;
             return Ok(());
         }
+
         let gbuf = self.caches.get(st.ts).map(|c| c.gbuf.clone());
         let mesh = self.mesh.clone();
         let mut staging = std::mem::take(&mut st.staging);
@@ -588,8 +589,7 @@ impl Session {
         self.redo.clear();
         self.modified = true;
         self.revision = self.revision.wrapping_add(1);
-        // The live preview already shows the committed result: the stroke's tiles recomposite
-        // from the committed pixels at low priority, without holding up this frame.
+        // Recompute committed tiles at low priority because the live preview already shows them
         self.mark_settle(st.ts, st.target, st.canvas.dirty.iter().copied());
         Ok(())
     }

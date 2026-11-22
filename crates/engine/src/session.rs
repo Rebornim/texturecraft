@@ -757,7 +757,7 @@ impl Session {
             (Some(previous), Some(current)) => !Arc::ptr_eq(previous, current),
             (previous, current) => previous.is_some() != current.is_some(),
         };
-        if self.path_cache.as_ref().is_some_and(|cache| cache.images().any(|name| resource_changed(&name))) {
+        if self.path_cache.as_ref().is_some_and(|cache| cache.images().any(resource_changed)) {
             self.path_cache = None;
         }
 

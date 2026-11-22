@@ -58,8 +58,10 @@ fn add_bitmap(s: &mut Session, p: &Value) -> Result<Value> {
         }
         (None, None) => return Err(bad(CMD, "`image` or `alpha` is required")),
     };
+
     let projection = crate::layer_cmds::projection_from(p, CMD, None, || crate::warp_cmds::fitted_frame(&s.mesh))?;
     let kind = EffectKind::Fill { source: Source::Image { name, normal_format: Default::default() }, projection, sampling: Sampling::default() };
     let add_library = |s: &mut Session| library.map_or(Ok(()), |alpha| s.add_library_alpha(alpha).map(|_| ()));
+
     push_own_mask_effect(s, p, kind, "Add bitmap mask", add_library)
 }

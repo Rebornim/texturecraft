@@ -363,7 +363,7 @@ fn neighbourhood_filters(effects: &[Effect], res: u32) -> impl Iterator<Item = (
         EffectKind::Filter(Filter::Bevel { width }) => Some((index, texels(*width * 0.5), Op::Bevel)),
         EffectKind::Filter(Filter::Glow { radius, amount }) => Some((index, texels(*radius), Op::Glow(*amount))),
         EffectKind::Filter(Filter::Mosaic { size }) => Some((index, texels(*size), Op::Mosaic)),
-        // Independent of `res`, so every caller agrees on which effects are stages; the reach covers the cells, then the blur around them
+        // Use reference-resolution reach so all callers classify the same filters as stages
         EffectKind::Generator(generator) if generator.global.blur > 0.0 || generator.resolution.can_reduce() => {
             Some((index, texels(generator.global.blur_radius()) + generator.resolution.largest_cell(res) as f32, Op::Blur(None)))
         }
@@ -611,7 +611,7 @@ fn stroke_at(preview: Option<&[u16]>, o: usize) -> f32 {
 }
 
 /// The full stack of tile (tx, ty) in `channels` and the channels the layer's mask compares, when the layer reads the stack below it (else empty)
-fn anchor_plan<'a>(inp: &Inputs<'a>, id: LayerId, channels: &[Channel], tx: u32, ty: u32, fields: Option<&'a Fields>) -> Vec<Node<'a>> {
+fn anchor_plan<'a>(inp: &EvaluationInputs<'a>, id: LayerId, channels: &[Channel], tx: u32, ty: u32, fields: Option<&'a Fields>) -> Vec<Node<'a>> {
     let Ok(set) = inp.project.texture_set(inp.ts) else { return Vec::new() };
     if !reads_stack(inp.project, id) {
         return Vec::new();
@@ -1106,7 +1106,7 @@ fn fields_of(inp: &EvaluationInputs, channels: &[Channel], list: &[LayerId], til
 }
 
 /// Layer `id`'s filtered `mask` field put into `fields` (nothing without a mask or a field)
-fn insert_mask_field(inp: &Inputs, channels: &[Channel], fields: &mut Fields, id: LayerId, mask: Option<&Mask>, tiles: &[(u32, u32)]) {
+fn insert_mask_field(inp: &EvaluationInputs, channels: &[Channel], fields: &mut Fields, id: LayerId, mask: Option<&Mask>, tiles: &[(u32, u32)]) {
     if let Some(mask) = mask
         && let Some(filtered) = field(inp, channels, fields, id, Job::Mask(mask), tiles)
     {
@@ -1156,7 +1156,7 @@ struct Node<'a> {
 /// Plans of the visible effects of a stack: mask effects (`channel` None) or the content
 /// effects of one channel (paint effects then read that channel's pixels).
 fn effect_plans<'a>(
-    inp: &Inputs<'a>,
+    inp: &EvaluationInputs<'a>,
     effects: &'a [Effect],
     tile_x: u32,
     tile_y: u32,
@@ -1243,7 +1243,15 @@ fn tile_of<'a>(inp: &Inputs, img: Option<&'a TileImage>, tx: u32, ty: u32, chann
 }
 
 /// The plan of layer `id`'s `mask` for tile (tx, ty), its fills under the Scale and Rotation `around` of the folders holding the layer
-fn mask_plan<'a>(inp: &Inputs<'a>, id: LayerId, mask: &'a Mask, tx: u32, ty: u32, fields: Option<&'a Fields>, around: ContentsOffset) -> Option<MaskPlan<'a>> {
+fn mask_plan<'a>(
+    inp: &EvaluationInputs<'a>,
+    id: LayerId,
+    mask: &'a Mask,
+    tx: u32,
+    ty: u32,
+    fields: Option<&'a Fields>,
+    around: ContentsOffset,
+) -> Option<MaskPlan<'a>> {
     if !mask.enabled {
         return None;
     }
@@ -1268,7 +1276,7 @@ fn mask_plan<'a>(inp: &Inputs<'a>, id: LayerId, mask: &'a Mask, tx: u32, ty: u32
 }
 
 /// The plans of sibling layers `list` (under the Scale and Rotation of the folders holding them)
-fn plan<'a>(inp: &Inputs<'a>, list: &[LayerId], channels: &[Channel], tx: u32, ty: u32, depth: usize, fields: Option<&'a Fields>) -> Vec<Node<'a>> {
+fn plan<'a>(inp: &EvaluationInputs<'a>, list: &[LayerId], channels: &[Channel], tx: u32, ty: u32, depth: usize, fields: Option<&'a Fields>) -> Vec<Node<'a>> {
     let around = list.first().map_or(ContentsOffset::NONE, |id| inp.project.contents_around(*id));
     plan_in(inp, list, channels, tx, ty, depth, fields, around)
 }
@@ -1276,7 +1284,7 @@ fn plan<'a>(inp: &Inputs<'a>, list: &[LayerId], channels: &[Channel], tx: u32, t
 /// [`plan`] of sibling layers held by folders whose Scale and Rotation make `around`
 #[allow(clippy::too_many_arguments)]
 fn plan_in<'a>(
-    inp: &Inputs<'a>,
+    inp: &EvaluationInputs<'a>,
     list: &[LayerId],
     channels: &[Channel],
     tx: u32,
@@ -1288,13 +1296,14 @@ fn plan_in<'a>(
     if depth > texturecraft_core::project::MAX_DEPTH {
         return Vec::new();
     }
+
     list.iter().filter_map(|id| plan_node(inp, *id, channels, tx, ty, depth, fields, true, around)).collect()
 }
 
 /// The plan of layer `id` at `depth` (None where it draws nothing), its fills under the Scale and Rotation `around` of the folders holding it; a folder's children are planned when `kids`
 #[allow(clippy::too_many_arguments)]
 fn plan_node<'a>(
-    inp: &Inputs<'a>,
+    inp: &EvaluationInputs<'a>,
     id: LayerId,
     channels: &[Channel],
     tx: u32,
@@ -1342,7 +1351,7 @@ fn plan_node<'a>(
 /// The content of `layer` (layer `id`'s own, or its instance source's; None for an unfollowed instance) and its plan per drawn channel of `channels`, its fills under the Scale and Rotation `around` of the folders holding `id`; a folder's children are planned when `kids`
 #[allow(clippy::too_many_arguments)]
 fn plan_content<'a>(
-    inp: &Inputs<'a>,
+    inp: &EvaluationInputs<'a>,
     id: LayerId,
     layer: &'a Layer,
     channels: &[Channel],
@@ -2139,6 +2148,7 @@ impl<'a, 'b> Texel<'a, 'b> {
                 self.below = Some(*acc);
                 return true;
             }
+
             if node.mask.as_ref().is_some_and(|mask| mask.layer.is_some()) {
                 self.below = Some(*acc);
             }
@@ -3151,6 +3161,8 @@ pub fn effect_histogram(inp: &Inputs, effect: LayerId, channel: Channel, bins: u
     let bins = bins.max(1);
     let (cut, in_mask) = cut_below(inp.project, owner, effect)?;
     let cut_inp = Inputs { project: &cut, preview: None, block_scales: inp.block_scales.clone(), ..*inp };
+    let projectors = ProjectorDepthCache::default();
+    let cut_inp = EvaluationInputs::new(&cut_inp, &projectors);
     let channels = cut.texture_set(inp.ts).map(|set| set.channel_list()).unwrap_or_default();
     let tiles = histogram_tiles(inp.gbuf.width, inp.gbuf.height);
     let shared = shared_histogram_fields(&cut_inp, &channels, &tiles);
@@ -3204,23 +3216,33 @@ pub fn effect_histogram(inp: &Inputs, effect: LayerId, channel: Channel, bins: u
 }
 
 /// The neighbourhood fields every sampled tile of a histogram shares; None with only local neighbourhood filters below, where each tile builds its own
-fn shared_histogram_fields(inp: &Inputs, channels: &[Channel], tiles: &[(u32, u32)]) -> Option<Fields> {
-    // A field covers the bounding box of the tiles it is built for, the whole set for a scattered sample
-    let probe = neighbourhood_fields(inp, channels, tiles.get(..1).unwrap_or_default());
-    if probe.is_empty() {
+fn shared_histogram_fields(inp: &EvaluationInputs, channels: &[Channel], tiles: &[(u32, u32)]) -> Option<Fields> {
+    let probe = evaluation_fields(inp, channels, tiles.get(..1).unwrap_or_default());
+    let covers_set = |field: &Field| field.x0 == 0 && field.y0 == 0 && field.w == inp.gbuf.width && field.h == inp.gbuf.height;
+
+    // When every field covers the set, their inputs already span the sample
+    if probe.values().all(covers_set) {
         return Some(probe);
     }
 
-    // A stage reading the whole set builds it for every tile: once for the whole sample instead
-    let whole_set = probe.values().any(|field| field.w >= inp.gbuf.width && field.h >= inp.gbuf.height);
-    whole_set.then(|| neighbourhood_fields(inp, channels, tiles))
+    // Mixed fields need the sample's bounds to cover every dependency
+    let whole_set = probe.values().any(covers_set);
+    drop(probe);
+
+    whole_set.then(|| evaluation_fields(inp, channels, tiles))
 }
 
 /// The fields histogram tile `tile` reads: the `shared` ones, else its own built into `own`
-fn histogram_tile_fields<'f>(shared: Option<&'f Fields>, own: &'f mut Option<Fields>, inp: &Inputs, channels: &[Channel], tile: (u32, u32)) -> &'f Fields {
+fn histogram_tile_fields<'f>(
+    shared: Option<&'f Fields>,
+    own: &'f mut Option<Fields>,
+    inp: &EvaluationInputs,
+    channels: &[Channel],
+    tile: (u32, u32),
+) -> &'f Fields {
     match shared {
         Some(fields) => fields,
-        None => own.insert(neighbourhood_fields(inp, channels, &[tile])),
+        None => own.insert(evaluation_fields(inp, channels, &[tile])),
     }
 }
 
@@ -3256,6 +3278,8 @@ pub fn compare_histograms(inp: &Inputs, effect: LayerId, bins: usize) -> Option<
     }
 
     let cut_inp = Inputs { project: &cut, preview: None, block_scales: inp.block_scales.clone(), ..*inp };
+    let projectors = ProjectorDepthCache::default();
+    let cut_inp = EvaluationInputs::new(&cut_inp, &projectors);
     let mut channels = set.channel_list();
     if !channels.contains(&channel) {
         channels.push(channel);
@@ -4471,6 +4495,7 @@ soft {soft:?}"
         f.project.layer_mut(top).unwrap().mask = Some(mask);
 
         let color = run(&f, None).value(Channel::BaseColor, 30, 30);
+
         assert!(close(color, [0.5; 3]), "the layer under shows: {color:?}");
     }
 
@@ -4772,6 +4797,7 @@ soft {soft:?}"
 
         // The folder's mask ends at 0 (its black child hides), the reader above shows at 0.4 over the 0.5 base
         let color = run(&fixture, None).value(Channel::BaseColor, 5, 5);
+
         assert!(close(color, [0.7; 3]), "{color:?}");
     }
 

@@ -130,6 +130,7 @@ fn a_stroke_on_the_model_closes_the_add_effect_menu() {
     let mut harness = app(&MemoryStorage::default());
     harness.get_by_role_and_label(Role::Button, "Add effect").click();
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(egui::Popup::is_any_open(&harness.ctx), "the menu opens");
 
     stroke_on_model(&mut harness, Modifiers::NONE);

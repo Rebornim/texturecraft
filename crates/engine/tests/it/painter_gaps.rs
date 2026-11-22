@@ -133,6 +133,7 @@ fn filter_library_adds_every_filter_and_edits_its_parameters() {
         p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
         execute(&mut s, "effect.add.filter", &p).unwrap();
     }
+
     assert!(at(&mut s, Channel::BaseColor, 200.0, 200.0).iter().all(|v| v.is_finite()));
 }
 

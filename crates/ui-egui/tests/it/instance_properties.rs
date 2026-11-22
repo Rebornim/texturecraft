@@ -40,9 +40,11 @@ fn set_name(harness: &Harness<'_, TextureCraftApp>, layer: LayerId) -> String {
 fn the_source_card_names_the_source_and_its_texture_set_and_a_click_selects_it() {
     let (mut harness, instance, source) = instance_harness(false);
     assert_eq!(harness.state().session.selected_layer(), Some(instance));
+
     let card = format!("Steel {}", set_name(&harness, source));
     harness.get_by_role_and_label(Role::Button, &card).click();
     harness.run_steps(SETTLE_FRAMES);
+
     assert_eq!(harness.state().session.selected_layer(), Some(source), "the click goes to the source");
 }
 
@@ -60,6 +62,7 @@ fn a_source_that_is_gone_shows_a_missing_layer_that_takes_no_click() {
     harness.run_steps(1);
     harness.drop_at(at);
     harness.run_steps(SETTLE_FRAMES);
+
     assert_eq!(harness.state().session.selected_layer(), Some(instance));
     assert_eq!(harness.state().session.history_labels().len(), steps, "the click ran nothing");
 }

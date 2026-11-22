@@ -1834,6 +1834,7 @@ mod tests {
         assert!((open.apply(0.0) + 0.5).abs() < 1e-6, "0.2 below the black handle is half a range below black");
         assert!((open.apply(0.8) - 1.5).abs() < 1e-6);
         assert!((open.apply(0.4) - clamped.apply(0.4)).abs() < 1e-6, "between the handles both remap alike");
+
         let bent = Levels { gamma: 2.0, ..open };
         assert!((bent.apply(0.0) + 0.5).abs() < 1e-6, "gamma bends only the part between the handles");
     }
@@ -1872,15 +1873,21 @@ mod tests {
     fn levels_saved_before_the_channel_and_clamp_load_as_they_rendered() {
         let saved = serde_json::json!({"in_low": 0.2, "in_high": 0.6, "gamma": 1.0, "out_low": 0.0, "out_high": 1.0});
         let loaded: Levels = serde_json::from_value(saved.clone()).unwrap();
+
         assert!(loaded.clamp, "they stopped at the output ends");
         assert_eq!(loaded.affects, None, "they remapped every channel");
         assert!(Channel::ALL.iter().all(|&channel| loaded.remaps(channel)));
+
         let saved_again = serde_json::to_value(loaded).unwrap();
+
         assert!(saved_again.get("affects").is_none(), "no channel is saved, as before: {saved_again}");
         assert!(saved_again.get("clamp").is_none(), "a clamped level is saved as before: {saved_again}");
         assert_eq!(serde_json::from_value::<Levels>(saved_again).unwrap(), loaded);
+
         let unclamped = serde_json::to_value(Levels { clamp: false, ..loaded }).unwrap();
+
         assert_eq!(serde_json::from_value::<Levels>(unclamped).unwrap(), Levels { clamp: false, ..loaded }, "an unclamped level keeps its choice");
+
         let base = Levels { affects: Some(Channel::BaseColor), ..loaded };
         assert!(base.remaps(Channel::BaseColor) && !base.remaps(Channel::Roughness));
     }
@@ -1974,14 +1981,18 @@ mod tests {
         assert_eq!(EffectKind::Anchor.content_only(), None, "anchors go on content and masks");
         assert_eq!(EffectKind::Generator(Generator::new(GeneratorKind::Dirt)).content_only(), Some(false));
         assert_eq!(EffectKind::Filter(Filter::Invert).content_only(), None);
+
         let mut fill_layer = Layer::new(LayerId(1), "l", LayerKind::Paint, &[Channel::BaseColor]);
         assert!(!fill_layer.reads_anchor());
+
         let source = Source::Anchor { anchor: LayerId(9), channel: Channel::Height, ramp: Vec::new() };
         fill_layer.mask = Some(Mask {
             effects: vec![Effect::new(LayerId(2), EffectKind::Fill { source, projection: Projection::default(), sampling: Default::default() })],
             ..Mask::new(MaskBackground::Black)
         });
+
         assert!(fill_layer.reads_anchor());
+
         let reader = fill_layer.mask.as_ref().map(|mask| &mask.effects[0].kind);
         assert!(reader.is_some_and(|reader| reader.reads(Some(LayerId(9))) && reader.reads(None) && !reader.reads(Some(LayerId(8)))));
 
@@ -1989,9 +2000,12 @@ mod tests {
         let mut generator_layer = Layer::new(LayerId(3), "g", LayerKind::Paint, &[Channel::BaseColor]);
         let mut generator = Generator::new(GeneratorKind::Dirt);
         generator.micro = Some(MicroDetail { anchor: LayerId(9), amount: 0.5 });
+
         assert_eq!(EffectKind::Generator(generator.clone()).anchors_read(), [(LayerId(9), Channel::Height)]);
         assert!(EffectKind::Generator(generator.clone()).reads(Some(LayerId(9))) && !EffectKind::Generator(generator.clone()).reads(Some(LayerId(8))));
+
         generator_layer.mask = Some(Mask { effects: vec![Effect::new(LayerId(4), EffectKind::Generator(generator))], ..Mask::new(MaskBackground::Black) });
+
         assert!(generator_layer.reads_anchor());
     }
 
@@ -2002,7 +2016,9 @@ mod tests {
         let EffectKind::Compare { left, right, channel, hardness, .. } = kind else { panic!("{kind:?}") };
         assert_eq!((left, right, channel, hardness), (CompareSource::ThisMask, CompareSource::Constant, Channel::Height, 1.0));
         assert_eq!(serde_json::to_string(&kind).unwrap(), saved, "an unedited compare saves only its op, value and tolerance");
+
         let round_trip: EffectKind = serde_json::from_str(&serde_json::to_string(&kind).unwrap()).unwrap();
+
         assert_eq!(round_trip, kind);
     }
 
@@ -2015,6 +2031,7 @@ mod tests {
             assert_eq!(CompareOp::LesserThan.mask(left, right, 0.1, 1.0), step(left < right));
             assert_eq!(CompareOp::WithinTolerance.mask(left, right, 0.05, 1.0), step((left - right).abs() <= 0.05));
         }
+
         assert!((CompareOp::GreaterThan.mask(0.55, 0.5, 0.1, 0.9) - 0.5).abs() < 1e-5, "halfway up a 0.1 ramp");
         assert_eq!(CompareOp::GreaterThan.mask(0.45, 0.5, 0.1, 0.0), 0.0, "below the edge stays 0 however soft");
         assert_eq!(CompareOp::GreaterThan.mask(0.6, 0.5, 0.1, f32::NAN), 1.0, "a NaN hardness compares hard");

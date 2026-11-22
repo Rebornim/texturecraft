@@ -46,17 +46,22 @@ fn type_name(harness: &mut Harness<'_, TextureCraftApp>, text: &str) {
 fn the_name_field_renames_on_enter_in_one_undo_step_and_escape_keeps_it() {
     let (mut harness, anchor, _, _) = anchor_harness();
     assert_eq!(anchor_name(&harness, anchor), "Cavity Dirt mask", "a mask anchor point is named after its layer");
+
     let steps = harness.state().session.history_labels().len();
     type_name(&mut harness, "Edges");
+
     assert_eq!(anchor_name(&harness, anchor), "Cavity Dirt mask", "nothing changes while typing");
+
     harness.key_press(Key::Enter);
     harness.run_steps(SETTLE_FRAMES);
+
     assert_eq!(anchor_name(&harness, anchor), "Edges");
     assert_eq!(harness.state().session.history_labels().len(), steps + 1, "one undo step");
 
     type_name(&mut harness, "Never applied");
     harness.key_press(Key::Escape);
     harness.run_steps(SETTLE_FRAMES);
+
     assert_eq!(anchor_name(&harness, anchor), "Edges", "Escape keeps the name");
 }
 
@@ -64,8 +69,10 @@ fn the_name_field_renames_on_enter_in_one_undo_step_and_escape_keeps_it() {
 fn a_click_on_a_reference_selects_what_reads_the_anchor_point() {
     let (mut harness, _, top, reader) = anchor_harness();
     assert!(harness.state().session.selected_layer() != Some(top));
+
     harness.get_by_role_and_label(Role::Button, "Rust Mask fill").click();
     harness.run_steps(REDRAW_FRAMES);
+
     assert_eq!(harness.state().session.selected_layer(), Some(top));
     assert_eq!(harness.state().session.target, StackTarget::Effect(reader));
 }
@@ -98,6 +105,7 @@ fn a_name_typed_then_left_with_shift_tab_is_kept() {
     // The focus moves back to a control drawn before the field: the field never sees itself focused again
     harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
     harness.run_steps(SETTLE_FRAMES);
+
     assert_eq!(anchor_name(&harness, anchor), "Edges", "the typed name is kept");
     assert_eq!(harness.state().session.history_labels().len(), steps + 1, "in one undo step");
 }

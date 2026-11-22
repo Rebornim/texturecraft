@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 
 use egui::{Color32, ColorImage, Painter, Pos2, Rect, TextureHandle, TextureOptions};
+use texturecraft_engine::Session;
 use texturecraft_engine::compose::{ImageRes, ImageStore};
 use texturecraft_engine::core::{BakedMap, ProceduralKind};
 use texturecraft_engine::paint::presets::BrushPreset;
@@ -50,6 +51,7 @@ pub struct Thumbs {
     saved_files_epoch: u64,
     images: HashMap<String, (Weak<ImageRes>, TextureHandle)>,
     images_revision: Option<u64>,
+    preview_session: Option<(u64, u64)>,
     /// Each texture set's ID mesh map preview, with the map it shows (a rebake's new map replaces it)
     id_maps: HashMap<usize, (Weak<Vec<f32>>, TextureHandle)>,
     /// (frame, thumbnails rendered in it)
@@ -140,6 +142,27 @@ impl Thumbs {
         self.images.retain(|key, (cached_image, _)| {
             let name = key.strip_prefix("stencil:").unwrap_or(key);
             images.get(name).is_some_and(|image| cached_image.ptr_eq(&Arc::downgrade(image)))
+        });
+    }
+
+    /// Keep project previews only while they refer to current resources or bake maps.
+    pub(crate) fn sync_project_previews(&mut self, session: &Session) {
+        let current = (session.project_id, session.revision);
+        let previous = self.preview_session.replace(current);
+        if previous == Some(current) {
+            return;
+        }
+
+        // Two projects can have the same revision
+        if previous.is_none_or(|(project, _)| project != session.project_id) {
+            self.images_revision = None;
+            self.id_maps.clear();
+        }
+
+        self.sync_images(&session.images, session.revision);
+        self.id_maps.retain(|&set, (shown, _)| {
+            set < session.doc.project.texture_sets.len()
+                && session.baked(set).and_then(|baked| baked.maps.get(&BakedMap::Id)).is_some_and(|map| std::ptr::eq(shown.as_ptr(), Arc::as_ptr(map)))
         });
     }
 
@@ -660,5 +683,32 @@ mod tests {
         assert!(first.is_some());
         assert_eq!(shared, first, "the same map keeps its cached preview");
         assert_ne!(rebaked, first, "a new map of the same texture set, even of equal texels, gets a new preview");
+    }
+
+    #[test]
+    fn dropped_bakes_and_replaced_projects_release_their_id_preview_textures() {
+        use texturecraft_engine::geom::primitives;
+
+        let ctx = egui::Context::default();
+        let mut thumbs = Thumbs::default();
+        let mut project = Session::new_project("A", primitives::material_ball(), "builtin:materialBall", None, 128).unwrap();
+        project.doc.baked.insert(0, id_map());
+        project.doc.baked.insert(1, id_map());
+        thumbs.sync_project_previews(&project);
+        let first = thumbs.id_mesh_map(&ctx, 0, project.baked(0).unwrap()).unwrap().id();
+        let second = thumbs.id_mesh_map(&ctx, 1, project.baked(1).unwrap()).unwrap().id();
+
+        let _undo_map = project.doc.baked.remove(&0).unwrap();
+        project.revision += 1;
+        thumbs.sync_project_previews(&project);
+
+        assert!(ctx.tex_manager().read().meta(first).is_none(), "an undo-owned map does not need a preview");
+        assert!(ctx.tex_manager().read().meta(second).is_some(), "a live bake keeps its texture");
+
+        let mut replacement = Session::new_project("B", primitives::plane(2.0, 2), "builtin:plane", None, 128).unwrap();
+        replacement.revision = project.revision;
+        thumbs.sync_project_previews(&replacement);
+
+        assert!(ctx.tex_manager().read().meta(second).is_none(), "a different project with the same revision releases the old texture");
     }
 }

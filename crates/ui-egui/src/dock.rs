@@ -2835,6 +2835,7 @@ fn mask_fill_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, e
     else {
         return;
     };
+
     PropertySheet::show(ui, ("mask_fill_sheet", effect_id.0), |sheet| {
         crate::mask_fill_panel::mask_fill_sheet(app, sheet, effect_id, source, projection, sampling, layer.id);
     });

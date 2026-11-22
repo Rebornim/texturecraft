@@ -110,12 +110,14 @@ fn pick_mode_shows_the_id_map_and_a_click_on_the_mesh_adds_its_color() {
     let (mut harness, effect) = app_with_color_selection(true);
     harness.get_by_label(PICK_COLOR).click();
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.state().picking_id_color.is_some_and(|pick| pick.effect == effect && pick.index.is_none()));
     assert_eq!(harness.state().session.view, ViewMode::MeshMap(BakedMap::Id));
 
     let center = harness.state().viewport_rect.center();
     harness.event(Event::PointerMoved(center));
     harness.run_steps(2);
+
     assert!(eyedropper_at(&harness, center), "the pointer is an eyedropper");
 
     click_at(&mut harness, center);
@@ -134,6 +136,7 @@ fn without_an_id_map_picking_is_off() {
     harness.run_steps(SETTLE_FRAMES);
     let repick = row_button(&harness, FIRST, "Pick color");
     click_at(&mut harness, repick);
+
     assert!(harness.state().picking_id_color.is_none());
     assert_eq!(colors(&harness, effect).len(), 3);
 }
@@ -148,6 +151,7 @@ fn removing_a_row_cancels_a_pending_replacement() {
     let (mut harness, effect) = app_with_color_selection(true);
     let repick = row_button(&harness, SECOND, "Pick color");
     click_at(&mut harness, repick);
+
     assert_eq!(harness.state().picking_id_color.unwrap().index, Some(1));
 
     let remove = row_button(&harness, FIRST, "Remove");
@@ -185,9 +189,11 @@ fn escape_cancels_id_picking_with_a_hidden_rail_popup() {
     harness.get_by_role_and_label(egui::Role::Button, "Close");
     harness.key_press(egui::Key::Tab);
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.state().ui.hide_ui);
     assert!(harness.query_by_role_and_label(egui::Role::Button, "Close").is_none());
     assert!(harness.state().picking_id_color.is_some());
+
     let history = harness.state().session.history_labels();
 
     harness.key_press(egui::Key::Escape);
@@ -212,9 +218,12 @@ fn picking_from_the_popup_closes_it_before_the_viewport_click() {
     click_at(&mut harness, pick);
 
     assert!(harness.state().picking_id_color.is_some());
+
     let center = harness.state().viewport_rect.center();
     assert!(popup.contains(center), "pick a point the popup would otherwise cover");
+
     click_at(&mut harness, center);
+
     assert_eq!(colors(&harness, effect).len(), 4, "the next viewport click must pick, even under the former popup");
     assert_eq!(harness.state().properties_popup, None);
 }
@@ -236,7 +245,9 @@ fn a_2d_pick_replaces_the_chosen_row_and_undo_restores_it() {
     assert_eq!(colors(&harness, effect), vec![FIRST, ID_PART.map(|channel| channel as f32 / 255.0), THIRD]);
     assert_eq!(harness.state().session.view, ViewMode::Material);
     assert!(!harness.state().session.stroke_active());
+
     harness.state_mut().session.undo().unwrap();
+
     assert_eq!(colors(&harness, effect), vec![FIRST, SECOND, THIRD]);
 }
 
@@ -264,6 +275,7 @@ fn removing_an_image_during_id_picking_falls_back_to_material() {
     execute(session, "viewport.view", &json!({"mode": "image", "image": name})).unwrap();
     harness.get_by_label(PICK_COLOR).click();
     harness.run_steps(3);
+
     assert_eq!(harness.state().session.view, ViewMode::MeshMap(BakedMap::Id));
     assert!(harness.state().picking_id_color.is_some());
 
@@ -317,6 +329,7 @@ fn color_selection_snapshots_and_quick_mask_pick() {
     click_at(&mut harness, center);
 
     assert!(harness.state().session.quick_mask.editing, "picking preserves quick-mask editing");
+
     save(&mut harness, "color-selection-quick-mask-restored");
 
     execute(&mut harness.state_mut().session, "viewport.quickMask.edit", &json!({"editing": false})).unwrap();
@@ -350,11 +363,13 @@ fn the_background_list_and_the_output_invert_edit_one_undo_step_each() {
     harness.run_steps(SETTLE_FRAMES);
     harness.get_by_role_and_label(Role::ListBoxOption, "White").click();
     harness.run_steps(REDRAW_FRAMES);
+
     assert_eq!(selection(&harness, effect).background, SelectionBackground::White);
     assert_eq!(harness.state().session.history_labels().len(), steps + 1);
 
     let invert = harness.get_by_role_and_label(Role::Button, "Invert").rect().center();
     click_at(&mut harness, invert);
+
     assert_eq!(selection(&harness, effect).output, 0.0);
     assert_eq!(harness.state().session.history_labels().len(), steps + 2);
 }
@@ -367,6 +382,7 @@ fn the_background_list_leaves_the_view_its_wheel_and_closes_on_escape_or_a_click
         harness.run_steps(SETTLE_FRAMES);
         harness.get_by_role_and_label(Role::ComboBox, "Black").rect()
     });
+
     assert_eq!(selection(&harness, effect).background, SelectionBackground::Black, "nothing changed");
 }
 
@@ -381,10 +397,12 @@ fn the_id_mask_slot_picks_a_texture_and_its_x_goes_back_to_the_mesh_map() {
     harness.run_steps(SETTLE_FRAMES);
     harness.get_by_role_and_label(Role::ListBoxOption, &texture).click();
     harness.run_steps(REDRAW_FRAMES);
+
     assert_eq!(selection(&harness, effect).id_map.as_deref(), Some(texture.as_str()));
 
     let clear = harness.get_by_role_and_label(Role::Button, "Clear").rect().center();
     click_at(&mut harness, clear);
+
     assert_eq!(selection(&harness, effect).id_map, None);
     assert!(harness.query_by_role_and_label(Role::Button, "Clear").is_none(), "the mesh map has no ×");
 }
@@ -400,10 +418,12 @@ fn reading_the_mesh_map_shows_no_tile_as_the_current_id_mask() {
     let texture = session.import_resource_bytes("parts.png", id_map_png()).unwrap();
     let mut harness = Harness::builder().with_size(PROPERTIES_WINDOW).build_eframe(|cc| TextureCraftApp::new(cc, session));
     harness.run_steps(STARTUP_FRAMES);
+
     assert_eq!(selection(&harness, effect).id_map, None, "the selection reads the ID mesh map");
 
     harness.get_by_role_and_label(Role::ComboBox, "ID Mask").click();
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(!tile_is_current(&harness, "Import..."), "Import... is an action, not the map read");
     assert!(!tile_is_current(&harness, &texture));
 
@@ -411,6 +431,7 @@ fn reading_the_mesh_map_shows_no_tile_as_the_current_id_mask() {
     harness.run_steps(REDRAW_FRAMES);
     harness.get_by_role_and_label(Role::ComboBox, "ID Mask").click();
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(tile_is_current(&harness, &texture), "a chosen texture is the current tile");
     assert!(!tile_is_current(&harness, "Import..."));
 }
@@ -455,6 +476,7 @@ fn a_hand_picked_id_mask_picks_without_a_bake() {
 
     harness.get_by_label(PICK_COLOR).click();
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.state().picking_id_color.is_some_and(|pick| pick.effect == effect), "Pick color starts picking with no bake");
 
     let center = harness.state().viewport_rect.center();
@@ -475,10 +497,12 @@ fn clearing_the_only_id_mask_ends_a_waiting_pick() {
     harness.run_steps(STARTUP_FRAMES);
     harness.get_by_label(PICK_COLOR).click();
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.state().picking_id_color.is_some(), "the pick waits");
 
     let clear = harness.get_by_role_and_label(Role::Button, "Clear").rect().center();
     click_at(&mut harness, clear);
+
     assert_eq!(selection(&harness, effect).id_map, None);
     assert!(harness.state().picking_id_color.is_none(), "with no ID map left the pick ends");
     assert_eq!(harness.state().session.view, ViewMode::Material, "and the earlier view comes back");

@@ -25,8 +25,10 @@ fn gray_png() -> Vec<u8> {
 fn added(s: &mut Session, command: &str, params: Value) -> (LayerId, EffectKind) {
     let steps = s.history_labels().len();
     let effect = LayerId(execute(s, command, &params).unwrap()["effect"].as_u64().unwrap());
+
     assert_eq!(s.history_labels().len(), steps + 1, "{command} is one undo step");
     assert_eq!(s.target, StackTarget::Effect(effect), "{command} selects the effect it adds");
+
     let kind = s.doc.project.effect(effect).unwrap().1.kind.clone();
     (effect, kind)
 }
@@ -36,19 +38,25 @@ fn a_bitmap_mask_is_a_black_mask_with_a_fill_reading_the_picked_alpha() {
     let (mut s, layer) = fill();
     let name = resource_name(alphas::find("scratches").unwrap());
     let (_, kind) = added(&mut s, "mask.add.bitmap", json!({"layer": layer.0, "alpha": "scratches"}));
+
     assert!(matches!(kind, EffectKind::Fill { source: Source::Image { name: ref read, .. }, .. } if *read == name), "{kind:?}");
+
     let mask = s.doc.project.layer(layer).unwrap().mask.clone().unwrap();
+
     assert_eq!(mask.background, MaskBackground::Black);
     assert!(s.doc.resources.contains_key(&name));
 
     execute(&mut s, "edit.undo", &Value::Null).unwrap();
+
     assert!(s.doc.project.layer(layer).unwrap().mask.is_none(), "one undo takes the mask back");
     assert!(!s.doc.resources.contains_key(&name), "and the alpha's picture with it");
 
     // Without a picture there is nothing to add
     assert!(execute(&mut s, "mask.add.bitmap", &json!({"layer": layer.0})).is_err());
     assert!(execute(&mut s, "mask.add.bitmap", &json!({"layer": layer.0, "image": "missing.png"})).is_err());
+
     let image = s.import_resource_bytes("gray.png", gray_png()).unwrap();
+
     assert!(execute(&mut s, "mask.add.bitmap", &json!({"layer": layer.0, "image": image, "alpha": "scratches"})).is_err(), "one picture, not two");
     assert!(s.doc.project.layer(layer).unwrap().mask.is_none());
 }
@@ -57,6 +65,7 @@ fn a_bitmap_mask_is_a_black_mask_with_a_fill_reading_the_picked_alpha() {
 fn a_height_combination_is_a_mask_comparing_this_layers_height_with_the_layers_below() {
     let (mut s, layer) = fill();
     let (_, kind) = added(&mut s, "mask.add.heightCombination", json!({"layer": layer.0}));
+
     match kind {
         EffectKind::Compare { left, right, channel, hardness, .. } => {
             assert_eq!((left, right, channel, hardness), (CompareSource::ThisLayer, CompareSource::LayersBelow, Channel::Height, 0.9));
@@ -70,13 +79,16 @@ fn a_height_combination_is_a_mask_comparing_this_layers_height_with_the_layers_b
 fn color_selections_go_in_the_mask_and_are_selected() {
     let (mut s, layer) = fill();
     let (first, kind) = added(&mut s, "mask.add.colorSelection", json!({"layer": layer.0}));
+
     assert!(matches!(kind, EffectKind::ColorSelection(_)));
     assert_eq!(s.doc.project.layer(layer).unwrap().mask.as_ref().unwrap().background, MaskBackground::Black, "as colour selection masks were");
 
     // Add effect's item adds another to the same mask, whatever target it is given
     let (second, kind) = added(&mut s, "effect.add.colorSelection", json!({"layer": layer.0, "target": "content"}));
     assert!(matches!(kind, EffectKind::ColorSelection(_)));
+
     let mask: Vec<LayerId> = s.doc.project.layer(layer).unwrap().mask.as_ref().unwrap().effects.iter().map(|effect| effect.id).collect();
+
     assert_eq!(mask, vec![first, second]);
     assert!(s.doc.project.layer(layer).unwrap().content_effects.is_empty());
 }
@@ -102,7 +114,9 @@ fn add_mask_on_an_instance_starts_its_own_mask() {
             let (effect, _) = added(&mut s, command, params);
 
             assert_eq!(s.doc.project.layer(source).unwrap().mask, before, "{command} left the source's mask as it was");
+
             let own = s.doc.project.layer(instance).unwrap().mask.as_ref().map(|mask| mask.effects.iter().map(|effect| effect.id).collect::<Vec<_>>());
+
             assert_eq!(own, Some(vec![effect]), "{command} started the instance's own mask");
         }
     }

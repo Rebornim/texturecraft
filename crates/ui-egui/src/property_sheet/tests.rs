@@ -162,6 +162,67 @@ fn toggles_switches_and_pills_change_their_state() {
     assert_eq!(harness.state().channels, [true, true, true, true, true]);
 }
 
+#[test]
+fn keyboard_focus_is_visible_on_switches_toggles_and_channel_pills() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for brightness in [Brightness::MediumDark, Brightness::Light] {
+        let mut harness = builder(brightness).build_ui(|ui| {
+            ui.set_width(PANEL_WIDTH);
+            PropertySheet::show(ui, "keyboard", |sheet| {
+                sheet.switch("Scale", &["Tiling", "Physical size"], 0);
+                sheet.toggle("Shape Crop", &mut false);
+                sheet.channel_pills(&["Normal"], &[true]);
+            });
+        });
+        harness.run_steps(3);
+
+        for label in ["Tiling", "Physical size", "Shape Crop", "Normal"] {
+            harness.key_press(egui::Key::Tab);
+            harness.run_steps(2);
+
+            let node = harness.get_by_label(label);
+            assert!(node.is_focused(), "{label} receives keyboard focus");
+
+            let rect = node.rect();
+            assert!(
+                harness.output().shapes.iter().any(|clipped| {
+                    matches!(&clipped.shape, egui::Shape::Rect(shape) if shape.stroke.width > 1.0 && shape.rect.center().distance(rect.center()) < 1.0)
+                }),
+                "{label} paints a visible focus outline"
+            );
+        }
+    }
+}
+
+#[test]
+fn keyboard_can_remove_an_id_color_without_hovering_the_row() {
+    let _language = crate::i18n::TEST_LANGUAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut harness = builder(Brightness::MediumDark).build_ui_state(
+        |ui, removed| {
+            ui.set_width(PANEL_WIDTH);
+            PropertySheet::show(ui, "keyboard", |sheet| {
+                if !*removed {
+                    *removed = sheet.id_color_row([10, 20, 30], false, true).remove;
+                }
+            });
+        },
+        false,
+    );
+    harness.run_steps(3);
+
+    for label in ["Pick color R 10 G 20 B 30", "Remove R 10 G 20 B 30"] {
+        harness.key_press(egui::Key::Tab);
+        harness.run_steps(2);
+
+        assert!(harness.get_by_label(label).is_focused(), "{label} receives keyboard focus");
+    }
+    harness.key_press(egui::Key::Space);
+    harness.run_steps(2);
+
+    assert!(*harness.state(), "Space activates the focused Remove button");
+    assert!(harness.query_by_label("Remove R 10 G 20 B 30").is_none());
+}
+
 /// A toggle's pill starts on the controls column, where a dropdown's button starts (it sat 3 px in)
 #[test]
 fn a_toggles_pill_starts_where_a_dropdown_starts() {

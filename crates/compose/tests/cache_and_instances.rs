@@ -1021,8 +1021,8 @@ enum BlurOn {
     Mask,
 }
 
-/// A folder of set `ts` holding a Clouds fill whose content or mask is blurred by 8; returns the folder
-fn folder_of_blurred_clouds(f: &mut Fixture, ts: usize, folder: Option<LayerId>, blur_on: BlurOn) -> LayerId {
+/// A folder of set `ts` holding a Clouds fill whose content or mask is blurred by 8; returns the folder and the fill
+fn folder_of_blurred_clouds(f: &mut Fixture, ts: usize, folder: Option<LayerId>, blur_on: BlurOn) -> (LayerId, LayerId) {
     let held = put(f, ts, folder, LayerKind::Group { children: vec![], collapsed: false, contents: Default::default(), randomized: Vec::new() }, None);
     let clouds = put(f, ts, Some(held), fill(&[(Channel::BaseColor, procedural(ProceduralKind::Clouds, 0.1, 0.9))]), None);
     let blur = effect(f, EffectKind::Filter(Filter::Blur { radius: 8.0, wrap: false }));
@@ -1036,7 +1036,7 @@ fn folder_of_blurred_clouds(f: &mut Fixture, ts: usize, folder: Option<LayerId>,
             f.project.layer_mut(clouds).unwrap().mask = Some(mask);
         }
     }
-    held
+    (held, clouds)
 }
 
 /// A top-level folder of set 0 laying Scale 2 and Rotation 25 on the fills inside it
@@ -1047,9 +1047,10 @@ fn offset_folder(f: &mut Fixture) -> LayerId {
 
 #[test]
 fn a_neighbourhood_filter_in_an_instanced_folder_under_an_offset_folder_reads_its_content_in_the_instances_space() {
+    let mut mismatches = Vec::new();
     for blur_on in [BlurOn::Content, BlurOn::Mask] {
         let mut instanced = fixture();
-        let source = folder_of_blurred_clouds(&mut instanced, 1, None, blur_on);
+        let (source, _) = folder_of_blurred_clouds(&mut instanced, 1, None, blur_on);
         let outer = offset_folder(&mut instanced);
         put(&mut instanced, 0, Some(outer), LayerKind::Instance { source }, None);
 
@@ -1068,6 +1069,24 @@ fn a_neighbourhood_filter_in_an_instanced_folder_under_an_offset_folder_reads_it
             .collect();
         let largest = differences.iter().copied().fold(0.0, f32::max);
 
-        assert!(differences.is_empty(), "{blur_on:?} blur: the instance differs from the copy by up to {largest} on {} texels", differences.len());
+        if !differences.is_empty() {
+            mismatches.push(format!("{blur_on:?} blur: the instance differs from the copy by up to {largest} on {} texels", differences.len()));
+        }
+    }
+
+    assert!(mismatches.is_empty(), "{}", mismatches.join("; "));
+}
+
+#[test]
+fn a_hot_layer_with_a_neighbourhood_filter_in_an_instanced_folder_under_an_offset_folder_composites_exactly_cached() {
+    for blur_on in [BlurOn::Content, BlurOn::Mask] {
+        let mut instanced = fixture();
+        let (source, clouds) = folder_of_blurred_clouds(&mut instanced, 1, None, blur_on);
+        let outer = offset_folder(&mut instanced);
+        put(&mut instanced, 0, Some(outer), LayerKind::Instance { source }, None);
+
+        let cache = check_cached(&instanced, 0, clouds);
+
+        assert!(!cache.is_empty(), "{blur_on:?} blur: the hot layer is cached through its instance");
     }
 }

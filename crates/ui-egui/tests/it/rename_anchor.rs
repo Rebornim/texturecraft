@@ -162,16 +162,6 @@ fn sphere_session() -> Session {
     Session::new_project("anchors", primitives::sphere(1.0, 48, 24), "builtin:sphere", None, 256).unwrap()
 }
 
-/// Opens the Layers toolbar's Add effect menu and clicks its item `item` (the one nearest the menu's button)
-fn add_effect(h: &mut Harness<'_, TextureCraftApp>, item: &str) {
-    let menu = h.get_by_role_and_label(Role::Button, "Add effect").rect();
-    h.get_by_role_and_label(Role::Button, "Add effect").click();
-    h.run_steps(3);
-    let distance = |rect: egui::Rect| rect.center().distance(menu.center());
-    let row = h.get_all_by_role_and_label(Role::Button, item).map(|node| node.rect()).min_by(|a, b| distance(*a).total_cmp(&distance(*b))).unwrap();
-    crate::filter_support::click_at(h, row.center());
-}
-
 fn mask_anchor_of(h: &Harness<'_, TextureCraftApp>, layer: u64) -> Option<u64> {
     let layer = h.state().session.doc.project.layer(LayerId(layer)).unwrap();
     layer.mask.iter().flat_map(|m| m.effects.iter()).find(|e| matches!(e.kind, EffectKind::Anchor)).map(|e| e.id.0)
@@ -190,18 +180,23 @@ fn a_fill_on_a_higher_layer_reads_a_mask_anchor_added_in_the_interface() {
     let low = low_layer(&mut session);
     let mut h = harness_for(session);
 
-    // Add effect adds to the mask, since the mask's fill is the selected target of the Low layer
+    // The wand adds to the mask, since the mask's fill is the selected target of the Low layer
     assert!(matches!(h.state().session.target, StackTarget::Effect(_)));
-
-    add_effect(&mut h, "Anchor point");
+    h.get_by_label(egui_phosphor::regular::MAGIC_WAND).click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Add to the mask").is_some(), "the menu offers the mask");
+    h.get_by_label("Add anchor point").click();
+    h.run_steps(3);
     let anchor = mask_anchor_of(&h, low).expect("the anchor point is in the mask of Low");
     assert!(h.state().session.doc.project.layer(LayerId(low)).unwrap().content_effects.is_empty(), "the anchor point is not on the layer content");
 
     // A higher layer with a mask fill, added through the same menu
     let high = high_layer(&mut h.state_mut().session);
     h.run_steps(3);
-    add_effect(&mut h, "Fill");
-
+    h.get_by_label(egui_phosphor::regular::MAGIC_WAND).click();
+    h.run_steps(3);
+    h.get_by_label("Add fill").click();
+    h.run_steps(3);
     assert!(matches!(reader_source(&h, high), Source::Uniform(_)), "a new fill starts as a uniform value");
 
     // The Anchor points tab lists the mask anchor of the layer below
@@ -212,9 +207,8 @@ fn a_fill_on_a_higher_layer_reads_a_mask_anchor_added_in_the_interface() {
     h.get_by_role_and_label(Role::Tab, "Anchor points").click();
     h.run_steps(3);
 
-    // The only anchor below is listed by its name alone
-    let label = effect_name(&h, anchor);
-    h.get_by_role_and_label(Role::ListBoxOption, &label).click();
+    let label = format!("Low / mask / {}", effect_name(&h, anchor));
+    h.get_by_role_and_label(Role::Button, &label).click();
     h.run_steps(3);
 
     let Source::Anchor { anchor: read, .. } = reader_source(&h, high) else { panic!("the fill reads an anchor: {:?}", reader_source(&h, high)) };
@@ -231,7 +225,6 @@ fn a_fill_on_a_higher_layer_reads_a_mask_anchor_added_in_the_interface() {
     let ref_anchor = id(&texturecraft_engine::execute(&mut reference, "effect.add.anchor", &json!({"target": "mask"})).unwrap(), "effect");
     high_layer(&mut reference);
     texturecraft_engine::execute(&mut reference, "effect.add.fill", &json!({"anchor": ref_anchor})).unwrap();
-
     assert!(close(base_color(&mut h.state_mut().session), base_color(&mut reference)));
 
     // Save and reopen keep the link and the result
@@ -256,16 +249,12 @@ fn a_fill_on_a_higher_layer_reads_a_mask_anchor_added_in_the_interface() {
         .id
         .0;
     h.state_mut().run("effect.set", json!({"effect": fill, "value": 1.0}));
-
     assert!(matches!(reader_source(&h, high), Source::Uniform(_)));
-
     h.state_mut().session.modified = false;
     reopen(&mut h, &file);
-
     assert_eq!(mask_anchor_of(&h, low), Some(anchor), "the anchor point is still in the mask");
     let Source::Anchor { anchor: read, .. } = reader_source(&h, high) else { panic!("the reopened fill reads an anchor") };
     assert_eq!(read.0, anchor, "the reopened fill still reads that anchor");
     assert!(close(base_color(&mut h.state_mut().session), [expected; 3]), "{:?}", base_color(&mut h.state_mut().session));
-
     std::fs::remove_dir_all(file.parent().unwrap()).unwrap();
 }

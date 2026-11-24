@@ -220,7 +220,6 @@ fn row(app: &mut TextureCraftApp, ui: &mut Ui, map: BakedMap, settings: &mut Bak
     let name = tr(baked_map_label(map));
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, is_selected, name));
-    let response = response.on_hover_text(name);
 
     // The selected row is brighter and its name bold: no outline, no accent
     let hovered = ui.rect_contains_pointer(rect);
@@ -283,6 +282,8 @@ fn row(app: &mut TextureCraftApp, ui: &mut Ui, map: BakedMap, settings: &mut Bak
     let mut job = egui::text::LayoutJob::simple_singleline(name.to_owned(), font, color);
     job.wrap = egui::text::TextWrapping::truncate_at_width((icons_left - name_left).max(0.0));
     let galley = ui.painter().layout_job(job);
+    // The full name on hover only when the row cuts it short
+    let response = if galley.elided { response.on_hover_text(name) } else { response };
     ui.painter().galley(pos2(name_left, rect.center().y - galley.size().y / 2.0), galley, color);
 
     response.context_menu(|ui| {

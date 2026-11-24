@@ -1,8 +1,8 @@
 //! The map preview: while Mesh Map Settings shows a map's settings, the 3D view shows that map on the model, re-baked small on a worker as the settings change
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::{Arc, OnceLock};
 
 use texturecraft_engine::bake::{BakeOutput, Progress};
 use texturecraft_engine::core::{BakeResolution, BakedMap};
@@ -141,14 +141,31 @@ fn start(app: &mut TextureCraftApp, target: LivePreviewTarget, size: BakeResolut
 
     let progress = Arc::new(Progress::new());
     let worker_progress = progress.clone();
-    let receiver = crate::spawn_worker("texturecraft-map-preview", move || task.run(&worker_progress));
+    let receiver = crate::spawn_worker("texturecraft-map-preview", move || match preview_pool() {
+        Some(pool) => pool.install(|| task.run(&worker_progress)),
+        None => task.run(&worker_progress),
+    });
     app.live_preview.running = Some(RunningPreview { target, progress, receiver });
 }
 
-/// The size a dragged slider's previews bake at: 128, or 64 for the bakers that can't keep 128 under about 100 ms
+/// The size a dragged slider's previews bake at: 128, or 64 for the ray-traced bakers, which take well over 100 ms at 128 on a 4-core machine
 fn drag_size(map: BakedMap) -> BakeResolution {
     match map {
-        BakedMap::Thickness | BakedMap::BentNormal => BakeResolution::R64,
+        BakedMap::AmbientOcclusion | BakedMap::Thickness | BakedMap::BentNormal | BakedMap::Curvature => BakeResolution::R64,
         _ => BakeResolution::R128,
     }
+}
+
+/// The preview bakes' own thread pool, a thread short of the cores, so the UI's parallel work never waits behind a preview; None where no pool can start
+fn preview_pool() -> Option<&'static rayon::ThreadPool> {
+    static POOL: OnceLock<Option<rayon::ThreadPool>> = OnceLock::new();
+    POOL.get_or_init(|| {
+        let threads = std::thread::available_parallelism().map_or(1, |cores| cores.get().saturating_sub(1).max(1));
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).thread_name(|i| format!("texturecraft-map-preview-{i}")).build();
+        if let Err(error) = &pool {
+            log::warn!("map previews share the global thread pool: {error}");
+        }
+        pool.ok()
+    })
+    .as_ref()
 }

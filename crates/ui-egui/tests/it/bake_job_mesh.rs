@@ -22,7 +22,7 @@ fn harness_with_job(mesh_id: impl FnOnce(u64) -> u64) -> (Harness<'static, Textu
     std::mem::forget(maps_tx);
     let running =
         RunningBake { set_index: 0, progress: progress.clone(), receiver, maps, maps_done: Arc::new(std::sync::atomic::AtomicUsize::new(0)), maps_total: 1 };
-    h.state_mut().bake = Some(BakeJob { queue: vec![], current: Some(running), total: 1, mesh_id: id, only: None });
+    h.state_mut().bake = Some(BakeJob { queue: vec![], current: Some(running), total: 1, mesh_id: id, only: None, preview_size: None });
     (h, progress)
 }
 

@@ -177,9 +177,12 @@ pub fn mesh_map_settings_panel(app: &mut TextureCraftApp, ui: &mut Ui) {
         .inner
     });
     let texture_sets = json!(app.session.doc.project.bake_synced_sets(app.session.ts(), BakeSyncGroup::Map(selected)));
-    edit_settings(app, ui, "mesh_map_settings", texture_sets, |_, ui, settings| {
+    let changed = edit_settings(app, ui, "mesh_map_settings", texture_sets, |_, ui, settings| {
         PropertySheet::show(ui, ("mesh_map_settings_sheet", selected), |sheet| map_settings::show(sheet, selected, &mut settings.maps, restore.inner))
     });
+    if changed {
+        app.queue_live_preview(selected);
+    }
 }
 
 /// The Common Settings panel: output, high poly, cage and skew settings
@@ -202,14 +205,14 @@ fn edit_settings(
     scroll_id: &str,
     texture_sets: Value,
     contents: impl FnOnce(&mut TextureCraftApp, &mut Ui, &mut BakeSettings) -> Option<Value>,
-) {
+) -> bool {
     let set_index = app.session.ts();
-    let Some(before) = app.session.doc.project.texture_sets.get(set_index).map(|texture_set| texture_set.bake.clone()) else { return };
+    let Some(before) = app.session.doc.project.texture_sets.get(set_index).map(|texture_set| texture_set.bake.clone()) else { return false };
 
     let mut settings = before.clone();
     let reset = egui::ScrollArea::vertical().id_salt(scroll_id).auto_shrink([false; 2]).show(ui, |ui| contents(app, ui, &mut settings)).inner;
     if settings == before && reset.is_none() {
-        return;
+        return false;
     }
 
     let mut patch = settings_patch(&before, &settings);
@@ -217,6 +220,7 @@ fn edit_settings(
         fields.extend(reset);
     }
     app.run("bake.settings", json!({ "ts": texture_sets, "patch": patch }));
+    true
 }
 
 /// What the 3D view shows while a bake runs: the newest finished map, one finished map or the material
@@ -284,11 +288,11 @@ pub(crate) fn bake_bar(app: &mut TextureCraftApp, ctx: &egui::Context, viewport:
         .anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -BAKE_BAR_MARGIN))
         .default_width(0.0)
         .show(ctx, |ui| {
-            if let Some(status) = app.bake_status() {
+            if let Some(status) = app.bake_status().filter(|_| !app.live_preview_running()) {
                 ui.vertical_centered(|ui| ui.label(egui::RichText::new(status).strong()));
             }
             ui.horizontal(|ui| {
-                if let Some(progress) = app.bake_progress() {
+                if let Some(progress) = app.bake_progress().filter(|_| !app.live_preview_running()) {
                     ui.add(egui::ProgressBar::new(progress).desired_width(220.0).show_percentage());
                     if ui.button(tr("Cancel")).clicked() {
                         app.cancel_bake();

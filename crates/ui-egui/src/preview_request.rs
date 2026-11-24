@@ -29,6 +29,9 @@ impl PreviewRequest {
                 let generator = ShelfPreview::curvature_generator(*mode, *solo);
                 Some(mask_preview_image(self.size_px, &shape.get()?.generator_of(generator, self.size_px)?))
             }
+            ShelfPreview::GeneratorSet { generator, images } => {
+                Some(mask_preview_image(self.size_px, &shape.get()?.generator_reading(generator.as_ref().clone(), images, self.size_px)?))
+            }
             ShelfPreview::SmartMaterial(id) => Some(material_preview_image(self.size_px, &shape.get()?.material(id, self.size_px)?)),
             preview => preview.image(self.size_px),
         }

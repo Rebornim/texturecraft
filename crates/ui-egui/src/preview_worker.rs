@@ -156,7 +156,7 @@ mod tests {
     use std::collections::HashMap;
     use std::time::{Duration, Instant};
 
-    use texturecraft_engine::core::GeneratorKind;
+    use texturecraft_engine::core::{Generator, GeneratorKind};
     use texturecraft_engine::materials::MATERIALS;
     use texturecraft_engine::smart_masks::SMART_MASKS;
 
@@ -185,6 +185,19 @@ mod tests {
             assert_eq!(results[0].1.is_some(), id == "steel");
             assert!(context.has_requested_repaint(), "the result needs another frame even when this is the only request");
         }
+    }
+
+    #[test]
+    fn a_generator_as_set_renders_its_settings() {
+        let mut shape = OrbShape::default();
+        let render = |shape: &mut OrbShape, generator: Generator| {
+            let preview = ShelfPreview::GeneratorSet { generator: Box::new(generator), images: Vec::new() };
+            PreviewRequest { key: String::new(), preview, size_px: 16, hover: false }.render(shape).expect("an orb picture")
+        };
+
+        let plain = render(&mut shape, Generator::new(GeneratorKind::Dirt));
+        let inverted = render(&mut shape, Generator { invert: true, ..Generator::new(GeneratorKind::Dirt) });
+        assert_ne!(plain.pixels, inverted.pixels, "the picture follows the generator's settings");
     }
 
     #[test]

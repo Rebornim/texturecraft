@@ -104,14 +104,18 @@ fn parameters(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, (layer, 
     // The Curvature size under the pointer shows alone in the preview: the columns are drawn after it, so it is kept from the frame before
     let solo_id = sheet.ui.make_persistent_id(("generator_solo", id));
     let mut solo: Option<usize> = sheet.ui.data(|data| data.get_temp(solo_id)).flatten();
-    let preview = match (kind, generator.detail_in_use()) {
-        (GeneratorKind::Curvature, Some(detail)) => ShelfPreview::Curvature { mode: detail.mode, solo },
-        _ => ShelfPreview::Generator(kind),
+    let solo_texture = match (kind, generator.detail_in_use(), solo) {
+        (GeneratorKind::Curvature, Some(detail), Some(size)) => {
+            app.thumbs.generator_picture(&ctx, ShelfPreview::Curvature { mode: detail.mode, solo: Some(size) }, PREVIEW_ORB_PX)
+        }
+        _ => None,
     };
-    let texture = app.thumbs.generator_picture(&ctx, preview, PREVIEW_ORB_PX);
 
-    // A size shows the whole preview until its own render arrives
-    let texture = texture.or_else(|| app.thumbs.generator_picture(&ctx, ShelfPreview::Generator(kind), PREVIEW_ORB_PX));
+    // The preview shows the generator as set; a size shows the whole preview until its own render arrives, and the kind at its defaults shows until the first render
+    let set = ShelfPreview::generator_set(generator, &app.session.images);
+    let texture = solo_texture
+        .or_else(|| app.thumbs.generator_set_picture(&ctx, id, set, PREVIEW_ORB_PX))
+        .or_else(|| app.thumbs.generator_picture(&ctx, ShelfPreview::Generator(kind), PREVIEW_ORB_PX));
     let picture = |painter: &Painter, rect: Rect| orb(painter, rect, texture.as_ref(), &tokens, &ctx);
 
     if let Some(controls) = generator.kind_controls() {

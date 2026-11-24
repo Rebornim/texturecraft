@@ -32,6 +32,8 @@ pub enum ShelfPreview {
     Generator(GeneratorKind),
     /// A Curvature generator in `mode`, with only detail size `solo` (finest first) when given, rendered like [`ShelfPreview::Generator`]
     Curvature { mode: CurvatureMode, solo: Option<usize> },
+    /// A generator as set, reading `images` (its image inputs by name), rendered like [`ShelfPreview::Generator`]
+    GeneratorSet { generator: Box<Generator>, images: Vec<(String, Arc<ImageRes>)> },
     /// A library filter on a sample material on a sphere
     Filter(&'static str),
     /// A procedural pattern as a grayscale swatch
@@ -59,6 +61,18 @@ impl ShelfPreview {
         }
         generator.detail = Some(detail);
         generator
+    }
+
+    /// `generator` as set, with the images it reads from `store`
+    pub fn generator_set(generator: &Generator, store: &ImageStore) -> ShelfPreview {
+        let images = generator
+            .sources()
+            .filter_map(|source| match source {
+                texturecraft_engine::core::Source::Image { name, .. } => store.get(name).map(|image| (name.clone(), image.clone())),
+                _ => None,
+            })
+            .collect();
+        ShelfPreview::GeneratorSet { generator: Box::new(generator.clone()), images }
     }
 
     /// Resolve a saved brush's image alpha while the project images are available
@@ -90,6 +104,7 @@ impl ShelfPreview {
             ShelfPreview::SmartMask(id) => format!("mask:{id}"),
             ShelfPreview::Generator(kind) => format!("generator:{kind:?}"),
             ShelfPreview::Curvature { mode, solo } => format!("curvature:{mode:?}:{solo:?}"),
+            ShelfPreview::GeneratorSet { generator, images } => format!("generator-set:{:016x}", settings_hash(generator, images)),
             ShelfPreview::Filter(id) => format!("filter:{id}"),
             ShelfPreview::Procedural(kind) => format!("proc:{kind:?}"),
             ShelfPreview::Alpha(alpha) => format!("alpha:{}", alpha.id),
@@ -105,7 +120,11 @@ impl ShelfPreview {
     pub fn image(&self, size: usize) -> Option<ColorImage> {
         match self {
             ShelfPreview::Material(id) => Some(sphere_image(size, &preview::material(id, size)?)),
-            ShelfPreview::SmartMask(_) | ShelfPreview::Generator(_) | ShelfPreview::Curvature { .. } | ShelfPreview::SmartMaterial(_) => None,
+            ShelfPreview::SmartMask(_)
+            | ShelfPreview::Generator(_)
+            | ShelfPreview::Curvature { .. }
+            | ShelfPreview::GeneratorSet { .. }
+            | ShelfPreview::SmartMaterial(_) => None,
             ShelfPreview::Filter(id) => Some(sphere_image(size, &preview::filter(id, size)?)),
             ShelfPreview::Procedural(kind) => Some(procedural_image(*kind, size)),
             ShelfPreview::Alpha(alpha) => Some(alpha_image(alpha, size)),
@@ -227,4 +246,17 @@ mod tests {
         let missing = ShelfPreview::SavedBrush { path: PathBuf::from("brush.tcbrush"), settings: Some(settings), image: None };
         assert!(missing.image(64).is_none());
     }
+}
+
+/// What a generator preview depends on: its settings and which images it reads
+fn settings_hash(generator: &Generator, images: &[(String, Arc<ImageRes>)]) -> u64 {
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    serde_json::to_string(generator).unwrap_or_default().hash(&mut hasher);
+    for (name, image) in images {
+        name.hash(&mut hasher);
+        Arc::as_ptr(image).hash(&mut hasher);
+    }
+    hasher.finish()
 }

@@ -2,8 +2,10 @@
 //! Presets use `mask.smart.apply`, materials use [`materials::apply`], both read back from the compositor
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use serde_json::json;
+use texturecraft_compose::ImageRes;
 use texturecraft_core::{
     BakeResolution, BakedMap, BlendMode, Channel, CurvatureMethod, EffectKind, Generator, GeneratorKind, KindControls, LayerId, MaskBackground, Procedural,
     ProceduralKind, Source,
@@ -14,6 +16,7 @@ use texturecraft_texel::TILE;
 
 pub use crate::mask_preview_pixel::MaskPreviewPixel;
 pub use crate::material_preview_pixel::MaterialPreviewPixel;
+
 use crate::orb_camera::OrbCamera;
 use crate::preview::Sample;
 use crate::session::Document;
@@ -49,6 +52,16 @@ pub struct OrbPreview {
     bare: (Document, BTreeMap<usize, LayerId>),
     /// Cached camera views, least recently used first
     cameras: Vec<OrbCamera>,
+}
+
+/// `generator` with clouds in Grayscale Conversion's empty image slot: it grays the image it is given, and its picture would be black without one
+fn with_sample_image(mut generator: Generator) -> Generator {
+    if let Some(KindControls::Grayscale(grayscale)) = generator.controls.as_deref_mut()
+        && grayscale.source.is_none()
+    {
+        grayscale.source = Some(Source::Procedural { pattern: Procedural::new(ProceduralKind::Clouds), low: [0.0; 3], high: [1.0; 3], ramp: Vec::new() });
+    }
+    generator
 }
 
 impl OrbPreview {
@@ -88,13 +101,7 @@ impl OrbPreview {
 
     /// Row-major `size²` pixels of a mask holding one generator of `kind` at its defaults, None outside the shape (and for sizes outside 1..=[`MAX_PREVIEW_SIZE_PX`])
     pub fn generator(&mut self, kind: GeneratorKind, size: usize) -> Option<Vec<Option<MaskPreviewPixel>>> {
-        let mut generator = Generator::new(kind);
-
-        // Grayscale Conversion grays the image it is given: its picture grays clouds, as it starts with none
-        if let Some(KindControls::Grayscale(grayscale)) = generator.controls.as_deref_mut() {
-            grayscale.source = Some(Source::Procedural { pattern: Procedural::new(ProceduralKind::Clouds), low: [0.0; 3], high: [1.0; 3], ramp: Vec::new() });
-        }
-        self.generator_of(generator, size)
+        self.generator_of(with_sample_image(Generator::new(kind)), size)
     }
 
     /// [`Self::generator`] for `generator` as given (a Curvature generator with one detail size alone)
@@ -109,6 +116,21 @@ impl OrbPreview {
         let mask = smart_masks::build_mask(&mut self.session.doc.project, MaskBackground::Black, effects);
         self.session.doc.project.layer_mut(self.layer).ok()?.mask = Some(mask);
         self.mask_pixels(size)
+    }
+
+    /// [`Self::generator_of`] with `images` (the images the generator reads, by name) loaded for this render only
+    pub fn generator_reading(&mut self, generator: Generator, images: &[(String, Arc<ImageRes>)], size: usize) -> Option<Vec<Option<MaskPreviewPixel>>> {
+        let replaced: Vec<_> = images.iter().map(|(name, image)| (name.clone(), self.session.images.insert(name.clone(), image.clone()))).collect();
+        let pixels = self.generator_of(with_sample_image(generator), size);
+
+        // The orb's own images come back: the next preview reads only what it brings
+        for (name, previous) in replaced {
+            match previous {
+                Some(previous) => self.session.images.insert(name, previous),
+                None => self.session.images.remove(&name),
+            };
+        }
+        pixels
     }
 
     /// Row-major `size²` pixels of the preview layer's current mask, with None outside the shape

@@ -64,6 +64,8 @@ pub struct Thumbs {
     big_shown: VecDeque<String>,
     /// The frame that last took in the worker's results
     received_in_pass: u64,
+    /// Per generator panel: the picture of its settings being rendered, and the last one finished (shown meanwhile)
+    set_pictures: HashMap<u64, (Option<String>, Option<TextureHandle>)>,
 }
 
 impl Thumbs {
@@ -305,6 +307,29 @@ impl Thumbs {
         self.worker_rendered(ctx, preview, size_px.clamp(1, texturecraft_engine::orb_preview::MAX_PREVIEW_SIZE_PX), false)
     }
 
+    /// Generator `effect`'s picture as set (`preview` a [`ShelfPreview::GeneratorSet`]): one render at a time, the last finished one shown while the next renders, so a drag renders only as fast as the worker keeps up
+    pub fn generator_set_picture(&mut self, ctx: &egui::Context, effect: u64, preview: ShelfPreview, size_px: usize) -> Option<TextureHandle> {
+        self.receive(ctx);
+        let size_px = size_px.clamp(1, texturecraft_engine::orb_preview::MAX_PREVIEW_SIZE_PX);
+        let key = self.worker_key(&preview, size_px);
+        let (in_flight, last) = self.set_pictures.get(&effect).cloned().unwrap_or_default();
+
+        // The picture in flight landed: it is the latest shown
+        let last = match in_flight.as_ref().map(|key| self.rendered.get(key)) {
+            Some(Some(WorkerPreview::Ready(texture))) => Some(texture.clone()),
+            _ => last,
+        };
+        let busy = in_flight.as_ref().is_some_and(|key| matches!(self.rendered.get(key), Some(WorkerPreview::Rendering)));
+        let shown = match self.ready(&key) {
+            Some(texture) => Some(texture),
+            None if busy => last.clone(),
+            None => self.big(ctx, preview, size_px).or_else(|| last.clone()),
+        };
+        let in_flight = if busy { in_flight } else { Some(key) };
+        self.set_pictures.insert(effect, (in_flight, shown.clone().or(last)));
+        shown
+    }
+
     /// Sphere thumbnail of library filter `id` applied to a sample material
     pub fn filter(&mut self, ctx: &egui::Context, id: &'static str) -> Option<TextureHandle> {
         self.shelf(ctx, ShelfPreview::Filter(id), SPHERE_PX)
@@ -466,10 +491,27 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use texturecraft_engine::compose::BakedMaps;
+    use texturecraft_engine::core::Generator;
 
     use crate::orb_shape::OrbShape;
 
     static NEXT_FILE: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn a_generator_picture_shows_the_last_one_while_the_next_renders() {
+        let ctx = egui::Context::default();
+        let mut thumbs = Thumbs { worker: PreviewWorker::Inline { shape: OrbShape::default(), results: Vec::new() }, ..Thumbs::default() };
+        let set = |invert| ShelfPreview::GeneratorSet { generator: Box::new(Generator { invert, ..Generator::new(GeneratorKind::Dirt) }), images: Vec::new() };
+        let last = ctx.load_texture("last", ColorImage::filled([1, 1], Color32::RED), TextureOptions::LINEAR);
+        let rendering = thumbs.worker_key(&set(false), 8);
+        thumbs.rendered.insert(rendering.clone(), WorkerPreview::Rendering);
+        thumbs.set_pictures.insert(1, (Some(rendering), Some(last.clone())));
+
+        let shown = thumbs.generator_set_picture(&ctx, 1, set(true), 8);
+
+        assert_eq!(shown.map(|texture| texture.id()), Some(last.id()), "the last picture stays up");
+        assert!(!thumbs.rendered.contains_key(&thumbs.worker_key(&set(true), 8)), "the newer settings wait for the render in flight");
+    }
 
     #[test]
     fn saved_brush_refresh_discards_old_worker_result() {

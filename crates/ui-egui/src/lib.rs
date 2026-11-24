@@ -956,14 +956,6 @@ fn spawn_worker<T: Send + 'static>(_name: &str, f: impl FnOnce() -> T + Send + '
     rx
 }
 
-/// WIP scratch (drop before the PR): name a slow step of a frame
-pub(crate) fn zz_slow(label: &str, started: std::time::Instant) {
-    let took = started.elapsed();
-    if took.as_millis() > 50 && std::env::var_os("TC_ZZ_SLOW").is_some() {
-        eprintln!("SLOW {label} {took:?}");
-    }
-}
-
 fn autosave_period_seconds(minutes: u32) -> f64 {
     f64::from(minutes) * 60.0
 }
@@ -1127,24 +1119,16 @@ impl eframe::App for TextureCraftApp {
                 web_files::dropped(self, ctx, file);
             }
         }
-        let t = std::time::Instant::now();
         self.poll_bake(ctx);
-        zz_slow("poll_bake", t);
-        let t = std::time::Instant::now();
         bake_mode::poll_live_preview(self, ctx);
-        zz_slow("poll_live_preview", t);
         self.poll_resize(ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.poll_high_poly_job(ctx);
         self.poll_link_cooks(ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.poll_link_imports(ctx);
-        let t = std::time::Instant::now();
         self.thumbs.sync_project_previews(&self.session);
-        zz_slow("sync_project_previews", t);
-        let t = std::time::Instant::now();
         self.properties_scroll.sync(&self.session);
-        zz_slow("properties_scroll", t);
 
         // The library shelf rescans when the window comes back (MaterialCraft may have sent a material)
         let focused = ctx.input(|input| input.viewport().focused).unwrap_or(true);
@@ -1215,12 +1199,8 @@ impl eframe::App for TextureCraftApp {
 
         // The dock keeps the cards' gutter from the bars and rails around it
         let panel_frame = if hide_ui { egui::Frame::NONE.fill(tokens.viewport) } else { egui::Frame::NONE.fill(tokens.chrome).inner_margin(theme::GUTTER) };
-        let t = std::time::Instant::now();
         egui::CentralPanel::default().frame(panel_frame).show(ui, |ui| if hide_ui { viewport::central(self, ui) } else { docking::show(self, ui) });
-        zz_slow("dock", t);
-        let t = std::time::Instant::now();
         windows::show(self, &ctx);
-        zz_slow("windows", t);
 
         // Finish after the dock and windows have requested their thumbnails
         self.layer_panel.end(&ctx, &self.session);

@@ -587,17 +587,13 @@ impl DockContent<Panel> for Panels<'_> {
         if *panel == Panel::Viewport {
             crate::rail_popup::remember_viewport(ui.ctx(), ui.max_rect());
             ui.painter().rect_filled(ui.max_rect(), 0.0, self.tokens.viewport);
-            let t = std::time::Instant::now();
             crate::viewport::central(self.app, ui);
-            crate::zz_slow("viewport", t);
             return;
         }
 
         // Before the rows, which draw over the foot of the shown tab's box
         self.paint_shown_group_tab(ui, *panel);
-        let t = std::time::Instant::now();
         panel_body(self.app, ui, *panel);
-        crate::zz_slow(panel.name(), t);
     }
 
     fn logical_label(&self, panel: &Panel) -> String {

@@ -181,16 +181,12 @@ pub fn mesh_map_settings_panel(app: &mut TextureCraftApp, ui: &mut Ui) {
         .inner
     });
     let texture_sets = json!(app.session.doc.project.bake_synced_sets(app.session.ts(), BakeSyncGroup::Map(selected)));
-    let t = std::time::Instant::now();
     let changed = edit_settings(app, ui, "mesh_map_settings", texture_sets, |_, ui, settings| {
         PropertySheet::show(ui, ("mesh_map_settings_sheet", selected), |sheet| map_settings::show(sheet, selected, &mut settings.maps, restore.inner))
     });
-    crate::zz_slow("mms edit_settings", t);
     if changed {
         let ctx = ui.ctx().clone();
-        let t = std::time::Instant::now();
         live_preview::settings_changed(app, &ctx, ctx.dragged_id().is_some());
-        crate::zz_slow("mms settings_changed", t);
     }
 }
 
@@ -233,9 +229,7 @@ fn edit_settings(
     if let (Some(fields), Some(Value::Object(reset))) = (patch.as_object_mut(), reset) {
         fields.extend(reset);
     }
-    let t = std::time::Instant::now();
     app.run("bake.settings", json!({ "ts": texture_sets, "patch": patch }));
-    crate::zz_slow("bake.settings command", t);
     true
 }
 

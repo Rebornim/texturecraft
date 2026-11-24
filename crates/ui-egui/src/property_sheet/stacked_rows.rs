@@ -229,7 +229,7 @@ impl PropertySheet<'_> {
         self.label_line(label);
         let button = self.control_line();
         let response = self.dropdown_button(button, &name(current), None::<fn(&egui::Painter, Rect)>);
-        self.ui.ctx().accesskit_node_builder(response.id, |node| node.set_description(label));
+        named_choice(self.ui, &response, label, &name(current));
         self.hanging_list(&response, current, options, &name, None::<ChoicePicture<'_, T>>).0
     }
 
@@ -251,12 +251,13 @@ impl PropertySheet<'_> {
         let second = Rect::from_min_max(pos2(link.right() + PAIR_LINK_AIR, line.top()), line.max);
 
         let first_response = self.dropdown_button(first, &name(values[0]), None::<fn(&egui::Painter, Rect)>);
-        self.ui.ctx().accesskit_node_builder(first_response.id, |node| node.set_description(label));
+        named_choice(self.ui, &first_response, label, &name(values[0]));
         let mut picked = self.hanging_list(&first_response, values[0], options, &name, None::<ChoicePicture<'_, T>>).0.map(|value| (0, value));
 
         let link_id = self.next_id();
         let link_response = self.ui.interact(link, link_id, Sense::click());
-        link_response.widget_info(|| WidgetInfo::selected(egui::Role::CheckBox, true, *linked, link_label));
+        let enabled = self.ui.is_enabled();
+        link_response.widget_info(|| WidgetInfo::selected(egui::Role::CheckBox, enabled, *linked, link_label));
         let link_response = self.tip(link_response, link_label);
         if link_response.clicked() {
             *linked = !*linked;
@@ -304,7 +305,7 @@ impl PropertySheet<'_> {
             ui: &mut second_ui,
         };
         let second_response = second_sheet.dropdown_button(second, &name(second_value), None::<fn(&egui::Painter, Rect)>);
-        second_sheet.ui.ctx().accesskit_node_builder(second_response.id, |node| node.set_description(label));
+        named_choice(second_sheet.ui, &second_response, label, &name(second_value));
         if let Some(value) = second_sheet.hanging_list(&second_response, second_value, options, &name, None::<ChoicePicture<'_, T>>).0 {
             picked = Some((1, value));
         }
@@ -349,9 +350,10 @@ impl PropertySheet<'_> {
         let hit = Rect::from_min_max(pos2(self.left, line.top()), pos2(self.left + CHECK_SIZE + CHECK_TO_LABEL + text.size().x, line.bottom()));
         let id = self.next_id();
         let response = self.ui.interact(hit, id, Sense::click());
+        let enabled = self.ui.is_enabled();
         response.widget_info(|| match state {
-            Some(on) => WidgetInfo::selected(egui::Role::CheckBox, true, on, label),
-            None => WidgetInfo::labeled(egui::Role::CheckBox, true, label),
+            Some(on) => WidgetInfo::selected(egui::Role::CheckBox, enabled, on, label),
+            None => WidgetInfo::labeled(egui::Role::CheckBox, enabled, label),
         });
 
         let check = Rect::from_min_size(pos2(self.left, center_y - CHECK_SIZE / 2.0), vec2(CHECK_SIZE, CHECK_SIZE));
@@ -380,7 +382,8 @@ impl PropertySheet<'_> {
             .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(FIELD_TEXT_INSET, 0)))
             .align(Align2::LEFT_CENTER);
         let response = self.ui.put(field.shrink(1.0), edit);
-        response.widget_info(|| WidgetInfo::labeled(egui::Role::TextInput, true, label));
+        let enabled = self.ui.is_enabled();
+        response.widget_info(|| WidgetInfo::labeled(egui::Role::TextInput, enabled, label));
         self.drawn(field.bottom());
         self.space(STACK_ROW_AIR);
         response.changed()
@@ -393,7 +396,8 @@ impl PropertySheet<'_> {
         let button = Rect::from_min_max(pos2(self.left, line.top()), pos2(self.right, line.bottom()));
         let id = self.next_id();
         let response = self.ui.interact(button, id, Sense::click());
-        response.widget_info(|| WidgetInfo::selected(egui::Role::Button, true, pressed, text));
+        let enabled = self.ui.is_enabled();
+        response.widget_info(|| WidgetInfo::selected(egui::Role::Button, enabled, pressed, text));
 
         let tokens = self.tokens;
         // Held down: the hairline grey, as the paired dropdowns' link
@@ -445,4 +449,12 @@ pub(crate) fn paint_check(painter: &egui::Painter, tokens: &crate::theme::Tokens
     }
     let points = TICK_POINTS.map(|(x, y)| pos2(rect.left() + x * rect.width(), rect.top() + y * rect.height()));
     painter.line(points.to_vec(), Stroke::new(TICK_WIDTH, tokens.panel));
+}
+
+/// Names a dropdown for assistive tech by its setting (`label`), its value the choice it shows
+fn named_choice(ui: &egui::Ui, response: &Response, label: &str, value: &str) {
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(label);
+        node.set_value(value);
+    });
 }

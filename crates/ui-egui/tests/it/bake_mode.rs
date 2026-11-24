@@ -45,9 +45,16 @@ fn click(harness: &mut Harness<'_, TextureCraftApp>, label: &str) {
     harness.run_steps(3);
 }
 
-fn number_field<'a>(harness: &'a Harness<'_, TextureCraftApp>, label: &str) -> egui_kittest::Node<'a> {
-    let label_row = harness.get_by_label(label).rect().center().y;
-    harness.get_all_by_role(Role::TextInput).find(|node| (node.rect().center().y - label_row).abs() < 4.0).unwrap()
+/// Type `text` as the value of the slider labelled `label`: a click on its value turns it into a field with the value selected
+fn type_slider_value(harness: &mut Harness<'_, TextureCraftApp>, label: &str, text: &str) {
+    let value = format!("{label} value");
+    harness.get_by_label(&value).click();
+    harness.run_steps(2);
+    let value_row = harness.get_by_label(&value).rect().center().y;
+    harness.get_all_by_role(Role::TextInput).find(|node| (node.rect().center().y - value_row).abs() < 4.0).unwrap().type_text(text);
+    harness.run_steps(1);
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(3);
 }
 
 #[test]
@@ -129,14 +136,7 @@ fn secondary_rays_edit_from_another_set_updates_all_sets() {
     select_map(&mut harness, "Ambient Occlusion");
     let history_steps = harness.state().session.history_labels().len();
 
-    number_field(&harness, "Secondary Rays").focus();
-    harness.run_steps(2);
-    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
-    harness.run_steps(1);
-    number_field(&harness, "Secondary Rays").type_text("128");
-    harness.run_steps(1);
-    harness.key_press(egui::Key::Enter);
-    harness.run_steps(3);
+    type_slider_value(&mut harness, "Secondary Rays", "128");
 
     let session = &harness.state().session;
     assert_eq!(session.ts(), 1);
@@ -419,7 +419,8 @@ fn clicking_a_row_shows_that_maps_settings_without_changing_what_bakes() {
     assert!(harness.query_by_label("Attenuation").is_none());
     assert_eq!(enabled_maps(&harness), before);
 
-    click(&mut harness, &format!("{} Common Settings", egui_phosphor::regular::GEAR));
+    harness.get_by_role_and_label(Role::Button, "Common Settings").click();
+    harness.run_steps(3);
     assert!(harness.state().ui.dock.is_visible(Panel::CommonSettings));
     assert_eq!(enabled_maps(&harness), before);
 }
@@ -439,9 +440,7 @@ fn the_breadcrumb_switches_the_shown_map() {
     harness.get_by_label("Sampling Radius");
     assert_eq!(harness.get_all_by_role_and_label(Role::Button, "Position").count(), 1, "only the list row before the menu opens");
 
-    let dropdowns: Vec<_> = harness.get_all_by_label(egui_phosphor::regular::CARET_RIGHT).collect();
-    let [_texture_set_dropdown, map_dropdown] = dropdowns.as_slice() else { panic!("the breadcrumb has a texture set and a map dropdown") };
-    map_dropdown.click();
+    harness.get_by_label("Switch Mesh Map").click();
     harness.run_steps(3);
     assert_eq!(harness.get_all_by_role_and_label(Role::Button, "Position").count(), 2, "the map menu lists Position");
 
@@ -494,7 +493,6 @@ fn cage_and_skew_controls_require_a_high_poly_and_grey_out_with_a_reason() {
     }
     harness.get_by_label("The cage applies once a high poly mesh is loaded.");
     harness.get_by_label("Skew Correction applies once a high poly mesh is loaded.");
-    assert!(harness.get_by_label("Remove").accesskit_node().is_disabled(), "nothing selected to remove");
 
     harness.state_mut().session.add_high_poly_bytes("High.obj", b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".to_vec()).unwrap();
     harness.run_steps(3);
@@ -613,14 +611,13 @@ fn the_high_poly_scene_is_a_list_with_add_and_remove() {
     harness.state_mut().ui.dock.focus(Panel::CommonSettings);
     harness.run_steps(3);
     harness.get_by_label("Add High-Poly Meshes");
-    assert!(harness.get_by_label("Remove").accesskit_node().is_disabled(), "− waits for a selection");
+    harness.get_by_label("Gunhigh.obj");
 
-    harness.get_by_label("Gunhigh.obj").click();
-    harness.run_steps(3);
+    // Each file's row has its own ×
     harness.get_by_label("Remove").click();
     harness.run_steps(3);
     assert!(harness.state().session.doc.bake_meshes.high.is_empty());
-    assert!(harness.get_by_label("Remove").accesskit_node().is_disabled());
+    assert!(harness.query_by_label("Remove").is_none());
 }
 
 #[test]

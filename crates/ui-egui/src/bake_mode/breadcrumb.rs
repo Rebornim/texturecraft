@@ -36,14 +36,14 @@ pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, selected: BakedMap, r
     let painter = ui.painter().clone();
 
     let mut x = line.left();
-    let set_caret = caret(ui, &painter, &tokens, x, center_y, "texture_set_caret", tr("Texture Sets"));
+    let set_caret = caret(ui, &painter, &tokens, x, center_y, "texture_set_caret", tr("Switch Texture Set"));
     x += CARET_BOX + CARET_TO_NAME;
     let set_name = set_names.get(active_set).map_or("", String::as_str);
     let set_galley = painter.layout_no_wrap(set_name.to_owned(), FontId::proportional(NAME_SIZE), tokens.text);
     let set_width = set_galley.size().x;
     painter.galley(pos2(x, center_y - set_galley.size().y / 2.0), set_galley, tokens.text);
     x += set_width + NAME_TO_CARET;
-    let map_caret = caret(ui, &painter, &tokens, x, center_y, "map_caret", tr("Mesh Maps"));
+    let map_caret = caret(ui, &painter, &tokens, x, center_y, "map_caret", tr("Switch Mesh Map"));
     x += CARET_BOX + CARET_TO_NAME;
     painter.text(pos2(x, center_y), Align2::LEFT_CENTER, tr(baked_map_label(selected)), semibold(NAME_SIZE), tokens.text_strong);
 

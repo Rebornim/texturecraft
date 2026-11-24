@@ -95,10 +95,12 @@ pub(super) fn show(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, set
                     sheet.check(tr("Average Normals"), &mut settings.cage.average_normals);
                 });
             }
-            if settings.cage.kind == CageType::CustomFile {
-                cage_file(app, sheet);
-            }
         });
+
+        // A loaded cage stays listed and removable while the cage can't apply, so a saved one can still be dropped
+        if settings.cage.kind == CageType::CustomFile {
+            cage_file(app, sheet, cage_applies);
+        }
     });
     if let Some(index) = cage_reset {
         if index != 1 {
@@ -196,7 +198,7 @@ fn high_poly_scene(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>) {
         .map(|mesh| FileRow { name: &mesh.name, folder: mesh.folder.as_deref(), loading: false })
         .chain(loading.iter().map(|name| FileRow { name, folder: None, loading: true }))
         .collect();
-    let answer = sheet.file_list(tr("High Poly Scene"), &rows, HIGH_POLY_LIST_MIN_ROWS, icon::PLUS, tr("Add High-Poly Meshes"), tr("Remove"));
+    let answer = sheet.file_list(tr("High Poly Scene"), &rows, HIGH_POLY_LIST_MIN_ROWS, icon::PLUS, tr("Add High-Poly Meshes"), true, tr("Remove"));
     if let Some(index) = answer.removed {
         app.run("bake.highPoly.remove", json!({ "index": index }));
     }
@@ -205,11 +207,11 @@ fn high_poly_scene(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>) {
     }
 }
 
-/// The cage file's row, with the folder button that loads one
-fn cage_file(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>) {
+/// The cage file's row, with the folder button that loads one while the cage `applies`
+fn cage_file(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, applies: bool) {
     let cage = app.session.doc.bake_meshes.cage.as_ref();
     let rows: Vec<FileRow<'_>> = cage.iter().map(|mesh| FileRow { name: &mesh.name, folder: mesh.folder.as_deref(), loading: false }).collect();
-    let answer = sheet.file_list(tr("Cage Scene"), &rows, 1, icon::FOLDER_OPEN, tr("Load Cage"), tr("Remove Cage"));
+    let answer = sheet.file_list(tr("Cage Scene"), &rows, 1, icon::FOLDER_OPEN, tr("Load Cage"), applies, tr("Remove Cage"));
     if answer.removed.is_some() {
         app.run("bake.cage.clear", json!({}));
     }

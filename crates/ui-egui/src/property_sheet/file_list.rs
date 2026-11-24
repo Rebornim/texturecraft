@@ -34,7 +34,8 @@ const DIVIDER_INSET: f32 = 8.0;
 const ELLIPSIS: &str = "…";
 
 impl PropertySheet<'_> {
-    /// `rows` in a box at least `min_rows` tall, with a `add_glyph` button (`add_label`) beside it; each loaded file's × (`remove_label`) asks to remove it
+    /// `rows` in a box at least `min_rows` tall, with a `add_glyph` button (`add_label`, greyed unless `can_add`) beside it; each loaded file's × (`remove_label`) asks to remove it
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn file_list(
         &mut self,
         label: &str,
@@ -42,6 +43,7 @@ impl PropertySheet<'_> {
         min_rows: usize,
         add_glyph: &str,
         add_label: &str,
+        can_add: bool,
         remove_label: &str,
     ) -> FileListResponse {
         let line = self.take(LABEL_LINE);
@@ -71,15 +73,17 @@ impl PropertySheet<'_> {
 
         let add = Rect::from_min_size(pos2(self.right - ADD_BUTTON_SIZE, area.top()), vec2(ADD_BUTTON_SIZE, ADD_BUTTON_SIZE));
         let add_id = self.next_id();
-        let add_response = self.ui.interact(add, add_id, Sense::click());
-        add_response.widget_info(|| WidgetInfo::labeled(egui::Role::Button, self.ui.is_enabled(), add_label));
+        let can_add = can_add && self.ui.is_enabled();
+        let add_response = self.ui.interact(add, add_id, if can_add { Sense::click() } else { Sense::hover() });
+        add_response.widget_info(|| WidgetInfo::labeled(egui::Role::Button, can_add, add_label));
         let add_response = self.tip(add_response, add_label);
-        let fill = if add_response.hovered() { tokens.row_hover } else { tokens.button };
+        let fill = if can_add && add_response.hovered() { tokens.row_hover } else { tokens.button };
+        let glyph_color = if can_add { tokens.text } else { tokens.text_dim };
         let painter = self.ui.painter();
         painter.rect(add, CornerRadius::same(CONTROL_RADIUS), fill, Stroke::new(1.0, tokens.button_border), StrokeKind::Inside);
-        painter.text(add.center(), Align2::CENTER_CENTER, add_glyph, FontId::proportional(CUBE_SIZE), tokens.text);
+        painter.text(add.center(), Align2::CENTER_CENTER, add_glyph, FontId::proportional(CUBE_SIZE), glyph_color);
         self.paint_control_focus(&add_response);
-        answer.add = add_response.clicked();
+        answer.add = can_add && add_response.clicked();
 
         self.drawn(area.bottom());
         self.space(2.0 * STACK_ROW_AIR);

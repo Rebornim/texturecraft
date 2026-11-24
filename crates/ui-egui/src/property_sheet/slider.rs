@@ -195,7 +195,8 @@ impl PropertySheet<'_> {
             pos2(track.end + KNOB_RADIUS, track.center_y + ROW_HIT_HALF_HEIGHT),
         );
         let response = self.ui.interact(hit, id, Sense::click_and_drag());
-        response.widget_info(|| WidgetInfo::slider(true, f64::from(*value), &label));
+        let enabled = self.ui.is_enabled();
+        response.widget_info(|| WidgetInfo::slider(enabled, f64::from(*value), &label));
 
         let mut moved = false;
         if (response.dragged() || response.drag_stopped() || response.clicked())
@@ -294,7 +295,8 @@ impl PropertySheet<'_> {
         let Some(mut draft) = editing else {
             self.skip_typing_edit();
             let response = self.ui.interact(rect, id.with("value"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
-            response.widget_info(|| WidgetInfo::labeled(egui::Role::Label, true, crate::i18n::trf("{label} value", &[("label", label)])));
+            let enabled = self.ui.is_enabled();
+            response.widget_info(|| WidgetInfo::labeled(egui::Role::Label, enabled, crate::i18n::trf("{label} value", &[("label", label)])));
             self.ui.painter().text(pos2(right, center_y), Align2::RIGHT_CENTER, shown, semibold(TEXT_SIZE), tokens.text);
 
             if response.hovered() {

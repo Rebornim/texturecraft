@@ -6,6 +6,10 @@ mod bake_visualization_panel;
 mod bake_visualization_toggles;
 mod breadcrumb;
 mod common_settings;
+mod live_preview;
+mod live_preview_target;
+mod map_preview_fold;
+pub(crate) use live_preview::LivePreview;
 mod section_opening;
 pub(crate) use bake_checks::bake_warnings;
 pub use bake_paint_brush::BakePaintBrush;
@@ -181,8 +185,13 @@ pub fn mesh_map_settings_panel(app: &mut TextureCraftApp, ui: &mut Ui) {
         PropertySheet::show(ui, ("mesh_map_settings_sheet", selected), |sheet| map_settings::show(sheet, selected, &mut settings.maps, restore.inner))
     });
     if changed {
-        app.queue_live_preview(selected);
+        live_preview::settings_changed(app, ui.ctx().dragged_id().is_some());
     }
+}
+
+/// Once a frame: the map preview follows the selected map and takes its finished bakes
+pub(crate) fn poll_live_preview(app: &mut TextureCraftApp, ctx: &egui::Context) {
+    live_preview::poll(app, ctx);
 }
 
 /// The Common Settings panel: output, high poly, cage and skew settings
@@ -194,7 +203,7 @@ pub fn common_settings_panel(app: &mut TextureCraftApp, ui: &mut Ui) {
 }
 
 /// The map whose settings show: the chosen one, else the first enabled map, else Normal
-fn selected_map(selection: Option<BakedMap>, settings: &BakeSettings) -> BakedMap {
+pub(super) fn selected_map(selection: Option<BakedMap>, settings: &BakeSettings) -> BakedMap {
     selection.or_else(|| settings.maps.enabled().next()).unwrap_or(BakedMap::Normal)
 }
 
@@ -288,11 +297,11 @@ pub(crate) fn bake_bar(app: &mut TextureCraftApp, ctx: &egui::Context, viewport:
         .anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -BAKE_BAR_MARGIN))
         .default_width(0.0)
         .show(ctx, |ui| {
-            if let Some(status) = app.bake_status().filter(|_| !app.live_preview_running()) {
+            if let Some(status) = app.bake_status() {
                 ui.vertical_centered(|ui| ui.label(egui::RichText::new(status).strong()));
             }
             ui.horizontal(|ui| {
-                if let Some(progress) = app.bake_progress().filter(|_| !app.live_preview_running()) {
+                if let Some(progress) = app.bake_progress() {
                     ui.add(egui::ProgressBar::new(progress).desired_width(220.0).show_percentage());
                     if ui.button(tr("Cancel")).clicked() {
                         app.cancel_bake();

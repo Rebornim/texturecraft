@@ -1,4 +1,4 @@
-use texturecraft_engine::core::{BakeResolution, BakedMap};
+use texturecraft_engine::core::BakedMap;
 
 use crate::RunningBake;
 
@@ -11,6 +11,4 @@ pub struct BakeJob {
     pub mesh_id: u64,
     /// The one map to bake (a row's quick bake) instead of the checked ones
     pub only: Option<BakedMap>,
-    /// A live preview's smaller output size: no toast, and the view stays on the map afterwards
-    pub preview_size: Option<BakeResolution>,
 }

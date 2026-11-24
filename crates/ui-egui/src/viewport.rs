@@ -1113,7 +1113,7 @@ const QUICK_MASK_NOTICE_COLOR: Color32 = Color32::from_rgb(0xe8, 0x6a, 0x6a);
 /// What bake mode's 3D view draws besides the low poly (nothing in the other modes)
 fn bake_visualization(app: &TextureCraftApp) -> Option<texturecraft_render::BakeVisualization> {
     // Setup meshes can cover the low-poly map preview; keep the switches for when setup resumes
-    if app.ui.mode != crate::state::Mode::Baking || app.session.bake_preview_active() || app.live_map_preview.is_some() {
+    if app.ui.mode != crate::state::Mode::Baking || app.session.bake_preview_active() {
         return None;
     }
 

@@ -255,10 +255,6 @@ pub struct TextureCraftApp {
     /// Texture sets the GPU could not hold, and the text of the one sticky toast naming them.
     pub(crate) gpu_memory: (Vec<String>, Option<String>),
     pub bake: Option<BakeJob>,
-    /// A live preview waiting for its settings to settle: the map and when it is due (app time)
-    live_preview_due: Option<(texturecraft_engine::core::BakedMap, f64)>,
-    /// The map the last live preview showed, while the view stays on it: the bake overlays stay out of its way
-    pub(crate) live_map_preview: Option<texturecraft_engine::core::BakedMap>,
     /// What the bake running now has done so far, for the summary when it ends
     pub bake_report: bake_report::BakeReport,
     /// The Import PBR textures dialog while it is open.
@@ -274,6 +270,8 @@ pub struct TextureCraftApp {
     pub layer_panel: layer_panel::LayerPanel,
     /// The Mesh Map Bakers rows' thumbnails
     pub(crate) bake_map_thumbnails: bake_mode::MapThumbnails,
+    /// The map preview: the selected map on the model while Mesh Map Settings shows it
+    pub(crate) live_preview: bake_mode::LivePreview,
     /// Last frame's viewport rect (logical points), for scripted input.
     pub viewport_rect: egui::Rect,
     pub fps: f32,
@@ -403,8 +401,6 @@ impl TextureCraftApp {
             toasts: Vec::new(),
             gpu_memory: (Vec::new(), None),
             bake: None,
-            live_preview_due: None,
-            live_map_preview: None,
             bake_report: Default::default(),
             pbr_import: None,
             resize: None,
@@ -415,6 +411,7 @@ impl TextureCraftApp {
             thumbs: thumbs::Thumbs::default(),
             layer_panel: layer_panel::LayerPanel::default(),
             bake_map_thumbnails: bake_mode::MapThumbnails::default(),
+            live_preview: bake_mode::LivePreview::default(),
             viewport_rect: egui::Rect::NOTHING,
             fps: 0.0,
             ui_ms: 0.0,
@@ -605,13 +602,12 @@ impl TextureCraftApp {
 
     /// Bake `sets`: only map `only` when given, else each set's checked maps
     pub fn start_bake_of(&mut self, sets: Vec<usize>, only: Option<texturecraft_engine::core::BakedMap>) {
-        // A live preview gives way to a real bake
-        if self.live_preview_running() {
-            self.cancel_bake();
-        }
         if self.bake.is_some() || sets.is_empty() {
             return;
         }
+
+        // The bake takes the 3D view over from the map preview
+        self.live_preview.release(&mut self.session);
 
         // Restore the picker's view before the preview starts following baked maps
         id_color_pick::IdColorPick::end(self);
@@ -628,45 +624,7 @@ impl TextureCraftApp {
 
         let total = sets.len();
         self.bake_report = bake_report::BakeReport::started(self.last_time);
-        self.bake = Some(BakeJob { queue: sets, current: None, total, mesh_id: self.session.mesh_id, only, preview_size: None });
-    }
-
-    /// Whether the running bake is a live map preview, which shows no bake bar
-    pub(crate) fn live_preview_running(&self) -> bool {
-        self.bake.as_ref().is_some_and(|job| job.preview_size.is_some())
-    }
-
-    /// Ask for a live preview of `map` once its settings stop changing for a moment
-    pub(crate) fn queue_live_preview(&mut self, map: texturecraft_engine::core::BakedMap) {
-        self.live_preview_due = Some((map, self.last_time + LIVE_PREVIEW_DELAY));
-    }
-
-    /// Start a queued live preview when it is due: the map alone, small, for the active set; a running preview gives way to it, a real bake does not
-    fn poll_live_preview(&mut self, ctx: &egui::Context) {
-        // Leaving the map's view ends the preview look: the bake overlays come back
-        if self.live_map_preview.is_some() && !matches!(self.session.view, texturecraft_engine::ViewMode::MeshMap(_)) && self.bake.is_none() {
-            self.live_map_preview = None;
-        }
-        let Some((map, due)) = self.live_preview_due else { return };
-        if self.last_time < due {
-            ctx.request_repaint_after(std::time::Duration::from_secs_f64(due - self.last_time));
-            return;
-        }
-        match &self.bake {
-            Some(job) if job.preview_size.is_none() => return,
-            Some(_) => self.cancel_bake(),
-            None => {}
-        }
-
-        self.live_preview_due = None;
-        let set = self.session.ts();
-        let own = self.session.doc.project.texture_sets.get(set).map(|texture_set| texture_set.bake.common.resolution);
-        let size = own.filter(|own| own.pixels() < LIVE_PREVIEW_SIZE.pixels()).unwrap_or(LIVE_PREVIEW_SIZE);
-        self.start_bake_of(vec![set], Some(map));
-        if let Some(job) = self.bake.as_mut() {
-            job.preview_size = Some(size);
-            self.live_map_preview = Some(map);
-        }
+        self.bake = Some(BakeJob { queue: sets, current: None, total, mesh_id: self.session.mesh_id, only });
     }
 
     /// Re-cook MaterialCraft material layer `layer` in the background. While one cook of the layer
@@ -772,8 +730,10 @@ impl TextureCraftApp {
         }
 
         let Some(job) = self.bake.as_mut() else {
-            // A preview whose bake is gone must not keep the view
-            self.session.bake_preview_end();
+            // A preview whose bake is gone must not keep the view; the map preview keeps its own
+            if self.live_preview.shown().is_none() {
+                self.session.bake_preview_end();
+            }
             return;
         };
 
@@ -830,31 +790,19 @@ impl TextureCraftApp {
         let Some(job) = self.bake.as_mut() else { return };
 
         if job.queue.is_empty() {
-            let preview = job.preview_size.is_some().then_some(job.only).flatten();
             self.bake = None;
             self.session.bake_preview_end();
-            match preview {
-                // A live preview stays on its map, quietly
-                Some(map) => {
-                    self.run("viewport.view", serde_json::json!({ "mode": format!("map:{}", map.id()) }));
-                }
-                None => self.finish_bake_report(),
-            }
+            self.finish_bake_report();
             return;
         }
 
         let set_index = job.queue.remove(0);
         let only = job.only;
-        let preview_size = job.preview_size;
         self.session.bake_preview_set_current(set_index);
         match self.session.bake_task(set_index) {
             Ok(mut task) => {
                 if let Some(map) = only {
                     task.settings.maps.select([map]);
-                }
-                if let Some(size) = preview_size {
-                    task.settings.common.resolution = size;
-                    task.settings.common.resolution_height = None;
                 }
                 let progress = Arc::new(Progress::new());
                 let worker_progress = progress.clone();
@@ -1081,12 +1029,6 @@ struct CameraGlide {
 
 const GLIDE_SECONDS: f64 = 0.35;
 
-/// A live map preview starts this long after its settings last changed, in seconds
-const LIVE_PREVIEW_DELAY: f64 = 0.3;
-
-/// The live map preview's output size
-const LIVE_PREVIEW_SIZE: texturecraft_engine::core::BakeResolution = texturecraft_engine::core::BakeResolution::R256;
-
 /// The share of the running frame rate and frame time averages each frame keeps (an average over about ten frames)
 const FRAME_AVERAGE_KEEP: f32 = 0.9;
 /// The interface scale applied: wider than the Settings slider, so a scale set elsewhere still applies within reason
@@ -1178,7 +1120,7 @@ impl eframe::App for TextureCraftApp {
             }
         }
         self.poll_bake(ctx);
-        self.poll_live_preview(ctx);
+        bake_mode::poll_live_preview(self, ctx);
         self.poll_resize(ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.poll_high_poly_job(ctx);

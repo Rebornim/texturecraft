@@ -8,6 +8,7 @@ use texturecraft_engine::core::{BakeSettings, BakeSyncGroup, BakedMap};
 
 use super::common_settings::antialiasing_label;
 use super::set_picker_purpose::SetPickerPurpose;
+use super::set_picker_row::SetPickerRow;
 use crate::TextureCraftApp;
 use crate::i18n::{baked_map_label, tr, trf};
 use crate::property_sheet::PropertySheet;
@@ -96,8 +97,8 @@ impl SetPicker {
         }
     }
 
-    /// The listed sets: index, name and, for a set not yet sharing a sync group, the values it would give up
-    fn rows(&self, app: &TextureCraftApp) -> Vec<(usize, String, Option<String>)> {
+    /// The listed sets
+    fn rows(&self, app: &TextureCraftApp) -> Vec<SetPickerRow> {
         let project = &app.session.doc.project;
         let active = app.session.ts();
         let source = match self.purpose {
@@ -116,7 +117,7 @@ impl SetPicker {
                     (SetPickerPurpose::Sync(group), Some(source)) if !set.bake.sync.shares(group) => differing_values(&set.bake, &source.bake, group),
                     _ => None,
                 };
-                (index, set.name.clone(), note)
+                SetPickerRow { index, name: set.name.clone(), note }
             })
             .collect()
     }
@@ -132,22 +133,22 @@ impl SetPicker {
     }
 
     /// The master check and one check per listed set, indented under it
-    fn list(&mut self, sheet: &mut PropertySheet<'_>, rows: &[(usize, String, Option<String>)]) {
-        let ticked = rows.iter().filter(|(index, ..)| self.chosen.get(*index).copied().unwrap_or(false)).count();
+    fn list(&mut self, sheet: &mut PropertySheet<'_>, rows: &[SetPickerRow]) {
+        let ticked = rows.iter().filter(|row| self.chosen.get(row.index).copied().unwrap_or(false)).count();
         let all_ticked = ticked == rows.len();
         let label = if all_ticked { tr("Deselect All") } else { tr("Select All") };
         let state = if ticked == 0 { Some(false) } else { all_ticked.then_some(true) };
         if sheet.check_mixed(label, state).clicked() {
-            for (index, ..) in rows {
-                if let Some(chosen) = self.chosen.get_mut(*index) {
+            for row in rows {
+                if let Some(chosen) = self.chosen.get_mut(row.index) {
                     *chosen = !all_ticked;
                 }
             }
         }
         sheet.indented(|sheet| {
-            for (index, name, note) in rows {
-                let Some(chosen) = self.chosen.get_mut(*index) else { continue };
-                if sheet.check_noted(name, Some(*chosen), note.as_deref()).clicked() {
+            for row in rows {
+                let Some(chosen) = self.chosen.get_mut(row.index) else { continue };
+                if sheet.check_noted(&row.name, Some(*chosen), row.note.as_deref()).clicked() {
                     *chosen = !*chosen;
                 }
             }

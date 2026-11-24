@@ -18,6 +18,7 @@ mod mesh_map_bakers;
 pub use map_thumbnails::MapThumbnails;
 mod set_picker;
 mod set_picker_purpose;
+mod set_picker_row;
 
 use egui::{Ui, vec2};
 use egui_phosphor::regular as icon;

@@ -27,9 +27,18 @@ fn app(_low: &str, high: Option<&str>) -> Harness<'static, TextureCraftApp> {
 #[test]
 #[ignore]
 fn bake_style_snapshots() {
-    let Some(dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
-    std::fs::create_dir_all(&dir).unwrap();
+    let Some(root) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    use texturecraft_ui_egui::theme::Brightness;
+    for (brightness, name) in [(Brightness::MediumDark, "medium"), (Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        shots(&dir, brightness);
+    }
+}
+
+fn shots(dir: &std::path::Path, brightness: texturecraft_ui_egui::theme::Brightness) {
     let mut h = app("Gunlow.fbx", Some("Gunhigh.fbx"));
+    h.state_mut().ui.prefs.brightness = brightness;
     h.state_mut().ui.dock.focus(texturecraft_ui_egui::docking::Panel::CommonSettings);
     h.run_steps(10);
     h.render().unwrap().save(dir.join("common-high.png")).unwrap();
@@ -67,6 +76,7 @@ fn bake_style_snapshots() {
     }
 
     let mut h = app("Gunlow.fbx", None);
+    h.state_mut().ui.prefs.brightness = brightness;
     for set in &mut h.state_mut().session.doc.project.texture_sets {
         set.bake.high_poly.use_low_as_high = false;
     }

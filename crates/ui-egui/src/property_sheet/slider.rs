@@ -216,6 +216,11 @@ impl PropertySheet<'_> {
         let response = self.ui.interact(hit, id, Sense::click_and_drag());
         response.widget_info(|| WidgetInfo::slider(true, f64::from(*value), &label));
 
+        // A press on the track drops what was typed in its value: the track's value is the one wanted
+        if response.is_pointer_button_down_on() {
+            self.drop_typing(id.with((self.id, "typed")));
+        }
+
         let mut moved = false;
         if (response.dragged() || response.drag_stopped() || response.clicked())
             && let Some(pointer) = response.interact_pointer_pos()
@@ -336,7 +341,7 @@ impl PropertySheet<'_> {
 
         let untouched = self.end_typing(field_id, &draft);
         let typed_text = draft.text.trim();
-        if self.ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+        if self.escape_pressed() {
             return None;
         }
 

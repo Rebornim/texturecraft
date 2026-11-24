@@ -154,7 +154,7 @@ impl PropertySheet<'_> {
 
             let untouched = self.end_typing(typing_id, &draft);
             let text = draft.text.trim();
-            if self.ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            if self.escape_pressed() {
                 return None;
             }
 

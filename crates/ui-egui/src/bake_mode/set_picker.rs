@@ -191,7 +191,8 @@ fn title_bar(ui: &mut Ui, tokens: &Tokens, title: &str) -> bool {
     let center_y = bar.center().y;
     ui.painter().text(pos2(bar.left() + TITLE_GEAR_CENTER, center_y), Align2::CENTER_CENTER, icon::GEAR, FontId::proportional(TITLE_GLYPH_SIZE), tokens.text);
     let text = Rect::from_min_max(pos2(bar.left() + TITLE_TEXT_LEFT, bar.top()), pos2(bar.right() - TITLE_BAR_HEIGHT, bar.bottom()));
-    ui.put(text, egui::Label::new(RichText::new(title).font(semibold(TITLE_TEXT_SIZE)).color(tokens.text_strong)).truncate());
+    let label = egui::Label::new(RichText::new(title).font(semibold(TITLE_TEXT_SIZE)).color(tokens.text_strong)).truncate();
+    ui.scope_builder(egui::UiBuilder::new().max_rect(text).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| ui.add(label));
 
     let close = Rect::from_center_size(pos2(bar.right() - TITLE_BAR_HEIGHT / 2.0, center_y), vec2(TITLE_BAR_HEIGHT, TITLE_BAR_HEIGHT));
     let response = ui.interact(close, ui.scope_id().with("close"), Sense::click());

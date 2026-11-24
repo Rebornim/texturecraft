@@ -76,6 +76,7 @@ pub(crate) use section_tabs::{
 pub(crate) use sheet::PropertySheet;
 pub(crate) use slot_response::SlotResponse;
 pub(crate) use stack_slider::StackSlider;
+pub(crate) use stacked_rows::{CHECK_SIZE, paint_check};
 
 /// Side padding: every row starts and ends this far inside the panel
 pub(crate) const SIDE_PADDING_POINTS: f32 = 12.0;

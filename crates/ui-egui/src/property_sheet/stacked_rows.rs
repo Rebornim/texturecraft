@@ -26,7 +26,7 @@ const TRACK_CENTER: f32 = 8.0;
 
 /// A check's line, its box and the air from the box to its label
 const CHECK_LINE: f32 = 20.0;
-const CHECK_SIZE: f32 = 13.0;
+pub(crate) const CHECK_SIZE: f32 = 13.0;
 const CHECK_RADIUS: u8 = 2;
 const CHECK_TO_LABEL: f32 = 9.0;
 
@@ -351,33 +351,12 @@ impl PropertySheet<'_> {
         });
 
         let check = Rect::from_min_size(pos2(self.left, center_y - CHECK_SIZE / 2.0), vec2(CHECK_SIZE, CHECK_SIZE));
-        self.paint_check(check, state, response.hovered());
+        paint_check(self.ui.painter(), &self.tokens, check, state, response.hovered());
         self.ui.painter().galley(pos2(check.right() + CHECK_TO_LABEL, center_y - text.size().y / 2.0), text, self.tokens.text);
         self.paint_control_focus(&response);
         self.drawn(line.bottom());
         self.space(STACK_ROW_AIR);
         response
-    }
-
-    /// A check's box in `rect`: on = dim fill and a tick in the panel's colour, mixed = a dash, off = the row colour with a field's border
-    pub(crate) fn paint_check(&self, rect: Rect, state: Option<bool>, hovered: bool) {
-        let tokens = self.tokens;
-        let painter = self.ui.painter();
-        if state == Some(false) {
-            let border = if hovered { tokens.button_border } else { tokens.field_border };
-            painter.rect(rect, CornerRadius::same(CHECK_RADIUS), tokens.row, Stroke::new(1.0, border), StrokeKind::Inside);
-            return;
-        }
-
-        let fill = if hovered { tokens.text } else { tokens.text_dim };
-        painter.rect_filled(rect, CornerRadius::same(CHECK_RADIUS), fill);
-        if state.is_none() {
-            let y = rect.center().y;
-            painter.line_segment([pos2(rect.center().x - DASH_HALF, y), pos2(rect.center().x + DASH_HALF, y)], Stroke::new(2.0, tokens.panel));
-            return;
-        }
-        let points = TICK_POINTS.map(|(x, y)| pos2(rect.left() + x * rect.width(), rect.top() + y * rect.height()));
-        painter.line(points.to_vec(), Stroke::new(TICK_WIDTH, tokens.panel));
     }
 
     /// A one-line text field under its label; returns whether `text` changed
@@ -443,4 +422,23 @@ impl PropertySheet<'_> {
         self.ui.painter().text(pos2(self.left, line.top() + LABEL_CENTER), Align2::LEFT_CENTER, text, FontId::proportional(TEXT_SIZE), dim);
         self.drawn(line.bottom());
     }
+}
+
+/// A check's box in `rect`: on = dim fill and a tick in the panel's colour, mixed (`None`) = a dash, off = the row colour with a field's border
+pub(crate) fn paint_check(painter: &egui::Painter, tokens: &crate::theme::Tokens, rect: Rect, state: Option<bool>, hovered: bool) {
+    if state == Some(false) {
+        let border = if hovered { tokens.button_border } else { tokens.field_border };
+        painter.rect(rect, CornerRadius::same(CHECK_RADIUS), tokens.row, Stroke::new(1.0, border), StrokeKind::Inside);
+        return;
+    }
+
+    let fill = if hovered { tokens.text } else { tokens.text_dim };
+    painter.rect_filled(rect, CornerRadius::same(CHECK_RADIUS), fill);
+    if state.is_none() {
+        let y = rect.center().y;
+        painter.line_segment([pos2(rect.center().x - DASH_HALF, y), pos2(rect.center().x + DASH_HALF, y)], Stroke::new(2.0, tokens.panel));
+        return;
+    }
+    let points = TICK_POINTS.map(|(x, y)| pos2(rect.left() + x * rect.width(), rect.top() + y * rect.height()));
+    painter.line(points.to_vec(), Stroke::new(TICK_WIDTH, tokens.panel));
 }

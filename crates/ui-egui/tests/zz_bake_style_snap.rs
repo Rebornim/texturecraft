@@ -51,6 +51,14 @@ fn bake_style_snapshots() {
     h.run_steps(10);
     h.render().unwrap().save(dir.join("custom-cage.png")).unwrap();
 
+    h.get(egui_kittest::kittest::by().role(egui::accesskit::Role::Button).label("Curvature")).hover();
+    h.run_steps(4);
+    h.render().unwrap().save(dir.join("bakers-hover.png")).unwrap();
+    h.get_by_label("Mesh Map Bakers Menu").click();
+    h.run_steps(4);
+    h.render().unwrap().save(dir.join("bakers-menu.png")).unwrap();
+    h.key_press(egui::Key::Escape);
+    h.run_steps(4);
     h.state_mut().ui.dock.focus(texturecraft_ui_egui::docking::Panel::MeshMapSettings);
     for map in ["Ambient Occlusion", "Curvature", "Position", "ID", "Height", "Normal"] {
         h.get(egui_kittest::kittest::by().role(egui::accesskit::Role::Button).label(map)).click();

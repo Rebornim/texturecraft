@@ -1,4 +1,4 @@
-use egui::{Align, Layout, Rect, RichText, Sense, Stroke, Ui, UiBuilder, vec2};
+use egui::{Align, CornerRadius, FontId, Layout, Rect, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
 use egui_phosphor::regular as icon;
 use serde_json::json;
 use texturecraft_engine::ViewMode;
@@ -9,17 +9,29 @@ use super::set_picker_purpose::SetPickerPurpose;
 use crate::TextureCraftApp;
 use crate::docking::Panel;
 use crate::i18n::{baked_map_label, tr, trf};
-use crate::theme::Tokens;
-use crate::widgets::{icon_button, icon_dropdown_button};
+use crate::property_sheet::{CHECK_SIZE, paint_check};
+use crate::theme::{Tokens, semibold};
+use crate::widgets::icon_button;
 
-/// Height of one baker row, in points
-const ROW_HEIGHT: f32 = 24.0;
-/// Inset of a row's checkbox and name from its left edge, in points
+/// Height of one baker row, and of the Check All row
+const ROW_HEIGHT: f32 = 28.0;
+/// Inset of a row's check from its left edge
 const ROW_INSET: f32 = 6.0;
-/// Side of a row's map thumbnail, in points
-const THUMBNAIL_SIZE: f32 = 18.0;
-/// Side of a row's icon buttons and of the list menu button, in points
+/// Side of a row's map thumbnail, and the air on its sides
+const THUMBNAIL_SIZE: f32 = 22.0;
+const THUMBNAIL_AIR: f32 = 9.0;
+/// Side of a row's icon buttons and of the list menu button
 const ROW_BUTTON_SIZE: f32 = 20.0;
+/// Size of a row's glyphs
+const ROW_GLYPH_SIZE: f32 = 14.0;
+/// Size of the map names
+const NAME_SIZE: f32 = 12.0;
+/// Corner radius of a row's face and of a held-down glyph's box
+const ROW_RADIUS: u8 = 4;
+/// Opacity of a hovered row's face, against the selected row's full one
+const HOVER_FACE_OPACITY: f32 = 0.5;
+/// Air above and below the hairline under Check All
+const RULE_AIR: f32 = 4.0;
 
 /// The Common Settings button (with the sync icon when there are several texture sets), Check All with the list menu, and one row per map (checkbox enables, click selects)
 pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSettings) {
@@ -42,12 +54,12 @@ pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSe
 
     presets_menu(app, ui, settings);
 
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        check_all(ui, settings);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| list_menu(app, ui, settings));
-    });
-    ui.separator();
+    ui.add_space(RULE_AIR);
+    check_all_row(app, ui, settings);
+    ui.add_space(RULE_AIR);
+    let rule = ui.available_rect_before_wrap();
+    ui.painter().hline(rule.x_range(), rule.top(), Stroke::new(1.0, Tokens::get(ui.ctx()).separator));
+    ui.add_space(RULE_AIR);
 
     let selected = super::selected_map(app.ui.selected_baked_map, settings);
     let check_drag_id = ui.scope_id().with("check_drag");
@@ -126,23 +138,44 @@ fn presets_menu(app: &mut TextureCraftApp, ui: &mut Ui, settings: &BakeSettings)
     });
 }
 
-/// Enable every map, or disable them all when every map is already enabled
-fn check_all(ui: &mut Ui, settings: &mut BakeSettings) {
+/// Check All (mixed while only some maps are checked; a click checks them all, or unchecks them when all are) with the ≡ menu at the right
+fn check_all_row(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSettings) {
+    let tokens = Tokens::get(ui.ctx());
     let enabled_count = BakedMap::ALL.into_iter().filter(|map| settings.maps.is_enabled(*map)).count();
-    let mut all_enabled = enabled_count == BakedMap::ALL.len();
-    let some_enabled = enabled_count > 0 && !all_enabled;
+    let all_enabled = enabled_count == BakedMap::ALL.len();
+    let state = match enabled_count {
+        0 => Some(false),
+        _ if all_enabled => Some(true),
+        _ => None,
+    };
 
-    if ui.add(egui::Checkbox::new(&mut all_enabled, tr("Check All")).indeterminate(some_enabled)).changed() {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
+    let label = tr("Check All");
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), FontId::proportional(NAME_SIZE), tokens.text);
+    let check = Rect::from_center_size(pos2(rect.left() + ROW_INSET + CHECK_SIZE / 2.0, rect.center().y), vec2(CHECK_SIZE, CHECK_SIZE));
+    let hit = Rect::from_min_max(pos2(rect.left(), rect.top()), pos2(check.right() + THUMBNAIL_AIR + galley.size().x, rect.bottom()));
+    let response = ui.interact(hit, ui.scope_id().with("check_all"), Sense::click());
+    response.widget_info(|| match state {
+        Some(on) => egui::WidgetInfo::selected(egui::Role::CheckBox, true, on, label),
+        None => egui::WidgetInfo::labeled(egui::Role::CheckBox, true, label),
+    });
+    paint_check(ui.painter(), &tokens, check, state, response.hovered());
+    ui.painter().galley(pos2(check.right() + THUMBNAIL_AIR, rect.center().y - galley.size().y / 2.0), galley, tokens.text);
+    if response.clicked() {
         for map in BakedMap::ALL {
-            settings.maps.set_enabled(map, all_enabled);
+            settings.maps.set_enabled(map, !all_enabled);
         }
     }
+
+    let menu = Rect::from_center_size(pos2(rect.right() - ROW_BUTTON_SIZE / 2.0, rect.center().y), vec2(ROW_BUTTON_SIZE, ROW_BUTTON_SIZE));
+    let mut menu_ui = ui.new_child(UiBuilder::new().max_rect(menu));
+    list_menu(app, &mut menu_ui, settings);
 }
 
 /// The ≡ menu beside Check All: check states, and copying them or every setting to other texture sets
 fn list_menu(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSettings) {
-    let button = icon_dropdown_button(ui, icon::LIST, tr("Mesh Map Bakers Menu"), false, ROW_BUTTON_SIZE);
-    egui::Popup::menu(&button).show(|ui| {
+    let button = glyph_button(ui, ui.max_rect(), icon::LIST, tr("Mesh Map Bakers Menu"), GlyphLook::Plain);
+    egui::Popup::menu(&button).align(egui::RectAlign::BOTTOM_END).show(|ui| {
         if ui.button(tr("Check All Mesh Maps")).clicked() {
             BakedMap::ALL.into_iter().for_each(|map| settings.maps.set_enabled(map, true));
         }
@@ -169,64 +202,77 @@ fn copy_items(app: &mut TextureCraftApp, ui: &mut Ui, what: &'static str, map: O
     }
 }
 
-/// One baker row (`check_drag`: the state a pressed checkbox gives those the pointer then crosses); returns whether the row itself was clicked
+/// One baker row (`check_drag`: the state a pressed check gives those the pointer then crosses); returns whether the row itself was clicked
 fn row(app: &mut TextureCraftApp, ui: &mut Ui, map: BakedMap, settings: &mut BakeSettings, is_selected: bool, check_drag: &mut Option<bool>) -> bool {
     let several_sets = app.session.doc.project.texture_sets.len() > 1;
     let tokens = Tokens::get(ui.ctx());
     let name = tr(baked_map_label(map));
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, is_selected, name));
+    let response = response.on_hover_text(name);
 
-    let painter = ui.painter();
+    // The selected row is brighter and its name bold: no outline, no accent
+    let hovered = ui.rect_contains_pointer(rect);
     if is_selected {
-        painter.rect_filled(rect, tokens.cr(), tokens.row_selected);
-        painter.rect_stroke(rect, tokens.cr(), Stroke::new(1.0, tokens.accent), egui::StrokeKind::Inside);
-    } else if response.hovered() {
-        painter.rect_filled(rect, tokens.cr(), tokens.row_hover);
+        ui.painter().rect_filled(rect, CornerRadius::same(ROW_RADIUS), tokens.row_hover);
+    } else if hovered {
+        ui.painter().rect_filled(rect, CornerRadius::same(ROW_RADIUS), tokens.row_hover.gamma_multiply(HOVER_FACE_OPACITY));
     }
-    painter.hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, tokens.separator));
 
-    // Added after the row's own response, so the checkbox and icons take the clicks over it
-    let content_rect = rect.shrink2(vec2(ROW_INSET, 0.0));
-    let mut content = ui.new_child(UiBuilder::new().max_rect(content_rect).layout(Layout::left_to_right(Align::Center)));
-    let mut is_enabled = settings.maps.is_enabled(map);
-    let checkbox = content.checkbox(&mut is_enabled, "").on_hover_text(tr("Include in Bake"));
-    let is_dragged_over = drag_check(&content, &checkbox, rect, settings.maps.is_enabled(map), check_drag);
+    // Added after the row's own response, so the check and icons take the clicks over it
+    let check = Rect::from_center_size(pos2(rect.left() + ROW_INSET + CHECK_SIZE / 2.0, rect.center().y), vec2(CHECK_SIZE, CHECK_SIZE));
+    let checkbox = ui.interact(check.expand(3.0), ui.scope_id().with("include"), Sense::click()).on_hover_text(tr("Include in Bake"));
+    checkbox.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, settings.maps.is_enabled(map), name));
+    let is_dragged_over = drag_check(ui, &checkbox, rect, settings.maps.is_enabled(map), check_drag);
     if let Some(value) = check_drag.filter(|_| is_dragged_over) {
         settings.maps.set_enabled(map, value);
+    } else if checkbox.clicked() && check_drag.is_none() {
+        settings.maps.set_enabled(map, !settings.maps.is_enabled(map));
     }
-    let texture = app.bake_map_thumbnails.texture(content.ctx(), &app.session, app.session.ts(), map);
-    thumbnail(&mut content, texture.as_ref());
-    let show_icons = is_selected || content.rect_contains_pointer(rect);
-    content.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        let shares = settings.sync.shares(BakeSyncGroup::Map(map));
-        if several_sets && show_icons && icon_button(ui, icon::LINK, &trf("Synchronize {map} Settings", &[("map", &name)]), shares, ROW_BUTTON_SIZE).clicked() {
-            SetPicker::open(app, ui.ctx(), SetPickerPurpose::Sync(BakeSyncGroup::Map(map)));
-        }
-        if show_icons {
-            let baking = app.bake_progress().is_some();
-            if ui
-                .add_enabled_ui(!baking, |ui| icon_button(ui, icon::LIGHTNING, &trf("Bake {map} Only", &[("map", &name)]), false, ROW_BUTTON_SIZE))
-                .inner
-                .clicked()
-            {
-                let active = app.session.ts();
-                app.start_bake_of(vec![active], Some(map));
-            }
-            let shown = app.session.view == ViewMode::MeshMap(map);
-            if icon_button(ui, icon::EYE, &trf("Show {map} in the Viewport", &[("map", &name)]), shown, ROW_BUTTON_SIZE).clicked() {
-                let mode = if shown { "material".to_owned() } else { format!("map:{}", map.id()) };
-                app.run("viewport.view", json!({ "mode": mode }));
+    paint_check(ui.painter(), &tokens, check, Some(settings.maps.is_enabled(map)), checkbox.hovered());
+
+    let texture = app.bake_map_thumbnails.texture(ui.ctx(), &app.session, app.session.ts(), map);
+    let thumbnail_rect = Rect::from_min_size(pos2(check.right() + THUMBNAIL_AIR, rect.center().y - THUMBNAIL_SIZE / 2.0), vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE));
+    thumbnail(ui, thumbnail_rect, texture.as_ref());
+
+    // Icons right to left, only on the hovered or selected row
+    let mut icons_left = rect.right();
+    if is_selected || hovered {
+        let mut next_icon = || {
+            let slot =
+                Rect::from_center_size(pos2(icons_left - ROW_BUTTON_SIZE / 2.0 - ROW_INSET / 2.0, rect.center().y), vec2(ROW_BUTTON_SIZE, ROW_BUTTON_SIZE));
+            icons_left = slot.left() - ROW_INSET / 2.0;
+            slot
+        };
+        if several_sets {
+            let shares = settings.sync.shares(BakeSyncGroup::Map(map));
+            let look = if shares { GlyphLook::Lit } else { GlyphLook::Plain };
+            if glyph_button(ui, next_icon(), icon::LINK, &trf("Synchronize {map} Settings", &[("map", &name)]), look).clicked() {
+                SetPicker::open(app, ui.ctx(), SetPickerPurpose::Sync(BakeSyncGroup::Map(map)));
             }
         }
-        let text = if is_selected { RichText::new(name).strong() } else { RichText::new(name) };
-        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-            let label = ui.add(egui::Label::new(text).selectable(false).truncate()).on_hover_text(name);
-            if checkbox.clone().labelled_by(label.id).changed() && check_drag.is_none() {
-                settings.maps.set_enabled(map, is_enabled);
-            }
-        });
-    });
+        let baking = app.bake_progress().is_some();
+        let bolt = next_icon();
+        let bolt_label = trf("Bake {map} Only", &[("map", &name)]);
+        if ui.add_enabled_ui(!baking, |ui| glyph_button(ui, bolt, icon::LIGHTNING, &bolt_label, GlyphLook::Plain)).inner.clicked() {
+            let active = app.session.ts();
+            app.start_bake_of(vec![active], Some(map));
+        }
+        let shown = app.session.view == ViewMode::MeshMap(map);
+        let look = if shown { GlyphLook::Pressed } else { GlyphLook::Plain };
+        if glyph_button(ui, next_icon(), icon::EYE, &trf("Show {map} in the Viewport", &[("map", &name)]), look).clicked() {
+            let mode = if shown { "material".to_owned() } else { format!("map:{}", map.id()) };
+            app.run("viewport.view", json!({ "mode": mode }));
+        }
+    }
+
+    let name_left = thumbnail_rect.right() + THUMBNAIL_AIR;
+    let font = if is_selected { semibold(NAME_SIZE) } else { FontId::proportional(NAME_SIZE) };
+    let color = if is_selected { tokens.text_strong } else { tokens.text };
+    let mut job = egui::text::LayoutJob::simple_singleline(name.to_owned(), font, color);
+    job.wrap = egui::text::TextWrapping::truncate_at_width((icons_left - name_left).max(0.0));
+    let galley = ui.painter().layout_job(job);
+    ui.painter().galley(pos2(name_left, rect.center().y - galley.size().y / 2.0), galley, color);
 
     response.context_menu(|ui| {
         let labels = |more: &str, all: &str| [trf(more, &[("map", &name)]), trf(all, &[("map", &name)])];
@@ -251,18 +297,41 @@ fn drag_check(ui: &Ui, checkbox: &egui::Response, row: Rect, is_enabled: bool, c
     check_drag.is_some() && ui.rect_contains_pointer(Rect::from_x_y_ranges(checkbox.rect.x_range(), row.y_range()))
 }
 
-/// The baked map's thumbnail; before it is baked, an empty square crossed by a diagonal
-fn thumbnail(ui: &mut Ui, texture: Option<&egui::TextureHandle>) {
+/// The baked map's thumbnail in `rect`; before it is baked, an empty square crossed by a diagonal
+fn thumbnail(ui: &Ui, rect: Rect, texture: Option<&egui::TextureHandle>) {
     let tokens = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE), Sense::hover());
     let stroke = Stroke::new(1.0, tokens.text_dim);
     match texture {
         Some(texture) => {
             egui::Image::new(texture).paint_at(ui, rect);
         }
         None => {
-            ui.painter().line_segment([rect.left_top(), rect.right_bottom()], stroke);
+            ui.painter().line_segment([rect.left_bottom(), rect.right_top()], stroke);
+            ui.painter().rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Inside);
         }
     }
-    ui.painter().rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Inside);
+}
+
+/// How a row's glyph button shows its state
+#[derive(Clone, Copy, PartialEq)]
+enum GlyphLook {
+    Plain,
+    /// Bright: what it stands for is on (the set shares these settings)
+    Lit,
+    /// Held down in a box: the view it toggles is showing
+    Pressed,
+}
+
+/// A glyph in `rect` that answers clicks as `label`, its tooltip
+fn glyph_button(ui: &mut Ui, rect: Rect, glyph: &str, label: &str, look: GlyphLook) -> egui::Response {
+    let tokens = Tokens::get(ui.ctx());
+    let response = ui.interact(rect, ui.scope_id().with(label), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), look != GlyphLook::Plain, label));
+    let response = response.on_hover_text(label);
+    if look == GlyphLook::Pressed {
+        ui.painter().rect(rect, CornerRadius::same(ROW_RADIUS), tokens.separator, Stroke::new(1.0, tokens.button_border), egui::StrokeKind::Inside);
+    }
+    let color = if look == GlyphLook::Plain && !response.hovered() { tokens.text_dim } else { tokens.text_strong };
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, glyph, FontId::proportional(ROW_GLYPH_SIZE), color);
+    response
 }

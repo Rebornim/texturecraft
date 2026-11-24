@@ -185,7 +185,8 @@ pub fn mesh_map_settings_panel(app: &mut TextureCraftApp, ui: &mut Ui) {
         PropertySheet::show(ui, ("mesh_map_settings_sheet", selected), |sheet| map_settings::show(sheet, selected, &mut settings.maps, restore.inner))
     });
     if changed {
-        live_preview::settings_changed(app, ui.ctx().dragged_id().is_some());
+        let ctx = ui.ctx().clone();
+        live_preview::settings_changed(app, &ctx, ctx.dragged_id().is_some());
     }
 }
 

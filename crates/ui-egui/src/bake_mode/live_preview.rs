@@ -1,5 +1,6 @@
 //! The map preview: while Mesh Map Settings shows a map's settings, the 3D view shows that map on the model, re-baked small on a worker as the settings change
 
+use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::{Arc, OnceLock};
@@ -13,19 +14,31 @@ use crate::TextureCraftApp;
 use crate::docking::Panel;
 use crate::state::Mode;
 
-/// A preview bake on its worker
+/// Sizes a dragged slider's previews step through, smallest first
+const DRAG_SIZES: [BakeResolution; 5] = [BakeResolution::R64, BakeResolution::R128, BakeResolution::R256, BakeResolution::R512, BakeResolution::R1024];
+
+/// A drag preview this quick (seconds) bakes one size up next time; one this slow, one size down
+const DRAG_STEP_UP: f64 = 0.07;
+const DRAG_STEP_DOWN: f64 = 0.14;
+
+/// A preview bake on its worker: its size, when it started (app time) and whether a drag asked for it
 struct RunningPreview {
     target: LivePreviewTarget,
+    size: BakeResolution,
+    started: f64,
+    dragging: bool,
     progress: Arc<Progress>,
     receiver: Receiver<Result<BakeOutput>>,
 }
 
-/// The map preview's state: what it shows, the bake running for it, and whether a drag's small bakes still need the full-size one
+/// The map preview's state: what it shows, the bake running for it, the drag change waiting for it, whether a drag still needs the full-size bake, and each map's drag size on this machine
 #[derive(Default)]
 pub(crate) struct LivePreview {
     shown: Option<LivePreviewTarget>,
     running: Option<RunningPreview>,
+    drag_waiting: bool,
     refine_on_release: bool,
+    drag_sizes: BTreeMap<BakedMap, BakeResolution>,
 }
 
 impl LivePreview {
@@ -44,9 +57,28 @@ impl LivePreview {
     }
 
     fn cancel(&mut self) {
+        self.drag_waiting = false;
         if let Some(running) = self.running.take() {
             running.progress.cancel.store(true, Ordering::Relaxed);
         }
+    }
+
+    /// The size `map` bakes at while a slider drags: it starts small and follows how fast this machine bakes it
+    fn drag_size(&self, map: BakedMap) -> BakeResolution {
+        self.drag_sizes.get(&map).copied().unwrap_or_else(|| first_drag_size(map))
+    }
+
+    /// A drag preview of `map` at `size` took `seconds`: step its drag size up or down one size, never past `chosen`
+    fn learn_drag_size(&mut self, map: BakedMap, size: BakeResolution, seconds: f64, chosen: BakeResolution) {
+        let Some(index) = DRAG_SIZES.iter().position(|step| *step == size) else { return };
+        let next = if seconds < DRAG_STEP_UP {
+            DRAG_SIZES.get(index + 1).copied().filter(|bigger| bigger.pixels() <= chosen.pixels()).unwrap_or(size)
+        } else if seconds > DRAG_STEP_DOWN {
+            index.checked_sub(1).and_then(|smaller| DRAG_SIZES.get(smaller).copied()).unwrap_or(size)
+        } else {
+            size
+        };
+        self.drag_sizes.insert(map, next);
     }
 }
 
@@ -58,8 +90,8 @@ pub(crate) fn wanted(app: &TextureCraftApp) -> Option<LivePreviewTarget> {
     (shows && app.ui.bake_visualization.map_preview).then(|| LivePreviewTarget { set, map: super::selected_map(app.ui.selected_baked_map, settings) })
 }
 
-/// A map setting changed: bake the preview again, small while a slider is dragged and at the chosen size otherwise
-pub(crate) fn settings_changed(app: &mut TextureCraftApp, dragging: bool) {
+/// A map setting changed: bake the preview again. While a slider drags, a running bake finishes and shows before the newest change bakes, so pictures keep coming; otherwise the change cancels it and bakes at the chosen size
+pub(crate) fn settings_changed(app: &mut TextureCraftApp, ctx: &egui::Context, dragging: bool) {
     let Some(target) = app.live_preview.shown else { return };
 
     // Web builds bake on the UI thread, so they wait for the release
@@ -68,9 +100,14 @@ pub(crate) fn settings_changed(app: &mut TextureCraftApp, dragging: bool) {
         return;
     }
 
-    let size = if dragging { drag_size(target.map) } else { app.ui.bake_visualization.map_preview_size };
     app.live_preview.refine_on_release = dragging;
-    start(app, target, size);
+    if !dragging {
+        start(app, ctx, target, app.ui.bake_visualization.map_preview_size, false);
+    } else if app.live_preview.running.as_ref().is_some_and(|running| running.dragging) {
+        app.live_preview.drag_waiting = true;
+    } else {
+        start(app, ctx, target, app.live_preview.drag_size(target.map), true);
+    }
 }
 
 /// Once a frame: follow what the preview should show, take a finished bake, and refine after a drag
@@ -85,14 +122,15 @@ pub(crate) fn poll(app: &mut TextureCraftApp, ctx: &egui::Context) {
     if wanted != app.live_preview.shown {
         app.live_preview.release(&mut app.session);
         if let Some(target) = wanted {
-            show(app, target);
+            show(app, ctx, target);
         }
     }
 
+    // The release: the drag's last value at the chosen size, replacing any drag bake still running
     if app.live_preview.refine_on_release && ctx.dragged_id().is_none() {
         app.live_preview.refine_on_release = false;
         if let Some(target) = app.live_preview.shown {
-            start(app, target, app.ui.bake_visualization.map_preview_size);
+            start(app, ctx, target, app.ui.bake_visualization.map_preview_size, false);
         }
     }
 
@@ -100,12 +138,21 @@ pub(crate) fn poll(app: &mut TextureCraftApp, ctx: &egui::Context) {
     ctx.request_repaint_after(std::time::Duration::from_millis(16));
     match running.receiver.try_recv() {
         Ok(Ok(output)) => {
-            let target = running.target;
+            let (target, size, dragging) = (running.target, running.size, running.dragging);
+            let seconds = ctx.input(|input| input.time) - running.started;
             app.live_preview.running = None;
+            if dragging {
+                app.live_preview.learn_drag_size(target.map, size, seconds, app.ui.bake_visualization.map_preview_size);
+            }
             if let Some(data) = output.maps.get(&target.map) {
                 let streamed =
                     StreamedMap { map: target.map, index: 0, total: 1, resolution: output.resolution, height: output.height, data: Arc::new(data.clone()) };
                 app.session.bake_preview_map(target.set, streamed);
+            }
+
+            // The newest drag change waited for this picture
+            if std::mem::take(&mut app.live_preview.drag_waiting) && app.live_preview.refine_on_release {
+                start(app, ctx, target, app.live_preview.drag_size(target.map), true);
             }
         }
         // A failed or cancelled preview keeps the picture it had
@@ -115,7 +162,7 @@ pub(crate) fn poll(app: &mut TextureCraftApp, ctx: &egui::Context) {
 }
 
 /// Start showing `target`: the map's last real bake at once when there is one, else a preview bake at the chosen size
-fn show(app: &mut TextureCraftApp, target: LivePreviewTarget) {
+fn show(app: &mut TextureCraftApp, ctx: &egui::Context, target: LivePreviewTarget) {
     app.session.bake_preview_begin(vec![(target.set, vec![target.map])]);
     app.live_preview.shown = Some(target);
 
@@ -125,18 +172,22 @@ fn show(app: &mut TextureCraftApp, target: LivePreviewTarget) {
             let height = (data.len() / target.map.components()).checked_div(resolution as usize).unwrap_or(0) as u32;
             app.session.bake_preview_map(target.set, StreamedMap { map: target.map, index: 0, total: 1, resolution, height, data });
         }
-        None => start(app, target, app.ui.bake_visualization.map_preview_size),
+        None => {
+            let size = app.ui.bake_visualization.map_preview_size;
+            start(app, ctx, target, size, false);
+        }
     }
 }
 
-/// Bake `target`'s map alone at `size` on a worker, cancelling the preview bake still running
-fn start(app: &mut TextureCraftApp, target: LivePreviewTarget, size: BakeResolution) {
+/// Bake `target`'s map alone at `size` on a worker (`dragging`: for a slider still moving), cancelling the preview bake still running
+fn start(app: &mut TextureCraftApp, ctx: &egui::Context, target: LivePreviewTarget, size: BakeResolution, dragging: bool) {
     app.live_preview.cancel();
     let Ok(mut task) = app.session.bake_task(target.set) else { return };
 
     task.settings.maps.select([target.map]);
     let own = task.settings.common.resolution;
-    task.settings.common.resolution = if own.pixels() < size.pixels() { own } else { size };
+    let size = if own.pixels() < size.pixels() { own } else { size };
+    task.settings.common.resolution = size;
     task.settings.common.resolution_height = None;
 
     let progress = Arc::new(Progress::new());
@@ -145,11 +196,12 @@ fn start(app: &mut TextureCraftApp, target: LivePreviewTarget, size: BakeResolut
         Some(pool) => pool.install(|| task.run(&worker_progress)),
         None => task.run(&worker_progress),
     });
-    app.live_preview.running = Some(RunningPreview { target, progress, receiver });
+    let started = ctx.input(|input| input.time);
+    app.live_preview.running = Some(RunningPreview { target, size, started, dragging, progress, receiver });
 }
 
-/// The size a dragged slider's previews bake at: 128, or 64 for the ray-traced bakers, which take well over 100 ms at 128 on a 4-core machine
-fn drag_size(map: BakedMap) -> BakeResolution {
+/// A dragged slider's first preview size before this machine's speed is known: 64 for the ray-traced bakers (well over 100 ms at 128 on a 4-core machine), else 128
+fn first_drag_size(map: BakedMap) -> BakeResolution {
     match map {
         BakedMap::AmbientOcclusion | BakedMap::Thickness | BakedMap::BentNormal | BakedMap::Curvature => BakeResolution::R64,
         _ => BakeResolution::R128,

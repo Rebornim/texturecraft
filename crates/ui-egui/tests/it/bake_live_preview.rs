@@ -83,3 +83,33 @@ fn switched_off_the_preview_never_shows() {
 
     assert!(!harness.state().session.bake_preview_active());
 }
+
+#[test]
+fn pictures_keep_coming_while_the_slider_is_still_moving() {
+    let mut harness = harness();
+    // Many rays: each preview bake takes several frames, as on a real mesh
+    harness.state_mut().session.doc.project.texture_sets[0].bake.maps.ao.parameters.rays.rays = 256;
+    wait_for_preview(&mut harness, |_| true);
+    let track = harness.get_by_role_and_label(Role::Slider, "Spread Angle").rect();
+    let from = track.left_center() + egui::vec2(track.width() * 0.05, 0.0);
+    let picture = |harness: &Harness<'static, TextureCraftApp>| {
+        harness
+            .state()
+            .session
+            .bake_preview_baked(0)
+            .and_then(|baked| baked.maps.get(&BakedMap::AmbientOcclusion).map(|data| std::sync::Arc::as_ptr(data) as usize))
+    };
+
+    harness.hover_at(from);
+    harness.run_steps(1);
+    harness.event(Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    let mut pictures = std::collections::BTreeSet::new();
+    for step in 0..600 {
+        // Every frame moves the slider, as a steady drag does
+        harness.hover_at(from + egui::vec2(track.width() * 0.002 * (step % 200) as f32, 0.0));
+        harness.run_steps(1);
+        pictures.extend(picture(&harness));
+    }
+
+    assert!(pictures.len() > 2, "new pictures arrive while the slider never stops");
+}

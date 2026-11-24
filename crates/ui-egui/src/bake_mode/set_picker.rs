@@ -107,7 +107,8 @@ impl SetPicker {
                 }
             }
         }
-        super::controls::indented(ui, |ui| {
+        ui.horizontal_top(|ui| {
+            ui.add_space(ui.spacing().indent);
             ui.vertical(|ui| {
                 for index in listed {
                     if let (Some(chosen), Some(name)) = (self.chosen.get_mut(index), names.get(index)) {

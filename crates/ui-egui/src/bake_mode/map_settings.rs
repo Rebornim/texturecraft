@@ -1,6 +1,6 @@
-use super::controls::{choice, hint, integer, number};
+use super::controls::{choice, integer, number};
 use crate::i18n::tr;
-use egui::Ui;
+use crate::property_sheet::PropertySheet;
 use serde::Serialize;
 use serde_json::{Value, json};
 use texturecraft_engine::core::{
@@ -9,39 +9,52 @@ use texturecraft_engine::core::{
     RayDistribution, RaySettings, SelfOcclusion, ThicknessNormalization, ThicknessSettings,
 };
 
-/// Draw `map`'s parameters with Restore Defaults; maps without parameters say so
-pub(super) fn show(ui: &mut Ui, map: BakedMap, settings: &mut MeshMapSettings) -> Option<Value> {
+/// Whether `map` has parameters (and so a Restore Defaults)
+pub(super) fn has_parameters(map: BakedMap) -> bool {
+    !matches!(map, BakedMap::Normal | BakedMap::WorldNormal | BakedMap::Opacity)
+}
+
+/// Draw `map`'s parameters; `restore` sets them back to the defaults. Maps without parameters say so
+pub(super) fn show(sheet: &mut PropertySheet<'_>, map: BakedMap, settings: &mut MeshMapSettings, restore: bool) -> Option<Value> {
     match map {
         BakedMap::Normal | BakedMap::WorldNormal | BakedMap::Opacity => {
-            hint(ui, tr("No Parameters"));
+            sheet.dim_line(tr("No Parameters"));
             None
         }
-        BakedMap::Id => parameters(ui, "id", &mut settings.id.parameters, id),
-        BakedMap::AmbientOcclusion => parameters(ui, "ao", &mut settings.ao.parameters, ambient_occlusion),
-        BakedMap::Curvature => parameters(ui, "curvature", &mut settings.curvature.parameters, curvature),
-        BakedMap::Position => parameters(ui, "position", &mut settings.position.parameters, position),
-        BakedMap::Thickness => parameters(ui, "thickness", &mut settings.thickness.parameters, thickness),
-        BakedMap::Height => parameters(ui, "height", &mut settings.height.parameters, height),
-        BakedMap::BentNormal => parameters(ui, "bent_normal", &mut settings.bent_normal.parameters, bent_normal),
+        BakedMap::Id => parameters(sheet, "id", &mut settings.id.parameters, restore, id),
+        BakedMap::AmbientOcclusion => parameters(sheet, "ao", &mut settings.ao.parameters, restore, ambient_occlusion),
+        BakedMap::Curvature => parameters(sheet, "curvature", &mut settings.curvature.parameters, restore, curvature),
+        BakedMap::Position => parameters(sheet, "position", &mut settings.position.parameters, restore, position),
+        BakedMap::Thickness => parameters(sheet, "thickness", &mut settings.thickness.parameters, restore, thickness),
+        BakedMap::Height => parameters(sheet, "height", &mut settings.height.parameters, restore, height),
+        BakedMap::BentNormal => parameters(sheet, "bent_normal", &mut settings.bent_normal.parameters, restore, bent_normal),
     }
 }
 
-/// A map's controls, then a right-aligned Restore Defaults that resets only its parameters
-fn parameters<T: Default + Serialize>(ui: &mut Ui, map_key: &str, parameters: &mut T, controls: impl FnOnce(&mut Ui, &mut T)) -> Option<Value> {
-    controls(ui, parameters);
-    ui.add_space(6.0);
-
-    let restore = ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| ui.button(tr("Restore Defaults"))).inner;
-    if restore.clicked() {
+/// A map's controls; on `restore` only its parameters go back to the defaults
+fn parameters<T: Default + Serialize>(
+    sheet: &mut PropertySheet<'_>,
+    map_key: &str,
+    parameters: &mut T,
+    restore: bool,
+    controls: impl FnOnce(&mut PropertySheet<'_>, &mut T),
+) -> Option<Value> {
+    controls(sheet, parameters);
+    if restore {
         *parameters = T::default();
         return Some(json!({"maps": {map_key: {"parameters": parameters}}}));
     }
     None
 }
 
-fn id(ui: &mut Ui, settings: &mut IdSettings) {
+/// Settings that belong to the one above: indented under it, greyed while it rules them out
+fn dependent(sheet: &mut PropertySheet<'_>, applies: bool, body: impl FnOnce(&mut PropertySheet<'_>)) {
+    sheet.greyed(applies, None, |sheet| sheet.indented(body));
+}
+
+fn id(sheet: &mut PropertySheet<'_>, settings: &mut IdSettings) {
     choice(
-        ui,
+        sheet,
         tr("Color Source"),
         &mut settings.source,
         &[
@@ -52,11 +65,11 @@ fn id(ui: &mut Ui, settings: &mut IdSettings) {
             (IdColorSource::Submesh, tr("Submesh")),
         ],
     );
-    // Dependent controls show greyed, never hidden, as in the reference
+    // Dependent controls show greyed and indented, never hidden, as in the reference
     let generates_colors = matches!(settings.source, IdColorSource::FileId | IdColorSource::MeshId | IdColorSource::Submesh);
-    ui.add_enabled_ui(generates_colors, |ui| {
+    dependent(sheet, generates_colors, |sheet| {
         choice(
-            ui,
+            sheet,
             tr("Color Generator"),
             &mut settings.generator,
             &[(IdColorGenerator::Random, tr("Random")), (IdColorGenerator::HueShift, tr("Hue Shift")), (IdColorGenerator::Grayscale, tr("Grayscale"))],
@@ -64,36 +77,36 @@ fn id(ui: &mut Ui, settings: &mut IdSettings) {
     });
 }
 
-fn rays(ui: &mut Ui, settings: &mut RaySettings) {
-    integer(ui, tr("Secondary Rays"), &mut settings.rays, 1..=256);
-    number(ui, tr("Min Occluder Distance"), &mut settings.min_distance, 0.00001..=1.0, 5);
-    number(ui, tr("Max Occluder Distance"), &mut settings.max_distance, 0.00001..=if settings.relative_to_bounding_box { 1.0 } else { 10.0 }, 5);
-    if ui.checkbox(&mut settings.relative_to_bounding_box, tr("Relative to Bounding Box")).changed() && settings.relative_to_bounding_box {
+fn rays(sheet: &mut PropertySheet<'_>, settings: &mut RaySettings) {
+    integer(sheet, tr("Secondary Rays"), &mut settings.rays, 1..=256);
+    number(sheet, tr("Min Occluder Distance"), &mut settings.min_distance, 0.00001..=1.0, 5);
+    number(sheet, tr("Max Occluder Distance"), &mut settings.max_distance, 0.00001..=if settings.relative_to_bounding_box { 1.0 } else { 10.0 }, 5);
+    if sheet.check(tr("Relative to Bounding Box"), &mut settings.relative_to_bounding_box) && settings.relative_to_bounding_box {
         settings.max_distance = settings.max_distance.min(1.0);
     }
-    number(ui, tr("Spread Angle"), &mut settings.spread, 0.0..=180.0, 0);
-    choice(ui, tr("Distribution"), &mut settings.distribution, &[(RayDistribution::Uniform, tr("Uniform")), (RayDistribution::Cosine, tr("Cosine"))]);
+    number(sheet, tr("Spread Angle"), &mut settings.spread, 0.0..=180.0, 0);
+    choice(sheet, tr("Distribution"), &mut settings.distribution, &[(RayDistribution::Uniform, tr("Uniform")), (RayDistribution::Cosine, tr("Cosine"))]);
 }
 
-fn backface(ui: &mut Ui, settings: &mut BackfaceMode) {
+fn backface(sheet: &mut PropertySheet<'_>, settings: &mut BackfaceMode) {
     choice(
-        ui,
+        sheet,
         tr("Ignore Backface"),
         settings,
         &[(BackfaceMode::Never, tr("Never")), (BackfaceMode::Always, tr("Always")), (BackfaceMode::ByMeshName, tr("By Mesh Name"))],
     );
 }
 
-fn occlusion(ui: &mut Ui, label: &str, settings: &mut SelfOcclusion) {
-    choice(ui, label, settings, &[(SelfOcclusion::Always, tr("Always")), (SelfOcclusion::SameMeshName, tr("Only Same Mesh Name"))]);
+fn occlusion(sheet: &mut PropertySheet<'_>, label: &str, settings: &mut SelfOcclusion) {
+    choice(sheet, label, settings, &[(SelfOcclusion::Always, tr("Always")), (SelfOcclusion::SameMeshName, tr("Only Same Mesh Name"))]);
 }
 
-fn ambient_occlusion(ui: &mut Ui, settings: &mut AmbientOcclusionSettings) {
-    rays(ui, &mut settings.rays);
-    backface(ui, &mut settings.ignore_backface);
-    occlusion(ui, tr("Self Occlusion"), &mut settings.self_occlusion);
+fn ambient_occlusion(sheet: &mut PropertySheet<'_>, settings: &mut AmbientOcclusionSettings) {
+    rays(sheet, &mut settings.rays);
+    backface(sheet, &mut settings.ignore_backface);
+    occlusion(sheet, tr("Self Occlusion"), &mut settings.self_occlusion);
     choice(
-        ui,
+        sheet,
         tr("Attenuation"),
         &mut settings.attenuation,
         &[
@@ -102,76 +115,76 @@ fn ambient_occlusion(ui: &mut Ui, settings: &mut AmbientOcclusionSettings) {
             (AmbientOcclusionAttenuation::Linear, tr("Linear")),
         ],
     );
-    ui.checkbox(&mut settings.ground_plane.enabled, tr("Ground Plane"));
-    ui.add_enabled_ui(settings.ground_plane.enabled, |ui| number(ui, tr("Ground Plane Offset"), &mut settings.ground_plane.offset, 0.0..=100.0, 2));
+    sheet.check(tr("Ground Plane"), &mut settings.ground_plane.enabled);
+    dependent(sheet, settings.ground_plane.enabled, |sheet| number(sheet, tr("Ground Plane Offset"), &mut settings.ground_plane.offset, 0.0..=100.0, 2));
 }
 
-fn curvature(ui: &mut Ui, settings: &mut CurvatureSettings) {
+fn curvature(sheet: &mut PropertySheet<'_>, settings: &mut CurvatureSettings) {
     choice(
-        ui,
+        sheet,
         tr("Method"),
         &mut settings.method,
         &[(CurvatureMethod::Mesh, tr("Generate from Mesh")), (CurvatureMethod::NormalMap, tr("Generate from Normal Map"))],
     );
     match settings.method {
         CurvatureMethod::NormalMap => {
-            number(ui, tr("Details"), &mut settings.normal_map.details, 0.0..=1.0, 2);
-            ui.checkbox(&mut settings.normal_map.enable_seams, tr("Enable Seams"));
+            number(sheet, tr("Details"), &mut settings.normal_map.details, 0.0..=1.0, 2);
+            sheet.check(tr("Enable Seams"), &mut settings.normal_map.enable_seams);
             let seams = settings.normal_map.enable_seams;
-            ui.add_enabled_ui(seams, |ui| number(ui, tr("Seams Intensity"), &mut settings.normal_map.seams_intensity, 0.0..=1.0, 2));
+            dependent(sheet, seams, |sheet| number(sheet, tr("Seams Intensity"), &mut settings.normal_map.seams_intensity, 0.0..=1.0, 2));
         }
         CurvatureMethod::Mesh => {
             let mesh = &mut settings.mesh;
-            integer(ui, tr("Secondary Rays"), &mut mesh.rays, 1..=256);
-            number(ui, tr("Sampling Radius"), &mut mesh.sampling_radius, 0.00001..=if mesh.relative_to_bounding_box { 10.0 } else { 1.0 }, 5);
-            if ui.checkbox(&mut mesh.relative_to_bounding_box, tr("Relative to Bounding Box")).changed() && !mesh.relative_to_bounding_box {
+            integer(sheet, tr("Secondary Rays"), &mut mesh.rays, 1..=256);
+            number(sheet, tr("Sampling Radius"), &mut mesh.sampling_radius, 0.00001..=if mesh.relative_to_bounding_box { 10.0 } else { 1.0 }, 5);
+            if sheet.check(tr("Relative to Bounding Box"), &mut mesh.relative_to_bounding_box) && !mesh.relative_to_bounding_box {
                 mesh.sampling_radius = mesh.sampling_radius.min(1.0);
             }
-            occlusion(ui, tr("Self Intersection"), &mut mesh.self_intersection);
-            ui.checkbox(&mut mesh.auto_tonemapping, tr("Auto Tonemapping (per UV Tile)"));
-            ui.add_enabled_ui(!mesh.auto_tonemapping, |ui| {
-                number(ui, tr("Value Bounds Min"), &mut mesh.value_min, -10.0..=10.0, 2);
-                number(ui, tr("Value Bounds Max"), &mut mesh.value_max, -10.0..=10.0, 2);
+            occlusion(sheet, tr("Self Intersection"), &mut mesh.self_intersection);
+            sheet.check(tr("Auto Tonemapping (per UV Tile)"), &mut mesh.auto_tonemapping);
+            dependent(sheet, !mesh.auto_tonemapping, |sheet| {
+                number(sheet, tr("Value Bounds Min"), &mut mesh.value_min, -10.0..=10.0, 2);
+                number(sheet, tr("Value Bounds Max"), &mut mesh.value_max, -10.0..=10.0, 2);
             });
         }
     }
 }
 
-fn position(ui: &mut Ui, settings: &mut PositionSettings) {
+fn position(sheet: &mut PropertySheet<'_>, settings: &mut PositionSettings) {
     // The reference splits the axis into a Mode and an Axis that applies only to One Axis
     let mut one_axis = settings.axis != PositionAxis::All;
-    choice(ui, tr("Mode"), &mut one_axis, &[(false, tr("All Axis")), (true, tr("One Axis"))]);
+    choice(sheet, tr("Mode"), &mut one_axis, &[(false, tr("All Axis")), (true, tr("One Axis"))]);
     if one_axis && settings.axis == PositionAxis::All {
         settings.axis = PositionAxis::X;
     } else if !one_axis {
         settings.axis = PositionAxis::All;
     }
-    ui.add_enabled_ui(one_axis, |ui| {
+    dependent(sheet, one_axis, |sheet| {
         let mut axis = if one_axis { settings.axis } else { PositionAxis::X };
-        choice(ui, tr("Axis"), &mut axis, &[(PositionAxis::X, "X"), (PositionAxis::Y, "Y"), (PositionAxis::Z, "Z")]);
+        choice(sheet, tr("Axis"), &mut axis, &[(PositionAxis::X, "X"), (PositionAxis::Y, "Y"), (PositionAxis::Z, "Z")]);
         if one_axis {
             settings.axis = axis;
         }
     });
     choice(
-        ui,
+        sheet,
         tr("Normalization Type"),
         &mut settings.normalization,
         &[(PositionMode::BoundingBox, tr("BBox")), (PositionMode::BoundingSphere, tr("BSphere")), (PositionMode::None, tr("None"))],
     );
     choice(
-        ui,
+        sheet,
         tr("Normalization Scale"),
         &mut settings.scale,
         &[(PositionNormalizationScale::PerMaterial, tr("Per Material")), (PositionNormalizationScale::FullScene, tr("Full Scene"))],
     );
 }
 
-fn thickness(ui: &mut Ui, settings: &mut ThicknessSettings) {
-    rays(ui, &mut settings.rays);
-    occlusion(ui, tr("Self Occlusion"), &mut settings.self_occlusion);
+fn thickness(sheet: &mut PropertySheet<'_>, settings: &mut ThicknessSettings) {
+    rays(sheet, &mut settings.rays);
+    occlusion(sheet, tr("Self Occlusion"), &mut settings.self_occlusion);
     choice(
-        ui,
+        sheet,
         tr("Normalization"),
         &mut settings.normalization,
         &[
@@ -182,9 +195,9 @@ fn thickness(ui: &mut Ui, settings: &mut ThicknessSettings) {
     );
 }
 
-fn height(ui: &mut Ui, settings: &mut HeightSettings) {
+fn height(sheet: &mut PropertySheet<'_>, settings: &mut HeightSettings) {
     choice(
-        ui,
+        sheet,
         tr("Normalization"),
         &mut settings.normalization,
         &[
@@ -195,11 +208,11 @@ fn height(ui: &mut Ui, settings: &mut HeightSettings) {
         ],
     );
     let manual = settings.normalization == HeightNormalization::Manual;
-    ui.add_enabled_ui(manual, |ui| number(ui, tr("Scaling Divisor"), &mut settings.scaling_divisor, 0.00001..=100.0, 5));
+    dependent(sheet, manual, |sheet| number(sheet, tr("Scaling Divisor"), &mut settings.scaling_divisor, 0.00001..=100.0, 5));
 }
 
-fn bent_normal(ui: &mut Ui, settings: &mut BentNormalSettings) {
-    rays(ui, &mut settings.rays);
-    backface(ui, &mut settings.ignore_backface);
-    occlusion(ui, tr("Self Occlusion"), &mut settings.self_occlusion);
+fn bent_normal(sheet: &mut PropertySheet<'_>, settings: &mut BentNormalSettings) {
+    rays(sheet, &mut settings.rays);
+    backface(sheet, &mut settings.ignore_backface);
+    occlusion(sheet, tr("Self Occlusion"), &mut settings.self_occlusion);
 }

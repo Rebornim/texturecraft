@@ -6,9 +6,7 @@ mod bake_visualization_panel;
 mod bake_visualization_toggles;
 mod breadcrumb;
 mod common_settings;
-mod section_jump;
 mod section_opening;
-mod settings_section;
 pub(crate) use bake_checks::bake_warnings;
 pub use bake_paint_brush::BakePaintBrush;
 pub(crate) use bake_visualization_panel::bake_visualization_panel;
@@ -30,6 +28,7 @@ use texturecraft_engine::core::{BakeSettings, BakeSyncGroup, BakedMap, CageType}
 
 use crate::TextureCraftApp;
 use crate::i18n::{tr, trf};
+use crate::property_sheet::PropertySheet;
 use crate::state::Mode;
 use crate::widgets::{icon_button, primary_button};
 
@@ -168,20 +167,26 @@ pub fn mesh_map_settings_panel(app: &mut TextureCraftApp, ui: &mut Ui) {
     let Some(texture_set) = app.session.doc.project.texture_sets.get(app.session.ts()) else { return };
 
     let selected = selected_map(app.ui.selected_baked_map, &texture_set.bake);
-    breadcrumb::show(app, ui, selected);
-    ui.separator();
+    let restore = ui.horizontal(|ui| {
+        ui.add_space(crate::property_sheet::SIDE_PADDING_POINTS);
+        ui.vertical(|ui| {
+            ui.set_width(ui.available_width() - crate::property_sheet::SIDE_PADDING_POINTS);
+            breadcrumb::show(app, ui, selected, map_settings::has_parameters(selected))
+        })
+        .inner
+    });
     let texture_sets = json!(app.session.doc.project.bake_synced_sets(app.session.ts(), BakeSyncGroup::Map(selected)));
     edit_settings(app, ui, "mesh_map_settings", texture_sets, |_, ui, settings| {
-        ui.push_id(selected, |ui| map_settings::show(ui, selected, &mut settings.maps)).inner
+        PropertySheet::show(ui, ("mesh_map_settings_sheet", selected), |sheet| map_settings::show(sheet, selected, &mut settings.maps, restore.inner))
     });
 }
 
 /// The Common Settings panel: output, high poly, cage and skew settings
 pub fn common_settings_panel(app: &mut TextureCraftApp, ui: &mut Ui) {
-    section_jump::bar(ui);
-    ui.separator();
     let texture_sets = json!(app.session.doc.project.bake_synced_sets(app.session.ts(), BakeSyncGroup::Common));
-    edit_settings(app, ui, "bake_common_settings", texture_sets, common_settings::show);
+    edit_settings(app, ui, "bake_common_settings", texture_sets, |app, ui, settings| {
+        PropertySheet::show(ui, "bake_common_sheet", |sheet| common_settings::show(app, sheet, settings))
+    });
 }
 
 /// The map whose settings show: the chosen one, else the first enabled map, else Normal

@@ -112,7 +112,8 @@ pub(super) fn unique_name(file_name: &str, taken: &[&str]) -> String {
 pub(super) fn parse_mesh(file_name: &str, bytes: Vec<u8>) -> Result<BakeMesh> {
     let h = texturecraft_formats::import_high_poly_bytes(file_name, &bytes).map_err(|e| EngineError::Other(format!("{file_name}: {e}")))?;
     let base_color = h.base_color.into_iter().map(|c| c.map(Arc::new)).collect();
-    Ok(BakeMesh { name: file_name.to_string(), bytes: Arc::new(bytes), mesh: Arc::new(h.mesh), base_color })
+    let folder = std::path::Path::new(file_name).parent().map(|folder| folder.display().to_string()).filter(|folder| !folder.is_empty());
+    Ok(BakeMesh { name: file_name.to_string(), folder, bytes: Arc::new(bytes), mesh: Arc::new(h.mesh), base_color })
 }
 
 impl Session {

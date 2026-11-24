@@ -19,7 +19,7 @@ pub fn dnd_release<T: std::any::Any + Send + Sync>(resp: &Response) -> Option<st
 /// Returns the response of the track (`.changed()` while dragged); for a value kept in the
 /// document, use [`slider_edit`].
 pub fn slider(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, decimals: usize) -> Response {
-    slider_inner(ui, label, value, range, decimals, "").0
+    slider_inner(ui, label, value, range, decimals).0
 }
 
 /// For an editor `id` drawn every frame: `Some(merge)` when it `changed`, merge true for a press's later changes (one undo step per drag; typing never merges)
@@ -57,12 +57,7 @@ pub(crate) fn press_edit(ui: &Ui, id: egui::Id, changed: bool) -> Option<bool> {
 /// true for the later changes of one drag, so the edit that applies them (with the command's
 /// `merge` param) continues the drag's first undo step.
 pub fn slider_edit(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, decimals: usize) -> Option<bool> {
-    slider_inner(ui, label, value, range, decimals, "").1
-}
-
-/// [`slider_edit`] showing `suffix` after the value (a unit such as °), which a typed value may leave out
-pub fn slider_edit_with_suffix(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, decimals: usize, suffix: &str) -> Option<bool> {
-    slider_inner(ui, label, value, range, decimals, suffix).1
+    slider_inner(ui, label, value, range, decimals).1
 }
 
 /// Least width of a slider's value field, wide enough for a short number
@@ -80,24 +75,12 @@ const SLIDER_KNOB_RADIUS: f32 = 4.5;
 
 /// The row above a slider's track, `label` and `value` as a field to type in: the field's id, and `Some(false)` on the frame a typed value replaces `value`
 pub(crate) fn value_header(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, decimals: usize) -> (egui::Id, Option<bool>) {
-    suffixed_value_header(ui, label, value, range, decimals, "")
-}
-
-/// [`value_header`] showing `suffix` after the value, which a typed value may leave out
-fn suffixed_value_header(
-    ui: &mut Ui,
-    label: &str,
-    value: &mut f32,
-    range: std::ops::RangeInclusive<f32>,
-    decimals: usize,
-    suffix: &str,
-) -> (egui::Id, Option<bool>) {
     let tokens = Tokens::get(ui.ctx());
     let (minimum, maximum) = (*range.start(), *range.end());
     let font = egui::TextStyle::Body.resolve(ui.style());
     let value_width = [minimum, maximum]
         .into_iter()
-        .map(|bound| ui.painter().layout_no_wrap(format!("{bound:.decimals$}{suffix}"), font.clone(), tokens.text).size().x)
+        .map(|bound| ui.painter().layout_no_wrap(format!("{bound:.decimals$}"), font.clone(), tokens.text).size().x)
         .fold(SLIDER_VALUE_MIN_WIDTH, f32::max);
     let mut edit = None;
     let field = ui
@@ -105,7 +88,7 @@ fn suffixed_value_header(
             ui.label(RichText::new(label).color(tokens.text));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let id = ui.next_auto_id();
-                let shown = format!("{value:.decimals$}{suffix}");
+                let shown = format!("{value:.decimals$}");
 
                 // Keep unfinished input while the document value is re-read each frame
                 let mut text = ui.data(|data| data.get_temp::<String>(id)).unwrap_or_else(|| shown.clone());
@@ -128,7 +111,7 @@ fn suffixed_value_header(
                     if response.lost_focus()
                         && !escape
                         && text != shown
-                        && let Ok(parsed) = text.trim().strip_suffix(suffix).unwrap_or(text.trim()).trim_end().parse::<f32>()
+                        && let Ok(parsed) = text.trim().parse::<f32>()
                         && parsed.is_finite()
                         && parsed.clamp(minimum, maximum) != *value
                     {
@@ -144,10 +127,10 @@ fn suffixed_value_header(
     (field, edit)
 }
 
-fn slider_inner(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, decimals: usize, suffix: &str) -> (Response, Option<bool>) {
+fn slider_inner(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, decimals: usize) -> (Response, Option<bool>) {
     let (minimum, maximum) = (*range.start(), *range.end());
     let width = ui.available_width();
-    let (field, mut edit) = suffixed_value_header(ui, label, value, range, decimals, suffix);
+    let (field, mut edit) = value_header(ui, label, value, range, decimals);
     let (rect, mut response) = ui.allocate_exact_size(vec2(width, SLIDER_TRACK_HEIGHT), Sense::click_and_drag());
     if response.is_pointer_button_down_on() {
         ui.data_mut(|data| data.remove_temp::<String>(field));

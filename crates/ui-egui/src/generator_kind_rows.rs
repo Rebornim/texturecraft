@@ -15,16 +15,6 @@ use crate::i18n::{tr, trf};
 use crate::property_sheet::{NumberField, PropertySheet, StackSlider};
 use crate::theme::AXIS_COLORS;
 
-/// A 0..1 setting in the stack beside the preview
-fn stacked<'a>(label: &'a str, value: &'a mut f32) -> StackSlider<'a> {
-    StackSlider { label, value, range: 0.0..=1.0, typed: 0.0..=1.0, decimals: 2, suffix: "", dial: false }
-}
-
-/// A whole-number setting in the stack beside the preview
-fn stacked_whole<'a>(label: &'a str, value: &'a mut f32, range: std::ops::RangeInclusive<f32>) -> StackSlider<'a> {
-    StackSlider { label, value, range: range.clone(), typed: range, decimals: 0, suffix: "", dial: false }
-}
-
 /// The first edit of a stack beside the preview
 fn first_edit<const N: usize>(edits: [Option<bool>; N]) -> Option<bool> {
     edits.into_iter().flatten().next()
@@ -111,7 +101,7 @@ fn distance_rows(sheet: &mut PropertySheet<'_>, id: u64, shown: DistanceParamete
         suffix: "",
         dial: false,
     };
-    let mut stack = [radius, stacked(tr("Offset"), &mut edited.offset), stacked(tr("Contrast"), &mut edited.contrast)];
+    let mut stack = [radius, StackSlider::unit(tr("Offset"), &mut edited.offset), StackSlider::unit(tr("Contrast"), &mut edited.contrast)];
     let mut edit = first_edit(sheet.picture_sliders(picture, &mut stack));
     edit = edit.or(point_row(sheet, tr("3D Position"), &mut edited.point, PointPick { effect: id, point: "distance" }));
     sent(edit, KindControls::Distance(edited))
@@ -120,7 +110,7 @@ fn distance_rows(sheet: &mut PropertySheet<'_>, id: u64, shown: DistanceParamete
 /// 3D Linear Gradient: Balance and Contrast beside the preview, then its start and end
 fn linear_gradient_rows(sheet: &mut PropertySheet<'_>, id: u64, shown: LinearGradientParameters, picture: &dyn Fn(&Painter, Rect)) -> KindEdit {
     let mut edited = shown;
-    let mut stack = [stacked(tr("Balance"), &mut edited.balance), stacked(tr("Contrast"), &mut edited.contrast)];
+    let mut stack = [StackSlider::unit(tr("Balance"), &mut edited.balance), StackSlider::unit(tr("Contrast"), &mut edited.contrast)];
     let mut edit = first_edit(sheet.picture_sliders(picture, &mut stack));
     edit = edit.or(point_row(sheet, tr("3D Position Start"), &mut edited.start, PointPick { effect: id, point: "start" }));
     edit = edit.or(point_row(sheet, tr("3D Position End"), &mut edited.end, PointPick { effect: id, point: "end" }));
@@ -130,8 +120,11 @@ fn linear_gradient_rows(sheet: &mut PropertySheet<'_>, id: u64, shown: LinearGra
 /// UV Border Distance: Distance, Smoothness and Balance beside the preview, then Contrast
 fn border_rows(sheet: &mut PropertySheet<'_>, shown: BorderDistanceParameters, picture: &dyn Fn(&Painter, Rect)) -> KindEdit {
     let mut edited = shown;
-    let mut stack =
-        [stacked(tr("Distance"), &mut edited.distance), stacked(tr("Smoothness"), &mut edited.smoothness), stacked(tr("Balance"), &mut edited.balance)];
+    let mut stack = [
+        StackSlider::unit(tr("Distance"), &mut edited.distance),
+        StackSlider::unit(tr("Smoothness"), &mut edited.smoothness),
+        StackSlider::unit(tr("Balance"), &mut edited.balance),
+    ];
     let mut edit = first_edit(sheet.picture_sliders(picture, &mut stack));
     edit = edit.or(sheet.slider(tr("Contrast"), &mut edited.contrast, 0.0..=1.0, 2));
     sent(edit, KindControls::BorderDistance(edited))
@@ -147,9 +140,9 @@ fn grayscale_rows(sheet: &mut PropertySheet<'_>, shown: GrayscaleConversionParam
         edit = Some(false);
     }
     let mut stack = [
-        stacked(tr("Balance"), &mut edited.balance),
-        stacked(tr("Contrast"), &mut edited.contrast),
-        stacked_whole(tr("Tile"), &mut edited.tile, GrayscaleConversionParameters::TILE_RANGE),
+        StackSlider::unit(tr("Balance"), &mut edited.balance),
+        StackSlider::unit(tr("Contrast"), &mut edited.contrast),
+        StackSlider::whole(tr("Tile"), &mut edited.tile, GrayscaleConversionParameters::TILE_RANGE),
     ];
     edit = edit.or(first_edit(sheet.picture_sliders(picture, &mut stack)));
     edited.tile = edited.tile.round();
@@ -164,9 +157,9 @@ fn grayscale_rows(sheet: &mut PropertySheet<'_>, shown: GrayscaleConversionParam
 fn rust_rows(sheet: &mut PropertySheet<'_>, shown: DrippingRustParameters, picture: &dyn Fn(&Painter, Rect)) -> KindEdit {
     let mut edited = shown;
     let mut stack = [
-        stacked(tr("Rust Spreading"), &mut edited.spreading),
-        stacked(tr("Rust Contrast"), &mut edited.contrast),
-        stacked(tr("Spreading Smoothness"), &mut edited.spreading_smoothness),
+        StackSlider::unit(tr("Rust Spreading"), &mut edited.spreading),
+        StackSlider::unit(tr("Rust Contrast"), &mut edited.contrast),
+        StackSlider::unit(tr("Spreading Smoothness"), &mut edited.spreading_smoothness),
     ];
     let mut edit = first_edit(sheet.picture_sliders(picture, &mut stack));
     edit = edit.or(sheet.slider(tr("Drips Intensity"), &mut edited.drips_intensity, 0.0..=1.0, 2));
@@ -273,9 +266,9 @@ fn checker_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, shown:
     let mut tile = edited.grid_tile as f32;
     let tiles = *UvCheckerParameters::GRID_TILE_RANGE.start() as f32..=*UvCheckerParameters::GRID_TILE_RANGE.end() as f32;
     let mut stack = [
-        stacked_whole(tr("Checker Grid Tile"), &mut tile, tiles),
-        stacked(tr("Checker Grid Opacity"), &mut edited.grid_opacity),
-        stacked(tr("UV Borders Width"), &mut edited.border_width),
+        StackSlider::whole(tr("Checker Grid Tile"), &mut tile, tiles),
+        StackSlider::unit(tr("Checker Grid Opacity"), &mut edited.grid_opacity),
+        StackSlider::unit(tr("UV Borders Width"), &mut edited.border_width),
     ];
     edit = edit.or(first_edit(sheet.picture_sliders(picture, &mut stack)));
     edited.grid_tile = tile.round() as u32;

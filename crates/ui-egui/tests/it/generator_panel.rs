@@ -1,4 +1,4 @@
-//! The generator panel: global adjustments, restore defaults and image inputs edit the selected generator.
+//! The generator panel: global adjustments, restore defaults and image inputs edit the selected generator
 
 use egui::Role;
 use egui_kittest::Harness;
@@ -10,7 +10,7 @@ use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::docking::Panel;
 use texturecraft_ui_egui::theme::Brightness;
 
-/// The sample session with a fill layer whose black mask holds a curvature generator, selected in the properties panel.
+/// The sample session with a fill layer whose black mask holds a curvature generator, selected in the properties panel
 fn harness(render: bool) -> (Harness<'static, TextureCraftApp>, LayerId) {
     harness_with(render, json!({"generator": "curvature"}))
 }
@@ -395,8 +395,21 @@ fn is_on(harness: &Harness<'_, TextureCraftApp>, role: Role, label: &str) -> boo
 }
 
 #[test]
+fn restore_defaults_puts_a_kind_with_its_own_controls_back() {
+    let added = json!({"generator": "uvRandomColor", "colorSourceMode": "customGradient", "gradientColors": [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]], "gradientPositions": [0.0, 0.3, 1.0], "seed": 4});
+    let (mut harness, effect) = harness_with(false, added);
+    execute(&mut harness.state_mut().session, "effect.set", &json!({"effect": effect.0, "gradientQuantity": 2})).unwrap();
+    harness.run_steps(3);
+
+    click_live(&mut harness, Role::Button, "Restore defaults");
+
+    assert_eq!(generator(&harness, effect), Generator::new(GeneratorKind::UvRandomColor), "colors, places and count back to the kind's");
+    assert!(harness.get_by_role_and_label(Role::Button, "Restore defaults").accesskit_node().is_disabled(), "nothing left to restore");
+}
+
+#[test]
 fn a_point_pick_waits_for_the_view_until_escape() {
-    let (mut harness, _) = harness_with(false, json!({"generator": "3dLinearGradient"}));
+    let (mut harness, effect) = harness_with(false, json!({"generator": "3dLinearGradient"}));
     let (start, end) = ("Pick 3D Position Start on the mesh", "Pick 3D Position End on the mesh");
     assert!(!is_on(&harness, Role::Button, start) && !is_on(&harness, Role::Button, end));
 
@@ -410,6 +423,15 @@ fn a_point_pick_waits_for_the_view_until_escape() {
     harness.key_press(egui::Key::Escape);
     harness.run_steps(3);
     assert!(!is_on(&harness, Role::Button, start), "Esc cancels the pick");
+
+    // Selecting something else drops the pick: coming back finds it disarmed
+    click_live(&mut harness, Role::Button, end);
+    let layer = harness.state().session.doc.project.effect(effect).unwrap().0;
+    execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": layer.0, "target": "content"})).unwrap();
+    harness.run_steps(3);
+    execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": layer.0, "target": effect.0})).unwrap();
+    harness.run_steps(3);
+    assert!(!is_on(&harness, Role::Button, end), "a pick left behind is dropped");
 }
 
 #[test]

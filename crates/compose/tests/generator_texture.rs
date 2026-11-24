@@ -161,6 +161,18 @@ fn overlay_with_a_mid_gray_texture_doubles_a_dark_signal_times_the_gray() {
 }
 
 #[test]
+fn an_image_not_loaded_blends_black_with_or_without_a_blur() {
+    let mut fixture = fixture([0.6; 3]);
+    let texels: Vec<_> = surface(&fixture).iter().map(|point| point.texel).collect();
+    let loading = occlusion_with("not loaded yet", TextureLayer { opacity: 0.5, ..replacing() });
+    assert_all(&mask(&mut fixture, loading.clone(), &texels), OCCLUSION * 0.5, "per texel");
+
+    let mut blurred = loading;
+    blurred.global.blur = 0.5;
+    assert_all(&mask(&mut fixture, blurred, &texels), OCCLUSION * 0.5, "over a region, as the blur computes it");
+}
+
+#[test]
 fn the_texture_blends_after_the_section_controls_and_before_the_global_ones() {
     let mut fixture = fixture([0.6; 3]);
     let texels: Vec<_> = surface(&fixture).iter().map(|point| point.texel).collect();

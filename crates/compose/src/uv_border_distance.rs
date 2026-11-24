@@ -6,16 +6,14 @@ use rayon::prelude::*;
 use texturecraft_core::{BorderDistanceParameters, GeneratorGlobal};
 
 use crate::eval::Inputs;
-use crate::working_field::{FieldCache, blur_blocks};
+use crate::field_cache::FieldCache;
+use crate::working_field::{REFERENCE_TILE_TEXELS, blur_blocks, box_radius};
 
 /// How far in the gradient reaches at Distance 1, in UV units (fitted: about half a UV tile)
 const REACH_PER_DISTANCE: f32 = 0.4936;
 
 /// The blur at Smoothness 1, as a gaussian sigma in texels of a 2K UV tile (fitted)
 const SMOOTHNESS_SIGMA_2K: f32 = 45.0;
-
-/// The UV tile resolution [`SMOOTHNESS_SIGMA_2K`] is measured at
-const REFERENCE_TILE_TEXELS: f32 = 2048.0;
 
 static CACHE: FieldCache = FieldCache::new();
 
@@ -52,10 +50,7 @@ fn build(inp: &Inputs, border: &BorderDistanceParameters, block: (u32, u32)) -> 
 
     // Smoothness blurs the gradient with the empty space around the islands, so their borders soften towards black
     if border.smoothness > 0.0 {
-        let radius_at = |tile_texels: f32| {
-            let sigma = border.smoothness * SMOOTHNESS_SIGMA_2K * tile_texels / REFERENCE_TILE_TEXELS;
-            (((1.0 + 4.0 * sigma * sigma).sqrt() - 1.0) * 0.5).round() as usize
-        };
+        let radius_at = |tile_texels: f32| box_radius(border.smoothness * SMOOTHNESS_SIGMA_2K * tile_texels / REFERENCE_TILE_TEXELS);
         blur_blocks(&mut gradient, (width, height), block, |left, top| radius_at(block.0 as f32 * inp.block_scales.at(left, top)));
         for (value, texel) in gradient.iter_mut().zip(0..) {
             if !gbuf.covered(texel) {

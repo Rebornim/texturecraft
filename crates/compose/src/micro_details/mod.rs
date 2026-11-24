@@ -1,13 +1,29 @@
 //! A generator's micro details: the curvature and occlusion its micro height (an image or an anchor point's height) and normal image add to its mesh maps, built once per map, image and settings
 
+mod anchor_entry;
+mod anchor_heights;
+mod cache_key;
+mod cached_bytes;
+mod layout_map;
+mod micro_cache;
+mod micro_curvature;
+mod slot;
+mod slot_key;
+
 use std::sync::{Arc, Mutex, Weak};
 
+use anchor_entry::AnchorEntry;
+pub use anchor_heights::AnchorHeights;
+use cache_key::CacheKey;
+pub use layout_map::LayoutMap;
+use micro_cache::MicroCache;
+pub use micro_curvature::MicroCurvature;
 use rayon::prelude::*;
-use texturecraft_core::{BakedMap, BlockScales, GeneratorKind, LayerId, MicroCurvatureType, MicroDetails, NormalFormat, Source};
+use slot::Slot;
+use texturecraft_core::{BakedMap, LayerId, MicroCurvatureType, MicroDetails};
 
 use crate::below::StackKey;
-use crate::eval::Inputs;
-use crate::store::ImageRes;
+use crate::eval::{BLUR_BOX_PASSES, Inputs};
 
 /// The resolution of a UV tile the reference's micro details were measured at: derivatives and radii are per texel at this size
 const REFERENCE_TILE_TEXELS: f32 = 2048.0;
@@ -20,6 +36,9 @@ const SMOOTH_SIGMAS: [f32; 7] = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0];
 
 /// Below this sigma a blur is an explicit kernel; wider ones are three box passes
 const BOX_BLUR_MIN_SIGMA: f32 = 2.0;
+
+/// How many sigmas the sampled kernel reaches each side
+const KERNEL_REACH_SIGMAS: f32 = 3.0;
 
 /// Directions the occlusion looks along
 const OCCLUSION_DIRECTIONS: usize = 16;
@@ -44,80 +63,6 @@ const OCCLUSION_STRENGTH: f32 = 0.3232;
 /// Most micro maps cached, and the bytes they may hold (the newest is kept whatever its size), like the curvature sizes they feed
 const CACHE_ENTRIES: usize = 8;
 const CACHE_BYTES: usize = 256 << 20;
-
-/// What a cached map holds, to keep the cache within [`CACHE_BYTES`]
-trait CachedBytes {
-    fn bytes(&self) -> usize;
-}
-
-impl CachedBytes for LayoutMap {
-    fn bytes(&self) -> usize {
-        self.data.len().saturating_mul(size_of::<f32>())
-    }
-}
-
-impl CachedBytes for MicroCurvature {
-    fn bytes(&self) -> usize {
-        self.term.bytes().saturating_add(self.curvature.len().saturating_mul(size_of::<f32>()))
-    }
-}
-
-/// A map in a mesh map's layout: `size` texels, each UV tile one block
-pub struct LayoutMap {
-    data: Vec<f32>,
-    size: (u32, u32),
-}
-
-impl LayoutMap {
-    /// The value under working texel (`x`, `y`) of a `working_size` atlas laid out by `scales` (None outside the layout)
-    pub fn at(&self, (x, y): (u32, u32), working_size: (u32, u32), scales: &BlockScales) -> Option<f32> {
-        let uv = [(x as f32 + 0.5) / working_size.0.max(1) as f32, (y as f32 + 0.5) / working_size.1.max(1) as f32];
-        let baked_uv = scales.bake_uv(uv, working_size)?;
-        let column = ((baked_uv[0] * self.size.0 as f32) as u32).min(self.size.0.saturating_sub(1));
-        let row = ((baked_uv[1] * self.size.1 as f32) as u32).min(self.size.1.saturating_sub(1));
-        self.data.get((row * self.size.0 + column) as usize).copied()
-    }
-}
-
-/// The curvature a generator's micro details add
-pub struct MicroCurvature {
-    /// What they add to the curvature input
-    pub term: LayoutMap,
-    /// The baked curvature with the term added, which the detail sizes blur
-    pub curvature: Arc<Vec<f32>>,
-}
-
-/// An anchor point's height over the whole texture set, in the working atlas's layout
-pub struct AnchorHeights {
-    data: Vec<f32>,
-    working_size: (u32, u32),
-    scales: BlockScales,
-}
-
-impl AnchorHeights {
-    pub fn new(data: Vec<f32>, working_size: (u32, u32), scales: BlockScales) -> AnchorHeights {
-        AnchorHeights { data, working_size, scales }
-    }
-
-    /// The height under texel (`x`, `y`) of a `layout` sized mesh map (0 outside the working atlas)
-    fn at(&self, (x, y): (u32, u32), layout: (u32, u32)) -> f32 {
-        let baked_uv = [(x as f32 + 0.5) / layout.0.max(1) as f32, (y as f32 + 0.5) / layout.1.max(1) as f32];
-        let Some(uv) = self.scales.working_uv(baked_uv, self.working_size) else { return 0.0 };
-
-        let column = ((uv[0] * self.working_size.0 as f32) as u32).min(self.working_size.0.saturating_sub(1));
-        let row = ((uv[1] * self.working_size.1 as f32) as u32).min(self.working_size.1.saturating_sub(1));
-        self.data.get((row * self.working_size.0 + column) as usize).copied().unwrap_or(0.0)
-    }
-}
-
-/// The anchor heights built for a texture set's stack: the mesh maps they were built beside, the set, the anchor and the stack's key
-struct AnchorEntry {
-    baked: Weak<Vec<f32>>,
-    texture_set: usize,
-    anchor: LayerId,
-    stack: StackKey,
-    heights: Arc<AnchorHeights>,
-}
 
 /// The anchor heights prepared last, one per mesh maps, texture set and anchor
 static ANCHOR_HEIGHTS: Mutex<Vec<AnchorEntry>> = Mutex::new(Vec::new());
@@ -167,188 +112,13 @@ fn anchor_heights(inp: &Inputs, anchor: LayerId) -> Option<Arc<AnchorHeights>> {
     entries.iter().find(|entry| entry.baked.ptr_eq(&baked) && entry.texture_set == inp.ts && entry.anchor == anchor).map(|entry| entry.heights.clone())
 }
 
-/// What a micro details slot reads
-#[derive(Clone)]
-enum Slot {
-    Uniform([f32; 3]),
-    Image {
-        image: Arc<ImageRes>,
-        flip_green: bool,
-    },
-    /// An anchor point's height, different in each UV tile block: read from the block at `origin` of a `layout` sized mesh map
-    Anchor {
-        heights: Arc<AnchorHeights>,
-        origin: (u32, u32),
-        layout: (u32, u32),
-    },
-}
-
-impl Slot {
-    /// The slot holding `source` (an empty slot, an image not loaded and an anchor not prepared yet read black; procedurals are not read)
-    fn of(inp: &Inputs, source: Option<&Source>) -> Slot {
-        match source {
-            Some(Source::Uniform(value)) => Slot::Uniform(*value),
-            Some(Source::Image { name, normal_format }) => match inp.images.get(name) {
-                Some(image) => Slot::Image { image: image.clone(), flip_green: *normal_format == NormalFormat::DirectX },
-                None => Slot::Uniform([0.0; 3]),
-            },
-            Some(Source::Anchor { anchor, .. }) => match anchor_heights(inp, *anchor) {
-                Some(heights) => Slot::Anchor { heights, origin: (0, 0), layout: (0, 0) },
-                None => Slot::Uniform([0.0; 3]),
-            },
-            _ => Slot::Uniform([0.0; 3]),
-        }
-    }
-
-    /// Whether every UV tile block reads the same (an image or a value repeats in each)
-    fn same_in_every_block(&self) -> bool {
-        !matches!(self, Slot::Anchor { .. })
-    }
-
-    /// The slot read in the block at `origin` of a `layout` sized mesh map
-    fn in_block(&self, origin: (u32, u32), layout: (u32, u32)) -> Slot {
-        match self {
-            Slot::Anchor { heights, .. } => Slot::Anchor { heights: heights.clone(), origin, layout },
-            other => other.clone(),
-        }
-    }
-
-    fn key(&self) -> SlotKey {
-        match self {
-            Slot::Uniform(value) => SlotKey::Uniform(value.map(f32::to_bits)),
-            Slot::Image { image, flip_green } => SlotKey::Image(Arc::downgrade(image), *flip_green),
-            Slot::Anchor { heights, .. } => SlotKey::Anchor(Arc::downgrade(heights)),
-        }
-    }
-
-    /// The slot's color at `uv`, in the file's encoding
-    fn color(&self, uv: [f32; 2]) -> [f32; 3] {
-        match self {
-            Slot::Uniform(value) => *value,
-            Slot::Image { image, .. } => {
-                let [red, green, blue, _] = image.sample(uv[0], uv[1]);
-                [red, green, blue]
-            }
-            Slot::Anchor { .. } => [0.0; 3],
-        }
-    }
-
-    /// The slot read as a height (its gray) over a `size` block
-    fn heights(&self, size: (u32, u32)) -> Vec<f32> {
-        match self {
-            Slot::Anchor { heights, origin, layout } => {
-                (0..size.1).flat_map(|row| (0..size.0).map(move |column| (origin.0 + column, origin.1 + row))).map(|texel| heights.at(texel, *layout)).collect()
-            }
-            _ => block_uvs(size).map(|uv| self.color(uv).iter().sum::<f32>() / 3.0).collect(),
-        }
-    }
-
-    /// The slot read as a normal over a `size` block: its X and Y, OpenGL convention
-    fn normals(&self, size: (u32, u32)) -> (Vec<f32>, Vec<f32>) {
-        let flip_green = matches!(self, Slot::Image { flip_green: true, .. });
-        block_uvs(size)
-            .map(|uv| {
-                let [red, green, _] = self.color(uv);
-                let y = green * 2.0 - 1.0;
-                (red * 2.0 - 1.0, if flip_green { -y } else { y })
-            })
-            .unzip()
-    }
-}
-
 /// The UV of each texel's center in a `size` block, row by row
 fn block_uvs((width, height): (u32, u32)) -> impl Iterator<Item = [f32; 2]> {
     (0..height).flat_map(move |y| (0..width).map(move |x| [(x as f32 + 0.5) / width as f32, (y as f32 + 0.5) / height as f32]))
 }
 
-/// A slot as a cache key: an image by identity, a value by its bits
-#[derive(Clone)]
-enum SlotKey {
-    Uniform([u32; 3]),
-    Image(Weak<ImageRes>, bool),
-    Anchor(Weak<AnchorHeights>),
-}
-
-impl PartialEq for SlotKey {
-    fn eq(&self, other: &SlotKey) -> bool {
-        match (self, other) {
-            (SlotKey::Uniform(a), SlotKey::Uniform(b)) => a == b,
-            (SlotKey::Image(a, a_flip), SlotKey::Image(b, b_flip)) => a.strong_count() > 0 && a.ptr_eq(b) && a_flip == b_flip,
-            (SlotKey::Anchor(a), SlotKey::Anchor(b)) => a.strong_count() > 0 && a.ptr_eq(b),
-            _ => false,
-        }
-    }
-}
-
-/// What a micro map was built from: the mesh map giving its layout, its slots, its settings' bits and its UV tile block
-#[derive(Clone)]
-struct Key {
-    map: Weak<Vec<f32>>,
-    height: Option<SlotKey>,
-    normal: Option<SlotKey>,
-    settings: Vec<u32>,
-    block: (u32, u32),
-}
-
-impl PartialEq for Key {
-    fn eq(&self, other: &Key) -> bool {
-        self.map.strong_count() > 0
-            && self.map.ptr_eq(&other.map)
-            && self.height == other.height
-            && self.normal == other.normal
-            && self.settings == other.settings
-            && self.block == other.block
-    }
-}
-
-/// Built maps by what they were built from, most recently used last
-struct Cache<T> {
-    entries: Mutex<Vec<(Key, Arc<T>)>>,
-}
-
-impl<T: CachedBytes> Cache<T> {
-    const fn new() -> Cache<T> {
-        Cache { entries: Mutex::new(Vec::new()) }
-    }
-
-    /// The map built from `key`, built by `build` when missing (outside the lock: the build runs parallel work)
-    fn get_or_build(&self, key: Key, build: impl FnOnce() -> T) -> Arc<T> {
-        let found = {
-            let mut entries = self.entries.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            entries.retain(|(key, _)| key.map.strong_count() > 0);
-            entries.iter().position(|(cached, _)| *cached == key).map(|index| {
-                let entry = entries.remove(index);
-                let built = entry.1.clone();
-                entries.push(entry);
-                built
-            })
-        };
-        if let Some(built) = found {
-            return built;
-        }
-
-        let built = Arc::new(build());
-        let mut entries = self.entries.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        entries.retain(|(cached, _)| *cached != key);
-        entries.push((key, built.clone()));
-        let mut bytes = 0usize;
-        let keep = entries
-            .iter()
-            .rev()
-            .take_while(|(_, built)| {
-                bytes = bytes.saturating_add(built.bytes());
-                bytes <= CACHE_BYTES
-            })
-            .count()
-            .clamp(1, CACHE_ENTRIES);
-        let excess = entries.len().saturating_sub(keep);
-        entries.drain(..excess);
-        built
-    }
-}
-
-static CURVATURE_CACHE: Cache<MicroCurvature> = Cache::new();
-static OCCLUSION_CACHE: Cache<LayoutMap> = Cache::new();
+static CURVATURE_CACHE: MicroCache<MicroCurvature> = MicroCache::new();
+static OCCLUSION_CACHE: MicroCache<LayoutMap> = MicroCache::new();
 
 /// A baked map, its size and the size of one UV tile's block in it
 type MapLayout = (Arc<Vec<f32>>, (u32, u32), (u32, u32));
@@ -388,34 +158,12 @@ fn by_blocks(size: (u32, u32), block: (u32, u32), same_in_every_block: bool, per
     data
 }
 
-impl MicroCurvature {
-    /// The curvature `micro` adds on a `kind` generator, in the baked curvature map's layout (None without a baked curvature map)
-    pub fn of(inp: &Inputs, kind: GeneratorKind, micro: &MicroDetails) -> Option<Arc<MicroCurvature>> {
-        let (curvature, size, block) = layout(inp, BakedMap::Curvature)?;
-        let height = micro.height.then(|| Slot::of(inp, micro.height_source.as_ref()));
-        let normal = micro.normal.then(|| Slot::of(inp, micro.normal_source.as_ref()));
-        let settings = vec![micro.curvature_type as u32, micro.curvature_intensity.to_bits(), micro.height_intensity.to_bits(), kind as u32];
-        let key = Key { map: Arc::downgrade(&curvature), height: height.as_ref().map(Slot::key), normal: normal.as_ref().map(Slot::key), settings, block };
-
-        Some(CURVATURE_CACHE.get_or_build(key, || {
-            let same_in_every_block = height.iter().chain(&normal).all(Slot::same_in_every_block);
-            let term = by_blocks(size, block, same_in_every_block, |origin, block| {
-                let height = height.as_ref().map(|height| height.in_block(origin, size));
-                let normal = normal.as_ref().map(|normal| normal.in_block(origin, size));
-                curvature_term(micro, height.as_ref(), normal.as_ref(), block)
-            });
-            let adjusted = curvature.par_iter().zip(term.par_iter()).map(|(curvature, term)| curvature + term).collect();
-            MicroCurvature { term: LayoutMap { data: term, size }, curvature: Arc::new(adjusted) }
-        }))
-    }
-}
-
 /// What the occlusion input is multiplied by: the micro height's occlusion in the baked AO map's layout (None without a baked AO map or a micro height)
 pub fn micro_occlusion(inp: &Inputs, micro: &MicroDetails) -> Option<Arc<LayoutMap>> {
     let (occlusion, size, block) = layout(inp, BakedMap::AmbientOcclusion)?;
     let height = Slot::of(inp, micro.height.then_some(micro.height_source.as_ref())?);
     let settings = vec![micro.ao_radius.to_bits(), micro.ao_depth.to_bits()];
-    let key = Key { map: Arc::downgrade(&occlusion), height: Some(height.key()), normal: None, settings, block };
+    let key = CacheKey { map: Arc::downgrade(&occlusion), height: Some(height.key()), normal: None, settings, block };
 
     Some(OCCLUSION_CACHE.get_or_build(key, || {
         let data = by_blocks(size, block, height.same_in_every_block(), |origin, block| occlusion_factor(micro, &height.in_block(origin, size), block));
@@ -520,7 +268,7 @@ fn blur_lines(values: &[f32], length: usize, sigma: f32) -> Vec<f32> {
             // Three box passes of radius r spread a value with variance r(r + 1)
             let radius = (((1.0 + 4.0 * sigma * sigma).sqrt() - 1.0) / 2.0).round().max(1.0) as usize;
             let mut current = line.to_vec();
-            for _ in 0..3 {
+            for _ in 0..BLUR_BOX_PASSES {
                 box_blur(&current, out, radius);
                 current.copy_from_slice(out);
             }
@@ -531,7 +279,7 @@ fn blur_lines(values: &[f32], length: usize, sigma: f32) -> Vec<f32> {
 
 /// `line` blurred into `out` by a sampled gaussian of `sigma`, wrapping around
 fn kernel_blur(line: &[f32], out: &mut [f32], sigma: f32) {
-    let reach = (3.0 * sigma).ceil().max(1.0) as i64;
+    let reach = (KERNEL_REACH_SIGMAS * sigma).ceil().max(1.0) as i64;
     let weights: Vec<f32> = (-reach..=reach).map(|offset| (-(offset * offset) as f32 / (2.0 * sigma * sigma)).exp()).collect();
     let total: f32 = weights.iter().sum();
     let length = line.len().max(1) as i64;
@@ -612,6 +360,8 @@ fn occlusion_factor(micro: &MicroDetails, height: &Slot, size: (u32, u32)) -> Ve
 
 #[cfg(test)]
 mod tests {
+    use texturecraft_core::GeneratorKind;
+
     use super::*;
 
     #[test]

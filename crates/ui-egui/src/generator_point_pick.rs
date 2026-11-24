@@ -25,6 +25,16 @@ pub(crate) fn toggle(ctx: &egui::Context, pick: PointPick) {
     set(ctx, next);
 }
 
+/// The armed pick while its effect is still the selected one; a pick whose effect was deselected or deleted is dropped
+pub(crate) fn armed_on(ctx: &egui::Context, session: &texturecraft_engine::Session) -> Option<PointPick> {
+    let armed = armed(ctx)?;
+    if session.target == texturecraft_engine::StackTarget::Effect(texturecraft_engine::core::LayerId(armed.effect)) {
+        return Some(armed);
+    }
+    set(ctx, None);
+    None
+}
+
 pub(crate) fn set(ctx: &egui::Context, pick: Option<PointPick>) {
     ctx.data_mut(|data| data.insert_temp(pick_id(), pick));
 }

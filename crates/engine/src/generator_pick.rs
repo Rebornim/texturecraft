@@ -46,7 +46,8 @@ fn pick_point(session: &mut Session, params: &Value) -> Result<Value> {
     let viewport = viewport_of(session, params);
     let screen = match (f32p(params, "x"), f32p(params, "y")) {
         (Some(x), Some(y)) => Vec2::new(x, y),
-        _ => viewport * 0.5,
+        (None, None) => viewport * 0.5,
+        _ => return Err(bad(CMD, "give both `x` and `y`, or neither for the viewport's centre")),
     };
     let hit = session.pick(screen, viewport).ok_or_else(|| bad(CMD, "nothing under that point: pick on the mesh"))?;
     let picked = across_bounds(hit.pos, session.mesh.bounds()).to_array().map(|coordinate| coordinate.clamp(0.0, 1.0));

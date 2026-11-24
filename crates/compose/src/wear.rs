@@ -1,12 +1,11 @@
 //! The wear generators' value at a texel (Metal Edge Wear, Fiber Glass Edge Wear, Dirt), fitted to the reference app's observed results
 
-use texturecraft_core::{GeneratorKind, Procedural, ProceduralKind, Projection, WearParameters};
+use texturecraft_core::{GeneratorKind, Procedural, Projection, WearParameters};
 
 use crate::curvature_sizes::LEVEL_RADII;
-
+use crate::grunge_pattern::grunge_pattern;
 use crate::pattern::{Coords, procedural};
-use crate::texture_layer::SlotPlacement;
-
+use crate::slot_placement::SlotPlacement;
 use crate::wear_inputs::WearInputs;
 use crate::wear_scan::{DIRT_SCAN, EDGE_WEAR_SCAN, FIBER_GLASS_SCAN};
 
@@ -21,33 +20,6 @@ const SMOOTHED_SHARE: f32 = 0.5;
 /// Dirt reads its edges and cavities slightly softened, sigma in texels at 2K
 const DIRT_CURVATURE_SIGMA: f32 = 1.49;
 
-/// The pattern that breaks a wear kind up, its repeats across the UV square (or the mesh, triplanar) per unit of grunge scale, its rotation in degrees, and its mean and spread over the UV square (measured by `grunge_is_normalised`)
-struct GrungePattern {
-    kind: ProceduralKind,
-    repeats_per_scale: f32,
-    rotation: f32,
-    /// A seeded pattern and its repeats per unit of grunge scale that varies the pattern's strength, for patterns the seed doesn't change
-    breakup: Option<(ProceduralKind, f32)>,
-    mean: f32,
-    spread: f32,
-    /// How strongly a custom grunge's gray away from mid gray counts, in units of the normalised grunge (Dirt reads a brighter custom grunge as cleaner)
-    custom_gain: f32,
-}
-
-/// Fine scratches on metal edges, a woven fibre on fibreglass, blotchy grime for dirt
-const EDGE_WEAR_GRUNGE: GrungePattern =
-    GrungePattern { kind: ProceduralKind::Scratches, repeats_per_scale: 4.0, rotation: 0.0, breakup: None, mean: 0.037, spread: 0.149, custom_gain: 6.22 };
-const FIBER_GLASS_GRUNGE: GrungePattern = GrungePattern {
-    kind: ProceduralKind::Weave,
-    repeats_per_scale: 16.0,
-    rotation: 45.0,
-    breakup: Some((ProceduralKind::Grunge, 4.0)),
-    mean: 0.539,
-    spread: 0.198,
-    custom_gain: 1.9,
-};
-const DIRT_GRUNGE: GrungePattern =
-    GrungePattern { kind: ProceduralKind::Grunge, repeats_per_scale: 4.0, rotation: 0.0, breakup: None, mean: 0.682, spread: 0.242, custom_gain: -5.56 };
 /// How much a breakup pattern varies the grunge's strength (0 none, 1 down to nothing)
 const BREAKUP_DEPTH: f32 = 0.6;
 
@@ -66,14 +38,6 @@ pub(crate) fn blur_sigma(kind: GeneratorKind, wear: &WearParameters) -> f32 {
         GeneratorKind::Dirt => DIRT_CURVATURE_SIGMA,
         GeneratorKind::FiberGlassEdgeWear => FIBER_GLASS_SMOOTHNESS_SIGMA * wear.edges_smoothness,
         _ => EDGE_WEAR_SMOOTHNESS_SIGMA * wear.edges_smoothness,
-    }
-}
-
-fn grunge_pattern(kind: GeneratorKind) -> &'static GrungePattern {
-    match kind {
-        GeneratorKind::Dirt => &DIRT_GRUNGE,
-        GeneratorKind::FiberGlassEdgeWear => &FIBER_GLASS_GRUNGE,
-        _ => &EDGE_WEAR_GRUNGE,
     }
 }
 
@@ -195,6 +159,7 @@ mod tests {
     use texturecraft_geom::glam::{Vec2, Vec3};
 
     use super::*;
+    use crate::grunge_pattern::{DIRT_GRUNGE, EDGE_WEAR_GRUNGE, FIBER_GLASS_GRUNGE};
 
     fn inputs(curvature: f32, occlusion: f32) -> WearInputs {
         WearInputs { curvature, blurred_curvature: curvature, occlusion, grunge: 0.0 }

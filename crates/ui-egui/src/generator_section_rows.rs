@@ -14,19 +14,14 @@ use crate::i18n::tr;
 use crate::property_sheet::{PropertySheet, StackSlider};
 use crate::theme::AXIS_COLORS;
 
-/// A 0..1 setting in the stack beside the preview
-fn stacked<'a>(label: &'a str, value: &'a mut f32) -> StackSlider<'a> {
-    StackSlider { label, value, range: 0.0..=1.0, typed: 0.0..=1.0, decimals: 2, suffix: "", dial: false }
-}
-
 /// Global Invert, then the preview beside Global Blur, Balance and Contrast: what every generator applies to its finished value
 pub(crate) fn global_rows(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, id: u64, generator: &Generator, picture: &dyn Fn(&Painter, Rect)) {
     let (mut invert, mut global) = (generator.invert, generator.global);
     let invert_edit = sheet.toggle(tr("Global Invert"), &mut invert).then_some(false);
     let mut stack = [
-        stacked(tr("Global Blur"), &mut global.blur),
-        stacked(tr("Global Balance"), &mut global.balance),
-        stacked(tr("Global Contrast"), &mut global.contrast),
+        StackSlider::unit(tr("Global Blur"), &mut global.blur),
+        StackSlider::unit(tr("Global Balance"), &mut global.balance),
+        StackSlider::unit(tr("Global Contrast"), &mut global.contrast),
     ];
     let stack_edit = sheet.picture_sliders(picture, &mut stack).into_iter().flatten().next();
     if let Some(merge) = invert_edit.or(stack_edit) {

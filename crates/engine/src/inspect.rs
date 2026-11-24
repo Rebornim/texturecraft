@@ -153,6 +153,15 @@ fn generator_json(generator: &Generator) -> Value {
     if !generator.inputs.is_empty() {
         out["inputs"] = generator.inputs.iter().map(|(map, source)| (map.id().to_string(), source_json(source))).collect::<serde_json::Map<_, _>>().into();
     }
+    if let Some(wear) = &generator.wear {
+        out["wear"] = json!(wear);
+    }
+    if let Some(section) = &generator.section {
+        out["section"] = json!(section);
+    }
+    if let Some(light) = &generator.light {
+        out["light"] = json!(light);
+    }
     if let Some(texture) = &generator.texture {
         out["texture"] = json!(texture);
     }

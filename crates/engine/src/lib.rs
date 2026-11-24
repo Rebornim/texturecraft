@@ -30,6 +30,7 @@ pub mod filter_about;
 pub mod filter_lib;
 pub mod folder_cmds;
 mod frame_target;
+mod generator_input;
 pub mod generator_pick;
 pub mod id_mask_view;
 pub mod inspect;

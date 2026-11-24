@@ -723,7 +723,6 @@ fn nested_layers_snapshot() {
     save(&mut harness, &output_dir, "panel-layers-narrow-nested");
 }
 
-/// The mask anchor and generator micro controls in the integrated properties panel
 #[test]
 #[ignore]
 fn path_tool_snapshots() {

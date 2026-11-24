@@ -1,4 +1,4 @@
-//! A selected effect's sliders apply what they are dragged, clicked or typed to (a generator's global balance stands in for them all).
+//! A selected effect's sliders apply what they are dragged, clicked or typed to (a generator's global balance stands in for them all)
 
 use egui::accesskit::Role;
 use egui_kittest::Harness;
@@ -64,8 +64,7 @@ fn dragging_a_slider_applies_it() {
     assert!(balance(&harness, effect) < 0.25, "the dragged balance applies: {}", balance(&harness, effect));
 }
 
-/// A generator slider applies while it is dragged (the texture follows the pointer), and the
-/// whole drag is one undo step.
+/// A generator slider applies while it is dragged (the texture follows the pointer), and the whole drag is one undo step
 #[test]
 fn dragging_a_generator_slider_applies_live_as_one_undo_step() {
     let (mut harness, effect) = selected_generator();
@@ -112,7 +111,7 @@ fn number_field<'a>(harness: &'a Harness<'_, TextureCraftApp>, label: &str) -> e
     harness.get_all(by().role(Role::TextInput)).find(|node| (node.rect().center().y - row).abs() < 4.0).unwrap()
 }
 
-/// Click the balance's value to type in it and press `keys`, then type `text`, one key per frame like a person.
+/// Click the balance's value to type in it and press `keys`, then type `text`, one key per frame like a person
 fn type_balance(harness: &mut Harness<'_, TextureCraftApp>, keys: &[egui::Key], text: &str) {
     harness.get_by_label("Global Balance value").click();
     harness.run_steps(2);
@@ -140,8 +139,7 @@ fn a_value_typed_in_the_number_field_applies() {
     assert_eq!(harness.state().session.history_labels().len(), steps + 1);
 }
 
-/// Dragging the track while the number field has focus drops what was typed there: leaving the
-/// field afterwards does not undo the drag.
+/// Dragging the track while the value is being typed drops what was typed: leaving the field afterwards does not undo the drag
 #[test]
 fn a_track_drag_drops_text_typed_in_the_number_field() {
     let (mut harness, effect) = selected_generator();
@@ -165,8 +163,7 @@ fn a_track_drag_drops_text_typed_in_the_number_field() {
     assert_eq!(balance(&harness, effect), dragged, "the text typed before the drag stays dropped");
 }
 
-/// Leaving the number field without typing, or with Escape, keeps the value (not the rounded
-/// text the field shows) and makes no undo step.
+/// Leaving the value without typing, or with Escape, keeps it (not the rounded text shown) and makes no undo step
 #[test]
 fn leaving_the_number_field_unchanged_keeps_the_value() {
     let (mut harness, effect) = selected_generator();

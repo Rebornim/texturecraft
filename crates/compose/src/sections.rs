@@ -31,6 +31,7 @@ pub(crate) fn axes_signal(channels: [f32; 3], axes: &[AxisLayer; 3]) -> f32 {
         if axis.weight <= 0.0 {
             return base;
         }
+
         let layer = if axis.invert { 1.0 - channels[index] } else { channels[index] };
         (base + (blended(axis.blend, base, layer) - base) * axis.weight).clamp(0.0, 1.0)
     })
@@ -81,11 +82,14 @@ pub(crate) fn adjusted(kind: GeneratorKind, section: &SectionParameters, signal:
             value.powf(BALANCE_POWER_BASE.powf(2.0 * balance - 1.0))
         };
     }
+
     value = contrasted(value, section.contrast.clamp(0.0, 1.0));
+
     if SectionParameters::has_brightness(kind) {
         let brightness = section.brightness.clamp(*SectionParameters::BRIGHTNESS_RANGE.start(), *SectionParameters::BRIGHTNESS_RANGE.end());
         value = if brightness > 0.0 { value + brightness * (1.0 - value) } else { value * (1.0 + brightness) };
     }
+
     if section.invert { 1.0 - value } else { value }
 }
 

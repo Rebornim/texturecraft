@@ -119,7 +119,7 @@ pub(crate) fn kind_params(controls: &KindControls) -> Value {
             "dripsIntensity": rust.drips_intensity,
             "dripsSmoothness": rust.drips_smoothness,
             "dripsSamples": rust.drips_samples,
-            "dripsAxis": DRIPS_AXES.get(usize::from(rust.axis)).copied().unwrap_or("y"),
+            "dripsAxis": DRIPS_AXES.get(usize::from(rust.axis)).copied().unwrap_or(DEFAULT_DRIPS_AXIS),
         }),
         KindControls::UvRandomColor(random) => {
             let mut params = json!({
@@ -147,6 +147,9 @@ pub(crate) fn kind_params(controls: &KindControls) -> Value {
 
 /// Dripping Rust's `dripsAxis` names, by axis
 pub(crate) const DRIPS_AXES: [&str; 3] = ["x", "y", "z"];
+
+/// The axis drips run along when a saved one is out of range: down Y, as new ones do
+const DEFAULT_DRIPS_AXIS: &str = "y";
 
 /// Every micro details control a generator of `kind` has, set to `micro` (its images are the `microHeight` and `microNormal` inputs)
 pub(crate) fn micro_params(kind: GeneratorKind, micro: &MicroDetails) -> Value {

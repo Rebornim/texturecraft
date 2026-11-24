@@ -10,6 +10,7 @@ use texturecraft_core::{
 use crate::anchored_micro_edit::AnchoredMicroEdit;
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
 use crate::distance_params::distance_from;
+use crate::generator_input::GeneratorInput;
 use crate::layer_cmds::{projection_from, projection_from_fields};
 use crate::mask_owner::MaskOwner;
 use crate::micro_params::{MICRO_HEIGHT_INPUT, MICRO_NORMAL_INPUT, micro_from, swapped_micro};
@@ -391,7 +392,6 @@ fn add_fill(session: &mut Session, params: &Value) -> Result<Value> {
     push_effect(session, params, EffectKind::Fill { source, projection, sampling }, blend)
 }
 
-/// Apply `params` to `generator`, using `command` in errors
 /// The parameters that drive the wear generators' earlier model
 const EARLIER_WEAR_KEYS: [&str; 7] = ["level", "softness", "noise", "noiseScale", "offset", "mode", "sizes"];
 
@@ -550,6 +550,7 @@ fn section_from(command: &str, params: &Value, generator: &mut Generator) -> Res
             None => Ok(()),
         };
     }
+
     if let Some(unused) = new_keys.iter().find(|key| !section_key_applies(kind, key)) {
         return Err(bad(command, format!("{} has no `{unused}`", kind.label())));
     }
@@ -576,10 +577,12 @@ fn section_from(command: &str, params: &Value, generator: &mut Generator) -> Res
         generator.light = None;
         return Ok(());
     }
+
     let on_light = generator.light.is_some() || (light_defaults.is_some() && !new_keys.is_empty());
     if on_light && GLOBAL_KEYS.iter().any(|key| params.get(*key).is_some()) {
         return Err(bad(command, "Light has no global blur, balance or contrast on its light controls"));
     }
+
     if new_keys.is_empty() {
         return Ok(());
     }
@@ -594,6 +597,7 @@ fn section_from(command: &str, params: &Value, generator: &mut Generator) -> Res
             generator.global = defaults.global;
         }
     }
+
     if let Some(defaults) = light_defaults {
         let light = generator.light.get_or_insert(defaults);
         for (key, value) in [
@@ -623,9 +627,11 @@ fn section_from(command: &str, params: &Value, generator: &mut Generator) -> Res
             *value = given;
         }
     }
+
     if let Some(invert) = boolp(params, "sectionInvert") {
         section.invert = invert;
     }
+
     for (axis, name) in section.axes.iter_mut().zip(AXIS_NAMES) {
         if let Some(invert) = boolp(params, &format!("{name}Invert")) {
             axis.invert = invert;
@@ -639,6 +645,7 @@ fn section_from(command: &str, params: &Value, generator: &mut Generator) -> Res
             axis.blend = AxisBlend::parse(blend_name).ok_or_else(|| bad(command, format!("unknown blending mode `{blend_name}`")))?;
         }
     }
+
     generator.section = Some(section.clamped(kind));
     texture_from(command, params, generator)
 }
@@ -695,6 +702,7 @@ pub fn section_key_applies(kind: GeneratorKind, key: &str) -> bool {
     }
 }
 
+/// Apply `params` to `generator`, using `command` in errors
 fn generator_from(command: &str, params: &Value, generator: &mut Generator) -> Result<()> {
     wear_from(command, params, generator)?;
     section_from(command, params, generator)?;
@@ -788,17 +796,6 @@ fn add_anchor(session: &mut Session, params: &Value) -> Result<Value> {
         fields.insert("name".into(), json!(name));
     }
     push_effect(session, &Value::Object(fields), EffectKind::Anchor, BlendMode::Normal)
-}
-
-/// A generator input a command names: a mesh map it reads, its texture or its custom grunge
-#[derive(Clone, Copy)]
-enum GeneratorInput {
-    Map(BakedMap),
-    Texture,
-    Grunge,
-    MicroHeight,
-    MicroNormal,
-    Image,
 }
 
 /// The generator input named by `input` and what replaces it (None: its mesh map again, or an empty texture or grunge slot), for a generator on layer `owner`

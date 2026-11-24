@@ -3,19 +3,13 @@
 use texturecraft_core::{TextureBlend, TextureLayer};
 use texturecraft_geom::glam::{Vec2, Vec3};
 
+pub(crate) use crate::slot_placement::SlotPlacement;
+
 /// Exponent of the triplanar weights per unit of `1 / (1 − triplanar contrast)`: contrast 0 weighs the axes by the normal itself, 0.5 by its cube
 const TRIPLANAR_SHARPNESS_POWER: f32 = 1.58;
 
 /// Smallest normal component still dividing the weights, so a zero normal weighs the axes evenly
 const MIN_NORMAL_COMPONENT: f32 = 1e-6;
-
-/// Where a generator's image slot is read: `scale` times across the UV square (or the mesh's bounds, triplanar), plus `offset`
-pub(crate) struct SlotPlacement {
-    pub scale: f32,
-    pub offset: f32,
-    /// How sharply the three projections meet, or None to read in UV
-    pub triplanar_contrast: Option<f32>,
-}
 
 /// The texture is scaled about the centre of the UV square (or of the mesh's bounds)
 pub(crate) fn texture_placement(texture: &TextureLayer) -> SlotPlacement {

@@ -7,9 +7,10 @@ use texturecraft_core::{BakedMap, DrippingRustParameters, GeneratorKind, WearPar
 use texturecraft_geom::glam::Vec3;
 
 use crate::eval::{Inputs, texel_coords};
+use crate::field_cache::FieldCache;
 use crate::histogram_scan::histogram_scan;
 use crate::wear;
-use crate::working_field::{FieldCache, blur_blocks};
+use crate::working_field::{REFERENCE_TILE_TEXELS, blur_blocks, box_radius};
 
 /// The rust before any grunge: `RUST_FLOOR + RUST_GAIN * max(RUST_OCCLUSION − occlusion, 0)^RUST_POWER` (fitted to the reference)
 const RUST_FLOOR: f32 = 0.315;
@@ -28,9 +29,6 @@ const DRIPS_SIGMA_2K: f32 = 11.5;
 const DRIP_LENGTH_2K: f32 = 90.86;
 const DRIP_FADE: f32 = 0.898;
 const DRIP_FADE_POWER: f32 = 0.671;
-
-/// The UV tile resolution the sizes above are measured at
-const REFERENCE_TILE_TEXELS: f32 = 2048.0;
 
 /// Coverage below which a blurred texel has nothing to average
 const MIN_COVERAGE: f32 = 1e-3;
@@ -73,17 +71,12 @@ fn build(inp: &Inputs, rust: &DrippingRustParameters, seed: u32, block: (u32, u3
     };
     let mut field: Vec<f32> = (0..width * height).into_par_iter().map(|texel| if gbuf.covered(texel as usize) { rust_at(texel) } else { 0.0 }).collect();
 
-    let sigma_at = |sigma_2k: f32, smoothness: f32| move |x: u32, y: u32| box_radius(smoothness * sigma_2k * tile_texels(x, y) / REFERENCE_TILE_TEXELS);
-    blur_over_cover(&mut field, &cover, (width, height), block, sigma_at(SPREADING_SIGMA_2K, rust.spreading_smoothness));
+    let radius_at = |sigma_2k: f32, smoothness: f32| move |x: u32, y: u32| box_radius(smoothness * sigma_2k * tile_texels(x, y) / REFERENCE_TILE_TEXELS);
+    blur_over_cover(&mut field, &cover, (width, height), block, radius_at(SPREADING_SIGMA_2K, rust.spreading_smoothness));
     let mut field = drips(inp, rust, &field, (width, height), &tile_texels);
-    blur_over_cover(&mut field, &cover, (width, height), block, sigma_at(DRIPS_SIGMA_2K, rust.drips_smoothness));
+    blur_over_cover(&mut field, &cover, (width, height), block, radius_at(DRIPS_SIGMA_2K, rust.drips_smoothness));
     field.iter_mut().zip(&cover).for_each(|(value, covered)| *value = if *covered > 0.0 { value.clamp(0.0, 1.0) } else { 0.0 });
     field
-}
-
-/// The radius of three box passes that blur like a gaussian of `sigma`: three boxes of radius r spread a texel with variance r (r + 1)
-fn box_radius(sigma: f32) -> usize {
-    (((1.0 + 4.0 * sigma * sigma).sqrt() - 1.0) * 0.5).round() as usize
 }
 
 /// `values` blurred within each UV tile block by the radius `radius_at` gives, weighted by `cover` so the empty space around the islands doesn't bleed in

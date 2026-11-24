@@ -11,11 +11,6 @@ use crate::generator_params::{light_params, merged, micro_params, wear_params};
 use crate::i18n::tr;
 use crate::property_sheet::{PropertySheet, StackSlider};
 
-/// A 0..1 setting in the stack beside the preview
-fn stacked<'a>(label: &'a str, value: &'a mut f32) -> StackSlider<'a> {
-    StackSlider { label, value, range: 0.0..=1.0, typed: 0.0..=1.0, decimals: 2, suffix: "", dial: false }
-}
-
 /// The wear controls of generator effect `id` on `layer` in the reference's order, showing `wear`; `picture` draws the preview
 pub(crate) fn wear_rows(
     app: &mut TextureCraftApp,
@@ -38,8 +33,11 @@ pub(crate) fn wear_rows(
     let dirt = kind == GeneratorKind::Dirt;
     let (level_label, contrast_label) = if dirt { (tr("Dirt Level"), tr("Dirt Contrast")) } else { (tr("Wear Level"), tr("Wear Contrast")) };
     let mut edited = wear;
-    let mut stack =
-        [stacked(level_label, &mut edited.level), stacked(contrast_label, &mut edited.contrast), stacked(tr("Grunge Amount"), &mut edited.grunge_amount)];
+    let mut stack = [
+        StackSlider::unit(level_label, &mut edited.level),
+        StackSlider::unit(contrast_label, &mut edited.contrast),
+        StackSlider::unit(tr("Grunge Amount"), &mut edited.grunge_amount),
+    ];
     let mut edit = sheet.picture_sliders(picture, &mut stack).into_iter().flatten().next();
     if kind != GeneratorKind::FiberGlassEdgeWear {
         edit = edit.or(sheet.slider(tr("Grunge Scale"), &mut edited.grunge_scale, WearParameters::GRUNGE_SCALE_RANGE, 0));
@@ -106,7 +104,7 @@ pub(crate) fn light_rows(
     let mut stack = [
         angle(tr("Horizontal Angle"), &mut edited.horizontal),
         angle(tr("Vertical Angle"), &mut edited.vertical),
-        stacked(tr("Light Attenuation"), &mut edited.attenuation),
+        StackSlider::unit(tr("Light Attenuation"), &mut edited.attenuation),
     ];
     let mut edit = sheet.picture_sliders(picture, &mut stack).into_iter().flatten().next();
     edit = edit.or(sheet.slider(tr("Highlight Glossiness"), &mut edited.glossiness, LightParameters::GLOSSINESS_RANGE, 2));

@@ -865,7 +865,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     }
 
     // A 3D generator's armed point pick: a click sets the point there instead of painting
-    let point_pick = crate::generator_point_pick::armed(ui.ctx());
+    let point_pick = crate::generator_point_pick::armed_on(ui.ctx(), &app.session);
     if let Some(pick) = point_pick {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
         if !alt

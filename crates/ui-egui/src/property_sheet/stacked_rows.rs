@@ -74,6 +74,9 @@ const WIDE_BUTTON_ICON_GAP: f32 = 8.0;
 const PAIR_LINK_WIDTH: f32 = 26.0;
 const PAIR_LINK_AIR: f32 = 4.0;
 
+/// Values with more places than this drop their trailing zeros
+const SHORT_DECIMALS: usize = 2;
+
 /// Air before a field's text
 const FIELD_TEXT_INSET: i8 = 8;
 
@@ -195,7 +198,9 @@ impl PropertySheet<'_> {
         if let (false, false, Some(reason)) = (enabled, already_greyed, reason) {
             let response = self.ui.interact(region, self.id.with(("greyed", top as i32)), Sense::hover());
             response.widget_info(|| WidgetInfo::labeled(egui::Role::Label, true, reason));
-            self.tip(response, reason);
+
+            // Beside the pointer: the region is tall, so a tip at its edge would land far from what was hovered
+            response.on_hover_text(reason);
         }
         result
     }
@@ -307,6 +312,9 @@ impl PropertySheet<'_> {
         let line = self.label_line(label);
         let id = self.named_id("slider_above", label);
         let shown = shown_number(*value, decimals);
+
+        // Fine-grained values read as the reference's do, without trailing zeros ("0.01", "1"); short ones keep their places ("0.50")
+        let shown = if decimals > SHORT_DECIMALS && shown.contains('.') { shown.trim_end_matches('0').trim_end_matches('.').to_owned() } else { shown };
         let width = self.text_width(&shown, semibold(TEXT_SIZE)).max(super::VALUE_MIN_WIDTH);
         let value_text = ValueText { label: &label, right: self.right, width, center_y: line.top() + LABEL_CENTER, shown: &shown, suffix: "" };
         let typed = self.value_text_field(id, value_text, *value, &range, decimals);
@@ -375,7 +383,8 @@ impl PropertySheet<'_> {
     /// A one-line text field under its label; returns whether `text` changed
     pub(crate) fn text_field_above(&mut self, label: &str, text: &mut String) -> bool {
         self.label_line(label);
-        let field = self.control_line();
+        let line = self.take(CONTROL_HEIGHT);
+        let field = Rect::from_min_max(pos2(self.left, line.top()), pos2(self.right, line.bottom()));
         let id = self.named_id("text_field_above", label);
         let typing = self.ui.memory(|memory| memory.has_focus(id));
         let tokens = self.tokens;
@@ -389,6 +398,8 @@ impl PropertySheet<'_> {
             .align(Align2::LEFT_CENTER);
         let response = self.ui.put(field.shrink(1.0), edit);
         response.widget_info(|| WidgetInfo::labeled(egui::Role::TextInput, true, label));
+        self.drawn(field.bottom());
+        self.space(STACK_ROW_AIR);
         response.changed()
     }
 
@@ -402,8 +413,9 @@ impl PropertySheet<'_> {
         response.widget_info(|| WidgetInfo::selected(egui::Role::Button, true, pressed, text));
 
         let tokens = self.tokens;
+        // Held down: the hairline grey, as the link above
         let fill = match (pressed, response.hovered()) {
-            (true, _) => tokens.tool_active,
+            (true, _) => tokens.separator,
             (false, true) => tokens.row_hover,
             (false, false) => tokens.button,
         };

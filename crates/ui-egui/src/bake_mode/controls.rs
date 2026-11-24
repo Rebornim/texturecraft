@@ -9,7 +9,8 @@ pub(super) fn section(sheet: &mut PropertySheet<'_>, title: &str, reset_menu: &[
     if reset_menu.is_empty() {
         chosen = section.reset.clicked().then_some(0);
     } else {
-        egui::Popup::menu(&section.reset).show(|ui| {
+        // Hanging left from the glyph at the panel's right edge, so it stays inside the panel
+        egui::Popup::menu(&section.reset).align(egui::RectAlign::BOTTOM_END).show(|ui| {
             for (index, item) in reset_menu.iter().enumerate() {
                 if ui.button(*item).clicked() {
                     chosen = Some(index);

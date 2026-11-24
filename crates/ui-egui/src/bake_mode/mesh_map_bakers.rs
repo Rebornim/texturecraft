@@ -48,17 +48,17 @@ pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSe
         if header_button(ui, icon::GEAR, tr("Common Settings")).clicked() {
             app.ui.dock.focus(Panel::CommonSettings);
         }
-        presets_menu(app, ui, settings);
-        if several_sets {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if several_sets {
                 let shares = settings.sync.shares(BakeSyncGroup::Common);
                 let look = if shares { GlyphLook::Lit } else { GlyphLook::Plain };
                 let (slot, _) = ui.allocate_exact_size(vec2(ROW_BUTTON_SIZE, ROW_BUTTON_SIZE), Sense::hover());
                 if glyph_button(ui, slot, icon::LINK, tr("Synchronize Common Settings"), look).clicked() {
                     SetPicker::open(app, ui.ctx(), SetPickerPurpose::Sync(BakeSyncGroup::Common));
                 }
-            });
-        }
+            }
+            presets_menu(app, ui, settings);
+        });
     });
 
     SetPicker::show(app, &ui.ctx().clone());
@@ -93,8 +93,9 @@ pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSe
 
 /// The Presets menu: save the active set's settings under a name, load or delete a saved one, copy to all sets
 fn presets_menu(app: &mut TextureCraftApp, ui: &mut Ui, settings: &BakeSettings) {
-    let button = header_button(ui, icon::SLIDERS_HORIZONTAL, tr("Presets"));
-    egui::Popup::menu(&button).show(|ui| {
+    let (slot, _) = ui.allocate_exact_size(vec2(ROW_BUTTON_SIZE, ROW_BUTTON_SIZE), Sense::hover());
+    let button = glyph_button(ui, slot, icon::SLIDERS_HORIZONTAL, tr("Presets"), GlyphLook::Plain);
+    egui::Popup::menu(&button).align(egui::RectAlign::BOTTOM_END).align_alternatives(&[egui::RectAlign::BOTTOM_START]).show(|ui| {
         ui.set_min_width(220.0);
         ui.horizontal(|ui| {
             let name_edit = egui::TextEdit::singleline(&mut app.ui.bake_preset_name).hint_text(tr("Preset name")).desired_width(130.0);
@@ -185,7 +186,7 @@ fn check_all_row(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSett
 /// The ≡ menu beside Check All: check states, and copying them or every setting to other texture sets
 fn list_menu(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSettings) {
     let button = glyph_button(ui, ui.max_rect(), icon::LIST, tr("Mesh Map Bakers Menu"), GlyphLook::Plain);
-    egui::Popup::menu(&button).align(egui::RectAlign::BOTTOM_END).show(|ui| {
+    egui::Popup::menu(&button).align(egui::RectAlign::BOTTOM_END).align_alternatives(&[egui::RectAlign::BOTTOM_START]).show(|ui| {
         if ui.button(tr("Check All Mesh Maps")).clicked() {
             BakedMap::ALL.into_iter().for_each(|map| settings.maps.set_enabled(map, true));
         }

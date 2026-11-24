@@ -203,10 +203,17 @@ fn start(app: &mut TextureCraftApp, ctx: &egui::Context, target: LivePreviewTarg
     let progress = Arc::new(Progress::new());
     let worker_progress = progress.clone();
     let t = std::time::Instant::now();
-    let receiver = crate::spawn_worker("texturecraft-map-preview", move || match preview_pool() {
-        Some(pool) => pool.install(|| task.run(&worker_progress)),
-        None => task.run(&worker_progress),
-    });
+    // Queued on the preview pool's own threads: starting a new thread per change can stall the UI while a bake allocates
+    let receiver = match preview_pool() {
+        Some(pool) => {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            pool.spawn(move || {
+                let _ = sender.send(task.run(&worker_progress));
+            });
+            receiver
+        }
+        None => crate::spawn_worker("texturecraft-map-preview", move || task.run(&worker_progress)),
+    };
     crate::zz_slow("start spawn", t);
     if std::env::var_os("TC_ZZ_TRACE").is_some() {
         eprintln!("TRACE start {:?} size {} dragging {dragging}", target.map, size.pixels());

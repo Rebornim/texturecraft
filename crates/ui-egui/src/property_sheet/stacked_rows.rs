@@ -199,8 +199,10 @@ impl PropertySheet<'_> {
             let response = self.ui.interact(region, self.id.with(("greyed", top as i32)), Sense::hover());
             response.widget_info(|| WidgetInfo::labeled(egui::Role::Label, true, reason));
 
-            // Beside the pointer: the region is tall, so a tip at its edge would land far from what was hovered
-            response.on_hover_text(reason);
+            // At the pointer: the region is tall, so a tip at its edge would land far from what was hovered
+            let mut tooltip = egui::Tooltip::for_enabled(&response);
+            tooltip.popup = tooltip.popup.anchor(egui::PopupAnchor::Pointer);
+            tooltip.show(|ui| ui.label(reason));
         }
         result
     }
@@ -260,8 +262,10 @@ impl PropertySheet<'_> {
             *linked = !*linked;
         }
         let tokens = self.tokens;
+
+        // Held down: the hairline grey, neutral in every accent (tool_active takes the accent's tint)
         let fill = if *linked {
-            tokens.tool_active
+            tokens.separator
         } else if link_response.hovered() {
             tokens.row_hover
         } else {
@@ -392,7 +396,7 @@ impl PropertySheet<'_> {
         response.widget_info(|| WidgetInfo::selected(egui::Role::Button, true, pressed, text));
 
         let tokens = self.tokens;
-        // Held down: the hairline grey, as the link above
+        // Held down: the hairline grey, as the paired dropdowns' link
         let fill = match (pressed, response.hovered()) {
             (true, _) => tokens.separator,
             (false, true) => tokens.row_hover,

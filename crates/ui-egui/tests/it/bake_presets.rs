@@ -56,6 +56,8 @@ fn a_saved_preset_loads_back_into_the_active_set_as_one_undo_step() {
     assert!(harness.state().ui.bake_preset_name.is_empty(), "the name field is cleared");
 
     harness.state_mut().session.doc.project.texture_sets[0].bake.common.antialiasing = BakeAntialiasing::None;
+    // The sets share Common Settings at first, and a set sharing them takes what the active set loads
+    harness.state_mut().run("bake.sync", json!({ "group": "common", "ts": [0] }));
     let steps = harness.state().session.history_labels().len();
     open_menu(&mut harness);
     click(&mut harness, "Final");

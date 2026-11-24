@@ -11,8 +11,14 @@ use crate::docking::Panel;
 use crate::i18n::{baked_map_label, tr, trf};
 use crate::property_sheet::{CHECK_SIZE, paint_check};
 use crate::theme::{Tokens, semibold};
-use crate::widgets::icon_button;
 
+/// Height of the header's buttons, the air inside them beside their words, and between the glyph and the words
+const HEADER_BUTTON_HEIGHT: f32 = 24.0;
+const HEADER_BUTTON_PADDING: f32 = 10.0;
+const HEADER_GLYPH_GAP: f32 = 6.0;
+/// Air above the header and between its buttons
+const HEADER_AIR: f32 = 6.0;
+const HEADER_GAP: f32 = 6.0;
 /// Height of one baker row, and of the Check All row
 const ROW_HEIGHT: f32 = 28.0;
 /// Inset of a row's check from its left edge
@@ -36,14 +42,19 @@ const RULE_AIR: f32 = 4.0;
 /// The Common Settings button (with the sync icon when there are several texture sets), Check All with the list menu, and one row per map (checkbox enables, click selects)
 pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSettings) {
     let several_sets = app.session.doc.project.texture_sets.len() > 1;
+    ui.add_space(HEADER_AIR);
     ui.horizontal(|ui| {
-        if ui.button(format!("{} {}", icon::GEAR, tr("Common Settings"))).clicked() {
+        ui.spacing_mut().item_spacing.x = HEADER_GAP;
+        if header_button(ui, icon::GEAR, tr("Common Settings")).clicked() {
             app.ui.dock.focus(Panel::CommonSettings);
         }
+        presets_menu(app, ui, settings);
         if several_sets {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let shares = settings.sync.shares(BakeSyncGroup::Common);
-                if icon_button(ui, icon::LINK, tr("Synchronize Common Settings"), shares, ROW_BUTTON_SIZE).clicked() {
+                let look = if shares { GlyphLook::Lit } else { GlyphLook::Plain };
+                let (slot, _) = ui.allocate_exact_size(vec2(ROW_BUTTON_SIZE, ROW_BUTTON_SIZE), Sense::hover());
+                if glyph_button(ui, slot, icon::LINK, tr("Synchronize Common Settings"), look).clicked() {
                     SetPicker::open(app, ui.ctx(), SetPickerPurpose::Sync(BakeSyncGroup::Common));
                 }
             });
@@ -51,8 +62,6 @@ pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSe
     });
 
     SetPicker::show(app, &ui.ctx().clone());
-
-    presets_menu(app, ui, settings);
 
     ui.add_space(RULE_AIR);
     check_all_row(app, ui, settings);
@@ -84,7 +93,8 @@ pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSe
 
 /// The Presets menu: save the active set's settings under a name, load or delete a saved one, copy to all sets
 fn presets_menu(app: &mut TextureCraftApp, ui: &mut Ui, settings: &BakeSettings) {
-    ui.menu_button(format!("{} {}", icon::SLIDERS_HORIZONTAL, tr("Presets")), |ui| {
+    let button = header_button(ui, icon::SLIDERS_HORIZONTAL, tr("Presets"));
+    egui::Popup::menu(&button).show(|ui| {
         ui.set_min_width(220.0);
         ui.horizontal(|ui| {
             let name_edit = egui::TextEdit::singleline(&mut app.ui.bake_preset_name).hint_text(tr("Preset name")).desired_width(130.0);
@@ -333,5 +343,21 @@ fn glyph_button(ui: &mut Ui, rect: Rect, glyph: &str, label: &str, look: GlyphLo
     }
     let color = if look == GlyphLook::Plain && !response.hovered() { tokens.text_dim } else { tokens.text_strong };
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, glyph, FontId::proportional(ROW_GLYPH_SIZE), color);
+    response
+}
+
+/// One of the header's bordered buttons, sized to its glyph and words
+fn header_button(ui: &mut Ui, glyph: &str, text: &str) -> egui::Response {
+    let tokens = Tokens::get(ui.ctx());
+    let icon = ui.painter().layout_no_wrap(glyph.to_owned(), FontId::proportional(ROW_GLYPH_SIZE), tokens.text);
+    let words = ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(NAME_SIZE), tokens.text);
+    let width = 2.0 * HEADER_BUTTON_PADDING + icon.size().x + HEADER_GLYPH_GAP + words.size().x;
+    let (rect, response) = ui.allocate_exact_size(vec2(width, HEADER_BUTTON_HEIGHT), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, text));
+    let fill = if response.hovered() { tokens.row_hover } else { tokens.button };
+    ui.painter().rect(rect, CornerRadius::same(ROW_RADIUS), fill, Stroke::new(1.0, tokens.button_border), egui::StrokeKind::Inside);
+    let x = rect.left() + HEADER_BUTTON_PADDING;
+    ui.painter().galley(pos2(x, rect.center().y - icon.size().y / 2.0), icon.clone(), tokens.text);
+    ui.painter().galley(pos2(x + icon.size().x + HEADER_GLYPH_GAP, rect.center().y - words.size().y / 2.0), words, tokens.text);
     response
 }

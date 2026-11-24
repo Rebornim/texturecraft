@@ -92,6 +92,9 @@ pub(crate) fn wanted(app: &TextureCraftApp) -> Option<LivePreviewTarget> {
 
 /// A map setting changed: bake the preview again. While a slider drags, a running bake finishes and shows before the newest change bakes, so pictures keep coming; otherwise the change cancels it and bakes at the chosen size
 pub(crate) fn settings_changed(app: &mut TextureCraftApp, ctx: &egui::Context, dragging: bool) {
+    if std::env::var_os("TC_ZZ_TRACE").is_some() {
+        eprintln!("TRACE changed dragging {dragging} running {:?}", app.live_preview.running.as_ref().map(|running| running.dragging));
+    }
     let Some(target) = app.live_preview.shown else { return };
 
     // Web builds bake on the UI thread, so they wait for the release
@@ -138,6 +141,9 @@ pub(crate) fn poll(app: &mut TextureCraftApp, ctx: &egui::Context) {
     ctx.request_repaint_after(std::time::Duration::from_millis(16));
     match running.receiver.try_recv() {
         Ok(Ok(output)) => {
+            if std::env::var_os("TC_ZZ_TRACE").is_some() {
+                eprintln!("TRACE done dragging {} waiting {}", running.dragging, app.live_preview.drag_waiting);
+            }
             let (target, size, dragging) = (running.target, running.size, running.dragging);
             let seconds = ctx.input(|input| input.time) - running.started;
             app.live_preview.running = None;
@@ -181,8 +187,12 @@ fn show(app: &mut TextureCraftApp, ctx: &egui::Context, target: LivePreviewTarge
 
 /// Bake `target`'s map alone at `size` on a worker (`dragging`: for a slider still moving), cancelling the preview bake still running
 fn start(app: &mut TextureCraftApp, ctx: &egui::Context, target: LivePreviewTarget, size: BakeResolution, dragging: bool) {
+    let t = std::time::Instant::now();
     app.live_preview.cancel();
+    crate::zz_slow("start cancel", t);
+    let t = std::time::Instant::now();
     let Ok(mut task) = app.session.bake_task(target.set) else { return };
+    crate::zz_slow("start bake_task", t);
 
     task.settings.maps.select([target.map]);
     let own = task.settings.common.resolution;
@@ -192,10 +202,15 @@ fn start(app: &mut TextureCraftApp, ctx: &egui::Context, target: LivePreviewTarg
 
     let progress = Arc::new(Progress::new());
     let worker_progress = progress.clone();
+    let t = std::time::Instant::now();
     let receiver = crate::spawn_worker("texturecraft-map-preview", move || match preview_pool() {
         Some(pool) => pool.install(|| task.run(&worker_progress)),
         None => task.run(&worker_progress),
     });
+    crate::zz_slow("start spawn", t);
+    if std::env::var_os("TC_ZZ_TRACE").is_some() {
+        eprintln!("TRACE start {:?} size {} dragging {dragging}", target.map, size.pixels());
+    }
     let started = ctx.input(|input| input.time);
     app.live_preview.running = Some(RunningPreview { target, size, started, dragging, progress, receiver });
 }

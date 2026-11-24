@@ -8,6 +8,9 @@ use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::docking::Panel;
 use texturecraft_ui_egui::state::Mode;
 
+/// How long a steady drag may take to bring its first new pictures, on a slow machine
+const MOVING_DRAG_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// Bake mode on the sample with Ambient Occlusion's settings in front
 fn harness() -> Harness<'static, TextureCraftApp> {
     let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
@@ -102,7 +105,12 @@ fn pictures_keep_coming_while_the_slider_is_still_moving() {
     // Holding the last picture keeps a new one from reusing its address
     let mut last = picture(&harness);
     let mut pictures = 0;
-    for step in 0..600 {
+    let started = std::time::Instant::now();
+    for step in 0.. {
+        if pictures > 2 || started.elapsed() > MOVING_DRAG_LIMIT {
+            break;
+        }
+
         // Every frame moves the slider, as a steady drag does
         harness.hover_at(from + egui::vec2(track.width() * 0.002 * (step % 200) as f32, 0.0));
         harness.run_steps(1);

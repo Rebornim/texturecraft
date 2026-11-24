@@ -256,3 +256,35 @@ fn leaf_count(patch: &Value) -> usize {
         _ => 1,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use texturecraft_engine::core::{BakeAntialiasing, BakeResolution, BakeSettings, BakeSyncGroup, BakedMap};
+
+    use super::differing_values;
+
+    #[test]
+    fn a_set_shows_its_own_size_and_antialiasing_and_counts_the_rest() {
+        let source = BakeSettings::default();
+        let mut set = BakeSettings::default();
+        set.common.resolution = BakeResolution::R1024;
+        set.common.antialiasing = BakeAntialiasing::Subsampling4x4;
+        set.common.dilation = 8;
+        set.high_poly.ignore_backface = !source.high_poly.ignore_backface;
+
+        let note = differing_values(&set, &source, BakeSyncGroup::Common);
+
+        assert_eq!(note.as_deref(), Some("1024 · Subsampling 4x4 · 2 more"));
+    }
+
+    #[test]
+    fn a_set_matching_the_group_shows_nothing_and_other_groups_are_not_compared() {
+        let source = BakeSettings::default();
+        let mut set = BakeSettings::default();
+        set.common.is_enabled = false;
+        set.maps.ao.parameters.rays.rays = 16;
+
+        assert_eq!(differing_values(&set, &source, BakeSyncGroup::Common), None);
+        assert_eq!(differing_values(&set, &source, BakeSyncGroup::Map(BakedMap::AmbientOcclusion)).as_deref(), Some("1 differing setting"));
+    }
+}

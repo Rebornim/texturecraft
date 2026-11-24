@@ -1,16 +1,37 @@
 //! The dialog that picks texture sets: which ones share settings, or which ones a copy goes to
 
-use egui::{Align, Layout, RichText, Ui};
+use egui::{Align2, CornerRadius, FontId, Rect, RichText, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use egui_phosphor::regular as icon;
-use serde_json::json;
-use texturecraft_engine::core::{BakeSyncGroup, BakedMap};
+use serde_json::{Value, json};
+use texturecraft_engine::bake::settings_patch;
+use texturecraft_engine::core::{BakeSettings, BakeSyncGroup, BakedMap};
 
+use super::common_settings::antialiasing_label;
 use super::set_picker_purpose::SetPickerPurpose;
 use crate::TextureCraftApp;
 use crate::i18n::{baked_map_label, tr, trf};
+use crate::property_sheet::PropertySheet;
+use crate::theme::{Tokens, semibold};
 
 /// Width of the dialog, in points
 const DIALOG_WIDTH: f32 = 420.0;
+
+/// The title bar: its height, the gear's and the title's left edges, and the glyph and title sizes
+const TITLE_BAR_HEIGHT: f32 = 30.0;
+const TITLE_GEAR_CENTER: f32 = 19.0;
+const TITLE_TEXT_LEFT: f32 = 34.0;
+const TITLE_GLYPH_SIZE: f32 = 14.0;
+const TITLE_TEXT_SIZE: f32 = 12.0;
+
+/// Air under the title bar and above the buttons, and around the dialog's edge
+const BODY_AIR: f32 = 12.0;
+const BUTTONS_AIR: f32 = 18.0;
+const EDGE_AIR: f32 = 12.0;
+
+/// OK and Cancel: their size, the air between them, their corners
+const BUTTON_SIZE: egui::Vec2 = vec2(88.0, 24.0);
+const BUTTON_GAP: f32 = 8.0;
+const DIALOG_RADIUS: u8 = 4;
 
 /// An open picker: what it is for, and per texture set whether it is ticked
 #[derive(Clone, Debug)]
@@ -44,32 +65,24 @@ impl SetPicker {
     pub(super) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
         let Some(mut picker) = ctx.data(|data| data.get_temp::<SetPicker>(Self::id())) else { return };
 
-        let names: Vec<String> = app.session.doc.project.texture_sets.iter().map(|set| set.name.clone()).collect();
+        let rows = picker.rows(app);
         let active = app.session.ts();
-        let modal = egui::Modal::new(Self::id().with("modal")).show(ctx, |ui| {
+        let tokens = Tokens::get(ctx);
+        let frame = egui::Frame::new()
+            .fill(tokens.panel)
+            .stroke(Stroke::new(1.0, tokens.button_border))
+            .corner_radius(CornerRadius::same(DIALOG_RADIUS))
+            .inner_margin(0);
+        let modal = egui::Modal::new(Self::id().with("modal")).frame(frame).show(ctx, |ui| {
             ui.set_width(DIALOG_WIDTH);
-            ui.label(RichText::new(picker.title()).strong());
-            ui.add_space(8.0);
-            if let SetPickerPurpose::Sync(group) = picker.purpose {
-                ui.horizontal_top(|ui| {
-                    ui.label(RichText::new(icon::GEAR).size(18.0));
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing.x = 0.0;
-                        ui.label(tr("All the selected Texture Sets will share their "));
-                        ui.label(RichText::new(group_label(group)).strong());
-                        ui.label(tr(". New additions will take on the currently synced settings."));
-                    });
-                });
-                ui.add_space(6.0);
-            }
-            picker.list(ui, &names, active);
-            ui.add_space(12.0);
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let cancel = ui.button(tr("Cancel")).clicked();
-                let ok = ui.button(tr("OK")).clicked();
-                (ok, cancel)
-            })
-            .inner
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            let closed = title_bar(ui, &tokens, &picker.title());
+            ui.add_space(BODY_AIR);
+            PropertySheet::show(ui, "bake_set_picker_sheet", |sheet| picker.list(sheet, &rows));
+            ui.add_space(BUTTONS_AIR);
+            let (ok, cancel) = buttons(ui, &tokens);
+            ui.add_space(EDGE_AIR);
+            (ok, cancel || closed)
         });
 
         let (ok, cancel) = modal.inner;
@@ -83,6 +96,31 @@ impl SetPicker {
         }
     }
 
+    /// The listed sets: index, name and, for a set not yet sharing a sync group, the values it would give up
+    fn rows(&self, app: &TextureCraftApp) -> Vec<(usize, String, Option<String>)> {
+        let project = &app.session.doc.project;
+        let active = app.session.ts();
+        let source = match self.purpose {
+            // New additions take on the settings already shared, or the active set's when none are
+            SetPickerPurpose::Sync(group) => project.texture_sets.iter().find(|set| set.bake.sync.shares(group)).or(project.texture_sets.get(active)),
+            SetPickerPurpose::Copy { .. } => None,
+        };
+        project
+            .texture_sets
+            .iter()
+            .enumerate()
+            // A copy goes from the active set, so it isn't listed
+            .filter(|(index, _)| matches!(self.purpose, SetPickerPurpose::Sync(_)) || *index != active)
+            .map(|(index, set)| {
+                let note = match (self.purpose, source) {
+                    (SetPickerPurpose::Sync(group), Some(source)) if !set.bake.sync.shares(group) => differing_values(&set.bake, &source.bake, group),
+                    _ => None,
+                };
+                (index, set.name.clone(), note)
+            })
+            .collect()
+    }
+
     fn title(&self) -> String {
         match self.purpose {
             SetPickerPurpose::Sync(group) => trf("{settings} Sync", &[("settings", &group_label(group))]),
@@ -93,29 +131,26 @@ impl SetPicker {
         }
     }
 
-    /// The master checkbox and one checkbox per set; a copy goes from the active set, so it isn't listed
-    fn list(&mut self, ui: &mut Ui, names: &[String], active: usize) {
-        let listed: Vec<usize> = (0..names.len()).filter(|index| matches!(self.purpose, SetPickerPurpose::Sync(_)) || *index != active).collect();
-        let ticked = listed.iter().filter(|index| self.chosen.get(**index).copied().unwrap_or(false)).count();
-        let all_ticked = ticked == listed.len();
+    /// The master check and one check per listed set, indented under it
+    fn list(&mut self, sheet: &mut PropertySheet<'_>, rows: &[(usize, String, Option<String>)]) {
+        let ticked = rows.iter().filter(|(index, ..)| self.chosen.get(*index).copied().unwrap_or(false)).count();
+        let all_ticked = ticked == rows.len();
         let label = if all_ticked { tr("Deselect All") } else { tr("Select All") };
-        let mut all = all_ticked;
-        if ui.add(egui::Checkbox::new(&mut all, label).indeterminate(ticked > 0 && !all_ticked)).changed() {
-            for index in &listed {
+        let state = if ticked == 0 { Some(false) } else { all_ticked.then_some(true) };
+        if sheet.check_mixed(label, state).clicked() {
+            for (index, ..) in rows {
                 if let Some(chosen) = self.chosen.get_mut(*index) {
-                    *chosen = all;
+                    *chosen = !all_ticked;
                 }
             }
         }
-        ui.horizontal_top(|ui| {
-            ui.add_space(ui.spacing().indent);
-            ui.vertical(|ui| {
-                for index in listed {
-                    if let (Some(chosen), Some(name)) = (self.chosen.get_mut(index), names.get(index)) {
-                        ui.checkbox(chosen, name);
-                    }
+        sheet.indented(|sheet| {
+            for (index, name, note) in rows {
+                let Some(chosen) = self.chosen.get_mut(*index) else { continue };
+                if sheet.check_noted(name, Some(*chosen), note.as_deref()).clicked() {
+                    *chosen = !*chosen;
                 }
-            });
+            }
         });
     }
 
@@ -145,5 +180,77 @@ fn group_label(group: BakeSyncGroup) -> String {
     match group {
         BakeSyncGroup::Common => tr("Common Settings").to_owned(),
         BakeSyncGroup::Map(map) => trf("{map} Settings", &[("map", &tr(baked_map_label(map)))]),
+    }
+}
+
+/// The title bar: gear, title, and × at the right; returns whether × was clicked
+fn title_bar(ui: &mut Ui, tokens: &Tokens, title: &str) -> bool {
+    let (bar, _) = ui.allocate_exact_size(vec2(DIALOG_WIDTH, TITLE_BAR_HEIGHT), Sense::hover());
+    let top = CornerRadius { nw: DIALOG_RADIUS, ne: DIALOG_RADIUS, sw: 0, se: 0 };
+    ui.painter().rect_filled(bar, top, tokens.chrome);
+    let center_y = bar.center().y;
+    ui.painter().text(pos2(bar.left() + TITLE_GEAR_CENTER, center_y), Align2::CENTER_CENTER, icon::GEAR, FontId::proportional(TITLE_GLYPH_SIZE), tokens.text);
+    let text = Rect::from_min_max(pos2(bar.left() + TITLE_TEXT_LEFT, bar.top()), pos2(bar.right() - TITLE_BAR_HEIGHT, bar.bottom()));
+    ui.put(text, egui::Label::new(RichText::new(title).font(semibold(TITLE_TEXT_SIZE)).color(tokens.text_strong)).truncate());
+
+    let close = Rect::from_center_size(pos2(bar.right() - TITLE_BAR_HEIGHT / 2.0, center_y), vec2(TITLE_BAR_HEIGHT, TITLE_BAR_HEIGHT));
+    let response = ui.interact(close, ui.scope_id().with("close"), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tr("Close")));
+    let color = if response.hovered() { tokens.text_strong } else { tokens.text_dim };
+    ui.painter().text(close.center(), Align2::CENTER_CENTER, icon::X, FontId::proportional(TITLE_TEXT_SIZE), color);
+    response.clicked()
+}
+
+/// OK then Cancel at the right, both neutral; returns (OK, Cancel) clicked
+fn buttons(ui: &mut Ui, tokens: &Tokens) -> (bool, bool) {
+    let (row, _) = ui.allocate_exact_size(vec2(DIALOG_WIDTH, BUTTON_SIZE.y), Sense::hover());
+    let cancel = Rect::from_min_size(pos2(row.right() - EDGE_AIR - BUTTON_SIZE.x, row.top()), BUTTON_SIZE);
+    let ok = cancel.translate(vec2(-(BUTTON_SIZE.x + BUTTON_GAP), 0.0));
+    (dialog_button(ui, tokens, ok, tr("OK")), dialog_button(ui, tokens, cancel, tr("Cancel")))
+}
+
+fn dialog_button(ui: &mut Ui, tokens: &Tokens, rect: Rect, text: &str) -> bool {
+    let response = ui.interact(rect, ui.scope_id().with(text), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, text));
+    let fill = if response.hovered() { tokens.row_hover } else { tokens.button };
+    ui.painter().rect(rect, CornerRadius::same(DIALOG_RADIUS), fill, Stroke::new(1.0, tokens.button_border), StrokeKind::Inside);
+    ui.painter().text(rect.center(), Align2::CENTER_CENTER, text, FontId::proportional(TITLE_TEXT_SIZE), tokens.text);
+    response.clicked()
+}
+
+/// What `set` holds in `group` that differs from `source`, dim beside it: output size and antialiasing by value, the rest counted
+fn differing_values(set: &BakeSettings, source: &BakeSettings, group: BakeSyncGroup) -> Option<String> {
+    let mut taken = set.clone();
+    taken.copy_group(source, group);
+    let mut patch = settings_patch(set, &taken);
+    let mut values = Vec::new();
+    if let Some(common) = patch.get_mut("common").and_then(Value::as_object_mut) {
+        let resolution = common.remove("resolution").is_some();
+        let height = common.remove("resolution_height").is_some();
+        if resolution || height {
+            values.push(match set.common.output_size() {
+                (width, height) if width == height => width.to_string(),
+                (width, height) => format!("{width} × {height}"),
+            });
+        }
+        if common.remove("antialiasing").is_some() {
+            values.push(tr(antialiasing_label(set.common.antialiasing)).to_owned());
+        }
+    }
+    let rest = leaf_count(&patch);
+    match (values.is_empty(), rest) {
+        (true, 0) => None,
+        (true, 1) => Some(tr("1 differing setting").to_owned()),
+        (true, count) => Some(trf("{count} differing settings", &[("count", &count.to_string())])),
+        (false, 0) => Some(values.join(" · ")),
+        (false, count) => Some(trf("{values} · {count} more", &[("values", &values.join(" · ")), ("count", &count.to_string())])),
+    }
+}
+
+/// How many plain values a settings patch changes
+fn leaf_count(patch: &Value) -> usize {
+    match patch {
+        Value::Object(fields) => fields.values().map(leaf_count).sum(),
+        _ => 1,
     }
 }

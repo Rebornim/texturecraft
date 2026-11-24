@@ -11,7 +11,7 @@ use texturecraft_core::BakePaintTarget;
 
 use super::{BakeCageInputs, HighPolyLoad, MergedHigh};
 use crate::{BakeMesh, BakeTask, StreamedBake};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use texturecraft_bake::tracing::Tracer;
 use texturecraft_bake::{BakeOutput, BakePaintMap, MAX_RAYS, Progress};
 use texturecraft_core::{
@@ -748,7 +748,7 @@ fn with_sync_partners(project: &texturecraft_core::Project, targets: Vec<(usize,
     let mut next: BTreeMap<usize, BakeSettings> = BTreeMap::new();
     for (target, settings) in &targets {
         let Some(before) = project.texture_sets.get(*target).map(|set| &set.bake) else { continue };
-        let Some(changed) = changed_fields(&json!(before), &json!(settings)) else { continue };
+        let Some(changed) = model_patch::changed_fields(&json!(before), &json!(settings)) else { continue };
 
         let groups = std::iter::once(BakeSyncGroup::Common).chain(BakedMap::ALL.map(BakeSyncGroup::Map));
         for group in groups {
@@ -764,20 +764,6 @@ fn with_sync_partners(project: &texturecraft_core::Project, targets: Vec<(usize,
     }
     next.extend(targets);
     Ok(next.into_iter().collect())
-}
-
-/// The fields of `after` that differ from `before`, nested as a `bake.settings` patch; `None` when nothing changed
-fn changed_fields(before: &Value, after: &Value) -> Option<Value> {
-    match (before, after) {
-        (Value::Object(before), Value::Object(after)) => {
-            let fields: Map<String, Value> = after
-                .iter()
-                .filter_map(|(name, value)| changed_fields(before.get(name).unwrap_or(&Value::Null), value).map(|changed| (name.clone(), changed)))
-                .collect();
-            (!fields.is_empty()).then_some(Value::Object(fields))
-        }
-        _ => (before != after).then(|| after.clone()),
-    }
 }
 
 fn settings(session: &mut Session, params: &Value) -> Result<Value> {

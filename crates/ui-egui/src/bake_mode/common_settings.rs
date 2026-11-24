@@ -21,17 +21,8 @@ pub(super) fn show(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, set
     let common_reset = section(sheet, tr("Common Settings"), &[], |sheet| {
         sheet.sub_header(tr("Output Settings"), |sheet| {
             output_size(sheet, &mut settings.common);
-            choice(
-                sheet,
-                tr("Antialiasing"),
-                &mut settings.common.antialiasing,
-                &[
-                    (BakeAntialiasing::None, tr("None")),
-                    (BakeAntialiasing::Subsampling2x2, tr("Subsampling 2x2")),
-                    (BakeAntialiasing::Subsampling4x4, tr("Subsampling 4x4")),
-                    (BakeAntialiasing::Subsampling8x8, tr("Subsampling 8x8")),
-                ],
-            );
+            let antialiasing = BakeAntialiasing::ALL.map(|option| (option, antialiasing_label(option)));
+            choice(sheet, tr("Antialiasing"), &mut settings.common.antialiasing, &antialiasing);
             integer(sheet, tr("Dilation Width"), &mut settings.common.dilation, 0..=MAX_DILATION_WIDTH);
             sheet.check(tr("Apply Diffusion"), &mut settings.common.apply_diffusion);
         });
@@ -158,6 +149,16 @@ fn skew_unavailable_reason(settings: &BakeSettings, has_high: bool) -> &'static 
         tr("Skew Correction needs a distance-based cage: the automatic cage is fitted to the high poly as it is.")
     } else {
         tr("Skew Correction needs Average Normals turned on in the cage settings.")
+    }
+}
+
+/// How the Antialiasing dropdown names `antialiasing`
+pub(super) fn antialiasing_label(antialiasing: BakeAntialiasing) -> &'static str {
+    match antialiasing {
+        BakeAntialiasing::None => tr("None"),
+        BakeAntialiasing::Subsampling2x2 => tr("Subsampling 2x2"),
+        BakeAntialiasing::Subsampling4x4 => tr("Subsampling 4x4"),
+        BakeAntialiasing::Subsampling8x8 => tr("Subsampling 8x8"),
     }
 }
 

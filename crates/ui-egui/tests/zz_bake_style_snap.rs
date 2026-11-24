@@ -75,4 +75,18 @@ fn bake_style_snapshots() {
     h.get_by_label("Max Frontal Distance").hover();
     h.run_steps(10);
     h.render().unwrap().save(dir.join("common-no-high.png")).unwrap();
+
+    // The sync window: the second set left the group and differs in size and antialiasing
+    {
+        let second = &mut h.state_mut().session.doc.project.texture_sets[1].bake;
+        second.sync.common = false;
+        second.common.resolution = texturecraft_engine::core::BakeResolution::R1024;
+        second.common.antialiasing = texturecraft_engine::core::BakeAntialiasing::Subsampling4x4;
+        second.common.dilation = 8;
+    }
+    h.state_mut().ui.dock.focus(texturecraft_ui_egui::docking::Panel::MeshMapBakers);
+    h.run_steps(6);
+    h.get_by_label("Synchronize Common Settings").click();
+    h.run_steps(8);
+    h.render().unwrap().save(dir.join("sync-window.png")).unwrap();
 }

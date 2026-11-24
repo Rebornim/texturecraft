@@ -344,6 +344,11 @@ impl PropertySheet<'_> {
 
     /// A check that may show mixed (`None`, a dash) for several states at once; the caller flips what it stands for on a click
     pub(crate) fn check_mixed(&mut self, label: &str, state: Option<bool>) -> Response {
+        self.check_noted(label, state, None)
+    }
+
+    /// `check_mixed` with a dim `note` at the row's right end, such as the values a set would give up
+    pub(crate) fn check_noted(&mut self, label: &str, state: Option<bool>, note: Option<&str>) -> Response {
         let line = self.take(CHECK_LINE);
         let center_y = line.center().y;
         let text = self.ui.painter().layout_no_wrap(label.to_owned(), FontId::proportional(TEXT_SIZE), self.tokens.text);
@@ -359,6 +364,9 @@ impl PropertySheet<'_> {
         let check = Rect::from_min_size(pos2(self.left, center_y - CHECK_SIZE / 2.0), vec2(CHECK_SIZE, CHECK_SIZE));
         paint_check(self.ui.painter(), &self.tokens, check, state, response.hovered());
         self.ui.painter().galley(pos2(check.right() + CHECK_TO_LABEL, center_y - text.size().y / 2.0), text, self.tokens.text);
+        if let Some(note) = note {
+            self.ui.painter().text(pos2(self.right, center_y), Align2::RIGHT_CENTER, note, FontId::proportional(SMALL_TEXT_SIZE), self.tokens.text_dim);
+        }
         self.paint_control_focus(&response);
         self.drawn(line.bottom());
         self.space(STACK_ROW_AIR);

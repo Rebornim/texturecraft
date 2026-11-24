@@ -3634,15 +3634,17 @@ impl<'a, 'b> Texel<'a, 'b> {
         Some(((baked_uv[0] * baked_size.0 as f32) as u32, (baked_uv[1] * baked_size.1 as f32) as u32))
     }
 
-    /// The generator's value at this texel: its ramp finished by balance, contrast, invert and offset (its blur and resolution need neighbours: see [`generator_region`]).
+    /// The generator's value at this texel: its ramp finished by balance, contrast, invert and offset (its blur and resolution need neighbours: see [`generator_region`])
     fn generator(&mut self, generator: &Generator, maps: &GeneratorMaps) -> f32 {
         let ramp = self.generator_ramp(generator, maps);
         let adjusted = generator.section_controls().map_or(ramp, |section| sections::adjusted(generator.kind, &section, ramp));
+
         // An image still loading reads black, as it does where blur or resolution compute the generator over a region
         let textured = match generator.texture_in_use() {
             Some(texture) => texture_layer::blended_over(texture, adjusted, self.generator_texture(generator).unwrap_or(0.0)),
             None => adjusted,
         };
+
         finish_generator(generator, textured)
     }
 

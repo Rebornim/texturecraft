@@ -13,7 +13,7 @@ pub(crate) fn working_block(inp: &Inputs) -> (u32, u32) {
     (block.0.clamp(1, size.0.max(1)), block.1.clamp(1, size.1.max(1)))
 }
 
-/// The box radius whose repeated passes approximate a Gaussian of `sigma`
+/// The radius of three box passes that blur like a gaussian of `sigma`: three boxes of radius r spread a texel with variance r (r + 1)
 pub(crate) fn box_radius(sigma: f32) -> usize {
     (((1.0 + 4.0 * sigma * sigma).sqrt() - 1.0) * 0.5).round() as usize
 }

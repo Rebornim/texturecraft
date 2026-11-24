@@ -31,7 +31,8 @@ impl FieldCache {
             fingerprint: gbuf.tri.iter().step_by(FINGERPRINT_STRIDE).fold(gbuf.tri.len() as u64, |hash, tri| hash.rotate_left(5) ^ u64::from(*tri)),
             block,
             scales: inp.block_scales.clone(),
-            mesh: (inp.mesh.positions.as_ptr() as usize, inp.mesh.positions.len(), inp.mesh.uvs.as_ptr() as usize, inp.mesh.uvs.len()),
+            positions: (inp.mesh.positions.as_ptr() as usize, inp.mesh.positions.len()),
+            uvs: (inp.mesh.uvs.as_ptr() as usize, inp.mesh.uvs.len()),
             maps: maps.iter().map(|map| Arc::downgrade(map)).collect(),
             settings,
         };

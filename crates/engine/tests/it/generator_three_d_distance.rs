@@ -215,6 +215,7 @@ fn picking_on_the_mesh_sets_the_point() {
 
     let missed = json!({"effect": distance, "x": 0.0, "y": 0.0, "viewport": [512, 512]});
     assert!(execute(&mut session, "effect.generator.pickPoint", &missed).is_err(), "a corner off the mesh picks nothing");
+    assert!(execute(&mut session, "effect.generator.pickPoint", &json!({"effect": distance, "x": 10.0})).is_err(), "a pixel needs both coordinates");
     assert!(execute(&mut session, "effect.generator.pickPoint", &json!({"effect": distance, "point": "end"})).is_err());
     let curvature = add(&mut session, json!({"generator": "curvature"}));
     assert!(execute(&mut session, "effect.generator.pickPoint", &json!({"effect": curvature})).is_err());

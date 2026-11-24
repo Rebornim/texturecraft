@@ -66,9 +66,7 @@ pub(crate) fn generator_blur_sigma(generator: &Generator) -> f32 {
 /// The radius of the three box passes that blur like the section blur at `resolution` texels per side
 pub(crate) fn blur_radius_at(kind: GeneratorKind, section: &SectionParameters, resolution: u32) -> usize {
     let sigma = blur_sigma(kind, section) * resolution as f32 / GeneratorGlobal::BLUR_RESOLUTION;
-
-    // Three boxes of radius r spread a texel with variance r (r + 1)
-    (((1.0 + 4.0 * sigma * sigma).sqrt() - 1.0) * 0.5).round() as usize
+    crate::working_field::box_radius(sigma)
 }
 
 /// `signal` after the section's balance, contrast, brightness and invert, as far as a generator of `kind` has them

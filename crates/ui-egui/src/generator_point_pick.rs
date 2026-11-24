@@ -1,5 +1,8 @@
 //! Picking a 3D generator's point on the mesh: its crosshair button arms it, the next click in the 3D view sets the point, Esc or the button again cancels
 
+use texturecraft_engine::core::LayerId;
+use texturecraft_engine::{Session, StackTarget};
+
 /// Which point of which generator effect the next click in the 3D view sets
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PointPick {
@@ -26,10 +29,10 @@ pub(crate) fn toggle(ctx: &egui::Context, pick: PointPick) {
 }
 
 /// The armed pick while its effect is still the selected one; a pick whose effect was deselected or deleted is dropped
-pub(crate) fn armed_on(ctx: &egui::Context, session: &texturecraft_engine::Session) -> Option<PointPick> {
-    let armed = armed(ctx)?;
-    if session.target == texturecraft_engine::StackTarget::Effect(texturecraft_engine::core::LayerId(armed.effect)) {
-        return Some(armed);
+pub(crate) fn armed_on(ctx: &egui::Context, session: &Session) -> Option<PointPick> {
+    let pick = armed(ctx)?;
+    if session.target == StackTarget::Effect(LayerId(pick.effect)) {
+        return Some(pick);
     }
     set(ctx, None);
     None

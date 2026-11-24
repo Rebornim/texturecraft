@@ -24,9 +24,7 @@ use texturecraft_core::{BakedMap, LayerId, MicroCurvatureType, MicroDetails};
 
 use crate::below::StackKey;
 use crate::eval::{BLUR_BOX_PASSES, Inputs};
-
-/// The resolution of a UV tile the reference's micro details were measured at: derivatives and radii are per texel at this size
-const REFERENCE_TILE_TEXELS: f32 = 2048.0;
+use crate::working_field::REFERENCE_TILE_TEXELS;
 
 /// How steeply the micro height tilts the normal it is turned into, per unit of Height Details Intensity (fitted)
 const HEIGHT_NORMAL_STRENGTH: f32 = 5.9;

@@ -427,10 +427,13 @@ fn a_point_pick_waits_for_the_view_until_escape() {
     // Selecting something else drops the pick: coming back finds it disarmed
     click_live(&mut harness, Role::Button, end);
     let layer = harness.state().session.doc.project.effect(effect).unwrap().0;
+
     execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": layer.0, "target": "content"})).unwrap();
     harness.run_steps(3);
+
     execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": layer.0, "target": effect.0})).unwrap();
     harness.run_steps(3);
+
     assert!(!is_on(&harness, Role::Button, end), "a pick left behind is dropped");
 }
 

@@ -10,7 +10,9 @@ pub(crate) struct FieldCacheKey {
     pub(crate) fingerprint: u64,
     pub(crate) block: (u32, u32),
     pub(crate) scales: BlockScales,
-    pub(crate) mesh: (usize, usize, usize, usize),
+    /// The mesh's positions and UVs, each by address and length: a UV edit changes island fields
+    pub(crate) positions: (usize, usize),
+    pub(crate) uvs: (usize, usize),
     pub(crate) maps: Vec<Weak<Vec<f32>>>,
     pub(crate) settings: Vec<u32>,
 }
@@ -24,7 +26,8 @@ impl PartialEq for FieldCacheKey {
             && self.fingerprint == other.fingerprint
             && self.block == other.block
             && self.scales == other.scales
-            && self.mesh == other.mesh
+            && self.positions == other.positions
+            && self.uvs == other.uvs
             && self.settings == other.settings
     }
 }

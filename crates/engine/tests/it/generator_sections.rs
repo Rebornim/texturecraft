@@ -154,3 +154,16 @@ fn the_offset_belongs_to_the_earlier_model() {
         assert!(execute(&mut session, "effect.set", &both).is_err(), "{kind}: offset and the reference controls at once are refused");
     }
 }
+
+#[test]
+fn inspect_reports_the_reference_controls_set() {
+    let mut session = session();
+    add(&mut session, json!({"generator": "position", "sectionContrast": 0.25}));
+    add(&mut session, json!({"generator": "direction", "lightHorizontal": 90.0}));
+    add(&mut session, json!({"generator": "dirt", "wearLevel": 0.125}));
+
+    let inspected = execute(&mut session, "project.inspect", &Value::Null).unwrap().to_string();
+    for (key, value) in [("section", "\"contrast\":0.25"), ("light", "\"horizontal\":90.0"), ("wear", "\"level\":0.125")] {
+        assert!(inspected.contains(&format!("\"{key}\"")) && inspected.contains(value), "{key} with {value} in {inspected}");
+    }
+}

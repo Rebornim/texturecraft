@@ -18,6 +18,8 @@ pub struct HighPolyJob {
     answer: Receiver<Result<HighPolyLoad>>,
     /// The files still to load, in order
     pub queue: VecDeque<String>,
+    /// The project the files are for: they are dropped once another project is open
+    project: u64,
 }
 
 impl HighPolyJob {
@@ -33,8 +35,8 @@ impl TextureCraftApp {
     pub fn load_high_polys(&mut self, paths: impl IntoIterator<Item = String>) {
         let mut paths: VecDeque<String> = paths.into_iter().collect();
         match &mut self.high_poly_job {
-            Some(job) => job.queue.append(&mut paths),
-            None => self.load_next_high_poly(paths),
+            Some(job) if job.project == self.session.project_id => job.queue.append(&mut paths),
+            _ => self.load_next_high_poly(paths),
         }
     }
 
@@ -44,14 +46,19 @@ impl TextureCraftApp {
         self.high_poly_job = queue.pop_front().map(|current| {
             let (meshes, path) = (self.session.doc.bake_meshes.clone(), current.clone());
             let answer = crate::spawn_worker("texturecraft-high-poly", move || HighPolyLoad::read(&meshes, &path));
-            HighPolyJob { current, answer, queue }
+            HighPolyJob { current, answer, queue, project: self.session.project_id }
         });
     }
 
-    /// Add a loaded high poly to the session and start on the next file
+    /// Add a loaded high poly to the session and start on the next file; drop them all once another project is open
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn poll_high_poly_job(&mut self, context: &egui::Context) {
         let Some(job) = &self.high_poly_job else { return };
+        if job.project != self.session.project_id {
+            self.high_poly_job = None;
+            self.toast(tr("The project changed while the high polys loaded, so they were not added"), true);
+            return;
+        }
 
         context.request_repaint_after(POLL_INTERVAL);
         let loaded = match job.answer.try_recv() {

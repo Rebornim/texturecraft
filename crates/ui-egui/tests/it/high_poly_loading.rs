@@ -69,6 +69,23 @@ fn picked_high_polys_load_in_the_background_and_each_is_an_undo_step() {
 }
 
 #[test]
+fn high_polys_still_loading_when_another_project_opens_are_not_added_to_it() {
+    let folder = std::env::temp_dir().join(format!("texturecraft-high-poly-moved-on-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let path = folder.join("part.obj").display().to_string();
+    std::fs::write(&path, TRIANGLE_OBJ).unwrap();
+
+    let mut harness = harness();
+    harness.state_mut().load_high_polys([path.clone(), path]);
+    assert!(harness.state_mut().run("project.new", serde_json::json!({"mesh": "cube", "resolution": 128})).is_some());
+    run_until_loaded(&mut harness);
+
+    assert!(high_names(&harness).is_empty());
+    assert!(harness.state().toasts.iter().any(|toast| toast.text.contains("not added")));
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+#[test]
 fn a_high_poly_that_finishes_after_the_list_changed_joins_the_list_as_it_is() {
     let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
     let file = |name: &str| texturecraft_engine::formats::MeshFile { name: name.into(), bytes: TRIANGLE_OBJ.as_bytes().to_vec(), warnings: Vec::new() };

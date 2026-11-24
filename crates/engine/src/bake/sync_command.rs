@@ -235,4 +235,30 @@ mod tests {
         assert_eq!((bake(&session, 0).maps.ao.parameters.rays.rays, bake(&session, 1).maps.ao.parameters.rays.rays), (3, 3), "set 1 shares AO with set 0");
         assert!(!bake(&session, 2).sync.shares(BakeSyncGroup::Map(BakedMap::AmbientOcclusion)));
     }
+
+    #[test]
+    fn loading_a_preset_on_one_set_keeps_its_sync_groups_and_reaches_the_sets_sharing_them() {
+        let mut session = session();
+        execute(&mut session, "bake.sync", &json!({ "group": "ambientOcclusion", "ts": [1] })).unwrap();
+        let mut preset = bake(&session, 0).clone();
+        preset.common.dilation = 9;
+        preset.maps.ao.parameters.rays.rays = 5;
+        preset.sync = Default::default();
+
+        let params = json!({ "ts": 0, "model": preset, "preserveEnabled": true, "preset": true });
+        execute(&mut session, "bake.settings", &params).unwrap();
+        assert!(!bake(&session, 0).sync.shares(BakeSyncGroup::Map(BakedMap::AmbientOcclusion)), "a preset is settings, not membership");
+        assert_eq!(bake(&session, 1).common.dilation, 9, "set 1 shares Common Settings with set 0");
+        assert_ne!(bake(&session, 1).maps.ao.parameters.rays.rays, 5, "set 1 no longer shares AO with set 0");
+    }
+
+    #[test]
+    fn a_change_to_one_group_leaves_the_other_groups_of_the_sets_sharing_it_alone() {
+        let mut session = session();
+        session.doc.project.texture_sets[1].bake.common.dilation = 3;
+
+        execute(&mut session, "bake.settings", &json!({ "ts": 0, "patch": { "maps": { "ao": { "parameters": { "rays": { "rays": 6 } } } } } })).unwrap();
+        assert_eq!(bake(&session, 1).maps.ao.parameters.rays.rays, 6);
+        assert_eq!(bake(&session, 1).common.dilation, 3);
+    }
 }

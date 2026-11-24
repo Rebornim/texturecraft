@@ -15,7 +15,8 @@ use serde_json::{Value, json};
 use texturecraft_bake::tracing::Tracer;
 use texturecraft_bake::{BakeOutput, BakePaintMap, MAX_RAYS, Progress};
 use texturecraft_core::{
-    BackfaceMode, BakeAntialiasing, BakeResolution, BakeSettings, BakedMap, CurvatureMethod, PositionMode, RayDistribution, RaySettings, SelfOcclusion,
+    BackfaceMode, BakeAntialiasing, BakeResolution, BakeSettings, BakeSyncGroup, BakedMap, CurvatureMethod, PositionMode, RayDistribution, RaySettings,
+    SelfOcclusion,
 };
 use texturecraft_geom::Mesh;
 
@@ -483,8 +484,9 @@ fn apply_settings(settings: &mut BakeSettings, params: &Value, command: &str) ->
     if let Some(model) = params.get("model") {
         let replacement: BakeSettings = serde_json::from_value(model.clone()).map_err(|error| bad(command, error.to_string()))?;
         validate_model_settings(&replacement, command, boolp(params, "preset") == Some(true), None)?;
-        let is_enabled = settings.common.is_enabled;
-        *settings = replacement;
+        let (is_enabled, sync) = (settings.common.is_enabled, std::mem::take(&mut settings.sync));
+        // Sync membership is not a setting: only `bake.sync` changes it
+        *settings = BakeSettings { sync, ..replacement };
         if boolp(params, "preserveEnabled") == Some(true) {
             settings.common.is_enabled = is_enabled;
         }
@@ -726,8 +728,9 @@ fn updated_settings(session: &Session, params: &Value, command: &str) -> Result<
 }
 
 fn set_settings(session: &mut Session, params: &Value, command: &str) -> Result<Vec<usize>> {
-    let next = updated_settings(session, params, command)?;
-    let sets = next.iter().map(|(index, _)| *index).collect();
+    let targets = updated_settings(session, params, command)?;
+    let sets = targets.iter().map(|(index, _)| *index).collect();
+    let next = with_sync_partners(&session.doc.project, targets);
     if next.iter().any(|(index, settings)| session.doc.project.texture_sets.get(*index).is_some_and(|set| set.bake != *settings)) {
         session.edit("Bake Settings", |session| {
             for (index, settings) in next {
@@ -737,6 +740,29 @@ fn set_settings(session: &mut Session, params: &Value, command: &str) -> Result<
         })?;
     }
     Ok(sets)
+}
+
+/// `targets` plus every set sharing a sync group whose settings a target changed, which takes the group's new settings
+fn with_sync_partners(project: &texturecraft_core::Project, targets: Vec<(usize, BakeSettings)>) -> Vec<(usize, BakeSettings)> {
+    let mut next: BTreeMap<usize, BakeSettings> = BTreeMap::new();
+    let groups = std::iter::once(BakeSyncGroup::Common).chain(BakedMap::ALL.map(BakeSyncGroup::Map));
+    for group in groups {
+        for (target, settings) in &targets {
+            let Some(before) = project.texture_sets.get(*target).map(|set| &set.bake) else { continue };
+            let mut copied = before.clone();
+            copied.copy_group(settings, group);
+            if copied == *before {
+                continue;
+            }
+
+            for partner in project.bake_synced_sets(*target, group).into_iter().filter(|partner| partner != target) {
+                let Some(set) = project.texture_sets.get(partner) else { continue };
+                next.entry(partner).or_insert_with(|| set.bake.clone()).copy_group(settings, group);
+            }
+        }
+    }
+    next.extend(targets);
+    next.into_iter().collect()
 }
 
 fn settings(session: &mut Session, params: &Value) -> Result<Value> {

@@ -48,8 +48,8 @@ mod generator_panel;
 pub mod gpu;
 mod gray_slider;
 mod grid_tile;
-mod histogram_cache;
 mod high_poly_job;
+mod histogram_cache;
 pub mod i18n;
 pub mod id_color_pick;
 #[cfg(not(target_arch = "wasm32"))]

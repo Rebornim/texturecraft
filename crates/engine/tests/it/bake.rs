@@ -65,9 +65,9 @@ fn high_poly_meshes_drive_the_bake_and_round_trip() {
 
     // Save and reopen: meshes, cage and settings come back
     let reloaded = Session::from_project_bytes(&session.to_project_bytes().unwrap()).unwrap();
-    let names = |session: &Session| session.doc.bake_meshes.high.iter().map(|h| (h.name.clone(), h.mesh.triangle_count())).collect::<Vec<_>>();
+    let names = |session: &Session| session.doc.bake_meshes.high.iter().map(|high| (high.name.clone(), high.mesh.triangle_count())).collect::<Vec<_>>();
     assert_eq!(names(&reloaded), names(&session));
-    assert_eq!(reloaded.doc.bake_meshes.cage.as_ref().map(|c| c.name.as_str()), Some("cage.obj"));
+    assert_eq!(reloaded.doc.bake_meshes.cage.as_ref().map(|cage| cage.name.as_str()), Some("cage.obj"));
     assert_eq!(reloaded.doc.project.texture_sets[0].bake, session.doc.project.texture_sets[0].bake);
 
     execute(&mut session, "bake.highPoly.remove", &json!({ "name": "hp_high.obj" })).unwrap();

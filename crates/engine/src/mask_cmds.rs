@@ -1299,6 +1299,7 @@ fn swapped_kind(current: &Generator, kind: GeneratorKind) -> Generator {
         resolution: current.resolution,
         inputs,
         grunge: current.grunge.clone().filter(|_| WearParameters::defaults(kind).is_some()),
+        texture: current.texture.clone().filter(|_| SectionParameters::defaults(kind).is_some()),
         micro: swapped_micro(current.micro.as_deref(), kind),
         ..Generator::new(kind)
     }

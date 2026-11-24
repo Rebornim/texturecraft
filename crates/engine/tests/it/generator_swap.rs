@@ -63,3 +63,23 @@ fn only_generator_effects_take_a_generator_kind() {
     assert!(execute(&mut session, "effect.set", &json!({"effect": generator, "generator": "nope"})).is_err());
     assert!(matches!(effect_kind(&session, filter), EffectKind::Filter(_)), "a refused swap changes nothing");
 }
+
+#[test]
+fn use_texture_goes_along_between_the_kinds_that_have_it() {
+    let mut session = session();
+    execute(&mut session, "layer.add.fill", &Value::Null).unwrap();
+    execute(&mut session, "mask.add.black", &Value::Null).unwrap();
+    let added = json!({"generator": "curvature", "useTexture": true, "textureOpacity": 0.75, "textureScale": 2.0});
+    let effect = execute(&mut session, "effect.add.generator", &added).unwrap()["effect"].as_u64().unwrap();
+    let texture = |session: &Session| match effect_kind(session, effect) {
+        EffectKind::Generator(generator) => generator.texture.map(|texture| (texture.enabled, texture.opacity, texture.scale)),
+        other => panic!("not a generator: {other:?}"),
+    };
+    let before = texture(&session);
+
+    execute(&mut session, "effect.set", &json!({"effect": effect, "generator": "ambientOcclusion"})).unwrap();
+    assert_eq!(texture(&session), before, "Ambient Occlusion has Use Texture too");
+
+    execute(&mut session, "effect.set", &json!({"effect": effect, "generator": "dirt"})).unwrap();
+    assert_eq!(texture(&session), None, "Dirt has none");
+}

@@ -569,6 +569,9 @@ fn a_loaded_cage_can_be_removed_while_the_cage_does_not_apply() {
 #[test]
 fn the_view_menu_picks_the_neutral_or_the_painted_material_in_bake_mode() {
     let mut harness = harness(None);
+    // Mesh Map Settings in front would show its map's preview instead of the material
+    harness.state_mut().ui.dock.focus(Panel::CommonSettings);
+    harness.run_steps(2);
     assert!(harness.state().ui.bake_visualization.neutral_shown, "bake mode starts on the neutral material");
     harness.get_by_value("Neutral Material").click();
     harness.run_steps(3);

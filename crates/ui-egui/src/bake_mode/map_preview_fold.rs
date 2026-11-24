@@ -12,7 +12,8 @@ pub(super) struct MapPreviewFold {
 impl MapPreviewFold {
     /// Whether the section should open (Some(true)) or fold (Some(false)) this frame, or stay as it is; `selected` is the map whose settings show, `switched_off` whether the preview is turned off
     pub(super) fn follow(&mut self, shown: Option<BakedMap>, selected: Option<BakedMap>, switched_off: bool) -> Option<bool> {
-        if self.folded_for.is_some() && selected != self.folded_for {
+        // Only another map ends it; no map at all (Common Settings in front) keeps it
+        if selected.is_some() && selected != self.folded_for {
             self.folded_for = None;
         }
         if shown == self.shown {

@@ -163,52 +163,52 @@ fn largest_change(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
 
 #[test]
 fn generators_read_an_anchor_height_as_their_micro_height() {
-    let mut s = texturecraft_engine::sample_session(128, 64).unwrap();
+    let mut session = texturecraft_engine::sample_session(128, 64).unwrap();
 
     // A checker of raised height below, recorded by an anchor point
-    let low = id(execute(&mut s, "layer.add.fill", &json!({"height": 1.0})).unwrap(), "layer");
-    execute(&mut s, "mask.add.black", &json!({"layer": low})).unwrap();
-    execute(&mut s, "effect.add.fill", &json!({"layer": low, "procedural": "checker", "scale": 4.0})).unwrap();
-    let anchor = id(execute(&mut s, "effect.add.anchor", &json!({"layer": low})).unwrap(), "effect");
-    let top = id(execute(&mut s, "layer.add.fill", &json!({"color": [1.0, 1.0, 1.0]})).unwrap(), "layer");
-    execute(&mut s, "mask.add.black", &json!({"layer": top})).unwrap();
+    let low = id(execute(&mut session, "layer.add.fill", &json!({"height": 1.0})).unwrap(), "layer");
+    execute(&mut session, "mask.add.black", &json!({"layer": low})).unwrap();
+    execute(&mut session, "effect.add.fill", &json!({"layer": low, "procedural": "checker", "scale": 4.0})).unwrap();
+    let anchor = id(execute(&mut session, "effect.add.anchor", &json!({"layer": low})).unwrap(), "effect");
+    let top = id(execute(&mut session, "layer.add.fill", &json!({"color": [1.0, 1.0, 1.0]})).unwrap(), "layer");
+    execute(&mut session, "mask.add.black", &json!({"layer": top})).unwrap();
 
     // The anchor must be below; `microAmount` needs an anchor; ids must be numbers
-    assert!(execute(&mut s, "effect.add.generator", &json!({"layer": low, "microAnchor": anchor})).is_err());
-    assert!(execute(&mut s, "effect.add.generator", &json!({"layer": top, "microAmount": 0.5})).is_err());
-    assert!(execute(&mut s, "effect.add.generator", &json!({"layer": top, "microAnchor": "x"})).is_err());
-    assert!(execute(&mut s, "effect.add.generator", &json!({"layer": top, "microAnchor": low})).is_err(), "not an anchor point");
+    assert!(execute(&mut session, "effect.add.generator", &json!({"layer": low, "microAnchor": anchor})).is_err());
+    assert!(execute(&mut session, "effect.add.generator", &json!({"layer": top, "microAmount": 0.5})).is_err());
+    assert!(execute(&mut session, "effect.add.generator", &json!({"layer": top, "microAnchor": "x"})).is_err());
+    assert!(execute(&mut session, "effect.add.generator", &json!({"layer": top, "microAnchor": low})).is_err(), "not an anchor point");
 
-    let generator = id(execute(&mut s, "effect.add.generator", &json!({"layer": top, "generator": "curvature"})).unwrap(), "effect");
-    let plain = base_colors(&mut s);
-    execute(&mut s, "effect.set", &json!({"effect": generator, "microAnchor": anchor, "microAmount": 1.0})).unwrap();
-    let raised = base_colors(&mut s);
+    let generator = id(execute(&mut session, "effect.add.generator", &json!({"layer": top, "generator": "curvature"})).unwrap(), "effect");
+    let plain = base_colors(&mut session);
+    execute(&mut session, "effect.set", &json!({"effect": generator, "microAnchor": anchor, "microAmount": 1.0})).unwrap();
+    let raised = base_colors(&mut session);
     assert!(largest_change(&raised, &plain) > 0.05, "the checker's raised edges read as curvature");
-    let inspect = execute(&mut s, "project.inspect", &Value::Null).unwrap();
+    let inspect = execute(&mut session, "project.inspect", &Value::Null).unwrap();
     let inspected = inspect.to_string();
     assert!(inspected.contains("\"heightSource\"") && inspected.contains(&format!("\"anchor\":{anchor}")), "{inspect}");
 
     // The amount alone keeps the anchor; null empties the Micro Height
-    execute(&mut s, "effect.set", &json!({"effect": generator, "microAmount": 0.0})).unwrap();
-    assert!(largest_change(&base_colors(&mut s), &plain) < 1e-3, "no amount, no micro height");
-    execute(&mut s, "effect.set", &json!({"effect": generator, "microAnchor": null})).unwrap();
-    let emptied = s
+    execute(&mut session, "effect.set", &json!({"effect": generator, "microAmount": 0.0})).unwrap();
+    assert!(largest_change(&base_colors(&mut session), &plain) < 1e-3, "no amount, no micro height");
+    execute(&mut session, "effect.set", &json!({"effect": generator, "microAnchor": null})).unwrap();
+    let emptied = session
         .doc
         .project
         .effect(LayerId(generator))
-        .map(|(_, e)| matches!(&e.kind, EffectKind::Generator(g) if g.micro.as_ref().is_some_and(|micro| micro.height_source.is_none())));
+        .map(|(_, effect)| matches!(&effect.kind, EffectKind::Generator(made) if made.micro.as_ref().is_some_and(|micro| micro.height_source.is_none())));
     assert_eq!(emptied, Some(true));
-    assert!(largest_change(&base_colors(&mut s), &plain) < 1e-3, "without an anchor, as without micro details");
-    assert!(execute(&mut s, "effect.set", &json!({"effect": anchor, "microAmount": 0.5})).is_err(), "generators only");
+    assert!(largest_change(&base_colors(&mut session), &plain) < 1e-3, "without an anchor, as without micro details");
+    assert!(execute(&mut session, "effect.set", &json!({"effect": anchor, "microAmount": 0.5})).is_err(), "generators only");
 
     // A copied generator reading an anchor needs the anchor below its new layer
-    execute(&mut s, "effect.set", &json!({"effect": generator, "microAnchor": anchor})).unwrap();
-    execute(&mut s, "layer.select", &json!({"layer": top, "target": generator})).unwrap();
-    execute(&mut s, "effect.copy", &json!({"effect": generator})).unwrap();
-    execute(&mut s, "layer.select", &json!({"layer": low})).unwrap();
-    assert!(execute(&mut s, "effect.paste", &json!({"target": "mask"})).is_err());
-    let back = Session::from_project_bytes(&s.to_project_bytes().unwrap()).unwrap();
-    assert_eq!(back.doc.project, s.doc.project);
+    execute(&mut session, "effect.set", &json!({"effect": generator, "microAnchor": anchor})).unwrap();
+    execute(&mut session, "layer.select", &json!({"layer": top, "target": generator})).unwrap();
+    execute(&mut session, "effect.copy", &json!({"effect": generator})).unwrap();
+    execute(&mut session, "layer.select", &json!({"layer": low})).unwrap();
+    assert!(execute(&mut session, "effect.paste", &json!({"target": "mask"})).is_err());
+    let back = Session::from_project_bytes(&session.to_project_bytes().unwrap()).unwrap();
+    assert_eq!(back.doc.project, session.doc.project);
 }
 
 #[test]

@@ -86,8 +86,7 @@ impl OrbPreview {
         self.mask_pixels(size)
     }
 
-    /// Row-major `size²` pixels of a mask holding one generator of `kind` at its defaults, with None outside the shape
-    /// Returns None for sizes outside 1..=[`MAX_PREVIEW_SIZE_PX`]
+    /// Row-major `size²` pixels of a mask holding one generator of `kind` at its defaults, None outside the shape (and for sizes outside 1..=[`MAX_PREVIEW_SIZE_PX`])
     pub fn generator(&mut self, kind: GeneratorKind, size: usize) -> Option<Vec<Option<MaskPreviewPixel>>> {
         let mut generator = Generator::new(kind);
 

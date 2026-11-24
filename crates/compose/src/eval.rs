@@ -1953,22 +1953,22 @@ fn filter_region(
 
 /// Where working texel (`x`, `y`) of `inp` is, for pattern evaluation (as [`Texel::coords`] sees it outside a fill copy)
 pub(crate) fn texel_coords(inp: &Inputs, x: u32, y: u32) -> Coords {
-    let g = inp.gbuf;
-    let mut c = match g.surface(inp.mesh, (y * g.width + x) as usize) {
-        Some(s) => {
+    let gbuf = inp.gbuf;
+    let mut coords = match gbuf.surface(inp.mesh, (y * gbuf.width + x) as usize) {
+        Some(surface) => {
             let (center, radius) = mesh_frame(inp.bounds);
-            Coords { uv: s.uv, pos: (s.pos - center) / radius, nrm: s.nrm }
+            Coords { uv: surface.uv, pos: (surface.pos - center) / radius, nrm: surface.nrm }
         }
-        None => Coords { uv: Vec2::new((x as f32 + 0.5) / g.width as f32, (y as f32 + 0.5) / g.height as f32), pos: Vec3::ZERO, nrm: Vec3::Y },
+        None => Coords { uv: Vec2::new((x as f32 + 0.5) / gbuf.width as f32, (y as f32 + 0.5) / gbuf.height as f32), pos: Vec3::ZERO, nrm: Vec3::Y },
     };
 
     // UV-tiled sets: projections see the mesh's own UVs (patterns repeat per tile)
     if let Ok(set) = inp.project.texture_set(inp.ts)
         && let Some(grid) = set.tile_grid()
     {
-        c.uv = Vec2::from(set.from_atlas(&grid, c.uv.to_array()));
+        coords.uv = Vec2::from(set.from_atlas(&grid, coords.uv.to_array()));
     }
-    c
+    coords
 }
 
 /// What a generator's texture or custom grunge reads with nothing in its slot

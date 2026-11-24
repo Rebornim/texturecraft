@@ -1096,8 +1096,8 @@ impl GeneratorKind {
         )
     }
 
-    pub fn parse(s: &str) -> Option<GeneratorKind> {
-        let norm = |x: &str| x.to_ascii_lowercase().replace([' ', '_', '-', ':'], "");
+    pub fn parse(name: &str) -> Option<GeneratorKind> {
+        let normalised = |text: &str| text.to_ascii_lowercase().replace([' ', '_', '-', ':'], "");
         // The labels before the reference app's names, which agents may still send
         let earlier = |kind: GeneratorKind| match kind {
             GeneratorKind::EdgeWear => Some("Mask Editor: Edge wear"),
@@ -1105,9 +1105,10 @@ impl GeneratorKind {
             GeneratorKind::Direction => Some("Light / direction"),
             _ => None,
         };
-        GeneratorKind::ALL
-            .into_iter()
-            .find(|k| norm(k.id()) == norm(s) || norm(k.label()) == norm(s) || earlier(*k).is_some_and(|label| norm(label) == norm(s)))
+        GeneratorKind::ALL.into_iter().find(|kind| {
+            let wanted = normalised(name);
+            normalised(kind.id()) == wanted || normalised(kind.label()) == wanted || earlier(*kind).is_some_and(|label| normalised(label) == wanted)
+        })
     }
 }
 

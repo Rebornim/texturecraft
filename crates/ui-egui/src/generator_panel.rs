@@ -66,7 +66,7 @@ pub(crate) fn generator_properties(app: &mut TextureCraftApp, ui: &mut egui::Ui,
             attributes(sheet, generator.kind);
         }
         if !app.session.doc.baked.contains_key(&app.session.ts()) {
-            sheet.caption(tr("Bake mesh maps (Ctrl+Shift+B) for curvature, AO and thickness based generators."));
+            sheet.caption(tr("Bake mesh maps for curvature, AO and thickness based generators."));
         }
     });
 }

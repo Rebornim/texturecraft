@@ -2,8 +2,9 @@
 //! pixels when a texture set changes size.
 
 use serde_json::{Value, json};
-use texturecraft_core::{Channel, ChannelKind, LayerId, LayerKind};
-use texturecraft_texel::TileImage;
+use texturecraft_compose::eval::FlatTile;
+use texturecraft_core::{Channel, ChannelKind, Effect, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Mask, MaskBackground, Sampling, Source};
+use texturecraft_texel::{TILE, TileImage, from_u16, from_u16_signed, linear_to_srgb, to_u16};
 
 use crate::commands::{CommandSpec, boolp, has_layer, layer_param};
 use crate::session::{Document, StackTarget};
@@ -19,7 +20,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Flatten layer",
             ["Layers"],
             Some("Ctrl+M"),
-            "{layer?} — a fill or masked paint layer becomes a plain paint layer",
+            "{layer?} — a fill or masked paint layer becomes a plain paint layer; a folder becomes a new fill layer above it holding one image per channel (its mask baked into a painted mask) and is hidden",
             has_layer,
             flatten
         ),
@@ -200,7 +201,7 @@ fn flatten(s: &mut Session, p: &Value) -> Result<Value> {
     // An instance flattens what it draws into a plain layer of its own.
     let content = s.doc.project.content_layer(id).cloned().ok_or_else(|| EngineError::Other("the instance's source is missing".into()))?;
     if content.is_group() {
-        return Err(EngineError::Other("flattening a folder is not supported yet; flatten its layers".into()));
+        return flatten_folder(s, ts, &layer);
     }
     s.update();
     let size = s.caches.get(ts).ok_or_else(|| EngineError::Other("texture set not ready".into()))?.size;
@@ -227,6 +228,100 @@ fn flatten(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     Ok(json!({ "layer": id.0 }))
+}
+
+/// Flatten `folder` of texture set `ts` into a new fill layer above it, reading one image per channel it lays down, with its mask baked into a painted mask; the folder is hidden and kept
+fn flatten_folder(s: &mut Session, ts: usize, folder: &Layer) -> Result<Value> {
+    s.update();
+    let size = s.caches.get(ts).ok_or_else(|| EngineError::Other("texture set not ready".into()))?.size;
+    let tiles: Vec<(u32, u32)> = s.caches.get(ts).map(|cache| cache.covered_tiles.iter().copied().collect()).unwrap_or_default();
+    let (content, mask) = s
+        .with_inputs(ts, |inputs| texturecraft_compose::flatten_folder(inputs, folder.id, &tiles))
+        .ok_or_else(|| EngineError::Other("nothing to flatten".into()))?;
+    let images = channel_images(content, size)?;
+    if images.is_empty() {
+        return Err(EngineError::Other("the folder shows nothing to flatten".into()));
+    }
+
+    let flat = s.edit("Flatten folder", |s| {
+        let mut fill = Fill { sampling: Sampling { filtering: Filtering::Nearest, alpha_coverage: true, ..Sampling::default() }, ..Fill::default() };
+        for (channel, png) in images {
+            let file_name = format!("{} flattened {}.png", folder.name, channel.id());
+            let name = s.add_image_resource(&file_name, png, texturecraft_formats::MAX_RESOURCE_TEXELS)?;
+            fill.sources.insert(channel, Source::image(name));
+        }
+
+        // Only the channels the folder lays down, at its opacity: a channel without an image would cover the stack with its default
+        let channels: Vec<Channel> = fill.sources.keys().copied().collect();
+        let mut layer = Layer::new(s.doc.project.alloc_id(), format!("{} (flattened)", folder.name), LayerKind::Fill(fill), &channels);
+        for (channel, blend) in &mut layer.channels {
+            blend.opacity = folder.blend(*channel).map_or(1.0, |folder_blend| folder_blend.opacity);
+        }
+        if !mask.is_empty() {
+            let paint = s.doc.project.alloc_id();
+            let mut baked = Mask::new(MaskBackground::Black);
+            baked.effects.push(Effect::new(paint, EffectKind::Paint));
+            layer.mask = Some(baked);
+            let image = s.doc.pixels.mask_mut(paint, size);
+            for ((tx, ty), data) in mask {
+                image.set_tile(tx, ty, Some(std::sync::Arc::new(data)));
+            }
+        }
+
+        let flat = s.doc.project.insert_layer(ts, layer, Some(folder.id), false)?;
+        s.doc.project.layer_mut(folder.id)?.visible = false;
+        s.select_one(ts, flat);
+        s.target = StackTarget::Content;
+        Ok(flat)
+    })?;
+    Ok(json!({ "layer": flat.0 }))
+}
+
+/// Flattened tiles as one 16-bit RGBA PNG per channel (straight values as a fill reads them, coverage in the alpha), in channel order
+fn channel_images(tiles: Vec<FlatTile>, size: (u32, u32)) -> Result<Vec<(Channel, Vec<u8>)>> {
+    let (width, height) = size;
+    let mut by_channel: std::collections::BTreeMap<Channel, Vec<((u32, u32), Vec<u16>)>> = Default::default();
+    for (channel, tile, data) in tiles {
+        by_channel.entry(channel).or_default().push((tile, data));
+    }
+
+    by_channel
+        .into_iter()
+        .map(|(channel, tiles)| {
+            let comps = channel.components();
+            let mut rgba = vec![0u16; width as usize * height as usize * 4];
+            for ((tx, ty), data) in tiles {
+                for (offset, texel) in data.chunks_exact(comps + 1).enumerate() {
+                    let (x, y) = (tx * TILE + offset as u32 % TILE, ty * TILE + offset as u32 / TILE);
+                    let coverage = texel.get(comps).copied().map_or(0.0, from_u16);
+                    if x >= width || y >= height || coverage <= 0.0 {
+                        continue;
+                    }
+
+                    let straight = |i: usize| {
+                        let premultiplied = texel.get(i).copied().unwrap_or(0);
+                        let value = if channel.kind() == ChannelKind::Signed { from_u16_signed(premultiplied) } else { from_u16(premultiplied) };
+                        value / coverage
+                    };
+                    let rgb = match channel.kind() {
+                        ChannelKind::Color => [0, 1, 2].map(|i| linear_to_srgb(straight(i))),
+                        ChannelKind::NormalMap => [0, 1, 2].map(straight),
+                        ChannelKind::Scalar => [straight(0); 3],
+
+                        // A fill reads a signed channel's image gray as -1..1
+                        ChannelKind::Signed => [(straight(0) + 1.0) * 0.5; 3],
+                    };
+                    let start = (y as usize * width as usize + x as usize) * 4;
+                    if let Some(pixel) = rgba.get_mut(start..start + 4) {
+                        pixel.copy_from_slice(&[to_u16(rgb[0]), to_u16(rgb[1]), to_u16(rgb[2]), to_u16(coverage)]);
+                    }
+                }
+            }
+            let png =
+                texturecraft_formats::rgba16_png(width, height, &rgba).map_err(|error| EngineError::Other(format!("flattened {}: {error}", channel.id())))?;
+            Ok((channel, png))
+        })
+        .collect()
 }
 
 impl Session {

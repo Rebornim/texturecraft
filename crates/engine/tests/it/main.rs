@@ -33,6 +33,7 @@ mod filter_support;
 mod filter_swap;
 mod filter_transform;
 mod filters;
+mod flatten_folder;
 mod folder_contents;
 mod frame_selection;
 mod generator_inputs;

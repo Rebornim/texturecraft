@@ -3116,7 +3116,30 @@ impl<'a, 'b> Texel<'a, 'b> {
             None => ch.default_value(),
         };
         let cover = if covers_all { 1.0 } else { self.cover(fill.sources.values(), projection, fill.sampling, depth) };
-        (value, cover)
+        match source {
+            Some(Source::Image { name, .. }) if fill.sampling.alpha_coverage && cover > 0.0 => {
+                (value, cover * self.image_alpha(name, projection, fill.sampling))
+            }
+            _ => (value, cover),
+        }
+    }
+
+    /// Image resource `name`'s alpha at this texel through `projection` (0 for a missing image)
+    fn image_alpha(&mut self, name: &str, projection: &Projection, sampling: Sampling) -> f32 {
+        let Some(image) = self.inp.images.get(name) else { return 0.0 };
+
+        let (coords, _) = self.projected(projection);
+        let samples = self.image_uvs(projection, &coords);
+        let footprints = match sampling.filtering {
+            Filtering::BilinearHq => self.footprints(projection, &samples, image),
+            Filtering::BilinearSharp | Filtering::Nearest => [1.0; 3],
+        };
+        samples
+            .into_iter()
+            .zip(footprints)
+            .map(|((uv, weight), footprint)| image.sample_alpha(uv.x, uv.y, sampling, footprint) * weight)
+            .sum::<f32>()
+            .clamp(0.0, 1.0)
     }
 
     /// How much a fill projected by `proj` covers this texel: [`Texel::shape_cover`], then depth culling through the projector's `depth` map
@@ -4959,6 +4982,105 @@ pub fn flatten_layer(inputs: &Inputs, id: LayerId, tiles: &[(u32, u32)]) -> Opti
         .collect();
 
     Some(out.into_iter().flatten().collect())
+}
+
+/// One tile of a flattened folder's mask: (tile, mask value + coverage data)
+pub type FlatMaskTile = ((u32, u32), Vec<u16>);
+
+/// Flatten folder `id`: what its visible layers lay down (premultiplied value and coverage tiles per enabled channel, as [`flatten_layer`]) without its mask or opacity, and its mask and submesh limits as mask tiles (none when it has neither); None for a layer that is not a folder
+pub fn flatten_folder(inputs: &Inputs, id: LayerId, tiles: &[(u32, u32)]) -> Option<(Vec<FlatTile>, Vec<FlatMaskTile>)> {
+    let set = inputs.project.texture_set(inputs.ts).ok()?;
+    if !inputs.project.content_layer(id)?.is_group() {
+        return None;
+    }
+
+    let channels: Vec<Channel> = set.channel_list();
+
+    // Plan the folder forced visible so hidden folders flatten too
+    let mut forced_visible = inputs.project.clone();
+    if let Some(layer) = forced_visible.layers.get_mut(&id) {
+        layer.visible = true;
+    }
+    let visible_inputs = Inputs { project: &forced_visible, preview: None, block_scales: inputs.block_scales.clone(), ..*inputs };
+    let projectors = ProjectorDepthCache::default();
+    let visible_inputs = EvaluationInputs::new(&visible_inputs, &projectors);
+    let planned_channels = evaluation_channels(&visible_inputs, channels.clone());
+    let fields = evaluation_fields(&visible_inputs, &planned_channels, tiles);
+
+    let out: Vec<(Vec<FlatTile>, Option<FlatMaskTile>)> = tiles
+        .par_iter()
+        .map(|&(tx, ty)| {
+            let nodes = plan(&visible_inputs, &[id], &channels, tx, ty, 0, Some(&fields));
+            let Some(node) = nodes.first() else { return (Vec::new(), None) };
+            let Content::Group(children) = &node.content else { return (Vec::new(), None) };
+            let below = below_plan(&visible_inputs, (id, 0), &planned_channels, (tx, ty), Some(&fields), node.lights);
+
+            // One value + coverage buffer per channel the folder plans; signed channels start at their middle
+            let mut buffers: Vec<(Channel, Vec<u16>, bool)> = node
+                .chans
+                .iter()
+                .filter_map(|planned| Channel::ALL.get(planned.ch).map(|channel| (*channel, vec![0u16; TILE_AREA * (planned.comps + 1)], false)))
+                .collect();
+            for (channel, buffer, _) in &mut buffers {
+                if channel.kind() == ChannelKind::Signed {
+                    for pixel in buffer.as_chunks_mut::<2>().0 {
+                        pixel[0] = to_u16_signed(0.0);
+                    }
+                }
+            }
+
+            let masked = node.mask.is_some() || node.parts.is_some();
+            let mut mask = masked.then(|| vec![0u16; TILE_AREA * 2]);
+
+            for (x, y, offset) in tile_texels(inputs.gbuf, tx, ty) {
+                // The texel with the stack below the folder run, so masks and fills that read it or its anchors find them
+                let texel_over_below = || {
+                    let mut texel = Texel::new(&visible_inputs, x, y, offset, 0.0);
+                    if !below.is_empty() {
+                        texel.anchors_below(&below, (id, 0));
+                    }
+                    texel
+                };
+
+                // Laid over an all-0 and an all-1 stack, the layers show their premultiplied value and how much of the stack they hide
+                let over = |background: f32| {
+                    let mut texel = texel_over_below();
+                    let mut stack: Acc = [[background; 3]; NCH];
+                    texel.eval(children, &mut stack);
+                    stack
+                };
+                let (low, high) = (over(0.0), over(1.0));
+                for (planned, (channel, buffer, laid_down)) in node.chans.iter().zip(buffers.iter_mut()) {
+                    let (Some(premultiplied), Some(shown)) = (low.get(planned.ch), high.get(planned.ch)) else { continue };
+                    let comps = planned.comps.min(3);
+                    let hidden = premultiplied.iter().zip(shown).take(comps).map(|(low, high)| 1.0 - (high - low)).sum::<f32>() / comps as f32;
+                    let coverage = hidden.clamp(0.0, 1.0);
+                    if coverage <= 0.0 {
+                        continue;
+                    }
+
+                    *laid_down = true;
+                    let Some(pixel) = buffer.get_mut(offset * (planned.comps + 1)..(offset + 1) * (planned.comps + 1)) else { continue };
+                    for (slot, value) in pixel.iter_mut().zip(premultiplied.iter().take(planned.comps)) {
+                        *slot = if channel.kind() == ChannelKind::Signed { to_u16_signed(*value) } else { to_u16(*value) };
+                    }
+                    if let Some(slot) = pixel.get_mut(planned.comps) {
+                        *slot = to_u16(coverage);
+                    }
+                }
+
+                if let Some(pixel) = mask.as_mut().and_then(|mask| mask.get_mut(offset * 2..offset * 2 + 2)) {
+                    pixel.copy_from_slice(&[to_u16(texel_over_below().node_mask(node)), u16::MAX]);
+                }
+            }
+
+            let content = buffers.into_iter().filter(|(_, _, laid_down)| *laid_down).map(|(channel, buffer, _)| (channel, (tx, ty), buffer)).collect();
+            (content, mask.map(|mask| ((tx, ty), mask)))
+        })
+        .collect();
+
+    let (content, masks): (Vec<_>, Vec<_>) = out.into_iter().unzip();
+    Some((content.into_iter().flatten().collect(), masks.into_iter().flatten().collect()))
 }
 
 #[cfg(test)]

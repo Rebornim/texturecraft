@@ -19,9 +19,9 @@ pub fn specs() -> Vec<CommandSpec> {
     )]
 }
 
-/// The sampling a reset Fill section has: a new fill's, with `current`'s symmetry (it belongs to the Symmetry section)
+/// The sampling a reset Fill section has: a new fill's, with `current`'s symmetry (it belongs to the Symmetry section) and its alpha coverage (a flattened folder's shape)
 pub fn reset_sampling(current: Sampling) -> Sampling {
-    Sampling { symmetry: current.symmetry, ..Sampling::default() }
+    Sampling { symmetry: current.symmetry, alpha_coverage: current.alpha_coverage, ..Sampling::default() }
 }
 
 /// The defaults of `current`'s projection kind: a new fill's projection of that kind, with the frame a placed planar or a warp projects from kept

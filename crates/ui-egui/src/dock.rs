@@ -1406,7 +1406,8 @@ fn layer_context_menu(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, con
     ui.separator();
     solo_menu(app, ui, layer.id);
     ui.separator();
-    run(app, ui, tr("Flatten layer"), "layer.flatten", json!({"layer": layer_id}), !layer.is_group());
+    let flatten = if layer.is_group() { tr("Flatten folder") } else { tr("Flatten layer") };
+    run(app, ui, flatten, "layer.flatten", json!({"layer": layer_id}), true);
     #[cfg(not(target_arch = "wasm32"))]
     if ui.button(tr("Create smart material")).clicked() {
         let file = crate::library_dir().join(format!("{}.tcmat", texturecraft_engine::formats::sanitize_resource_name(&layer.name)));

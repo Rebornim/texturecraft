@@ -14,12 +14,15 @@ pub struct Sampling {
     pub scale: ScaleMode,
     #[serde(default, skip_serializing_if = "FillSymmetry::is_default")]
     pub symmetry: FillSymmetry,
+    /// Each channel's image alpha is how much of that channel shows (the images a folder is flattened into)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub alpha_coverage: bool,
 }
 
 impl Sampling {
     /// What fills saved before the sampling choices existed did: plain bilinear
     pub const SAVED_BEFORE: Sampling =
-        Sampling { filtering: Filtering::BilinearSharp, wrap: UvWrap::Repeat, scale: ScaleMode::Tiling, symmetry: FillSymmetry::OFF };
+        Sampling { filtering: Filtering::BilinearSharp, wrap: UvWrap::Repeat, scale: ScaleMode::Tiling, symmetry: FillSymmetry::OFF, alpha_coverage: false };
 
     /// Serde default for fills saved before the field existed
     pub fn saved_before() -> Sampling {

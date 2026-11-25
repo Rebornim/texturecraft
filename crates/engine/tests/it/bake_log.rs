@@ -48,3 +48,20 @@ fn a_canceled_bake_keeps_the_finished_sets_and_cancels_the_rest() {
     assert!(state_of(1).iter().all(|state| *state == BakeMapState::Canceled), "maps of the set not kept are canceled: {:?}", log.maps);
     assert!(!log.is_running());
 }
+
+#[test]
+fn bake_log_reports_each_map_with_its_state_and_a_failures_reason() {
+    let mesh = primitives::builtin("plane").unwrap();
+    let mut session = Session::new_project("t", mesh, "builtin:plane", None, 256).unwrap();
+    execute(&mut session, "bake.run", &json!({ "resolution": 64, "maps": ["opacity", "position"], "dilation": 0 })).unwrap();
+
+    let log = execute(&mut session, "bake.log", &json!({})).unwrap();
+    assert_eq!(log["running"], false);
+    let maps: BTreeSet<&str> = log["maps"].as_array().unwrap().iter().map(|row| row["map"].as_str().unwrap()).collect();
+    assert_eq!(maps, BTreeSet::from(["opacity", "position"]));
+    assert!(log["maps"].as_array().unwrap().iter().all(|row| row["state"] == "baked" && row["textureSet"] == 0 && row.get("reason").is_none()), "{log}");
+
+    session.bake_log.set_failed(0, "The high poly file could not be read.");
+    let log = execute(&mut session, "bake.log", &json!({})).unwrap();
+    assert!(log["maps"].as_array().unwrap().iter().all(|row| row["state"] == "failed" && row["reason"] == "The high poly file could not be read."), "{log}");
+}

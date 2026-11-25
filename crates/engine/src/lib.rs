@@ -11,6 +11,7 @@
 pub mod add_mask_cmds;
 mod anchored_micro_edit;
 pub mod bake;
+pub mod bake_log_cmds;
 pub mod bake_preview;
 pub mod brush_preset_cmds;
 pub mod camera_cmds;

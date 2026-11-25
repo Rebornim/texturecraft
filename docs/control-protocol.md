@@ -305,6 +305,14 @@ also `session.inspect`'s `bakePreview`:
  "sets": [{"set": 0, "order": ["id", "ambientOcclusion", "curvature", "height"], "done": ["id", "ambientOcclusion"]}]}
 ```
 
+`bake.log` `{}` returns the latest bake map by map, as the Baking Log shows it (empty before the first bake).
+`state` is `waiting`, `baking`, `baked`, `failed` (with the error as `reason`) or `canceled`:
+
+```json
+{"running": false, "maps": [{"textureSet": 0, "setName": "Body", "map": "normal", "state": "baked"},
+ {"textureSet": 1, "setName": "Head", "map": "normal", "state": "failed", "reason": "no UV tile left to bake"}]}
+```
+
 `{"active": false}` when no bake is shown; setting `show` then is an error. Drive a bake with
 `ui.bake.start` and poll `ui.inspect`'s `bakeStatus` / `bakePreview` (and `viewport.screenshot`)
 until `baking` is `null`.

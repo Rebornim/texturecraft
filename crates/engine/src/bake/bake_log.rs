@@ -1,10 +1,9 @@
-use serde::Serialize;
 use texturecraft_core::{BakedMap, Project};
 
 use super::{BakeLogMap, BakeMapState};
 
 /// The latest bake map by map for the Baking Log, kept from the bake's own state, never from Log lines
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct BakeLog {
     pub maps: Vec<BakeLogMap>,
 }

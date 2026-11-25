@@ -139,6 +139,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(crate::project_cmds::specs());
         v.extend(crate::bake::specs());
         v.extend(crate::bake_preview::specs());
+        v.extend(crate::bake_log_cmds::specs());
         v.extend(crate::materialx_cmds::specs());
         v.extend(crate::pbr_cmds::specs());
         v.extend(crate::file_cmds::specs());

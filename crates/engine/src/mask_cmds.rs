@@ -7,6 +7,7 @@ use texturecraft_core::{
 };
 
 use crate::commands::{CommandSpec, always, bad, blend_param, boolp, channel_param, color_param, f32p, has_layer, layer_param, strp, u64p};
+use crate::effect_step::EffectStep;
 use crate::layer_cmds::{projection_from, projection_from_fields};
 use crate::mask_owner::MaskOwner;
 use crate::session::StackTarget;
@@ -113,6 +114,24 @@ pub fn specs() -> Vec<CommandSpec> {
             duplicate_effect
         ),
         cmd!("effect.move", "Move effect", [], None, "{effect, index: position in its stack, 0 = bottom (applied first)}", has_layer, move_effect),
+        cmd!(
+            "effect.moveUp",
+            "Move effect up",
+            ["Layers"],
+            Some("Alt+Up"),
+            "{effect?: the selected effect} — one place up its stack (applied later)",
+            has_layer,
+            |s, p| step_effect(s, p, EffectStep::Up)
+        ),
+        cmd!(
+            "effect.moveDown",
+            "Move effect down",
+            ["Layers"],
+            Some("Alt+Down"),
+            "{effect?: the selected effect} — one place down its stack (applied earlier)",
+            has_layer,
+            |s, p| step_effect(s, p, EffectStep::Down)
+        ),
         cmd!(
             "effect.histogram",
             "Effect input histogram",
@@ -1020,6 +1039,24 @@ fn move_effect(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     Ok(Value::Null)
+}
+
+/// Move an effect one place in its stack (one undo step; nothing at its end)
+fn step_effect(s: &mut Session, p: &Value, step: EffectStep) -> Result<Value> {
+    let cmd = match step {
+        EffectStep::Up => "effect.moveUp",
+        EffectStep::Down => "effect.moveDown",
+    };
+    let effect = effect_id(s, p, cmd)?;
+    let (list, index) = stack_of(&mut s.doc.project, effect).ok_or_else(|| bad(cmd, format!("no effect {}", effect.0)))?;
+    let to = match step {
+        EffectStep::Up if index + 1 < list.len() => index + 1,
+        EffectStep::Down if index > 0 => index - 1,
+        _ => return Ok(json!({ "moved": false })),
+    };
+
+    crate::execute(s, "effect.move", &json!({ "effect": effect.0, "index": to }))?;
+    Ok(json!({ "moved": true }))
 }
 
 fn remove_effect(s: &mut Session, p: &Value) -> Result<Value> {

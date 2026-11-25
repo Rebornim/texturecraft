@@ -610,3 +610,22 @@ fn a_color_histogram_has_its_components_and_luminance() {
     assert_eq!(counts(&histogram["bins"]), vec![2 * texels, 0, 0, texels]);
     assert!(roughness.get("components").is_none(), "one value has no components");
 }
+
+#[test]
+fn a_named_effect_moves_up_and_down_while_its_layer_content_is_selected() {
+    let mut s = session();
+    let layer = LayerId(id(execute(&mut s, "layer.add.fill", &Value::Null).unwrap(), "layer"));
+    let add = |s: &mut Session| id(execute(s, "effect.add.filter", &json!({"target": "content", "filter": "invert"})).unwrap(), "effect");
+    let (bottom, top) = (add(&mut s), add(&mut s));
+    let order = |s: &Session| s.doc.project.layers[&layer].content_effects.iter().map(|e| e.id.0).collect::<Vec<_>>();
+    execute(&mut s, "layer.select", &json!({"layer": layer.0})).unwrap();
+    s.target = StackTarget::Content;
+
+    execute(&mut s, "effect.moveUp", &json!({"effect": bottom})).unwrap();
+
+    assert_eq!(order(&s), [top, bottom]);
+
+    execute(&mut s, "effect.moveDown", &json!({"effect": bottom})).unwrap();
+
+    assert_eq!(order(&s), [bottom, top]);
+}

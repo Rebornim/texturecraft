@@ -266,7 +266,7 @@ fn narrow_harness() -> Harness<'static, TextureCraftApp> {
 #[test]
 fn layer_toolbar_stays_on_one_row_in_a_1280_by_800_window() {
     let h = narrow_harness();
-    let buttons = ["Add paint layer", "Add fill layer", "Add folder"].map(|label| h.get_by_label(label).rect());
+    let buttons = ["Add paint layer", "Add fill layer", "Add smart material", "Add folder"].map(|label| h.get_by_label(label).rect());
 
     let wand = h.get_by_label("Add effect").rect();
     let remove = h.query_all_by_label_contains("Remove layer").next().expect("the remove button").rect();

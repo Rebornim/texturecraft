@@ -1,11 +1,12 @@
 //! The Layers panel's top row: Add effect greys what can't go where the selection is, Add mask adds a mask with its effect, and
-//! Bitmap adds nothing until a texture is picked
+//! Bitmap adds nothing until a texture is picked; Add smart material adds the smart material picked
 
 use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::{Value, json};
 use texturecraft_engine::core::{Channel, EffectKind, LayerId, Source};
+use texturecraft_engine::materials::MATERIALS;
 use texturecraft_engine::paint::alphas;
 use texturecraft_engine::{StackTarget, execute};
 use texturecraft_ui_egui::TextureCraftApp;
@@ -127,6 +128,38 @@ fn the_bitmap_picker_closes_when_the_selection_moves_and_masks_no_other_layer() 
     assert!(mask_kinds(&harness, opener).is_empty(), "nor the layer that opened it");
 }
 
+/// The selected texture set's top-level layers, bottom to top
+fn stack(harness: &Harness<'_, TextureCraftApp>) -> Vec<LayerId> {
+    let session = &harness.state().session;
+    session.doc.project.texture_set(session.ts()).unwrap().stack.clone()
+}
+
+/// Add smart material opens a picker of the smart materials only; a pick adds its folder right above the selected layer
+#[test]
+fn add_smart_material_adds_the_picked_smart_material_above_the_selection() {
+    let (mut harness, layer) = app();
+    let smart = MATERIALS.iter().find(|material| material.smart).unwrap();
+    let simple = MATERIALS.iter().find(|material| !material.smart).unwrap();
+    let tiles_of = |harness: &Harness<'_, TextureCraftApp>, label: &str| harness.query_all_by_label(label).map(|node| node.rect()).collect::<Vec<_>>();
+    let (smart_before, simple_before) = (tiles_of(&harness, smart.label), tiles_of(&harness, simple.label));
+
+    click_widget(&mut harness, Role::Button, "Add smart material");
+    let new_tile = tiles_of(&harness, smart.label).into_iter().find(|tile| !smart_before.contains(tile));
+
+    assert!(egui::Popup::is_any_open(&harness.ctx), "the button opens the picker");
+    assert_eq!(tiles_of(&harness, simple.label).len(), simple_before.len(), "simple materials stay out of it");
+
+    let before = stack(&harness);
+    click_at(&mut harness, new_tile.expect("a tile for the smart material").center());
+    let after = stack(&harness);
+    let added: Vec<_> = after.iter().filter(|id| !before.contains(id)).copied().collect();
+
+    assert_eq!(added.len(), 1, "one folder added: {added:?}");
+    let place = |id: LayerId| after.iter().position(|shown| *shown == id).unwrap();
+    assert_eq!(place(added[0]), place(layer) + 1, "right above the selection");
+    assert!(!egui::Popup::is_any_open(&harness.ctx), "the pick closes the picker");
+}
+
 /// A floating Layers panel this narrow cannot hold the toolbar on one row
 const NARROW_LAYERS: [f32; 4] = [600.0, 200.0, 200.0, 400.0];
 
@@ -143,7 +176,7 @@ fn a_narrow_layers_panel_keeps_every_toolbar_button_inside_and_clickable() {
     harness.run_steps(SETTLE_FRAMES);
     let [left, _, width, _] = NARROW_LAYERS;
 
-    for label in ["Add effect", "Add mask", "Add paint layer", "Add fill layer", "Add folder", "Remove layer"] {
+    for label in ["Add effect", "Add mask", "Add paint layer", "Add fill layer", "Add smart material", "Add folder", "Remove layer"] {
         let button = harness.query_all_by_label_contains(label).find(|node| node.accesskit_node().role() == Role::Button).unwrap().rect();
 
         assert!(button.left() >= left && button.right() <= left + width, "{label} at {button:?} stays inside the panel");

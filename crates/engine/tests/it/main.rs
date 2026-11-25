@@ -36,6 +36,7 @@ mod filters;
 mod folder_contents;
 mod frame_selection;
 mod generator_inputs;
+mod generator_names;
 mod gradient_map;
 mod high_poly_missed;
 mod instances;

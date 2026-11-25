@@ -333,6 +333,8 @@ const EFFECT_ROW_SHADES: [f32; 2] = [0.2, 0.5];
 /// Width of the blend mode and opacity pair at the right of an effect row (a gap between them), and of its opacity part.
 const EFFECT_BLEND_WIDTH: f32 = 82.0;
 const EFFECT_OPACITY_WIDTH: f32 = 36.0;
+/// Width of the column at an effect row's right end holding its remove cross
+const EFFECT_REMOVE_WIDTH: f32 = 17.0;
 /// Height of the "Content effects" / "Mask effects" header rows.
 const GROUP_HEADER_H: f32 = 20.0;
 
@@ -977,7 +979,7 @@ fn blend_controls(
     (picked, field.changed().then_some((percent / 100.0, merge)))
 }
 
-/// Effect `effect` of `stack` (a layer's content or, with `in_mask`, mask effects) at indent `level`.
+/// Effect `effect` of `stack` (a layer's content or, with `in_mask`, mask effects) at indent `level`
 #[allow(clippy::too_many_arguments)]
 fn effect_row(
     app: &mut TextureCraftApp,
@@ -1037,11 +1039,20 @@ fn effect_row(
         painter.line_segment([thumbnail.left_bottom(), thumbnail.right_top()], Stroke::new(HIDDEN_STRIKE_WIDTH, tokens.text_dim));
     }
 
-    // The name, then the blend mode and opacity side by side at the right when the name keeps room to be read
+    // The cross at the right end removes the effect: it ends where a layer row's controls end, and takes clicks left of the panel's floating scroll bar
+    let remove =
+        Rect::from_min_max(pos2(rect.right() - ROW_CONTROL_GAP - EFFECT_REMOVE_WIDTH, rect.top()), pos2(rect.right() - ROW_CONTROL_GAP, rect.bottom()));
+    let remove_hit = Rect::from_min_max(remove.min, pos2(remove.right().min(rect.right() - ui.spacing().scroll.bar_width), remove.bottom()));
+    let remove_response = ui.interact(remove_hit, ui.scope_id().with(("eff_remove", effect_id.0)), Sense::click()).on_hover_text(tr("Remove effect"));
+    remove_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, trf("Remove effect {name}", &[("name", &effect.name)])));
+    let remove_color = if remove_response.hovered() { tokens.text } else { tokens.text_dim };
+    painter.text(remove.center(), egui::Align2::CENTER_CENTER, ic::X, egui::FontId::proportional(EYE_FONT_SIZE), remove_color);
+
+    // The name, then the blend mode and opacity side by side left of the cross when the name keeps room to be read
     let name_left = thumbnail.right() + THUMBNAIL_GAP;
-    let controls_left = rect.right() - ROW_CONTROL_GAP - EFFECT_BLEND_WIDTH;
+    let controls_left = remove.left() - ROW_CONTROL_GAP - EFFECT_BLEND_WIDTH;
     let show_blend = controls_left - ROW_CONTROL_GAP - name_left >= MIN_NAME_WIDTH;
-    let name_right = if show_blend { controls_left - ROW_CONTROL_GAP } else { rect.right() - ROW_RIGHT_PADDING };
+    let name_right = if show_blend { controls_left - ROW_CONTROL_GAP } else { remove.left() - ROW_RIGHT_PADDING };
     let name_color = if visible { tokens.text } else { tokens.text_dim };
     let renaming = app.ui.rename.as_ref().is_some_and(|(id, _)| *id == effect_id.0);
     if renaming {
@@ -1076,6 +1087,9 @@ fn effect_row(
 
     if eye_response.clicked() {
         app.run("effect.set", json!({"effect": effect_id.0, "visible": !visible}));
+    } else if remove_response.clicked() {
+        app.run("effect.remove", json!({"effect": effect_id.0}));
+        return;
     } else if row.double_clicked() && !renaming {
         app.ui.rename = Some((effect_id.0, effect.name.clone()));
     } else if row.clicked() {

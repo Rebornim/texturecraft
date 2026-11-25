@@ -1342,7 +1342,7 @@ fn layer_context_menu(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, con
     let layer_id = layer.id.0;
     let keymap = app.ui.keymap.clone();
 
-    // The row menu can act on several selected layers. A thumbnail identifies one layer.
+    // The row menu can act on several selected layers; a thumbnail names one
     let several = if content_thumbnail { None } else { selection_with(app, layer.id) };
     let run = |app: &mut TextureCraftApp, ui: &mut Ui, label: &str, id: &str, params: Value, enabled: bool| {
         let mut button = egui::Button::new(label);
@@ -1365,6 +1365,7 @@ fn layer_context_menu(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, con
     run(app, ui, tr("Add white mask"), "mask.add.white", json!({"layer": layer_id}), layer.mask.is_none());
     run(app, ui, tr("Add black mask"), "mask.add.black", json!({"layer": layer_id}), layer.mask.is_none());
     run(app, ui, tr("Add mask with color selection"), "mask.add.colorSelection", json!({"layer": layer_id}), true);
+    run(app, ui, tr("Add mask with height combination"), "mask.add.heightCombination", json!({"layer": layer_id}), true);
     if !content_thumbnail {
         ui.separator();
         mask_management_menu(app, ui, layer, false);

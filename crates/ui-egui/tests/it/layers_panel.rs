@@ -379,6 +379,19 @@ fn click_eye(h: &mut Harness<'_, TextureCraftApp>, name: &str, modifiers: egui::
 }
 
 #[test]
+fn the_row_menu_adds_a_height_combination_to_the_clicked_layers_mask() {
+    let (mut h, layer) = harness();
+    let row = h.get_by_label("Masked fill").rect();
+    right_click(&mut h, row.center());
+    h.get_by_label("Add mask with height combination").click();
+    h.run_steps(3);
+
+    let mask = h.state().session.doc.project.layers[&layer].mask.clone().unwrap();
+    assert_eq!(mask.effects.len(), 2, "the compare lands in the existing mask");
+    assert!(mask.effects.iter().any(|effect| matches!(effect.kind, texturecraft_engine::core::EffectKind::Compare { .. })));
+}
+
+#[test]
 fn the_context_menu_solos_a_layer_without_touching_the_document() {
     let (mut h, layer) = harness();
     let (project, history, modified) = (h.state().session.doc.project.clone(), h.state().session.history_labels(), h.state().session.modified);

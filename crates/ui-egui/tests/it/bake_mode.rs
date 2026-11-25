@@ -697,3 +697,25 @@ fn picking_material_while_painting_keeps_bake_modes_neutral_material() {
 
     assert!(harness.state().ui.bake_visualization.neutral_shown, "bake mode still opens on the neutral material");
 }
+
+#[test]
+fn a_baked_maps_row_shows_out_of_date_once_its_settings_change() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    let mesh = texturecraft_engine::geom::primitives::builtin("plane").unwrap();
+    let mut session = texturecraft_engine::Session::new_project("t", mesh, "builtin:plane", None, 128).unwrap();
+    execute(&mut session, "bake.run", &json!({ "resolution": 64, "maps": ["position"], "dilation": 0 })).unwrap();
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1600.0, 1200.0))
+        .with_context_setup(texturecraft_ui_egui::framework::install_headless)
+        .build_eframe(|context| TextureCraftApp::new(context, session));
+    harness.state_mut().ui.mode = Mode::Baking;
+    harness.run_steps(4);
+    assert!(harness.query_by_label("Out of date: Position").is_none(), "just baked");
+
+    execute(&mut harness.state_mut().session, "bake.settings", &json!({ "dilation": 4 })).unwrap();
+    harness.run_steps(3);
+    harness.get_by_label("Out of date: Position");
+    assert!(harness.query_by_label("Out of date: Normal").is_none(), "never baked: not out of date");
+}

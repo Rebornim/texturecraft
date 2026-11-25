@@ -1,15 +1,15 @@
-use egui::{Align, CornerRadius, FontId, Layout, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
+use egui::{Align, Align2, CornerRadius, FontId, Layout, Pos2, Rect, RichText, Role, Sense, Stroke, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 use egui_phosphor::regular as icon;
 use serde_json::json;
 use texturecraft_engine::ViewMode;
-use texturecraft_engine::core::{BakeSettings, BakeSyncGroup, BakedMap};
+use texturecraft_engine::core::{BakeChange, BakeSettings, BakeSyncGroup, BakedMap};
 
 use super::glyph_look::GlyphLook;
 use super::set_picker::SetPicker;
 use super::set_picker_purpose::SetPickerPurpose;
 use crate::TextureCraftApp;
 use crate::docking::Panel;
-use crate::i18n::{baked_map_label, tr, trf};
+use crate::i18n::{bake_change_reason, baked_map_label, tr, trf};
 use crate::property_sheet::{CHECK_SIZE, paint_check};
 use crate::theme::{Tokens, semibold};
 
@@ -46,6 +46,8 @@ const ROW_RADIUS: u8 = 4;
 const HOVER_FACE_OPACITY: f32 = 0.5;
 /// Air above and below the hairline under Check All
 const RULE_AIR: f32 = 4.0;
+/// Size of a row icon's tooltip title and reasons
+const TOOLTIP_TEXT_SIZE: f32 = 12.0;
 
 /// The Common Settings button (with the sync icon when there are several texture sets), Check All with the list menu, and one row per map (checkbox enables, click selects)
 pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSettings) {
@@ -85,8 +87,10 @@ pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSe
     let drag_from_id = ui.scope_id().with("check_drag_from");
     let mut check_drag: Option<bool> = ui.data(|data| data.get_temp(check_drag_id));
     let drag_from: Option<Pos2> = ui.data(|data| data.get_temp(drag_from_id));
+    let out_of_date = app.session.out_of_date_maps(app.session.ts());
     for map in BakedMap::ALL {
-        if ui.push_id(map, |ui| row(app, ui, map, settings, map == selected, &mut check_drag, drag_from)).inner {
+        let changes = out_of_date.get(&map).map_or(&[][..], Vec::as_slice);
+        if ui.push_id(map, |ui| row(app, ui, map, settings, map == selected, changes, &mut check_drag, drag_from)).inner {
             app.ui.selected_baked_map = Some(map);
             app.ui.dock.focus(Panel::MeshMapSettings);
         }
@@ -239,13 +243,14 @@ fn copy_items(app: &mut TextureCraftApp, ui: &mut Ui, opener: &egui::Response, w
     }
 }
 
-/// One baker row (`check_drag`: the state a pressed check gives those the pointer then crosses; `drag_from`: where that drag's pointer was last frame); returns whether the row itself was clicked
+/// One baker row, with a clock at its right end while `changes` make the map out of date (`check_drag`: the state a pressed check gives those the pointer then crosses; `drag_from`: where that drag's pointer was last frame); returns whether the row itself was clicked
 fn row(
     app: &mut TextureCraftApp,
     ui: &mut Ui,
     map: BakedMap,
     settings: &mut BakeSettings,
     is_selected: bool,
+    changes: &[BakeChange],
     check_drag: &mut Option<bool>,
     drag_from: Option<Pos2>,
 ) -> bool {
@@ -253,7 +258,7 @@ fn row(
     let tokens = Tokens::get(ui.ctx());
     let name = tr(baked_map_label(map));
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
-    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, is_selected, name));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, true, is_selected, name));
 
     let hovered = ui.rect_contains_pointer(rect);
     if is_selected {
@@ -280,18 +285,17 @@ fn row(
     thumbnail(ui, thumbnail_rect, texture.as_ref());
 
     let mut icons_left = rect.right();
+    if !changes.is_empty() {
+        let clock = icon_slot(&mut icons_left, rect.center().y);
+        out_of_date_mark(ui, clock, name, changes);
+    }
     let focus_in_row = || {
         ui.memory(|memory| memory.focused())
             .and_then(|id| ui.ctx().read_response(id))
             .is_some_and(|widget| widget.layer_id == ui.layer_id() && rect.contains(widget.rect.center()))
     };
     if is_selected || hovered || focus_in_row() {
-        let mut next_icon = || {
-            let slot =
-                Rect::from_center_size(pos2(icons_left - ROW_BUTTON_SIZE / 2.0 - ROW_INSET / 2.0, rect.center().y), vec2(ROW_BUTTON_SIZE, ROW_BUTTON_SIZE));
-            icons_left = slot.left() - ROW_INSET / 2.0;
-            slot
-        };
+        let mut next_icon = || icon_slot(&mut icons_left, rect.center().y);
         if several_sets {
             let shares = settings.sync.shares(BakeSyncGroup::Map(map));
             let look = if shares { GlyphLook::Lit } else { GlyphLook::Plain };
@@ -429,4 +433,28 @@ fn header_button(ui: &mut Ui, glyph: &str, text: &str) -> egui::Response {
     ui.painter().galley(pos2(x + icon.size().x + HEADER_GLYPH_GAP, rect.center().y - words.size().y / 2.0), words, tokens.text);
     crate::property_sheet::paint_keyboard_focus(ui, &response, &tokens);
     response
+}
+
+/// The yellow clock in `rect` of a map that `changes` made out of date since its bake; hover tells what changed
+fn out_of_date_mark(ui: &mut Ui, rect: Rect, name: &str, changes: &[BakeChange]) {
+    let tokens = Tokens::get(ui.ctx());
+    let response = ui.interact(rect, ui.scope_id().with("out_of_date"), Sense::hover());
+    let title = tr("Out of date");
+    let label = trf("Out of date: {map}", &[("map", &name)]);
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &label));
+    ui.painter().text(rect.center(), Align2::CENTER_CENTER, icon::CLOCK, FontId::proportional(ROW_GLYPH_SIZE), tokens.warning);
+
+    response.on_hover_ui(|ui| {
+        ui.label(RichText::new(title).font(semibold(TOOLTIP_TEXT_SIZE)).color(tokens.text));
+        for change in changes {
+            ui.label(RichText::new(tr(bake_change_reason(*change))).size(TOOLTIP_TEXT_SIZE).color(tokens.text_dim));
+        }
+    });
+}
+
+/// The next icon slot leftwards from `icons_left`, centred on `center_y`; moves `icons_left` past it
+fn icon_slot(icons_left: &mut f32, center_y: f32) -> Rect {
+    let slot = Rect::from_center_size(pos2(*icons_left - ROW_BUTTON_SIZE / 2.0 - ROW_INSET / 2.0, center_y), vec2(ROW_BUTTON_SIZE, ROW_BUTTON_SIZE));
+    *icons_left = slot.left() - ROW_INSET / 2.0;
+    slot
 }

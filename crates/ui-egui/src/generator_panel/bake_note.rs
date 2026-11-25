@@ -7,7 +7,7 @@ use texturecraft_engine::bake::settings_patch;
 use texturecraft_engine::core::{BakeChange, BakedMap, Generator};
 
 use crate::TextureCraftApp;
-use crate::i18n::{baked_map_label, tr, trf};
+use crate::i18n::{bake_change_reason, baked_map_label, tr, trf};
 use crate::property_sheet::{PropertySheet, SIDE_PADDING_POINTS};
 use crate::theme::{Tokens, semibold};
 
@@ -82,16 +82,7 @@ fn reasons(changes: &[BakeChange], checked: bool) -> Vec<&'static str> {
         return reasons;
     }
 
-    changes
-        .iter()
-        .map(|change| match change {
-            BakeChange::LowPoly => tr("The mesh changed after this bake."),
-            BakeChange::HighPoly => tr("The high poly files changed after this bake."),
-            BakeChange::Cage => tr("The cage changed after this bake."),
-            BakeChange::Settings => tr("The common bake settings changed after this bake."),
-            BakeChange::MapSettings => tr("This map's bake settings changed after this bake."),
-        })
-        .collect()
+    changes.iter().map(|change| tr(bake_change_reason(*change))).collect()
 }
 
 /// Bake `texture_set` in the background, turning `map` on in its bake settings first when it is off

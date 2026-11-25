@@ -1,8 +1,8 @@
 //! Live bake preview: while the app bakes, the 3D view shows each mesh map on the model as soon
 //! as it is finished ([`crate::BakeTask::run_streaming`]). The streamed maps live here, not in
 //! the document: nothing enters the undo history until a texture set's bake is applied
-//! ([`Session::apply_streamed_bake`]). Cancellation leaves the current set unchanged; sets already
-//! applied keep their results and undo steps. The preview shows one map at a time, raw on the
+//! ([`Session::apply_streamed_bake`]). Cancellation keeps the maps the current set finished
+//! ([`Session::keep_canceled_bake`], even when the preview closed); applied sets keep their results and undo steps. The preview shows one map at a time, raw on the
 //! model; maps and texture sets not baked yet show their neutral value.
 
 mod preview_set;

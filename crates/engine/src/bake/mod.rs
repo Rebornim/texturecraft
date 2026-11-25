@@ -13,6 +13,7 @@ mod bake_mesh;
 mod bake_meshes;
 mod bake_sources;
 mod bake_task;
+mod canceled_bake;
 mod high_poly_load;
 mod high_poly_missed;
 mod layout;

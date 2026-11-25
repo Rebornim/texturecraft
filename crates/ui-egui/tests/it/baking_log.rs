@@ -69,6 +69,36 @@ fn a_one_map_bake_lists_only_that_map() {
 }
 
 #[test]
+fn a_canceled_bake_keeps_the_maps_it_finished_and_warns_only_on_the_rest() {
+    let mut harness = harness();
+    let before = harness.state().session.baked(0).cloned().unwrap_or_default();
+    harness.state_mut().start_bake(vec![0, 1]);
+
+    // Leaving Bake mode closes the preview; the bake and the maps it finishes go on
+    harness.state_mut().ui.mode = Mode::Painting;
+    let state = |app: &TextureCraftApp, set: usize, map: BakedMap| {
+        app.session.bake_log.maps.iter().find(|row| row.texture_set == set && row.map == map).map(|row| row.state.clone())
+    };
+    super::step_until(&mut harness, "set 0's first map", |app| state(app, 0, BakedMap::Id) == Some(BakeMapState::Baked));
+    assert!(!harness.state().session.bake_preview_active());
+
+    harness.state_mut().cancel_bake();
+
+    let app = harness.state();
+    assert_eq!(state(app, 0, BakedMap::Id), Some(BakeMapState::Baked), "a ticked map keeps its tick");
+    for (set, map) in [(0, BakedMap::Position), (1, BakedMap::Id), (1, BakedMap::Position)] {
+        assert_eq!(state(app, set, map), Some(BakeMapState::Canceled), "set {set}'s unfinished {map:?} warns");
+    }
+    let after = app.session.baked(0).cloned().unwrap_or_default();
+    let changed = |map: BakedMap| match (before.maps.get(&map), after.maps.get(&map)) {
+        (Some(old), Some(new)) => !std::sync::Arc::ptr_eq(old, new),
+        (old, new) => old.is_some() != new.is_some(),
+    };
+    assert!(changed(BakedMap::Id), "the ticked map is in the document");
+    assert!(!changed(BakedMap::Position), "the unfinished map stays as it was");
+}
+
+#[test]
 fn a_failed_maps_arrow_opens_its_settings() {
     let mut harness = harness();
 

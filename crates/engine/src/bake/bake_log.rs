@@ -83,10 +83,10 @@ impl BakeLog {
         }
     }
 
-    /// The bake stopped: the maps of `current` (the set being baked, not kept) and every map still waiting are canceled
-    pub fn cancel(&mut self, current: Option<usize>) {
+    /// The bake stopped: every map still waiting or baking is canceled, and so are the finished maps of `discarded` (the set being baked, when they were not kept)
+    pub fn cancel(&mut self, discarded: Option<usize>) {
         for row in &mut self.maps {
-            if row.state.is_pending() || (Some(row.texture_set) == current && row.state == BakeMapState::Baked) {
+            if row.state.is_pending() || (Some(row.texture_set) == discarded && row.state == BakeMapState::Baked) {
                 row.state = BakeMapState::Canceled;
             }
         }

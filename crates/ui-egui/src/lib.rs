@@ -832,12 +832,14 @@ impl TextureCraftApp {
         }
 
         ctx.request_repaint_after(BAKE_POLL_INTERVAL);
-        if let Some(running) = &job.current {
+        if let Some(running) = &mut job.current {
             let set_index = running.set_index;
 
             // Wait for the sender to close so the last map also gets a preview frame
             match running.maps.try_recv() {
                 Ok(map) => {
+                    running.finished.resolution = map.resolution;
+                    running.finished.maps.insert(map.map, map.data.clone());
                     self.session.bake_log.map_baked(set_index, map.map);
                     self.session.bake_preview_map(set_index, map);
                     return;
@@ -861,16 +863,12 @@ impl TextureCraftApp {
                 }
                 Ok(Err(error)) => {
                     // The worker's error ends the whole bake; the maps of the sets before it stay
-                    self.bake_failed(set_index, &error.to_string());
-                    self.cancel_bake();
-                    self.finish_bake_report();
+                    self.end_failed_bake(set_index, &error.to_string());
                     return;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => return,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.bake_failed(set_index, i18n::tr("The bake worker stopped"));
-                    self.cancel_bake();
-                    self.finish_bake_report();
+                    self.end_failed_bake(set_index, i18n::tr("The bake worker stopped"));
                     return;
                 }
             }
@@ -903,6 +901,7 @@ impl TextureCraftApp {
                 let progress = Arc::new(Progress::new());
                 let worker_progress = progress.clone();
                 let maps_total = task.maps().len();
+                let (sources, painted_stroke) = (task.sources.clone(), task.painted_stroke);
                 let maps_done = Arc::new(std::sync::atomic::AtomicUsize::new(0));
                 let worker_done = maps_done.clone();
                 let (sender, maps) = std::sync::mpsc::channel();
@@ -916,11 +915,23 @@ impl TextureCraftApp {
                 });
 
                 if let Some(job) = self.bake.as_mut() {
-                    job.current = Some(RunningBake { set_index, progress, receiver, maps, maps_done, maps_total });
+                    job.current =
+                        Some(RunningBake { set_index, progress, receiver, maps, maps_done, maps_total, finished: Default::default(), sources, painted_stroke });
                 }
             }
             Err(error) => self.bake_failed(set_index, &error.to_string()),
         }
+    }
+
+    /// End the bake at texture set `set_index`, whose worker failed: none of its maps are kept, the queued sets are canceled
+    fn end_failed_bake(&mut self, set_index: usize, error: &str) {
+        if let Some(job) = &mut self.bake {
+            job.current = None;
+        }
+
+        self.bake_failed(set_index, error);
+        self.cancel_bake();
+        self.finish_bake_report();
     }
 
     /// Note a texture set whose bake failed: one Log line, counted in the summary
@@ -949,16 +960,31 @@ impl TextureCraftApp {
         }
     }
 
-    /// Cancel the running set's bake and the queued ones and restore the view; sets already applied keep their maps and undo steps
+    /// Cancel the running set's bake and the queued ones and restore the view; sets already applied keep their maps and undo steps, the running set keeps the maps it finished
     pub fn cancel_bake(&mut self) {
         let Some(job) = self.bake.take() else { return };
 
-        self.session.bake_log.cancel(job.current.as_ref().map(|running| running.set_index));
+        let mut discarded = None;
         if let Some(running) = job.current {
             running.progress.cancel.store(true, Ordering::Relaxed);
+
+            // Maps baked for a mesh that has since been replaced are never kept
+            let same_mesh = job.mesh_id == self.session.mesh_id;
+            let kept = match same_mesh {
+                true => {
+                    self.session.keep_canceled_bake(running.set_index, running.finished, &running.sources, running.painted_stroke).unwrap_or_else(|error| {
+                        self.toast(error.to_string(), true);
+                        Vec::new()
+                    })
+                }
+                false => Vec::new(),
+            };
+            if kept.is_empty() {
+                discarded = Some(running.set_index);
+            }
         }
 
-        // Only the current set is uncommitted; completed sets remain applied
+        self.session.bake_log.cancel(discarded);
         self.session.bake_preview_end();
     }
 

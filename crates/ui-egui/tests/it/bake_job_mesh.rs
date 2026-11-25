@@ -20,8 +20,18 @@ fn with_running_job(mesh_id: impl FnOnce(u64) -> u64, check: impl FnOnce(&Harnes
     let (_result_sender, receiver) = std::sync::mpsc::channel();
     let (_map_sender, maps) = std::sync::mpsc::channel();
     let job_mesh_id = mesh_id(harness.state().session.mesh_id);
-    let running =
-        RunningBake { set_index: 0, progress: progress.clone(), receiver, maps, maps_done: Arc::new(std::sync::atomic::AtomicUsize::new(0)), maps_total: 1 };
+    let maps_done = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let running = RunningBake {
+        set_index: 0,
+        progress: progress.clone(),
+        receiver,
+        maps,
+        maps_done,
+        maps_total: 1,
+        finished: Default::default(),
+        sources: Default::default(),
+        painted_stroke: 0,
+    };
     harness.state_mut().bake = Some(BakeJob { queue: vec![], current: Some(running), total: 1, mesh_id: job_mesh_id, only: None, rebake: None });
 
     harness.step();

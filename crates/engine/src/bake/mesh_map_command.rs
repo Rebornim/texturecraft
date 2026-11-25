@@ -291,7 +291,7 @@ impl Session {
         self.store_bake_maps(texture_set, output.resolution, output.height, maps, recorded)
     }
 
-    fn store_bake_maps(
+    pub(super) fn store_bake_maps(
         &mut self,
         texture_set: usize,
         resolution: u32,

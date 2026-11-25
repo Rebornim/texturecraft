@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 
 use serde_json::json;
 use texturecraft_engine::bake::{BakeHighState, BakeLog, BakeMapState, NamePair};
+use texturecraft_engine::compose::BakedMaps;
 use texturecraft_engine::core::{BakedMap, MeshMatchMode};
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute, sample_session};
@@ -126,4 +127,34 @@ fn a_bake_matching_by_name_lists_its_pairs_and_only_the_high_parts_no_set_pairs_
     assert_eq!(matching.issue_count(), 2);
     let log = execute(&mut session, "bake.log", &json!({})).unwrap();
     assert_eq!(log["matching"]["pairs"][1], json!({ "low": "Lid_low", "high": null }), "{log}");
+}
+
+#[test]
+fn a_canceled_bake_at_a_new_output_size_keeps_none_of_its_maps_so_the_sets_others_stay() {
+    let mut session = sample_session(256, 64).unwrap();
+    let before = session.baked(0).cloned().unwrap();
+    let resolution = before.resolution * 2;
+    let data = std::sync::Arc::new(vec![0.5; (resolution * resolution) as usize * BakedMap::Normal.components()]);
+    let finished = BakedMaps { resolution, maps: [(BakedMap::Normal, data)].into() };
+
+    let kept = session.keep_canceled_bake(0, finished, &Default::default(), 0).unwrap();
+
+    assert!(kept.is_empty(), "{kept:?}");
+    assert_eq!(session.baked(0).map(|baked| baked.maps.keys().copied().collect::<Vec<_>>()), Some(before.maps.keys().copied().collect()));
+    assert_eq!(session.baked(0).map(|baked| baked.resolution), Some(before.resolution));
+}
+
+#[test]
+fn a_canceled_bake_keeps_the_out_of_date_mark_of_a_map_it_did_not_finish() {
+    let mut session = sample_session(256, 64).unwrap();
+    execute(&mut session, "bake.run", &json!({ "resolution": 64, "maps": ["id", "position"], "dilation": 0 })).unwrap();
+    execute(&mut session, "bake.settings", &json!({ "positionMode": "boundingBox" })).unwrap();
+    let task = session.bake_task_for(0, &[BakedMap::Id, BakedMap::Position]).unwrap();
+    let stored = session.baked(0).cloned().unwrap();
+    let finished = BakedMaps { resolution: stored.resolution, maps: [(BakedMap::Id, stored.maps[&BakedMap::Id].clone())].into() };
+
+    let kept = session.keep_canceled_bake(0, finished, &task.sources, task.painted_stroke).unwrap();
+
+    assert_eq!(kept, [BakedMap::Id]);
+    assert!(!session.bake_changes(0, BakedMap::Position).is_empty(), "Position still has its old pixels, so it stays out of date");
 }

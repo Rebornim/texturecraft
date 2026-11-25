@@ -1,5 +1,5 @@
 //! Live bake preview: maps stream into the view while a bake runs, the view mode comes back,
-//! painting is paused, a cancelled bake leaves the set it was baking alone (sets finished before it
+//! painting is paused, ending the preview leaves the set it was baking alone (sets finished before it
 //! stay applied), the streamed pixels are the ones a single bake makes, and the preview and the
 //! document share each map's buffer instead of holding two copies.
 
@@ -215,7 +215,7 @@ fn cancelling_mid_bake_leaves_the_document_and_the_shown_maps_whole() {
         assert!(**data == full.maps[map], "{map:?}");
     }
 
-    // What the app does on cancel: end the preview; the document keeps what it had
+    // Ending the preview alone leaves the document as it was; the app keeps finished maps through keep_canceled_bake
     session.bake_preview_end();
 
     assert_eq!(session.doc.baked.get(&0).cloned(), before);

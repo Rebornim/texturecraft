@@ -71,12 +71,13 @@ fn the_view_shows_each_map_as_it_lands_and_the_previous_mode_comes_back() {
 }
 
 #[test]
-fn cancelling_restores_the_view_and_leaves_the_document_alone() {
+fn cancelling_before_a_map_finishes_restores_the_view_and_leaves_the_document_alone() {
     let mut harness = harness();
     let before = harness.state().session.doc.baked.get(&0).cloned();
 
+    // One frame starts the worker; a finished map shows only from the next one
     harness.state_mut().start_bake(vec![0]);
-    harness.run_steps(2);
+    harness.run_steps(1);
 
     assert!(harness.state().session.bake_preview_active());
     let (at, viewport) = (texturecraft_engine::geom::glam::Vec2::new(5.0, 5.0), texturecraft_engine::geom::glam::Vec2::new(100.0, 100.0));
@@ -142,6 +143,9 @@ fn a_ready_result_waits_for_the_map_stream_to_close() {
             maps,
             maps_done: Arc::new(AtomicUsize::new(MAPS.len())),
             maps_total: MAPS.len(),
+            finished: Default::default(),
+            sources: Default::default(),
+            painted_stroke: 0,
         }),
     });
 

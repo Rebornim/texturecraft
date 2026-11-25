@@ -47,6 +47,17 @@ fn a_settings_change_rebakes_only_the_auto_rebake_map_without_a_toast() {
 }
 
 #[test]
+fn the_progress_footer_names_the_map_the_rebake_makes() {
+    let mut harness = harness(64);
+    change_settings(&mut harness, json!({ "positionMode": "boundingBox" }));
+
+    super::step_until(&mut harness, "the rebake", |app| app.bake.as_ref().is_some_and(|job| job.current.is_some()));
+
+    let stage = harness.state().session.bake_preview.as_ref().and_then(|preview| preview.stage());
+    assert_eq!(stage.map(|stage| (stage.map, stage.total)), Some((BakedMap::Position, 1)), "not the set's first checked map, not all its maps");
+}
+
+#[test]
 fn nothing_is_rebaked_outside_bake_mode() {
     let mut harness = harness(64);
     harness.state_mut().ui.mode = Mode::Painting;

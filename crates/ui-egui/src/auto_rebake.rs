@@ -65,20 +65,15 @@ pub(crate) fn poll(app: &mut TextureCraftApp, ctx: &egui::Context) {
 /// Rebake only the map of `rebake`'s texture set in the background, shown in the Baking Log like any bake
 fn start(app: &mut TextureCraftApp, rebake: Due) {
     let (set, map) = (rebake.0, rebake.1);
-    let orders = match app.session.bake_preview_orders(&[set], Some(map)) {
-        Ok(orders) => orders,
-        Err(error) => {
-            app.toast(error.to_string(), true);
-            return;
-        }
-    };
 
     // Restore the previous view before the rebake takes it over
     app.live_preview.release(&mut app.session);
     crate::id_color_pick::IdColorPick::end(app);
-    app.session.bake_preview_begin(orders);
+
+    // The progress footer names the maps this rebake makes, not every checked map of the set
     let maps = app.session.auto_rebake_maps(set, map);
+    app.session.bake_preview_begin(vec![(set, maps.clone())]);
     app.session.begin_map_bake_log(&[set], &maps);
     app.bake_report = bake_report::BakeReport { auto_rebake: true, ..bake_report::BakeReport::started(app.last_time) };
-    app.bake = Some(BakeJob { queue: vec![set], current: None, total: 1, mesh_id: app.session.mesh_id, only: Some(map), rebake: Some(rebake) });
+    app.bake = Some(BakeJob { queue: vec![set], current: None, total: 1, mesh_id: app.session.mesh_id, only: None, rebake: Some(rebake) });
 }

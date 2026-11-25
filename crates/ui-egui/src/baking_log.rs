@@ -2,10 +2,13 @@
 
 use egui::{Align2, CornerRadius, FontId, Id, Rect, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 use egui_phosphor::regular as ic;
+use serde_json::json;
 use texturecraft_engine::bake::{BakeLogMap, BakeMapState};
+use texturecraft_engine::core::BakedMap;
 
 use crate::TextureCraftApp;
-use crate::i18n::{baked_map_label, tr};
+use crate::docking::Panel;
+use crate::i18n::{baked_map_label, tr, trf};
 use crate::property_sheet::{SIDE_PADDING_POINTS, TAB_GAP, TAB_ICON_CENTER, TAB_ICON_SIZE, TAB_NAME_LEFT, TAB_PADDING, TAB_TEXT_SIZE, TAB_TOP, shown_tab_box};
 use crate::theme::{Tokens, semibold};
 
@@ -36,18 +39,43 @@ const NAME_LEFT: f32 = SIDE_PADDING_POINTS + 22.0;
 const GLYPH_SIZE: f32 = 13.0;
 const NAME_SIZE: f32 = 12.0;
 
+/// Size of the open-settings arrow at an issue row's right end, and of the square it answers clicks in
+const OPEN_ICON_SIZE: f32 = 14.0;
+const OPEN_BUTTON_SIZE: f32 = 20.0;
+
 pub(crate) fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
     let running = app.session.bake_log.is_running();
     if let Some(tab) = tab_strip(ui, app.ui.baking_log_tab, running) {
         app.ui.baking_log_tab = tab;
     }
 
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        ui.add_space(LIST_TOP);
-        if app.ui.baking_log_tab == BakingLogTab::BakingProcess {
-            baking_process(ui, &app.session.bake_log.maps);
-        }
-    });
+    let opened = egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.add_space(LIST_TOP);
+            match app.ui.baking_log_tab {
+                BakingLogTab::BakingProcess => baking_process(ui, &app.session.bake_log.maps),
+                _ => None,
+            }
+        })
+        .inner;
+    if let Some((texture_set, map)) = opened {
+        open_map_settings(app, texture_set, map);
+    }
+}
+
+/// Show `map`'s settings of `texture_set` in Mesh Map Settings, as picking it in Mesh Map Bakers does
+fn open_map_settings(app: &mut TextureCraftApp, texture_set: usize, map: BakedMap) {
+    // The set may have been deleted since the bake
+    if texture_set >= app.session.set_count() {
+        return;
+    }
+
+    if texture_set != app.session.ts() {
+        app.run("textureSet.select", json!({ "ts": texture_set }));
+    }
+    app.ui.selected_baked_map = Some(map);
+    app.ui.dock.focus(Panel::MeshMapSettings);
 }
 
 /// The tabs on the panel's top edge, as the Properties section tabs; a tab with work in progress shows dots for its icon
@@ -89,23 +117,28 @@ fn tab_strip(ui: &mut Ui, shown: BakingLogTab, running: bool) -> Option<BakingLo
     picked
 }
 
-/// One row per texture set and map, in bake order; the map being baked stays in view
-fn baking_process(ui: &mut Ui, maps: &[BakeLogMap]) {
+/// One row per texture set and map, in bake order; the map being baked stays in view. Returns the map whose settings to open
+fn baking_process(ui: &mut Ui, maps: &[BakeLogMap]) -> Option<(usize, BakedMap)> {
     let followed = maps.iter().position(|row| row.state == BakeMapState::Baking);
     let follow_id = Id::unique("baking_log_followed_map");
     let newly_followed = followed.is_some() && ui.data(|data| data.get_temp::<Option<usize>>(follow_id)) != Some(followed);
     ui.data_mut(|data| data.insert_temp(follow_id, followed));
 
+    let mut opened = None;
     for (index, row) in maps.iter().enumerate() {
-        let rect = map_row(ui, row);
+        let (rect, open_clicked) = map_row(ui, row);
         if newly_followed && followed == Some(index) {
             ui.scroll_to_rect(rect, None);
         }
+        if open_clicked {
+            opened = Some((row.texture_set, row.map));
+        }
     }
+    opened
 }
 
-/// A map's row: its state's glyph, then "<texture set> <map>"; a map that was not baked tells why on hover
-fn map_row(ui: &mut Ui, row: &BakeLogMap) -> Rect {
+/// A map's row: glyph, then "<texture set> <map>"; a map not baked tells why on hover and has an arrow to its settings; returns the row and whether the arrow was clicked
+fn map_row(ui: &mut Ui, row: &BakeLogMap) -> (Rect, bool) {
     let tokens = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
     let name = format!("{} {}", row.set_name, tr(baked_map_label(row.map)));
@@ -117,9 +150,11 @@ fn map_row(ui: &mut Ui, row: &BakeLogMap) -> Rect {
         BakeMapState::Canceled => (ic::WARNING, tokens.warning, tr("Canceled")),
     };
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, format!("{name}, {state}")));
+    let open = row.state.is_issue().then(|| open_settings_button(ui, rect, &name));
+    let row_hovered = response.hovered() || open.as_ref().is_some_and(|open| open.hovered());
 
     let painter = ui.painter();
-    if response.hovered() {
+    if row_hovered {
         painter.rect_filled(rect.shrink2(vec2(HOVER_INSET, 0.0)), CornerRadius::ZERO, tokens.row_hover);
     }
     let center_y = rect.center().y;
@@ -129,7 +164,16 @@ fn map_row(ui: &mut Ui, row: &BakeLogMap) -> Rect {
         BakeMapState::Waiting => (FontId::proportional(NAME_SIZE), tokens.text_dim),
         _ => (FontId::proportional(NAME_SIZE), tokens.text),
     };
-    painter.text(pos2(rect.left() + NAME_LEFT, center_y), Align2::LEFT_CENTER, name, font, color);
+    painter.text(pos2(rect.left() + NAME_LEFT, center_y), Align2::LEFT_CENTER, &name, font, color);
+    if let Some(open) = &open
+        && (row_hovered || open.has_focus())
+    {
+        let color = if open.hovered() || open.has_focus() { tokens.text } else { tokens.text_dim };
+        painter.text(open.rect.center(), Align2::CENTER_CENTER, ic::ARROW_SQUARE_OUT, FontId::proportional(OPEN_ICON_SIZE), color);
+        if open.has_focus() {
+            crate::property_sheet::paint_focus_outline(painter, open.rect, tokens.text_strong);
+        }
+    }
 
     let reason = match &row.state {
         BakeMapState::Failed(reason) => Some(reason.as_str()),
@@ -142,5 +186,16 @@ fn map_row(ui: &mut Ui, row: &BakeLogMap) -> Rect {
             ui.label(egui::RichText::new(reason).size(NAME_SIZE).color(tokens.text_dim));
         });
     }
-    rect
+    let open_clicked = open.is_some_and(|open| open.clicked());
+    (rect, open_clicked)
+}
+
+/// The open-settings arrow's square at the right end of `row`; it shows only while the row is hovered or it has focus
+fn open_settings_button(ui: &mut Ui, row: Rect, name: &str) -> egui::Response {
+    let center = pos2(row.right() - SIDE_PADDING_POINTS - OPEN_BUTTON_SIZE / 2.0, row.center().y);
+    let rect = Rect::from_center_size(center, vec2(OPEN_BUTTON_SIZE, OPEN_BUTTON_SIZE));
+    let label = trf("Open the {name} settings", &[("name", &name)]);
+    let response = ui.interact(rect, ui.scope_id().with(("baking_log_open", name)), Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, &label));
+    response.on_hover_text(label)
 }

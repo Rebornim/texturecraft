@@ -681,6 +681,9 @@ pub struct UiState {
     /// The Log panel's shown channel tab
     #[serde(default)]
     pub log_channel: crate::log_panel::LogChannel,
+    /// The Baking Log panel's shown tab
+    #[serde(default)]
+    pub baking_log_tab: crate::baking_log::BakingLogTab,
     /// The project template the last New project was created from (name or label)
     #[serde(default)]
     pub last_template: String,
@@ -844,6 +847,7 @@ impl Default for UiState {
             bake_preset_name: String::new(),
             layout_dialog: None,
             log_channel: crate::log_panel::LogChannel::default(),
+            baking_log_tab: crate::baking_log::BakingLogTab::default(),
             last_template: String::new(),
             log_selection: Default::default(),
             log_anchor: None,

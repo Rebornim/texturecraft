@@ -612,13 +612,7 @@ pub(crate) fn panel_body(app: &mut TextureCraftApp, ui: &mut Ui, panel: Panel) {
         Panel::Shader => crate::shader_settings::body(app, ui),
         Panel::History => crate::windows::history(app, ui),
         Panel::Log => crate::log_panel::body(app, ui),
-        Panel::BakingLog => {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for entry in app.session.log.entries().iter().filter(|entry| entry.source == "Baker") {
-                    ui.label(entry.line());
-                }
-            });
-        }
+        Panel::BakingLog => crate::baking_log::body(app, ui),
         Panel::Export => crate::export_panel::body(app, ui),
         Panel::Renderer => crate::render_mode::settings_body(app, ui),
         Panel::Viewport => {}

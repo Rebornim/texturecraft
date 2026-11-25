@@ -10,6 +10,7 @@ mod bake_mode;
 mod bake_presets;
 mod bake_reset_menus;
 mod bake_sync;
+mod baking_log;
 mod brush_drag;
 mod brush_section_reset;
 mod camera_views;

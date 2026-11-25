@@ -114,6 +114,24 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!("effect.move", "Move effect", [], None, "{effect, index: position in its stack, 0 = bottom (applied first)}", has_layer, move_effect),
         cmd!(
+            "effect.moveUp",
+            "Move effect up",
+            ["Layers"],
+            Some("Alt+Up"),
+            "{effect?: the selected effect} — one place up its stack (applied later)",
+            has_effect,
+            |s, p| { step_effect(s, p, Step::Up) }
+        ),
+        cmd!(
+            "effect.moveDown",
+            "Move effect down",
+            ["Layers"],
+            Some("Alt+Down"),
+            "{effect?: the selected effect} — one place down its stack (applied earlier)",
+            has_effect,
+            |s, p| { step_effect(s, p, Step::Down) }
+        ),
+        cmd!(
             "effect.histogram",
             "Effect input histogram",
             [],
@@ -1020,6 +1038,39 @@ fn move_effect(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     Ok(Value::Null)
+}
+
+/// Which way [`step_effect`] moves an effect: up is later in its stack (rows list the top first)
+#[derive(Clone, Copy)]
+enum Step {
+    Up,
+    Down,
+}
+
+/// Move an effect one place in its stack (one undo step; nothing at its end)
+fn step_effect(s: &mut Session, p: &Value, step: Step) -> Result<Value> {
+    let cmd = match step {
+        Step::Up => "effect.moveUp",
+        Step::Down => "effect.moveDown",
+    };
+    let eid = effect_id(s, p, cmd)?;
+    let (list, index) = stack_of(&mut s.doc.project, eid).ok_or_else(|| bad(cmd, format!("no effect {}", eid.0)))?;
+    let to = match step {
+        Step::Up if index + 1 < list.len() => index + 1,
+        Step::Down if index > 0 => index - 1,
+        _ => return Ok(json!({ "moved": false })),
+    };
+
+    crate::execute(s, "effect.move", &json!({ "effect": eid.0, "index": to }))?;
+    Ok(json!({ "moved": true }))
+}
+
+/// The keys act on the selected effect, so they need one
+fn has_effect(s: &Session) -> std::result::Result<(), String> {
+    match s.target {
+        StackTarget::Effect(_) => Ok(()),
+        _ => Err("no effect selected".into()),
+    }
 }
 
 fn remove_effect(s: &mut Session, p: &Value) -> Result<Value> {

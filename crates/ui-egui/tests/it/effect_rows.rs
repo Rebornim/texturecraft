@@ -94,6 +94,36 @@ fn an_effect_rows_menu_moves_it_within_its_stack() {
     assert!(!harness.get_by_label("Move up").accesskit_node().is_disabled());
 }
 
+/// Alt+Up and Alt+Down move the selected effect one place in its stack; at its end it stays
+#[test]
+fn alt_up_and_down_move_the_selected_effect() {
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = LayerId(id(execute(&mut session, "layer.add.fill", &Value::Null).unwrap(), "layer"));
+    let mut add =
+        |name: &str| id(execute(&mut session, "effect.add.filter", &json!({"target": "content", "filter": "invert", "name": name})).unwrap(), "effect");
+    let (a, b, c) = (add("Effect A"), add("Effect B"), add("Effect C"));
+    execute(&mut session, "layer.select", &json!({"layer": layer.0})).unwrap();
+    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).build_eframe(|creation_context| TextureCraftApp::new(creation_context, session));
+    harness.run_steps(4);
+    let order =
+        |harness: &Harness<'_, TextureCraftApp>| harness.state().session.doc.project.layers[&layer].content_effects.iter().map(|e| e.id.0).collect::<Vec<_>>();
+    let press = |harness: &mut Harness<'_, TextureCraftApp>, key: egui::Key| {
+        harness.key_press_modifiers(egui::Modifiers::ALT, key);
+        harness.run_steps(3);
+    };
+    harness.get_by_label("Effect A").click();
+    harness.run_steps(3);
+
+    press(&mut harness, egui::Key::ArrowUp);
+    assert_eq!(order(&harness), [b, a, c]);
+    press(&mut harness, egui::Key::ArrowUp);
+    assert_eq!(order(&harness), [b, c, a]);
+    press(&mut harness, egui::Key::ArrowUp);
+    assert_eq!(order(&harness), [b, c, a], "the top effect stays");
+    press(&mut harness, egui::Key::ArrowDown);
+    assert_eq!(order(&harness), [b, a, c]);
+}
+
 /// The cross at an effect row's right end removes that effect alone, in one undo step
 #[test]
 fn an_effect_rows_cross_removes_it() {

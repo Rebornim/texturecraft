@@ -684,6 +684,9 @@ pub struct UiState {
     /// The Baking Log panel's shown tab
     #[serde(default)]
     pub baking_log_tab: crate::baking_log::BakingLogTab,
+    /// Whether the Baking Log keeps only the rows with an issue
+    #[serde(default)]
+    pub baking_log_issues_only: bool,
     /// The project template the last New project was created from (name or label)
     #[serde(default)]
     pub last_template: String,
@@ -848,6 +851,7 @@ impl Default for UiState {
             layout_dialog: None,
             log_channel: crate::log_panel::LogChannel::default(),
             baking_log_tab: crate::baking_log::BakingLogTab::default(),
+            baking_log_issues_only: false,
             last_template: String::new(),
             log_selection: Default::default(),
             log_anchor: None,

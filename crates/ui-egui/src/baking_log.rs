@@ -1,6 +1,6 @@
 //! The Baking Log panel: the latest bake under three tabs, read from the session's bake record
 
-use egui::{Align2, CornerRadius, FontId, Id, Rect, Role, Sense, Ui, WidgetInfo, pos2, vec2};
+use egui::{Align2, CornerRadius, FontId, Id, Rect, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 use egui_phosphor::regular as ic;
 use serde_json::json;
 use texturecraft_engine::bake::{BakeLogMap, BakeMapState};
@@ -43,18 +43,56 @@ const NAME_SIZE: f32 = 12.0;
 const OPEN_ICON_SIZE: f32 = 14.0;
 const OPEN_BUTTON_SIZE: f32 = 20.0;
 
+/// Height of the issues filter toggle, and its width without a count
+const FILTER_HEIGHT: f32 = 22.0;
+const FILTER_BUTTON_WIDTH: f32 = 30.0;
+
+/// How far the issues filter sits below the strip's centre, and how far it reaches past the side padding
+const FILTER_DROP: f32 = 1.0;
+const FILTER_OUTDENT: f32 = 4.0;
+
+/// Corner rounding of the issues filter's pressed and hovered fill
+const FILTER_ROUNDING: f32 = 5.0;
+
+/// From the issues filter's left edge to its glyph's centre and to its count, and the glyph's size
+const FILTER_GLYPH_CENTER: f32 = 15.0;
+const FILTER_COUNT_LEFT: f32 = 26.0;
+const FILTER_GLYPH_SIZE: f32 = 14.0;
+
+/// Air between the issue count and the toggle's right end
+const FILTER_COUNT_GAP: f32 = 4.0;
+
+/// Height of the two lines the issues filter leaves when nothing is wrong, to centre them
+const EMPTY_TEXT_HEIGHT: f32 = 40.0;
+
 pub(crate) fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
-    let running = app.session.bake_log.is_running();
-    if let Some(tab) = tab_strip(ui, app.ui.baking_log_tab, running) {
+    let tokens = Tokens::get(ui.ctx());
+    let (strip, _) = ui.allocate_exact_size(vec2(ui.available_width(), STRIP_HEIGHT), Sense::hover());
+    ui.painter().rect_filled(strip, CornerRadius::ZERO, tokens.chrome);
+    if let Some(tab) = tabs(ui, strip, app.ui.baking_log_tab, app.session.bake_log.is_running()) {
         app.ui.baking_log_tab = tab;
+    }
+    let tab = app.ui.baking_log_tab;
+    let issue_count = match tab {
+        BakingLogTab::BakingProcess => app.session.bake_log.maps.iter().filter(|row| row.state.is_issue()).count(),
+        _ => 0,
+    };
+    if issues_filter(ui, strip, issue_count, app.ui.baking_log_issues_only) {
+        app.ui.baking_log_issues_only = !app.ui.baking_log_issues_only;
+    }
+
+    let issues_only = app.ui.baking_log_issues_only;
+    if issues_only && issue_count == 0 {
+        no_issues(ui, tab);
+        return;
     }
 
     let opened = egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add_space(LIST_TOP);
-            match app.ui.baking_log_tab {
-                BakingLogTab::BakingProcess => baking_process(ui, &app.session.bake_log.maps),
+            match tab {
+                BakingLogTab::BakingProcess => baking_process(ui, &app.session.bake_log.maps, issues_only),
                 _ => None,
             }
         })
@@ -78,12 +116,9 @@ fn open_map_settings(app: &mut TextureCraftApp, texture_set: usize, map: BakedMa
     app.ui.dock.focus(Panel::MeshMapSettings);
 }
 
-/// The tabs on the panel's top edge, as the Properties section tabs; a tab with work in progress shows dots for its icon
-fn tab_strip(ui: &mut Ui, shown: BakingLogTab, running: bool) -> Option<BakingLogTab> {
+/// The tabs on the `strip` along the panel's top edge, as the Properties section tabs; a tab with work in progress shows dots for its icon
+fn tabs(ui: &mut Ui, strip: Rect, shown: BakingLogTab, running: bool) -> Option<BakingLogTab> {
     let tokens = Tokens::get(ui.ctx());
-    let (strip, _) = ui.allocate_exact_size(vec2(ui.available_width(), STRIP_HEIGHT), Sense::hover());
-    ui.painter().rect_filled(strip, CornerRadius::ZERO, tokens.chrome);
-
     let mut picked = None;
     let mut left = strip.left() + SIDE_PADDING_POINTS - FIRST_TAB_OUTDENT;
     for tab in BakingLogTab::ALL {
@@ -117,15 +152,65 @@ fn tab_strip(ui: &mut Ui, shown: BakingLogTab, running: bool) -> Option<BakingLo
     picked
 }
 
-/// One row per texture set and map, in bake order; the map being baked stays in view. Returns the map whose settings to open
-fn baking_process(ui: &mut Ui, maps: &[BakeLogMap]) -> Option<(usize, BakedMap)> {
+/// The toggle at the `strip`'s right end that keeps only the rows with an issue: a warning glyph and how many there are
+fn issues_filter(ui: &mut Ui, strip: Rect, issue_count: usize, on: bool) -> bool {
+    let tokens = Tokens::get(ui.ctx());
+    let count = (issue_count > 0).then(|| issue_count.to_string());
+    let count_width =
+        count.as_ref().map_or(0.0, |count| ui.painter().layout_no_wrap(count.clone(), semibold(NAME_SIZE), tokens.text).size().x + FILTER_COUNT_GAP);
+    let right = strip.right() - SIDE_PADDING_POINTS + FILTER_OUTDENT;
+    let center_y = strip.center().y + FILTER_DROP;
+    let rect = Rect::from_min_max(pos2(right - FILTER_BUTTON_WIDTH - count_width, center_y - FILTER_HEIGHT / 2.0), pos2(right, center_y + FILTER_HEIGHT / 2.0));
+
+    let name = match &count {
+        Some(count) => trf("{count}, Show Only Issues", &[("count", count)]),
+        None => tr("Show Only Issues").to_owned(),
+    };
+    let response = ui.interact(rect, ui.scope_id().with("baking_log_issues_filter"), Sense::click());
+    response.widget_info(|| WidgetInfo::selected(Role::Button, true, on, &name));
+
+    let painter = ui.painter();
+    if on {
+        painter.rect(rect, FILTER_ROUNDING, tokens.tool_active, Stroke::new(1.0, tokens.button_border), StrokeKind::Inside);
+    } else if response.hovered() {
+        painter.rect_filled(rect, FILTER_ROUNDING, tokens.row_hover);
+    }
+    let glyph_color = if count.is_some() { tokens.warning } else { tokens.text_dim };
+    painter.text(pos2(rect.left() + FILTER_GLYPH_CENTER, center_y), Align2::CENTER_CENTER, ic::WARNING, FontId::proportional(FILTER_GLYPH_SIZE), glyph_color);
+    if let Some(count) = count {
+        painter.text(pos2(rect.left() + FILTER_COUNT_LEFT, center_y), Align2::LEFT_CENTER, count, semibold(NAME_SIZE), tokens.text);
+    }
+    if response.has_focus() {
+        crate::property_sheet::paint_focus_outline(painter, rect, tokens.text_strong);
+    }
+    response.on_hover_text(tr("Show Only Issues")).clicked()
+}
+
+/// What the issues filter leaves when `tab` has no issue: the reference's words for that tab, and how to see every row
+fn no_issues(ui: &mut Ui, tab: BakingLogTab) {
+    let tokens = Tokens::get(ui.ctx());
+    let message = match tab {
+        BakingLogTab::BakingProcess => tr("All textures baked successfully so far."),
+        BakingLogTab::HighPolyParameters => tr("No issues encountered so far."),
+        BakingLogTab::MatchingByName => tr("No matching issues encountered"),
+    };
+    let area = ui.available_rect_before_wrap();
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(egui::Align::Center)));
+    child.add_space((area.height() - EMPTY_TEXT_HEIGHT).max(0.0) / 2.0);
+    child.label(egui::RichText::new(message).font(semibold(NAME_SIZE)).color(tokens.text));
+    child.label(egui::RichText::new(tr("Deselect filter to view.")).size(NAME_SIZE).color(tokens.text_dim));
+    ui.allocate_rect(area, Sense::hover());
+}
+
+/// One row per texture set and map (with an issue, if `issues_only`) in bake order, following the map being baked; returns the map to open
+fn baking_process(ui: &mut Ui, maps: &[BakeLogMap], issues_only: bool) -> Option<(usize, BakedMap)> {
     let followed = maps.iter().position(|row| row.state == BakeMapState::Baking);
     let follow_id = Id::unique("baking_log_followed_map");
     let newly_followed = followed.is_some() && ui.data(|data| data.get_temp::<Option<usize>>(follow_id)) != Some(followed);
     ui.data_mut(|data| data.insert_temp(follow_id, followed));
 
     let mut opened = None;
-    for (index, row) in maps.iter().enumerate() {
+    for (index, row) in maps.iter().enumerate().filter(|(_, row)| !issues_only || row.state.is_issue()) {
         let (rect, open_clicked) = map_row(ui, row);
         if newly_followed && followed == Some(index) {
             ui.scroll_to_rect(rect, None);

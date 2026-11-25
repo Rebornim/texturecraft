@@ -2,6 +2,7 @@
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
+use texturecraft_engine::bake::{BakeLogMap, BakeMapState};
 use texturecraft_engine::core::{BakeResolution, BakedMap};
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::docking::Panel;
@@ -85,4 +86,44 @@ fn a_failed_maps_arrow_opens_its_settings() {
         harness.query_by_label(&format!("Open the {} ID settings", harness.state().session.doc.project.texture_sets[0].name)).is_none(),
         "a baked map has no arrow"
     );
+}
+
+/// Put a finished bake of set 0's ID and Position maps in the log, the Position map ending as `position`
+fn log_a_bake(harness: &mut Harness<'static, TextureCraftApp>, position: BakeMapState) -> String {
+    let set_name = harness.state().session.doc.project.texture_sets[0].name.clone();
+    let row = |map, state| BakeLogMap { texture_set: 0, set_name: set_name.clone(), map, state };
+    harness.state_mut().session.bake_log.maps = vec![row(BakedMap::Id, BakeMapState::Baked), row(BakedMap::Position, position)];
+    harness.run_steps(3);
+    set_name
+}
+
+#[test]
+fn the_issues_filter_keeps_only_the_maps_with_a_problem() {
+    let mut harness = harness();
+    let set_name = log_a_bake(&mut harness, BakeMapState::Failed("The high poly file could not be read.".into()));
+    harness.get_by_label(&format!("{set_name} ID, Baked"));
+
+    harness.get_by_label("1, Show Only Issues").click();
+    harness.run_steps(3);
+
+    assert!(harness.query_by_label(&format!("{set_name} ID, Baked")).is_none(), "a baked map is filtered out");
+    harness.get_by_label(&format!("{set_name} Position, Not baked"));
+    assert!(harness.query_by_label("Deselect filter to view.").is_none(), "an issue left: no empty text");
+}
+
+#[test]
+fn the_issues_filter_says_so_when_nothing_went_wrong() {
+    let mut harness = harness();
+    let set_name = log_a_bake(&mut harness, BakeMapState::Baked);
+    harness.get_by_label("Show Only Issues").click();
+    harness.run_steps(3);
+
+    assert!(harness.query_by_label(&format!("{set_name} ID, Baked")).is_none());
+    harness.get_by_label("All textures baked successfully so far.");
+    harness.get_by_label("Deselect filter to view.");
+
+    harness.get_by_label("Show Only Issues").click();
+    harness.run_steps(3);
+    harness.get_by_label(&format!("{set_name} ID, Baked"));
+    assert!(harness.query_by_label("All textures baked successfully so far.").is_none(), "off again: every row is back");
 }

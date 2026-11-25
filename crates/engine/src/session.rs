@@ -458,6 +458,8 @@ pub struct Session {
     pub clipboard: Option<(Document, LayerId)>,
     /// Channel blending copied from an effect (see [`crate::effect_blending_cmds`])
     pub blending_clipboard: Option<crate::effect_blending_cmds::CopiedBlending>,
+    /// Where the last layer pick landed (viewport pixels): a click there again picks the next layer down
+    pub(crate) last_layer_pick: Option<Vec2>,
     /// Decoded image resources (rebuilt from `doc.resources` by `Session::sync_images`).
     pub images: texturecraft_compose::ImageStore,
     /// Resource names whose decoded pixels match a library alpha.
@@ -545,6 +547,7 @@ impl Session {
             stroke: None,
             clipboard: None,
             blending_clipboard: None,
+            last_layer_pick: None,
             images: Default::default(),
             library_alphas: BTreeSet::new(),
             quick_mask: Default::default(),

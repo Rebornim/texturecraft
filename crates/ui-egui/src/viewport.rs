@@ -27,6 +27,8 @@ use crate::toolbar::{MAX_BRUSH_SIZE, MIN_BRUSH_SIZE};
 pub const STENCIL_KEY: egui::Key = egui::Key::S;
 /// Hold this key with the Clone tool and click to set the source
 pub const CLONE_SOURCE_KEY: egui::Key = egui::Key::V;
+/// Hold this key with any tool and click the mesh to select the layer laying something down there
+pub const PICK_LAYER_KEY: egui::Key = egui::Key::R;
 
 pub const VIEW_3D: u64 = 1;
 pub const VIEW_2D: u64 = 2;
@@ -864,6 +866,17 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         app.run("tool.cloneSource", json!({"x": at.x, "y": at.y, "viewport": [viewport.x, viewport.y]}));
     }
 
+    // Layer pick: R + click selects the top layer laying something down there, whatever the tool
+    let r_held = layer_pick_key(app, ui);
+    if r_held
+        && !alt
+        && response.clicked_by(PointerButton::Primary)
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let (at, viewport) = (local(pointer), app.session.viewport);
+        app.run("layer.pickAt", json!({"x": at.x, "y": at.y, "viewport": [viewport.x, viewport.y]}));
+    }
+
     // Depth of field focus pick: a click focuses there instead of painting
     let focus_pick = focus_picking(ui.ctx());
     if focus_pick {
@@ -881,7 +894,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     // A dismissing click cannot paint or place a decal through the rail popup
     let rail_popup = crate::rail_popup::blocks_paint_input(app, ui.ctx());
 
-    crate::properties_popup::open_on_right_click(app, ui, &response, rect, s_held || v_held);
+    crate::properties_popup::open_on_right_click(app, ui, &response, rect, s_held || v_held || r_held);
 
     // A press that closes an open colour picker only closes it: it neither paints nor moves a projection
     let picker = crate::color_picker::blocks_view_press(ui.ctx());
@@ -916,8 +929,17 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     }
 
     // Only a press on a projection handle moves the selected fill
-    let gizmo_free =
-        !adjusting && !alt && !holding && !s_held && !v_held && !focus_pick && !popup && !picking && touch.is_none() && !DecalDrop::blocks_input(ui.ctx());
+    let gizmo_free = !adjusting
+        && !alt
+        && !holding
+        && !s_held
+        && !v_held
+        && !r_held
+        && !focus_pick
+        && !popup
+        && !picking
+        && touch.is_none()
+        && !DecalDrop::blocks_input(ui.ctx());
     let gizmo = ShownGizmo::of(app, rect);
     let began_on_handle = handle_press(ui.ctx(), |at| gizmo.as_ref().is_some_and(|gizmo| gizmo.on_handle(rect, at)));
     let frame_drag = gizmo_free && began_on_handle && ShownGizmo::input(app, ui, &response, rect, gizmo.as_ref());
@@ -934,6 +956,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     let plane_pick = !popup
         && !s_held
         && !v_held
+        && !r_held
         && !focus_pick
         && !picking
         && touch.is_none()
@@ -945,6 +968,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !adjusting
         && !s_held
         && !v_held
+        && !r_held
         && !focus_pick
         && !popup
         && !picking
@@ -965,6 +989,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         && !adjusting
         && !s_held
         && !v_held
+        && !r_held
         && !focus_pick
         && !picking
         && touch.is_none()
@@ -1038,6 +1063,11 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     add_callback(app, ui, rect, frame, sync);
     polygon_fill_box_overlay(ui, rect, fill_box);
 
+    // Over the 3D image: what a click does while the layer pick key is held
+    if r_held && let Some(hover) = response.hover_pos() {
+        layer_pick_hint(ui, rect, hover);
+    }
+
     // Route shelf drops by asset type to a layer, decal, or brush
     crate::shelf::drop_target(app, ui, &response, crate::shelf::DropZone::View3d);
 
@@ -1045,6 +1075,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     let mut symmetry_cursor = None;
     if tool_acts(app)
         && !navigating
+        && !r_held
         && response.hovered()
         && brush_tool(app.session.tool.tool)
         && (app.session.tool.tool != Tool::Path || adjusting)
@@ -1688,6 +1719,29 @@ fn uv_fill_box_corners(view: crate::uv_view_map::UvViewMap, [origin, opposite]: 
 fn clone_source_key(app: &TextureCraftApp, ui: &Ui) -> bool {
     tool_acts(app) && app.session.tool.tool == Tool::Clone && ui.input(|input| input.key_down(CLONE_SOURCE_KEY)) && !ui.ctx().egui_wants_keyboard_input()
 }
+
+/// R held over a view in painting mode, outside a text field: clicks select the layer under the cursor
+fn layer_pick_key(app: &TextureCraftApp, ui: &Ui) -> bool {
+    app.ui.mode == crate::state::Mode::Painting && ui.input(|input| input.key_down(PICK_LAYER_KEY)) && !ui.ctx().egui_wants_keyboard_input()
+}
+
+/// The pointing hand and a label beside it saying what a click does while the layer pick key is held
+fn layer_pick_hint(ui: &Ui, rect: Rect, hover: Pos2) {
+    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    let tokens = Tokens::get(ui.ctx());
+    let painter = ui.painter_at(rect);
+    let font = egui::TextStyle::Small.resolve(ui.style());
+    let galley = painter.layout_no_wrap(tr("Click to select the layer here").to_string(), font, tokens.text);
+    let at = hover + vec2(LAYER_PICK_HINT_OFFSET, LAYER_PICK_HINT_OFFSET);
+    let frame = Rect::from_min_size(at, galley.size()).expand(LAYER_PICK_HINT_PADDING);
+    painter.rect_filled(frame, egui::CornerRadius::same(LAYER_PICK_HINT_PADDING as u8), tokens.panel);
+    painter.rect_stroke(frame, egui::CornerRadius::same(LAYER_PICK_HINT_PADDING as u8), Stroke::new(1.0, tokens.separator), egui::StrokeKind::Inside);
+    painter.galley(at, galley, tokens.text);
+}
+
+/// How far the layer pick label sits right of and below the pointer, and the room around its text (points)
+const LAYER_PICK_HINT_OFFSET: f32 = 16.0;
+const LAYER_PICK_HINT_PADDING: f32 = 4.0;
 
 /// Crosshair where the Clone tool reads from.
 fn clone_marker(app: &TextureCraftApp, ui: &Ui, rect: Rect, pos: Vec3) {

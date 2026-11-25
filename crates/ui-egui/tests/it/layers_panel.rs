@@ -2,7 +2,7 @@
 //! fold without touching the document, and the thumbnails arrive from the worker.
 
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::kittest::{NodeT, Queryable, by};
 use serde_json::{Value, json};
 use texturecraft_engine::compose::ThumbTarget;
 use texturecraft_engine::core::{Channel, LayerId};
@@ -516,4 +516,59 @@ fn dragging_a_row_opacity_adds_one_undo_step() {
 
     assert!(opacity(&h) < before, "the drag lowers the opacity: {}", opacity(&h));
     assert_eq!(h.state().session.history_labels().len(), steps + 1, "every frame of the drag merges into one step");
+}
+
+/// When the selection moves to a layer below the panel's visible rows (a pick on the mesh, a command), its row scrolls into view
+#[test]
+fn a_newly_selected_layer_out_of_view_scrolls_into_view() {
+    let (mut h, _) = harness();
+    for index in 0..20 {
+        execute(&mut h.state_mut().session, "layer.add.fill", &json!({"name": format!("Filler {index}")})).unwrap();
+    }
+    h.run_steps(SETTLE_FRAMES);
+    let bottom = h.state().session.doc.project.texture_sets[h.state().session.ts()].stack[0];
+    let name = h.state().session.doc.project.layers[&bottom].name.clone();
+
+    let before = h.get_by_label(&name).rect();
+    assert!(before.top() > properties_top(&h), "the bottom layer starts out of view");
+    execute(&mut h.state_mut().session, "layer.select", &json!({"layer": bottom.0})).unwrap();
+    h.run_steps(SETTLE_FRAMES);
+
+    let after = h.get_by_label(&name).rect();
+    assert!(after.bottom() <= properties_top(&h), "its row is inside the panel");
+}
+
+/// The top of the Properties tab, which sits under the Layers panel
+fn properties_top(h: &Harness<'_, TextureCraftApp>) -> f32 {
+    h.query_all(by().role(egui::Role::Tab).label_contains("Properties")).next().map(|tab| tab.rect().top()).unwrap_or(f32::MAX)
+}
+
+/// Holding R and clicking the model selects the layer laying something down there instead of painting with the current tool
+#[test]
+fn r_and_a_click_on_the_model_select_the_layer_there_without_painting() {
+    let (mut h, _) = harness();
+    let empty = LayerId(execute(&mut h.state_mut().session, "layer.add.paint", &json!({"name": "Empty on top"})).unwrap()["layer"].as_u64().unwrap());
+    h.run_steps(SETTLE_FRAMES);
+    let steps = h.state().session.history_labels().len();
+    let middle = h.state().viewport_rect.center();
+    let local = middle - h.state().viewport_rect.min;
+    assert!(
+        h.state().session.pick(texturecraft_engine::geom::glam::Vec2::new(local.x, local.y), h.state().session.viewport).is_some(),
+        "the middle of the view shows the model"
+    );
+
+    let key = |pressed| egui::Event::Key { key: egui::Key::R, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+    h.event(key(true));
+    h.hover_at(middle);
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos: middle, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+    }
+    h.event(key(false));
+    h.run_steps(SETTLE_FRAMES);
+
+    let selected = h.state().session.selected_layer();
+    assert!(selected.is_some_and(|layer| layer != empty), "the empty top layer lays nothing down: a layer under it is picked");
+    assert_eq!(h.state().session.history_labels().len(), steps, "no stroke was painted");
 }

@@ -4,6 +4,7 @@
 
 mod draw_placement;
 mod evaluation_inputs;
+mod layers_at;
 pub(crate) mod thumbnail;
 
 use std::borrow::Cow;
@@ -42,6 +43,7 @@ use crate::store::{BakedMaps, ImageRes, ImageStore, PixelStore, decode};
 use crate::warp_texel::{Input, MIN_READ_WEIGHT, Sample, warp_texel};
 use draw_placement::DrawPlacement;
 use evaluation_inputs::EvaluationInputs;
+pub use layers_at::layers_at;
 
 const NCH: usize = Channel::ALL.len();
 

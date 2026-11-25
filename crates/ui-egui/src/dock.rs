@@ -455,6 +455,10 @@ fn layer_row(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, depth: usize
     let row_height = layer_row_height(preferred_size);
     let (rect, row) = ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click_and_drag());
     row.widget_info(|| egui::WidgetInfo::selected(egui::Role::ListItem, true, highlighted, &layer.name));
+    if app.layer_panel.reveal == Some(layer.id) {
+        app.layer_panel.reveal = None;
+        row.scroll_to_me(None);
+    }
 
     // Background, folder lines, the selected rows' accent edge and the colour tag
     let painter = ui.painter().clone();

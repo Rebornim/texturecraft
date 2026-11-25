@@ -48,4 +48,16 @@ impl Session {
             .filter_map(|(index, map)| Some((index, map, self.bake_source(index, map).ok()?)))
             .collect()
     }
+
+    /// The maps an auto-rebake of `map` bakes: that map alone, or with every checked map once the output size changed (storing a new size drops the old maps)
+    pub fn auto_rebake_maps(&self, texture_set: usize, map: BakedMap) -> Vec<BakedMap> {
+        let Ok(set) = self.doc.project.texture_set(texture_set) else { return vec![map] };
+        let (width, height) = set.bake.common.output_size();
+        let stored = self.doc.baked.get(&texture_set);
+        let resized = stored.is_some_and(|stored| stored.resolution != width || stored.maps.keys().any(|baked| stored.height(*baked) != height));
+        match resized {
+            true => BakedMap::ALL.into_iter().filter(|baked| *baked == map || set.bake.maps.is_enabled(*baked)).collect(),
+            false => vec![map],
+        }
+    }
 }

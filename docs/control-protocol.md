@@ -331,7 +331,10 @@ own). Imported maps, and maps saved before this record existed, never show:
 with the project and shows as the set's `autoRebake` in `project.inspect`. While the desktop or web
 app is in Bake mode, an auto-rebake map that goes out of date is baked again on its own in the
 background, alone, once its settings have stopped changing for half a second; a change during
-that bake restarts it. The headless CLI does not rebake by itself: run `bake.run` there.
+that bake restarts it. A skew or cage stroke (`bake.skew.paint`, `bake.cage.paint`) on a set that
+bakes from a high poly makes the app bake its auto-rebake map again only inside the stroke's UV
+box, keeping the rest; maps scaled by their whole range (curvature, height, thickness) are baked
+whole. The headless CLI does not rebake by itself: run `bake.run` there.
 
 `{"active": false}` when no bake is shown; setting `show` then is an error. Drive a bake with
 `ui.bake.start` and poll `ui.inspect`'s `bakeStatus` / `bakePreview` (and `viewport.screenshot`)

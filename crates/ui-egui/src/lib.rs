@@ -705,7 +705,7 @@ impl TextureCraftApp {
 
         let total = sets.len();
         match only {
-            Some(map) => self.session.begin_map_bake_log(&sets, map),
+            Some(map) => self.session.begin_map_bake_log(&sets, &[map]),
             None => self.session.begin_bake_log(&sets),
         }
         self.bake_report = bake_report::BakeReport::started(self.last_time);
@@ -886,12 +886,14 @@ impl TextureCraftApp {
         }
 
         let set_index = job.queue.remove(0);
-        let (only, rebake) = (job.only, job.rebake);
+        let only = job.only;
+        let rebake = job.rebake.as_ref().map(|(_, map, _, stroke)| (*map, stroke.is_some()));
 
         self.session.bake_preview_set_current(set_index);
         self.session.bake_log.set_started(set_index);
         let task = match (rebake, only) {
-            (Some((_, map, _)), _) => self.session.bake_task_for(set_index, &[map]),
+            (Some((map, true)), _) => self.session.bake_painted_task(set_index, map),
+            (Some((map, false)), _) => self.session.bake_task_for(set_index, &self.session.auto_rebake_maps(set_index, map)),
             (None, Some(map)) => self.session.bake_task_only(set_index, map),
             (None, None) => self.session.bake_task(set_index),
         };
@@ -947,8 +949,7 @@ impl TextureCraftApp {
         }
     }
 
-    /// Cancel the active worker, discard queued sets and restore the view. The current set's
-    /// preview maps are discarded; previously applied sets keep their results and undo steps.
+    /// Cancel the running set's bake and the queued ones and restore the view; sets already applied keep their maps and undo steps
     pub fn cancel_bake(&mut self) {
         let Some(job) = self.bake.take() else { return };
 

@@ -13,4 +13,6 @@ pub struct StreamedBake {
     pub tracer: String,
     /// What the baked maps were baked from (the task's [`crate::BakeTask::sources`])
     pub sources: BTreeMap<BakedMap, BakeSource>,
+    /// The task's [`crate::BakeTask::painted_stroke`]
+    pub painted_stroke: u64,
 }

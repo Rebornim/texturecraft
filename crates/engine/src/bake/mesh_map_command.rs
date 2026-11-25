@@ -206,6 +206,8 @@ impl Session {
             previous_maps,
             tracer,
             sources,
+            painted_stroke: self.painted_strokes,
+            region: None,
         })
     }
 
@@ -273,19 +275,20 @@ impl Session {
         Ok(())
     }
 
-    /// Apply a streamed bake like [`Session::apply_bake`], keeping the maps' shared buffers (the
-    /// preview that showed them holds the same ones)
+    /// Apply a streamed bake like [`Session::apply_bake`], keeping the buffers the preview that showed them shares
     pub fn apply_streamed_bake(&mut self, texture_set: usize, output: StreamedBake) -> Result<()> {
         let tracer = output.tracer.clone();
-        self.edit("Bake mesh maps", |session| session.store_bake_maps(texture_set, output.resolution, output.height, output.maps, Some(&output.sources)))?;
+        self.edit("Bake mesh maps", |session| {
+            session.store_bake_maps(texture_set, output.resolution, output.height, output.maps, Some((&output.sources, output.painted_stroke)))
+        })?;
         self.log.info("Baker", format!("Baked texture set {texture_set} ({tracer})"));
         Ok(())
     }
 
-    /// Store `output`, recording what its maps were baked from when `sources` are known
-    fn store_bake(&mut self, texture_set: usize, output: BakeOutput, sources: Option<&BTreeMap<BakedMap, BakeSource>>) -> Result<()> {
+    /// Store `output`, recording what its maps were baked from when known (see [`Session::record_bake_sources`])
+    fn store_bake(&mut self, texture_set: usize, output: BakeOutput, recorded: Option<(&BTreeMap<BakedMap, BakeSource>, u64)>) -> Result<()> {
         let maps = output.maps.into_iter().map(|(map, pixels)| (map, Arc::new(pixels))).collect();
-        self.store_bake_maps(texture_set, output.resolution, output.height, maps, sources)
+        self.store_bake_maps(texture_set, output.resolution, output.height, maps, recorded)
     }
 
     fn store_bake_maps(
@@ -294,7 +297,7 @@ impl Session {
         resolution: u32,
         height: u32,
         maps: BTreeMap<BakedMap, Arc<Vec<f32>>>,
-        sources: Option<&BTreeMap<BakedMap, BakeSource>>,
+        recorded: Option<(&BTreeMap<BakedMap, BakeSource>, u64)>,
     ) -> Result<()> {
         let stored: Vec<BakedMap> = maps.keys().copied().collect();
         let entry = self.doc.baked.entry(texture_set).or_default();
@@ -305,18 +308,19 @@ impl Session {
         entry.resolution = resolution;
         entry.maps.extend(maps);
         self.doc.project.texture_set_mut(texture_set)?.baked = entry.maps.keys().copied().collect();
-        self.record_bake_sources(texture_set, sources, &stored)
+        self.record_bake_sources(texture_set, recorded, &stored)
     }
 
-    /// Bake texture set `ts` now (blocking), on the CPU when `cpu`; returns where the rays ran.
+    /// Bake texture set `ts` now (blocking), on the CPU when `cpu`; returns where the rays ran
     pub fn bake_now(&mut self, ts: usize, cpu: bool) -> Result<String> {
         let mut task = self.bake_task(ts)?;
         if cpu {
             task.tracer = None;
         }
-        let out = task.run(&Progress::new())?;
-        let tracer = out.tracer.clone();
-        self.edit("Bake mesh maps", |session| session.store_bake(ts, out, Some(&task.sources)))?;
+
+        let output = task.run(&Progress::new())?;
+        let tracer = output.tracer.clone();
+        self.edit("Bake mesh maps", |session| session.store_bake(ts, output, Some((&task.sources, task.painted_stroke))))?;
         self.log.info("Baker", format!("Baked texture set {ts} ({tracer})"));
         Ok(tracer)
     }
@@ -897,7 +901,7 @@ fn bake_one_set(session: &mut Session, index: usize, cpu: bool) -> Result<String
     let maps = task.maps();
     let output = task.run(&Progress::new())?;
     let tracer = output.tracer.clone();
-    session.store_bake(index, output, Some(&task.sources))?;
+    session.store_bake(index, output, Some((&task.sources, task.painted_stroke)))?;
     for map in maps {
         session.bake_log.map_baked(index, map);
     }

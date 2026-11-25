@@ -527,7 +527,7 @@ fn opacity_samples_textures_next_to_a_high_poly() {
 }
 
 /// A plane session whose vertex normals lean, with a high poly plane `dy` above it.
-fn leaning_session(lean: bool) -> Session {
+pub(super) fn leaning_session(lean: bool) -> Session {
     let mut mesh = primitives::builtin("plane").unwrap();
     if lean {
         mesh.normals = vec![texturecraft_engine::geom::glam::Vec3::new(0.6, 0.8, 0.0); mesh.positions.len()];

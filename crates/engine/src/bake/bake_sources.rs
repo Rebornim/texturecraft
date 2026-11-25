@@ -44,22 +44,31 @@ impl Session {
     fn low_poly_fingerprint(&self) -> u64 {
         *self.low_poly_fingerprint.get_or_init(|| {
             let source = &self.source;
-            let floats = source.positions.iter().chain(&source.normals).flat_map(|vector| vector.to_array()).chain(source.uvs.iter().flat_map(|uv| uv.to_array()));
+            let floats =
+                source.positions.iter().chain(&source.normals).flat_map(|vector| vector.to_array()).chain(source.uvs.iter().flat_map(|uv| uv.to_array()));
             let words = floats.map(|float| u64::from(float.to_bits())).chain(source.indices.iter().map(|index| u64::from(*index)));
             fingerprint_words(words)
         })
     }
 
-    /// Keep `sources` as what maps of `texture_set` were baked from; without them the `stored` maps lose their record
-    pub(super) fn record_bake_sources(&mut self, texture_set: usize, sources: Option<&BTreeMap<BakedMap, BakeSource>>, stored: &[BakedMap]) -> Result<()> {
+    /// Keep what the `stored` maps of `texture_set` were baked from and the newest stroke their bake saw; without it they lose their record
+    pub(super) fn record_bake_sources(
+        &mut self,
+        texture_set: usize,
+        recorded: Option<(&BTreeMap<BakedMap, BakeSource>, u64)>,
+        stored: &[BakedMap],
+    ) -> Result<()> {
         let set = self.doc.project.texture_set_mut(texture_set)?;
-        match sources {
-            Some(sources) => set.bake_sources.extend(sources),
+        match recorded {
+            Some((sources, _)) => set.bake_sources.extend(sources),
             None => set.bake_sources.retain(|map, _| !stored.contains(map)),
         }
 
         let baked = &set.baked;
         set.bake_sources.retain(|map, _| baked.contains(map));
+        if let Some((_, painted_stroke)) = recorded {
+            self.forget_painted_region(texture_set, stored, painted_stroke);
+        }
         Ok(())
     }
 }

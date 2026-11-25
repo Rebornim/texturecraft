@@ -136,15 +136,15 @@ impl Session {
         self.bake_log.matching = matching;
     }
 
-    /// Start the Baking Log for a bake of only `map` of each of `sets`, checked or not
-    pub fn begin_map_bake_log(&mut self, sets: &[usize], map: BakedMap) {
+    /// Start the Baking Log for a bake of only `maps` of each of `sets`, checked or not
+    pub fn begin_map_bake_log(&mut self, sets: &[usize], maps: &[BakedMap]) {
         self.begin_bake_log(sets);
         let project = &self.doc.project;
         self.bake_log.maps = sets
             .iter()
-            .filter_map(|&texture_set| {
-                let set_name = project.texture_sets.get(texture_set)?.name.clone();
-                Some(BakeLogMap { texture_set, set_name, map, state: BakeMapState::Waiting })
+            .filter_map(|&texture_set| Some((texture_set, project.texture_sets.get(texture_set)?.name.clone())))
+            .flat_map(|(texture_set, set_name)| {
+                maps.iter().map(move |&map| BakeLogMap { texture_set, set_name: set_name.clone(), map, state: BakeMapState::Waiting })
             })
             .collect();
     }

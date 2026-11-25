@@ -66,3 +66,76 @@ fn a_one_map_bake_brings_that_map_up_to_date_and_leaves_the_others_alone() {
     assert!(std::sync::Arc::ptr_eq(&baked.maps[&BakedMap::Id], &id_before), "the ID map was not baked again");
     assert_eq!(session.doc.project.texture_sets[0].bake.maps.enabled().collect::<Vec<_>>(), [BakedMap::Id], "the checks stay");
 }
+
+#[test]
+fn a_new_output_size_rebakes_every_checked_map_so_none_is_lost() {
+    let mut session = baked_plane();
+    execute(&mut session, "bake.autoRebake", &json!({ "map": "position" })).unwrap();
+    execute(&mut session, "bake.settings", &json!({ "resolution": 128 })).unwrap();
+
+    let maps = session.auto_rebake_maps(0, BakedMap::Position);
+    let output = session.bake_task_for(0, &maps).unwrap().run_streaming(&Progress::new(), &mut |_| {}).unwrap();
+    session.apply_streamed_bake(0, output).unwrap();
+
+    let baked = session.baked(0).unwrap();
+    assert!(baked.maps.contains_key(&BakedMap::Id), "the ID map survives the new size: {:?}", baked.maps.keys().collect::<Vec<_>>());
+    assert!(session.out_of_date_maps(0).is_empty(), "{:?}", session.out_of_date_maps(0));
+}
+
+#[test]
+fn a_skew_stroke_rebakes_only_its_box_and_the_box_matches_a_whole_bake() {
+    let mut session = super::bake::leaning_session(true);
+    execute(&mut session, "bake.run", &json!({ "maps": ["position"], "dilation": 2 })).unwrap();
+    execute(&mut session, "bake.autoRebake", &json!({ "map": "position" })).unwrap();
+    assert!(session.auto_rebake_painted().is_empty(), "nothing painted since the bake");
+    let before = session.baked(0).unwrap().maps[&BakedMap::Position].clone();
+
+    execute(&mut session, "bake.skew.paint", &json!({ "points": [[0.3, 0.3], [0.4, 0.35]], "radius": 0.05, "size": 64 })).unwrap();
+    let painted: Vec<_> = session.auto_rebake_painted().into_iter().map(|(set, map, _, _)| (set, map)).collect();
+    assert_eq!(painted, [(0, BakedMap::Position)]);
+    assert!(session.auto_rebake_due().is_empty(), "painting is not a settings change: {:?}", due_maps(&session));
+
+    let mut task = session.bake_painted_task(0, BakedMap::Position).unwrap();
+    task.tracer = None;
+    let region = task.region.expect("a stroke rebakes only its box");
+    let mut whole = session.bake_task_for(0, &[BakedMap::Position]).unwrap();
+    whole.tracer = None;
+    let whole = whole.run(&Progress::new()).unwrap().maps.remove(&BakedMap::Position).unwrap();
+    let output = task.run_streaming(&Progress::new(), &mut |_| {}).unwrap();
+
+    let width = output.resolution as usize;
+    assert!(((region.max.0 - region.min.0) as usize) < width / 2, "the box is far smaller than the map: {region:?}");
+    let components = BakedMap::Position.components();
+    let pixels = output.maps[&BakedMap::Position].chunks(components).zip(before.chunks(components)).zip(whole.chunks(components));
+    let mut changed = 0;
+    for (index, ((rebaked, kept), baked_whole)) in pixels.enumerate() {
+        if region.contains(index % width, index / width) {
+            assert_eq!(rebaked, baked_whole, "texel {index} inside the box");
+            changed += usize::from(rebaked != kept);
+        } else {
+            assert_eq!(rebaked, kept, "texel {index} outside the box");
+        }
+    }
+    assert!(changed > 0, "the stroke changed the map inside its box");
+
+    session.apply_streamed_bake(0, output).unwrap();
+    assert!(session.auto_rebake_painted().is_empty(), "the rebake took the stroke");
+}
+
+#[test]
+fn a_stroke_painted_while_the_rebake_runs_waits_for_the_next_one() {
+    let mut session = super::bake::leaning_session(true);
+    execute(&mut session, "bake.run", &json!({ "maps": ["position"], "dilation": 2 })).unwrap();
+    execute(&mut session, "bake.autoRebake", &json!({ "map": "position" })).unwrap();
+    let stroke = |at: f32| json!({ "points": [[at, at]], "radius": 0.05, "size": 64 });
+    execute(&mut session, "bake.skew.paint", &stroke(0.3)).unwrap();
+
+    let mut task = session.bake_painted_task(0, BakedMap::Position).unwrap();
+    task.tracer = None;
+    execute(&mut session, "bake.skew.paint", &stroke(0.7)).unwrap();
+    let output = task.run_streaming(&Progress::new(), &mut |_| {}).unwrap();
+    session.apply_streamed_bake(0, output).unwrap();
+
+    let painted: Vec<_> = session.auto_rebake_painted().into_iter().map(|(set, map, _, _)| (set, map)).collect();
+    assert_eq!(painted, [(0, BakedMap::Position)], "the second stroke is not in the stored map yet");
+}

@@ -85,3 +85,31 @@ fn a_change_while_the_rebake_runs_cancels_it_so_the_newest_settings_win() {
     assert_eq!(app.session.bake_log.maps[0].state, BakeMapState::Canceled);
     execute(&mut harness.state_mut().session, "bake.autoRebake", &json!({ "map": null })).unwrap();
 }
+
+#[test]
+fn a_skew_stroke_rebakes_the_auto_rebake_map_inside_the_stroke() {
+    let mut harness = harness(64);
+    let plane = primitives::builtin("plane").unwrap();
+    let mut high = String::from("o Part_high\n");
+    for position in &plane.positions {
+        high += &format!("v {} {} {}\n", position.x, position.y + 0.1, position.z);
+    }
+    for triangle in plane.indices.as_chunks::<3>().0 {
+        high += &format!("f {} {} {}\n", triangle[0] + 1, triangle[1] + 1, triangle[2] + 1);
+    }
+    let session = &mut harness.state_mut().session;
+    session.add_high_poly_bytes("high.obj", high.into_bytes()).unwrap();
+    execute(session, "bake.run", &json!({ "maps": ["position"] })).unwrap();
+    harness.run_steps(4);
+    assert!(harness.state().bake.is_none(), "up to date after the bake");
+
+    execute(&mut harness.state_mut().session, "bake.skew.paint", &json!({ "points": [[0.5, 0.5]], "radius": 0.05, "size": 64 })).unwrap();
+    step_until(&mut harness, "the rebake", |app| app.bake.is_some());
+    step_until(&mut harness, "the end of the rebake", |app| app.bake.is_none());
+
+    let app = harness.state();
+    assert!(app.session.auto_rebake_painted().is_empty(), "the rebake took the stroke");
+    let rows: Vec<_> = app.session.bake_log.maps.iter().map(|row| (row.map, row.state.clone())).collect();
+    assert_eq!(rows, [(BakedMap::Position, BakeMapState::Baked)]);
+    assert!(app.toasts.is_empty(), "a rebake that went well is quiet");
+}

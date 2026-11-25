@@ -65,6 +65,7 @@ fn set(session: &mut Session, parameters: &Value, target: BakePaintTarget) -> Re
         session.doc.bake_paint.insert((texture_set, target), Arc::new(map));
         Ok(())
     })?;
+    session.note_bake_paint(texture_set, None);
     Ok(super::meshes_json(session))
 }
 
@@ -75,6 +76,7 @@ fn clear(session: &mut Session, parameters: &Value, target: BakePaintTarget) -> 
             session.doc.bake_paint.remove(&(texture_set, target));
             Ok(())
         })?;
+        session.note_bake_paint(texture_set, None);
     }
     Ok(super::meshes_json(session))
 }
@@ -123,6 +125,13 @@ fn paint(session: &mut Session, parameters: &Value, target: BakePaintTarget) -> 
         }
         Arc::make_mut(map).paint(&points, radius, value, hardness, strength).map_err(|error| bad("bake.paint", error.to_string()))
     })?;
+
+    // The dabs reach `radius` from each point, and the paint map's bilinear sampling one of its texels further
+    let paint_texel = session.doc.bake_paint.get(&(texture_set, target)).map_or(0.0, |map| 1.0 / map.width.min(map.height).max(1) as f32);
+    let reach = Vec2::splat(radius + paint_texel);
+    let low = points.iter().fold(Vec2::INFINITY, |low, point| low.min(*point)) - reach;
+    let high = points.iter().fold(Vec2::NEG_INFINITY, |high, point| high.max(*point)) + reach;
+    session.note_bake_paint(texture_set, Some((low, high)));
     Ok(super::meshes_json(session))
 }
 

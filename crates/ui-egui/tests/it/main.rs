@@ -44,6 +44,7 @@ mod fill_symmetry_rows;
 mod filter_picker;
 mod folder_properties;
 mod frame_selection;
+mod generator_bake_note;
 mod generator_panel;
 mod generator_picker;
 mod help_menu_664;

@@ -308,7 +308,7 @@ impl Dock {
         self.replaced_unreadable
     }
 
-    /// Texture sets over the bakers, the two settings tabs, the log under both, then the viewport
+    /// Texture sets over the bakers, the two settings tabs, the Baking Log under both, then the viewport
     pub(crate) fn for_baking() -> Self {
         let painting = default_workspace();
         let mut hidden = painting.hidden().to_vec();
@@ -318,14 +318,14 @@ impl Dock {
             }
         }
 
-        let bake_panels = [Panel::MeshMapSettings, Panel::CommonSettings, Panel::MeshMapBakers, Panel::Log];
+        let bake_panels = [Panel::MeshMapSettings, Panel::CommonSettings, Panel::MeshMapBakers, Panel::BakingLog];
         hidden.retain(|(panel, _)| !bake_panels.contains(panel));
 
         let gutter_width = f32::from(crate::theme::GUTTER);
         let list_column = split(Axis::Y, SplitSize::Ratio(TEXTURE_SET_LIST_SHARE), tabs(&[Panel::TextureSetList]), tabs(&[Panel::MeshMapBakers]));
         let settings_column = tabs(&[Panel::CommonSettings, Panel::MeshMapSettings]);
         let columns = split(Axis::X, SplitSize::FixedFirst(BAKERS_COLUMN_WIDTH), list_column, settings_column);
-        let columns_over_log = split(Axis::Y, SplitSize::FixedSecond(BAKING_LOG_HEIGHT), columns, tabs(&[Panel::Log]));
+        let columns_over_log = split(Axis::Y, SplitSize::FixedSecond(BAKING_LOG_HEIGHT), columns, tabs(&[Panel::BakingLog]));
         let columns_width = BAKERS_COLUMN_WIDTH + gutter_width + SETTINGS_COLUMN_WIDTH;
         let root = split(Axis::X, SplitSize::FixedFirst(columns_width), columns_over_log, tabs(&[Panel::Viewport]));
         let workspace = Workspace::from_parts(Layout::new(Some(root), Vec::new()), hidden, painting.floated().to_vec());
@@ -759,12 +759,12 @@ mod tests {
     }
 
     #[test]
-    fn the_bake_dock_round_trips_with_the_log_under_both_settings_columns() {
+    fn the_bake_dock_round_trips_with_the_baking_log_under_both_settings_columns() {
         let dock = Dock::for_baking();
         assert!(validate(dock.workspace()).is_ok());
         assert_eq!(
             panels_of(dock.workspace()),
-            [Panel::TextureSetList, Panel::MeshMapBakers, Panel::CommonSettings, Panel::MeshMapSettings, Panel::Log, Panel::Viewport]
+            [Panel::TextureSetList, Panel::MeshMapBakers, Panel::CommonSettings, Panel::MeshMapSettings, Panel::BakingLog, Panel::Viewport]
         );
         assert!(dock.is_visible(Panel::CommonSettings) && !dock.is_visible(Panel::MeshMapSettings));
 

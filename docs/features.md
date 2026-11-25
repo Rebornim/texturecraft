@@ -45,6 +45,11 @@ Everything TextureCraft does today, by area. What's still missing is in [`ROADMA
   one layer alone in the 3D and 2D views, optionally without its mask (Alt+Shift+click, or
   **Solo layer without its mask**), to judge a material hidden behind a mask. It is only a view:
   the document, the undo history, saving, exporting and baking never see it.
+- **Pick a layer on the model:** hold R over the 3D view, with any tool: a label at the pointer
+  names the top layer laying something down there (the shown channel in a single-channel view)
+  and how many more. Click: one layer there is selected; several open a list at the pointer with
+  each one's thumbnail, name and the channels it changes there, to pick from (Up/Down, Enter, Esc
+  work too). Closed folders holding the picked layer open and its row scrolls into view.
 - **Several layers at once:** Shift+click a layer to select the rows from the last clicked one,
   Ctrl+click (Cmd+click on macOS) to add or take out one layer, Ctrl+A (Cmd+A) with the pointer
   over the Layers panel to select every shown row (folder rows and the layers of open folders).

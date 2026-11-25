@@ -7,6 +7,7 @@ use std::time::Duration;
 use egui::{Context, TextureHandle, TextureId, TextureOptions};
 use texturecraft_engine::Session;
 use texturecraft_engine::compose::ThumbTarget;
+use texturecraft_engine::core::LayerId;
 use texturecraft_engine::thumbs::{CACHE_ENTRIES, ThumbService};
 
 use crate::TextureCraftApp;
@@ -44,6 +45,9 @@ pub struct LayerPanel {
     pictures_begun: bool,
     /// Folded effect groups: (layer, true for the mask's). A view setting; the document is not touched.
     pub(crate) folded: HashSet<(u64, bool)>,
+    /// The selected layer the panel last drew, and the one whose row scrolls into view because the selection moved to it (a pick on the mesh, a command)
+    shown_selection: Option<LayerId>,
+    pub(crate) reveal: Option<LayerId>,
 }
 
 /// How soon to look again for pictures still rendering (milliseconds)
@@ -53,6 +57,11 @@ impl LayerPanel {
     /// Start drawing the panel for this frame.
     pub(crate) fn begin(&mut self, session: &Session, now: f64) {
         self.begin_pictures(session, now);
+        let selected = session.selected_layer();
+        if selected != self.shown_selection {
+            self.shown_selection = selected;
+            self.reveal = selected;
+        }
 
         // Deleted layer IDs must not accumulate in panel state
         self.folded.retain(|(layer, _)| session.doc.project.layers.contains_key(&texturecraft_engine::core::LayerId(*layer)));

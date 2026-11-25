@@ -4,6 +4,7 @@
 mod add_mask_items;
 mod bake;
 mod bake_checks;
+mod bake_log;
 mod bake_resolution;
 mod bake_settings;
 mod bake_tiles;

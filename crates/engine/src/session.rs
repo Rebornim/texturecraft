@@ -451,6 +451,8 @@ pub struct Session {
     pub solo: Option<crate::Solo>,
     /// The live bake preview while the app bakes (see [`crate::bake_preview`]).
     pub bake_preview: Option<crate::bake_preview::BakePreview>,
+    /// The latest bake, map by map (the Baking Log)
+    pub bake_log: crate::bake::BakeLog,
     /// Viewport size (pixels) used by scripted strokes.
     pub viewport: Vec2,
     pub(crate) stroke: Option<ActiveStroke>,
@@ -543,6 +545,7 @@ impl Session {
             view_image: None,
             solo: None,
             bake_preview: None,
+            bake_log: Default::default(),
             viewport: Vec2::new(1280.0, 800.0),
             stroke: None,
             clipboard: None,

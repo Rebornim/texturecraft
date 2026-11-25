@@ -843,16 +843,21 @@ fn bake_run(session: &mut Session, params: &Value) -> Result<Value> {
         for (index, settings) in next {
             session.doc.project.texture_set_mut(index)?.bake = settings;
         }
+        session.bake_log.begin(&session.doc.project, &sets);
 
         let mut tracers = Vec::with_capacity(sets.len());
         for &index in &sets {
-            let mut task = session.bake_task(index)?;
-            if cpu {
-                task.tracer = None;
+            session.bake_log.set_started(index);
+            let baked = bake_one_set(session, index, cpu);
+            match baked {
+                Ok(tracer) => tracers.push(tracer),
+                Err(error) => {
+                    session.bake_log.set_failed(index, &error.to_string());
+                    // The edit rolls back the sets baked before this one too
+                    session.bake_log.discard();
+                    return Err(error);
+                }
             }
-            let output = task.run(&Progress::new())?;
-            tracers.push(output.tracer.clone());
-            session.store_bake(index, output)?;
         }
         Ok(tracers)
     })?;
@@ -861,6 +866,23 @@ fn bake_run(session: &mut Session, params: &Value) -> Result<Value> {
     }
     session.update();
     Ok(json!({ "baked": sets, "tracer": tracers }))
+}
+
+/// Bake every checked map of texture set `index` at once, store them and mark them baked in the Baking Log
+fn bake_one_set(session: &mut Session, index: usize, cpu: bool) -> Result<String> {
+    let mut task = session.bake_task(index)?;
+    if cpu {
+        task.tracer = None;
+    }
+
+    let maps = task.maps();
+    let output = task.run(&Progress::new())?;
+    let tracer = output.tracer.clone();
+    session.store_bake(index, output)?;
+    for map in maps {
+        session.bake_log.map_baked(index, map);
+    }
+    Ok(tracer)
 }
 
 #[cfg(test)]

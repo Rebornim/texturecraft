@@ -699,6 +699,7 @@ impl TextureCraftApp {
         self.session.bake_preview_begin(orders);
 
         let total = sets.len();
+        self.session.bake_log.begin(&self.session.doc.project, &sets);
         self.bake_report = bake_report::BakeReport::started(self.last_time);
         self.bake = Some(BakeJob { queue: sets, current: None, total, mesh_id: self.session.mesh_id, only });
     }
@@ -817,6 +818,7 @@ impl TextureCraftApp {
             if let Some(running) = &job.current {
                 running.progress.cancel.store(true, Ordering::Relaxed);
             }
+            self.session.bake_log.cancel(job.current.as_ref().map(|running| running.set_index));
             self.bake = None;
             return;
         }
@@ -828,6 +830,7 @@ impl TextureCraftApp {
             // Wait for the sender to close so the last map also gets a preview frame
             match running.maps.try_recv() {
                 Ok(map) => {
+                    self.session.bake_log.map_baked(set_index, map.map);
                     self.session.bake_preview_map(set_index, map);
                     return;
                 }
@@ -841,7 +844,10 @@ impl TextureCraftApp {
                     job.current = None;
 
                     match self.session.apply_streamed_bake(set_index, output) {
-                        Ok(()) => self.bake_report.map_count += maps_baked,
+                        Ok(()) => {
+                            self.session.bake_log.set_finished(set_index);
+                            self.bake_report.map_count += maps_baked;
+                        }
                         Err(error) => self.bake_failed(set_index, &error.to_string()),
                     }
                 }
@@ -875,6 +881,7 @@ impl TextureCraftApp {
         let only = job.only;
 
         self.session.bake_preview_set_current(set_index);
+        self.session.bake_log.set_started(set_index);
         let task = match only {
             Some(map) => self.session.bake_task_only(set_index, map),
             None => self.session.bake_task(set_index),
@@ -907,6 +914,7 @@ impl TextureCraftApp {
     /// Note a texture set whose bake failed: one Log line, counted in the summary
     fn bake_failed(&mut self, set_index: usize, error: &str) {
         self.session.log.error("Baker", format!("Bake of texture set {set_index} failed: {error}"));
+        self.session.bake_log.set_failed(set_index, error);
         self.bake_report.failed_set_count += 1;
     }
 
@@ -930,6 +938,7 @@ impl TextureCraftApp {
     pub fn cancel_bake(&mut self) {
         let Some(job) = self.bake.take() else { return };
 
+        self.session.bake_log.cancel(job.current.as_ref().map(|running| running.set_index));
         if let Some(running) = job.current {
             running.progress.cancel.store(true, Ordering::Relaxed);
         }

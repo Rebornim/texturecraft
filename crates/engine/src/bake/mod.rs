@@ -2,6 +2,9 @@
 
 mod bake_cage_inputs;
 mod bake_checks;
+mod bake_log;
+mod bake_log_map;
+mod bake_map_state;
 mod bake_mesh;
 mod bake_meshes;
 mod bake_task;
@@ -19,6 +22,9 @@ mod sync_command;
 mod tile_command;
 
 pub use bake_cage_inputs::BakeCageInputs;
+pub use bake_log::BakeLog;
+pub use bake_log_map::BakeLogMap;
+pub use bake_map_state::BakeMapState;
 pub use bake_mesh::BakeMesh;
 pub use bake_meshes::BakeMeshes;
 pub use bake_task::BakeTask;

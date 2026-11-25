@@ -196,6 +196,23 @@ fn assert_list_leaves_the_wheel_and_closes(harness: &mut Harness<'_, TextureCraf
     assert!(!egui::Popup::is_any_open(&harness.ctx), "a click outside closes the list");
 }
 
+/// Most frames [`step_until`] waits, and its pause between them for background work
+const STEP_UNTIL_FRAMES: usize = 4000;
+const STEP_UNTIL_PAUSE: std::time::Duration = std::time::Duration::from_millis(2);
+
+/// Step frames until `done` holds, up to a generous limit
+fn step_until(harness: &mut Harness<'_, TextureCraftApp>, what: &str, done: impl Fn(&TextureCraftApp) -> bool) {
+    for _ in 0..STEP_UNTIL_FRAMES {
+        harness.run_steps(1);
+        if done(harness.state()) {
+            return;
+        }
+
+        std::thread::sleep(STEP_UNTIL_PAUSE);
+    }
+    panic!("{what} did not happen");
+}
+
 /// Presses and releases the primary button at `at` without moving, as a pointer click does
 fn click_at(harness: &mut Harness<'_, TextureCraftApp>, at: egui::Pos2) {
     harness.hover_at(at);

@@ -25,17 +25,10 @@ fn harness() -> Harness<'static, TextureCraftApp> {
     harness
 }
 
+/// Run frames until the bake ends, then a few more for its result to show
 fn run_to_the_end(harness: &mut Harness<'static, TextureCraftApp>) {
-    for _ in 0..4000 {
-        harness.run_steps(1);
-        if harness.state().bake.is_none() {
-            harness.run_steps(2);
-            return;
-        }
-
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
-    panic!("the bake did not finish");
+    super::step_until(harness, "the end of the bake", |app| app.bake.is_none());
+    harness.run_steps(super::SETTLE_FRAMES);
 }
 
 /// Bake sets 0 and 1, where set 1 has no tile left to bake, so its bake fails
@@ -199,9 +192,9 @@ fn the_matching_tab_says_when_no_set_matched_by_name() {
     let mut harness = harness();
     harness.get_by_label("Matching by Name").click();
     harness.run_steps(3);
-    assert!(harness.query_by_label("Matching by name was off for this bake.").is_none(), "nothing baked yet: nothing to say");
+    assert!(harness.query_by_label("Set Match to By Mesh Name to pair parts by name.").is_none(), "nothing baked yet: nothing to say");
 
     log_a_bake(&mut harness, BakeMapState::Baked);
 
-    harness.get_by_label("Matching by name was off for this bake.");
+    harness.get_by_label("Set Match to By Mesh Name to pair parts by name.");
 }

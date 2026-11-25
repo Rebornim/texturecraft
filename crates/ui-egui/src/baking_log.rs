@@ -124,7 +124,7 @@ pub(crate) fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
 
 /// Show `map`'s settings of `texture_set` in Mesh Map Settings, as picking it in Mesh Map Bakers does
 fn open_map_settings(app: &mut TextureCraftApp, texture_set: usize, map: BakedMap) {
-    // The set may have been deleted since the bake
+    // A guard against a row naming a set the session no longer has
     if texture_set >= app.session.set_count() {
         return;
     }
@@ -226,16 +226,19 @@ fn no_issues(ui: &mut Ui, tab: BakingLogTab) {
     ui.allocate_rect(area, Sense::hover());
 }
 
-/// What the Matching by Name tab says when no texture set of the latest bake matched by mesh name: the setting's name in SemiBold
+/// What the Matching by Name tab says when no texture set of the latest bake matched by mesh name: the setting and its value in SemiBold
 fn matching_not_enabled(ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     let mut text = egui::text::LayoutJob::default();
     let format = |font| egui::TextFormat { font_id: font, color: tokens.text, ..Default::default() };
-    // One sentence to translate, its setting kept apart to set it in SemiBold
-    let sentence = tr("{setting} was off for this bake.");
-    let (before, after) = sentence.split_once("{setting}").unwrap_or(("", sentence));
+    // One sentence to translate, its setting and value kept apart to set them in SemiBold
+    let sentence = tr("Set {setting} to {value} to pair parts by name.");
+    let (before, rest) = sentence.split_once("{setting}").unwrap_or(("", sentence));
+    let (between, after) = rest.split_once("{value}").unwrap_or((rest, ""));
     text.append(before, 0.0, format(FontId::proportional(NAME_SIZE)));
-    text.append(tr("Matching by name"), 0.0, format(semibold(NAME_SIZE)));
+    text.append(tr("Match"), 0.0, format(semibold(NAME_SIZE)));
+    text.append(between, 0.0, format(FontId::proportional(NAME_SIZE)));
+    text.append(tr("By Mesh Name"), 0.0, format(semibold(NAME_SIZE)));
     text.append(after, 0.0, format(FontId::proportional(NAME_SIZE)));
 
     let area = ui.available_rect_before_wrap();

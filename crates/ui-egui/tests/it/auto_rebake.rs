@@ -16,7 +16,10 @@ fn harness(resolution: u32) -> Harness<'static, TextureCraftApp> {
     execute(&mut session, "bake.run", &json!({ "resolution": resolution, "maps": ["position", "id"], "dilation": 0 })).unwrap();
     execute(&mut session, "bake.autoRebake", &json!({ "map": "position" })).unwrap();
 
-    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1000.0)).build_eframe(|context| TextureCraftApp::new(context, session));
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1600.0, 1000.0))
+        .with_context_setup(texturecraft_ui_egui::framework::install_headless)
+        .build_eframe(|context| TextureCraftApp::new(context, session));
     harness.state_mut().ui.mode = Mode::Baking;
     harness.run_steps(4);
     harness
@@ -26,27 +29,14 @@ fn change_settings(harness: &mut Harness<'static, TextureCraftApp>, params: serd
     execute(&mut harness.state_mut().session, "bake.settings", &params).unwrap();
 }
 
-/// Step frames until `done` holds, up to a generous limit
-fn step_until(harness: &mut Harness<'static, TextureCraftApp>, what: &str, done: impl Fn(&TextureCraftApp) -> bool) {
-    for _ in 0..4000 {
-        harness.run_steps(1);
-        if done(harness.state()) {
-            return;
-        }
-
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
-    panic!("{what} did not happen");
-}
-
 #[test]
 fn a_settings_change_rebakes_only_the_auto_rebake_map_without_a_toast() {
     let mut harness = harness(64);
     let id_before = harness.state().session.baked(0).unwrap().maps[&BakedMap::Id].clone();
     change_settings(&mut harness, json!({ "positionMode": "boundingBox" }));
 
-    step_until(&mut harness, "the rebake", |app| app.bake.is_some());
-    step_until(&mut harness, "the end of the rebake", |app| app.bake.is_none());
+    super::step_until(&mut harness, "the rebake", |app| app.bake.is_some());
+    super::step_until(&mut harness, "the end of the rebake", |app| app.bake.is_none());
 
     let app = harness.state();
     assert!(app.session.bake_changes(0, BakedMap::Position).is_empty(), "{:?}", app.session.bake_changes(0, BakedMap::Position));
@@ -76,14 +66,36 @@ fn a_change_while_the_rebake_runs_cancels_it_so_the_newest_settings_win() {
 
     // A slow rebake, so the next change lands while it runs
     change_settings(&mut harness, json!({ "resolution": 2048, "ao": { "rays": 256 } }));
-    step_until(&mut harness, "the rebake", |app| app.bake.as_ref().is_some_and(|job| job.current.is_some()));
+    super::step_until(&mut harness, "the rebake", |app| app.bake.as_ref().is_some_and(|job| job.current.is_some()));
     change_settings(&mut harness, json!({ "ao": { "rays": 128 } }));
     harness.run_steps(1);
 
     let app = harness.state();
     assert!(app.bake.is_none(), "the outdated rebake stopped");
-    assert_eq!(app.session.bake_log.maps[0].state, BakeMapState::Canceled);
-    execute(&mut harness.state_mut().session, "bake.autoRebake", &json!({ "map": null })).unwrap();
+    let ambient_occlusion = app.session.bake_log.maps.iter().find(|row| row.map == BakedMap::AmbientOcclusion).map(|row| row.state.clone());
+    assert_eq!(ambient_occlusion, Some(BakeMapState::Canceled));
+}
+
+#[test]
+fn a_canceled_rebake_holds_back_only_its_own_texture_set() {
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    execute(&mut session, "bake.run", &json!({ "ts": "all", "resolution": 32, "maps": ["position"], "dilation": 0 })).unwrap();
+    for set in [0, 1] {
+        execute(&mut session, "bake.autoRebake", &json!({ "ts": set, "map": "position" })).unwrap();
+    }
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1600.0, 1000.0))
+        .with_context_setup(texturecraft_ui_egui::framework::install_headless)
+        .build_eframe(|context| TextureCraftApp::new(context, session));
+    harness.state_mut().ui.mode = Mode::Baking;
+    harness.run_steps(4);
+    let rebaking = |app: &TextureCraftApp, set: usize| app.bake.as_ref().and_then(|job| job.rebake.as_ref()).is_some_and(|rebake| rebake.0 == set);
+
+    change_settings(&mut harness, json!({ "ts": "all", "positionMode": "boundingBox" }));
+    super::step_until(&mut harness, "the first set's rebake", |app| rebaking(app, 0));
+    harness.state_mut().cancel_bake();
+
+    super::step_until(&mut harness, "the second set's rebake", |app| rebaking(app, 1));
 }
 
 #[test]
@@ -104,12 +116,35 @@ fn a_skew_stroke_rebakes_the_auto_rebake_map_inside_the_stroke() {
     assert!(harness.state().bake.is_none(), "up to date after the bake");
 
     execute(&mut harness.state_mut().session, "bake.skew.paint", &json!({ "points": [[0.5, 0.5]], "radius": 0.05, "size": 64 })).unwrap();
-    step_until(&mut harness, "the rebake", |app| app.bake.is_some());
-    step_until(&mut harness, "the end of the rebake", |app| app.bake.is_none());
+    super::step_until(&mut harness, "the rebake", |app| app.bake.is_some());
+    super::step_until(&mut harness, "the end of the rebake", |app| app.bake.is_none());
 
     let app = harness.state();
     assert!(app.session.auto_rebake_painted().is_empty(), "the rebake took the stroke");
     let rows: Vec<_> = app.session.bake_log.maps.iter().map(|row| (row.map, row.state.clone())).collect();
     assert_eq!(rows, [(BakedMap::Position, BakeMapState::Baked)]);
     assert!(app.toasts.is_empty(), "a rebake that went well is quiet");
+}
+
+#[test]
+fn the_rows_icon_turns_auto_rebake_on_for_its_map_and_off_again() {
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = harness(64);
+    let auto_rebake = |harness: &Harness<'static, TextureCraftApp>| harness.state().session.doc.project.texture_sets[0].auto_rebake;
+    assert_eq!(auto_rebake(&harness), Some(BakedMap::Position));
+
+    assert!(harness.query_by_label("Auto-rebake Normal").is_none(), "off: shown only on a hovered, focused or selected row");
+    harness.get_by_role_and_label(egui::Role::Button, "Normal").hover();
+    harness.run_steps(2);
+    harness.get_by_label("Auto-rebake Normal");
+
+    // ID is the selected row (the first checked map), which shows its icons
+    harness.get_by_label("Auto-rebake ID").click();
+    harness.run_steps(2);
+    assert_eq!(auto_rebake(&harness), Some(BakedMap::Id), "one map per set: ID replaces Position");
+
+    harness.get_by_label("Auto-rebake ID").click();
+    harness.run_steps(2);
+    assert_eq!(auto_rebake(&harness), None);
 }

@@ -699,6 +699,24 @@ fn picking_material_while_painting_keeps_bake_modes_neutral_material() {
 }
 
 #[test]
+fn a_click_on_the_middle_of_an_out_of_date_row_selects_its_map_and_bakes_nothing() {
+    use serde_json::json;
+    use texturecraft_engine::execute;
+
+    // Two sets show every hover icon (sync, Auto-rebake, bolt, eye) and the changed settings add the out-of-date clock
+    let mut harness = harness(None);
+    execute(&mut harness.state_mut().session, "bake.settings", &json!({ "dilation": 4 })).unwrap();
+    harness.state_mut().ui.dock.focus(Panel::CommonSettings);
+    harness.run_steps(3);
+    harness.get_by_label("Out of date: Ambient Occlusion");
+
+    select_map(&mut harness, "Ambient Occlusion");
+    assert!(harness.state().bake_progress().is_none(), "the click landed on the row, not its Bake Only icon");
+    assert!(harness.state().ui.dock.is_visible(Panel::MeshMapSettings), "selecting a map fronts its settings");
+    harness.get_by_label("Attenuation");
+}
+
+#[test]
 fn a_baked_maps_row_shows_out_of_date_once_its_settings_change() {
     use serde_json::json;
     use texturecraft_engine::execute;

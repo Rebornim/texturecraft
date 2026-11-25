@@ -1,10 +1,11 @@
 use egui::{Align, Align2, CornerRadius, FontId, Layout, Pos2, Rect, RichText, Role, Sense, Stroke, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 use egui_phosphor::regular as icon;
-use serde_json::json;
+use serde_json::{Value, json};
 use texturecraft_engine::ViewMode;
 use texturecraft_engine::core::{BakeChange, BakeSettings, BakeSyncGroup, BakedMap};
 
 use super::glyph_look::GlyphLook;
+use super::row_click::RowClick;
 use super::set_picker::SetPicker;
 use super::set_picker_purpose::SetPickerPurpose;
 use crate::TextureCraftApp;
@@ -34,8 +35,13 @@ const ROW_INSET: f32 = 6.0;
 /// Side of a row's map thumbnail, and the air on its sides
 const THUMBNAIL_SIZE: f32 = 22.0;
 const THUMBNAIL_AIR: f32 = 9.0;
-/// Side of a row's icon buttons and of the list menu button
+/// Side of the header icon slots and of the list menu button
 const ROW_BUTTON_SIZE: f32 = 20.0;
+/// Side of a row's hover icons, and the air right of each: four icons stay right of the row's middle in the Bakers column, so a click there selects the row
+const ROW_ICON_SIZE: f32 = 18.0;
+const ROW_ICON_GAP: f32 = 1.0;
+/// Radius of the out-of-date clock on a thumbnail's corner
+const CLOCK_BADGE_RADIUS: f32 = 6.0;
 /// Size of a row's glyphs
 const ROW_GLYPH_SIZE: f32 = 14.0;
 /// Size of the map names
@@ -49,7 +55,7 @@ const RULE_AIR: f32 = 4.0;
 /// Size of a row icon's tooltip title and reasons
 const TOOLTIP_TEXT_SIZE: f32 = 12.0;
 
-/// The Common Settings button (with the sync icon when there are several texture sets), Check All with the list menu, and one row per map (checkbox enables, click selects)
+/// The Common Settings button (with the sync icon when there are several texture sets), Check All with the list menu, and one row per map (checkbox enables, click selects, a hover icon toggles Auto-rebake)
 pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSettings) {
     let several_sets = app.session.doc.project.texture_sets.len() > 1;
     ui.add_space(HEADER_AIR);
@@ -87,12 +93,18 @@ pub(super) fn show(app: &mut TextureCraftApp, ui: &mut Ui, settings: &mut BakeSe
     let drag_from_id = ui.scope_id().with("check_drag_from");
     let mut check_drag: Option<bool> = ui.data(|data| data.get_temp(check_drag_id));
     let drag_from: Option<Pos2> = ui.data(|data| data.get_temp(drag_from_id));
-    let out_of_date = app.session.out_of_date_maps(app.session.ts());
+    let texture_set = app.session.ts();
     for map in BakedMap::ALL {
-        let changes = out_of_date.get(&map).map_or(&[][..], Vec::as_slice);
-        if ui.push_id(map, |ui| row(app, ui, map, settings, map == selected, changes, &mut check_drag, drag_from)).inner {
-            app.ui.selected_baked_map = Some(map);
-            app.ui.dock.focus(Panel::MeshMapSettings);
+        match ui.push_id(map, |ui| row(app, ui, map, settings, map == selected, &mut check_drag, drag_from)).inner {
+            Some(RowClick::Row) => {
+                app.ui.selected_baked_map = Some(map);
+                app.ui.dock.focus(Panel::MeshMapSettings);
+            }
+            Some(RowClick::AutoRebake) => {
+                let map = if auto_rebake_map(app, texture_set) == Some(map) { Value::Null } else { json!(map.id()) };
+                app.run("bake.autoRebake", json!({ "ts": texture_set, "map": map }));
+            }
+            None => {}
         }
     }
 
@@ -243,17 +255,16 @@ fn copy_items(app: &mut TextureCraftApp, ui: &mut Ui, opener: &egui::Response, w
     }
 }
 
-/// One baker row, with a clock at its right end while `changes` make the map out of date (`check_drag`: the state a pressed check gives those the pointer then crosses; `drag_from`: where that drag's pointer was last frame); returns whether the row itself was clicked
+/// One baker row: its hover icons end in the Auto-rebake toggle, which stays while on, and an out-of-date map's thumbnail carries a clock (`check_drag`: the state a pressed check gives those the pointer then crosses; `drag_from`: where that drag's pointer was last frame); returns what was clicked, if not the check
 fn row(
     app: &mut TextureCraftApp,
     ui: &mut Ui,
     map: BakedMap,
     settings: &mut BakeSettings,
     is_selected: bool,
-    changes: &[BakeChange],
     check_drag: &mut Option<bool>,
     drag_from: Option<Pos2>,
-) -> bool {
+) -> Option<RowClick> {
     let several_sets = app.session.doc.project.texture_sets.len() > 1;
     let tokens = Tokens::get(ui.ctx());
     let name = tr(baked_map_label(map));
@@ -284,27 +295,36 @@ fn row(
     let thumbnail_rect = Rect::from_min_size(pos2(check.right() + THUMBNAIL_AIR, rect.center().y - THUMBNAIL_SIZE / 2.0), vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE));
     thumbnail(ui, thumbnail_rect, texture.as_ref());
 
-    let mut icons_left = rect.right();
+    let texture_set = app.session.ts();
+    let changes = app.session.bake_changes(texture_set, map);
     if !changes.is_empty() {
-        let clock = icon_slot(&mut icons_left, rect.center().y);
-        out_of_date_mark(ui, clock, name, changes);
+        out_of_date_mark(ui, thumbnail_rect, name, &changes);
     }
+
+    // From the right: sync (with several sets), Auto-rebake, bolt, eye; Auto-rebake alone stays while on
     let focus_in_row = || {
         ui.memory(|memory| memory.focused())
             .and_then(|id| ui.ctx().read_response(id))
             .is_some_and(|widget| widget.layer_id == ui.layer_id() && rect.contains(widget.rect.center()))
     };
-    if is_selected || hovered || focus_in_row() {
-        let mut next_icon = || icon_slot(&mut icons_left, rect.center().y);
-        if several_sets {
+    let is_active = is_selected || hovered || focus_in_row();
+    let is_auto_rebake = auto_rebake_map(app, texture_set) == Some(map);
+    let mut icons_left = rect.right();
+    let mut next_icon = || icon_slot(&mut icons_left, rect.center().y);
+    let sync_slot = several_sets.then(&mut next_icon);
+    let toggle = next_icon();
+    let mut toggled = false;
+    if is_active {
+        if let Some(slot) = sync_slot {
             let shares = settings.sync.shares(BakeSyncGroup::Map(map));
             let look = if shares { GlyphLook::Lit } else { GlyphLook::Plain };
             let glyph = if shares { icon::LINK } else { icon::LINK_BREAK };
-            let sync = glyph_button(ui, next_icon(), glyph, &trf("Synchronize {map} Settings", &[("map", &name)]), look);
+            let sync = glyph_button(ui, slot, glyph, &trf("Synchronize {map} Settings", &[("map", &name)]), look);
             if sync.clicked() {
                 SetPicker::open(app, &sync, SetPickerPurpose::Sync(BakeSyncGroup::Map(map)));
             }
         }
+        toggled = auto_rebake_toggle(ui, toggle, name, is_auto_rebake).clicked();
         let baking = app.bake_progress().is_some();
         let bolt = next_icon();
         let bolt_label = trf("Bake {map} Only", &[("map", &name)]);
@@ -318,6 +338,10 @@ fn row(
             let mode = if shown { "material".to_owned() } else { format!("map:{}", map.id()) };
             app.run("viewport.view", json!({ "mode": mode }));
         }
+    } else if is_auto_rebake {
+        toggled = auto_rebake_toggle(ui, toggle, name, true).clicked();
+    } else {
+        icons_left = rect.right();
     }
 
     let name_left = thumbnail_rect.right() + THUMBNAIL_AIR;
@@ -360,7 +384,35 @@ fn row(
         response.request_focus();
     }
 
-    response.clicked()
+    if toggled {
+        Some(RowClick::AutoRebake)
+    } else if response.clicked() {
+        Some(RowClick::Row)
+    } else {
+        None
+    }
+}
+
+/// The map texture set `texture_set` rebakes on its own, if any
+fn auto_rebake_map(app: &TextureCraftApp, texture_set: usize) -> Option<BakedMap> {
+    app.session.doc.project.texture_sets.get(texture_set).and_then(|set| set.auto_rebake)
+}
+
+/// The Auto-rebake toggle in `rect`: bright while on or pointed at, dim while off
+fn auto_rebake_toggle(ui: &mut Ui, rect: Rect, name: &str, is_on: bool) -> egui::Response {
+    let tokens = Tokens::get(ui.ctx());
+    let response = ui.interact(rect, ui.scope_id().with("auto_rebake"), Sense::click());
+    let title = tr("Auto-rebake");
+    let label = trf("Auto-rebake {map}", &[("map", &name)]);
+    response.widget_info(|| WidgetInfo::selected(Role::Button, true, is_on, &label));
+
+    let is_pointed = response.hovered() || response.has_focus();
+    let color = if is_on || is_pointed { tokens.text_strong } else { tokens.text_dim };
+    ui.painter().text(rect.center(), Align2::CENTER_CENTER, icon::ARROWS_CLOCKWISE, FontId::proportional(ROW_GLYPH_SIZE), color);
+    crate::property_sheet::paint_keyboard_focus(ui, &response, &tokens);
+    response.on_hover_ui(|ui| {
+        ui.label(RichText::new(title).font(semibold(TOOLTIP_TEXT_SIZE)).color(tokens.text));
+    })
 }
 
 /// Start a checkbox drag at a primary press on `checkbox`; returns whether the drag's pointer crossed this row's checkbox column (the whole row height counts) since `drag_from`
@@ -435,14 +487,16 @@ fn header_button(ui: &mut Ui, glyph: &str, text: &str) -> egui::Response {
     response
 }
 
-/// The yellow clock in `rect` of a map that `changes` made out of date since its bake; hover tells what changed
-fn out_of_date_mark(ui: &mut Ui, rect: Rect, name: &str, changes: &[BakeChange]) {
+/// The yellow clock on the corner of `thumbnail`, of a map that `changes` made out of date since its bake; hovering the thumbnail tells what changed
+fn out_of_date_mark(ui: &mut Ui, thumbnail: Rect, name: &str, changes: &[BakeChange]) {
     let tokens = Tokens::get(ui.ctx());
-    let response = ui.interact(rect, ui.scope_id().with("out_of_date"), Sense::hover());
+    let response = ui.interact(thumbnail, ui.scope_id().with("out_of_date"), Sense::hover());
     let title = tr("Out of date");
     let label = trf("Out of date: {map}", &[("map", &name)]);
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &label));
-    ui.painter().text(rect.center(), Align2::CENTER_CENTER, icon::CLOCK, FontId::proportional(ROW_GLYPH_SIZE), tokens.warning);
+    let badge = thumbnail.right_bottom() - vec2(CLOCK_BADGE_RADIUS, CLOCK_BADGE_RADIUS) * 0.5;
+    ui.painter().circle_filled(badge, CLOCK_BADGE_RADIUS, tokens.panel);
+    ui.painter().text(badge, Align2::CENTER_CENTER, icon::CLOCK, FontId::proportional(CLOCK_BADGE_RADIUS * 2.0), tokens.warning);
 
     response.on_hover_ui(|ui| {
         ui.label(RichText::new(title).font(semibold(TOOLTIP_TEXT_SIZE)).color(tokens.text));
@@ -454,7 +508,7 @@ fn out_of_date_mark(ui: &mut Ui, rect: Rect, name: &str, changes: &[BakeChange])
 
 /// The next icon slot leftwards from `icons_left`, centred on `center_y`; moves `icons_left` past it
 fn icon_slot(icons_left: &mut f32, center_y: f32) -> Rect {
-    let slot = Rect::from_center_size(pos2(*icons_left - ROW_BUTTON_SIZE / 2.0 - ROW_INSET / 2.0, center_y), vec2(ROW_BUTTON_SIZE, ROW_BUTTON_SIZE));
-    *icons_left = slot.left() - ROW_INSET / 2.0;
+    let slot = Rect::from_center_size(pos2(*icons_left - ROW_ICON_SIZE / 2.0 - ROW_ICON_GAP, center_y), vec2(ROW_ICON_SIZE, ROW_ICON_SIZE));
+    *icons_left = slot.left();
     slot
 }

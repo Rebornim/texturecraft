@@ -31,17 +31,10 @@ fn harness() -> Harness<'static, TextureCraftApp> {
     harness
 }
 
+/// Run frames until the bake ends, then a few more for its result to show
 fn run_to_the_end(harness: &mut Harness<'static, TextureCraftApp>) {
-    for _ in 0..4000 {
-        harness.run_steps(1);
-        if harness.state().bake.is_none() {
-            harness.run_steps(2);
-            return;
-        }
-
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
-    panic!("the bake did not finish");
+    super::step_until(harness, "the end of the bake", |app| app.bake.is_none());
+    harness.run_steps(super::SETTLE_FRAMES);
 }
 
 #[test]

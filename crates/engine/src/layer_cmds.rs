@@ -87,6 +87,24 @@ pub fn specs() -> Vec<CommandSpec> {
             always,
             select
         ),
+        cmd!(
+            "layer.layersAt",
+            "Layers under the cursor",
+            [],
+            None,
+            "{x, y, viewport?: [w,h]} a point on the mesh — {layers: [{layer, name, channels}]}: the layers laying something down there in the shown channels, top first, each with the channels it changes there (R + click lists them)",
+            always,
+            layers_at
+        ),
+        cmd!(
+            "layer.pickAt",
+            "Pick layer under the cursor",
+            [],
+            None,
+            "{x, y, viewport?: [w,h], layer?} a point on the mesh — selects `layer` if it lays something down there, else the top layer laying something down there in the shown channels (R + click)",
+            always,
+            pick_at
+        ),
         cmd!("layer.rename", "Rename layer", [], None, "{layer?, name}", has_layer, rename),
         cmd!(
             "layer.visible",
@@ -280,6 +298,28 @@ fn new_folder(id: LayerId, name: String, channels: &[Channel]) -> Layer {
         blend.mode = BlendMode::Passthrough;
     }
     folder
+}
+
+fn pick_at(s: &mut Session, p: &Value) -> Result<Value> {
+    let (Some(x), Some(y)) = (f32p(p, "x"), f32p(p, "y")) else { return Err(bad("layer.pickAt", "`x` and `y` are required")) };
+    let viewport = crate::tool_cmds::viewport_of(s, p);
+    let wanted = u64p(p, "layer").map(LayerId);
+    let id = s.pick_layer(texturecraft_geom::glam::Vec2::new(x, y), viewport, wanted)?;
+    Ok(json!({ "layer": id.0 }))
+}
+
+fn layers_at(s: &mut Session, p: &Value) -> Result<Value> {
+    let (Some(x), Some(y)) = (f32p(p, "x"), f32p(p, "y")) else { return Err(bad("layer.layersAt", "`x` and `y` are required")) };
+    let viewport = crate::tool_cmds::viewport_of(s, p);
+    let (_, layers) = s.layers_under(texturecraft_geom::glam::Vec2::new(x, y), viewport)?;
+    let layers: Vec<Value> = layers
+        .iter()
+        .map(|(id, channels)| {
+            let name = s.doc.project.layers.get(id).map(|layer| layer.name.as_str()).unwrap_or_default();
+            json!({ "layer": id.0, "name": name, "channels": channels.iter().map(|channel| channel.id()).collect::<Vec<_>>() })
+        })
+        .collect();
+    Ok(json!({ "layers": layers }))
 }
 
 fn select(s: &mut Session, p: &Value) -> Result<Value> {

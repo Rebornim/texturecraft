@@ -57,6 +57,7 @@ mod inactive_set_hint;
 mod instance_properties;
 pub mod keymap;
 pub mod layer_panel;
+pub mod layer_pick_list;
 mod layer_toolbar;
 mod layout_dialog;
 mod levels_display;
@@ -291,6 +292,8 @@ pub struct TextureCraftApp {
     pub moving_on_model: Option<move_on_model::MoveOnModel>,
     /// The Properties popup a right click in a view opens.
     pub properties_popup: Option<properties_popup::PropertiesPopup>,
+    /// The layers under an R + click in the 3D view to pick one from
+    pub layer_pick_list: Option<layer_pick_list::LayerPickList>,
     properties_scroll: property_sheet::PropertiesScroll,
     /// The color selection the next click in the 3D or 2D view picks an ID color for
     pub picking_id_color: Option<id_color_pick::IdColorPick>,
@@ -422,6 +425,7 @@ impl TextureCraftApp {
             last_paint_uv: None,
             moving_on_model: None,
             properties_popup: None,
+            layer_pick_list: None,
             properties_scroll: property_sheet::PropertiesScroll::default(),
             picking_id_color: None,
             picking_symmetry_plane: false,

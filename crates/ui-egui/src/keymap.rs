@@ -642,6 +642,7 @@ pub fn fixed_gestures_grid(ui: &mut egui::Ui) {
 pub fn fixed_gestures() -> Vec<(String, String)> {
     let stencil = crate::viewport::STENCIL_KEY.name();
     let clone = crate::viewport::CLONE_SOURCE_KEY.name();
+    let pick = crate::viewport::PICK_LAYER_KEY.name();
     let keyed = |template: &str| trf(template, &[("key", &stencil)]);
     vec![
         (tr("Alt + LMB drag").into(), tr("Orbit").into()),
@@ -663,6 +664,7 @@ pub fn fixed_gestures() -> Vec<(String, String)> {
         (keyed("{key} + RMB drag"), tr("Projection: scale the stencil").into()),
         (keyed("{key} + MMB drag"), tr("Projection: move the stencil").into()),
         (trf("{key} + LMB", &[("key", &clone)]), tr("Clone: pick the point to copy from").into()),
+        (trf("{key} + LMB", &[("key", &pick)]), tr("Select the layer under the cursor; several there: pick one from a list").into()),
         (tr("Click (Path tool)").into(), tr("Path: add a point; on the curve it inserts one").into()),
         (tr("LMB drag on a point (Path tool)").into(), tr("Path: move the point").into()),
         (tr("Click the first point (Path tool)").into(), tr("Path: close it (needs 3 points)").into()),
@@ -696,6 +698,7 @@ mod tests {
         let (s, v) = (crate::viewport::STENCIL_KEY.name(), crate::viewport::CLONE_SOURCE_KEY.name());
         assert!(has(&format!("{s} + LMB drag"), "rotate") && has(&format!("{s} + RMB drag"), "scale") && has(&format!("{s} + MMB drag"), "move"));
         assert!(has(&format!("{v} + LMB"), "Clone"));
+        assert!(has(&format!("{} + LMB", crate::viewport::PICK_LAYER_KEY.name()), "Select the layer"));
         for (gesture, what) in [
             ("Shift + LMB", "straight line"),
             ("Shift + RMB drag", "environment light"),

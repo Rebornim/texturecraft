@@ -2,7 +2,7 @@
 //! fold without touching the document, and the thumbnails arrive from the worker.
 
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::kittest::{NodeT, Queryable, by};
 use serde_json::{Value, json};
 use texturecraft_engine::compose::ThumbTarget;
 use texturecraft_engine::core::{Channel, LayerId};
@@ -516,4 +516,73 @@ fn dragging_a_row_opacity_adds_one_undo_step() {
 
     assert!(opacity(&h) < before, "the drag lowers the opacity: {}", opacity(&h));
     assert_eq!(h.state().session.history_labels().len(), steps + 1, "every frame of the drag merges into one step");
+}
+
+/// When the selection moves to a layer below the panel's visible rows (a pick on the mesh, a command), its row scrolls into view
+#[test]
+fn a_newly_selected_layer_out_of_view_scrolls_into_view() {
+    let (mut h, _) = harness();
+    for index in 0..20 {
+        execute(&mut h.state_mut().session, "layer.add.fill", &json!({"name": format!("Filler {index}")})).unwrap();
+    }
+    h.run_steps(SETTLE_FRAMES);
+    let bottom = h.state().session.doc.project.texture_sets[h.state().session.ts()].stack[0];
+    let name = h.state().session.doc.project.layers[&bottom].name.clone();
+
+    let before = h.get_by_label(&name).rect();
+    assert!(before.top() > properties_top(&h), "the bottom layer starts out of view");
+    execute(&mut h.state_mut().session, "layer.select", &json!({"layer": bottom.0})).unwrap();
+    h.run_steps(SETTLE_FRAMES);
+
+    let after = h.get_by_label(&name).rect();
+    assert!(after.bottom() <= properties_top(&h), "its row is inside the panel");
+}
+
+/// The top of the Properties tab, which sits under the Layers panel
+fn properties_top(h: &Harness<'_, TextureCraftApp>) -> f32 {
+    h.query_all(by().role(egui::Role::Tab).label_contains("Properties")).next().map(|tab| tab.rect().top()).unwrap_or(f32::MAX)
+}
+
+/// Holding R and clicking the model lists the layers laying something down there instead of painting with the current tool; a row of the list, clicked or reached with the arrow keys and Enter, selects its layer
+#[test]
+fn r_and_a_click_on_the_model_list_the_layers_there_and_a_row_selects_one_without_painting() {
+    let (mut h, _) = harness();
+    let session = &mut h.state_mut().session;
+    let lower = LayerId(id(execute(session, "layer.add.fill", &json!({"name": "Lower fill", "color": "#aa3322"})).unwrap(), "layer"));
+    let upper = LayerId(id(execute(session, "layer.add.fill", &json!({"name": "Upper fill", "color": "#2233aa"})).unwrap(), "layer"));
+    let empty = LayerId(id(execute(session, "layer.add.paint", &json!({"name": "Empty on top"})).unwrap(), "layer"));
+    h.run_steps(SETTLE_FRAMES);
+    let steps = h.state().session.history_labels().len();
+    let view = h.state().viewport_rect;
+    let in_list = |h: &Harness<'_, TextureCraftApp>, name: &str| h.get_all_by_label(name).map(|node| node.rect()).find(|rect| view.contains(rect.center()));
+    let open_list = |h: &mut Harness<'_, TextureCraftApp>| {
+        let key = |pressed| egui::Event::Key { key: egui::Key::R, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+        h.event(key(true));
+        h.hover_at(view.center());
+        h.run_steps(1);
+        click(h, view.center());
+        h.event(key(false));
+        h.run_steps(SETTLE_FRAMES);
+    };
+
+    open_list(&mut h);
+
+    assert!(in_list(&h, "Upper fill").is_some() && in_list(&h, "Lower fill").is_some(), "both fills under the click are listed over the view");
+    assert!(in_list(&h, "Empty on top").is_none(), "the empty top layer lays nothing down there");
+    assert_eq!(h.state().session.selected_layer(), Some(empty), "opening the list selects nothing yet");
+
+    h.key_press(egui::Key::ArrowDown);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(SETTLE_FRAMES);
+
+    assert_eq!(h.state().session.selected_layer(), Some(lower), "Down from the top row and Enter select the second layer");
+    assert!(h.state().layer_pick_list.is_none(), "picking closes the list");
+
+    open_list(&mut h);
+    let row = in_list(&h, "Upper fill").unwrap().center();
+    click(&mut h, row);
+    h.run_steps(SETTLE_FRAMES);
+
+    assert_eq!(h.state().session.selected_layer(), Some(upper), "the clicked row's layer is selected");
+    assert_eq!(h.state().session.history_labels().len(), steps, "no stroke was painted");
 }

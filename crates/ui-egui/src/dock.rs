@@ -271,7 +271,7 @@ const SELECTED_LAYER_TINT: f32 = 0.3;
 const EYE_CHIP_INSET: f32 = 1.0;
 const EYE_CHIP_ROUNDING: f32 = 4.0;
 /// An effect thumbnail's corner rounding and border, the strike across a hidden effect's, and the line marking where a drag drops.
-const THUMBNAIL_ROUNDING: f32 = 2.0;
+pub(crate) const THUMBNAIL_ROUNDING: f32 = 2.0;
 const THUMBNAIL_BORDER_WIDTH: f32 = 1.0;
 const HIDDEN_STRIKE_WIDTH: f32 = 1.5;
 const DROP_LINE_WIDTH: f32 = 2.0;
@@ -455,6 +455,10 @@ fn layer_row(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, depth: usize
     let row_height = layer_row_height(preferred_size);
     let (rect, row) = ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click_and_drag());
     row.widget_info(|| egui::WidgetInfo::selected(egui::Role::ListItem, true, highlighted, &layer.name));
+    if app.layer_panel.reveal == Some(layer.id) {
+        app.layer_panel.reveal = None;
+        row.scroll_to_me(None);
+    }
 
     // Background, folder lines, the selected rows' accent edge and the colour tag
     let painter = ui.painter().clone();

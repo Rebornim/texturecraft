@@ -34,6 +34,7 @@ pub mod inspect;
 pub mod instance_cmds;
 pub mod layer_cmds;
 pub mod layer_ops;
+mod layer_pick;
 pub mod layer_selection;
 pub mod link_cmds;
 pub mod log;

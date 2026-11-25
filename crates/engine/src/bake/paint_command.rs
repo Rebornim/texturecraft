@@ -3,7 +3,7 @@ use crate::{Result, Session, cmd};
 use serde_json::Value;
 use std::sync::Arc;
 use texturecraft_bake::BakePaintMap;
-use texturecraft_core::BakePaintTarget;
+use texturecraft_core::{BakePaintTarget, BakedMap};
 use texturecraft_geom::glam::Vec2;
 
 pub(super) fn specs() -> Vec<CommandSpec> {
@@ -81,14 +81,22 @@ fn clear(session: &mut Session, parameters: &Value, target: BakePaintTarget) -> 
     Ok(super::meshes_json(session))
 }
 
+/// Most UV points one `bake.paint` call takes
+const MAX_POINTS: usize = 100_000;
+/// Brush radius in UV units: the default, and the smallest that still paints
+const DEFAULT_RADIUS: f32 = 0.03;
+const MIN_RADIUS: f32 = 0.00001;
+/// Side of a new paint map in texels: the default, and the range a call may ask for
+const DEFAULT_PAINT_SIZE: u64 = 1024;
+const PAINT_SIZES: std::ops::RangeInclusive<u64> = 16..=4096;
+
 fn paint(session: &mut Session, parameters: &Value, target: BakePaintTarget) -> Result<Value> {
-    const MAX_POINTS: usize = 100_000;
     let texture_set = texture_set(session, parameters)?;
     let points = parameters
         .get("points")
         .and_then(Value::as_array)
         .filter(|points| !points.is_empty() && points.len() <= MAX_POINTS)
-        .ok_or_else(|| bad("bake.paint", "points must contain 1 to 100000 UV coordinates"))?;
+        .ok_or_else(|| bad("bake.paint", format!("points must contain 1 to {MAX_POINTS} UV coordinates")))?;
     let points = points
         .iter()
         .map(|point| {
@@ -99,17 +107,19 @@ fn paint(session: &mut Session, parameters: &Value, target: BakePaintTarget) -> 
             }
         })
         .collect::<Result<Vec<_>>>()?;
+
     let value = number(parameters, "value", 1.0, 0.0, 1.0)?;
-    let radius = number(parameters, "radius", 0.03, 0.00001, 1.0)?;
+    let radius = number(parameters, "radius", DEFAULT_RADIUS, MIN_RADIUS, 1.0)?;
     let hardness = number(parameters, "hardness", 0.5, 0.0, 1.0)?;
     let strength = number(parameters, "strength", 1.0, 0.0, 1.0)?;
     let size = match parameters.get("size") {
-        None => 1024,
+        None => DEFAULT_PAINT_SIZE,
         Some(_) => u64p(parameters, "size").ok_or_else(|| bad("bake.paint", "size must be an integer"))?,
     };
-    if !(16..=4096).contains(&size) {
-        return Err(bad("bake.paint", "size must be between 16 and 4096"));
+    if !PAINT_SIZES.contains(&size) {
+        return Err(bad("bake.paint", format!("size must be between {} and {}", PAINT_SIZES.start(), PAINT_SIZES.end())));
     }
+
     let default = match target {
         BakePaintTarget::Cage => 1.0,
         BakePaintTarget::Skew => 0.0,
@@ -118,7 +128,15 @@ fn paint(session: &mut Session, parameters: &Value, target: BakePaintTarget) -> 
         BakePaintTarget::Cage => "Paint Cage",
         BakePaintTarget::Skew => "Paint Skew Correction",
     };
+
     session.edit_merging(label, boolp(parameters, "continue") == Some(true), |session| {
+        // Skew painting starts with Auto-rebake on for the Normal map, which shows the skew best, unless the set picked one
+        let first_skew = target == BakePaintTarget::Skew && !session.doc.bake_paint.contains_key(&(texture_set, target));
+        let set = session.doc.project.texture_set_mut(texture_set)?;
+        if first_skew && set.auto_rebake.is_none() {
+            set.auto_rebake = Some(BakedMap::Normal);
+        }
+
         let map = session.doc.bake_paint.entry((texture_set, target)).or_insert_with(|| Arc::new(BakePaintMap::constant(default)));
         if map.values.len() == 1 {
             *map = Arc::new(map.resized(size as u32, size as u32).map_err(|error| bad("bake.paint", error.to_string()))?);

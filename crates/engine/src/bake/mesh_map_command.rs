@@ -861,7 +861,9 @@ fn bake_run(session: &mut Session, params: &Value) -> Result<Value> {
 
     let next = with_sync_partners(&session.doc.project, next, "bake.run")?;
     let cpu = boolp(params, "cpu") == Some(true);
-    let tracers = session.edit("Bake mesh maps", |session| {
+    // The painted boxes are not in the document, so a rolled-back bake puts them back by hand
+    let painted_regions = session.painted_regions.clone();
+    let baked = session.edit("Bake mesh maps", |session| {
         for (index, settings) in next {
             session.doc.project.texture_set_mut(index)?.bake = settings;
         }
@@ -882,7 +884,8 @@ fn bake_run(session: &mut Session, params: &Value) -> Result<Value> {
             }
         }
         Ok(tracers)
-    })?;
+    });
+    let tracers = baked.inspect_err(|_| session.painted_regions = painted_regions)?;
     for (index, tracer) in sets.iter().zip(&tracers) {
         session.log.info("Baker", format!("Baked texture set {index} ({tracer})"));
     }

@@ -4,7 +4,7 @@ use serde_json::json;
 use texturecraft_engine::bake::Progress;
 use texturecraft_engine::core::BakedMap;
 use texturecraft_engine::geom::primitives;
-use texturecraft_engine::{Session, execute};
+use texturecraft_engine::{Session, execute, sample_session};
 
 /// A plane with its position and ID maps baked
 fn baked_plane() -> Session {
@@ -138,4 +138,42 @@ fn a_stroke_painted_while_the_rebake_runs_waits_for_the_next_one() {
 
     let painted: Vec<_> = session.auto_rebake_painted().into_iter().map(|(set, map, _, _)| (set, map)).collect();
     assert_eq!(painted, [(0, BakedMap::Position)], "the second stroke is not in the stored map yet");
+}
+
+#[test]
+fn a_failed_bake_keeps_the_painted_box_of_the_sets_it_rolled_back() {
+    let mut session = sample_session(256, 64).unwrap();
+    session.add_high_poly_bytes("detail_high.obj", b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".to_vec()).unwrap();
+    execute(&mut session, "bake.run", &json!({ "ts": "all", "resolution": 32, "maps": ["position"], "dilation": 0 })).unwrap();
+    execute(&mut session, "bake.autoRebake", &json!({ "ts": 0, "map": "position" })).unwrap();
+    execute(&mut session, "bake.skew.paint", &json!({ "ts": 0, "points": [[0.5, 0.5]], "radius": 0.05, "size": 64 })).unwrap();
+    let second = &mut session.doc.project.texture_sets[1].bake.maps.ao;
+    second.is_enabled = true;
+    second.parameters.rays.rays = 0;
+
+    assert!(execute(&mut session, "bake.run", &json!({ "ts": "all" })).is_err(), "set 1's AO has no rays to cast");
+
+    let painted: Vec<_> = session.auto_rebake_painted().into_iter().map(|(set, map, _, _)| (set, map)).collect();
+    assert_eq!(painted, [(0, BakedMap::Position)], "set 0's stroke is still waiting for its rebake");
+}
+
+#[test]
+fn the_first_skew_stroke_turns_auto_rebake_on_for_the_normal_map_once() {
+    let mut session = super::bake::leaning_session(true);
+    let stroke = json!({ "points": [[0.5, 0.5]], "radius": 0.05, "size": 64 });
+    execute(&mut session, "bake.cage.paint", &stroke).unwrap();
+    assert_eq!(session.doc.project.texture_sets[0].auto_rebake, None, "cage painting leaves it alone");
+
+    execute(&mut session, "bake.skew.paint", &stroke).unwrap();
+    assert_eq!(session.doc.project.texture_sets[0].auto_rebake, Some(BakedMap::Normal));
+    execute(&mut session, "edit.undo", &json!({})).unwrap();
+    assert_eq!(session.doc.project.texture_sets[0].auto_rebake, None, "undone with the stroke");
+
+    execute(&mut session, "bake.autoRebake", &json!({ "map": "position" })).unwrap();
+    execute(&mut session, "bake.skew.paint", &stroke).unwrap();
+    assert_eq!(session.doc.project.texture_sets[0].auto_rebake, Some(BakedMap::Position), "a map picked before stays");
+
+    execute(&mut session, "bake.autoRebake", &json!({ "map": null })).unwrap();
+    execute(&mut session, "bake.skew.paint", &stroke).unwrap();
+    assert_eq!(session.doc.project.texture_sets[0].auto_rebake, None, "turned off after skew painting started, it stays off");
 }

@@ -305,6 +305,10 @@ also `session.inspect`'s `bakePreview`:
  "sets": [{"set": 0, "order": ["id", "ambientOcclusion", "curvature", "height"], "done": ["id", "ambientOcclusion"]}]}
 ```
 
+`{"active": false}` when no bake is shown; setting `show` then is an error. Drive a bake with
+`ui.bake.start` and poll `ui.inspect`'s `bakeStatus` / `bakePreview` (and `viewport.screenshot`)
+until `baking` is `null`.
+
 `bake.log` `{}` returns the latest bake map by map, as the Baking Log shows it (empty before the first bake).
 A map's `state` is `waiting`, `baking`, `baked`, `failed` (with the error as `reason`) or `canceled`.
 `highPolys` lists the high poly files of each set that bakes from them; a file's `state` is `waiting`,
@@ -314,7 +318,7 @@ with no partner. It is `null` when no set of the bake matches by mesh name:
 
 ```json
 {"running": false, "maps": [{"textureSet": 0, "setName": "Body", "map": "normal", "state": "baked"},
- {"textureSet": 1, "setName": "Head", "map": "normal", "state": "failed", "reason": "no UV tile left to bake"}],
+ {"textureSet": 1, "setName": "Head", "map": "normal", "state": "failed", "reason": "texture set Head has no UV tiles selected for baking"}],
  "highPolys": [{"textureSet": 0, "setName": "Body", "file": "body_high.fbx", "state": "loaded"}],
  "matching": {"lowSuffix": "_low", "highSuffix": "_high",
   "pairs": [{"low": "Arm_low", "high": "Arm_high"}, {"low": "Strap_low", "high": null}]}}
@@ -330,15 +334,13 @@ own). Imported maps, and maps saved before this record existed, never show:
 (the active one by default), replacing its previous one, or turns it off with `null`; it is saved
 with the project and shows as the set's `autoRebake` in `project.inspect`. While the desktop or web
 app is in Bake mode, an auto-rebake map that goes out of date is baked again on its own in the
-background, alone, once its settings have stopped changing for half a second; a change during
+background, alone (with every checked map when the output size changed), once what it is baked from has stopped changing for half a second; a change during
 that bake restarts it. A skew or cage stroke (`bake.skew.paint`, `bake.cage.paint`) on a set that
 bakes from a high poly makes the app bake its auto-rebake map again only inside the stroke's UV
 box, keeping the rest; maps scaled by their whole range (curvature, height, thickness) are baked
-whole. The headless CLI does not rebake by itself: run `bake.run` there.
-
-`{"active": false}` when no bake is shown; setting `show` then is an error. Drive a bake with
-`ui.bake.start` and poll `ui.inspect`'s `bakeStatus` / `bakePreview` (and `viewport.screenshot`)
-until `baking` is `null`.
+whole. The first `bake.skew.paint` stroke of a set (no skew map yet) turns Auto-rebake on for its
+`normal` map when the set has none, in the stroke's undo step. The headless CLI does not rebake by
+itself: run `bake.run` there.
 
 A minimal client (Python, for illustration):
 

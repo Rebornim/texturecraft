@@ -2,7 +2,7 @@
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use texturecraft_engine::bake::{BakeLogMap, BakeMapState};
+use texturecraft_engine::bake::{BakeHighState, BakeLogHigh, BakeLogMap, BakeMapState};
 use texturecraft_engine::core::{BakeResolution, BakedMap};
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::docking::Panel;
@@ -126,4 +126,37 @@ fn the_issues_filter_says_so_when_nothing_went_wrong() {
     harness.run_steps(3);
     harness.get_by_label(&format!("{set_name} ID, Baked"));
     assert!(harness.query_by_label("All textures baked successfully so far.").is_none(), "off again: every row is back");
+}
+
+#[test]
+fn the_high_poly_tab_lists_each_sets_high_poly_files_under_a_row_that_folds() {
+    let mut harness = harness();
+    harness.state_mut().session.add_high_poly_bytes("ball_high.obj", b"o Ball_high\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".to_vec()).unwrap();
+    harness.state_mut().start_bake(vec![0]);
+    run_to_the_end(&mut harness);
+
+    harness.get_by_label("High Poly Parameters").click();
+    harness.run_steps(3);
+    let set_name = harness.state().session.doc.project.texture_sets[0].name.clone();
+    harness.get_by_label("ball_high.obj, Loaded");
+
+    harness.get_by_label(&format!("{set_name}, High poly files")).click();
+    harness.run_steps(3);
+    assert!(harness.query_by_label("ball_high.obj, Loaded").is_none(), "a folded set hides its files");
+}
+
+#[test]
+fn the_high_poly_tab_counts_and_keeps_its_own_issues() {
+    let mut harness = harness();
+    let set_name = log_a_bake(&mut harness, BakeMapState::Baked);
+    let row = |file: &str, state| BakeLogHigh { texture_set: 0, set_name: set_name.clone(), file: file.into(), state };
+    harness.state_mut().session.bake_log.highs = vec![row("ball_high.obj", BakeHighState::Loaded), row("bolt_high.obj", BakeHighState::Canceled)];
+    harness.get_by_label("High Poly Parameters").click();
+    harness.run_steps(3);
+
+    harness.get_by_label("1, Show Only Issues").click();
+    harness.run_steps(3);
+
+    assert!(harness.query_by_label("ball_high.obj, Loaded").is_none(), "a loaded file is filtered out");
+    harness.get_by_label("bolt_high.obj, Canceled");
 }

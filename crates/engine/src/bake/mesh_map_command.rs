@@ -843,7 +843,7 @@ fn bake_run(session: &mut Session, params: &Value) -> Result<Value> {
         for (index, settings) in next {
             session.doc.project.texture_set_mut(index)?.bake = settings;
         }
-        session.bake_log.begin(&session.doc.project, &sets);
+        session.bake_log.begin(&session.doc.project, &session.bake_meshes.high, &sets);
 
         let mut tracers = Vec::with_capacity(sets.len());
         for &index in &sets {
@@ -871,6 +871,7 @@ fn bake_run(session: &mut Session, params: &Value) -> Result<Value> {
 /// Bake every checked map of texture set `index` at once, store them and mark them baked in the Baking Log
 fn bake_one_set(session: &mut Session, index: usize, cpu: bool) -> Result<String> {
     let mut task = session.bake_task(index)?;
+    session.bake_log.high_polys_loaded(index);
     if cpu {
         task.tracer = None;
     }

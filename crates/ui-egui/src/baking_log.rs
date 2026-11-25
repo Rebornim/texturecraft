@@ -3,7 +3,7 @@
 use egui::{Align2, CornerRadius, FontId, Id, Rect, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 use egui_phosphor::regular as ic;
 use serde_json::json;
-use texturecraft_engine::bake::{BakeLogMap, BakeMapState};
+use texturecraft_engine::bake::{BakeLog, BakeLogMap, BakeMapState};
 use texturecraft_engine::core::BakedMap;
 
 use crate::TextureCraftApp;
@@ -13,6 +13,7 @@ use crate::property_sheet::{SIDE_PADDING_POINTS, TAB_GAP, TAB_ICON_CENTER, TAB_I
 use crate::theme::{Tokens, semibold};
 
 mod baking_log_tab;
+mod high_poly_list;
 
 pub use baking_log_tab::BakingLogTab;
 
@@ -69,13 +70,14 @@ pub(crate) fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     let (strip, _) = ui.allocate_exact_size(vec2(ui.available_width(), STRIP_HEIGHT), Sense::hover());
     ui.painter().rect_filled(strip, CornerRadius::ZERO, tokens.chrome);
-    if let Some(tab) = tabs(ui, strip, app.ui.baking_log_tab, app.session.bake_log.is_running()) {
+    if let Some(tab) = tabs(ui, strip, app.ui.baking_log_tab, &app.session.bake_log) {
         app.ui.baking_log_tab = tab;
     }
     let tab = app.ui.baking_log_tab;
     let issue_count = match tab {
         BakingLogTab::BakingProcess => app.session.bake_log.maps.iter().filter(|row| row.state.is_issue()).count(),
-        _ => 0,
+        BakingLogTab::HighPolyParameters => app.session.bake_log.highs.iter().filter(|row| row.state.is_issue()).count(),
+        BakingLogTab::MatchingByName => 0,
     };
     if issues_filter(ui, strip, issue_count, app.ui.baking_log_issues_only) {
         app.ui.baking_log_issues_only = !app.ui.baking_log_issues_only;
@@ -93,7 +95,11 @@ pub(crate) fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
             ui.add_space(LIST_TOP);
             match tab {
                 BakingLogTab::BakingProcess => baking_process(ui, &app.session.bake_log.maps, issues_only),
-                _ => None,
+                BakingLogTab::HighPolyParameters => {
+                    high_poly_list::high_poly_list(ui, &app.session.bake_log.highs, issues_only);
+                    None
+                }
+                BakingLogTab::MatchingByName => None,
             }
         })
         .inner;
@@ -117,7 +123,7 @@ fn open_map_settings(app: &mut TextureCraftApp, texture_set: usize, map: BakedMa
 }
 
 /// The tabs on the `strip` along the panel's top edge, as the Properties section tabs; a tab with work in progress shows dots for its icon
-fn tabs(ui: &mut Ui, strip: Rect, shown: BakingLogTab, running: bool) -> Option<BakingLogTab> {
+fn tabs(ui: &mut Ui, strip: Rect, shown: BakingLogTab, log: &BakeLog) -> Option<BakingLogTab> {
     let tokens = Tokens::get(ui.ctx());
     let mut picked = None;
     let mut left = strip.left() + SIDE_PADDING_POINTS - FIRST_TAB_OUTDENT;
@@ -137,7 +143,11 @@ fn tabs(ui: &mut Ui, strip: Rect, shown: BakingLogTab, running: bool) -> Option<
             shown_tab_box(painter, &tokens, rect);
         }
         let color = if on || response.hovered() { tokens.text } else { tokens.text_dim };
-        let in_progress = running && tab == BakingLogTab::BakingProcess;
+        let in_progress = match tab {
+            BakingLogTab::BakingProcess => log.is_running(),
+            BakingLogTab::HighPolyParameters => log.is_loading_high_polys(),
+            BakingLogTab::MatchingByName => false,
+        };
         let (icon, icon_color) = if in_progress { (ic::DOTS_THREE, tokens.accent) } else { (tab.icon(), color) };
         let center_y = strip.center().y + TAB_TOP / 2.0;
         painter.text(pos2(left + TAB_ICON_CENTER, center_y), Align2::CENTER_CENTER, icon, FontId::proportional(TAB_ICON_SIZE), icon_color);

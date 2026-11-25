@@ -700,7 +700,7 @@ impl TextureCraftApp {
         self.session.bake_preview_begin(orders);
 
         let total = sets.len();
-        self.session.bake_log.begin(&self.session.doc.project, &sets);
+        self.session.bake_log.begin(&self.session.doc.project, &self.session.bake_meshes.high, &sets);
         self.bake_report = bake_report::BakeReport::started(self.last_time);
         self.bake = Some(BakeJob { queue: sets, current: None, total, mesh_id: self.session.mesh_id, only });
     }
@@ -889,6 +889,7 @@ impl TextureCraftApp {
         };
         match task {
             Ok(task) => {
+                self.session.bake_log.high_polys_loaded(set_index);
                 let progress = Arc::new(Progress::new());
                 let worker_progress = progress.clone();
                 let maps_total = task.maps().len();

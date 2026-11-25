@@ -306,11 +306,14 @@ also `session.inspect`'s `bakePreview`:
 ```
 
 `bake.log` `{}` returns the latest bake map by map, as the Baking Log shows it (empty before the first bake).
-`state` is `waiting`, `baking`, `baked`, `failed` (with the error as `reason`) or `canceled`:
+A map's `state` is `waiting`, `baking`, `baked`, `failed` (with the error as `reason`) or `canceled`.
+`highPolys` lists the high poly files of each set that bakes from them; a file's `state` is `waiting`,
+`loading`, `loaded`, `failed` (with the error as `reason`) or `canceled`:
 
 ```json
 {"running": false, "maps": [{"textureSet": 0, "setName": "Body", "map": "normal", "state": "baked"},
- {"textureSet": 1, "setName": "Head", "map": "normal", "state": "failed", "reason": "no UV tile left to bake"}]}
+ {"textureSet": 1, "setName": "Head", "map": "normal", "state": "failed", "reason": "no UV tile left to bake"}],
+ "highPolys": [{"textureSet": 0, "setName": "Body", "file": "body_high.fbx", "state": "loaded"}]}
 ```
 
 `{"active": false}` when no bake is shown; setting `show` then is an error. Drive a bake with

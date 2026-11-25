@@ -1135,6 +1135,23 @@ fn effect_row(
             }
         }
 
+        // Rows list the stack top first and index 0 is its bottom, so up is one index higher
+        ui.separator();
+        if let Some(index) = position(effect_id.0) {
+            let top = stack.len() - 1;
+            for (label, to, enabled) in [
+                (tr("Move up"), index + 1, index < top),
+                (tr("Move down"), index.saturating_sub(1), index > 0),
+                (tr("Move to top"), top, index < top),
+                (tr("Move to bottom"), 0, index > 0),
+            ] {
+                if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                    app.run("effect.move", json!({"effect": effect_id.0, "index": to}));
+                    ui.close();
+                }
+            }
+        }
+
         // Blending options can apply across channels or effects
         ui.separator();
         let blends = effect.kind.blends();

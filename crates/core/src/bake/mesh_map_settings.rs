@@ -84,6 +84,22 @@ impl MeshMapSettings {
         }
     }
 
+    /// `map`'s typed parameters as JSON
+    pub fn parameters_json(&self, map: BakedMap) -> serde_json::Value {
+        let parameters = match map {
+            // These maps have no parameters of their own
+            BakedMap::Normal | BakedMap::WorldNormal | BakedMap::Opacity => return serde_json::Value::Null,
+            BakedMap::Id => serde_json::to_value(self.id.parameters),
+            BakedMap::AmbientOcclusion => serde_json::to_value(self.ao.parameters),
+            BakedMap::Curvature => serde_json::to_value(self.curvature.parameters),
+            BakedMap::Position => serde_json::to_value(self.position.parameters),
+            BakedMap::Thickness => serde_json::to_value(self.thickness.parameters),
+            BakedMap::Height => serde_json::to_value(self.height.parameters),
+            BakedMap::BentNormal => serde_json::to_value(self.bent_normal.parameters),
+        };
+        parameters.unwrap_or_default()
+    }
+
     pub fn enabled(&self) -> impl Iterator<Item = BakedMap> {
         BakedMap::ALL.into_iter().filter(|map| self.is_enabled(*map))
     }

@@ -10,6 +10,7 @@ mod bake_log_matching;
 mod bake_map_state;
 mod bake_mesh;
 mod bake_meshes;
+mod bake_sources;
 mod bake_task;
 mod high_poly_load;
 mod high_poly_missed;

@@ -276,6 +276,7 @@ pub fn texture_set(session: &Session, index: usize) -> Value {
         "layers": session.doc.project.walk(index).len(),
         "parts": crate::set_cmds::parts(session, index),
         "baked": crate::project_cmds::baked_json(session.doc.baked.get(&index)),
+        "outOfDate": session.out_of_date_maps(index).into_iter().map(|(map, changes)| (map.id(), changes.iter().map(|change| change.id()).collect::<Vec<_>>())).collect::<std::collections::BTreeMap<_, _>>(),
         "visible": texture_set.visible,
         "active": index == session.ts(),
     })

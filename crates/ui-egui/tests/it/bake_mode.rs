@@ -595,7 +595,7 @@ fn a_loaded_cage_can_be_removed_while_the_cage_does_not_apply() {
     session.add_high_poly_bytes("High.obj", b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".to_vec()).unwrap();
     let mesh = session.mesh.clone();
     session.doc.bake_meshes.cage =
-        Some(texturecraft_engine::BakeMesh { name: "Cage.obj".into(), folder: None, bytes: Default::default(), mesh, base_color: Vec::new() });
+        Some(texturecraft_engine::BakeMesh { name: "Cage.obj".into(), folder: None, bytes: Default::default(), mesh, base_color: Vec::new(), fingerprint: 0 });
     let settings = &mut session.doc.project.texture_sets[0].bake;
     (settings.cage.kind, settings.high_poly.use_low_as_high) = (CageType::CustomFile, true);
     harness.run_steps(3);

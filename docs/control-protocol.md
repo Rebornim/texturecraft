@@ -320,6 +320,12 @@ with no partner. It is `null` when no set of the bake matches by mesh name:
   "pairs": [{"low": "Arm_low", "high": "Arm_high"}, {"low": "Strap_low", "high": null}]}}
 ```
 
+Each texture set in `project.inspect` / `session.inspect` lists its out-of-date mesh maps as
+`outOfDate`: map id → what changed since that map was baked, any of `lowPoly`, `highPoly`, `cage`,
+`settings` (the bake settings every map shares, or the UV tiles baked) and `mapSettings` (the map's
+own). Imported maps, and maps saved before this record existed, never show:
+`"outOfDate": {"ambientOcclusion": ["mapSettings"]}`.
+
 `{"active": false}` when no bake is shown; setting `show` then is an error. Drive a bake with
 `ui.bake.start` and poll `ui.inspect`'s `bakeStatus` / `bakePreview` (and `viewport.screenshot`)
 until `baking` is `null`.

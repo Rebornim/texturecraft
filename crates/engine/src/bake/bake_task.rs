@@ -26,6 +26,8 @@ pub struct BakeTask {
     pub previous_maps: BakedMaps,
     /// The GPU ray tracer, if installed and not turned off (`bake.run {cpu: true}`).
     pub tracer: Option<Arc<dyn Tracer>>,
+    /// What each map this task makes is baked from, taken when the task was made
+    pub sources: std::collections::BTreeMap<BakedMap, texturecraft_core::BakeSource>,
 }
 
 impl BakeTask {
@@ -66,7 +68,13 @@ impl BakeTask {
                     // A resized partial bake also returns unchecked maps that must survive application
                     let mut retained: std::collections::BTreeMap<_, _> = output.maps.into_iter().map(|(map, pixels)| (map, Arc::new(pixels))).collect();
                     retained.insert(map, data);
-                    combined = Some(StreamedBake { resolution: output.resolution, height: output.height, maps: retained, tracer: output.tracer });
+                    combined = Some(StreamedBake {
+                        resolution: output.resolution,
+                        height: output.height,
+                        maps: retained,
+                        tracer: output.tracer,
+                        sources: self.sources.clone(),
+                    });
                 }
             }
         }
@@ -80,6 +88,7 @@ impl BakeTask {
                     height: output.height,
                     maps: output.maps.into_iter().map(|(map, pixels)| (map, Arc::new(pixels))).collect(),
                     tracer: output.tracer,
+                    sources: self.sources.clone(),
                 })
             }
         }

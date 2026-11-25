@@ -1655,7 +1655,14 @@ f 1/1 2/2 3/3
         let b = dir.join("b.obj");
         std::fs::write(&b, "v 0 0 0\nv 2 0 0\nv 0 2 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n").unwrap();
         let mut s = Session::from_mesh_bytes("a.obj", &std::fs::read(&a).unwrap(), 128, "a").unwrap();
-        let cage = crate::bake::BakeMesh { name: "cage".into(), folder: None, bytes: Default::default(), mesh: s.mesh.clone(), base_color: Vec::new() };
+        let cage = crate::bake::BakeMesh {
+            name: "cage".into(),
+            folder: None,
+            bytes: Default::default(),
+            mesh: s.mesh.clone(),
+            base_color: Vec::new(),
+            fingerprint: 0,
+        };
         s.doc.bake_meshes.cage = Some(cage);
         let _ = s.doc.bake_meshes.low_base_color.set(Err("old".into()));
 

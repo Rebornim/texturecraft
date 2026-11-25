@@ -425,6 +425,8 @@ pub struct Session {
     pub project_id: u64,
     /// The mesh with its own UVs (`mesh` maps UV-tiled sets into their atlas).
     pub(crate) source: Arc<Mesh>,
+    /// Fingerprint of `source`'s geometry, once a bake or an out-of-date check needs it
+    pub(crate) low_poly_fingerprint: std::sync::OnceLock<u64>,
     pub bvh: Arc<Bvh>,
     /// Original mesh file (saved inside the project); None for built-in meshes.
     pub mesh_source: Option<(String, Arc<Vec<u8>>)>,
@@ -527,6 +529,7 @@ impl Session {
             mesh_id: next_mesh_id(),
             project_id: next_mesh_id(),
             source,
+            low_poly_fingerprint: Default::default(),
             mesh,
             bvh: Arc::new(bvh),
             mesh_source: mesh_source.map(|(extension, bytes)| (extension, Arc::new(bytes))),

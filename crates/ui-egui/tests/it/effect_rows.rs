@@ -1,4 +1,4 @@
-//! Effect rows in the layer stack: dragging one reorders its stack, its blend mode and opacity sit at its right, and its menu holds the Blending options
+//! Effect rows in the layer stack: dragging one or its menu's Move items reorder its stack, its blend mode and opacity sit at its right, and its menu holds the Blending options
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
@@ -57,6 +57,41 @@ fn dragging_an_effect_row_reorders_its_stack() {
     drag(&mut harness, "Effect C", "Effect A", false);
 
     assert_eq!(order(&harness), [a, c, b]);
+}
+
+/// An effect row's menu moves it one step or to an end of its stack; a move past an end is greyed
+#[test]
+fn an_effect_rows_menu_moves_it_within_its_stack() {
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = LayerId(id(execute(&mut session, "layer.add.fill", &Value::Null).unwrap(), "layer"));
+    let mut add =
+        |name: &str| id(execute(&mut session, "effect.add.filter", &json!({"target": "content", "filter": "invert", "name": name})).unwrap(), "effect");
+    let (a, b, c) = (add("Effect A"), add("Effect B"), add("Effect C"));
+    execute(&mut session, "layer.select", &json!({"layer": layer.0})).unwrap();
+    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).build_eframe(|creation_context| TextureCraftApp::new(creation_context, session));
+    harness.run_steps(4);
+    let order =
+        |harness: &Harness<'_, TextureCraftApp>| harness.state().session.doc.project.layers[&layer].content_effects.iter().map(|e| e.id.0).collect::<Vec<_>>();
+    let menu_item = |harness: &mut Harness<'_, TextureCraftApp>, row: &str, item: &str| {
+        harness.get_by_label(row).click_secondary();
+        harness.run_steps(3);
+        harness.get_by_label(item).click();
+        harness.run_steps(3);
+    };
+
+    menu_item(&mut harness, "Effect A", "Move up");
+    assert_eq!(order(&harness), [b, a, c]);
+    menu_item(&mut harness, "Effect A", "Move to top");
+    assert_eq!(order(&harness), [b, c, a]);
+    menu_item(&mut harness, "Effect C", "Move down");
+    assert_eq!(order(&harness), [c, b, a]);
+    menu_item(&mut harness, "Effect A", "Move to bottom");
+    assert_eq!(order(&harness), [a, c, b]);
+
+    harness.get_by_label("Effect A").click_secondary();
+    harness.run_steps(3);
+    assert!(harness.get_by_label("Move down").accesskit_node().is_disabled(), "the bottom effect can't go lower");
+    assert!(!harness.get_by_label("Move up").accesskit_node().is_disabled());
 }
 
 /// An effect row's blend mode menu and opacity field sit at its right and set the displayed channel's blending, as on layer rows

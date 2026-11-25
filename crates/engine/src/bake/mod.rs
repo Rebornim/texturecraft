@@ -6,6 +6,7 @@ mod bake_high_state;
 mod bake_log;
 mod bake_log_high;
 mod bake_log_map;
+mod bake_log_matching;
 mod bake_map_state;
 mod bake_mesh;
 mod bake_meshes;
@@ -28,6 +29,7 @@ pub use bake_high_state::BakeHighState;
 pub use bake_log::BakeLog;
 pub use bake_log_high::BakeLogHigh;
 pub use bake_log_map::BakeLogMap;
+pub use bake_log_matching::BakeLogMatching;
 pub use bake_map_state::BakeMapState;
 pub use bake_mesh::BakeMesh;
 pub use bake_meshes::BakeMeshes;
@@ -39,6 +41,7 @@ pub use mesh_map_command::{install_gpu_tracer, meshes_json, set_gpu_raytracing, 
 pub use model_patch::settings_patch;
 pub use streamed_bake::StreamedBake;
 pub use streamed_map::StreamedMap;
+pub use texturecraft_bake::NamePair;
 pub use texturecraft_bake::*;
 
 use crate::CommandSpec;

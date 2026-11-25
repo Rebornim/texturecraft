@@ -843,7 +843,7 @@ fn bake_run(session: &mut Session, params: &Value) -> Result<Value> {
         for (index, settings) in next {
             session.doc.project.texture_set_mut(index)?.bake = settings;
         }
-        session.bake_log.begin(&session.doc.project, &session.bake_meshes.high, &sets);
+        session.begin_bake_log(&sets);
 
         let mut tracers = Vec::with_capacity(sets.len());
         for &index in &sets {

@@ -308,12 +308,16 @@ also `session.inspect`'s `bakePreview`:
 `bake.log` `{}` returns the latest bake map by map, as the Baking Log shows it (empty before the first bake).
 A map's `state` is `waiting`, `baking`, `baked`, `failed` (with the error as `reason`) or `canceled`.
 `highPolys` lists the high poly files of each set that bakes from them; a file's `state` is `waiting`,
-`loading`, `loaded`, `failed` (with the error as `reason`) or `canceled`:
+`loading`, `loaded`, `failed` (with the error as `reason`) or `canceled`. `matching` lists each low poly
+part with the high poly part it bakes from, then the high poly parts no set paired with; a `null` side is a part
+with no partner. It is `null` when no set of the bake matches by mesh name:
 
 ```json
 {"running": false, "maps": [{"textureSet": 0, "setName": "Body", "map": "normal", "state": "baked"},
  {"textureSet": 1, "setName": "Head", "map": "normal", "state": "failed", "reason": "no UV tile left to bake"}],
- "highPolys": [{"textureSet": 0, "setName": "Body", "file": "body_high.fbx", "state": "loaded"}]}
+ "highPolys": [{"textureSet": 0, "setName": "Body", "file": "body_high.fbx", "state": "loaded"}],
+ "matching": {"lowSuffix": "_low", "highSuffix": "_high",
+  "pairs": [{"low": "Arm_low", "high": "Arm_high"}, {"low": "Strap_low", "high": null}]}}
 ```
 
 `{"active": false}` when no bake is shown; setting `show` then is an error. Drive a bake with

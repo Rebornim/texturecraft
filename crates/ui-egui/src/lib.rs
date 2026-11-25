@@ -700,7 +700,7 @@ impl TextureCraftApp {
         self.session.bake_preview_begin(orders);
 
         let total = sets.len();
-        self.session.bake_log.begin(&self.session.doc.project, &self.session.bake_meshes.high, &sets);
+        self.session.begin_bake_log(&sets);
         self.bake_report = bake_report::BakeReport::started(self.last_time);
         self.bake = Some(BakeJob { queue: sets, current: None, total, mesh_id: self.session.mesh_id, only });
     }

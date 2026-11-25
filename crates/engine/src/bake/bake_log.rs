@@ -1,6 +1,10 @@
+use std::collections::HashSet;
+
+use texturecraft_bake::NamePair;
 use texturecraft_core::{BakedMap, Project};
 
-use super::{BakeHighState, BakeLogHigh, BakeLogMap, BakeMapState, BakeMesh};
+use super::{BakeHighState, BakeLogHigh, BakeLogMap, BakeLogMatching, BakeMapState, BakeMesh};
+use crate::Session;
 
 /// The latest bake map by map for the Baking Log, kept from the bake's own state, never from Log lines
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -8,6 +12,8 @@ pub struct BakeLog {
     pub maps: Vec<BakeLogMap>,
     /// Each high poly file of each texture set that bakes from the high polys, in bake order
     pub highs: Vec<BakeLogHigh>,
+    /// How the parts paired by name; `None` when no set of the bake matches "By Mesh Name"
+    pub matching: Option<BakeLogMatching>,
 }
 
 impl BakeLog {
@@ -33,6 +39,7 @@ impl BakeLog {
                 })
             })
             .collect();
+        self.matching = None;
     }
 
     /// `set` starts baking: its high polys load and its first map is the one in progress
@@ -118,5 +125,45 @@ impl BakeLog {
         if let Some(row) = self.maps.iter_mut().find(|row| row.texture_set == set && row.state == BakeMapState::Waiting) {
             row.state = BakeMapState::Baking;
         }
+    }
+}
+
+impl Session {
+    /// Start the Baking Log over for a bake of `sets` ([`BakeLog::begin`]), with how their parts pair by name
+    pub fn begin_bake_log(&mut self, sets: &[usize]) {
+        let matching = self.bake_log_matching(sets);
+        self.bake_log.begin(&self.doc.project, &self.doc.bake_meshes.high, sets);
+        self.bake_log.matching = matching;
+    }
+
+    /// The name pairs of each of `sets` that matches "By Mesh Name"; a high poly part counts as unpaired only when none of them pairs with it
+    fn bake_log_matching(&self, sets: &[usize]) -> Option<BakeLogMatching> {
+        let mut matching: Option<BakeLogMatching> = None;
+        let (mut paired_highs, mut unpaired_highs) = (HashSet::new(), Vec::new());
+        for &set in sets {
+            let (Ok(Some(pairs)), Ok(texture_set)) = (self.bake_name_pairs(set), self.doc.project.texture_set(set)) else { continue };
+            let settings = &texture_set.bake.high_poly;
+            let matching = matching.get_or_insert_with(|| BakeLogMatching {
+                low_suffix: settings.low_suffix.clone(),
+                high_suffix: settings.high_suffix.clone(),
+                pairs: Vec::new(),
+            });
+            for pair in pairs {
+                match (&pair.low, &pair.high) {
+                    (None, Some(high)) if !unpaired_highs.contains(high) => unpaired_highs.push(high.clone()),
+                    (None, _) => {}
+                    (Some(_), high) => {
+                        paired_highs.extend(high.clone());
+                        matching.pairs.push(pair);
+                    }
+                }
+            }
+        }
+
+        if let Some(matching) = &mut matching {
+            let unpaired = unpaired_highs.into_iter().filter(|high| !paired_highs.contains(high));
+            matching.pairs.extend(unpaired.map(|high| NamePair { low: None, high: Some(high) }));
+        }
+        matching
     }
 }

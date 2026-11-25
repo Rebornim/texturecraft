@@ -2,7 +2,7 @@
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use texturecraft_engine::bake::{BakeHighState, BakeLogHigh, BakeLogMap, BakeMapState};
+use texturecraft_engine::bake::{BakeHighState, BakeLogHigh, BakeLogMap, BakeLogMatching, BakeMapState, NamePair};
 use texturecraft_engine::core::{BakeResolution, BakedMap};
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::docking::Panel;
@@ -103,29 +103,29 @@ fn the_issues_filter_keeps_only_the_maps_with_a_problem() {
     let set_name = log_a_bake(&mut harness, BakeMapState::Failed("The high poly file could not be read.".into()));
     harness.get_by_label(&format!("{set_name} ID, Baked"));
 
-    harness.get_by_label("1, Show Only Issues").click();
+    harness.get_by_label("1, Show only rows with an issue").click();
     harness.run_steps(3);
 
     assert!(harness.query_by_label(&format!("{set_name} ID, Baked")).is_none(), "a baked map is filtered out");
     harness.get_by_label(&format!("{set_name} Position, Not baked"));
-    assert!(harness.query_by_label("Deselect filter to view.").is_none(), "an issue left: no empty text");
+    assert!(harness.query_by_label("Turn off the issues filter to see every row.").is_none(), "an issue left: no empty text");
 }
 
 #[test]
 fn the_issues_filter_says_so_when_nothing_went_wrong() {
     let mut harness = harness();
     let set_name = log_a_bake(&mut harness, BakeMapState::Baked);
-    harness.get_by_label("Show Only Issues").click();
+    harness.get_by_label("Show only rows with an issue").click();
     harness.run_steps(3);
 
     assert!(harness.query_by_label(&format!("{set_name} ID, Baked")).is_none());
-    harness.get_by_label("All textures baked successfully so far.");
-    harness.get_by_label("Deselect filter to view.");
+    harness.get_by_label("Every map so far baked without a problem.");
+    harness.get_by_label("Turn off the issues filter to see every row.");
 
-    harness.get_by_label("Show Only Issues").click();
+    harness.get_by_label("Show only rows with an issue").click();
     harness.run_steps(3);
     harness.get_by_label(&format!("{set_name} ID, Baked"));
-    assert!(harness.query_by_label("All textures baked successfully so far.").is_none(), "off again: every row is back");
+    assert!(harness.query_by_label("Every map so far baked without a problem.").is_none(), "off again: every row is back");
 }
 
 #[test]
@@ -154,9 +154,42 @@ fn the_high_poly_tab_counts_and_keeps_its_own_issues() {
     harness.get_by_label("High Poly Parameters").click();
     harness.run_steps(3);
 
-    harness.get_by_label("1, Show Only Issues").click();
+    harness.get_by_label("1, Show only rows with an issue").click();
     harness.run_steps(3);
 
     assert!(harness.query_by_label("ball_high.obj, Loaded").is_none(), "a loaded file is filtered out");
     harness.get_by_label("bolt_high.obj, Canceled");
+}
+
+#[test]
+fn the_matching_tab_lists_the_pairs_and_its_filter_keeps_the_parts_with_no_partner() {
+    let mut harness = harness();
+    log_a_bake(&mut harness, BakeMapState::Baked);
+    let pair = |low: Option<&str>, high: Option<&str>| NamePair { low: low.map(Into::into), high: high.map(Into::into) };
+    harness.state_mut().session.bake_log.matching = Some(BakeLogMatching {
+        low_suffix: "_low".into(),
+        high_suffix: "_high".into(),
+        pairs: vec![pair(Some("Barrel_low"), Some("Barrel_high")), pair(Some("Strap_low"), None)],
+    });
+    harness.get_by_label("Matching by Name").click();
+    harness.run_steps(3);
+    harness.get_by_label("Barrel_low, Barrel_high");
+
+    harness.get_by_label("1, Show only rows with an issue").click();
+    harness.run_steps(3);
+
+    assert!(harness.query_by_label("Barrel_low, Barrel_high").is_none(), "a pair is filtered out");
+    harness.get_by_label("Strap_low, No match");
+}
+
+#[test]
+fn the_matching_tab_says_when_no_set_matched_by_name() {
+    let mut harness = harness();
+    harness.get_by_label("Matching by Name").click();
+    harness.run_steps(3);
+    assert!(harness.query_by_label("Matching by name was off for this bake.").is_none(), "nothing baked yet: nothing to say");
+
+    log_a_bake(&mut harness, BakeMapState::Baked);
+
+    harness.get_by_label("Matching by name was off for this bake.");
 }

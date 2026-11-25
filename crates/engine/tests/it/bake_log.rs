@@ -3,8 +3,8 @@
 use std::collections::BTreeSet;
 
 use serde_json::json;
-use texturecraft_engine::bake::{BakeHighState, BakeMapState};
-use texturecraft_engine::core::BakedMap;
+use texturecraft_engine::bake::{BakeHighState, BakeLog, BakeMapState, NamePair};
+use texturecraft_engine::core::{BakedMap, MeshMatchMode};
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute, sample_session};
 
@@ -86,15 +86,44 @@ fn a_set_that_fails_before_its_high_polys_are_ready_marks_them_failed_and_a_canc
     session.add_high_poly_bytes("ball_high.obj", b"o Ball_high\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".to_vec()).unwrap();
     let log = &mut session.bake_log;
     log.begin(&session.doc.project, &session.doc.bake_meshes.high, &[0, 1]);
+    let state = |log: &BakeLog, set: usize| log.highs.iter().find(|high| high.texture_set == set).map(|high| high.state.clone());
 
     log.set_started(0);
-    assert_eq!(log.highs[0].state, BakeHighState::Loading);
+    assert_eq!(state(log, 0), Some(BakeHighState::Loading));
     assert!(log.is_loading_high_polys());
     log.set_failed(0, "The cage file could not be read.");
     log.set_started(1);
     log.cancel(Some(1));
 
-    assert_eq!(log.highs[0].state, BakeHighState::Failed("The cage file could not be read.".into()));
-    assert_eq!(log.highs[1].state, BakeHighState::Canceled);
+    assert_eq!(state(log, 0), Some(BakeHighState::Failed("The cage file could not be read.".into())));
+    assert_eq!(state(log, 1), Some(BakeHighState::Canceled));
     assert!(!log.is_loading_high_polys());
+}
+
+#[test]
+fn a_bake_matching_by_name_lists_its_pairs_and_only_the_high_parts_no_set_pairs_with() {
+    let obj = "o Box_low\nusemtl Body\nv 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n\
+               o Lid_low\nusemtl Lid\nv 2 0 0\nv 3 0 0\nv 2 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 4/4 5/5 6/6\n";
+    let mut session = Session::from_mesh_bytes("sets.obj", obj.as_bytes(), 128, "sets").unwrap();
+    session
+        .add_high_poly_bytes("high.obj", b"o Box_high\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\no Extra_high\nv 2 0 0\nv 3 0 0\nv 2 1 0\nf 4 5 6\n".to_vec())
+        .unwrap();
+    session.begin_bake_log(&[0, 1]);
+    assert_eq!(session.bake_log.matching, None, "matching \"Always\" lists no pairs");
+
+    for set in &mut session.doc.project.texture_sets {
+        set.bake.high_poly.match_mode = MeshMatchMode::ByMeshName;
+    }
+    session.begin_bake_log(&[0, 1]);
+
+    let pair = |low: Option<&str>, high: Option<&str>| NamePair { low: low.map(Into::into), high: high.map(Into::into) };
+    let matching = session.bake_log.matching.clone().unwrap();
+    assert_eq!(
+        matching.pairs,
+        [pair(Some("Box_low"), Some("Box_high")), pair(Some("Lid_low"), None), pair(None, Some("Extra_high"))],
+        "Box_high is paired by the other set"
+    );
+    assert_eq!(matching.issue_count(), 2);
+    let log = execute(&mut session, "bake.log", &json!({})).unwrap();
+    assert_eq!(log["matching"]["pairs"][1], json!({ "low": "Lid_low", "high": null }), "{log}");
 }

@@ -1,10 +1,13 @@
-//! The Layers panel's top row: the displayed channel, the Add effect and Add mask menus, the add-layer buttons and remove
+//! The Layers panel's top row: the displayed channel, the Add effect and Add mask menus, the add-layer buttons, the smart material picker and remove
+
+use std::path::PathBuf;
 
 use egui::{Align2, Color32, CornerRadius, FontId, Frame, Id, Painter, Pos2, Rect, Response, Sense, Shadow, Stroke, StrokeKind, Ui, pos2, vec2};
 use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::Session;
 use texturecraft_engine::core::{Layer, LayerId};
+use texturecraft_engine::materials::MATERIALS;
 use texturecraft_engine::paint::alphas;
 
 use crate::TextureCraftApp;
@@ -21,12 +24,14 @@ mod bitmap_choice;
 mod item_icon;
 mod menu_icon;
 mod pick;
+mod smart_material_choice;
 
 use add_item::AddItem;
 use bitmap_choice::BitmapChoice;
 use item_icon::ItemIcon;
 use menu_icon::MenuIcon;
 use pick::Pick;
+use smart_material_choice::SmartMaterialChoice;
 
 /// The row's height and its controls' height
 const BAR_HEIGHT: f32 = 40.0;
@@ -37,14 +42,16 @@ const CONTROL_ROUNDING: u8 = 5;
 const SIDE_PADDING: f32 = 8.0;
 
 const CHANNEL_WIDTH: f32 = 88.0;
+/// The channel list's width when the row gets tight: "Material" and its caret still fit, and the row fits a 1280 pt wide window's Layers panel
+const CHANNEL_MIN_WIDTH: f32 = 70.0;
 /// A menu button: its icon, then its caret
-const MENU_BUTTON_WIDTH: f32 = 32.0;
+const MENU_BUTTON_WIDTH: f32 = 30.0;
 const MENU_ICON_X: f32 = 11.0;
 const MENU_CARET_INSET: f32 = 8.0;
 const MENU_ICON_SIZE: f32 = 14.0;
 const MASK_ICON_SIZE: f32 = 12.0;
 const CARET_SIZE: f32 = 11.0;
-const BUTTON_WIDTH: f32 = 24.0;
+const BUTTON_WIDTH: f32 = 23.0;
 const ICON_SIZE: f32 = 14.0;
 /// Air after the channel list, between the two menu buttons, before the add-layer buttons and between them
 const CHANNEL_GAP: f32 = 6.0;
@@ -52,16 +59,16 @@ const MENU_GAP: f32 = 3.0;
 const GROUP_GAP: f32 = 8.0;
 const BUTTON_GAP: f32 = 2.0;
 const CHANNEL_TEXT_X: f32 = 8.0;
-const CHANNEL_CARET_INSET: f32 = 10.0;
+const CHANNEL_CARET_INSET: f32 = 9.0;
 const CHANNEL_CARET_SIZE: f32 = 12.0;
 const TEXT_SIZE: f32 = 12.0;
 
 /// The row's width besides the channel list's: its padding, the two menu buttons and their gaps
 const MENUS_ROW_WIDTH: f32 = 2.0 * SIDE_PADDING + CHANNEL_GAP + 2.0 * MENU_BUTTON_WIDTH + MENU_GAP;
-/// The three add-layer buttons and Remove
-const LAYER_BUTTONS_WIDTH: f32 = 4.0 * BUTTON_WIDTH + 3.0 * BUTTON_GAP;
-/// The width every control takes in one row
-const ONE_ROW_WIDTH: f32 = MENUS_ROW_WIDTH + CHANNEL_WIDTH + GROUP_GAP + LAYER_BUTTONS_WIDTH;
+/// The three add-layer buttons, the smart material button and Remove
+const LAYER_BUTTONS_WIDTH: f32 = 4.0 * BUTTON_WIDTH + MENU_BUTTON_WIDTH + 4.0 * BUTTON_GAP;
+/// The smallest width that holds every control in one row, the channel list at its narrowest
+const ONE_ROW_WIDTH: f32 = MENUS_ROW_WIDTH + CHANNEL_MIN_WIDTH + GROUP_GAP + LAYER_BUTTONS_WIDTH;
 
 /// A hanging menu: its caption, rows, icon and text columns and its smallest width
 const MENU_PADDING: f32 = 4.0;
@@ -105,8 +112,9 @@ pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     let mut x = bar.left() + SIDE_PADDING;
     let control = |x: f32, top: f32, width: f32| Rect::from_min_size(pos2(x, top), vec2(width, CONTROL_HEIGHT));
 
-    // Narrower still, the channel list gives up width before a menu button leaves the panel
-    let channel_width = CHANNEL_WIDTH.min(width - MENUS_ROW_WIDTH).max(0.0);
+    // A tight row takes width from the channel list first; narrower still, it gives up width before a menu button leaves the panel
+    let channel_room = if two_rows { width - MENUS_ROW_WIDTH } else { width - MENUS_ROW_WIDTH - GROUP_GAP - LAYER_BUTTONS_WIDTH };
+    let channel_width = CHANNEL_WIDTH.min(channel_room).max(0.0);
     channel_list(app, ui, control(x, top, channel_width), &tokens);
     x += channel_width + CHANNEL_GAP;
 
@@ -119,16 +127,19 @@ pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     x += MENU_BUTTON_WIDTH + GROUP_GAP;
 
     let (top, mut x) = if two_rows { (top + BAR_HEIGHT, bar.left() + SIDE_PADDING) } else { (top, x) };
-    for (glyph, label, command) in [
-        (ic::PAINT_BRUSH, tr("Add paint layer"), "layer.add.paint"),
-        (ic::PAINT_BUCKET, tr("Add fill layer"), "layer.add.fill"),
-        (ic::FOLDER_SIMPLE, tr("Add folder"), "layer.add.group"),
-    ] {
+    for (glyph, label, command) in [(ic::PAINT_BRUSH, tr("Add paint layer"), "layer.add.paint"), (ic::PAINT_BUCKET, tr("Add fill layer"), "layer.add.fill")] {
         if plain_button(ui, control(x, top, BUTTON_WIDTH), glyph, label, &tokens).clicked() {
             app.run(command, Value::Null);
         }
         x += BUTTON_WIDTH + BUTTON_GAP;
     }
+    let smart_materials = ui.scope_id().with("smart_material_picker");
+    picker_button(ui, control(x, top, MENU_BUTTON_WIDTH), tr("Add smart material"), MenuIcon::Glyph(ic::STACK), smart_materials, &tokens);
+    x += MENU_BUTTON_WIDTH + BUTTON_GAP;
+    if plain_button(ui, control(x, top, BUTTON_WIDTH), ic::FOLDER_SIMPLE, tr("Add folder"), &tokens).clicked() {
+        app.run("layer.add.group", Value::Null);
+    }
+    x += BUTTON_WIDTH + BUTTON_GAP;
     let remove = control((bar.right() - SIDE_PADDING - BUTTON_WIDTH).max(x), top, BUTTON_WIDTH);
     if plain_button(ui, remove, ic::TRASH, &crate::keymap::tip(&app.ui.keymap, tr("Remove layer"), "layer.remove"), &tokens).clicked() {
         app.run("layer.remove", Value::Null);
@@ -144,6 +155,7 @@ pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     if let Some(layer) = selected {
         bitmap_picker(app, &anchor, popup(layer), layer);
     }
+    smart_material_picker(app, &anchor, smart_materials);
 }
 
 /// Layer `id` of the project, when there is one
@@ -254,6 +266,19 @@ fn menu_button(ui: &mut Ui, rect: Rect, label: &str, icon: MenuIcon, caption: &s
         button_face(&painter, rect, icon, tokens);
     }
     picked
+}
+
+/// A button drawn like a menu button whose click opens or closes resource picker `popup`; it keeps its button face while the picker is open
+fn picker_button(ui: &mut Ui, rect: Rect, label: &str, icon: MenuIcon, popup: Id, tokens: &Tokens) {
+    let response = tip_above(ui.interact(rect, ui.scope_id().with(("layer_toolbar_menu", label)), Sense::click()), label);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    if response.clicked() {
+        resource_picker::toggle(ui.ctx(), popup);
+    }
+    if response.hovered() || egui::Popup::is_id_open(ui.ctx(), popup) {
+        ui.painter().rect_filled(rect, CornerRadius::same(CONTROL_ROUNDING), tokens.button);
+    }
+    button_face(ui.painter(), rect, icon, tokens);
 }
 
 /// A menu button's icon and caret
@@ -460,4 +485,47 @@ fn bitmap_tabs(session: &Session) -> Vec<PickerTab<BitmapChoice>> {
         .collect();
     let groups = vec![PickerGroup { header: Some(tr("Textures")), items: textures }, PickerGroup { header: Some(tr("Alphas")), items: alphas }];
     vec![PickerTab { icon: ic::SQUARES_FOUR, name: tr("Resources"), groups }]
+}
+
+/// The smart material picker, hanging under `anchor` at its width while open: a pick adds the material above the selection, as a shelf click on a saved one does
+fn smart_material_picker(app: &mut TextureCraftApp, anchor: &Response, popup: Id) {
+    let tabs = || smart_material_tabs(app.library.as_deref().unwrap_or_default());
+    match resource_picker::show(anchor, popup, &mut app.thumbs, None, false, tabs) {
+        Some(SmartMaterialChoice::BuiltIn(id)) => {
+            app.run("material.apply", json!({"material": id}));
+        }
+        Some(SmartMaterialChoice::Saved(path)) => {
+            app.run("material.load", json!({"path": path.display().to_string()}));
+        }
+        None => {}
+    }
+}
+
+/// The smart material picker's one tab: the built-in smart materials, then the ones the user saved (once the shelf has read them)
+fn smart_material_tabs(library: &[PathBuf]) -> Vec<PickerTab<SmartMaterialChoice>> {
+    let built_in = MATERIALS
+        .iter()
+        .filter(|material| material.smart)
+        .map(|material| ResourcePickerItem {
+            id: SmartMaterialChoice::BuiltIn(material.id),
+            label: tr(material.label).to_owned(),
+            caption: Some(tr(material.category)),
+            picture: TilePicture::Material(material.id),
+        })
+        .collect();
+    let saved: Vec<_> = library
+        .iter()
+        .filter(|path| !crate::shelf::is_saved_mask(path))
+        .map(|path| ResourcePickerItem {
+            id: SmartMaterialChoice::Saved(path.clone()),
+            label: crate::shelf::saved_material_name(path).to_owned(),
+            caption: None,
+            picture: TilePicture::Glyph(ic::SPHERE),
+        })
+        .collect();
+    let mut groups = vec![PickerGroup { header: Some(tr("Smart materials")), items: built_in }];
+    if !saved.is_empty() {
+        groups.push(PickerGroup { header: Some(tr("Your assets")), items: saved });
+    }
+    vec![PickerTab { icon: ic::STACK, name: tr("Smart materials"), groups }]
 }

@@ -360,7 +360,7 @@ fn grid(app: &mut TextureCraftApp, ui: &mut Ui, entries: &[ShelfEntry], height: 
 }
 
 /// Whether a library file is a saved smart mask (not a smart material)
-fn is_saved_mask(path: &std::path::Path) -> bool {
+pub(crate) fn is_saved_mask(path: &std::path::Path) -> bool {
     path.extension().is_some_and(|extension| extension == texturecraft_engine::smart_masks::SMART_MASK_EXT)
 }
 
@@ -444,7 +444,7 @@ fn scan_library(app: &mut TextureCraftApp) {
 fn scan_library(_: &mut TextureCraftApp) {}
 
 /// A saved smart material's name: its file name without the extension
-fn saved_material_name(path: &std::path::Path) -> &str {
+pub(crate) fn saved_material_name(path: &std::path::Path) -> &str {
     path.file_stem().and_then(|stem| stem.to_str()).unwrap_or(SAVED_MATERIAL_NAME)
 }
 

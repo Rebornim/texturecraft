@@ -3,6 +3,7 @@
 
 mod alpha_parameters;
 mod anchor_point;
+mod auto_rebake;
 mod bake_job_mesh;
 mod bake_live_preview;
 mod bake_map_rows;

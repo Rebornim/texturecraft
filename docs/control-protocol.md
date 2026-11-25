@@ -326,6 +326,13 @@ Each texture set in `project.inspect` / `session.inspect` lists its out-of-date 
 own). Imported maps, and maps saved before this record existed, never show:
 `"outOfDate": {"ambientOcclusion": ["mapSettings"]}`.
 
+`bake.autoRebake` `{ts?, map: id | null}` turns on Auto-rebake for one mesh map of a texture set
+(the active one by default), replacing its previous one, or turns it off with `null`; it is saved
+with the project and shows as the set's `autoRebake` in `project.inspect`. While the desktop or web
+app is in Bake mode, an auto-rebake map that goes out of date is baked again on its own in the
+background, alone, once its settings have stopped changing for half a second; a change during
+that bake restarts it. The headless CLI does not rebake by itself: run `bake.run` there.
+
 `{"active": false}` when no bake is shown; setting `show` then is an error. Drive a bake with
 `ui.bake.start` and poll `ui.inspect`'s `bakeStatus` / `bakePreview` (and `viewport.screenshot`)
 until `baking` is `null`.

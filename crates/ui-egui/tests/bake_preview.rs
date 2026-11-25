@@ -134,6 +134,7 @@ fn a_ready_result_waits_for_the_map_stream_to_close() {
         total: 1,
         mesh_id,
         only: None,
+        rebake: None,
         current: Some(RunningBake {
             set_index: 0,
             progress: Arc::new(Progress::new()),

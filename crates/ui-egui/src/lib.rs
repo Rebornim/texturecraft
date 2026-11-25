@@ -10,13 +10,14 @@
 mod anchor_properties;
 mod angle_dial;
 mod ask;
+mod auto_rebake;
 mod bake_job;
 pub mod bake_mode;
-pub mod baking_log;
 mod bake_preset;
 pub mod bake_presets;
 mod bake_report;
 mod bake_scene;
+pub mod baking_log;
 mod color_management;
 mod color_picker;
 mod color_selection_editor;
@@ -288,6 +289,8 @@ pub struct TextureCraftApp {
     pub bake: Option<BakeJob>,
     /// What the bake running now has done so far, for the summary when it ends
     pub bake_report: bake_report::BakeReport,
+    /// When the out-of-date auto-rebake maps are rebaked
+    auto_rebake: auto_rebake::AutoRebake,
     /// The Import PBR textures dialog while it is open.
     pub pbr_import: Option<pbr_import::PbrDialog>,
     pub resize: Option<ResizeJob>,
@@ -461,6 +464,7 @@ impl TextureCraftApp {
             gpu_memory: (Vec::new(), None),
             bake: None,
             bake_report: Default::default(),
+            auto_rebake: Default::default(),
             pbr_import: None,
             resize: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -700,9 +704,12 @@ impl TextureCraftApp {
         self.session.bake_preview_begin(orders);
 
         let total = sets.len();
-        self.session.begin_bake_log(&sets);
+        match only {
+            Some(map) => self.session.begin_map_bake_log(&sets, map),
+            None => self.session.begin_bake_log(&sets),
+        }
         self.bake_report = bake_report::BakeReport::started(self.last_time);
-        self.bake = Some(BakeJob { queue: sets, current: None, total, mesh_id: self.session.mesh_id, only });
+        self.bake = Some(BakeJob { queue: sets, current: None, total, mesh_id: self.session.mesh_id, only, rebake: None });
     }
 
     /// Re-cook MaterialCraft material layer `layer` in the background. While one cook of the layer
@@ -879,13 +886,14 @@ impl TextureCraftApp {
         }
 
         let set_index = job.queue.remove(0);
-        let only = job.only;
+        let (only, rebake) = (job.only, job.rebake);
 
         self.session.bake_preview_set_current(set_index);
         self.session.bake_log.set_started(set_index);
-        let task = match only {
-            Some(map) => self.session.bake_task_only(set_index, map),
-            None => self.session.bake_task(set_index),
+        let task = match (rebake, only) {
+            (Some((_, map, _)), _) => self.session.bake_task_for(set_index, &[map]),
+            (None, Some(map)) => self.session.bake_task_only(set_index, map),
+            (None, None) => self.session.bake_task(set_index),
         };
         match task {
             Ok(task) => {
@@ -927,6 +935,10 @@ impl TextureCraftApp {
             self.session.log.warn("Baker", line);
         } else {
             self.session.log.info("Baker", line);
+        }
+
+        if self.bake_report.auto_rebake && !failed {
+            return;
         }
 
         self.toast(text, failed);
@@ -1220,6 +1232,7 @@ impl eframe::App for TextureCraftApp {
         self.poll_bake(ctx);
         self.bake_map_thumbnails.retain_mesh(self.session.mesh_id);
         bake_mode::poll_live_preview(self, ctx);
+        auto_rebake::poll(self, ctx);
         self.poll_resize(ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.poll_high_poly_job(ctx);

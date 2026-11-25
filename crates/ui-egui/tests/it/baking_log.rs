@@ -64,6 +64,18 @@ fn the_baking_process_tab_lists_each_set_and_map_with_how_it_went() {
 }
 
 #[test]
+fn a_one_map_bake_lists_only_that_map() {
+    let mut harness = harness();
+
+    harness.state_mut().start_bake_of(vec![0], Some(BakedMap::Position));
+    run_to_the_end(&mut harness);
+
+    let name = harness.state().session.doc.project.texture_sets[0].name.clone();
+    assert!(harness.query_by_label(&format!("{name} Position, Baked")).is_some(), "the baked map is ticked");
+    assert!(harness.query_by_label_contains(&format!("{name} ID")).is_none(), "a checked map the bake left alone has no row");
+}
+
+#[test]
 fn a_failed_maps_arrow_opens_its_settings() {
     let mut harness = harness();
 

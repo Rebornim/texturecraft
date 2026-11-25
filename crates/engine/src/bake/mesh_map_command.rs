@@ -131,9 +131,14 @@ impl Session {
         self.bake_task_of(texture_set, None)
     }
 
+    /// A task that bakes only `maps` of texture set `texture_set`, checked or not; its other baked maps stay as they are
+    pub fn bake_task_for(&self, texture_set: usize, maps: &[BakedMap]) -> Result<BakeTask> {
+        self.bake_task_of(texture_set, Some(maps))
+    }
+
     /// The bake of texture set `texture_set`'s map `map` alone, checked or not
     pub fn bake_task_only(&self, texture_set: usize, map: BakedMap) -> Result<BakeTask> {
-        self.bake_task_of(texture_set, Some(map))
+        self.bake_task_of(texture_set, Some(&[map]))
     }
 
     /// Prepare a display-only bake, retaining previous pixels only for the displayed map's excluded UV tiles
@@ -143,15 +148,15 @@ impl Session {
         Ok(task)
     }
 
-    fn bake_task_of(&self, texture_set: usize, only: Option<BakedMap>) -> Result<BakeTask> {
+    fn bake_task_of(&self, texture_set: usize, only: Option<&[BakedMap]>) -> Result<BakeTask> {
         let set = self.doc.project.texture_set(texture_set)?;
         if !set.has_enabled_bake_tiles() {
             return Err(EngineError::Other(format!("texture set {} has no UV tiles selected for baking", set.name)));
         }
 
         let mut settings = set.bake.clone();
-        if let Some(map) = only {
-            settings.maps.select([map]);
+        if let Some(maps) = only {
+            settings.maps.select(maps.iter().copied());
         }
 
         // Read from the maps that bake, so a map baked alone while unchecked still gets the colours
@@ -184,7 +189,7 @@ impl Session {
         let previous_maps = if excluded_tiles.is_empty() { Default::default() } else { self.doc.baked.get(&texture_set).cloned().unwrap_or_default() };
 
         let tracer = chosen_tracer(GPU_TRACER.get(), GPU_RAYTRACING.load(Ordering::Relaxed));
-        let sources = set.bake.maps.enabled().map(|map| Ok((map, self.bake_source(texture_set, map)?))).collect::<Result<_>>()?;
+        let sources = settings.maps.enabled().map(|map| Ok((map, self.bake_source(texture_set, map)?))).collect::<Result<_>>()?;
         Ok(BakeTask {
             low_base_color,
             ts: texture_set,

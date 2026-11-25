@@ -1,5 +1,6 @@
 //! Baking tasks, commands, settings helpers, and the mesh-map baking API
 
+mod auto_rebake;
 mod bake_cage_inputs;
 mod bake_checks;
 mod bake_high_state;
@@ -52,6 +53,7 @@ type MaterialColors = std::sync::Arc<Vec<Option<std::sync::Arc<texturecraft_geom
 pub(crate) fn specs() -> Vec<CommandSpec> {
     let mut commands = mesh_map_command::specs();
     commands.extend(paint_command::specs());
+    commands.extend(auto_rebake::specs());
     commands.extend(tile_command::specs());
     commands.extend(sync_command::specs());
     commands

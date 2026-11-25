@@ -72,6 +72,9 @@ pub struct TextureSet {
     /// What each baked map was baked from; a map without a record (imported, or older project) is never out of date
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub bake_sources: BTreeMap<BakedMap, BakeSource>,
+    /// The one mesh map the app rebakes by itself when what it is baked from changes
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_rebake: Option<BakedMap>,
     #[serde(default = "yes")]
     pub visible: bool,
     /// UDIM numbers of the UV tiles this set paints, ascending (UV tiles mode);
@@ -175,6 +178,7 @@ impl TextureSet {
             bake: BakeSettings::default(),
             baked: BTreeSet::new(),
             bake_sources: BTreeMap::new(),
+            auto_rebake: None,
             visible: true,
             uv_tiles: Vec::new(),
             bake_excluded_tiles: BTreeSet::new(),

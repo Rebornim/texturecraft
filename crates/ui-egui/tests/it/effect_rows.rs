@@ -1,4 +1,4 @@
-//! Effect rows in the layer stack: dragging one or its menu's Move items reorder its stack, its blend mode and opacity sit at its right, and its menu holds the Blending options
+//! Effect rows in the layer stack: dragging one or its menu's Move items reorder its stack, its cross removes it, its blend mode and opacity sit at its right, and its menu holds the Blending options
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
@@ -94,6 +94,30 @@ fn an_effect_rows_menu_moves_it_within_its_stack() {
     assert!(!harness.get_by_label("Move up").accesskit_node().is_disabled());
 }
 
+/// The cross at an effect row's right end removes that effect alone, in one undo step
+#[test]
+fn an_effect_rows_cross_removes_it() {
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let layer = LayerId(id(execute(&mut session, "layer.add.fill", &Value::Null).unwrap(), "layer"));
+    let mut add =
+        |name: &str| id(execute(&mut session, "effect.add.filter", &json!({"target": "content", "filter": "invert", "name": name})).unwrap(), "effect");
+    let a = add("Effect A");
+    add("Effect B");
+    execute(&mut session, "layer.select", &json!({"layer": layer.0})).unwrap();
+    let mut harness = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).build_eframe(|creation_context| TextureCraftApp::new(creation_context, session));
+    harness.run_steps(4);
+    let undo_steps = harness.state().session.history_labels().len();
+
+    let at = harness.get_by_label("Remove effect Effect B").rect().center();
+    harness.drag_at(at);
+    harness.drop_at(at);
+    harness.run_steps(3);
+
+    let remaining = harness.state().session.doc.project.layers[&layer].content_effects.iter().map(|e| e.id.0).collect::<Vec<_>>();
+    assert_eq!(remaining, [a]);
+    assert_eq!(harness.state().session.history_labels().len(), undo_steps + 1);
+}
+
 /// An effect row's blend mode menu and opacity field sit at its right and set the displayed channel's blending, as on layer rows
 #[test]
 fn an_effect_row_sets_its_blend_mode_and_opacity() {
@@ -110,9 +134,9 @@ fn an_effect_row_sets_its_blend_mode_and_opacity() {
     harness.state_mut().ui.layer_material_view = false;
     harness.run_steps(2);
 
-    // From the row's right edge: a 4-point gap, then the 82-point pair of mode menu and opacity field
+    // Left of the remove cross: a 4-point gap, then the 82-point pair of mode menu and opacity field
     let row = harness.get_by_label("Effect A").rect();
-    let pair_right = row.right() - 4.0;
+    let pair_right = harness.get_by_label("Remove effect Effect A").rect().left() - 4.0;
     let pair_left = pair_right - 82.0;
     let mode_at = egui::pos2(pair_left + 20.0, row.center().y);
     harness.drag_at(mode_at);

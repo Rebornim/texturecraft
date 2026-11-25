@@ -2096,10 +2096,16 @@ pub struct Effect {
 
 impl Effect {
     pub fn new(id: LayerId, kind: EffectKind) -> Effect {
+        // Generators are named after their kind, as filters are
+        let name = match &kind {
+            EffectKind::Generator(generator) => generator.kind.label(),
+            _ => kind.name(),
+        };
+
         // Generators and fills that build a mask usually add on top of the background
         Effect {
             id,
-            name: kind.name().to_string(),
+            name: name.to_string(),
             visible: true,
             kind,
             blend: BlendMode::Normal,

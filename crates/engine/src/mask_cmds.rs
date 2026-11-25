@@ -713,6 +713,9 @@ fn histogram(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(out)
 }
 
+/// The name every generator effect got before they were named after their kind
+const FORMER_GENERATOR_NAME: &str = "Generator";
+
 /// Edit visibility, blending, name, effect parameters, or a filter's type
 fn set(session: &mut Session, params: &Value) -> Result<Value> {
     const CMD: &str = "effect.set";
@@ -818,6 +821,11 @@ fn set(session: &mut Session, params: &Value) -> Result<Value> {
                 if let Some(kind) = generator_kind
                     && kind != generator.kind
                 {
+                    // A name taken from the kind follows the new kind
+                    let named_by_kind = edited.name == generator.kind.label() || edited.name == FORMER_GENERATOR_NAME;
+                    if named_by_kind && name_param(params).is_none() {
+                        edited.name = kind.label().to_string();
+                    }
                     generator.kind = kind;
                     generator.detail = Generator::new(kind).detail;
                     generator.inputs.retain(|map, _| kind.inputs().contains(map));

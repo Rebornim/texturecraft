@@ -1365,6 +1365,7 @@ fn layer_context_menu(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, con
     run(app, ui, tr("Add white mask"), "mask.add.white", json!({"layer": layer_id}), layer.mask.is_none());
     run(app, ui, tr("Add black mask"), "mask.add.black", json!({"layer": layer_id}), layer.mask.is_none());
     run(app, ui, tr("Add mask with color selection"), "mask.add.colorSelection", json!({"layer": layer_id}), true);
+    run(app, ui, tr("Add mask with height combination"), "mask.add.heightCombination", json!({"layer": layer_id}), true);
     if !content_thumbnail {
         ui.separator();
         mask_management_menu(app, ui, layer, false);

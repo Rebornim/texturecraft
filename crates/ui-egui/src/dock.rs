@@ -23,7 +23,6 @@ use crate::property_sheet::{PropertySheet, SectionScope};
 use crate::shelf::{Asset, ShelfDrag};
 use crate::source_choice::SourceChoice;
 use crate::theme::{Tokens, caption};
-use crate::toolbar::{MAX_BRUSH_SIZE, MIN_BRUSH_SIZE};
 use crate::widgets::{chip, color_swatch, combo, dnd_release, elided, icon_button, press_edit, section, section_with_reset, slider, slider_edit};
 
 const TAG_COLORS: [Color32; 8] = [
@@ -2128,9 +2127,9 @@ fn tool_properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     };
     PropertySheet::show(ui, "tool_sheet", |sheet| {
         for section in tool_sections(app) {
-            sheet.section(section.title(), false);
+            let menu = sheet.section(section.title(), section == PaintSection::Brush);
             match section {
-                PaintSection::Brush => legacy(sheet, app, brush_section),
+                PaintSection::Brush => crate::brush_sheet::brush_section(app, sheet, menu),
                 PaintSection::Alpha => legacy(sheet, app, alpha_section),
                 PaintSection::Stencil => legacy(sheet, app, stencil_section),
                 PaintSection::Material => legacy(sheet, app, material_controls),
@@ -2270,34 +2269,6 @@ fn path_section(app: &mut TextureCraftApp, ui: &mut Ui) {
     ui.label(RichText::new(hint).size(10.5).color(tk.text_dim));
 }
 
-/// Popover for built-in and saved brush presets
-fn brush_presets_popover(app: &mut TextureCraftApp, ui: &mut Ui) {
-    let response = ui.button(format!("{}  {}", ic::PAINT_BRUSH_BROAD, tr("Brush presets")));
-    let popup_id = ui.make_persistent_id("brush_presets_popup");
-    if response.clicked() {
-        egui::Popup::toggle_id(ui.ctx(), popup_id);
-    }
-
-    egui::Popup::from_response(&response).id(popup_id).open_memory(None).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-        ui.set_min_width(230.0);
-        egui::ScrollArea::vertical().max_height(380.0).show(ui, |ui| {
-            let mut category = "";
-            for preset in texturecraft_engine::paint::presets::PRESETS.iter() {
-                if preset.category != category {
-                    category = preset.category;
-                    ui.label(caption(category));
-                }
-                if ui.selectable_label(false, preset.label).on_hover_text(tr("Use this brush (keeps its size)")).clicked() {
-                    app.run("brush.preset.apply", json!({"preset": preset.id}));
-                }
-            }
-
-            ui.separator();
-            crate::shelf::user_brushes(app, ui, "");
-        });
-    });
-}
-
 /// Width of the label column in polygon fill's properties
 const POLYGON_FILL_LABEL_WIDTH: f32 = 108.0;
 
@@ -2394,129 +2365,6 @@ fn polygon_fill_paints_mask(app: &TextureCraftApp) -> Result<bool, String> {
             }
         }
     }
-}
-
-/// Font size of the dim hint line under the Brush caption
-const HINT_TEXT_SIZE: f32 = 10.5;
-
-fn brush_section(app: &mut TextureCraftApp, ui: &mut Ui) {
-    brush_presets_popover(app, ui);
-
-    let brush = &mut app.session.tool.brush;
-    let defaults = BrushSettings::default();
-    let hint = tr("Ctrl+right-drag in a view sets the size and hardness, Ctrl+left-drag the flow and angle.");
-    ui.label(RichText::new(hint).size(HINT_TEXT_SIZE).color(Tokens::get(ui.ctx()).text_dim));
-    ui.label(RichText::new(tr("Ctrl+Shift+right-drag: size and hardness in fine steps.")).size(HINT_TEXT_SIZE).color(Tokens::get(ui.ctx()).text_dim));
-
-    // Each section's reset puts back only the fields it shows
-    let size_fields = |settings: &BrushSettings| (settings.size, settings.min_size, settings.screen_space);
-    if section_with_reset(ui, "sec_size", tr("Size"), true, size_fields(brush) == size_fields(&defaults), |ui| {
-        let mut size_percent = brush.size / MAX_BRUSH_SIZE * 100.0;
-        if slider(ui, tr("Size"), &mut size_percent, 0.05..=100.0, 1).changed() {
-            brush.size = (size_percent / 100.0 * MAX_BRUSH_SIZE).clamp(MIN_BRUSH_SIZE, MAX_BRUSH_SIZE);
-        }
-
-        let mut min_size_percent = brush.min_size * 100.0;
-        if slider(ui, tr("Minimum size (%)"), &mut min_size_percent, 0.0..=100.0, 0).changed() {
-            brush.min_size = min_size_percent / 100.0;
-        }
-
-        ui.checkbox(&mut brush.screen_space, tr("Size in screen space"));
-    }) {
-        (brush.size, brush.min_size, brush.screen_space) = size_fields(&defaults);
-    }
-
-    let flow_fields = |settings: &BrushSettings| (settings.flow, settings.opacity, settings.spacing);
-    if section_with_reset(ui, "sec_flow", tr("Flow and opacity"), true, flow_fields(brush) == flow_fields(&defaults), |ui| {
-        let mut flow_percent = brush.flow * 100.0;
-        if slider(ui, tr("Flow"), &mut flow_percent, 0.0..=100.0, 0).changed() {
-            brush.flow = flow_percent / 100.0;
-        }
-
-        let mut opacity_percent = brush.opacity * 100.0;
-        if slider(ui, tr("Stroke opacity"), &mut opacity_percent, 0.0..=100.0, 0).changed() {
-            brush.opacity = opacity_percent / 100.0;
-        }
-
-        let mut spacing_percent = brush.spacing * 100.0;
-        if slider(ui, tr("Spacing"), &mut spacing_percent, 1.0..=1000.0, 0).changed() {
-            brush.spacing = spacing_percent / 100.0;
-        }
-    }) {
-        (brush.flow, brush.opacity, brush.spacing) = flow_fields(&defaults);
-    }
-
-    let angle_fields = |settings: &BrushSettings| (settings.angle, settings.follow_path);
-    if section_with_reset(ui, "sec_angle", tr("Angle"), false, angle_fields(brush) == angle_fields(&defaults), |ui| {
-        slider(ui, tr("Angle"), &mut brush.angle, -180.0..=180.0, 0);
-        ui.checkbox(&mut brush.follow_path, tr("Follow path"));
-    }) {
-        (brush.angle, brush.follow_path) = angle_fields(&defaults);
-    }
-
-    let jitter_fields = |settings: &BrushSettings| (settings.jitter_size, settings.jitter_angle, settings.jitter_flow, settings.jitter_position);
-    if section_with_reset(ui, "sec_jitter", tr("Jitters"), false, jitter_fields(brush) == jitter_fields(&defaults), |ui| {
-        let jitters = [(tr("Size jitter"), &mut brush.jitter_size), (tr("Angle jitter"), &mut brush.jitter_angle), (tr("Flow jitter"), &mut brush.jitter_flow)];
-        for (label, jitter) in jitters {
-            let mut jitter_percent = *jitter * 100.0;
-            if slider(ui, label, &mut jitter_percent, 0.0..=100.0, 0).changed() {
-                *jitter = jitter_percent / 100.0;
-            }
-        }
-
-        let mut position_jitter_percent = brush.jitter_position * 100.0;
-        if slider(ui, tr("Position jitter"), &mut position_jitter_percent, 0.0..=400.0, 0).changed() {
-            brush.jitter_position = position_jitter_percent / 100.0;
-        }
-    }) {
-        (brush.jitter_size, brush.jitter_angle, brush.jitter_flow, brush.jitter_position) = jitter_fields(&defaults);
-    }
-
-    let alignment_fields = |settings: &BrushSettings| (settings.alignment, settings.backface_culling, settings.angle_fade, settings.depth);
-    if section_with_reset(ui, "sec_align", tr("Alignment and culling"), false, alignment_fields(brush) == alignment_fields(&defaults), |ui| {
-        use texturecraft_engine::paint::Alignment;
-        let alignments = [(Alignment::Tangent, tr("Tangent | Wrap")), (Alignment::Camera, tr("Camera"))];
-        let shown = alignments.iter().find(|(alignment, _)| *alignment == brush.alignment).map_or("", |(_, label)| label);
-        combo(ui, tr("Alignment"), shown, |ui| {
-            for (alignment, label) in alignments {
-                ui.selectable_value(&mut brush.alignment, alignment, label);
-            }
-        });
-
-        ui.checkbox(&mut brush.backface_culling, tr("Backface culling"));
-        slider(ui, tr("Angle fade from"), &mut brush.angle_fade.0, 0.0..=90.0, 0);
-        slider(ui, tr("Angle fade to"), &mut brush.angle_fade.1, 0.0..=90.0, 0);
-        slider(ui, tr("Stamp depth"), &mut brush.depth, 0.05..=4.0, 2);
-    }) {
-        (brush.alignment, brush.backface_culling, brush.angle_fade, brush.depth) = alignment_fields(&defaults);
-    }
-
-    if section_with_reset(ui, "sec_particles", tr("Particles"), false, brush.particles == defaults.particles, |ui| {
-        let particles = &mut brush.particles;
-        ui.checkbox(&mut particles.enabled, tr("Particle brush (slides down the surface)"));
-
-        let mut count = particles.count as f32;
-        if slider(ui, tr("Count per stamp"), &mut count, 1.0..=16.0, 0).changed() {
-            particles.count = count as u32;
-        }
-
-        let mut lifetime_steps = particles.lifetime as f32;
-        if slider(ui, tr("Lifetime (steps)"), &mut lifetime_steps, 1.0..=128.0, 0).changed() {
-            particles.lifetime = lifetime_steps as u32;
-        }
-
-        slider(ui, tr("Gravity"), &mut particles.gravity, 0.0..=2.0, 2);
-    }) {
-        brush.particles = defaults.particles;
-    }
-
-    if section_with_reset(ui, "sec_lazy", tr("Lazy mouse"), false, brush.lazy == defaults.lazy, |ui| {
-        slider(ui, tr("Lazy mouse distance"), &mut brush.lazy, 0.0..=200.0, 0);
-    }) {
-        brush.lazy = defaults.lazy;
-    }
-
-    *brush = brush.sanitized();
 }
 
 /// One alpha in the picker: a 52×64 tile with the shape drawn by `paint` and a label.

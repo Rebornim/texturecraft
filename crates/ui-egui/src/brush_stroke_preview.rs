@@ -37,18 +37,31 @@ pub(crate) struct BrushStrokePreview {
 impl BrushStrokePreview {
     /// Paint the brush's stroke across `rect`, each pixel column coloured by `tint` of its position 0..1; it renders again only on a new brush, alpha image, colour or size
     pub(crate) fn paint(ctx: &Context, painter: &Painter, rect: Rect, brush: &BrushSettings, image: Option<&Arc<ImageRes>>, tint: impl Fn(f32) -> [u8; 3]) {
+        Self::paint_picture(ctx, painter, rect, "brush_stroke_preview", (brush, image), tint, stroke_image);
+    }
+
+    /// Paint `render`'s picture of the brush across `rect`, kept under `key` until the brush, alpha image, colour or size change
+    pub(crate) fn paint_picture(
+        ctx: &Context,
+        painter: &Painter,
+        rect: Rect,
+        key: &'static str,
+        (brush, image): (&BrushSettings, Option<&Arc<ImageRes>>),
+        tint: impl Fn(f32) -> [u8; 3],
+        render: impl FnOnce(&BrushSettings, Option<&ImageRes>, [usize; 2], f32, &[[u8; 3]]) -> ColorImage,
+    ) {
         let pixels_per_point = ctx.pixels_per_point();
         let size = [(rect.width() * pixels_per_point).round().max(1.0) as usize, (rect.height() * pixels_per_point).round().max(1.0) as usize];
         let tints: Vec<[u8; 3]> = (0..size[0]).map(|x| tint((x as f32 + 0.5) / size[0] as f32)).collect();
-        let id = Id::unique("brush_stroke_preview");
+        let id = Id::unique(key);
         let cached = ctx.data(|data| data.get_temp::<BrushStrokePreview>(id)).filter(|preview| {
             preview.brush == *brush && preview.size == size && preview.tints == tints && preview.image.as_ref().map(Arc::as_ptr) == image.map(Arc::as_ptr)
         });
         let preview = match cached {
             Some(preview) => preview,
             None => {
-                let picture = stroke_image(brush, image.map(|image| &**image), size, pixels_per_point, &tints);
-                let texture = ctx.load_texture("brush-stroke-preview", picture, TextureOptions::LINEAR);
+                let picture = render(brush, image.map(|image| &**image), size, pixels_per_point, &tints);
+                let texture = ctx.load_texture(key, picture, TextureOptions::LINEAR);
                 let preview = BrushStrokePreview { brush: brush.clone(), image: image.cloned(), tints, size, texture };
                 ctx.data_mut(|data| data.insert_temp(id, preview.clone()));
                 preview

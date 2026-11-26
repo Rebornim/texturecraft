@@ -3277,7 +3277,7 @@ fn paint_tool_properties_snapshots() {
     let in_properties = |harness: &Harness<'_, TextureCraftApp>, label: &str| {
         harness.get_all_by_label(label).map(|node| node.rect().center()).max_by(|a, b| a.x.total_cmp(&b.x)).unwrap()
     };
-    for header in ["Angle", "Jitters", "Alignment and culling", "Particles", "Lazy mouse"] {
+    for header in ["Particles", "Lazy mouse"] {
         harness.get_all_by_label(header).max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap().scroll_to_me();
         harness.run_steps(3);
         let at = in_properties(&harness, header);

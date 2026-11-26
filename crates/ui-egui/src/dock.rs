@@ -10,9 +10,11 @@ use texturecraft_engine::core::{
 };
 use texturecraft_engine::paint::alpha_params::MAX_ALPHA_CONTRAST;
 use texturecraft_engine::paint::{BrushAlpha, BrushSettings, alphas};
+use texturecraft_engine::texel::linear_to_srgb;
 use texturecraft_engine::{CloneFrom, StackTarget, Tool};
 
 use crate::TextureCraftApp;
+use crate::brush_stroke_preview::BrushStrokePreview;
 use crate::i18n::{n_, tr, trf};
 use crate::layer_panel::{effect_preview_size, effect_row_height, layer_preview_size, layer_row_height};
 use crate::past_end::PastEnd;
@@ -2053,23 +2055,14 @@ fn height_mask_section(app: &mut TextureCraftApp, ui: &mut Ui, layer: LayerId) {
 const BRUSH_PREVIEW_HEIGHT: f32 = 88.0;
 const BRUSH_PREVIEW_CORNER_RADIUS: f32 = 2.0;
 
-/// The preview stroke: its segments, its margin from the preview's left (each side of its half), its wave's phase span in radians and its swing
-const PREVIEW_STROKE_STEPS: usize = 40;
-const PREVIEW_STROKE_MARGIN: f32 = 14.0;
-const PREVIEW_STROKE_WAVE: f32 = 9.0;
-const PREVIEW_STROKE_SWING: f32 = 18.0;
-
-/// The preview stroke's width: [`PREVIEW_STROKE_WIDTH_SCALE`] points for each [`PREVIEW_SIZE_UNIT`] of brush size, kept inside [`PREVIEW_STROKE_WIDTH`]
-const PREVIEW_SIZE_UNIT: f32 = 0.25;
-const PREVIEW_STROKE_WIDTH_SCALE: f32 = 60.0;
-const PREVIEW_STROKE_WIDTH: std::ops::RangeInclusive<f32> = 2.0..=30.0;
-
-/// Faintest the preview stroke draws, so a low flow or opacity still shows
-const PREVIEW_STROKE_MIN_ALPHA: u8 = 30;
-
-/// Radius of the preview's material sphere, and the colour it shows when the tool has no base colour
+/// Radius of the preview's material sphere, and the material it shows for channels the tool doesn't paint
 const PREVIEW_SPHERE_RADIUS: f32 = 36.0;
 const PREVIEW_FALLBACK_BASE_COLOR: [f32; 3] = [0.8; 3];
+const PREVIEW_FALLBACK_METALLIC: f32 = 0.0;
+const PREVIEW_FALLBACK_ROUGHNESS: f32 = 0.5;
+
+/// Samples an image-backed mask's gray is read at across the preview stroke
+const STROKE_GRAY_SAMPLES: u32 = 64;
 
 /// Gap between the brush preview and the tab buttons
 const BRUSH_PREVIEW_GAP: f32 = 4.0;
@@ -2078,47 +2071,33 @@ fn tool_properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     let content = targets_content(app);
 
-    // Brush preview: a stroke and a sphere with the tool's material
+    // Brush preview: the brush's own stroke in the colour it paints, and a sphere with the tool's material
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), BRUSH_PREVIEW_HEIGHT), Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(rect, BRUSH_PREVIEW_CORNER_RADIUS, tokens.viewport);
     let half_width = rect.width() * 0.5;
+    let stroke_rect = Rect::from_min_size(rect.min, vec2(half_width, rect.height()));
     let brush = &app.session.tool.brush;
-    let mut points = Vec::new();
-    for step in 0..=PREVIEW_STROKE_STEPS {
-        let fraction = step as f32 / PREVIEW_STROKE_STEPS as f32;
-        let x = rect.left() + PREVIEW_STROKE_MARGIN + fraction * (half_width - 2.0 * PREVIEW_STROKE_MARGIN);
-        points.push(pos2(x, rect.center().y + (fraction * PREVIEW_STROKE_WAVE).sin() * PREVIEW_STROKE_SWING));
-    }
-
-    let stroke_width = (brush.size / PREVIEW_SIZE_UNIT * PREVIEW_STROKE_WIDTH_SCALE).clamp(*PREVIEW_STROKE_WIDTH.start(), *PREVIEW_STROKE_WIDTH.end());
-    let alpha = (brush.flow * brush.opacity * 255.0) as u8;
-
-    let preview_stroke = |gray: f32| {
-        let gray = (gray.clamp(0.0, 1.0) * 255.0).round() as u8;
-        Stroke::new(stroke_width, Color32::from_rgba_unmultiplied(gray, gray, gray, alpha.max(PREVIEW_STROKE_MIN_ALPHA)))
-    };
-
-    // Sample image-backed masks along the preview stroke
-    let gray = if content { texturecraft_engine::compose::MaskGray::Value(1.0) } else { app.session.mask_gray() };
-    match gray {
-        texturecraft_engine::compose::MaskGray::Value(value) => {
-            painter.add(egui::Shape::line(points, preview_stroke(value)));
-        }
-        texturecraft_engine::compose::MaskGray::Image { .. } => {
-            let size = PREVIEW_STROKE_STEPS as u32;
-            for (index, segment) in points.windows(2).enumerate() {
-                let value = gray.at(index as u32, size / 2, (size, size));
-                painter.line_segment([segment[0], segment[1]], preview_stroke(value));
-            }
-        }
-    }
-
+    let image = brush.alpha_image.as_ref().and_then(|name| app.session.images.get(name));
+    let value = |channel: Channel| app.session.tool.values.get(&channel).copied();
     if content {
-        let base_color = app.session.tool.values.get(&Channel::BaseColor).copied().unwrap_or(PREVIEW_FALLBACK_BASE_COLOR);
+        let srgb = value(Channel::BaseColor).unwrap_or(PREVIEW_FALLBACK_BASE_COLOR).map(|linear| (linear_to_srgb(linear) * 255.0 + 0.5) as u8);
+        BrushStrokePreview::paint(ui.ctx(), painter, stroke_rect, brush, image, |_| srgb);
 
         // The sphere sits in the middle of the preview's right half
-        crate::thumbs::paint_sphere(painter, pos2(rect.left() + half_width * 1.5, rect.center().y), PREVIEW_SPHERE_RADIUS, base_color);
+        let metallic = value(Channel::Metallic).map_or(PREVIEW_FALLBACK_METALLIC, |metallic| metallic[0]);
+        let roughness = value(Channel::Roughness).map_or(PREVIEW_FALLBACK_ROUGHNESS, |roughness| roughness[0]);
+        let base_color = value(Channel::BaseColor).unwrap_or(PREVIEW_FALLBACK_BASE_COLOR);
+        let center = pos2(rect.left() + half_width * 1.5, rect.center().y);
+        crate::thumbs::paint_material_sphere(painter, center, PREVIEW_SPHERE_RADIUS, base_color, metallic, roughness);
+    } else {
+        // A mask paints gray: an image-backed one is read across the stroke
+        let gray = app.session.mask_gray();
+        let mask_tint = |across: f32| {
+            let gray = (gray.at((across * STROKE_GRAY_SAMPLES as f32) as u32, 0, (STROKE_GRAY_SAMPLES, 1)) * 255.0).round() as u8;
+            [gray; 3]
+        };
+        BrushStrokePreview::paint(ui.ctx(), painter, stroke_rect, brush, image, mask_tint);
     }
     ui.add_space(BRUSH_PREVIEW_GAP);
 

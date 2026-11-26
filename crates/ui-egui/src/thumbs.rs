@@ -481,13 +481,18 @@ impl Thumbs {
 
 /// A small shaded sphere drawn with a vertex-colored mesh (layer thumbnails, previews).
 pub fn paint_sphere(p: &Painter, c: Pos2, r: f32, base: [f32; 3]) {
+    paint_material_sphere(p, c, r, base, 0.0, 0.5);
+}
+
+/// [`paint_sphere`] with the material's `metallic` and `roughness` (0..1)
+pub fn paint_material_sphere(p: &Painter, c: Pos2, r: f32, base: [f32; 3], metallic: f32, roughness: f32) {
     let mut mesh = egui::Mesh::default();
     let rings = 10;
     let segs = 28;
     let color = |dx: f32, dy: f32| {
         let d2 = (dx * dx + dy * dy).min(1.0);
         let n = [dx, dy, (1.0 - d2).sqrt()];
-        let s = shade(n, base, 0.0, 0.5).map(|v| (linear_to_srgb(aces(v * 1.4)) * 255.0) as u8);
+        let s = shade(n, base, metallic, roughness).map(|v| (linear_to_srgb(aces(v * 1.4)) * 255.0) as u8);
         Color32::from_rgb(s[0], s[1], s[2])
     };
     mesh.colored_vertex(c, color(0.0, 0.0));

@@ -28,8 +28,13 @@ fn app_with_brush(brush: BrushSettings) -> Harness<'static, TextureCraftApp> {
     harness
 }
 
+/// The reset on the Parameters band's row
 fn restore_defaults<'tree>(harness: &'tree Harness<'_, TextureCraftApp>) -> egui_kittest::Node<'tree> {
-    harness.get_by_role_and_label(egui::Role::Button, "Parameters: Reset to defaults")
+    let band = harness.get_by_role_and_label(egui::Role::Button, "Parameters").rect();
+    harness
+        .query_all_by_role_and_label(egui::Role::Button, "Restore defaults")
+        .find(|node| node.rect().y_range().intersects(band.y_range()))
+        .unwrap_or_else(|| panic!("no reset on the Parameters band"))
 }
 
 fn invert_checkbox<'tree>(harness: &'tree Harness<'_, TextureCraftApp>) -> Option<egui_kittest::Node<'tree>> {
@@ -89,8 +94,8 @@ fn hardness_left_the_brush_tab_and_its_reset() {
     let harness = app_with_brush(BrushSettings::default());
 
     // One page: the Brush section comes first, Hardness only in the Alpha section under it
-    let hardness: Vec<_> = harness.get_all_by_label("Hardness").map(|node| node.rect().top()).collect();
-    let flow = harness.get_by_label("Flow").rect().top();
+    let hardness: Vec<_> = harness.query_all_by_role_and_label(egui::Role::Slider, "Hardness").map(|node| node.rect().top()).collect();
+    let flow = harness.get_by_role_and_label(egui::Role::Slider, "Flow").rect().top();
     assert_eq!(hardness.len(), 1, "Hardness is in the Alpha section alone");
     assert!(hardness[0] > flow, "the Alpha section follows the Brush section's Flow");
 }

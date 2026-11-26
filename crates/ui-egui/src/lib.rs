@@ -7,6 +7,8 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod alpha_choice;
+mod alpha_sheet;
 mod anchor_properties;
 mod angle_dial;
 mod ask;

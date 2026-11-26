@@ -22,23 +22,11 @@ fn picker<'a>(h: &'a Harness<'_, TextureCraftApp>, value: &str) -> egui_kittest:
     h.get_all_by_role(Role::ComboBox).find(|node| node.value().as_deref() == Some(value)).unwrap_or_else(|| panic!("a view picker showing {value}"))
 }
 
-/// The nodes labelled `label` left of the Properties panel, whose paint tool sections also tile every image as an alpha
-fn listed<'a>(h: &'a Harness<'_, TextureCraftApp>, label: &'a str) -> Vec<egui_kittest::Node<'a>> {
-    let properties = h.get_by_role_and_label(Role::Tab, "Properties - Paint").rect().left();
-    h.get_all_by_label(label).filter(|node| node.rect().center().x < properties).collect()
-}
-
-fn one_listed<'a>(h: &'a Harness<'_, TextureCraftApp>, label: &'a str) -> egui_kittest::Node<'a> {
-    let mut nodes = listed(h, label);
-    assert_eq!(nodes.len(), 1, "one {label} listed");
-    nodes.remove(0)
-}
-
 /// Clicks the entry `label` of the open list (a long list scrolls inside the viewport's height)
 fn pick(h: &mut Harness<'_, TextureCraftApp>, label: &str) {
-    one_listed(h, label).scroll_to_me();
+    h.get_by_label(label).scroll_to_me();
     h.run_steps(12);
-    one_listed(h, label).click();
+    h.get_by_label(label).click();
     h.run_steps(3);
 }
 
@@ -77,7 +65,7 @@ fn other_opens_an_image_picker_and_shows_the_chosen_image() {
 
     query_field(&h);
     h.get_by_label("reset query to default");
-    one_listed(&h, &name).click();
+    h.get_by_label(&name).click();
     h.run_steps(3);
 
     assert_eq!(h.state().session.view, ViewMode::Image);
@@ -93,19 +81,19 @@ fn the_image_picker_filters_by_name_and_the_reset_button_restores_the_query() {
     h.run_steps(3);
     open(&mut h, "Material");
     pick(&mut h, "Other...");
-    assert!(!listed(&h, &first).is_empty() && !listed(&h, &second).is_empty(), "the default query lists every image");
+    assert!(h.query_by_label(&first).is_some() && h.query_by_label(&second).is_some(), "the default query lists every image");
 
     let field = query_field(&h);
     field.click();
     field.type_text(" stone");
     h.run_steps(3);
-    assert!(listed(&h, &second).is_empty(), "{second} does not match");
-    assert!(!listed(&h, &first).is_empty());
+    assert!(h.query_by_label(&second).is_none(), "{second} does not match");
+    assert!(h.query_by_label(&first).is_some());
 
     h.get_by_label("reset query to default").click();
     h.run_steps(3);
     query_field(&h);
-    assert!(!listed(&h, &second).is_empty(), "the reset lists every image again");
+    assert!(h.query_by_label(&second).is_some(), "the reset lists every image again");
 }
 
 #[test]

@@ -97,8 +97,7 @@ pub(crate) fn padding_seams(mesh: &Mesh, ts: &TextureSet) -> Vec<UvSeam> {
 
 /// The viewport's padding of `ts`, which stays inside each UV tile
 fn display_padding(mesh: &Mesh, ts: &TextureSet, gbuf: &UvGBuffer) -> PaddingMaps {
-    let block = ts.block_resolution();
-    PaddingMaps::new(ts.uv_padding, &gbuf.coverage_mask(), (gbuf.width, gbuf.height), Some(DISPLAY_PADDING), (block, block), &padding_seams(mesh, ts))
+    PaddingMaps::new(ts.uv_padding, &gbuf.coverage_mask(), (gbuf.width, gbuf.height), Some(DISPLAY_PADDING), ts.block_size(), &padding_seams(mesh, ts))
 }
 
 /// Active tool.

@@ -36,6 +36,7 @@ struct Globals {
     bake_neutral: vec4<f32>, // x roughness, y metallic, z AO intensity of the neutral material, w on (1)
     bake_bent_normal: vec4<f32>, // x, y how much the bent normal (in the aux texture) turns the diffuse light and dims reflections, zw -
     uv_rotation: vec4<f32>, // UV view: x cos, y sin of the view rotation (counter-clockwise on screen), z view aspect (width / height); w Smooth (Sobel) height to normal (1) or Sharp (0)
+    height_slope: vec4<f32>, // xy height slope factors across and down the texture (y: columns over rows of a UV tile grid), zw -
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -492,11 +493,10 @@ fn shade_mesh(i: VOut, front: bool) -> Shaded {
     let hgt = textureSample(t_height, samp, uv);
     let hc = hgt.r;
 
-    // Match export: a unit height over 1/16 of the width tilts 45°
-    // Combine the height gradient with the tangent-space normal
-    let k = g.mode.z * g.disp.w * dims.x / 16.0 * tile_scale(uv);
+    // Match export (a unit height over 1/16 of a block's width or height tilts 45°), then combine with the tangent-space normal
+    let k = g.mode.z * g.disp.w * dims * g.height_slope.xy / 16.0 * tile_scale(uv);
     let slope = height_slope(uv, ts);
-    let n_height = normalize(vec3<f32>(-slope.x * k, slope.y * k, 1.0));
+    let n_height = normalize(vec3<f32>(-slope.x * k.x, slope.y * k.y, 1.0));
 
     // The Normal texture holds the signed normal in half floats (flat is exactly +z)
     var n_detail = clamp(nrm_s, vec3<f32>(-1.0), vec3<f32>(1.0));
@@ -736,9 +736,9 @@ fn fs_uv(i: VOut) -> @location(0) vec4<f32> {
         // The tangent-space normal the shading uses: the height slope turned by the normal channel
         let dims = vec2<f32>(textureDimensions(t_height));
         let ts = 1.0 / dims;
-        let k = g.mode.z * g.disp.w * dims.x / 16.0 * tile_scale(i.uv);
+        let k = g.mode.z * g.disp.w * dims * g.height_slope.xy / 16.0 * tile_scale(i.uv);
         let slope = height_slope(i.uv, ts);
-        let n_height = normalize(vec3<f32>(-slope.x * k, slope.y * k, 1.0));
+        let n_height = normalize(vec3<f32>(-slope.x * k.x, slope.y * k.y, 1.0));
         var n_detail = clamp(textureSample(t_nrm, samp, i.uv).rgb, vec3<f32>(-1.0), vec3<f32>(1.0));
         n_detail.y *= g.mode.w;
         return raw_out(rnm(n_height, normalize(n_detail)) * 0.5 + 0.5);

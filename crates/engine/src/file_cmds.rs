@@ -100,7 +100,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "List export outputs",
             [],
             None,
-            "{preset?: name or preset object, ts?, format?, bitDepth?, dithering?, size?, colorSpace?, maps?} → [{ts, map, file, format, bitDepth, dithering, size, sourceSize, warnings}] (keeps the first file per case-insensitive name and warns about later duplicates)",
+            "{preset?: name or preset object, ts?, format?, bitDepth?, dithering?, size?, colorSpace?, maps?} → [{ts, map, file, format, bitDepth, dithering, size (width), height, sourceSize, sourceHeight, warnings}] (keeps the first file per case-insensitive name and warns about later duplicates)",
             always,
             plan
         ),
@@ -491,6 +491,10 @@ fn plan(session: &mut Session, params: &Value) -> Result<Value> {
             let source_size = output.tile.map_or(set.resolution, |tile| set.tile_resolution(tile));
             let size = scale_export_side(source_size, block_size, options.size);
 
+            // Non-square sets have no tile sizes of their own
+            let source_height = if set.resolution_height.is_some() { set.height() } else { source_size };
+            let height = scale_export_side(source_height, block_size, options.size);
+
             files.push(json!({
                 "ts": set_index,
                 "map": output.map,
@@ -499,7 +503,9 @@ fn plan(session: &mut Session, params: &Value) -> Result<Value> {
                 "bitDepth": output.bit_depth,
                 "dithering": output.dither,
                 "size": size,
+                "height": height,
                 "sourceSize": source_size,
+                "sourceHeight": source_height,
                 "warnings": output.warnings,
             }));
         }

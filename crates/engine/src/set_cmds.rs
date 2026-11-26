@@ -20,11 +20,19 @@ pub fn specs() -> Vec<CommandSpec> {
             "Inspect texture set",
             [],
             None,
-            "{ts?} → {index, name, resolution, size: [w, h], uvTiles: [UDIM numbers] (empty: no UV tiles), tiles: [{udim, block: [x, y]}], channels, layers, baked, visible, active}",
+            "{ts?} → {index, name, resolution, height, size: [w, h], uvTiles: [UDIM numbers] (empty: no UV tiles), tiles: [{udim, block: [x, y]}], channels, layers, baked, visible, active}",
             always,
             |s, p| Ok(crate::inspect::texture_set(s, ts_param(s, p, "textureSet.inspect")?))
         ),
-        cmd!("textureSet.resolution", "Texture set size", [], None, "{ts?, resolution: 128..8192 (power of two)}", always, resolution),
+        cmd!(
+            "textureSet.resolution",
+            "Texture set size",
+            [],
+            None,
+            "{ts?, resolution: 128..8192 (power of two, texels across), height?: 128..8192 (texels down; default = resolution, a square set)}",
+            always,
+            resolution
+        ),
         cmd!("textureSet.channel.add", "Add channel", [], None, "{ts?, channel}", always, |s, p| channel(s, p, true)),
         cmd!("textureSet.channel.remove", "Remove channel", [], None, "{ts?, channel}", always, |s, p| channel(s, p, false)),
         cmd!("textureSet.visible", "Toggle texture set visibility", [], None, "{ts?, visible?}", always, visible),
@@ -112,7 +120,8 @@ pub(crate) fn select_set(s: &mut Session, ts: usize) -> Result<()> {
 fn resolution(s: &mut Session, p: &Value) -> Result<Value> {
     let ts = ts_param(s, p, "textureSet.resolution")?;
     let r = u64p(p, "resolution").ok_or_else(|| bad("textureSet.resolution", "`resolution` is required"))?;
-    let task = s.resize_task(ts, u32::try_from(r).unwrap_or(0))?;
+    let height = u64p(p, "height").unwrap_or(r);
+    let task = s.resize_task_to(ts, u32::try_from(r).unwrap_or(0), u32::try_from(height).unwrap_or(0))?;
     let out = task.run(&texturecraft_bake::Progress::new())?;
     s.apply_resize(out)
 }
@@ -123,6 +132,7 @@ fn resolution(s: &mut Session, p: &Value) -> Result<Value> {
 pub struct ResizeTask {
     ts: usize,
     resolution: u32,
+    height: u32,
     doc: Document,
     mesh: Arc<Mesh>,
     /// The session's revision and mesh when the task was made: the result applies only to them.
@@ -133,6 +143,7 @@ pub struct ResizeTask {
 pub struct ResizeOutput {
     ts: usize,
     resolution: u32,
+    height: u32,
     doc: Document,
     /// The set's new caches (None when its UV tile layout moved: the session rebuilds them).
     cache: Option<SetCache>,
@@ -144,10 +155,13 @@ impl ResizeTask {
     /// Resample the set's painted pixels (bilinear; strokes are not replayed) and build its
     /// caches. Progress goes from 0 to 1.
     pub fn run(self, progress: &texturecraft_bake::Progress) -> Result<ResizeOutput> {
-        let ResizeTask { ts, resolution, mut doc, mesh, from } = self;
+        let ResizeTask { ts, resolution, height, mut doc, mesh, from } = self;
         let set = doc.project.texture_set_mut(ts)?;
         let old = set.clone();
-        set.resolution = resolution;
+        set.set_size(resolution, height);
+        if set.resolution_height.is_some() && !set.tile_resolutions.is_empty() {
+            return Err(bad("textureSet.resolution", "a texture set whose UV tiles have their own sizes stays square"));
+        }
         crate::session::check_size(set)?;
         let size = set.size();
         let mut log = crate::log::SessionLog::new();
@@ -162,7 +176,7 @@ impl ResizeTask {
         let set = doc.project.texture_set(ts)?;
         let cache = (crate::session::uv_layout(&old) == crate::session::uv_layout(set)).then(|| SetCache::new(&mesh, set));
         progress.done.store(10_000, std::sync::atomic::Ordering::Relaxed);
-        Ok(ResizeOutput { ts, resolution, doc, cache, log, from })
+        Ok(ResizeOutput { ts, resolution, height, doc, cache, log, from })
     }
 }
 
@@ -174,23 +188,28 @@ impl ResizeOutput {
 }
 
 impl Session {
-    /// Prepare resizing texture set `ts` to `resolution` (a power of two, 128..8192).
+    /// Prepare resizing texture set `ts` to a square `resolution` (a power of two, 128..8192).
     pub fn resize_task(&mut self, ts: usize, resolution: u32) -> Result<ResizeTask> {
-        let resolution = check_resolution(resolution)?;
+        self.resize_task_to(ts, resolution, resolution)
+    }
+
+    /// Prepare resizing texture set `ts` to `width × height` texels (powers of two, 128..8192).
+    pub fn resize_task_to(&mut self, ts: usize, width: u32, height: u32) -> Result<ResizeTask> {
+        let (resolution, height) = (check_resolution(width)?, check_resolution(height)?);
         self.doc.project.texture_set(ts)?;
         self.cancel_stroke();
-        Ok(ResizeTask { ts, resolution, doc: self.doc.clone(), mesh: self.mesh.clone(), from: (self.revision, self.mesh_id) })
+        Ok(ResizeTask { ts, resolution, height, doc: self.doc.clone(), mesh: self.mesh.clone(), from: (self.revision, self.mesh_id) })
     }
 
     /// Apply a finished resize as one undo step. When the document changed while it ran, the
     /// resize runs again here on the current document.
     pub fn apply_resize(&mut self, out: ResizeOutput) -> Result<Value> {
         if out.from != (self.revision, self.mesh_id) || self.stroke_active() {
-            let task = self.resize_task(out.ts, out.resolution)?;
+            let task = self.resize_task_to(out.ts, out.resolution, out.height)?;
             return self.apply_resize(task.run(&texturecraft_bake::Progress::new())?);
         }
 
-        let ResizeOutput { ts, resolution, doc, cache, log, .. } = out;
+        let ResizeOutput { ts, resolution, height, doc, cache, log, .. } = out;
         let before = std::mem::replace(&mut self.doc, doc);
 
         // Install the new caches before adding history to avoid rebuilding them
@@ -205,7 +224,7 @@ impl Session {
         }
         self.log.append(log);
         self.push_history("Texture set size", before);
-        Ok(json!({ "ts": ts, "resolution": resolution }))
+        Ok(json!({ "ts": ts, "resolution": resolution, "height": height }))
     }
 }
 

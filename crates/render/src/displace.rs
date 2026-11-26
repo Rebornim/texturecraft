@@ -145,6 +145,7 @@ mod tests {
             material: 0,
             composite,
             height_strength: strength,
+            height_y_factor: 1.0,
             height_in_normal: true,
             height_to_normal: texturecraft_core::HeightToNormalMethod::Smooth,
         }

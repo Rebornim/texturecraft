@@ -261,6 +261,21 @@ fn the_combined_normal_view_shows_the_shading_normal_unlit() {
 }
 
 #[test]
+fn the_height_y_factor_steepens_slopes_down_the_texture_only() {
+    let Some((mut h, frame)) = setup() else { return };
+    let normal_view = shaded(&frame, |s| s.view_mode = 4);
+    let doubled = shaded(&normal_view, |s| s.height_y_factor = 2.0);
+
+    upload_height(&mut h, |x, _| [x as f32 / 256.0, 0.0, 0.0, 0.0]);
+    let (across, across_doubled) = (render(&mut h, &normal_view, "height_across"), render(&mut h, &doubled, "height_across_y_doubled"));
+    upload_height(&mut h, |_, y| [y as f32 / 256.0, 0.0, 0.0, 0.0]);
+    let (down, down_doubled) = (render(&mut h, &normal_view, "height_down"), render(&mut h, &doubled, "height_down_y_doubled"));
+
+    assert_same(&across, &across_doubled, "a slope across the texture keeps its tilt");
+    assert_ne!(down.px, down_doubled.px, "a slope down the texture tilts more");
+}
+
+#[test]
 fn post_effects() {
     let Some((mut h, frame)) = setup() else { return };
     let base = render(&mut h, &frame, "post_off");

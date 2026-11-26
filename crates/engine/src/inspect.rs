@@ -265,6 +265,7 @@ pub fn texture_set(session: &Session, index: usize) -> Value {
         "index": index,
         "name": texture_set.name,
         "resolution": texture_set.resolution,
+        "height": texture_set.height(),
         "size": texture_set.size(),
         "blockResolution": texture_set.block_resolution(),
         "uvTiles": texture_set.uv_tiles,

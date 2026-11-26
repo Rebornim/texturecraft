@@ -34,8 +34,8 @@ const _: () = assert!(KINDS == 8);
 /// The placeholder mask word's bit for a set with Smooth (Sobel) height to normal (trace.wgsl reads it)
 const SMOOTH_HEIGHT_BIT: f32 = (1 << KINDS) as f32;
 
-/// Bytes of the trace uniform: [`Head`] then 256 texture-set entries (`MAX_SETS` in trace.wgsl).
-const PARAMS_SIZE: u64 = (size_of::<Head>() + 256 * 16) as u64;
+/// Bytes of the trace uniform: [`Head`], 256 texture-set entries (`MAX_SETS` in trace.wgsl), then their height slope factors down the texture, four per entry
+const PARAMS_SIZE: u64 = (size_of::<Head>() + 256 * 16 + 256 * 4) as u64;
 /// Post uniform slots: resolve and denoise init, then the five à-trous steps.
 const STEPS: [u32; 6] = [0, 1, 2, 4, 8, 16];
 const WORKGROUP: u32 = 8;
@@ -103,6 +103,8 @@ struct SceneConst {
     rotation: f32,
     env_camera: bool,
     heights: Vec<f32>,
+    /// Per set: how much more the height slope tilts down the texture than across it
+    height_y_factors: Vec<f32>,
     /// Per set: Smooth (Sobel) height to normal
     smooth: Vec<bool>,
     ior: f32,
@@ -426,6 +428,7 @@ impl GpuTracer {
             rotation: scene.env_rotation,
             env_camera: scene.env_camera,
             heights: scene.sets.iter().map(crate::trace::TraceSet::normal_height_strength).collect(),
+            height_y_factors: scene.sets.iter().map(|s| s.height_y_factor).collect(),
             smooth: scene.sets.iter().map(|s| s.height_to_normal == HeightToNormalMethod::Smooth).collect(),
             ior: scene.ior,
             lens: scene.lens.map_or([0.0; 2], |[focus, aperture]| [focus, aperture.max(0.0) * scene.radius]),
@@ -627,8 +630,13 @@ impl GpuTracer {
             let smooth = if sc.smooth.get(i).copied().unwrap_or(false) { SMOOTH_HEIGHT_BIT } else { 0.0 };
             *slot = [m[0], m[1], m[2] + smooth, sc.heights.get(i).copied().unwrap_or(0.0)];
         }
+        let mut height_y_factors = [1.0f32; 256];
+        for (slot, factor) in height_y_factors.iter_mut().zip(&sc.height_y_factors) {
+            *slot = *factor;
+        }
         let mut bytes = bytemuck::bytes_of(&head).to_vec();
         bytes.extend_from_slice(bytemuck::cast_slice(&sets));
+        bytes.extend_from_slice(bytemuck::cast_slice(&height_y_factors));
         queue.write_buffer(&self.params, 0, &bytes);
         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("tc_trace"), timestamp_writes: None });
         cpass.set_pipeline(&self.trace_pipe);
@@ -853,6 +861,7 @@ mod tests {
                 material: 0,
                 composite,
                 height_strength: 0.0,
+                height_y_factor: 1.0,
                 height_in_normal: true,
                 height_to_normal: texturecraft_core::HeightToNormalMethod::Smooth,
             }],
@@ -1053,6 +1062,7 @@ mod tests {
                 material: 0,
                 composite,
                 height_strength: 0.0,
+                height_y_factor: 1.0,
                 height_in_normal: true,
                 height_to_normal: texturecraft_core::HeightToNormalMethod::Smooth,
             }],

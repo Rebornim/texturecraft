@@ -29,6 +29,9 @@ use texturecraft_geom::{Bvh, Mesh, OrbitCamera};
 
 use crate::ibl::EnvImage;
 
+/// A unit height over this share of a side tilts the normal 45°, as in export
+const HEIGHT_SPAN: f32 = 16.0;
+
 /// One texture set's composited channels.
 #[derive(Clone)]
 pub struct TraceSet {
@@ -37,6 +40,8 @@ pub struct TraceSet {
     pub composite: Composite,
     /// Height displacement and, with `height_in_normal`, height-to-normal strength
     pub height_strength: f32,
+    /// How much more the height slope tilts down the texture than across it ([`texturecraft_core::TextureSet::atlas_height_y_factor`])
+    pub height_y_factor: f32,
     pub height_in_normal: bool,
     pub height_to_normal: HeightToNormalMethod,
 }
@@ -582,14 +587,15 @@ fn surface(scene: &TraceScene, tri: u32, u: f32, v: f32, o: Vec3, d: Vec3, t: f3
         s.composite.value(c, x, y)
     };
     let base = Vec3::from(ch(Channel::BaseColor, 0, 0));
-    // A UV tile smaller than its atlas block has fewer texels per UV unit: slopes per texel shrink.
-    let k = set.map_or(0.0, |s| {
+    // Slopes per texel become slopes across the set along each side (less in a UV tile smaller than its block)
+    let slope_scale = set.map_or(Vec2::ZERO, |s| {
         let (x, y) = texel(s, 0, 0);
-        s.normal_height_strength() * s.composite.resolution as f32 / 16.0 * s.composite.block_scales.at(x, y)
+        let strength = s.normal_height_strength() / HEIGHT_SPAN * s.composite.block_scales.at(x, y);
+        Vec2::new(s.composite.resolution as f32, s.composite.height as f32 * s.height_y_factor) * strength
     });
-    let n_height = if k != 0.0 {
+    let n_height = if slope_scale != Vec2::ZERO {
         let [gx, gy] = set.map_or(HeightToNormalMethod::Smooth, |s| s.height_to_normal).slope(|dx, dy| ch(Channel::Height, dx, dy)[0]);
-        Vec3::new(-gx * k, gy * k, 1.0).normalize_or(Vec3::Z)
+        Vec3::new(-gx * slope_scale.x, gy * slope_scale.y, 1.0).normalize_or(Vec3::Z)
     } else {
         Vec3::Z
     };
@@ -1250,12 +1256,65 @@ mod tests {
                 material: 0,
                 composite,
                 height_strength: 0.0,
+                height_y_factor: 1.0,
                 height_in_normal: true,
                 height_to_normal: texturecraft_core::HeightToNormalMethod::Smooth,
             }],
             env,
             0.0,
         )
+    }
+
+    /// How far the shaded normal of a plane leans from straight up under a height ramp along x or along y over `texture_set`'s atlas
+    fn ramp_tilt(texture_set: &texturecraft_core::TextureSet, along_x: bool) -> f32 {
+        let mesh = Arc::new(primitives::plane(2.0, 1));
+        let bvh = Arc::new(Bvh::new(&mesh));
+        let ((width, height), (block_width, block_height)) = (texture_set.size(), texture_set.block_size());
+        let mut composite = Composite::with_size(&[Channel::Height], width, height);
+        let img = composite.channels.get_mut(&Channel::Height).unwrap();
+        for y in 0..height {
+            for x in 0..width {
+                // The same rise per block side along either side
+                let rise = if along_x { x as f32 / block_width as f32 } else { y as f32 / block_height as f32 };
+                img.set(x, y, &[texturecraft_texel::to_u16(rise * 0.5)]);
+            }
+        }
+        let set = TraceSet {
+            material: 0,
+            composite,
+            height_strength: texture_set.atlas_height_strength(),
+            height_y_factor: texture_set.atlas_height_y_factor(),
+            height_in_normal: true,
+            height_to_normal: HeightToNormalMethod::Sharp,
+        };
+        let env = Arc::new(EnvImage { width: 8, height: 4, data: vec![[1.0; 3]; 32] });
+        let s = TraceScene::new(mesh, bvh, vec![set], env, 0.0);
+        let (o, d) = (Vec3::new(0.1, 1.0, 0.1), Vec3::NEG_Y);
+        let hit = s.bvh.closest(o, d, f32::MAX).unwrap();
+        let surf = surface(&s, hit.tri, hit.u, hit.v, o, d, hit.t).unwrap();
+        surf.n.angle_between(Vec3::Y)
+    }
+
+    #[test]
+    fn a_wide_set_tilts_the_normal_alike_for_the_same_rise_along_either_side() {
+        let mut wide = texturecraft_core::TextureSet::new("wide", 0, 128);
+        wide.set_size(128, 64);
+
+        let (across, down) = (ramp_tilt(&wide, true), ramp_tilt(&wide, false));
+
+        assert!(across > 0.05, "the ramp tilts the normal: {across}");
+        assert!((across - down).abs() < 0.1 * across, "across {across} down {down}");
+    }
+
+    #[test]
+    fn a_uv_tile_row_tilts_the_normal_alike_for_the_same_rise_along_either_side_of_a_tile() {
+        let mut row = texturecraft_core::TextureSet::new("row", 0, 64);
+        row.uv_tiles = vec![1001, 1002];
+
+        let (across, down) = (ramp_tilt(&row, true), ramp_tilt(&row, false));
+
+        assert!(across > 0.05, "the ramp tilts the normal: {across}");
+        assert!((across - down).abs() < 0.1 * across, "across {across} down {down}");
     }
 
     /// Mean radiance of parallel rays over the whole disc of the sphere (grazing hits included)

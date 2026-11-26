@@ -612,7 +612,8 @@ pub fn list_outputs(project: &Project, ts: usize, mesh_name: &str, opts: &Export
     let mut out = Vec::new();
     let tiles: Vec<Option<u32>> = if set.uv_tiles.is_empty() || opts.atlas { vec![None] } else { set.uv_tiles.iter().copied().map(Some).collect() };
     let grid = set.tile_grid();
-    let block_resolution = set.block_resolution();
+    let (block_resolution, block_size) = (set.block_resolution(), set.block_size());
+    let scale = |side| scale_export_side(side, block_resolution, opts.size);
     for (i, map) in opts.preset.maps.iter().enumerate() {
         if !map.channels.iter().any(|(_, s)| source_present(set, s)) {
             continue;
@@ -641,19 +642,13 @@ pub fn list_outputs(project: &Project, ts: usize, mesh_name: &str, opts: &Export
         for &tile in &tiles {
             if let Some(channels) = psd_channels {
                 let size = match (tile, grid) {
-                    (Some(tile), Some(_)) => {
+                    (Some(tile), Some(_)) if !set.tile_resolutions.is_empty() => {
                         let side = tile_side(set, tile, block_resolution);
                         let side = scale_export_side(side, block_resolution, opts.size);
                         (side, side)
                     }
-                    (_, Some(grid)) => {
-                        let side = opts.size.unwrap_or(block_resolution);
-                        (side.saturating_mul(grid.cols), side.saturating_mul(grid.rows))
-                    }
-                    (_, None) => {
-                        let side = opts.size.unwrap_or(block_resolution);
-                        (side, side)
-                    }
+                    (Some(_), Some(_)) | (_, None) => (scale(block_size.0), scale(block_size.1)),
+                    (_, Some(grid)) => (scale(block_size.0).saturating_mul(grid.cols), scale(block_size.1).saturating_mul(grid.rows)),
                 };
                 check_psd_size(size, channels, bit_depth)?;
             }
@@ -774,9 +769,9 @@ struct Sampler<'a> {
     coverage: &'a [bool],
     /// Composite width.
     res: u32,
-    /// Texels per atlas block (`res` for a classic set): the height slope and the slope window
-    /// follow the block.
-    tile_res: u32,
+    /// Texels across and down an atlas block (the composite for a classic set): the height
+    /// slope and the slope window follow the block.
+    block: (u32, u32),
     /// The share of its block each tile fills: a smaller tile's height slope shrinks with it.
     scales: BlockScales,
     /// Normal convention overriding every normal output.
@@ -820,16 +815,18 @@ impl Sampler<'_> {
     fn height_normal(&self, x: u32, y: u32) -> Vec3 {
         let center = self.channel(Channel::Height, At::Texel(x, y))[0];
         // Clamped to the texel's UV tile.
-        let t = self.tile_res.max(1);
-        let (x0, y0, last) = ((x / t * t) as i64, (y / t * t) as i64, t as i64 - 1);
+        let (tw, th) = (self.block.0.max(1), self.block.1.max(1));
+        let (x0, y0) = ((x / tw * tw) as i64, (y / th * th) as i64);
         let h = |dx: i32, dy: i32| {
-            let (sx, sy) = ((x as i64 + dx as i64).clamp(x0, x0 + last) as u32, (y as i64 + dy as i64).clamp(y0, y0 + last) as u32);
+            let (sx, sy) = ((x as i64 + dx as i64).clamp(x0, x0 + tw as i64 - 1) as u32, (y as i64 + dy as i64).clamp(y0, y0 + th as i64 - 1) as u32);
             if self.covered(sx, sy) { self.channel(Channel::Height, At::Texel(sx, sy))[0] } else { center }
         };
         let [gx, gy] = self.set.height_to_normal.slope(h);
-        let s = self.set.height_strength * self.tile_res as f32 * self.scales.at(x, y) / HEIGHT_SPAN;
+        // Slopes per texel become slopes across the tile along each side
+        let s = self.set.height_strength * self.scales.at(x, y) / HEIGHT_SPAN;
+        let (sx, sy) = (s * tw as f32, s * th as f32);
         // Image y points down; OpenGL normals have +Y up the image.
-        Vec3::new(-gx * s, gy * s, 1.0).try_normalize().unwrap_or(Vec3::Z)
+        Vec3::new(-gx * sx, gy * sy, 1.0).try_normalize().unwrap_or(Vec3::Z)
     }
 
     /// The final tangent-space normal (OpenGL): baked normal ⊕ (height ⊕ normal channel).
@@ -911,8 +908,9 @@ pub fn render_planned_maps(input: &ExportInput, options: &ExportOptions, planned
     let set = input.project.texture_set(input.ts)?;
     let (width, height) = (input.composite.resolution, input.composite.height);
     let grid = set.tile_grid();
-    let tile_res = width / grid.map_or(1, |g| g.cols.max(1));
-    if tile_res == 0 || tile_res > MAX_IMAGE_SIZE || height != tile_res * grid.map_or(1, |g| g.rows) {
+    let (cols, rows) = grid.map_or((1, 1), |g| (g.cols.max(1), g.rows.max(1)));
+    let (tile_res, tile_height) = (width / cols, height / rows);
+    if tile_res == 0 || tile_height == 0 || tile_res.max(tile_height) > MAX_IMAGE_SIZE || (width, height) != (tile_res * cols, tile_height * rows) {
         return Err(FormatError::Invalid(format!("composite size {width}×{height} does not fit texture set \"{}\"", set.name)));
     }
 
@@ -925,7 +923,7 @@ pub fn render_planned_maps(input: &ExportInput, options: &ExportOptions, planned
     }
 
     // Padding stays inside each UV tile
-    let padding_maps = |max_dist| PaddingMaps::new(set.uv_padding, input.coverage, (width, height), max_dist, (tile_res, tile_res), input.seams);
+    let padding_maps = |max_dist| PaddingMaps::new(set.uv_padding, input.coverage, (width, height), max_dist, (tile_res, tile_height), input.seams);
     let padding = match options.padding {
         Padding::None => None,
         Padding::Dilation(d) | Padding::DilationDefault(d) | Padding::DilationDiffusion(d) => Some(padding_maps(Some(d))),
@@ -939,7 +937,7 @@ pub fn render_planned_maps(input: &ExportInput, options: &ExportOptions, planned
         baked: input.baked,
         coverage: input.coverage,
         res: width,
-        tile_res,
+        block: (tile_res, tile_height),
         scales: set.block_scales(),
         normal_override: options.normal_format,
         project_normal: input.project.normal_format,
@@ -961,7 +959,8 @@ pub fn render_planned_maps(input: &ExportInput, options: &ExportOptions, planned
 
                     // A tile smaller than its block fills the block's top-left corner
                     let side = tile_side(set, t, tile_res);
-                    (bx * tile_res, by * tile_res, side, side)
+                    let tile_size = if set.tile_resolutions.is_empty() { (tile_res, tile_height) } else { (side, side) };
+                    (bx * tile_res, by * tile_height, tile_size.0, tile_size.1)
                 }
                 _ => (0, 0, width, height),
             };
@@ -1010,8 +1009,8 @@ pub fn render_planned_maps(input: &ExportInput, options: &ExportOptions, planned
                     .collect();
 
                 // Keep diffusion within each UV tile when rendering an atlas
-                let block = if planned_file.tile.is_none() && grid.is_some() { tile_res } else { w.max(h) };
-                diffuse_blocks(&mut data, (w as usize, h as usize), component_count, &known, block as usize);
+                let block = if planned_file.tile.is_none() && grid.is_some() { (tile_res, tile_height) } else { (w, h) };
+                diffuse_blocks(&mut data, (w as usize, h as usize), component_count, &known, (block.0 as usize, block.1 as usize));
             }
 
             let mut data = resize(data, (w, h), component_count, size);
@@ -1060,16 +1059,16 @@ pub fn scale_export_side(source_side: u32, block_resolution: u32, export_size: O
     u32::try_from(scaled).unwrap_or(u32::MAX).max(u32::from(source_side > 0))
 }
 
-fn diffuse_blocks(data: &mut Vec<f32>, (width, height): (usize, usize), channels: usize, known: &[bool], block: usize) {
+fn diffuse_blocks(data: &mut Vec<f32>, (width, height): (usize, usize), channels: usize, known: &[bool], (block_w, block_h): (usize, usize)) {
     // A whole image or a separately exported tile already occupies a contiguous buffer
-    if block >= width.max(height) {
+    if block_w >= width && block_h >= height {
         diffuse_fill(data, (width, height), channels, known);
         return;
     }
 
-    for block_y in (0..height).step_by(block.max(1)) {
-        for block_x in (0..width).step_by(block.max(1)) {
-            let (block_width, block_height) = (block.min(width - block_x), block.min(height - block_y));
+    for block_y in (0..height).step_by(block_h.max(1)) {
+        for block_x in (0..width).step_by(block_w.max(1)) {
+            let (block_width, block_height) = (block_w.min(width - block_x), block_h.min(height - block_y));
             let rows = || (block_y..block_y + block_height).map(|y| (y * width + block_x)..(y * width + block_x + block_width));
             let mut block_data: Vec<f32> =
                 rows().flat_map(|row| data.get(row.start * channels..row.end * channels).unwrap_or_default().iter().copied()).collect();

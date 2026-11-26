@@ -49,10 +49,10 @@ pub(crate) fn texture_set_list(app: &mut TextureCraftApp, ui: &mut Ui) {
         .texture_sets
         .iter()
         .map(|t| {
-            let res = t.resolution;
+            let (width, height) = (t.resolution, t.height());
             let size = match t.uv_tiles.len() {
-                0 => format!("{res}x{res}"),
-                n => format!("{res}x{res}, {n} UDIM"),
+                0 => format!("{width}x{height}"),
+                n => format!("{width}x{height}, {n} UDIM"),
             };
             (t.name.clone(), size, t.visible)
         })

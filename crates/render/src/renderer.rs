@@ -110,6 +110,7 @@ struct GlobalsRaw {
     bake_neutral: [f32; 4],
     bake_bent_normal: [f32; 4],
     uv_rotation: [f32; 4],
+    height_slope: [f32; 4],
 }
 
 /// The post pass uniform (see `Post` in post.wgsl).
@@ -157,6 +158,8 @@ pub struct Shade {
     pub env_opacity: f32,
     pub ao_intensity: f32,
     pub height_strength: f32,
+    /// How much more the height slope tilts down the texture than across it ([`texturecraft_core::TextureSet::atlas_height_y_factor`])
+    pub height_y_factor: f32,
     /// The height slope joins the shaded normal (normal mixing Combine; Replace leaves it out)
     pub height_in_normal: bool,
     /// How the height becomes normal slopes
@@ -299,6 +302,7 @@ impl Default for Shade {
             env_opacity: 0.0,
             ao_intensity: 0.75,
             height_strength: 1.0,
+            height_y_factor: 1.0,
             height_in_normal: true,
             height_to_normal: texturecraft_core::HeightToNormalMethod::Smooth,
             normal_y: 1.0,
@@ -2142,6 +2146,7 @@ impl Renderer {
             scatter: [s.scatter[0], s.scatter[1], s.scatter[2], if sss.is_some() { 1.0 } else { 0.0 }],
             fwd: [fwd.x, fwd.y, fwd.z, 0.0],
             disp: [disp[0], disp[1], disp[2], if s.height_in_normal { 1.0 } else { 0.0 }],
+            height_slope: [1.0, s.height_y_factor, 0.0, 0.0],
             refr: [if refraction { 1.0 } else { 0.0 }, (BEHIND_LEVELS - 1) as f32, REFRACTION_DEPTH * radius, 0.0],
             highlight: highlight_globals(s.highlight, HIGHLIGHT_OPACITY, s, data),
             highlight_shift: highlight_shift(frame.size),

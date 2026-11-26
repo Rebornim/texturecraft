@@ -383,6 +383,7 @@ fn shade(app: &TextureCraftApp) -> Shade {
     let set_index = app.session.ts();
     let active_set = app.session.doc.project.texture_sets.get(set_index);
     let height_strength = active_set.map(|texture_set| texture_set.atlas_height_strength()).unwrap_or(1.0);
+    let height_y_factor = active_set.map_or(1.0, |texture_set| texture_set.atlas_height_y_factor());
     let height_in_normal = active_set.is_none_or(|texture_set| texture_set.height_in_normal());
     let height_to_normal = active_set.map_or_else(Default::default, |texture_set| texture_set.height_to_normal);
 
@@ -390,6 +391,7 @@ fn shade(app: &TextureCraftApp) -> Shade {
     let polygon_fill_tool = tool_acts(app) && app.session.tool.tool == Tool::PolygonFill;
     Shade {
         height_strength,
+        height_y_factor,
         height_in_normal,
         height_to_normal,
         view_mode,

@@ -55,8 +55,12 @@ pub struct TextureSet {
     pub description: String,
     /// Material index in the mesh this set paints.
     pub material: usize,
-    /// Power of two, 128..=8192.
+    /// Texels across: a power of two, 128..=8192 (the side of a square set).
     pub resolution: u32,
+    /// Texels down when they differ from `resolution` (a non-square set); a power of two,
+    /// 128..=8192. Sets with per-tile resolutions stay square.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution_height: Option<u32>,
     pub channels: Vec<(Channel, ChannelFormat)>,
     /// Top-level layers, bottom → top.
     pub stack: Vec<LayerId>,
@@ -173,6 +177,7 @@ impl TextureSet {
             description: String::new(),
             material,
             resolution,
+            resolution_height: None,
             channels: Channel::DEFAULT_SET.iter().map(|c| (*c, ChannelFormat::default_for(*c))).collect(),
             stack: Vec::new(),
             normal_mixing: NormalMixing::Combine,
@@ -204,16 +209,42 @@ impl TextureSet {
         self.height_strength / self.tile_grid().map_or(1.0, |g| g.cols as f32)
     }
 
+    /// Columns over rows of the atlas grid (1 for a classic set): how much more slopes down the texture tilt than across it, as in export per block
+    pub fn atlas_height_y_factor(&self) -> f32 {
+        self.tile_grid().map_or(1.0, |g| g.cols as f32 / g.rows.max(1) as f32)
+    }
+
     /// Whether the height slope joins the shaded normal ([`NormalMixing::Replace`] leaves it out)
     pub fn height_in_normal(&self) -> bool {
         self.normal_mixing == NormalMixing::Combine
     }
 
-    /// Texels across and down: [`TextureSet::block_resolution`] per block of the atlas grid.
+    /// Texels across and down: [`TextureSet::block_size`] per block of the atlas grid.
     pub fn size(&self) -> (u32, u32) {
         let (cols, rows) = self.tile_grid().map_or((1, 1), |g| (g.cols, g.rows));
+        let (width, height) = self.block_size();
+        (width.saturating_mul(cols), height.saturating_mul(rows))
+    }
+
+    /// Texels down of the set's size (`resolution` for a square set).
+    pub fn height(&self) -> u32 {
+        self.resolution_height.unwrap_or(self.resolution)
+    }
+
+    /// Set the size to `width × height` (None when square).
+    pub fn set_size(&mut self, width: u32, height: u32) {
+        self.resolution = width;
+        self.resolution_height = (height != width).then_some(height);
+    }
+
+    /// Texels across and down of an atlas block: the set's size, or the largest tile
+    /// resolution square when tiles have their own.
+    pub fn block_size(&self) -> (u32, u32) {
+        if self.tile_resolutions.is_empty() {
+            return (self.resolution, self.height());
+        }
         let block = self.block_resolution();
-        (block.saturating_mul(cols), block.saturating_mul(rows))
+        (block, block)
     }
 
     /// Texels per side of UV tile `udim` (its override, else `resolution`).
@@ -221,8 +252,8 @@ impl TextureSet {
         self.tile_resolutions.get(&udim).copied().unwrap_or(self.resolution)
     }
 
-    /// Texels per side of an atlas block: the largest tile resolution (`resolution` for a
-    /// classic set or one without overrides).
+    /// Texels across an atlas block: the largest tile resolution (`resolution` for a
+    /// classic set or one without overrides); see [`TextureSet::block_size`] for both sides.
     pub fn block_resolution(&self) -> u32 {
         if self.tile_resolutions.is_empty() {
             return self.resolution;
@@ -733,6 +764,12 @@ impl Project {
         if let Some(t) = self.texture_sets.iter().find(|t| bad_tile_res(t)) {
             return Err(CoreError::Invalid(format!("texture set \"{}\" has invalid UV tile resolutions {:?}", t.name, t.tile_resolutions)));
         }
+        let bad_height = |t: &TextureSet| {
+            t.resolution_height.is_some_and(|h| !h.is_power_of_two() || !(MIN_RESOLUTION..=MAX_RESOLUTION).contains(&h) || !t.tile_resolutions.is_empty())
+        };
+        if let Some(t) = self.texture_sets.iter().find(|t| bad_height(t)) {
+            return Err(CoreError::Invalid(format!("texture set \"{}\" has an invalid height {:?}", t.name, t.resolution_height)));
+        }
         let mut seen = BTreeSet::new();
         for ts in 0..self.texture_sets.len() {
             for (id, depth) in self.walk(ts) {
@@ -1063,6 +1100,47 @@ mod tests {
             q.texture_sets[0].tile_resolutions = [bad].into_iter().collect();
             assert!(q.validate().is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn atlas_slopes_along_each_side_match_a_block_in_wide_tall_and_square_grids() {
+        let mut t = TextureSet::new("a", 0, 256);
+        t.height_strength = 3.0;
+        for tiles in [vec![1001, 1002], vec![1001, 1011], vec![1001, 1002, 1011, 1012], vec![1001, 1002, 1003]] {
+            t.uv_tiles = tiles;
+            let ((width, height), (block_width, block_height)) = (t.size(), t.block_size());
+
+            let across = t.atlas_height_strength() * width as f32;
+            let down = t.atlas_height_strength() * t.atlas_height_y_factor() * height as f32;
+
+            assert_eq!(across, t.height_strength * block_width as f32, "{:?}", t.uv_tiles);
+            assert_eq!(down, t.height_strength * block_height as f32, "{:?}", t.uv_tiles);
+        }
+    }
+
+    #[test]
+    fn non_square_sets_are_wider_than_tall_per_block_and_stay_square_with_tile_sizes() {
+        let mut p = project();
+        let t = &mut p.texture_sets[0];
+        t.set_size(1024, 256);
+        let (w, h) = t.size();
+        assert!(w > h, "{:?}", t.size());
+        t.uv_tiles = vec![1001, 1011];
+        // Tiles stack down, each block keeping the set's shape
+        assert_eq!(t.size(), (w, h * 2));
+        p.validate().unwrap();
+        // A height must be a valid size, and per-tile sizes need a square set
+        for bad in [Some(100), Some(16384)] {
+            let mut q = p.clone();
+            q.texture_sets[0].resolution_height = bad;
+            assert!(q.validate().is_err(), "{bad:?}");
+        }
+        let mut q = p.clone();
+        q.texture_sets[0].tile_resolutions.insert(1011, 128);
+        assert!(q.validate().is_err());
+        // The same size both ways is stored as square
+        p.texture_sets[0].set_size(512, 512);
+        assert_eq!(p.texture_sets[0].resolution_height, None);
     }
 
     #[test]

@@ -66,6 +66,7 @@ pub(crate) fn images_used(project: &Project, id: LayerId, out: &mut Vec<String>,
 pub(crate) fn one_set_document(src_set: &TextureSet, name: &str) -> Document {
     let mut project = Project::new(name, "builtin:none");
     let mut set = TextureSet::new(name, 0, src_set.resolution);
+    set.resolution_height = src_set.resolution_height;
     set.uv_tiles = src_set.uv_tiles.clone();
     set.tile_resolutions = src_set.tile_resolutions.clone();
     set.channels = src_set.channels.clone();

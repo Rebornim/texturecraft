@@ -168,6 +168,7 @@ fn trace_inputs(s: &mut Session) -> (TraceScene, TraceDisplay) {
             material: ts.material,
             composite: c.composite.clone(),
             height_strength: ts.atlas_height_strength(),
+            height_y_factor: ts.atlas_height_y_factor(),
             height_in_normal: ts.height_in_normal(),
             height_to_normal: ts.height_to_normal,
         })
@@ -205,10 +206,12 @@ pub fn shade(s: &Session) -> Shade {
         ViewMode::UvChecker => (3, 0),
         ViewMode::NormalHeightMesh => (4, 0),
     };
+    let active_set = s.doc.project.texture_sets.get(s.ts());
     Shade {
-        height_strength: s.doc.project.texture_sets.get(s.ts()).map(|t| t.atlas_height_strength()).unwrap_or(1.0),
-        height_in_normal: s.doc.project.texture_sets.get(s.ts()).is_none_or(|t| t.height_in_normal()),
-        height_to_normal: s.doc.project.texture_sets.get(s.ts()).map_or_else(Default::default, |t| t.height_to_normal),
+        height_strength: active_set.map_or(1.0, |t| t.atlas_height_strength()),
+        height_y_factor: active_set.map_or(1.0, |t| t.atlas_height_y_factor()),
+        height_in_normal: active_set.is_none_or(|t| t.height_in_normal()),
+        height_to_normal: active_set.map_or_else(Default::default, |t| t.height_to_normal),
         view_mode,
         channel,
         // Only the 2D view uses this default

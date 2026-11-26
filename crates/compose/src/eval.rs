@@ -171,6 +171,12 @@ impl Inputs<'_> {
         self.gbuf.width / self.tile_grid().map_or(1, |g| g.cols.max(1))
     }
 
+    /// Texels across and down an atlas block.
+    fn block_size(&self) -> [u32; 2] {
+        let (cols, rows) = self.tile_grid().map_or((1, 1), |g| (g.cols.max(1), g.rows.max(1)));
+        [self.gbuf.width / cols, self.gbuf.height / rows]
+    }
+
     /// The current UV tile can occupy only part of its atlas block
     fn tile_res_at(&self, x: u32, y: u32) -> u32 {
         ((self.tile_res() as f32 * self.block_scales.at(x, y)).round() as u32).max(1)
@@ -439,9 +445,9 @@ enum Op {
     /// The shapes moved by `offset` (whole texels), box blurred and laid under them
     Shadow { offset: [i32; 2] },
     /// Each UV tile's texels read from where `mirror` sends them in their tile (`block` texels across the set's atlas blocks)
-    Mirror { mirror: Mirror, block: u32 },
+    Mirror { mirror: Mirror },
     /// Each UV tile's texels read from where `transform` sends them (its `affine`, worked out once), repeating round the tile or empty past it
-    Transform { transform: TileTransform, affine: ([[f32; 2]; 2], [f32; 2]), block: u32 },
+    Transform { transform: TileTransform, affine: ([[f32; 2]; 2], [f32; 2]) },
     /// A band along the edge of the shapes past a threshold, from the box blur of the shapes
     Outline(MaskOutline),
     /// Drawn from the distance to the shapes' edge (see [`distance_filter`])
@@ -529,10 +535,10 @@ fn neighbourhood_filters(effects: &[Effect], res: u32, channel: Option<Channel>)
             }
 
             // A mirror reads anywhere in its UV tile
-            EffectKind::Filter(Filter::Mirror(mirror)) => Some((index, res as f32, Op::Mirror { mirror: *mirror, block: res })),
+            EffectKind::Filter(Filter::Mirror(mirror)) => Some((index, res as f32, Op::Mirror { mirror: *mirror })),
             // A transform reads anywhere in its UV tile; one that changes nothing is skipped
             EffectKind::Filter(Filter::Transform(transform)) if !transform.is_identity() => {
-                Some((index, res as f32, Op::Transform { transform: *transform, affine: transform.affine(), block: res }))
+                Some((index, res as f32, Op::Transform { transform: *transform, affine: transform.affine() }))
             }
 
             // Three box passes reach the band's width
@@ -771,10 +777,10 @@ fn gather(
                         keep_coverage(&mut acc, comps, center.get(3));
                     }
                 }
-                Op::Mirror { mirror, block } => {
-                    mirror_texel(&mirror, (x, y), (block, res), comps, orig.get((row * width + col) * comps + comps - 1), &mut acc, &sample)
+                Op::Mirror { mirror } => {
+                    mirror_texel(&mirror, (x, y), (block_size, tile_size), comps, orig.get((row * width + col) * comps + comps - 1), &mut acc, &sample)
                 }
-                Op::Transform { transform, affine, block } => transform_texel(&transform, affine, (x, y), (block, res), &mut acc, &sample),
+                Op::Transform { transform, affine } => transform_texel(&transform, affine, (x, y), (block_size, tile_size), &mut acc, &sample),
                 Op::SourceWarp(warp) => warp_texel((&warp, &warp_directions), (x, y), (res, comps), (block_size, tile_size), &mut acc, (&sample, &input)),
                 Op::SourceSlopeBlur(slope) => slope_texel(&slope, (x, y), (res, comps), (block_size, tile_size), &mut acc, (&sample, &input)),
                 Op::HeightToNormal(filter) => {
@@ -1164,21 +1170,14 @@ fn fxaa_texel((x, y): (f32, f32), comps: usize, center: &[f32], acc: &mut [f32; 
 fn mirror_texel(
     mirror: &Mirror,
     (x, y): (f32, f32),
-    (block, res): (u32, u32),
+    (block, tile): ([u32; 2], [u32; 2]),
     comps: usize,
     alpha: Option<&f32>,
     acc: &mut [f32; 5],
     sample: &dyn Fn(f32, f32, &mut [f32; 5]),
 ) {
-    let (block, size) = (block.max(1) as f32, res.max(1) as f32);
-    let (origin_x, origin_y) = ((x / block).floor() * block, (y / block).floor() * block);
-    let (local_x, local_y) = (x - origin_x, y - origin_y);
-    if local_x >= size || local_y >= size {
-        return;
-    }
-
-    let uv = [(local_x + 0.5) / size, (local_y + 0.5) / size];
-    let line = (Mirror::DEBUG_HALF_WIDTH * size / FILTER_SIZE_RESOLUTION).max(MIN_FILTER_RADIUS) / size;
+    let Some(([origin_x, origin_y], uv, size)) = tile_local((x, y), (block, tile)) else { return };
+    let line = (Mirror::DEBUG_HALF_WIDTH * size[0] / FILTER_SIZE_RESOLUTION).max(MIN_FILTER_RADIUS) / size[0];
     if mirror.debug && mirror.on_axis(uv, line) {
         // Content stays premultiplied by its own coverage; masks are one value
         let cover = if comps == 4 { alpha.copied().unwrap_or(0.0) } else { 1.0 };
@@ -1192,8 +1191,21 @@ fn mirror_texel(
     let [u, v] = mirror.source(uv);
 
     // Whole texels, so an even mirror copies texels exactly
-    let at = |origin: f32, along: f32| origin + (along * size - 0.5).round().clamp(0.0, size - 1.0);
-    sample(at(origin_x, u), at(origin_y, v), acc);
+    let at = |origin: f32, along: f32, size: f32| origin + (along * size - 0.5).round().clamp(0.0, size - 1.0);
+    sample(at(origin_x, u, size[0]), at(origin_y, v, size[1]), acc);
+}
+
+/// The top left of the UV tile holding texel `(x, y)` (tiles of `tile` texels at the top left of
+/// `block`-texel atlas blocks), the texel centre's UV in it and the tile's size, both per axis;
+/// None past the tile.
+fn tile_local((x, y): (f32, f32), (block, tile): ([u32; 2], [u32; 2])) -> Option<([f32; 2], [f32; 2], [f32; 2])> {
+    let (block, size) = (block.map(|b| b.max(1) as f32), tile.map(|t| t.max(1) as f32));
+    let origin = [(x / block[0]).floor() * block[0], (y / block[1]).floor() * block[1]];
+    let local = [x - origin[0], y - origin[1]];
+    if local[0] >= size[0] || local[1] >= size[1] {
+        return None;
+    }
+    Some((origin, [(local[0] + 0.5) / size[0], (local[1] + 0.5) / size[1]], size))
 }
 
 /// Transform `transform` (whose read is `affine`) at texel `(x, y)` into `acc`: bilinear between the four texels round where it reads in its UV tile (`res` texels from its `block`'s top left), each wrapped round the tile; where it does not repeat, a read past the tile counts as empty
@@ -1201,21 +1213,14 @@ fn transform_texel(
     transform: &TileTransform,
     (columns, shift): ([[f32; 2]; 2], [f32; 2]),
     (x, y): (f32, f32),
-    (block, res): (u32, u32),
+    (block, tile): ([u32; 2], [u32; 2]),
     acc: &mut [f32; 5],
     sample: &dyn Fn(f32, f32, &mut [f32; 5]),
 ) {
-    let (block, size) = (block.max(1) as f32, res.max(1) as f32);
-    let (origin_x, origin_y) = ((x / block).floor() * block, (y / block).floor() * block);
-    let (local_x, local_y) = (x - origin_x, y - origin_y);
-    if local_x >= size || local_y >= size {
-        return;
-    }
-
-    let uv = [(local_x + 0.5) / size, (local_y + 0.5) / size];
+    let Some(([origin_x, origin_y], uv, size)) = tile_local((x, y), (block, tile)) else { return };
 
     // Texel space of the tile, centres at whole numbers
-    let at = [0, 1].map(|axis| (columns[0][axis] * uv[0] + columns[1][axis] * uv[1] + shift[axis]) * size - 0.5);
+    let at = [0, 1].map(|axis| (columns[0][axis] * uv[0] + columns[1][axis] * uv[1] + shift[axis]) * size[axis] - 0.5);
     if !at.iter().all(|a| a.is_finite()) {
         return;
     }
@@ -1230,7 +1235,7 @@ fn transform_texel(
         }
 
         let (cx, cy) = (base_x + dx, base_y + dy);
-        let inside = (0.0..size).contains(&cx) && (0.0..size).contains(&cy);
+        let inside = (0.0..size[0]).contains(&cx) && (0.0..size[1]).contains(&cy);
         if !repeat && !inside {
             // Empty: no value, full weight
             total[4] += k;
@@ -1239,7 +1244,7 @@ fn transform_texel(
 
         // One whole texel: the sample's own weights, so this matches its bilinear read
         let mut one = [0.0f32; 5];
-        sample(origin_x + cx.rem_euclid(size), origin_y + cy.rem_euclid(size), &mut one);
+        sample(origin_x + cx.rem_euclid(size[0]), origin_y + cy.rem_euclid(size[1]), &mut one);
         for (slot, value) in total.iter_mut().zip(one) {
             *slot += value * k;
         }
@@ -1615,7 +1620,7 @@ fn filter_extent(radius: f32, op: Op, inputs: &Inputs) -> (u32, u32) {
         _ => None,
     };
     let source_reach = if tiled_source.is_some_and(|source| source.mode != WarpSourceMode::DefaultNoise && source.tiling_factor() != 1.0) {
-        inputs.tile_grid().map_or(longest_side, |_| inputs.tile_res())
+        inputs.tile_grid().map_or(longest_side, |_| inputs.block_size().into_iter().max().unwrap_or(0))
     } else {
         0
     };
@@ -1825,7 +1830,7 @@ fn filter_region(
 
     // A smaller UV tile has fewer texels per UV unit, so its filters reach fewer texels
     let (block_size, tiled) = match inputs.tile_grid() {
-        Some(_) => ([inputs.tile_res(); 2], true),
+        Some(_) => (inputs.block_size(), true),
         None => ([inputs.gbuf.width, inputs.gbuf.height], false),
     };
     let filtered = |scale: f32| -> Vec<f32> {
@@ -1838,7 +1843,7 @@ fn filter_region(
         let scaled = neighbourhood_filters(effects, tile_resolution, channel).find(|filter| filter.0 == index);
         let scaled_radius = scaled.map_or(radius_texels, |filter| filter.1.round().clamp(1.0, radius_texels as f32) as u32);
         if !is_box_blur(op) {
-            let tile_size = if tiled { [tile_resolution; 2] } else { block_size };
+            let tile_size = if tiled { block_size.map(|side| ((side as f32 * scale).round() as u32).max(1)) } else { block_size };
             return gather(
                 op,
                 (&stack_values, &cover, &grays),
@@ -5523,6 +5528,17 @@ mod tests {
 
     fn run(f: &Fixture, preview: Option<&StrokePreview>) -> Composite {
         run_with_images(f, preview, &ImageStore::default())
+    }
+
+    #[test]
+    fn a_mirror_on_a_wide_set_reflects_across_its_own_height() {
+        let mirror = Mirror { mode: texturecraft_core::MirrorMode::AxisY, ..Mirror::LIBRARY };
+        let (size, near_bottom) = ([256, 128], 120.0);
+        let read = std::cell::Cell::new(None);
+        mirror_texel(&mirror, (10.0, near_bottom), (size, size), 4, None, &mut [0.0; 5], &|x, y, _| read.set(Some((x, y))));
+        let (x, y) = read.get().unwrap();
+        assert_eq!(x, 10.0);
+        assert!(y < size[1] as f32 / 2.0, "the bottom half copies the top half: read row {y}");
     }
 
     #[test]

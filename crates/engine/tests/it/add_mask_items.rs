@@ -1,7 +1,7 @@
 //! The layer toolbar's Add mask items that add a mask with an effect in it, and Add effect's colour selection: one undo step each, the new effect selected
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, CompareSource, EffectKind, LayerId, MaskBackground, Source};
+use texturecraft_engine::core::{BlendMode, Channel, CompareSource, EffectKind, LayerId, MaskBackground, Source};
 use texturecraft_engine::fill_alpha::resource_name;
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::paint::alphas;
@@ -73,6 +73,21 @@ fn a_height_combination_is_a_mask_comparing_this_layers_height_with_the_layers_b
         other => panic!("not a compare mask: {other:?}"),
     }
     assert_eq!(s.history_labels().last().map(String::as_str), Some("Add mask with height combination"));
+}
+
+#[test]
+fn a_height_combination_makes_the_layers_height_blend_normal_in_the_same_step() {
+    let (mut s, layer) = fill();
+    execute(&mut s, "layer.blend", &json!({"layer": layer.0, "channel": "height", "enabled": true, "mode": "linearDodge"})).unwrap();
+    let height_mode = |s: &Session| s.doc.project.layer(layer).unwrap().channels.get(&Channel::Height).map(|blend| blend.mode);
+    let before = height_mode(&s);
+    assert!(before.is_some_and(|mode| mode != BlendMode::Normal), "the height starts out blending another way");
+
+    execute(&mut s, "mask.add.heightCombination", &json!({"layer": layer.0})).unwrap();
+    assert_eq!(height_mode(&s), Some(BlendMode::Normal));
+
+    execute(&mut s, "edit.undo", &Value::Null).unwrap();
+    assert_eq!(height_mode(&s), before, "one undo takes the mask and the blend back");
 }
 
 #[test]

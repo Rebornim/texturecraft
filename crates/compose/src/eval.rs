@@ -2754,6 +2754,7 @@ fn takes_symmetry(proj: &Projection, sampling: Sampling) -> bool {
 }
 
 /// Per-texel context.
+#[derive(Clone)]
 struct Texel<'a, 'b> {
     inp: &'b Inputs<'a>,
     x: u32,
@@ -2779,6 +2780,7 @@ struct Texel<'a, 'b> {
 
 /// What a layer contributes (its mask, its content value and coverage per channel): evaluated
 /// (`Off`), evaluated and recorded, or replayed from a recording.
+#[derive(Clone)]
 enum Tape<'t> {
     Off,
     Record(Vec<f32>),
@@ -5035,18 +5037,15 @@ pub fn flatten_folder(inputs: &Inputs, id: LayerId, tiles: &[(u32, u32)]) -> Opt
             let mut mask = masked.then(|| vec![0u16; TILE_AREA * 2]);
 
             for (x, y, offset) in tile_texels(inputs.gbuf, tx, ty) {
-                // The texel with the stack below the folder run, so masks and fills that read it or its anchors find them
-                let texel_over_below = || {
-                    let mut texel = Texel::new(&visible_inputs, x, y, offset, 0.0);
-                    if !below.is_empty() {
-                        texel.anchors_below(&below, (id, 0));
-                    }
-                    texel
-                };
+                // The texel with the stack below the folder run once, so masks and fills that read it or its anchors find them
+                let mut over_below = Texel::new(&visible_inputs, x, y, offset, 0.0);
+                if !below.is_empty() {
+                    over_below.anchors_below(&below, (id, 0));
+                }
 
                 // Laid over an all-0 and an all-1 stack, the layers show their premultiplied value and how much of the stack they hide
                 let over = |background: f32| {
-                    let mut texel = texel_over_below();
+                    let mut texel = over_below.clone();
                     let mut stack: Acc = [[background; 3]; NCH];
                     texel.eval(children, &mut stack);
                     stack
@@ -5072,7 +5071,7 @@ pub fn flatten_folder(inputs: &Inputs, id: LayerId, tiles: &[(u32, u32)]) -> Opt
                 }
 
                 if let Some(pixel) = mask.as_mut().and_then(|mask| mask.get_mut(offset * 2..offset * 2 + 2)) {
-                    pixel.copy_from_slice(&[to_u16(texel_over_below().node_mask(node)), u16::MAX]);
+                    pixel.copy_from_slice(&[to_u16(over_below.node_mask(node)), u16::MAX]);
                 }
             }
 

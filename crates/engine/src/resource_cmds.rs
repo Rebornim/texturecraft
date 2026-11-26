@@ -45,6 +45,15 @@ pub(crate) fn decoded(d: texturecraft_formats::DecodedImage) -> Arc<ImageRes> {
     Arc::new(ImageRes::new(d.width, d.height, d.rgba, d.srgb))
 }
 
+/// Refuse resource files over [`MAX_BYTES`]
+fn within_byte_limit(file_name: &str, bytes: &[u8]) -> Result<()> {
+    if bytes.len() > MAX_BYTES {
+        return Err(EngineError::Other(format!("{file_name} is larger than {} MB", MAX_BYTES >> 20)));
+    }
+
+    Ok(())
+}
+
 impl Session {
     /// Add an image resource from bytes (one undo step); returns its unique, sanitized name
     pub fn import_resource_bytes(&mut self, file_name: &str, bytes: Vec<u8>) -> Result<String> {
@@ -61,12 +70,21 @@ impl Session {
         self.add_image_resource_prefixed("", file_name, bytes, max_texels)
     }
 
+    /// [`Self::add_image_resource`] for an image whose decoded pixels the caller already has (bit-identical to decoding `bytes`)
+    pub(crate) fn add_decoded_image_resource(&mut self, file_name: &str, bytes: Vec<u8>, image: texturecraft_formats::DecodedImage) -> Result<String> {
+        within_byte_limit(file_name, &bytes)?;
+        Ok(self.insert_image_resource("", file_name, bytes, image))
+    }
+
     fn add_image_resource_prefixed(&mut self, prefix: &str, file_name: &str, bytes: Vec<u8>, max_texels: u64) -> Result<String> {
-        if bytes.len() > MAX_BYTES {
-            return Err(EngineError::Other(format!("{file_name} is larger than {} MB", MAX_BYTES >> 20)));
-        }
+        within_byte_limit(file_name, &bytes)?;
 
         let image = texturecraft_formats::decode_image_within(&bytes, max_texels).map_err(|error| EngineError::Other(format!("{file_name}: {error}")))?;
+        Ok(self.insert_image_resource(prefix, file_name, bytes, image))
+    }
+
+    /// Store `bytes` and their decoded `image` under a unique, sanitized name from `file_name` and `prefix`; returns the name
+    fn insert_image_resource(&mut self, prefix: &str, file_name: &str, bytes: Vec<u8>, image: texturecraft_formats::DecodedImage) -> String {
         let leaf = std::path::Path::new(file_name).file_name().and_then(|name| name.to_str()).unwrap_or("image");
         let mut base = sanitize_resource_name(leaf);
 
@@ -95,8 +113,7 @@ impl Session {
 
         self.doc.resources.insert(name.clone(), Arc::new(bytes));
         self.images.insert(name.clone(), decoded(image));
-
-        Ok(name)
+        name
     }
 
     /// Decode resources that are not decoded yet and forget removed ones (after undo, redo, load).

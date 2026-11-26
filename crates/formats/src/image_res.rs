@@ -173,15 +173,19 @@ pub fn gray16_resource(width: u32, height: u32, values: impl Iterator<Item = f32
     Ok((png, DecodedImage { width, height, rgba, srgb: true }))
 }
 
-/// 16-bit RGBA PNG bytes of `samples` (red, green, blue and alpha per pixel, `width × height`, top row first): one channel of a flattened folder
-pub fn rgba16_png(width: u32, height: u32, samples: &[u16]) -> Result<Vec<u8>> {
+/// A 16-bit RGBA PNG of `samples` (red, green, blue and alpha per pixel, `width × height`, top row first) and its decoded pixels, as reloading it gives them: one channel of a flattened folder
+pub fn rgba16_resource(width: u32, height: u32, samples: &[u16]) -> Result<(Vec<u8>, DecodedImage)> {
     let texels = u64::from(width) * u64::from(height);
     if width == 0 || height == 0 || width > MAX_IMAGE_SIZE || height > MAX_IMAGE_SIZE || texels > MAX_RESOURCE_TEXELS {
         return Err(FormatError::TooLarge(format!("image is {width}x{height} (limit {MAX_RESOURCE_TEXELS} texels)")));
     }
 
     let image = Image::from_u16(width, height, ChannelLayout::Rgba, samples).map_err(|error| FormatError::Invalid(error.to_string()))?;
-    encode_resource_png(&image)
+    let png = encode_resource_png(&image)?;
+
+    // Divide as the PNG decoder does for RGBA, so reload is bit-identical
+    let rgba = samples.as_chunks::<4>().0.iter().map(|pixel| pixel.map(|sample| f32::from(sample) / f32::from(u16::MAX))).collect();
+    Ok((png, DecodedImage { width, height, rgba, srgb: true }))
 }
 
 fn encode_resource_png(image: &Image) -> Result<Vec<u8>> {
@@ -308,6 +312,23 @@ mod tests {
             assert_eq!(cached, saved, "pixel {index}");
         }
         assert!(gray16_resource(2, 1, [0.5].into_iter()).is_err());
+    }
+
+    #[test]
+    fn generated_rgba16_resource_matches_reload_for_every_sample_value() {
+        // Every value in each of red, green, blue and alpha, with gray pixels as scalar channels write them
+        let mixed = (0..=u16::MAX).flat_map(|value| [value, value.wrapping_add(1), value.wrapping_add(2), value.wrapping_mul(3)]);
+        let gray = (0..=u16::MAX).flat_map(|value| [value, value, value, u16::MAX - value]);
+        let samples: Vec<u16> = mixed.chain(gray).collect();
+
+        let (png, decoded) = rgba16_resource(512, 256, &samples).unwrap();
+
+        let reloaded = decode_image(&png).unwrap();
+        assert_eq!((decoded.width, decoded.height, decoded.srgb), (reloaded.width, reloaded.height, reloaded.srgb));
+        for (index, (cached, saved)) in decoded.rgba.iter().zip(&reloaded.rgba).enumerate() {
+            assert_eq!(cached, saved, "pixel {index}");
+        }
+        assert!(rgba16_resource(2, 1, &[0; 4]).is_err(), "too few samples for the size");
     }
 
     #[test]

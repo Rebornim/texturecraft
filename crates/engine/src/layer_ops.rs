@@ -4,6 +4,7 @@
 use serde_json::{Value, json};
 use texturecraft_compose::eval::FlatTile;
 use texturecraft_core::{Channel, ChannelKind, Effect, EffectKind, Fill, Filtering, Layer, LayerId, LayerKind, Mask, MaskBackground, Sampling, Source};
+use texturecraft_formats::DecodedImage;
 use texturecraft_texel::{TILE, TileImage, from_u16, from_u16_signed, linear_to_srgb, to_u16};
 
 use crate::commands::{CommandSpec, boolp, has_layer, layer_param};
@@ -250,9 +251,9 @@ fn flatten_folder(s: &mut Session, ts: usize, folder: &Layer) -> Result<Value> {
 
     let flat = s.edit("Flatten folder", |s| {
         let mut fill = Fill { sampling: Sampling { filtering: Filtering::Nearest, alpha_coverage: true, ..Sampling::default() }, ..Fill::default() };
-        for (channel, png) in images {
+        for (channel, png, image) in images {
             let file_name = format!("{} flattened {}.png", folder.name, channel.id());
-            let name = s.add_image_resource(&file_name, png, texturecraft_formats::MAX_RESOURCE_TEXELS)?;
+            let name = s.add_decoded_image_resource(&file_name, png, image)?;
             fill.sources.insert(channel, Source::image(name));
         }
 
@@ -282,10 +283,13 @@ fn flatten_folder(s: &mut Session, ts: usize, folder: &Layer) -> Result<Value> {
     Ok(json!({ "layer": flat.0 }))
 }
 
-/// Flattened tiles as one 16-bit RGBA PNG per channel (straight values as a fill reads them, coverage in the alpha), in channel order
-fn channel_images(tiles: Vec<FlatTile>, size: (u32, u32)) -> Result<Vec<(Channel, Vec<u8>)>> {
+/// One flattened tile of a channel: (tile, value + coverage data)
+type ChannelTile = ((u32, u32), Vec<u16>);
+
+/// Flattened tiles as one 16-bit RGBA PNG per channel and its decoded pixels (straight values as a fill reads them, coverage in the alpha), in channel order
+fn channel_images(tiles: Vec<FlatTile>, size: (u32, u32)) -> Result<Vec<(Channel, Vec<u8>, DecodedImage)>> {
     let (width, height) = size;
-    let mut by_channel: std::collections::BTreeMap<Channel, Vec<((u32, u32), Vec<u16>)>> = Default::default();
+    let mut by_channel: std::collections::BTreeMap<Channel, Vec<ChannelTile>> = Default::default();
     for (channel, tile, data) in tiles {
         by_channel.entry(channel).or_default().push((tile, data));
     }
@@ -322,9 +326,9 @@ fn channel_images(tiles: Vec<FlatTile>, size: (u32, u32)) -> Result<Vec<(Channel
                     }
                 }
             }
-            let png =
-                texturecraft_formats::rgba16_png(width, height, &rgba).map_err(|error| EngineError::Other(format!("flattened {}: {error}", channel.id())))?;
-            Ok((channel, png))
+            let (png, image) = texturecraft_formats::rgba16_resource(width, height, &rgba)
+                .map_err(|error| EngineError::Other(format!("flattened {}: {error}", channel.id())))?;
+            Ok((channel, png, image))
         })
         .collect()
 }

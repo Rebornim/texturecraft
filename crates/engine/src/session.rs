@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use texturecraft_compose::{
     BakedMaps, BelowCache, Composite, PaddingMaps, PaintTarget, PixelStore, StackKey, StrokePreview, covered_tiles, pad_tiles, stack_reads_neighbours,
 };
-use texturecraft_core::{Channel, Layer, LayerId, LayerKind, Project, TextureSet, UvPaddingMode};
+use texturecraft_core::{Channel, ChannelFormat, Layer, LayerId, LayerKind, Project, TextureSet, UvPaddingMode};
 use texturecraft_geom::glam::Vec2;
 use texturecraft_geom::{Bvh, Mesh, OrbitCamera, UvGBuffer, UvSeam};
 use texturecraft_paint::{BrushSettings, EyeDepth, Stroke, StrokeCanvas};
@@ -42,6 +42,8 @@ pub struct SetCache {
     /// The set's UV padding mode and the display padding it gives
     pub uv_padding: UvPaddingMode,
     pub padding: Arc<PaddingMaps>,
+    /// The channels' storage formats the composite was made with
+    pub formats: Vec<(Channel, ChannelFormat)>,
     pub covered_tiles: Arc<Vec<(u32, u32)>>,
     pub composite: Composite,
     /// Tiles to recomposite.
@@ -71,6 +73,7 @@ impl SetCache {
             gbuf: Arc::new(gbuf),
             uv_padding: ts.uv_padding,
             padding: Arc::new(padding),
+            formats: ts.formats(),
             covered_tiles: Arc::new(covered),
             composite: Composite { block_scales: ts.block_scales(), ..Composite::with_size(&ts.channel_list(), w, h) },
             dirty: all.clone(),
@@ -87,7 +90,7 @@ impl SetCache {
     }
 }
 
-/// The seams `ts`'s UV padding crosses: none for 2D Space Neighbor
+/// The seams `ts`'s UV padding crosses: none for padding from island edges (2D)
 pub(crate) fn padding_seams(mesh: &Mesh, ts: &TextureSet) -> Vec<UvSeam> {
     match ts.uv_padding {
         UvPaddingMode::Space3d => UvSeam::of_material(mesh, ts.material),
@@ -927,6 +930,11 @@ impl Session {
                     if c.uv_padding != ts.uv_padding {
                         c.uv_padding = ts.uv_padding;
                         c.padding = Arc::new(display_padding(&self.mesh, ts, &c.gbuf));
+                        c.invalidate_all();
+                    }
+                    let formats = ts.formats();
+                    if c.formats != formats {
+                        c.formats = formats;
                         c.invalidate_all();
                     }
 

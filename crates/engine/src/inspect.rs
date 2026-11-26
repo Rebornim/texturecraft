@@ -270,7 +270,7 @@ pub fn texture_set(session: &Session, index: usize) -> Value {
         "blockResolution": texture_set.block_resolution(),
         "uvTiles": texture_set.uv_tiles,
         "tiles": tiles,
-        "channels": texture_set.channels.iter().map(|(channel, format)| json!({ "channel": channel.id(), "format": format.label() })).collect::<Vec<_>>(),
+        "channels": texture_set.formats().iter().map(|(channel, format)| json!({ "channel": channel.id(), "format": format.label() })).collect::<Vec<_>>(),
         "layers": session.doc.project.walk(index).len(),
         "parts": crate::set_cmds::parts(session, index),
         "baked": crate::project_cmds::baked_json(session.doc.baked.get(&index)),

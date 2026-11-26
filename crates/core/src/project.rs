@@ -41,11 +41,43 @@ pub enum NormalMixing {
     Replace,
 }
 
+impl NormalMixing {
+    pub const ALL: [NormalMixing; 2] = [NormalMixing::Combine, NormalMixing::Replace];
+
+    /// Stable id for commands and inspect
+    pub fn id(self) -> &'static str {
+        match self {
+            NormalMixing::Combine => "combine",
+            NormalMixing::Replace => "replace",
+        }
+    }
+
+    pub fn parse(id: &str) -> Option<NormalMixing> {
+        NormalMixing::ALL.into_iter().find(|mixing| mixing.id() == id)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AoMixing {
     #[default]
     Multiply,
     None,
+}
+
+impl AoMixing {
+    pub const ALL: [AoMixing; 2] = [AoMixing::Multiply, AoMixing::None];
+
+    /// Stable id for commands and inspect
+    pub fn id(self) -> &'static str {
+        match self {
+            AoMixing::Multiply => "multiply",
+            AoMixing::None => "none",
+        }
+    }
+
+    pub fn parse(id: &str) -> Option<AoMixing> {
+        AoMixing::ALL.into_iter().find(|mixing| mixing.id() == id)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -55,13 +87,16 @@ pub struct TextureSet {
     pub description: String,
     /// Material index in the mesh this set paints.
     pub material: usize,
-    /// Texels across: a power of two, 128..=8192 (the side of a square set).
+    /// Texels across: a power of two, 128..=8192 (the side of a square set)
     pub resolution: u32,
-    /// Texels down when they differ from `resolution` (a non-square set); a power of two,
-    /// 128..=8192. Sets with per-tile resolutions stay square.
+    /// Texels down when they differ from `resolution` (a power of two, 128..=8192); sets with per-tile resolutions stay square
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolution_height: Option<u32>,
+    /// Channels and their storage formats; see [`TextureSet::formats`] for what they hold
     pub channels: Vec<(Channel, ChannelFormat)>,
+    /// Whether channels hold their formats' precision; until a format is set every channel keeps 16 bits, what TextureCraft always stored
+    #[serde(default)]
+    pub format_precision: bool,
     /// Top-level layers, bottom → top.
     pub stack: Vec<LayerId>,
     #[serde(default)]
@@ -71,7 +106,7 @@ pub struct TextureSet {
     /// Height to normal method; projects without it keep Smooth, the filter their exports already used
     #[serde(default)]
     pub height_to_normal: HeightToNormalMethod,
-    /// UV padding; projects without it keep 2D Space Neighbor, the padding they were made with
+    /// UV padding; projects without it keep padding from island edges (2D), the padding they were made with
     #[serde(default)]
     pub uv_padding: UvPaddingMode,
     /// Height-to-normal strength.
@@ -179,6 +214,7 @@ impl TextureSet {
             resolution,
             resolution_height: None,
             channels: Channel::DEFAULT_SET.iter().map(|c| (*c, ChannelFormat::default_for(*c))).collect(),
+            format_precision: false,
             stack: Vec::new(),
             normal_mixing: NormalMixing::Combine,
             ao_mixing: AoMixing::Multiply,
@@ -219,26 +255,25 @@ impl TextureSet {
         self.normal_mixing == NormalMixing::Combine
     }
 
-    /// Texels across and down: [`TextureSet::block_size`] per block of the atlas grid.
+    /// Texels across and down: [`TextureSet::block_size`] per block of the atlas grid
     pub fn size(&self) -> (u32, u32) {
         let (cols, rows) = self.tile_grid().map_or((1, 1), |g| (g.cols, g.rows));
         let (width, height) = self.block_size();
         (width.saturating_mul(cols), height.saturating_mul(rows))
     }
 
-    /// Texels down of the set's size (`resolution` for a square set).
+    /// Texels down of the set's size (`resolution` for a square set)
     pub fn height(&self) -> u32 {
         self.resolution_height.unwrap_or(self.resolution)
     }
 
-    /// Set the size to `width × height` (None when square).
+    /// Set the size to `width × height` (`height` stored only when it differs)
     pub fn set_size(&mut self, width: u32, height: u32) {
         self.resolution = width;
         self.resolution_height = (height != width).then_some(height);
     }
 
-    /// Texels across and down of an atlas block: the set's size, or the largest tile
-    /// resolution square when tiles have their own.
+    /// Texels across and down of an atlas block: the set's size, or the largest tile resolution square when tiles have their own
     pub fn block_size(&self) -> (u32, u32) {
         if self.tile_resolutions.is_empty() {
             return (self.resolution, self.height());
@@ -252,8 +287,7 @@ impl TextureSet {
         self.tile_resolutions.get(&udim).copied().unwrap_or(self.resolution)
     }
 
-    /// Texels across an atlas block: the largest tile resolution (`resolution` for a
-    /// classic set or one without overrides); see [`TextureSet::block_size`] for both sides.
+    /// Texels across an atlas block: the largest tile resolution (`resolution` without overrides); see [`TextureSet::block_size`]
     pub fn block_resolution(&self) -> u32 {
         if self.tile_resolutions.is_empty() {
             return self.resolution;
@@ -308,6 +342,28 @@ impl TextureSet {
 
     pub fn channel_list(&self) -> Vec<Channel> {
         self.channels.iter().map(|(c, _)| *c).collect()
+    }
+
+    /// The channels with the formats they are stored in (8-bit ones read as 16-bit without `format_precision`)
+    pub fn formats(&self) -> Vec<(Channel, ChannelFormat)> {
+        let held = |format: ChannelFormat| if self.format_precision { format } else { format.at_least_16_bit() };
+        self.channels.iter().map(|(channel, format)| (*channel, held(*format))).collect()
+    }
+
+    /// Store channel `target` in `format` (false when the set lacks it); the other channels keep what they hold
+    pub fn set_channel_format(&mut self, target: Channel, format: ChannelFormat) -> bool {
+        if !self.has_channel(target) {
+            return false;
+        }
+
+        self.channels = self.formats();
+        self.format_precision = true;
+        for (channel, stored) in &mut self.channels {
+            if *channel == target {
+                *stored = format;
+            }
+        }
+        true
     }
 }
 
@@ -764,11 +820,12 @@ impl Project {
         if let Some(t) = self.texture_sets.iter().find(|t| bad_tile_res(t)) {
             return Err(CoreError::Invalid(format!("texture set \"{}\" has invalid UV tile resolutions {:?}", t.name, t.tile_resolutions)));
         }
-        let bad_height = |t: &TextureSet| {
-            t.resolution_height.is_some_and(|h| !h.is_power_of_two() || !(MIN_RESOLUTION..=MAX_RESOLUTION).contains(&h) || !t.tile_resolutions.is_empty())
+        let bad_height = |set: &TextureSet| {
+            set.resolution_height
+                .is_some_and(|height| !height.is_power_of_two() || !(MIN_RESOLUTION..=MAX_RESOLUTION).contains(&height) || !set.tile_resolutions.is_empty())
         };
-        if let Some(t) = self.texture_sets.iter().find(|t| bad_height(t)) {
-            return Err(CoreError::Invalid(format!("texture set \"{}\" has an invalid height {:?}", t.name, t.resolution_height)));
+        if let Some(set) = self.texture_sets.iter().find(|set| bad_height(set)) {
+            return Err(CoreError::Invalid(format!("texture set \"{}\" has an invalid height {:?}", set.name, set.resolution_height)));
         }
         let mut seen = BTreeSet::new();
         for ts in 0..self.texture_sets.len() {
@@ -868,6 +925,24 @@ mod tests {
         let mut p = Project::new("t", "builtin:sphere");
         p.texture_sets.push(TextureSet::new("Body", 0, 512));
         p
+    }
+
+    #[test]
+    fn sets_keep_16_bits_until_a_format_is_set_also_in_older_files() {
+        let new = TextureSet::new("a", 0, 128);
+        let mut v = serde_json::to_value(&new).unwrap();
+        v.as_object_mut().unwrap().remove("format_precision");
+        let mut old: TextureSet = serde_json::from_value(v).unwrap();
+        let format = |t: &TextureSet, c: Channel| t.formats().into_iter().find(|(x, _)| *x == c).map(|(_, f)| f);
+
+        assert_eq!(format(&new, Channel::Roughness), Some(ChannelFormat::L16));
+        assert_eq!(format(&old, Channel::Roughness), Some(ChannelFormat::L16));
+        assert_eq!(format(&old, Channel::BaseColor), Some(ChannelFormat::Rgb16));
+
+        assert!(old.set_channel_format(Channel::Metallic, ChannelFormat::L8));
+        assert_eq!(format(&old, Channel::Metallic), Some(ChannelFormat::L8));
+        assert_eq!(format(&old, Channel::Roughness), Some(ChannelFormat::L16), "the other channels keep their precision");
+        assert!(!old.set_channel_format(Channel::Emissive, ChannelFormat::L8), "a channel the set lacks");
     }
 
     #[test]

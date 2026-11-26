@@ -1601,7 +1601,7 @@ pub(crate) fn texture_set_settings(app: &mut TextureCraftApp, ui: &mut Ui) {
             });
         });
 
-        for (channel, format) in &set.channels {
+        for (channel, format) in &set.formats() {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(tr(channel.label())).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

@@ -10,6 +10,7 @@
 pub mod axis_frame;
 mod baked_maps;
 pub mod below;
+mod channel_store;
 mod curvature_size_level;
 pub mod curvature_sizes;
 pub mod display;
@@ -37,6 +38,7 @@ mod mask_gray;
 mod micro_detail;
 pub mod mip_level;
 mod organic;
+mod padding_maps;
 pub mod pattern;
 mod pattern_context;
 pub mod projector_cover;
@@ -52,6 +54,7 @@ mod slot_placement;
 mod soft_box;
 pub mod solo;
 pub mod store;
+mod texel_edge;
 mod texture_layer;
 mod three_d_distance;
 pub mod thumb;
@@ -78,9 +81,9 @@ pub use eval::{
     stack_reads_neighbours,
 };
 pub use mask_gray::MaskGray;
+pub use padding_maps::PaddingMaps;
 pub use pattern_context::PatternContext;
 pub use projector_depth_cache::ProjectorDepthCache;
-pub use seam_padding::PaddingMaps;
 pub use solo::solo_project;
 pub use store::{BakedMaps, ImageRes, ImageStore, PixelStore};
 pub use thumb::{THUMB_TEXELS, ThumbImage, ThumbTarget};

@@ -35,6 +35,7 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!("textureSet.channel.add", "Add channel", [], None, "{ts?, channel}", always, |s, p| channel(s, p, true)),
         cmd!("textureSet.channel.remove", "Remove channel", [], None, "{ts?, channel}", always, |s, p| channel(s, p, false)),
+        cmd!("textureSet.channel.format", "Set channel format", [], None, "{ts?, channel, format}", always, channel_format),
         cmd!("textureSet.visible", "Toggle texture set visibility", [], None, "{ts?, visible?}", always, visible),
         cmd!(
             "textureSet.visibility",
@@ -244,6 +245,25 @@ fn channel(s: &mut Session, p: &Value, add: bool) -> Result<Value> {
     Ok(Value::Null)
 }
 
+/// Store a channel in another format; layer data keeps its precision, so a wider format brings back what was painted
+fn channel_format(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "textureSet.channel.format";
+    let ts = ts_param(s, p, cmd)?;
+    let c = channel_param(cmd, p, "channel")?.ok_or_else(|| bad(cmd, "`channel` is required"))?;
+    let name = strp(p, "format").ok_or_else(|| bad(cmd, "`format` is required"))?;
+    let all = || ChannelFormat::ALL.map(ChannelFormat::label).join(", ");
+    let format = ChannelFormat::parse(name).ok_or_else(|| bad(cmd, format!("unknown format {name:?} ({})", all())))?;
+    s.edit("Channel format", |s| {
+        if s.doc.project.texture_set_mut(ts)?.set_channel_format(c, format) {
+            Ok(())
+        } else {
+            Err(bad(cmd, format!("the texture set has no {} channel", c.label())))
+        }
+    })?;
+    let float = matches!(format, ChannelFormat::L16F | ChannelFormat::Rgb16F | ChannelFormat::L32F | ChannelFormat::Rgb32F);
+    Ok(if float { json!({"note": "float formats are stored at 16 bits for now, and values stay in the channel's range"}) } else { Value::Null })
+}
+
 /// Add channel `c` to texture set `ts` (no-op when present) and enable it on the set's layers.
 /// Call inside [`Session::edit`].
 pub(crate) fn add_channel(s: &mut Session, ts: usize, c: Channel) -> Result<()> {
@@ -430,6 +450,36 @@ mod tests {
 
         crate::execute(&mut s, "edit.undo", &Value::Null).unwrap();
         assert_eq!((mode(&s), crosses_seams(&s)), (json!("3d"), true));
+    }
+
+    #[test]
+    fn channel_format_changes_what_the_viewport_holds_and_undoes() {
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+        let format = |s: &Session| crate::inspect::texture_set(s, 0)["channels"][2]["format"].clone();
+        let roughness = |s: &mut Session| {
+            s.update();
+            let img = &s.caches[0].composite.channels[&Channel::Roughness];
+            let tile = s.caches[0].covered_tiles[0];
+            img.tile(tile.0, tile.1).map(<[u16]>::to_vec).unwrap_or_default()
+        };
+        crate::execute(&mut s, "textureSet.channel.format", &json!({"channel": "roughness", "format": "L16"})).unwrap();
+        crate::execute(&mut s, "layer.add.fill", &json!({"roughness": 0.3013})).unwrap();
+        let sixteen = roughness(&mut s);
+        assert_eq!(format(&s), json!("L16"));
+
+        crate::execute(&mut s, "textureSet.channel.format", &json!({"channel": "Roughness", "format": "l8"})).unwrap();
+        let eight = roughness(&mut s);
+        assert_eq!(format(&s), json!("L8"));
+        assert_ne!(eight, sixteen, "the composite holds 8 bits");
+        assert!(eight.iter().all(|v| v % 257 == 0), "every texel is on an 8-bit step");
+
+        let float = crate::execute(&mut s, "textureSet.channel.format", &json!({"channel": "height", "format": "L32F"})).unwrap();
+        assert!(float["note"].is_string(), "a float format says it holds 16 bits");
+        crate::execute(&mut s, "edit.undo", &Value::Null).unwrap();
+        assert!(crate::execute(&mut s, "textureSet.channel.format", &json!({"channel": "roughness", "format": "L4"})).is_err());
+        assert!(crate::execute(&mut s, "textureSet.channel.format", &json!({"channel": "emissive", "format": "L8"})).is_err());
+        crate::execute(&mut s, "edit.undo", &Value::Null).unwrap();
+        assert_eq!((format(&s), roughness(&mut s)), (json!("L16"), sixteen));
     }
 
     #[test]

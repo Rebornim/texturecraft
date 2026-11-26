@@ -253,6 +253,38 @@ impl ChannelFormat {
             ChannelKind::Signed => ChannelFormat::L16F,
         }
     }
+    /// Every format, in the order the channel settings list them
+    pub const ALL: [ChannelFormat; 9] = [
+        ChannelFormat::Srgb8,
+        ChannelFormat::L8,
+        ChannelFormat::Rgb8,
+        ChannelFormat::L16,
+        ChannelFormat::Rgb16,
+        ChannelFormat::L16F,
+        ChannelFormat::Rgb16F,
+        ChannelFormat::L32F,
+        ChannelFormat::Rgb32F,
+    ];
+
+    /// A format by its label, ignoring case ("srgb8", "L16F")
+    pub fn parse(s: &str) -> Option<ChannelFormat> {
+        ChannelFormat::ALL.into_iter().find(|f| f.label().eq_ignore_ascii_case(s.trim()))
+    }
+
+    /// Grey formats keep one value per texel: a colour channel stored in one turns grey
+    pub fn is_grey(self) -> bool {
+        matches!(self, ChannelFormat::L8 | ChannelFormat::L16 | ChannelFormat::L16F | ChannelFormat::L32F)
+    }
+
+    /// The 16-bit format holding everything an 8-bit one does (itself for the others)
+    pub fn at_least_16_bit(self) -> ChannelFormat {
+        match self {
+            ChannelFormat::Srgb8 | ChannelFormat::Rgb8 => ChannelFormat::Rgb16,
+            ChannelFormat::L8 => ChannelFormat::L16,
+            other => other,
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             ChannelFormat::Srgb8 => "sRGB8",
@@ -302,6 +334,15 @@ mod tests {
         }
         assert_eq!(Channel::parse("sheen color"), Some(Channel::SheenColor));
         assert_eq!(Channel::parse("coatWeight"), Some(Channel::CoatWeight));
+    }
+
+    #[test]
+    fn formats_parse_by_label() {
+        for f in ChannelFormat::ALL {
+            assert_eq!(ChannelFormat::parse(&f.label().to_lowercase()), Some(f));
+            assert!(f.at_least_16_bit().is_grey() == f.is_grey());
+        }
+        assert_eq!(ChannelFormat::parse("RGB4"), None);
     }
 
     #[test]

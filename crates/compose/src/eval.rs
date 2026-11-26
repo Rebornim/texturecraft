@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 use texturecraft_core::{
-    AnisotropicKuwahara, BakedMap, Bevel, BevelSmooth, BlendMode, BlockScales, Channel, ChannelKind, ColorMatch, CompareSource, ContentsOffset,
+    AnisotropicKuwahara, BakedMap, Bevel, BevelSmooth, BlendMode, BlockScales, Channel, ChannelFormat, ChannelKind, ColorMatch, CompareSource, ContentsOffset,
     CurvatureDetail, CurvatureMode, Effect, EffectKind, FLAT_CURVATURE, Fill, Filter, Filtering, Generator, GeneratorGlobal, GeneratorKind,
     GrayscaleConversionParameters, HeightMask, HeightToNormal, HighpassSpace, ImageInput, KindControls, Layer, LayerId, LayerKind, Mask, MaskBackground,
     MaskOutline, Mirror, NormalFormat, PreparedColorMatch, PreparedGradient, Project, Projection, RepeatMode, Sampling, SectionParameters, ShapeCrop, Source,
@@ -171,7 +171,7 @@ impl Inputs<'_> {
         self.gbuf.width / self.tile_grid().map_or(1, |g| g.cols.max(1))
     }
 
-    /// Texels across and down an atlas block.
+    /// Texels across and down an atlas block
     fn block_size(&self) -> [u32; 2] {
         let (cols, rows) = self.tile_grid().map_or((1, 1), |g| (g.cols.max(1), g.rows.max(1)));
         [self.gbuf.width / cols, self.gbuf.height / rows]
@@ -444,7 +444,7 @@ enum Op {
     Halo,
     /// The shapes moved by `offset` (whole texels), box blurred and laid under them
     Shadow { offset: [i32; 2] },
-    /// Each UV tile's texels read from where `mirror` sends them in their tile (`block` texels across the set's atlas blocks)
+    /// Each UV tile's texels read from where `mirror` sends them in their tile
     Mirror { mirror: Mirror },
     /// Each UV tile's texels read from where `transform` sends them (its `affine`, worked out once), repeating round the tile or empty past it
     Transform { transform: TileTransform, affine: ([[f32; 2]; 2], [f32; 2]) },
@@ -1191,13 +1191,11 @@ fn mirror_texel(
     let [u, v] = mirror.source(uv);
 
     // Whole texels, so an even mirror copies texels exactly
-    let at = |origin: f32, along: f32, size: f32| origin + (along * size - 0.5).round().clamp(0.0, size - 1.0);
+    let at = |origin: f32, along: f32, extent: f32| origin + (along * extent - 0.5).round().clamp(0.0, extent - 1.0);
     sample(at(origin_x, u, size[0]), at(origin_y, v, size[1]), acc);
 }
 
-/// The top left of the UV tile holding texel `(x, y)` (tiles of `tile` texels at the top left of
-/// `block`-texel atlas blocks), the texel centre's UV in it and the tile's size, both per axis;
-/// None past the tile.
+/// The top left of texel `(x, y)`'s UV tile (`tile` texels at its `block`'s top left), the texel centre's UV in it and the tile's size, None past the tile
 fn tile_local((x, y): (f32, f32), (block, tile): ([u32; 2], [u32; 2])) -> Option<([f32; 2], [f32; 2], [f32; 2])> {
     let (block, size) = (block.map(|b| b.max(1) as f32), tile.map(|t| t.max(1) as f32));
     let origin = [(x / block[0]).floor() * block[0], (y / block[1]).floor() * block[1]];
@@ -1208,7 +1206,7 @@ fn tile_local((x, y): (f32, f32), (block, tile): ([u32; 2], [u32; 2])) -> Option
     Some((origin, [(local[0] + 0.5) / size[0], (local[1] + 0.5) / size[1]], size))
 }
 
-/// Transform `transform` (whose read is `affine`) at texel `(x, y)` into `acc`: bilinear between the four texels round where it reads in its UV tile (`res` texels from its `block`'s top left), each wrapped round the tile; where it does not repeat, a read past the tile counts as empty
+/// Transform `transform` (whose read is `affine`) at texel `(x, y)` into `acc`: bilinear between the four texels round where it reads in its UV tile (`tile` texels per axis from its block's top left), each wrapped round the tile; where it does not repeat, a read past the tile counts as empty
 fn transform_texel(
     transform: &TileTransform,
     (columns, shift): ([[f32; 2]; 2], [f32; 2]),
@@ -4677,13 +4675,15 @@ fn composite_block(
     quota: usize,
     fields: &Fields,
 ) -> Vec<((u32, u32), Vec<Band>)> {
-    let channels: Vec<Channel> = inp.project.texture_set(inp.ts).map(|s| s.channel_list()).unwrap_or_default();
+    let formats: Vec<(Channel, ChannelFormat)> = inp.project.texture_set(inp.ts).map(TextureSet::formats).unwrap_or_default();
+    let channels: Vec<Channel> = formats.iter().map(|(c, _)| *c).collect();
     let (w, h) = (out.resolution, out.height);
     let split = below.map(|(_, l)| l);
     let cached = |t: (u32, u32)| below.and_then(|(b, _)| b.tile(t));
     let fresh: Vec<(u32, u32)> = tiles.iter().copied().filter(|t| cached(*t).is_none()).collect();
     let recorded: std::collections::BTreeSet<(u32, u32)> = if split.is_some() { fresh.iter().copied().take(quota).collect() } else { Default::default() };
-    let lanes: Vec<Lane> = channels.iter().map(|c| Lane { ch: c.index(), n: c.components(), signed: c.kind() == ChannelKind::Signed }).collect();
+    let lanes: Vec<Lane> =
+        formats.iter().map(|(c, f)| Lane { ch: c.index(), n: c.components(), signed: c.kind() == ChannelKind::Signed, format: *f }).collect();
     let stride: usize = lanes.iter().map(|l| l.n).sum();
     let level_count = split.map_or(0, <[Level]>::len);
     let defaults: Acc = Channel::ALL.map(Channel::default_value);
@@ -4772,7 +4772,7 @@ fn composite_block(
                         anchors.clear();
                     }
                     for (l, buf) in lanes.iter().zip(&mut channel_buffers) {
-                        let v = acc.get(l.ch).copied().unwrap_or([0.0; 3]);
+                        let v = crate::channel_store::stored(l.format, l.signed, acc.get(l.ch).copied().unwrap_or([0.0; 3]), l.n);
                         for (k, x) in v.iter().take(l.n).enumerate() {
                             let encoded = if l.signed { to_u16_signed(*x) } else { to_u16(*x) };
                             if let Some(slot) = buf.get_mut(band_offset * l.n + k) {
@@ -4850,6 +4850,8 @@ struct Lane {
     ch: usize,
     n: usize,
     signed: bool,
+    /// What the channel is stored in
+    format: ChannelFormat,
 }
 
 /// Restore the cached stack value of slot `o` (a texel at one nesting level). Scalars are
@@ -4879,8 +4881,7 @@ fn store_below(cache: &mut [f32], lanes: &[Lane], stride: usize, o: usize, acc: 
     }
 }
 
-/// UV padding for display: fill uncovered texels in `tiles` and their neighbours from the
-/// covered texel `padding` gives each channel. Returns the tiles it wrote.
+/// UV padding for display: fill uncovered texels in `tiles` and their neighbours from the covered texel `padding` gives each, returning the tiles written
 pub fn pad_tiles(out: &mut Composite, padding: &crate::PaddingMaps, tiles: &[(u32, u32)]) -> std::collections::BTreeSet<(u32, u32)> {
     let mut written = std::collections::BTreeSet::new();
     let (w, h) = (out.resolution, out.height);
@@ -4904,7 +4905,7 @@ pub fn pad_tiles(out: &mut Composite, padding: &crate::PaddingMaps, tiles: &[(u3
     for (channel, img) in out.channels.iter_mut() {
         let comps = img.comps();
         let src: &TileImage = img;
-        let dmap = padding.for_channel(*channel);
+        let dilation = padding.for_channel(*channel);
 
         // Each tile pads from the original image, so parallel writes stay independent
         let padded: Vec<((u32, u32), Vec<u16>)> = set
@@ -4918,7 +4919,7 @@ pub fn pad_tiles(out: &mut Composite, padding: &crate::PaddingMaps, tiles: &[(u3
                             continue;
                         }
 
-                        let Some((sx, sy)) = dmap.source(x, y) else { continue };
+                        let Some((sx, sy)) = dilation.source(x, y) else { continue };
                         if (sx, sy) == (x, y) {
                             continue;
                         }

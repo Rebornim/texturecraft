@@ -91,13 +91,13 @@ fn stroke_on_model(harness: &mut Harness<'_, TextureCraftApp>, modifiers: Modifi
     drag(harness, view.center(), STROKE, modifiers);
 }
 
-/// Opens the paint tool's Base color swatch from its Properties' Material tab
+/// Opens the paint tool's Base color swatch from its Properties' Material section
 fn open_tool_color(harness: &mut Harness<'_, TextureCraftApp>) {
+    harness.get_by_role_and_label(egui::Role::Tab, "Material").click();
+    harness.run_steps(SETTLE_FRAMES);
+
     let header = harness.get_by_role_and_label(egui::Role::Tab, "Properties - Paint").rect();
     let in_properties = |rect: egui::Rect| header.x_range().contains(rect.center().x) && rect.top() > header.top();
-    let material = harness.get_all_by_label("Material").find(|node| in_properties(node.rect())).unwrap();
-    material.click();
-    harness.run_steps(SETTLE_FRAMES);
 
     let label = harness.get_all_by_value("Base color").find(|node| in_properties(node.rect())).unwrap().rect();
     click(harness, label.right_center() + vec2(LABEL_TO_SWATCH, 0.0));

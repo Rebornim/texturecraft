@@ -68,6 +68,7 @@ mod nav_buttons;
 mod new_project_baked_maps;
 mod new_project_window;
 mod output_templates;
+mod paint_tool_tabs;
 mod panel_header;
 mod path_in_view;
 mod path_list;

@@ -21,7 +21,7 @@ use texturecraft_core::{
 };
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Mesh, NO_TRI, Surface, UvGBuffer};
-use texturecraft_texel::{DilationMap, TILE, TILE_AREA, TileImage, from_u16, noise, to_u16, to_u16_signed};
+use texturecraft_texel::{TILE, TILE_AREA, TileImage, from_u16, noise, to_u16, to_u16_signed};
 
 use crate::ProjectorDepthCache;
 use crate::below::{Band, BelowCache, Level, StackKey};
@@ -4874,12 +4874,12 @@ fn store_below(cache: &mut [f32], lanes: &[Lane], stride: usize, o: usize, acc: 
     }
 }
 
-/// UV padding for display: fill uncovered texels in `tiles` and their neighbours from their
-/// nearest covered texel. Returns the tiles it wrote.
-pub fn pad_tiles(out: &mut Composite, dmap: &DilationMap, tiles: &[(u32, u32)]) -> std::collections::BTreeSet<(u32, u32)> {
+/// UV padding for display: fill uncovered texels in `tiles` and their neighbours from the
+/// covered texel `padding` gives each channel. Returns the tiles it wrote.
+pub fn pad_tiles(out: &mut Composite, padding: &crate::PaddingMaps, tiles: &[(u32, u32)]) -> std::collections::BTreeSet<(u32, u32)> {
     let mut written = std::collections::BTreeSet::new();
     let (w, h) = (out.resolution, out.height);
-    if (dmap.width, dmap.height) != (w, h) {
+    if (padding.all.width, padding.all.height) != (w, h) {
         return written;
     }
 
@@ -4896,9 +4896,10 @@ pub fn pad_tiles(out: &mut Composite, dmap: &DilationMap, tiles: &[(u32, u32)]) 
         }
     }
     let set: Vec<(u32, u32)> = set.into_iter().collect();
-    for img in out.channels.values_mut() {
+    for (channel, img) in out.channels.iter_mut() {
         let comps = img.comps();
         let src: &TileImage = img;
+        let dmap = padding.for_channel(*channel);
 
         // Each tile pads from the original image, so parallel writes stay independent
         let padded: Vec<((u32, u32), Vec<u16>)> = set
@@ -6417,8 +6418,8 @@ soft {soft:?}"
         out.channels.get_mut(&Channel::Roughness).unwrap().set(10, 10, &[to_u16(0.9)]);
         let mut covered = vec![false; 64 * 64];
         covered[10 * 64 + 10] = true;
-        let dmap = DilationMap::new(&covered, 64, 64, Some(4));
-        pad_tiles(&mut out, &dmap, &[(0, 0)]);
+        let padding = crate::PaddingMaps { all: texturecraft_texel::DilationMap::new(&covered, 64, 64, Some(4)), flat: None };
+        pad_tiles(&mut out, &padding, &[(0, 0)]);
         assert!((out.value(Channel::Roughness, 12, 12)[0] - 0.9).abs() < 1e-3);
         assert!(out.value(Channel::Roughness, 30, 30)[0] < 0.1 || !out.channels[&Channel::Roughness].is_allocated(0, 0));
     }

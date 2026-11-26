@@ -286,6 +286,10 @@ pub fn texture_set(session: &Session, index: usize) -> Value {
             texturecraft_core::HeightToNormalMethod::Sharp => "sharp",
             texturecraft_core::HeightToNormalMethod::Smooth => "smooth",
         },
+        "uvPadding": match texture_set.uv_padding {
+            texturecraft_core::UvPaddingMode::Space3d => "3d",
+            texturecraft_core::UvPaddingMode::Space2d => "2d",
+        },
         "active": index == session.ts(),
     })
 }

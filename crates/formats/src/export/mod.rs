@@ -18,10 +18,10 @@ use std::io::Cursor;
 use craft_image_codecs::{ChannelLayout, EncodeOptions, Format as CodecFormat, Image as CodecImage, SampleType};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use texturecraft_compose::{BakedMaps, Composite};
+use texturecraft_compose::{BakedMaps, Composite, PaddingMaps};
 use texturecraft_core::{AoMixing, BakedMap, BlockScales, Channel, ChannelKind, NormalFormat, Project, TextureSet};
-use texturecraft_geom::glam::Vec3;
-use texturecraft_texel::{ColorSpace, DilationMap, linear_to_srgb};
+use texturecraft_geom::{UvSeam, glam::Vec3};
+use texturecraft_texel::{ColorSpace, linear_to_srgb};
 
 use crate::{FormatError, MAX_IMAGE_SIZE, Result};
 
@@ -290,6 +290,16 @@ impl SourceRef {
         self.raw_component().min(2)
     }
 
+    /// Whether the source is a tangent-space normal, which pads in 2D whatever the set's UV padding
+    fn pads_flat(&self) -> bool {
+        match self {
+            SourceRef::Channel { channel, .. } => channel.kind() == ChannelKind::NormalMap,
+            SourceRef::Virtual { map, .. } => matches!(map, VirtualMap::NormalOpenGl | VirtualMap::NormalDirectX | VirtualMap::HeightNormal),
+            SourceRef::Baked { map, .. } => *map == BakedMap::Normal,
+            SourceRef::Constant(_) => false,
+        }
+    }
+
     /// Components the source has (1 or 3; constants are 1).
     pub fn components(&self) -> usize {
         match self {
@@ -480,6 +490,8 @@ pub struct ExportInput<'a> {
     pub composite: &'a Composite,
     pub baked: &'a BakedMaps,
     pub coverage: &'a [bool],
+    /// The set's UV seams, which 3D Space Neighbor padding crosses
+    pub seams: &'a [UvSeam],
     pub mesh_name: &'a str,
 }
 
@@ -913,12 +925,11 @@ pub fn render_planned_maps(input: &ExportInput, options: &ExportOptions, planned
     }
 
     // Padding stays inside each UV tile
-    let dilation_map = match options.padding {
+    let padding_maps = |max_dist| PaddingMaps::new(set.uv_padding, input.coverage, (width, height), max_dist, (tile_res, tile_res), input.seams);
+    let padding = match options.padding {
         Padding::None => None,
-        Padding::Dilation(d) | Padding::DilationDefault(d) | Padding::DilationDiffusion(d) => {
-            Some(DilationMap::in_blocks(input.coverage, width, height, Some(d), tile_res))
-        }
-        Padding::Infinite => Some(DilationMap::in_blocks(input.coverage, width, height, None, tile_res)),
+        Padding::Dilation(d) | Padding::DilationDefault(d) | Padding::DilationDiffusion(d) => Some(padding_maps(Some(d))),
+        Padding::Infinite => Some(padding_maps(None)),
     };
     let beyond_default = matches!(options.padding, Padding::DilationDefault(_) | Padding::Infinite);
     let diffuse = matches!(options.padding, Padding::DilationDiffusion(_));
@@ -941,6 +952,7 @@ pub fn render_planned_maps(input: &ExportInput, options: &ExportOptions, planned
             let channel_layout = layout(set, map);
             let component_count = channel_layout.len();
             let inverted: Vec<bool> = channel_layout.iter().map(|(d, _)| map.inverted.contains(d)).collect();
+            let pads_flat: Vec<bool> = channel_layout.iter().map(|(_, source)| source.pads_flat()).collect();
 
             // The texels written: one tile, or the whole set
             let (x0, y0, w, h) = match (planned_file.tile, grid) {
@@ -965,17 +977,23 @@ pub fn render_planned_maps(input: &ExportInput, options: &ExportOptions, planned
             data.par_chunks_mut(w as usize * component_count).enumerate().for_each(|(row_y, row)| {
                 let y = y0 + row_y as u32;
                 for (column, x) in (x0..x0 + w).enumerate() {
-                    let at = if sampler.covered(x, y) {
-                        Some(At::Texel(x, y))
-                    } else {
-                        match dilation_map.as_ref().and_then(|d| d.source(x, y)) {
+                    let at = |flat: bool| {
+                        if sampler.covered(x, y) {
+                            return Some(At::Texel(x, y));
+                        }
+
+                        let dilation_map = padding.as_ref().map(|padding| if flat { padding.flat() } else { &padding.all });
+                        match dilation_map.and_then(|d| d.source(x, y)) {
                             Some((sx, sy)) => Some(At::Texel(sx, sy)),
                             None => beyond_default.then_some(At::Default),
                         }
                     };
-                    let Some(at) = at else { continue };
+
+                    // Only normals use the sample cache, and they all sample the 2D padding
+                    let (at_all, at_flat) = (at(false), at(true));
                     let mut cache = None;
                     for (component, (_, source)) in channel_layout.iter().enumerate() {
+                        let Some(at) = (if pads_flat.get(component).copied().unwrap_or(false) { at_flat } else { at_all }) else { continue };
                         if let Some(value) = row.get_mut(column * component_count + component) {
                             let sample = sampler.sample(source, at, &mut cache);
                             *value = if inverted.get(component).copied().unwrap_or(false) { 1.0 - sample } else { sample };
@@ -988,7 +1006,7 @@ pub fn render_planned_maps(input: &ExportInput, options: &ExportOptions, planned
             if diffuse {
                 let known: Vec<bool> = (y0..y0 + h)
                     .flat_map(|y| (x0..x0 + w).map(move |x| (x, y)))
-                    .map(|(x, y)| sampler.covered(x, y) || dilation_map.as_ref().is_some_and(|d| d.source(x, y).is_some()))
+                    .map(|(x, y)| sampler.covered(x, y) || padding.as_ref().is_some_and(|padding| padding.all.source(x, y).is_some()))
                     .collect();
 
                 // Keep diffusion within each UV tile when rendering an atlas

@@ -1,7 +1,7 @@
 //! Texture set commands (Texture Set List / Texture Set Settings).
 
 use serde_json::{Value, json};
-use texturecraft_core::{AoMixing, Channel, ChannelBlend, ChannelFormat, HeightToNormalMethod, NormalMixing};
+use texturecraft_core::{AoMixing, Channel, ChannelBlend, ChannelFormat, HeightToNormalMethod, NormalMixing, UvPaddingMode};
 
 use std::sync::Arc;
 
@@ -43,7 +43,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Texture set settings",
             [],
             None,
-            "{ts?, description?, heightStrength?, normalMixing?: combine|replace, aoMixing?: multiply|none, heightToNormal?: sharp|smooth, normalFormat?: openGl|directX}",
+            "{ts?, description?, heightStrength?, normalMixing?: combine|replace, aoMixing?: multiply|none, heightToNormal?: sharp|smooth, uvPadding?: 3d|2d, normalFormat?: openGl|directX}",
             always,
             settings
         ),
@@ -308,6 +308,12 @@ fn settings(s: &mut Session, p: &Value) -> Result<Value> {
         Some("smooth") => Some(HeightToNormalMethod::Smooth),
         Some(other) => return Err(bad("textureSet.settings", format!("unknown height to normal method {other:?} (sharp or smooth)"))),
     };
+    let uv_padding = match strp(p, "uvPadding") {
+        None => None,
+        Some("3d") => Some(UvPaddingMode::Space3d),
+        Some("2d") => Some(UvPaddingMode::Space2d),
+        Some(other) => return Err(bad("textureSet.settings", format!("unknown UV padding {other:?} (3d or 2d)"))),
+    };
     s.edit("Texture set settings", |s| {
         if let Some(n) = nf {
             s.doc.project.normal_format = n;
@@ -327,6 +333,9 @@ fn settings(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let Some(method) = height_to_normal {
             set.height_to_normal = method;
+        }
+        if let Some(mode) = uv_padding {
+            set.uv_padding = mode;
         }
         Ok(())
     })?;
@@ -385,6 +394,23 @@ mod tests {
 
         crate::execute(&mut s, "edit.undo", &Value::Null).unwrap();
         assert_eq!(method(&s, 0), json!("smooth"));
+    }
+
+    #[test]
+    fn uv_padding_rebuilds_the_viewport_padding_and_undoes() {
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+        let mode = |s: &Session| crate::inspect::texture_set(s, 0)["uvPadding"].clone();
+        let crosses_seams = |s: &Session| s.caches[0].padding.flat.is_some();
+        assert_eq!((mode(&s), crosses_seams(&s)), (json!("3d"), true));
+        s.update();
+
+        crate::execute(&mut s, "textureSet.settings", &json!({"ts": 0, "uvPadding": "2d"})).unwrap();
+        assert_eq!((mode(&s), crosses_seams(&s)), (json!("2d"), false));
+        assert!(!s.caches[0].dirty.is_empty(), "the set recomposites with its new padding");
+        assert!(crate::execute(&mut s, "textureSet.settings", &json!({"uvPadding": "4d"})).is_err());
+
+        crate::execute(&mut s, "edit.undo", &Value::Null).unwrap();
+        assert_eq!((mode(&s), crosses_seams(&s)), (json!("3d"), true));
     }
 
     #[test]

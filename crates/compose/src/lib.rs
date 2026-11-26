@@ -44,6 +44,7 @@ pub mod projector_depth;
 mod projector_depth_cache;
 pub mod projector_view;
 mod sampled_map;
+pub mod seam_padding;
 mod sections;
 mod shape_distance;
 mod slope_texel;
@@ -79,6 +80,7 @@ pub use eval::{
 pub use mask_gray::MaskGray;
 pub use pattern_context::PatternContext;
 pub use projector_depth_cache::ProjectorDepthCache;
+pub use seam_padding::PaddingMaps;
 pub use solo::solo_project;
 pub use store::{BakedMaps, ImageRes, ImageStore, PixelStore};
 pub use thumb::{THUMB_TEXELS, ThumbImage, ThumbTarget};

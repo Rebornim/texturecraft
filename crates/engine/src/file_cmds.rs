@@ -343,12 +343,14 @@ impl Session {
             let composite =
                 self.document_composite(set_index, &cache.covered_tiles).ok_or_else(|| EngineError::Other(format!("no texture set {set_index}")))?;
             let coverage = cache.gbuf.coverage_mask();
+            let seams = self.doc.project.texture_set(set_index).map_or_else(|_| Vec::new(), |set| crate::session::padding_seams(&self.mesh, set));
             let input = ExportInput {
                 project: &self.doc.project,
                 ts: set_index,
                 composite: &composite,
                 baked: self.doc.baked.get(&set_index).unwrap_or(&empty),
                 coverage: &coverage,
+                seams: &seams,
                 mesh_name: &mesh_name,
             };
             out.extend(texturecraft_formats::export::render_planned_maps(&input, options, plans).map_err(fe)?);

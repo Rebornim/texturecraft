@@ -1,7 +1,7 @@
 use std::io::Cursor;
 
 use image::{DynamicImage, GenericImageView, ImageFormat};
-use texturecraft_core::{ChannelFormat, Project, TextureSet};
+use texturecraft_core::{ChannelFormat, Project, TextureSet, UvPaddingMode};
 use texturecraft_texel::{to_u16, to_u16_signed};
 
 use super::*;
@@ -50,7 +50,7 @@ impl Fx {
     }
 
     fn input(&self) -> ExportInput<'_> {
-        ExportInput { project: &self.project, ts: 0, composite: &self.comp, baked: &self.baked, coverage: &self.coverage, mesh_name: "sphere" }
+        ExportInput { project: &self.project, ts: 0, composite: &self.comp, baked: &self.baked, coverage: &self.coverage, seams: &[], mesh_name: "sphere" }
     }
 
     fn render(&self, opts: &ExportOptions) -> Vec<ExportedFile> {
@@ -654,7 +654,8 @@ fn uv_tiles_export_one_file_per_tile_without_padding_across() {
             }
         }
     }
-    let input = ExportInput { project: &project, ts: 0, composite: &comp, baked: &BakedMaps::default(), coverage: &coverage, mesh_name: "udim_plane" };
+    let input =
+        ExportInput { project: &project, ts: 0, composite: &comp, baked: &BakedMaps::default(), coverage: &coverage, seams: &[], mesh_name: "udim_plane" };
     let preset = ExportPreset {
         name: "t".into(),
         maps: vec![MapSpec {
@@ -705,7 +706,7 @@ fn small_export_size_keeps_each_nonempty_udim_tile_one_pixel_or_larger() {
     project.texture_sets.push(set);
     let composite = Composite::with_size(&[Channel::Roughness], 1024, 512);
     let coverage = vec![true; 1024 * 512];
-    let input = ExportInput { project: &project, ts: 0, composite: &composite, baked: &BakedMaps::default(), coverage: &coverage, mesh_name: "m" };
+    let input = ExportInput { project: &project, ts: 0, composite: &composite, baked: &BakedMaps::default(), coverage: &coverage, seams: &[], mesh_name: "m" };
 
     for format in [FileFormat::Png, FileFormat::Psd] {
         let opts = ExportOptions { size: Some(2), padding: Padding::None, ..one_map(format, 8, roughness()) };
@@ -1317,6 +1318,32 @@ fn dithering_is_ordered_and_keeps_the_average() {
     assert_eq!(decode(&fx.render(&own)[0]).to_rgba8(), a);
     let wide = ExportOptions { bit_depth_override: Some(16), ..dithered.clone() };
     assert!(list_outputs(&fx.project, 0, "sphere", &wide).unwrap().iter().all(|p| !p.dither));
+}
+
+#[test]
+fn padding_past_a_seam_takes_the_far_island_except_for_normals() {
+    // Two islands of one 3D edge: the left one's right side (x = 12) is the right one's left side (x = 20)
+    let mut fx = Fx::new(&default_channels());
+    fx.coverage = (0..RES * RES).map(|i| matches!(i % RES, 4..=11 | 20..=27)).collect();
+    fx.set_all(Channel::Roughness, |x, _| [if x < 16 { 0.2 } else { 0.8 }; 3]);
+    fx.set_all(Channel::Normal, |x, _| if x < 16 { [0.3, 0.5, 0.9] } else { [0.7, 0.5, 0.9] });
+    let at = |x: f32, y: f32| texturecraft_geom::glam::Vec2::new(x, y) / RES as f32;
+    let left = texturecraft_geom::UvSeamSide { start: at(12.0, 0.0), end: at(12.0, 64.0), interior: at(4.0, 0.0) };
+    let right = texturecraft_geom::UvSeamSide { start: at(20.0, 0.0), end: at(20.0, 64.0), interior: at(28.0, 0.0) };
+    let seams = [UvSeam { sides: [left, right] }];
+    let normal_x = SourceRef::Channel { channel: Channel::Normal, component: 0 };
+    let mut options = one_map(FileFormat::Png, 16, vec![(Dest::R, roughness()[0].1.clone()), (Dest::G, normal_x), (Dest::B, SourceRef::Constant(0.0))]);
+    options.padding = Padding::Dilation(4);
+    let render = |fx: &Fx| decode(&render_maps(&ExportInput { seams: &seams, ..fx.input() }, &options).unwrap()[0]).to_rgb16();
+
+    // Just right of the left island: roughness continues from the right island, the normal stays the left island's
+    let space_3d = render(&fx);
+    let (outside, near, far) = (space_3d.get_pixel(13, 30), space_3d.get_pixel(8, 30), space_3d.get_pixel(24, 30));
+    assert_eq!((outside[0], outside[1]), (far[0], near[1]));
+
+    fx.project.texture_sets[0].uv_padding = UvPaddingMode::Space2d;
+    let space_2d = render(&fx);
+    assert_eq!(space_2d.get_pixel(13, 30), space_2d.get_pixel(8, 30));
 }
 
 #[test]

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     BakeSettings, BakeSyncGroup, BakedMap, Channel, ChannelFormat, ContentsOffset, CoreError, Effect, HeightToNormalMethod, Layer, LayerId, LayerKind, Result,
+    UvPaddingMode,
 };
 
 pub use crate::env_alignment::EnvAlignment;
@@ -66,6 +67,9 @@ pub struct TextureSet {
     /// Height to normal method; projects without it keep Smooth, the filter their exports already used
     #[serde(default)]
     pub height_to_normal: HeightToNormalMethod,
+    /// UV padding; projects without it keep 2D Space Neighbor, the padding they were made with
+    #[serde(default)]
+    pub uv_padding: UvPaddingMode,
     /// Height-to-normal strength.
     #[serde(default = "one")]
     pub height_strength: f32,
@@ -174,6 +178,7 @@ impl TextureSet {
             normal_mixing: NormalMixing::Combine,
             ao_mixing: AoMixing::Multiply,
             height_to_normal: HeightToNormalMethod::Smooth,
+            uv_padding: UvPaddingMode::Space3d,
             height_strength: 1.0,
             bake: BakeSettings::default(),
             baked: BTreeSet::new(),

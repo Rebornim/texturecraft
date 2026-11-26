@@ -24,6 +24,11 @@ impl ProjectorDepthCache {
         }
     }
 
+    /// Whether its depth maps were built for `mesh`
+    pub(crate) fn serves(&self, mesh: &Mesh) -> bool {
+        std::ptr::eq(self.mesh.as_ptr(), mesh)
+    }
+
     pub(crate) fn get(&self, mesh: &Mesh, key: FillDepthKey) -> Option<Arc<FillDepth>> {
         // Rasterization is serial so tile workers can wait for a single build
         let mut maps = self.maps.lock().unwrap_or_else(|poisoned| poisoned.into_inner());

@@ -8,8 +8,8 @@ use super::{
 /// Below this weight a layer leaves the texel unchanged (one 16-bit step)
 const SMALLEST_WEIGHT: f32 = 1.0 / 65535.0;
 
-/// The paint and fill layers (and instances) that lay something down at texel (x, y) of texture set `inputs.ts` in any of `shown` channels, top first, each with the shown channels it changes there. Hidden layers, layers masked out there (by their own mask or a folder's) and channels at zero opacity count as laying nothing down
-pub fn layers_at(inputs: &Inputs, (x, y): (u32, u32), shown: &[Channel]) -> Vec<(LayerId, Vec<Channel>)> {
+/// The paint and fill layers (and instances) that lay something down at texel (x, y) of texture set `inputs.ts` in any of `shown` channels, top first, each with the shown channels it changes there. Hidden layers, layers masked out there (by their own mask or a folder's) and channels at zero opacity count as laying nothing down. Projection depth maps come from `projectors` when it serves `inputs.mesh`
+pub fn layers_at(inputs: &Inputs, projectors: &ProjectorDepthCache, (x, y): (u32, u32), shown: &[Channel]) -> Vec<(LayerId, Vec<Channel>)> {
     let Ok(set) = inputs.project.texture_set(inputs.ts) else { return Vec::new() };
     let gbuf = inputs.gbuf;
     let covered = x < gbuf.width && y < gbuf.height && gbuf.tri.get((y * gbuf.width + x) as usize).is_some_and(|tri| *tri != NO_TRI);
@@ -17,8 +17,10 @@ pub fn layers_at(inputs: &Inputs, (x, y): (u32, u32), shown: &[Channel]) -> Vec<
         return Vec::new();
     }
 
-    let projectors = ProjectorDepthCache::default();
-    let inputs = &EvaluationInputs::new(inputs, &projectors);
+    // A cache built for another mesh would hand out its depth maps
+    let unbound = ProjectorDepthCache::default();
+    let projectors = if projectors.serves(inputs.mesh) { projectors } else { &unbound };
+    let inputs = &EvaluationInputs::new(inputs, projectors);
     let channels = evaluation_channels(inputs, set.channel_list());
 
     // Filters and anchors can read texels outside this one's tile: the fields cover what it reads

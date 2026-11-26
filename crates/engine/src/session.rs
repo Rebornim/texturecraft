@@ -488,7 +488,7 @@ pub struct Session {
     /// are unchanged, so back-to-back dabs start instantly.
     pub(crate) depth_cache: Option<DepthCache>,
     /// Projection fill depth maps shared by this session's tile batches.
-    projector_depth_cache: texturecraft_compose::ProjectorDepthCache,
+    pub(crate) projector_depth_cache: texturecraft_compose::ProjectorDepthCache,
     /// The polygon fill box being dragged
     pub(crate) polygon_fill_drag: Option<crate::polygon_fill_drag::PolygonFillDrag>,
     /// The user's export presets (kept when another project opens).

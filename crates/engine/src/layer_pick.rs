@@ -25,7 +25,7 @@ impl Session {
             ViewMode::Channel(channel) => vec![channel],
             _ => self.doc.project.texture_set(ts).map(|set| set.channel_list()).unwrap_or_default(),
         };
-        self.with_inputs(ts, |inputs| Some(texturecraft_compose::layers_at(inputs, texel, &shown))).unwrap_or_default()
+        self.with_inputs(ts, |inputs| Some(texturecraft_compose::layers_at(inputs, &self.projector_depth_cache, texel, &shown))).unwrap_or_default()
     }
 
     /// The texture set under `screen` and the layers laying something down there (see [`Session::layers_at_texel`])

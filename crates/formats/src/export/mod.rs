@@ -36,8 +36,8 @@ const HEIGHT_SPAN: f32 = 16.0;
 const JPEG_QUALITY: u8 = 95;
 const PSD_MAX_SIDE_PIXELS: u32 = 30_000;
 const PSD_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-/// Preset limits (user presets are untrusted JSON).
-const MAX_MAPS: usize = 64;
+/// Preset limits (user presets are untrusted JSON); maps leave room for one per channel plus packed maps
+const MAX_MAPS: usize = 128;
 const MAX_TEMPLATE: usize = 256;
 const MAX_STEM: usize = 200;
 /// Longest preset name.
@@ -490,7 +490,7 @@ pub struct ExportInput<'a> {
     pub composite: &'a Composite,
     pub baked: &'a BakedMaps,
     pub coverage: &'a [bool],
-    /// The set's UV seams, which 3D Space Neighbor padding crosses
+    /// The set's UV seams, which padding across seams (3D) crosses
     pub seams: &'a [UvSeam],
     pub mesh_name: &'a str,
 }
@@ -769,8 +769,7 @@ struct Sampler<'a> {
     coverage: &'a [bool],
     /// Composite width.
     res: u32,
-    /// Texels across and down an atlas block (the composite for a classic set): the height
-    /// slope and the slope window follow the block.
+    /// Texels across and down an atlas block (the composite for a classic set), which the height slope follows
     block: (u32, u32),
     /// The share of its block each tile fills: a smaller tile's height slope shrinks with it.
     scales: BlockScales,
@@ -811,22 +810,24 @@ impl Sampler<'_> {
         self.coverage.get((y as usize) * self.res as usize + x as usize).copied().unwrap_or(false)
     }
 
-    /// Normal from the height channel (the set's height to normal method; uncovered neighbours repeat the centre).
+    /// Normal from the height channel (the set's height to normal method; uncovered neighbours repeat the centre)
     fn height_normal(&self, x: u32, y: u32) -> Vec3 {
         let center = self.channel(Channel::Height, At::Texel(x, y))[0];
-        // Clamped to the texel's UV tile.
-        let (tw, th) = (self.block.0.max(1), self.block.1.max(1));
-        let (x0, y0) = ((x / tw * tw) as i64, (y / th * th) as i64);
+        // Clamped to the texel's UV tile
+        let (block_width, block_height) = (self.block.0.max(1), self.block.1.max(1));
+        let (x0, y0) = ((x / block_width * block_width) as i64, (y / block_height * block_height) as i64);
         let h = |dx: i32, dy: i32| {
-            let (sx, sy) = ((x as i64 + dx as i64).clamp(x0, x0 + tw as i64 - 1) as u32, (y as i64 + dy as i64).clamp(y0, y0 + th as i64 - 1) as u32);
+            let sx = (x as i64 + dx as i64).clamp(x0, x0 + block_width as i64 - 1) as u32;
+            let sy = (y as i64 + dy as i64).clamp(y0, y0 + block_height as i64 - 1) as u32;
             if self.covered(sx, sy) { self.channel(Channel::Height, At::Texel(sx, sy))[0] } else { center }
         };
         let [gx, gy] = self.set.height_to_normal.slope(h);
+
         // Slopes per texel become slopes across the tile along each side
-        let s = self.set.height_strength * self.scales.at(x, y) / HEIGHT_SPAN;
-        let (sx, sy) = (s * tw as f32, s * th as f32);
-        // Image y points down; OpenGL normals have +Y up the image.
-        Vec3::new(-gx * sx, gy * sy, 1.0).try_normalize().unwrap_or(Vec3::Z)
+        let strength = self.set.height_strength * self.scales.at(x, y) / HEIGHT_SPAN;
+        let (scale_x, scale_y) = (strength * block_width as f32, strength * block_height as f32);
+        // Image y points down; OpenGL normals have +Y up the image
+        Vec3::new(-gx * scale_x, gy * scale_y, 1.0).try_normalize().unwrap_or(Vec3::Z)
     }
 
     /// The final tangent-space normal (OpenGL): baked normal ⊕ (height ⊕ normal channel).
@@ -1059,22 +1060,24 @@ pub fn scale_export_side(source_side: u32, block_resolution: u32, export_size: O
     u32::try_from(scaled).unwrap_or(u32::MAX).max(u32::from(source_side > 0))
 }
 
-fn diffuse_blocks(data: &mut Vec<f32>, (width, height): (usize, usize), channels: usize, known: &[bool], (block_w, block_h): (usize, usize)) {
+fn diffuse_blocks(data: &mut Vec<f32>, (width, height): (usize, usize), channels: usize, known: &[bool], block_size: (usize, usize)) {
+    let (block_width, block_height) = block_size;
+
     // A whole image or a separately exported tile already occupies a contiguous buffer
-    if block_w >= width && block_h >= height {
+    if block_width >= width && block_height >= height {
         diffuse_fill(data, (width, height), channels, known);
         return;
     }
 
-    for block_y in (0..height).step_by(block_h.max(1)) {
-        for block_x in (0..width).step_by(block_w.max(1)) {
-            let (block_width, block_height) = (block_w.min(width - block_x), block_h.min(height - block_y));
-            let rows = || (block_y..block_y + block_height).map(|y| (y * width + block_x)..(y * width + block_x + block_width));
+    for block_y in (0..height).step_by(block_height.max(1)) {
+        for block_x in (0..width).step_by(block_width.max(1)) {
+            let (clipped_width, clipped_height) = (block_width.min(width - block_x), block_height.min(height - block_y));
+            let rows = || (block_y..block_y + clipped_height).map(|y| (y * width + block_x)..(y * width + block_x + clipped_width));
             let mut block_data: Vec<f32> =
                 rows().flat_map(|row| data.get(row.start * channels..row.end * channels).unwrap_or_default().iter().copied()).collect();
             let block_known: Vec<bool> = rows().flat_map(|row| known.get(row).unwrap_or_default().iter().copied()).collect();
-            diffuse_fill(&mut block_data, (block_width, block_height), channels, &block_known);
-            for (row, chunk) in rows().zip(block_data.chunks(block_width * channels)) {
+            diffuse_fill(&mut block_data, (clipped_width, clipped_height), channels, &block_known);
+            for (row, chunk) in rows().zip(block_data.chunks(clipped_width * channels)) {
                 if let Some(destination) = data.get_mut(row.start * channels..row.end * channels) {
                     destination.copy_from_slice(chunk);
                 }

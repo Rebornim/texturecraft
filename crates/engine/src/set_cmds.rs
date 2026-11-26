@@ -498,4 +498,28 @@ mod tests {
         assert_eq!(crate::inspect::texture_set(&s, 0)["aoMixing"], json!("multiply"));
         assert!(!s.take_uploads(0).is_empty(), "undo resends the set too");
     }
+
+    #[test]
+    fn channels_our_shader_ignores_are_added_marked_and_exported() {
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+        for channel in ["user3", "Displacement", "coat tangent"] {
+            crate::execute(&mut s, "textureSet.channel.add", &json!({"ts": 0, "channel": channel})).unwrap();
+        }
+        let channels = crate::inspect::texture_set(&s, 0)["channels"].clone();
+        let shaded = |id: &str| channels.as_array().and_then(|list| list.iter().find(|c| c["channel"] == id)).map(|c| c["shaded"].clone());
+        assert_eq!((shaded("user3"), shaded("displacement"), shaded("coatTangent")), (Some(json!(false)), Some(json!(false)), Some(json!(false))));
+        assert_eq!(shaded("baseColor"), Some(json!(true)));
+
+        let plan = crate::execute(&mut s, "export.plan", &json!({"preset": "Separate maps"})).unwrap();
+        let files: Vec<(Value, String)> =
+            plan.as_array().into_iter().flatten().map(|f| (f["ts"].clone(), f["file"].as_str().unwrap_or_default().to_ascii_lowercase())).collect();
+        for map in ["user3", "displacement", "coattangent"] {
+            let from = |ts: usize| files.iter().any(|(t, file)| *t == json!(ts) && file.contains(map));
+            assert!(from(0) && !from(1), "{map} exported only from the set that has it: {files:?}");
+        }
+
+        s.update();
+        let composite = &s.caches[0].composite;
+        assert!(composite.channels.contains_key(&Channel::User3) && composite.channels.contains_key(&Channel::CoatTangent));
+    }
 }

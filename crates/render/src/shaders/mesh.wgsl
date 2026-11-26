@@ -22,7 +22,7 @@ struct Globals {
     material: vec4<f32>, // x specular/glossiness shading (1), y parallax occlusion (1), z accumulation sample index, w IOR of transmission
     scatter: vec4<f32>,  // xyz per-channel diffuse wrap at scattering weight 1 (0 = Lambert), w G-buffer holds the scattering light (1)
     fwd: vec4<f32>,      // xyz camera view direction (unit), w -
-    disp: vec4<f32>,     // x displacement on (1), y world units per unit of height at strength 1, z vertex spacing in UV units, w -
+    disp: vec4<f32>,     // x displacement on (1), y world units per unit of height at strength 1, z vertex spacing in UV units, w height slope in the shaded normal (1) or not (0)
     refr: vec4<f32>,     // x screen-space refraction on (1), y lods of the scene behind, z refraction depth (world units), w -
     highlight: vec4<f32>, // rgb highlighted set's edge color in the scene (before exposure and tone mapping), a opacity
     highlight_shift: vec4<f32>, // xy sideways shift of each highlight line copy (clip units), zw -
@@ -483,7 +483,7 @@ fn shade_mesh(i: VOut, front: bool) -> Shaded {
 
     // Match export: a unit height over 1/16 of the width tilts 45°
     // Combine the height gradient with the tangent-space normal
-    let k = g.mode.z * dims.x / 16.0 * tile_scale(uv);
+    let k = g.mode.z * g.disp.w * dims.x / 16.0 * tile_scale(uv);
     let n_height = normalize(vec3<f32>(-(hr - hl) * 0.5 * k, (hd - hu) * 0.5 * k, 1.0));
 
     // The Normal texture holds the signed normal in half floats (flat is exactly +z)
@@ -728,7 +728,7 @@ fn fs_uv(i: VOut) -> @location(0) vec4<f32> {
         let hr = textureSample(t_height, samp, i.uv + vec2<f32>(ts.x, 0.0)).r;
         let hu = textureSample(t_height, samp, i.uv - vec2<f32>(0.0, ts.y)).r;
         let hd = textureSample(t_height, samp, i.uv + vec2<f32>(0.0, ts.y)).r;
-        let k = g.mode.z * dims.x / 16.0 * tile_scale(i.uv);
+        let k = g.mode.z * g.disp.w * dims.x / 16.0 * tile_scale(i.uv);
         let n_height = normalize(vec3<f32>(-(hr - hl) * 0.5 * k, (hd - hu) * 0.5 * k, 1.0));
         var n_detail = clamp(textureSample(t_nrm, samp, i.uv).rgb, vec3<f32>(-1.0), vec3<f32>(1.0));
         n_detail.y *= g.mode.w;

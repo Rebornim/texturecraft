@@ -35,7 +35,16 @@ pub struct TraceSet {
     /// Mesh material the set covers.
     pub material: usize,
     pub composite: Composite,
+    /// Height displacement and, with `height_in_normal`, height-to-normal strength
     pub height_strength: f32,
+    pub height_in_normal: bool,
+}
+
+impl TraceSet {
+    /// The strength of the height slope in the shaded normal (0 when normal mixing replaces it)
+    pub fn normal_height_strength(&self) -> f32 {
+        if self.height_in_normal { self.height_strength } else { 0.0 }
+    }
 }
 
 /// Everything a pass reads (cheap to clone: shared or copy-on-write data).
@@ -575,7 +584,7 @@ fn surface(scene: &TraceScene, tri: u32, u: f32, v: f32, o: Vec3, d: Vec3, t: f3
     // A UV tile smaller than its atlas block has fewer texels per UV unit: slopes per texel shrink.
     let k = set.map_or(0.0, |s| {
         let (x, y) = texel(s, 0, 0);
-        s.height_strength * s.composite.resolution as f32 / 16.0 * s.composite.block_scales.at(x, y)
+        s.normal_height_strength() * s.composite.resolution as f32 / 16.0 * s.composite.block_scales.at(x, y)
     });
     let n_height = if k != 0.0 {
         let h = |dx, dy| ch(Channel::Height, dx, dy)[0];
@@ -1233,7 +1242,7 @@ mod tests {
                 }
             }
         }
-        TraceScene::new(mesh, bvh, vec![TraceSet { material: 0, composite, height_strength: 0.0 }], env, 0.0)
+        TraceScene::new(mesh, bvh, vec![TraceSet { material: 0, composite, height_strength: 0.0, height_in_normal: true }], env, 0.0)
     }
 
     /// Mean radiance of parallel rays over the whole disc of the sphere (grazing hits included)

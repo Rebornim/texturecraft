@@ -381,12 +381,15 @@ fn shade(app: &TextureCraftApp) -> Shade {
         ViewMode::NormalHeightMesh => (VIEW_MODE_NORMAL_HEIGHT_MESH, 0),
     };
     let set_index = app.session.ts();
-    let height_strength = app.session.doc.project.texture_sets.get(set_index).map(|texture_set| texture_set.atlas_height_strength()).unwrap_or(1.0);
+    let active_set = app.session.doc.project.texture_sets.get(set_index);
+    let height_strength = active_set.map(|texture_set| texture_set.atlas_height_strength()).unwrap_or(1.0);
+    let height_in_normal = active_set.is_none_or(|texture_set| texture_set.height_in_normal());
 
     // Polygon fill shows the polygons it fills without changing the saved wireframe toggles
     let polygon_fill_tool = tool_acts(app) && app.session.tool.tool == Tool::PolygonFill;
     Shade {
         height_strength,
+        height_in_normal,
         view_mode,
         channel,
         wireframe: wireframe_shown(&app.ui, polygon_fill_tool),

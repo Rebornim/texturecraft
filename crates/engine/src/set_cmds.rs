@@ -1,7 +1,7 @@
 //! Texture set commands (Texture Set List / Texture Set Settings).
 
 use serde_json::{Value, json};
-use texturecraft_core::{Channel, ChannelBlend, ChannelFormat};
+use texturecraft_core::{Channel, ChannelBlend, ChannelFormat, NormalMixing};
 
 use std::sync::Arc;
 
@@ -38,7 +38,15 @@ pub fn specs() -> Vec<CommandSpec> {
             visibility
         ),
         cmd!("textureSet.rename", "Rename texture set", [], None, "{ts?, name}", always, rename),
-        cmd!("textureSet.settings", "Texture set settings", [], None, "{ts?, description?, heightStrength?, normalFormat?: openGl|directX}", always, settings),
+        cmd!(
+            "textureSet.settings",
+            "Texture set settings",
+            [],
+            None,
+            "{ts?, description?, heightStrength?, normalMixing?: combine|replace, normalFormat?: openGl|directX}",
+            always,
+            settings
+        ),
         cmd!(
             "textureSet.parts",
             "List mesh parts",
@@ -281,6 +289,12 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
 fn settings(s: &mut Session, p: &Value) -> Result<Value> {
     let ts = ts_param(s, p, "textureSet.settings")?;
     let nf = normal_format_param("textureSet.settings", p)?;
+    let normal_mixing = match strp(p, "normalMixing") {
+        None => None,
+        Some("combine") => Some(NormalMixing::Combine),
+        Some("replace") => Some(NormalMixing::Replace),
+        Some(other) => return Err(bad("textureSet.settings", format!("unknown normal mixing {other:?} (combine or replace)"))),
+    };
     s.edit("Texture set settings", |s| {
         if let Some(n) = nf {
             s.doc.project.normal_format = n;
@@ -291,6 +305,9 @@ fn settings(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let Some(h) = f32p(p, "heightStrength") {
             set.height_strength = h.clamp(0.0, 100.0);
+        }
+        if let Some(mixing) = normal_mixing {
+            set.normal_mixing = mixing;
         }
         Ok(())
     })?;
@@ -313,5 +330,20 @@ mod tests {
         assert_eq!(run(json!({"mode": "invert"})).unwrap(), json!([false, true]));
         assert_eq!(run(json!({"mode": "showAll"})).unwrap(), json!([true, true]));
         assert!(run(json!({"mode": "sideways"})).is_err() && run(json!({"mode": "solo", "ts": 9})).is_err());
+    }
+
+    #[test]
+    fn normal_mixing_replace_keeps_height_out_of_the_normal_and_undoes() {
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+        let mixing = |s: &Session| crate::inspect::texture_set(s, 0)["normalMixing"].clone();
+        assert_eq!(mixing(&s), json!("combine"));
+
+        crate::execute(&mut s, "textureSet.settings", &json!({"ts": 0, "normalMixing": "replace"})).unwrap();
+        assert_eq!(mixing(&s), json!("replace"));
+        assert!(!s.doc.project.texture_sets[0].height_in_normal() && s.doc.project.texture_sets[1].height_in_normal());
+        assert!(crate::execute(&mut s, "textureSet.settings", &json!({"normalMixing": "blend"})).is_err());
+
+        crate::execute(&mut s, "edit.undo", &Value::Null).unwrap();
+        assert_eq!(mixing(&s), json!("combine"));
     }
 }

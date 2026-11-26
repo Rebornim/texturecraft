@@ -19,7 +19,7 @@ use craft_image_codecs::{ChannelLayout, EncodeOptions, Format as CodecFormat, Im
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use texturecraft_compose::{BakedMaps, Composite};
-use texturecraft_core::{AoMixing, BakedMap, BlockScales, Channel, ChannelKind, NormalFormat, NormalMixing, Project, TextureSet};
+use texturecraft_core::{AoMixing, BakedMap, BlockScales, Channel, ChannelKind, NormalFormat, Project, TextureSet};
 use texturecraft_geom::glam::Vec3;
 use texturecraft_texel::{ColorSpace, DilationMap, linear_to_srgb};
 
@@ -826,7 +826,7 @@ impl Sampler<'_> {
         let At::Texel(x, y) = at else { return Vec3::Z };
         let base = if self.set.baked.contains(&BakedMap::Normal) { unpack(self.baked(BakedMap::Normal, at)) } else { Vec3::Z };
         let mut detail = if self.set.has_channel(Channel::Normal) { unpack(self.channel(Channel::Normal, at)) } else { Vec3::Z };
-        if self.set.normal_mixing == NormalMixing::Combine && self.set.has_channel(Channel::Height) && self.set.height_strength != 0.0 {
+        if self.set.height_in_normal() && self.set.has_channel(Channel::Height) && self.set.height_strength != 0.0 {
             detail = rnm(self.height_normal(x, y), detail);
         }
         rnm(base, detail)

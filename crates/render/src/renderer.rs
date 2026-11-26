@@ -157,6 +157,8 @@ pub struct Shade {
     pub env_opacity: f32,
     pub ao_intensity: f32,
     pub height_strength: f32,
+    /// The height slope joins the shaded normal (normal mixing Combine; Replace leaves it out)
+    pub height_in_normal: bool,
     /// -1 for DirectX normal maps in the normal channel, 1 for OpenGL.
     pub normal_y: f32,
     /// 0 material, 1 channel, 2 mesh map (aux texture), 3 UV checker.
@@ -295,6 +297,7 @@ impl Default for Shade {
             env_opacity: 0.0,
             ao_intensity: 0.75,
             height_strength: 1.0,
+            height_in_normal: true,
             normal_y: 1.0,
             view_mode: 0,
             channel: 0,
@@ -2130,7 +2133,7 @@ impl Renderer {
             material: [if s.spec_gloss { 1.0 } else { 0.0 }, if s.parallax { 1.0 } else { 0.0 }, sample as f32, s.ior],
             scatter: [s.scatter[0], s.scatter[1], s.scatter[2], if sss.is_some() { 1.0 } else { 0.0 }],
             fwd: [fwd.x, fwd.y, fwd.z, 0.0],
-            disp,
+            disp: [disp[0], disp[1], disp[2], if s.height_in_normal { 1.0 } else { 0.0 }],
             refr: [if refraction { 1.0 } else { 0.0 }, (BEHIND_LEVELS - 1) as f32, REFRACTION_DEPTH * radius, 0.0],
             highlight: highlight_globals(s.highlight, HIGHLIGHT_OPACITY, s, data),
             highlight_shift: highlight_shift(frame.size),

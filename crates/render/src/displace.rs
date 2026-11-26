@@ -141,7 +141,7 @@ mod tests {
                 img.tile_mut(x, y, &[texturecraft_texel::to_u16_signed(height)]);
             }
         }
-        TraceSet { material: 0, composite, height_strength: strength }
+        TraceSet { material: 0, composite, height_strength: strength, height_in_normal: true }
     }
 
     #[test]

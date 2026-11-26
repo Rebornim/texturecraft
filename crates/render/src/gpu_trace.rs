@@ -416,7 +416,7 @@ impl GpuTracer {
             sigma: scene.scatter_sigma,
             rotation: scene.env_rotation,
             env_camera: scene.env_camera,
-            heights: scene.sets.iter().map(|s| s.height_strength).collect(),
+            heights: scene.sets.iter().map(crate::trace::TraceSet::normal_height_strength).collect(),
             ior: scene.ior,
             lens: scene.lens.map_or([0.0; 2], |[focus, aperture]| [focus, aperture.max(0.0) * scene.radius]),
         });
@@ -826,7 +826,7 @@ mod tests {
         }
         let mesh = Arc::new(primitives::sphere(1.0, 32, 16));
         let bvh = Arc::new(Bvh::new(&mesh));
-        TraceScene::new(mesh, bvh, vec![TraceSet { material: 0, composite, height_strength: 0.0 }], Arc::new(env), 0.0)
+        TraceScene::new(mesh, bvh, vec![TraceSet { material: 0, composite, height_strength: 0.0, height_in_normal: true }], Arc::new(env), 0.0)
     }
 
     fn gpu() -> Option<(Headless, GpuTracer)> {
@@ -1006,7 +1006,7 @@ mod tests {
         let mesh = Arc::new(primitives::sphere(1.0, 32, 16));
         let bvh = Arc::new(Bvh::new(&mesh));
         let env = crate::ibl::environment("Studio Contrast", 256);
-        let scene = TraceScene::new(mesh, bvh, vec![TraceSet { material: 0, composite, height_strength: 0.0 }], Arc::new(env), 0.0);
+        let scene = TraceScene::new(mesh, bvh, vec![TraceSet { material: 0, composite, height_strength: 0.0, height_in_normal: true }], Arc::new(env), 0.0);
         let d = TraceDisplay { exposure: 1.0, aces: true, env_opacity: 0.5, denoise: false, background: crate::DEFAULT_BACKGROUND };
         let settings = TraceSettings { bounces: 4 };
         let (_, _, gpu) = t.render(&h.device, &h.queue, &h.renderer, &scene, &camera(), &settings, &d, [48, 36], 1024).unwrap();

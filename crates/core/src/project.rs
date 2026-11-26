@@ -193,6 +193,11 @@ impl TextureSet {
         self.height_strength / self.tile_grid().map_or(1.0, |g| g.cols as f32)
     }
 
+    /// Whether the height slope joins the shaded normal ([`NormalMixing::Replace`] leaves it out)
+    pub fn height_in_normal(&self) -> bool {
+        self.normal_mixing == NormalMixing::Combine
+    }
+
     /// Texels across and down: [`TextureSet::block_resolution`] per block of the atlas grid.
     pub fn size(&self) -> (u32, u32) {
         let (cols, rows) = self.tile_grid().map_or((1, 1), |g| (g.cols, g.rows));

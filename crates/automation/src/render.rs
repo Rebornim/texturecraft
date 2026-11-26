@@ -162,7 +162,12 @@ fn trace_inputs(s: &mut Session) -> (TraceScene, TraceDisplay) {
         .texture_sets
         .iter()
         .zip(&s.caches)
-        .map(|(ts, c)| TraceSet { material: ts.material, composite: c.composite.clone(), height_strength: ts.atlas_height_strength() })
+        .map(|(ts, c)| TraceSet {
+            material: ts.material,
+            composite: c.composite.clone(),
+            height_strength: ts.atlas_height_strength(),
+            height_in_normal: ts.height_in_normal(),
+        })
         .collect();
     let d = &s.doc.project.display;
     let env_image = d.environment_resource().and_then(|n| s.images.get(n));
@@ -199,6 +204,7 @@ pub fn shade(s: &Session) -> Shade {
     };
     Shade {
         height_strength: s.doc.project.texture_sets.get(s.ts()).map(|t| t.atlas_height_strength()).unwrap_or(1.0),
+        height_in_normal: s.doc.project.texture_sets.get(s.ts()).is_none_or(|t| t.height_in_normal()),
         view_mode,
         channel,
         // Only the 2D view uses this default

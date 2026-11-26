@@ -2163,7 +2163,8 @@ fn folder_mask_snapshots() {
         .with_context_setup(texturecraft_ui_egui::framework::install_headless)
         .build_eframe(|cc| TextureCraftApp::new(cc, session));
     harness.state_mut().ui.prefs.language = "en".into();
-    harness.state_mut().ui.props_tab = texturecraft_ui_egui::state::PropsTab::Material;
+    harness.run_steps(6);
+    harness.get_by_role_and_label(egui::Role::Tab, "Grayscale").click();
     harness.run_steps(6);
     save(&mut harness, &output_dir, "foldermask-white");
     if std::env::var_os("TC_UI_THEMES").is_some() {
@@ -3214,7 +3215,6 @@ fn paint_tool_properties_snapshots() {
     use texturecraft_engine::core::Channel;
     use texturecraft_engine::execute;
     use texturecraft_engine::paint::{BrushAlpha, BrushSettings};
-    use texturecraft_ui_egui::state::PropsTab;
 
     let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
     std::fs::create_dir_all(&output_dir).unwrap();
@@ -3295,8 +3295,9 @@ fn paint_tool_properties_snapshots() {
     save(&mut harness, &output_dir, "paint-brush-scrolled");
 
     let themes = std::env::var_os("TC_UI_THEMES").is_some();
-    let tab = |harness: &mut Harness<'_, TextureCraftApp>, tab: PropsTab, name: &str| {
-        harness.state_mut().ui.props_tab = tab;
+    let tab = |harness: &mut Harness<'_, TextureCraftApp>, tab: &str, name: &str| {
+        harness.run_steps(2);
+        harness.get_by_role_and_label(egui::Role::Tab, tab).click();
         harness.run_steps(6);
         save(harness, &output_dir, name);
         if themes {
@@ -3307,26 +3308,26 @@ fn paint_tool_properties_snapshots() {
             harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
         }
     };
-    tab(&mut harness, PropsTab::Brush, "paint-brush-top");
-    tab(&mut harness, PropsTab::Alpha, "paint-alpha");
-    tab(&mut harness, PropsTab::Material, "paint-material");
+    tab(&mut harness, "Brush", "paint-brush-top");
+    tab(&mut harness, "Alpha", "paint-alpha");
+    tab(&mut harness, "Material", "paint-material");
 
     execute(&mut harness.state_mut().session, "tool.select", &json!({"tool": "eraser"})).unwrap();
-    tab(&mut harness, PropsTab::Material, "eraser-material");
+    tab(&mut harness, "Material", "eraser-material");
     execute(&mut harness.state_mut().session, "tool.select", &json!({"tool": "clone"})).unwrap();
-    tab(&mut harness, PropsTab::Brush, "clone-brush");
+    tab(&mut harness, "Brush", "clone-brush");
     execute(&mut harness.state_mut().session, "tool.select", &json!({"tool": "projection"})).unwrap();
     execute(&mut harness.state_mut().session, "tool.stencil", &json!({"image": image})).unwrap();
-    tab(&mut harness, PropsTab::Brush, "projection-stencil");
+    tab(&mut harness, "Stencil", "projection-stencil");
 
     execute(&mut harness.state_mut().session, "tool.select", &json!({"tool": "paint"})).unwrap();
     let layer = harness.state().session.selected_layer().map(|id| id.0);
     execute(&mut harness.state_mut().session, "mask.add.black", &json!({"layer": layer})).unwrap();
     execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": layer, "target": "mask"})).unwrap();
-    tab(&mut harness, PropsTab::Material, "mask-grayscale");
+    tab(&mut harness, "Grayscale", "mask-grayscale");
     execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": layer, "target": "content"})).unwrap();
 
-    harness.state_mut().ui.props_tab = PropsTab::Brush;
+    harness.get_by_role_and_label(egui::Role::Tab, "Brush").click();
     harness.run_steps(4);
     let at = harness.state().viewport_rect.center() - egui::vec2(150.0, 250.0);
     harness.hover_at(at);

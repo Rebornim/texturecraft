@@ -8,7 +8,6 @@ use texturecraft_engine::core::Channel;
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, Tool, execute};
 use texturecraft_ui_egui::TextureCraftApp;
-use texturecraft_ui_egui::state::PropsTab;
 
 fn harness() -> Harness<'static, TextureCraftApp> {
     let session = Session::new_project("t", primitives::sphere(1.0, 48, 24), "builtin:sphere", None, 256).unwrap();
@@ -26,11 +25,15 @@ fn run(harness: &mut Harness<'_, TextureCraftApp>, command: &str, params: Value)
     harness.run_steps(4);
 }
 
-/// The channel chips drawn in the open Properties panel
-fn chip_is_on(harness: &Harness<'_, TextureCraftApp>, channel: Channel) -> bool {
+/// The Smudge panel's chip for `channel`: the top one, over the Material section's
+fn smudge_chip<'a>(harness: &'a Harness<'_, TextureCraftApp>, channel: Channel) -> egui_kittest::Node<'a> {
     let chips: Vec<_> = harness.get_all_by_role_and_label(Role::Button, channel.short()).collect();
-    assert_eq!(chips.len(), 1, "one {} chip is drawn", channel.short());
-    chips[0].accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+    assert_eq!(chips.len(), 2, "the Smudge panel and the Material section each draw a {} chip", channel.short());
+    chips.into_iter().min_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).unwrap()
+}
+
+fn chip_is_on(harness: &Harness<'_, TextureCraftApp>, channel: Channel) -> bool {
+    smudge_chip(harness, channel).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
 }
 
 /// Channels whose chip is on, in the order of `Channel::ALL`
@@ -67,12 +70,12 @@ fn smudge_panel_shows_the_channels_the_material_has_on() {
 fn clicking_a_channel_in_the_smudge_panel_turns_it_off_and_on_for_the_material() {
     let mut harness = harness();
 
-    harness.get_by_role_and_label(Role::Button, Channel::Metallic.short()).click();
+    smudge_chip(&harness, Channel::Metallic).click();
     harness.run_steps(4);
     assert!(!harness.state().session.tool.enabled.contains(&Channel::Metallic));
     assert!(!chip_is_on(&harness, Channel::Metallic));
 
-    harness.get_by_role_and_label(Role::Button, Channel::Metallic.short()).click();
+    smudge_chip(&harness, Channel::Metallic).click();
     harness.run_steps(4);
     assert!(harness.state().session.tool.enabled.contains(&Channel::Metallic));
     assert!(chip_is_on(&harness, Channel::Metallic));
@@ -81,10 +84,7 @@ fn clicking_a_channel_in_the_smudge_panel_turns_it_off_and_on_for_the_material()
 #[test]
 fn material_tab_and_smudge_panel_stay_in_sync() {
     let mut harness = harness();
-    harness.state_mut().ui.props_tab = PropsTab::Material;
-    harness.run_steps(4);
-
-    // Both the Smudge panel and the Material tab draw a chip per channel
+    // Both the Smudge panel and the Material section draw a chip per channel
     let chips = harness.get_all_by_role_and_label(Role::Button, Channel::Height.short()).count();
     assert_eq!(chips, 2, "Smudge panel and Material tab");
 

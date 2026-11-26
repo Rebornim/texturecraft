@@ -24,6 +24,8 @@ fn projection_app() -> (Harness<'static, TextureCraftApp>, String) {
         .build_eframe(|cc| TextureCraftApp::new(cc, session));
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(4);
+    harness.get_by_role_and_label(Role::Tab, "Stencil").click();
+    harness.run_steps(4);
     (harness, name)
 }
 

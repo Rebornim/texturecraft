@@ -81,14 +81,6 @@ pub enum ViewLayout {
     Only2D,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum PropsTab {
-    #[default]
-    Brush,
-    Alpha,
-    Material,
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct Windows {
     pub export: bool,
@@ -595,7 +587,6 @@ pub struct UiState {
     /// Saved searches' share of the pane column above Filter by path, set by the splitter between them
     #[serde(default = "default_shelf_panes_split", deserialize_with = "deserialize_shelf_panes_split")]
     pub shelf_panes_split: f32,
-    pub props_tab: PropsTab,
     #[serde(default)]
     pub text: TextUi,
     /// Layer being renamed and the edit buffer.
@@ -787,7 +778,6 @@ impl Default for UiState {
             shelf_panes: ShelfPanes::default(),
             shelf_saved_searches: Vec::new(),
             shelf_panes_split: default_shelf_panes_split(),
-            props_tab: PropsTab::Brush,
             text: TextUi::default(),
             rename: None,
             new_project: NewProject::default(),

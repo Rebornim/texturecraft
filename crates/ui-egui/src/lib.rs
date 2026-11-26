@@ -104,6 +104,7 @@ pub mod orb_previews;
 mod orb_shape;
 /// The channel's OS identity (app id, window and app names) — see its module docs.
 pub mod os_window;
+mod paint_section;
 mod pane_split;
 pub mod parity;
 mod past_end;

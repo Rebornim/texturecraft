@@ -126,9 +126,7 @@ impl Stroke {
     }
 
     fn radius_at(&self, ctx: &PickCtx, pos: Vec3, pressure: f32) -> f32 {
-        let p = pressure.clamp(0.0, 1.0);
-        let scale = self.settings.min_size + (1.0 - self.settings.min_size) * p;
-        let r = self.radius * if pressure < 1.0 { scale } else { 1.0 };
+        let r = self.radius * self.settings.pressure_size(pressure);
         if self.settings.screen_space { r * (pos.distance(ctx.camera.eye()) / ctx.camera.distance.max(1e-4)) } else { r }
     }
 

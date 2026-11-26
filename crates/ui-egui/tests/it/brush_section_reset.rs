@@ -19,7 +19,9 @@ type SectionReset = fn(&mut BrushSettings, &BrushSettings);
 
 /// Each band's title, a label shown only while it is open, whether it starts open, and its reset
 const SECTIONS: [(&str, &str, bool, SectionReset); 7] = [
-    ("Size", "Minimum Size (%)", true, |brush, defaults| (brush.size, brush.min_size, brush.spacing) = (defaults.size, defaults.min_size, defaults.spacing)),
+    ("Size", "Minimum Size (%)", true, |brush, defaults| {
+        (brush.size, brush.size_pressure, brush.min_size, brush.spacing) = (defaults.size, defaults.size_pressure, defaults.min_size, defaults.spacing)
+    }),
     ("Opacity", "Stroke opacity", true, |brush, defaults| (brush.flow, brush.opacity) = (defaults.flow, defaults.opacity)),
     ("Orientation", "Follow Path", true, |brush, defaults| (brush.angle, brush.follow_path) = (defaults.angle, defaults.follow_path)),
     ("Jitter", "Size Jitter", true, |brush, defaults| {
@@ -39,6 +41,7 @@ fn changed_brush() -> BrushSettings {
     BrushSettings {
         size: 0.1,
         min_size: 0.5,
+        size_pressure: false,
         screen_space: true,
         flow: 0.5,
         opacity: 0.6,
@@ -179,7 +182,8 @@ fn enter_and_space_on_the_focused_reset_icon_reset_only_its_section() {
 
         let defaults = BrushSettings::default();
         let mut expected = changed_brush();
-        (expected.size, expected.min_size, expected.spacing) = (defaults.size, defaults.min_size, defaults.spacing);
+        (expected.size, expected.size_pressure, expected.min_size, expected.spacing) =
+            (defaults.size, defaults.size_pressure, defaults.min_size, defaults.spacing);
         assert_eq!(harness.state().session.tool.brush, expected, "resetting Size with {key:?}");
     }
 }

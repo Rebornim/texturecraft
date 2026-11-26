@@ -31,24 +31,32 @@ pub(crate) fn press_edit(ui: &Ui, id: egui::Id, changed: bool) -> Option<bool> {
         return None;
     }
 
-    ui.memory_mut(|memory| {
-        let edits = memory.caches.cache::<egui::cache::FramePublisher<egui::Id, u64>>();
+    // Kept in memory, not a frame cache: a floating panel in its own OS window ends a pass of its own inside ours, which would clear it every frame
+    let frame = ui.ctx().cumulative_frame_nr();
+    ui.data_mut(|data| {
         let id = id.with("pointer edit");
-        let previous = edits.get(&id).copied();
+        let previous = data.get_temp::<PressEdit>(id);
         let merge = match press {
             Some(start) => {
-                let continuing = previous == Some(start);
+                let continuing = previous.is_some_and(|previous| previous.press == start);
                 if changed || continuing {
-                    edits.set(id, start);
+                    data.insert_temp(id, PressEdit { press: start, frame });
                 }
                 continuing
             }
 
             // A final movement still belongs to the press that ended
-            None => release_only && previous.is_some(),
+            None => release_only && previous.is_some_and(|previous| previous.frame + 1 >= frame),
         };
         changed.then_some(merge)
     })
+}
+
+/// The press an editor's last change belonged to, and the frame it was seen in
+#[derive(Clone, Copy)]
+struct PressEdit {
+    press: u64,
+    frame: u64,
 }
 
 /// [`slider`] for a value re-read from the document every frame: `Some(merge)` on every frame

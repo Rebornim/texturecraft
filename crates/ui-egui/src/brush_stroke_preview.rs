@@ -170,4 +170,12 @@ mod tests {
         assert!(start < end, "the stroke widens as the pen presses harder");
         assert!(start < full_start, "Minimum Size bounds how thin the light start gets");
     }
+
+    #[test]
+    fn without_size_pressure_the_stroke_keeps_its_width() {
+        let brush = BrushSettings { hardness: 1.0, min_size: 0.05, size_pressure: false, ..BrushSettings::default() };
+        let full = BrushSettings { min_size: 1.0, size_pressure: true, ..brush.clone() };
+
+        assert!(paint(&brush) == paint(&full), "a mouse brush draws no taper");
+    }
 }

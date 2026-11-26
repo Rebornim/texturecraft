@@ -68,18 +68,22 @@ pub(crate) fn brush_section(app: &mut TextureCraftApp, sheet: &mut PropertySheet
     let defaults = BrushSettings::default();
 
     // Each band's reset puts back only the fields it shows
-    let size_fields = |settings: &BrushSettings| (settings.size, settings.min_size, settings.spacing);
+    let size_fields = |settings: &BrushSettings| (settings.size, settings.size_pressure, settings.min_size, settings.spacing);
     let band = sheet.band(tr("Size"), true, Some(size_fields(brush) != size_fields(&defaults)), None);
     if band.reset {
-        (brush.size, brush.min_size, brush.spacing) = size_fields(&defaults);
+        (brush.size, brush.size_pressure, brush.min_size, brush.spacing) = size_fields(&defaults);
     }
     if band.open {
+        // Every row keeps the pen button's slot, so the three values line up
         let mut size_percent = brush.size / MAX_BRUSH_SIZE * 100.0;
-        if sheet.slider(tr("Size"), &mut size_percent, SIZE_PERCENT_RANGE, 1).is_some() {
+        if sheet.pen_slider(tr("Size"), &mut size_percent, SIZE_PERCENT_RANGE, 1, Some(&mut brush.size_pressure)).0.is_some() {
             brush.size = (size_percent / 100.0 * MAX_BRUSH_SIZE).clamp(MIN_BRUSH_SIZE, MAX_BRUSH_SIZE);
         }
-        percent_slider(sheet, tr("Minimum Size (%)"), &mut brush.min_size, PERCENT_RANGE);
-        percent_slider(sheet, tr("Spacing"), &mut brush.spacing, SPACING_PERCENT_RANGE);
+        let pressure = brush.size_pressure;
+        sheet.greyed(pressure, Some(tr("Applies only while pen pressure on Size is on")), |sheet| {
+            pen_percent_slider(sheet, tr("Minimum Size (%)"), &mut brush.min_size, PERCENT_RANGE);
+        });
+        pen_percent_slider(sheet, tr("Spacing"), &mut brush.spacing, SPACING_PERCENT_RANGE);
     }
 
     let opacity_fields = |settings: &BrushSettings| (settings.flow, settings.opacity);
@@ -222,6 +226,14 @@ fn jitter_strip(sheet: &mut PropertySheet<'_>, brush: &BrushSettings, image: Opt
 fn percent_slider(sheet: &mut PropertySheet<'_>, label: &str, fraction: &mut f32, percent: RangeInclusive<f32>) {
     let mut shown = *fraction * 100.0;
     if sheet.slider(label, &mut shown, percent, 0).is_some() {
+        *fraction = shown / 100.0;
+    }
+}
+
+/// [`percent_slider`] in a band whose rows keep the pen button's slot
+fn pen_percent_slider(sheet: &mut PropertySheet<'_>, label: &str, fraction: &mut f32, percent: RangeInclusive<f32>) {
+    let mut shown = *fraction * 100.0;
+    if sheet.pen_slider(label, &mut shown, percent, 0, None).0.is_some() {
         *fraction = shown / 100.0;
     }
 }

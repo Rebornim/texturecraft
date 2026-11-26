@@ -132,13 +132,16 @@ fn select(s: &mut Session, p: &Value) -> Result<Value> {
 /// Brush values use the UI's 0–100 scales, so agents and the sliders speak the same numbers
 fn brush(session: &mut Session, params: &Value) -> Result<Value> {
     let mut settings = session.tool.brush.clone();
-    let percent = |key: &str| f32p(params, key).map(|value| value / 100.0);
+    let percent = |key: &str| f32p(params, key).map(|value| value / PERCENT);
 
     if let Some(value) = percent("size") {
-        settings.size = value * 0.25;
+        settings.size = value * MAX_BRUSH_SIZE;
     }
     if let Some(value) = percent("minSize") {
         settings.min_size = value;
+    }
+    if let Some(value) = boolp(params, "sizePressure") {
+        settings.size_pressure = value;
     }
 
     if let Some(value) = percent("flow") {
@@ -174,11 +177,11 @@ fn brush(session: &mut Session, params: &Value) -> Result<Value> {
 
     for (key, slot) in [("jitterSize", &mut settings.jitter_size), ("jitterAngle", &mut settings.jitter_angle), ("jitterFlow", &mut settings.jitter_flow)] {
         if let Some(value) = f32p(params, key) {
-            *slot = value / 100.0;
+            *slot = value / PERCENT;
         }
     }
     if let Some(value) = f32p(params, "jitterPosition") {
-        settings.jitter_position = value / 100.0;
+        settings.jitter_position = value / PERCENT;
     }
 
     let alpha = params.get("alpha");
@@ -282,30 +285,31 @@ fn brush(session: &mut Session, params: &Value) -> Result<Value> {
         }
     }
     if let Some(value) = f32p(params, "smudgeStrength") {
-        session.tool.smudge_strength = (value / 100.0).clamp(0.0, 1.0);
+        session.tool.smudge_strength = (value / PERCENT).clamp(0.0, 1.0);
     }
 
     session.revision = session.revision.wrapping_add(1);
     Ok(brush_json(session))
 }
 
+/// The brush settings `tool.brush` reports, on the UI's 0–100 scales
 pub(crate) fn brush_json(session: &Session) -> Value {
     let settings = &session.tool.brush;
     json!({
-        "size": settings.size / 0.25 * 100.0, "minSize": settings.min_size * 100.0, "flow": settings.flow * 100.0, "opacity": settings.opacity * 100.0,
-        "spacing": settings.spacing * 100.0, "hardness": settings.hardness * 100.0, "angle": settings.angle, "followPath": settings.follow_path,
+        "size": settings.size / MAX_BRUSH_SIZE * PERCENT, "minSize": settings.min_size * PERCENT, "sizePressure": settings.size_pressure, "flow": settings.flow * PERCENT, "opacity": settings.opacity * PERCENT,
+        "spacing": settings.spacing * PERCENT, "hardness": settings.hardness * PERCENT, "angle": settings.angle, "followPath": settings.follow_path,
         "alignment": format!("{:?}", settings.alignment).to_lowercase(), "lazy": settings.lazy,
         "alpha": match (&settings.alpha_image, &settings.alpha_library) {
             (Some(name), _) => json!({ "image": name }),
             (None, Some(id)) => json!({ "library": id }),
             (None, None) => json!(settings.alpha.label()),
         },
-        "alphaSizeX": settings.alpha_params.size_x * 100.0, "alphaSizeY": settings.alpha_params.size_y * 100.0,
-        "alphaRoundness": settings.alpha_params.roundness * 100.0, "alphaContrast": settings.alpha_params.contrast, "alphaInvert": settings.alpha_params.invert,
+        "alphaSizeX": settings.alpha_params.size_x * PERCENT, "alphaSizeY": settings.alpha_params.size_y * PERCENT,
+        "alphaRoundness": settings.alpha_params.roundness * PERCENT, "alphaContrast": settings.alpha_params.contrast, "alphaInvert": settings.alpha_params.invert,
         "backfaceCulling": settings.backface_culling, "symmetry": [settings.symmetry.x, settings.symmetry.y, settings.symmetry.z],
         "radialSymmetry": { "copies": settings.symmetry.radial, "axis": (["x", "y", "z"].get(settings.symmetry.axis as usize)) },
         "symmetryOffset": settings.symmetry.offset, "symmetryOn": settings.symmetry.enabled, "symmetryAngleSpan": settings.symmetry.angle_span,
-        "material": session.tool.material, "smudgeStrength": session.tool.smudge_strength * 100.0, "particles": settings.particles,
+        "material": session.tool.material, "smudgeStrength": session.tool.smudge_strength * PERCENT, "particles": settings.particles,
         "cloneSource": if session.tool.clone_from == CloneFrom::Layer { "layer" } else { "composite" },
         "cloneAligned": session.tool.clone_aligned,
     })

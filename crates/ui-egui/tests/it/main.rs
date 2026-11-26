@@ -95,6 +95,7 @@ mod shift_lines_3d;
 mod shortcut_keys;
 mod shortcut_list;
 mod side_panels;
+mod size_pressure;
 mod skew_paint;
 mod smudge_channels;
 mod snapped_lines;

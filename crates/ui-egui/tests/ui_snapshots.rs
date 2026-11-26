@@ -3211,7 +3211,9 @@ fn sheet_scroll_end_snapshots() {
 fn paint_tool_properties_snapshots() {
     use egui::{Event, Modifiers, PointerButton};
     use serde_json::json;
+    use texturecraft_engine::core::Channel;
     use texturecraft_engine::execute;
+    use texturecraft_engine::paint::{BrushAlpha, BrushSettings};
     use texturecraft_ui_egui::state::PropsTab;
 
     let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
@@ -3235,6 +3237,41 @@ fn paint_tool_properties_snapshots() {
     harness.set_render_cursor(false);
     harness.run_steps(6);
     save(&mut harness, &output_dir, "paint-brush");
+
+    // The top preview follows the brush and the paint: one picture per brush
+    let default_brush = harness.state().session.tool.brush.clone();
+    let default_values = harness.state().session.tool.values.clone();
+    let brushes = [
+        ("dotted-red", BrushSettings { size: 0.06, hardness: 1.0, spacing: 1.6, ..default_brush.clone() }, [0.8, 0.05, 0.04], 0.0, 0.5),
+        ("soft-blue-metal", BrushSettings { size: 0.12, hardness: 0.0, flow: 0.35, ..default_brush.clone() }, [0.1, 0.3, 0.9], 1.0, 0.2),
+        (
+            "star-jitter-green",
+            BrushSettings {
+                size: 0.08,
+                alpha: BrushAlpha::Star,
+                spacing: 0.9,
+                follow_path: true,
+                jitter_size: 0.5,
+                jitter_angle: 0.3,
+                jitter_position: 0.6,
+                ..default_brush.clone()
+            },
+            [0.1, 0.6, 0.15],
+            0.0,
+            0.8,
+        ),
+    ];
+    for (name, brush, base_color, metallic, roughness) in brushes {
+        let tool = &mut harness.state_mut().session.tool;
+        tool.brush = brush;
+        tool.values.insert(Channel::BaseColor, base_color);
+        tool.values.insert(Channel::Metallic, [metallic; 3]);
+        tool.values.insert(Channel::Roughness, [roughness; 3]);
+        save(&mut harness, &output_dir, &format!("paint-preview-{name}"));
+    }
+    let tool = &mut harness.state_mut().session.tool;
+    tool.brush = default_brush;
+    tool.values = default_values;
 
     // The top bar has a Lazy mouse button too: Properties is the rightmost
     let in_properties = |harness: &Harness<'_, TextureCraftApp>, label: &str| {

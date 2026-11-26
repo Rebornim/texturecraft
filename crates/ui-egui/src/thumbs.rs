@@ -479,41 +479,60 @@ impl Thumbs {
     }
 }
 
-/// A small shaded sphere drawn with a vertex-colored mesh (layer thumbnails, previews).
-pub fn paint_sphere(p: &Painter, c: Pos2, r: f32, base: [f32; 3]) {
-    let mut mesh = egui::Mesh::default();
-    let rings = 10;
-    let segs = 28;
+/// Metallic and roughness of a sphere drawn without a material's own values
+pub(crate) const SPHERE_DEFAULT_METALLIC: f32 = 0.0;
+pub(crate) const SPHERE_DEFAULT_ROUGHNESS: f32 = 0.5;
+
+/// Rings and segments per ring of a drawn sphere's mesh
+const SPHERE_RINGS: usize = 10;
+const SPHERE_SEGMENTS: usize = 28;
+
+/// Exposure applied to a drawn sphere's shading before tone mapping
+const SPHERE_EXPOSURE: f32 = 1.4;
+
+/// A small shaded sphere drawn with a vertex-colored mesh (layer thumbnails, previews)
+pub fn paint_sphere(painter: &Painter, center: Pos2, radius: f32, base: [f32; 3]) {
+    paint_material_sphere(painter, center, radius, base, SPHERE_DEFAULT_METALLIC, SPHERE_DEFAULT_ROUGHNESS);
+}
+
+/// [`paint_sphere`] with the material's `metallic` and `roughness` (0..1)
+pub fn paint_material_sphere(painter: &Painter, center: Pos2, radius: f32, base: [f32; 3], metallic: f32, roughness: f32) {
     let color = |dx: f32, dy: f32| {
-        let d2 = (dx * dx + dy * dy).min(1.0);
-        let n = [dx, dy, (1.0 - d2).sqrt()];
-        let s = shade(n, base, 0.0, 0.5).map(|v| (linear_to_srgb(aces(v * 1.4)) * 255.0) as u8);
-        Color32::from_rgb(s[0], s[1], s[2])
+        let distance_squared = (dx * dx + dy * dy).min(1.0);
+        let normal = [dx, dy, (1.0 - distance_squared).sqrt()];
+        let srgb = shade(normal, base, metallic, roughness).map(|linear| (linear_to_srgb(aces(linear * SPHERE_EXPOSURE)) * 255.0) as u8);
+        Color32::from_rgb(srgb[0], srgb[1], srgb[2])
     };
-    mesh.colored_vertex(c, color(0.0, 0.0));
-    for i in 1..=rings {
-        let rr = i as f32 / rings as f32;
-        for j in 0..segs {
-            let a = j as f32 / segs as f32 * std::f32::consts::TAU;
-            let (dx, dy) = (a.cos() * rr, a.sin() * rr);
-            mesh.colored_vertex(Pos2::new(c.x + dx * r, c.y - dy * r), color(dx, dy));
+
+    // A center vertex, then each ring's vertices outwards
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(center, color(0.0, 0.0));
+    for ring in 1..=SPHERE_RINGS {
+        let ring_radius = ring as f32 / SPHERE_RINGS as f32;
+        for segment in 0..SPHERE_SEGMENTS {
+            let angle = segment as f32 / SPHERE_SEGMENTS as f32 * std::f32::consts::TAU;
+            let (dx, dy) = (angle.cos() * ring_radius, angle.sin() * ring_radius);
+            mesh.colored_vertex(Pos2::new(center.x + dx * radius, center.y - dy * radius), color(dx, dy));
         }
     }
-    for j in 0..segs {
-        let (a, b) = (1 + j, 1 + (j + 1) % segs);
-        mesh.add_triangle(0, a as u32, b as u32);
+
+    // A fan from the center to the first ring, then quads between neighbouring rings
+    for segment in 0..SPHERE_SEGMENTS {
+        let (first, next) = (1 + segment, 1 + (segment + 1) % SPHERE_SEGMENTS);
+        mesh.add_triangle(0, first as u32, next as u32);
     }
-    for i in 1..rings {
-        let r0 = 1 + (i - 1) * segs;
-        let r1 = 1 + i * segs;
-        for j in 0..segs {
-            let (a, b) = (r0 + j, r0 + (j + 1) % segs);
-            let (c2, d) = (r1 + j, r1 + (j + 1) % segs);
-            mesh.add_triangle(a as u32, c2 as u32, d as u32);
-            mesh.add_triangle(a as u32, d as u32, b as u32);
+    for ring in 1..SPHERE_RINGS {
+        let inner_start = 1 + (ring - 1) * SPHERE_SEGMENTS;
+        let outer_start = 1 + ring * SPHERE_SEGMENTS;
+        for segment in 0..SPHERE_SEGMENTS {
+            let next_segment = (segment + 1) % SPHERE_SEGMENTS;
+            let (inner, inner_next) = (inner_start + segment, inner_start + next_segment);
+            let (outer, outer_next) = (outer_start + segment, outer_start + next_segment);
+            mesh.add_triangle(inner as u32, outer as u32, outer_next as u32);
+            mesh.add_triangle(inner as u32, outer_next as u32, inner_next as u32);
         }
     }
-    p.add(egui::Shape::mesh(mesh));
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 /// Brush alpha preview drawn as small cells (cheap, no texture).

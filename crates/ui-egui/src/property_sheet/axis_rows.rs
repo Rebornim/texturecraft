@@ -157,7 +157,7 @@ impl PropertySheet<'_> {
             let id = self.next_id();
             let dial_x = self.right - self.used.value_width.max(super::VALUE_MIN_WIDTH) - DIAL_AIR - DIAL_RADIUS;
             let end = if slider.dial { dial_x - DIAL_RADIUS - DIAL_AIR } else { self.track_end() };
-            let track = Track { start: x0 + KNOB_RADIUS, end, center_y, zero: None, ramp: false };
+            let track = Track { start: x0 + KNOB_RADIUS, end, center_y, zero: (*slider.range.start() < 0.0).then_some(0.0), ramp: false };
             if slider.dial {
                 self.paint_dial(pos2(dial_x, center_y), *slider.value);
             }

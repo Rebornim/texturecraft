@@ -156,16 +156,16 @@ fn dragging_its_size_slider_changes_the_brush() {
     click(&mut harness, PointerButton::Secondary, center);
     let popup = harness.ctx.memory(|memory| memory.area_rect(properties_popup::area_id())).unwrap();
 
-    // The Size section's header sits above its slider of the same name
-    let slider_label = harness
-        .query_all_by_label("Size")
+    // The Size band holds a slider of the same name, its track right of the label
+    let slider = harness
+        .query_all_by_role(egui::Role::Slider)
+        .filter(|node| node.accesskit_node().label().as_deref() == Some("Size"))
         .map(|node| node.rect())
-        .filter(|rect| popup.contains_rect(*rect))
-        .max_by(|first, second| first.top().total_cmp(&second.top()))
+        .find(|rect| popup.contains_rect(*rect))
         .unwrap();
-    let track_y = slider_label.bottom() + 10.0;
+    let track_y = slider.center().y;
     let size = harness.state().session.tool.brush.size;
-    harness.drag_at(egui::pos2(slider_label.left() + 20.0, track_y));
+    harness.drag_at(egui::pos2(slider.left() + 4.0, track_y));
     harness.run_steps(2);
     harness.hover_at(egui::pos2(popup.right() - 30.0, track_y));
     harness.run_steps(2);
@@ -194,7 +194,7 @@ fn it_shows_what_the_properties_panel_shows() {
     let popup = harness.ctx.memory(|memory| memory.area_rect(properties_popup::area_id())).unwrap();
     let in_popup = |label: &str| harness.query_all_by_label(label).any(|node| popup.contains_rect(node.rect()));
     assert!(in_popup("UV projection"), "a selected fill shows its fill settings");
-    assert!(!in_popup("Minimum size (%)"), "not the brush's");
+    assert!(!in_popup("Minimum Size (%)"), "not the brush's");
 }
 
 /// Whether the jump tab `name` inside `area` is the lit one

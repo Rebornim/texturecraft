@@ -16,6 +16,8 @@ mod bake_preset;
 pub mod bake_presets;
 mod bake_report;
 mod bake_scene;
+mod brush_pictures;
+mod brush_sheet;
 mod brush_stroke_preview;
 mod color_management;
 mod color_picker;

@@ -3204,3 +3204,99 @@ fn sheet_scroll_end_snapshots() {
     harness.run_steps(30);
     save(&mut harness, &output_dir, "sheet-end-scrolled-medium");
 }
+
+/// The paint tool's Properties: the Brush tab with every section open and scrolled down, the Alpha and Material tabs, a stencil on the Projection tool, a mask's Grayscale tab, the right-click popup, and the Clone and Eraser tools' tabs; `TC_UI_THEMES` set adds the dark and light themes
+#[test]
+#[ignore]
+fn paint_tool_properties_snapshots() {
+    use egui::{Event, Modifiers, PointerButton};
+    use serde_json::json;
+    use texturecraft_engine::execute;
+    use texturecraft_ui_egui::state::PropsTab;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let stripes = image::RgbaImage::from_fn(64, 64, |x, _| {
+        let value = if (x / 8) % 2 == 0 { 230 } else { 40 };
+        image::Rgba([value, value, value, 255])
+    });
+    let mut bytes = Vec::new();
+    stripes.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).unwrap();
+    let image = session.import_resource_bytes("stripes.png", bytes).unwrap();
+    execute(&mut session, "tool.select", &json!({"tool": "paint"})).unwrap();
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1600.0, 1400.0))
+        .with_pixels_per_point(2.0)
+        .wgpu()
+        .with_context_setup(texturecraft_ui_egui::framework::install_headless)
+        .build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.set_render_cursor(false);
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "paint-brush");
+
+    // The top bar has a Lazy mouse button too: Properties is the rightmost
+    let in_properties = |harness: &Harness<'_, TextureCraftApp>, label: &str| {
+        harness.get_all_by_label(label).map(|node| node.rect().center()).max_by(|a, b| a.x.total_cmp(&b.x)).unwrap()
+    };
+    for header in ["Angle", "Jitters", "Alignment and culling", "Particles", "Lazy mouse"] {
+        harness.get_all_by_label(header).max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap().scroll_to_me();
+        harness.run_steps(3);
+        let at = in_properties(&harness, header);
+        harness.hover_at(at);
+        for pressed in [true, false] {
+            harness.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+            harness.run_steps(2);
+        }
+    }
+    harness.get_by_label_contains("Brush presets").scroll_to_me();
+    harness.run_steps(3);
+    save(&mut harness, &output_dir, "paint-brush-open");
+    harness.get_all_by_label("Lazy mouse").max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap().scroll_to_me();
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "paint-brush-scrolled");
+
+    let themes = std::env::var_os("TC_UI_THEMES").is_some();
+    let tab = |harness: &mut Harness<'_, TextureCraftApp>, tab: PropsTab, name: &str| {
+        harness.state_mut().ui.props_tab = tab;
+        harness.run_steps(6);
+        save(harness, &output_dir, name);
+        if themes {
+            for (brightness, theme) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
+                harness.state_mut().ui.prefs.brightness = brightness;
+                save(harness, &output_dir, &format!("{name}-{theme}"));
+            }
+            harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
+        }
+    };
+    tab(&mut harness, PropsTab::Brush, "paint-brush-top");
+    tab(&mut harness, PropsTab::Alpha, "paint-alpha");
+    tab(&mut harness, PropsTab::Material, "paint-material");
+
+    execute(&mut harness.state_mut().session, "tool.select", &json!({"tool": "eraser"})).unwrap();
+    tab(&mut harness, PropsTab::Material, "eraser-material");
+    execute(&mut harness.state_mut().session, "tool.select", &json!({"tool": "clone"})).unwrap();
+    tab(&mut harness, PropsTab::Brush, "clone-brush");
+    execute(&mut harness.state_mut().session, "tool.select", &json!({"tool": "projection"})).unwrap();
+    execute(&mut harness.state_mut().session, "tool.stencil", &json!({"image": image})).unwrap();
+    tab(&mut harness, PropsTab::Brush, "projection-stencil");
+
+    execute(&mut harness.state_mut().session, "tool.select", &json!({"tool": "paint"})).unwrap();
+    let layer = harness.state().session.selected_layer().map(|id| id.0);
+    execute(&mut harness.state_mut().session, "mask.add.black", &json!({"layer": layer})).unwrap();
+    execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": layer, "target": "mask"})).unwrap();
+    tab(&mut harness, PropsTab::Material, "mask-grayscale");
+    execute(&mut harness.state_mut().session, "layer.select", &json!({"layer": layer, "target": "content"})).unwrap();
+
+    harness.state_mut().ui.props_tab = PropsTab::Brush;
+    harness.run_steps(4);
+    let at = harness.state().viewport_rect.center() - egui::vec2(150.0, 250.0);
+    harness.hover_at(at);
+    for pressed in [true, false] {
+        harness.event(Event::PointerButton { pos: at, button: PointerButton::Secondary, pressed, modifiers: Modifiers::NONE });
+        harness.run_steps(2);
+    }
+    harness.run_steps(6);
+    save(&mut harness, &output_dir, "paint-popup");
+}

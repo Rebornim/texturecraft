@@ -4,7 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BakeSettings, BakeSyncGroup, BakedMap, Channel, ChannelFormat, ContentsOffset, CoreError, Effect, Layer, LayerId, LayerKind, Result};
+use crate::{
+    BakeSettings, BakeSyncGroup, BakedMap, Channel, ChannelFormat, ContentsOffset, CoreError, Effect, HeightToNormalMethod, Layer, LayerId, LayerKind, Result,
+};
 
 pub use crate::env_alignment::EnvAlignment;
 pub use crate::shadow_mode::ShadowMode;
@@ -61,6 +63,9 @@ pub struct TextureSet {
     pub normal_mixing: NormalMixing,
     #[serde(default)]
     pub ao_mixing: AoMixing,
+    /// Height to normal method; projects without it keep Smooth, the filter their exports already used
+    #[serde(default)]
+    pub height_to_normal: HeightToNormalMethod,
     /// Height-to-normal strength.
     #[serde(default = "one")]
     pub height_strength: f32,
@@ -168,6 +173,7 @@ impl TextureSet {
             stack: Vec::new(),
             normal_mixing: NormalMixing::Combine,
             ao_mixing: AoMixing::Multiply,
+            height_to_normal: HeightToNormalMethod::Smooth,
             height_strength: 1.0,
             bake: BakeSettings::default(),
             baked: BTreeSet::new(),

@@ -224,6 +224,20 @@ fn height_becomes_normal_detail() {
 }
 
 #[test]
+fn height_to_normal_method_smooth_reaches_the_diagonal_neighbours() {
+    let mut fx = Fx::new(&[Channel::BaseColor, Channel::Height]);
+    fx.set(Channel::Height, 30, 30, [1.0; 3]);
+    let normal_at = |fx: &Fx, x: u32, y: u32| decode(find(&fx.render_preset("Separate maps"), "_normal.png")).to_rgb8().get_pixel(x, y).0;
+    let flat = [128, 128, 255];
+
+    assert_eq!(fx.project.texture_sets[0].height_to_normal, texturecraft_core::HeightToNormalMethod::Smooth);
+    assert_ne!(normal_at(&fx, 31, 31), flat, "Sobel reads the bump from the diagonal");
+    fx.project.texture_sets[0].height_to_normal = texturecraft_core::HeightToNormalMethod::Sharp;
+    assert_eq!(normal_at(&fx, 31, 31), flat, "Sharp only reads the neighbours across");
+    assert_ne!(normal_at(&fx, 31, 30), flat, "Sharp still tilts beside the bump");
+}
+
+#[test]
 fn reoriented_normal_mapping_identities() {
     let d = Vec3::new(0.2, -0.3, 0.9).normalize();
     assert!((rnm(Vec3::Z, d) - d).length() < 1e-5);

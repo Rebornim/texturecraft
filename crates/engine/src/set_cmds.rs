@@ -1,7 +1,7 @@
 //! Texture set commands (Texture Set List / Texture Set Settings).
 
 use serde_json::{Value, json};
-use texturecraft_core::{AoMixing, Channel, ChannelBlend, ChannelFormat, NormalMixing};
+use texturecraft_core::{AoMixing, Channel, ChannelBlend, ChannelFormat, HeightToNormalMethod, NormalMixing};
 
 use std::sync::Arc;
 
@@ -43,7 +43,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Texture set settings",
             [],
             None,
-            "{ts?, description?, heightStrength?, normalMixing?: combine|replace, aoMixing?: multiply|none, normalFormat?: openGl|directX}",
+            "{ts?, description?, heightStrength?, normalMixing?: combine|replace, aoMixing?: multiply|none, heightToNormal?: sharp|smooth, normalFormat?: openGl|directX}",
             always,
             settings
         ),
@@ -302,6 +302,12 @@ fn settings(s: &mut Session, p: &Value) -> Result<Value> {
         Some("none") => Some(AoMixing::None),
         Some(other) => return Err(bad("textureSet.settings", format!("unknown ambient occlusion mixing {other:?} (multiply or none)"))),
     };
+    let height_to_normal = match strp(p, "heightToNormal") {
+        None => None,
+        Some("sharp") => Some(HeightToNormalMethod::Sharp),
+        Some("smooth") => Some(HeightToNormalMethod::Smooth),
+        Some(other) => return Err(bad("textureSet.settings", format!("unknown height to normal method {other:?} (sharp or smooth)"))),
+    };
     s.edit("Texture set settings", |s| {
         if let Some(n) = nf {
             s.doc.project.normal_format = n;
@@ -318,6 +324,9 @@ fn settings(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let Some(mixing) = ao_mixing {
             set.ao_mixing = mixing;
+        }
+        if let Some(method) = height_to_normal {
+            set.height_to_normal = method;
         }
         Ok(())
     })?;
@@ -362,6 +371,20 @@ mod tests {
 
         crate::execute(&mut s, "edit.undo", &Value::Null).unwrap();
         assert_eq!(mixing(&s), json!("combine"));
+    }
+
+    #[test]
+    fn height_to_normal_method_is_set_by_command_and_undoes() {
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+        let method = |s: &Session, ts: usize| crate::inspect::texture_set(s, ts)["heightToNormal"].clone();
+        assert_eq!(method(&s, 0), json!("smooth"));
+
+        crate::execute(&mut s, "textureSet.settings", &json!({"ts": 0, "heightToNormal": "sharp"})).unwrap();
+        assert_eq!((method(&s, 0), method(&s, 1)), (json!("sharp"), json!("smooth")));
+        assert!(crate::execute(&mut s, "textureSet.settings", &json!({"heightToNormal": "blurry"})).is_err());
+
+        crate::execute(&mut s, "edit.undo", &Value::Null).unwrap();
+        assert_eq!(method(&s, 0), json!("smooth"));
     }
 
     #[test]

@@ -22,8 +22,8 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 use texturecraft_compose::{Composite, ImageRes};
-use texturecraft_core::Channel;
 use texturecraft_core::project::{DisplaySettings, EnvAlignment, ToneMapping};
+use texturecraft_core::{Channel, HeightToNormalMethod};
 use texturecraft_geom::glam::{Vec2, Vec3};
 use texturecraft_geom::{Bvh, Mesh, OrbitCamera};
 
@@ -38,6 +38,7 @@ pub struct TraceSet {
     /// Height displacement and, with `height_in_normal`, height-to-normal strength
     pub height_strength: f32,
     pub height_in_normal: bool,
+    pub height_to_normal: HeightToNormalMethod,
 }
 
 impl TraceSet {
@@ -587,8 +588,8 @@ fn surface(scene: &TraceScene, tri: u32, u: f32, v: f32, o: Vec3, d: Vec3, t: f3
         s.normal_height_strength() * s.composite.resolution as f32 / 16.0 * s.composite.block_scales.at(x, y)
     });
     let n_height = if k != 0.0 {
-        let h = |dx, dy| ch(Channel::Height, dx, dy)[0];
-        Vec3::new(-(h(1, 0) - h(-1, 0)) * 0.5 * k, (h(0, 1) - h(0, -1)) * 0.5 * k, 1.0).normalize_or(Vec3::Z)
+        let [gx, gy] = set.map_or(HeightToNormalMethod::Smooth, |s| s.height_to_normal).slope(|dx, dy| ch(Channel::Height, dx, dy)[0]);
+        Vec3::new(-gx * k, gy * k, 1.0).normalize_or(Vec3::Z)
     } else {
         Vec3::Z
     };
@@ -1242,7 +1243,19 @@ mod tests {
                 }
             }
         }
-        TraceScene::new(mesh, bvh, vec![TraceSet { material: 0, composite, height_strength: 0.0, height_in_normal: true }], env, 0.0)
+        TraceScene::new(
+            mesh,
+            bvh,
+            vec![TraceSet {
+                material: 0,
+                composite,
+                height_strength: 0.0,
+                height_in_normal: true,
+                height_to_normal: texturecraft_core::HeightToNormalMethod::Smooth,
+            }],
+            env,
+            0.0,
+        )
     }
 
     /// Mean radiance of parallel rays over the whole disc of the sphere (grazing hits included)

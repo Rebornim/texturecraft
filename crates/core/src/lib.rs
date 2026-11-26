@@ -34,6 +34,7 @@ pub mod gradient_input;
 pub mod grayscale_conversion;
 pub mod grayscale_mode;
 pub mod height_to_normal;
+mod height_to_normal_method;
 pub mod highpass_space;
 pub mod image_input;
 pub mod layer;
@@ -108,6 +109,7 @@ pub use gradient_input::GradientInput;
 pub use grayscale_conversion::GrayscaleConversion;
 pub use grayscale_mode::GrayscaleMode;
 pub use height_to_normal::HeightToNormal;
+pub use height_to_normal_method::HeightToNormalMethod;
 pub use highpass_space::HighpassSpace;
 pub use image_input::ImageInput;
 pub use layer::{

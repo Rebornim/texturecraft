@@ -35,7 +35,7 @@ struct Globals {
     bake_neutral_color: vec4<f32>, // rgb the neutral material's color, a its reflection samples this frame
     bake_neutral: vec4<f32>, // x roughness, y metallic, z AO intensity of the neutral material, w on (1)
     bake_bent_normal: vec4<f32>, // x, y how much the bent normal (in the aux texture) turns the diffuse light and dims reflections, zw -
-    uv_rotation: vec4<f32>, // UV view: x cos, y sin of the view rotation (counter-clockwise on screen), z view aspect (width / height), w -
+    uv_rotation: vec4<f32>, // UV view: x cos, y sin of the view rotation (counter-clockwise on screen), z view aspect (width / height); w Smooth (Sobel) height to normal (1) or Sharp (0)
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -430,6 +430,21 @@ const UV_CHECKER_FINE_CELLS: f32 = 256.0;
 // Offset alpha dithering between accumulated frames
 const DITHER_FRAME_STEP: vec2<f32> = vec2<f32>(17.0, 59.0);
 
+// The change of height per texel (`ts` = one texel in UV) to the right and down: Sobel when g.uv_rotation.w is 1, else the neighbours across (as HeightToNormalMethod::slope)
+fn height_slope(uv: vec2<f32>, ts: vec2<f32>) -> vec2<f32> {
+    let r = textureSample(t_height, samp, uv + vec2<f32>(ts.x, 0.0)).r;
+    let l = textureSample(t_height, samp, uv - vec2<f32>(ts.x, 0.0)).r;
+    let d = textureSample(t_height, samp, uv + vec2<f32>(0.0, ts.y)).r;
+    let u = textureSample(t_height, samp, uv - vec2<f32>(0.0, ts.y)).r;
+    let ru = textureSample(t_height, samp, uv + vec2<f32>(ts.x, -ts.y)).r;
+    let rd = textureSample(t_height, samp, uv + ts).r;
+    let lu = textureSample(t_height, samp, uv - ts).r;
+    let ld = textureSample(t_height, samp, uv + vec2<f32>(-ts.x, ts.y)).r;
+    let sharp = vec2<f32>(r - l, d - u) * 0.5;
+    let sobel = vec2<f32>(ru + 2.0 * r + rd - lu - 2.0 * l - ld, ld + 2.0 * d + rd - lu - 2.0 * u - ru) / 8.0;
+    return select(sharp, sobel, g.uv_rotation.w > 0.5);
+}
+
 fn shade_mesh(i: VOut, front: bool) -> Shaded {
     var n_geo = normalize(i.nrm);
     if (!front) {
@@ -476,15 +491,12 @@ fn shade_mesh(i: VOut, front: bool) -> Shaded {
     let ts = 1.0 / dims;
     let hgt = textureSample(t_height, samp, uv);
     let hc = hgt.r;
-    let hl = textureSample(t_height, samp, uv - vec2<f32>(ts.x, 0.0)).r;
-    let hr = textureSample(t_height, samp, uv + vec2<f32>(ts.x, 0.0)).r;
-    let hu = textureSample(t_height, samp, uv - vec2<f32>(0.0, ts.y)).r;
-    let hd = textureSample(t_height, samp, uv + vec2<f32>(0.0, ts.y)).r;
 
     // Match export: a unit height over 1/16 of the width tilts 45°
     // Combine the height gradient with the tangent-space normal
     let k = g.mode.z * g.disp.w * dims.x / 16.0 * tile_scale(uv);
-    let n_height = normalize(vec3<f32>(-(hr - hl) * 0.5 * k, (hd - hu) * 0.5 * k, 1.0));
+    let slope = height_slope(uv, ts);
+    let n_height = normalize(vec3<f32>(-slope.x * k, slope.y * k, 1.0));
 
     // The Normal texture holds the signed normal in half floats (flat is exactly +z)
     var n_detail = clamp(nrm_s, vec3<f32>(-1.0), vec3<f32>(1.0));
@@ -724,12 +736,9 @@ fn fs_uv(i: VOut) -> @location(0) vec4<f32> {
         // The tangent-space normal the shading uses: the height slope turned by the normal channel
         let dims = vec2<f32>(textureDimensions(t_height));
         let ts = 1.0 / dims;
-        let hl = textureSample(t_height, samp, i.uv - vec2<f32>(ts.x, 0.0)).r;
-        let hr = textureSample(t_height, samp, i.uv + vec2<f32>(ts.x, 0.0)).r;
-        let hu = textureSample(t_height, samp, i.uv - vec2<f32>(0.0, ts.y)).r;
-        let hd = textureSample(t_height, samp, i.uv + vec2<f32>(0.0, ts.y)).r;
         let k = g.mode.z * g.disp.w * dims.x / 16.0 * tile_scale(i.uv);
-        let n_height = normalize(vec3<f32>(-(hr - hl) * 0.5 * k, (hd - hu) * 0.5 * k, 1.0));
+        let slope = height_slope(i.uv, ts);
+        let n_height = normalize(vec3<f32>(-slope.x * k, slope.y * k, 1.0));
         var n_detail = clamp(textureSample(t_nrm, samp, i.uv).rgb, vec3<f32>(-1.0), vec3<f32>(1.0));
         n_detail.y *= g.mode.w;
         return raw_out(rnm(n_height, normalize(n_detail)) * 0.5 + 0.5);

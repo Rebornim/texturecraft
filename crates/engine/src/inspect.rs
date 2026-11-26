@@ -282,6 +282,10 @@ pub fn texture_set(session: &Session, index: usize) -> Value {
             texturecraft_core::AoMixing::Multiply => "multiply",
             texturecraft_core::AoMixing::None => "none",
         },
+        "heightToNormal": match texture_set.height_to_normal {
+            texturecraft_core::HeightToNormalMethod::Sharp => "sharp",
+            texturecraft_core::HeightToNormalMethod::Smooth => "smooth",
+        },
         "active": index == session.ts(),
     })
 }

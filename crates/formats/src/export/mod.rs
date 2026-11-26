@@ -762,7 +762,7 @@ struct Sampler<'a> {
     coverage: &'a [bool],
     /// Composite width.
     res: u32,
-    /// Texels per atlas block (`res` for a classic set): the height slope and the Sobel window
+    /// Texels per atlas block (`res` for a classic set): the height slope and the slope window
     /// follow the block.
     tile_res: u32,
     /// The share of its block each tile fills: a smaller tile's height slope shrinks with it.
@@ -804,18 +804,17 @@ impl Sampler<'_> {
         self.coverage.get((y as usize) * self.res as usize + x as usize).copied().unwrap_or(false)
     }
 
-    /// Normal from the height channel (3×3 Sobel; uncovered neighbours repeat the centre).
+    /// Normal from the height channel (the set's height to normal method; uncovered neighbours repeat the centre).
     fn height_normal(&self, x: u32, y: u32) -> Vec3 {
         let center = self.channel(Channel::Height, At::Texel(x, y))[0];
         // Clamped to the texel's UV tile.
         let t = self.tile_res.max(1);
         let (x0, y0, last) = ((x / t * t) as i64, (y / t * t) as i64, t as i64 - 1);
-        let h = |dx: i64, dy: i64| {
-            let (sx, sy) = ((x as i64 + dx).clamp(x0, x0 + last) as u32, (y as i64 + dy).clamp(y0, y0 + last) as u32);
+        let h = |dx: i32, dy: i32| {
+            let (sx, sy) = ((x as i64 + dx as i64).clamp(x0, x0 + last) as u32, (y as i64 + dy as i64).clamp(y0, y0 + last) as u32);
             if self.covered(sx, sy) { self.channel(Channel::Height, At::Texel(sx, sy))[0] } else { center }
         };
-        let gx = (h(1, -1) + 2.0 * h(1, 0) + h(1, 1) - h(-1, -1) - 2.0 * h(-1, 0) - h(-1, 1)) / 8.0;
-        let gy = (h(-1, 1) + 2.0 * h(0, 1) + h(1, 1) - h(-1, -1) - 2.0 * h(0, -1) - h(1, -1)) / 8.0;
+        let [gx, gy] = self.set.height_to_normal.slope(h);
         let s = self.set.height_strength * self.tile_res as f32 * self.scales.at(x, y) / HEIGHT_SPAN;
         // Image y points down; OpenGL normals have +Y up the image.
         Vec3::new(-gx * s, gy * s, 1.0).try_normalize().unwrap_or(Vec3::Z)

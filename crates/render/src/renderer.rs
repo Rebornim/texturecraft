@@ -159,6 +159,8 @@ pub struct Shade {
     pub height_strength: f32,
     /// The height slope joins the shaded normal (normal mixing Combine; Replace leaves it out)
     pub height_in_normal: bool,
+    /// How the height becomes normal slopes
+    pub height_to_normal: texturecraft_core::HeightToNormalMethod,
     /// -1 for DirectX normal maps in the normal channel, 1 for OpenGL.
     pub normal_y: f32,
     /// 0 material, 1 channel, 2 mesh map (aux texture), 3 UV checker.
@@ -298,6 +300,7 @@ impl Default for Shade {
             ao_intensity: 0.75,
             height_strength: 1.0,
             height_in_normal: true,
+            height_to_normal: texturecraft_core::HeightToNormalMethod::Smooth,
             normal_y: 1.0,
             view_mode: 0,
             channel: 0,
@@ -2120,7 +2123,12 @@ impl Renderer {
             mode: [s.view_mode as f32, s.channel as f32, s.height_strength, s.normal_y],
             bg: [s.env_opacity, s.env_blur * (ENV_LEVELS - 1) as f32, uv_view, s.wireframe_opacity.clamp(0.0, 1.0)],
             uv_xform,
-            uv_rotation,
+            uv_rotation: [
+                uv_rotation[0],
+                uv_rotation[1],
+                uv_rotation[2],
+                f32::from(u8::from(s.height_to_normal == texturecraft_core::HeightToNormalMethod::Smooth)),
+            ],
             light: [light.x, light.y, light.z, lw],
             light_vp: shadow_vp.unwrap_or(Mat4::IDENTITY).to_cols_array_2d(),
             // Offset by 1.5 shadow texels to avoid self-shadowing

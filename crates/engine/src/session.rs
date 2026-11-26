@@ -825,6 +825,12 @@ impl Session {
             )
         };
         for (texture_set_index, cache) in self.caches.iter_mut().enumerate() {
+            // Display-only settings change the uploaded textures, not the composite
+            let ao_mixing = |document: &Document| document.project.texture_sets.get(texture_set_index).map(|set| set.ao_mixing);
+            if ao_mixing(previous_document) != ao_mixing(&self.doc) {
+                cache.upload.extend(texturecraft_compose::all_tiles(cache.size.0, cache.size.1));
+            }
+
             if uses_added_resource(texture_set_index) {
                 cache.invalidate_all();
                 continue;

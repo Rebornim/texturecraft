@@ -1,7 +1,7 @@
 //! Texture set commands (Texture Set List / Texture Set Settings).
 
 use serde_json::{Value, json};
-use texturecraft_core::{Channel, ChannelBlend, ChannelFormat, NormalMixing};
+use texturecraft_core::{AoMixing, Channel, ChannelBlend, ChannelFormat, NormalMixing};
 
 use std::sync::Arc;
 
@@ -43,7 +43,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Texture set settings",
             [],
             None,
-            "{ts?, description?, heightStrength?, normalMixing?: combine|replace, normalFormat?: openGl|directX}",
+            "{ts?, description?, heightStrength?, normalMixing?: combine|replace, aoMixing?: multiply|none, normalFormat?: openGl|directX}",
             always,
             settings
         ),
@@ -289,11 +289,18 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
 fn settings(s: &mut Session, p: &Value) -> Result<Value> {
     let ts = ts_param(s, p, "textureSet.settings")?;
     let nf = normal_format_param("textureSet.settings", p)?;
+    let ao_mixing_before = s.doc.project.texture_set(ts)?.ao_mixing;
     let normal_mixing = match strp(p, "normalMixing") {
         None => None,
         Some("combine") => Some(NormalMixing::Combine),
         Some("replace") => Some(NormalMixing::Replace),
         Some(other) => return Err(bad("textureSet.settings", format!("unknown normal mixing {other:?} (combine or replace)"))),
+    };
+    let ao_mixing = match strp(p, "aoMixing") {
+        None => None,
+        Some("multiply") => Some(AoMixing::Multiply),
+        Some("none") => Some(AoMixing::None),
+        Some(other) => return Err(bad("textureSet.settings", format!("unknown ambient occlusion mixing {other:?} (multiply or none)"))),
     };
     s.edit("Texture set settings", |s| {
         if let Some(n) = nf {
@@ -309,8 +316,18 @@ fn settings(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(mixing) = normal_mixing {
             set.normal_mixing = mixing;
         }
+        if let Some(mixing) = ao_mixing {
+            set.ao_mixing = mixing;
+        }
         Ok(())
     })?;
+
+    // The viewport's occlusion texture mixes the baked map in: resend the set
+    if s.doc.project.texture_set(ts)?.ao_mixing != ao_mixing_before
+        && let Some(cache) = s.caches.get_mut(ts)
+    {
+        cache.upload.extend(texturecraft_compose::all_tiles(cache.size.0, cache.size.1));
+    }
     Ok(Value::Null)
 }
 
@@ -345,5 +362,22 @@ mod tests {
 
         crate::execute(&mut s, "edit.undo", &Value::Null).unwrap();
         assert_eq!(mixing(&s), json!("combine"));
+    }
+
+    #[test]
+    fn ao_mixing_resends_the_set_to_the_viewport_and_undoes() {
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+        s.update();
+        let _ = (s.take_uploads(0), s.take_uploads(1));
+
+        crate::execute(&mut s, "textureSet.settings", &json!({"ts": 0, "aoMixing": "none"})).unwrap();
+        assert_eq!(crate::inspect::texture_set(&s, 0)["aoMixing"], json!("none"));
+        assert!(!s.take_uploads(0).is_empty() && s.take_uploads(1).is_empty(), "only the changed set is resent");
+        assert!(crate::execute(&mut s, "textureSet.settings", &json!({"aoMixing": "screen"})).is_err());
+
+        crate::execute(&mut s, "edit.undo", &Value::Null).unwrap();
+        s.update();
+        assert_eq!(crate::inspect::texture_set(&s, 0)["aoMixing"], json!("multiply"));
+        assert!(!s.take_uploads(0).is_empty(), "undo resends the set too");
     }
 }

@@ -278,6 +278,10 @@ pub fn texture_set(session: &Session, index: usize) -> Value {
             texturecraft_core::NormalMixing::Combine => "combine",
             texturecraft_core::NormalMixing::Replace => "replace",
         },
+        "aoMixing": match texture_set.ao_mixing {
+            texturecraft_core::AoMixing::Multiply => "multiply",
+            texturecraft_core::AoMixing::None => "none",
+        },
         "active": index == session.ts(),
     })
 }

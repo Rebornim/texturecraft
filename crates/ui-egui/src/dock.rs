@@ -8,8 +8,6 @@ use texturecraft_engine::compose::ThumbTarget;
 use texturecraft_engine::core::{
     BakedMap, BlendMode, Channel, ChannelBlend, Effect, EffectKind, Layer, LayerId, LayerKind, LinkParam, Projection, Sampling, Source,
 };
-use texturecraft_engine::paint::alpha_params::MAX_ALPHA_CONTRAST;
-use texturecraft_engine::paint::{BrushAlpha, BrushSettings, alphas};
 use texturecraft_engine::texel::linear_to_srgb;
 use texturecraft_engine::{CloneFrom, StackTarget, Tool};
 
@@ -23,7 +21,7 @@ use crate::property_sheet::{PropertySheet, SectionScope};
 use crate::shelf::{Asset, ShelfDrag};
 use crate::source_choice::SourceChoice;
 use crate::theme::{Tokens, caption};
-use crate::widgets::{chip, color_swatch, combo, dnd_release, elided, icon_button, press_edit, section, section_with_reset, slider, slider_edit};
+use crate::widgets::{chip, color_swatch, combo, dnd_release, elided, icon_button, press_edit, section, slider, slider_edit};
 
 const TAG_COLORS: [Color32; 8] = [
     Color32::from_rgb(0xc0, 0x40, 0x40),
@@ -2132,7 +2130,7 @@ fn tool_properties(app: &mut TextureCraftApp, ui: &mut Ui) {
             let menu = sheet.section(section.title(), section == PaintSection::Brush);
             match section {
                 PaintSection::Brush => crate::brush_sheet::brush_section(app, sheet, menu),
-                PaintSection::Alpha => legacy(sheet, app, alpha_section),
+                PaintSection::Alpha => crate::alpha_sheet::alpha_section(app, sheet),
                 PaintSection::Stencil => legacy(sheet, app, stencil_section),
                 PaintSection::Material => legacy(sheet, app, material_controls),
                 PaintSection::Grayscale => crate::mask_paint_panel::grayscale_section(app, sheet),
@@ -2367,152 +2365,6 @@ fn polygon_fill_paints_mask(app: &TextureCraftApp) -> Result<bool, String> {
             }
         }
     }
-}
-
-/// One alpha in the picker: a 52×64 tile with the shape drawn by `paint` and a label.
-fn alpha_tile(ui: &mut Ui, on: bool, label: &str, paint: impl FnOnce(&egui::Painter, Rect)) -> egui::Response {
-    let tk = Tokens::get(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(vec2(52.0, 64.0), Sense::click());
-    let p = ui.painter();
-    p.rect_filled(rect, 3.0, tk.viewport);
-    if on {
-        p.rect_stroke(rect, 3.0, Stroke::new(1.0, tk.accent), egui::StrokeKind::Inside);
-    }
-    paint(p, Rect::from_center_size(rect.center() - vec2(0.0, 7.0), vec2(40.0, 40.0)));
-    let name = elided(p, label, 9.5, tk.viewport_text, rect.width() - 4.0);
-    p.galley(rect.center_bottom() - vec2(name.size().x * 0.5, 6.0 + name.size().y * 0.5), name, tk.viewport_text);
-    resp.on_hover_text(label)
-}
-
-fn alpha_section(app: &mut TextureCraftApp, ui: &mut Ui) {
-    let tk = Tokens::get(ui.ctx());
-    import_button(app, ui);
-    let brush = &app.session.tool.brush;
-    let (current, image, hardness) = (brush.alpha, brush.alpha_image.clone(), brush.hardness);
-    let library = if image.is_none() { brush.alpha_library.as_deref().and_then(alphas::find) } else { None };
-    let mut pick = None;
-    let zone = ui.horizontal_wrapped(|ui| {
-        for a in BrushAlpha::ALL {
-            let on = image.is_none() && library.is_none() && current == a;
-            if alpha_tile(ui, on, tr(a.label()), |p, r| crate::thumbs::paint_alpha(p, r, a, hardness)).clicked() {
-                pick = Some(json!(a.label()));
-            }
-        }
-
-        // The library alpha in use (picked from the shelf's Alphas tab)
-        if let Some(a) = library {
-            let tex = app.thumbs.alpha(ui.ctx(), a);
-            alpha_tile(ui, true, &a.label, |p, r| {
-                if let Some(t) = tex {
-                    p.image(t.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-                }
-            });
-        }
-
-        // Imported images, sampled as grayscale
-        for name in app.session.doc.resources.keys() {
-            let Some(img) = app.session.images.get(name) else { continue };
-            let tex = app.thumbs.image(ui.ctx(), name, img);
-            let on = image.as_deref() == Some(name.as_str());
-            if alpha_tile(ui, on, name, |p, r| {
-                p.image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-            })
-            .clicked()
-            {
-                pick = Some(json!({ "image": name }));
-            }
-        }
-    });
-    if let Some(alpha) = pick {
-        app.run("tool.brush", json!({ "alpha": alpha }));
-    }
-    ui.label(RichText::new(tr("More in Assets > Alphas: click one, or drag it here")).size(10.0).color(tk.text_dim));
-    crate::shelf::drop_target(app, ui, &zone.response, crate::shelf::DropZone::Brush);
-    alpha_parameters(&mut app.session.tool.brush, ui);
-    section(ui, "sec_text", tr("Text"), true, |ui| text_section(app, ui));
-}
-
-/// Hardness and the parameters every alpha shares, under a header whose reset puts them back
-fn alpha_parameters(brush: &mut BrushSettings, ui: &mut Ui) {
-    let defaults = BrushSettings::default();
-    let at_defaults = brush.hardness == defaults.hardness && brush.alpha_params == defaults.alpha_params;
-    let round = brush.alpha == BrushAlpha::Round && brush.alpha_image.is_none() && brush.alpha_library.is_none();
-    let percent_slider = |ui: &mut Ui, label: &str, value: &mut f32, min: f32, max: f32| {
-        let mut percent = *value * 100.0;
-        if slider(ui, label, &mut percent, min..=max, 0).changed() {
-            *value = percent / 100.0;
-        }
-    };
-
-    let reset = section_with_reset(ui, "sec_alpha_params", tr("Parameters"), true, at_defaults, |ui| {
-        percent_slider(ui, tr("Hardness"), &mut brush.hardness, 0.0, 99.9);
-        percent_slider(ui, tr("Size X"), &mut brush.alpha_params.size_x, 5.0, 100.0);
-        percent_slider(ui, tr("Size Y"), &mut brush.alpha_params.size_y, 5.0, 100.0);
-
-        // Only the procedural Round shape has a roundness
-        ui.add_enabled_ui(round, |ui| percent_slider(ui, tr("Roundness"), &mut brush.alpha_params.roundness, 0.0, 100.0));
-        slider(ui, tr("Contrast"), &mut brush.alpha_params.contrast, 1.0..=MAX_ALPHA_CONTRAST, 2);
-        ui.checkbox(&mut brush.alpha_params.invert, tr("Invert"));
-    });
-    if reset {
-        (brush.hardness, brush.alpha_params) = (defaults.hardness, defaults.alpha_params);
-    }
-    *brush = brush.sanitized();
-}
-
-/// Text drawn in a font, as the brush alpha or a decal (`resource.text`).
-fn text_section(app: &mut TextureCraftApp, ui: &mut Ui) {
-    if app.ui.text.fonts.is_empty()
-        && let Some(f) = app.run("text.fonts", Value::Null)
-    {
-        let installed = f["installed"].as_array().into_iter().flatten().map(|v| {
-            let styles = v["styles"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
-            (v["family"].as_str().unwrap_or_default().to_string(), styles)
-        });
-        let built_in = f["builtIn"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|n| (n.to_string(), Vec::new()));
-        app.ui.text.fonts = installed.chain(built_in).collect();
-    }
-    // A decal shows the text in the tool's base color; an alpha must stay white.
-    let color = app.session.tool.values.get(&Channel::BaseColor).copied().unwrap_or([1.0; 3]);
-    let t = &mut app.ui.text;
-    ui.add(egui::TextEdit::multiline(&mut t.text).desired_rows(2).desired_width(f32::INFINITY).hint_text(tr("Text")));
-    let shown = if t.font.is_empty() { tr("Default").to_string() } else { t.font.clone() };
-    combo(ui, tr("Font"), shown, |ui| {
-        if ui.selectable_label(t.font.is_empty(), tr("Default")).clicked() {
-            (t.font, t.style) = (String::new(), String::new());
-        }
-        for (family, _) in &t.fonts {
-            if ui.selectable_label(t.font == *family, family).clicked() {
-                (t.font, t.style) = (family.clone(), String::new());
-            }
-        }
-    });
-    let styles = t.fonts.iter().find(|(f, _)| *f == t.font).map(|(_, s)| s.clone()).unwrap_or_default();
-    if styles.len() > 1 {
-        let shown = if t.style.is_empty() { tr("Default").to_string() } else { t.style.clone() };
-        combo(ui, tr("Style"), shown, |ui| {
-            for s in styles {
-                ui.selectable_value(&mut t.style, s.clone(), s);
-            }
-        });
-    }
-    let mut params = json!({"text": t.text, "font": (!t.font.is_empty()).then_some(&t.font), "style": (!t.style.is_empty()).then_some(&t.style)});
-    let ready = !t.text.trim().is_empty();
-    ui.horizontal_wrapped(|ui| {
-        let alpha = ui.add_enabled(ready, egui::Button::new(tr("Use as brush alpha"))).clicked();
-        let decal = ui.add_enabled(ready, egui::Button::new(tr("Place as decal"))).clicked();
-        if decal {
-            params["color"] = json!(color);
-        }
-        if (alpha || decal)
-            && let Some(name) = app.run("resource.text", params).and_then(|r| r["name"].as_str().map(str::to_string))
-        {
-            match alpha {
-                true => app.run("tool.brush", json!({"alpha": {"image": name}})),
-                false => app.run("layer.add.decal", json!({"image": name})),
-            };
-        }
-    });
 }
 
 /// Tooltip of the material channel chips.

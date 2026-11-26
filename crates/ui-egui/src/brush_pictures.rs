@@ -45,6 +45,11 @@ pub(crate) fn stamp_image(brush: &BrushSettings, image: Option<&ImageRes>, size:
     stroke_strip(&still, image, size, |_| radius, |_| center, |x| column_tint(tints, x))
 }
 
+/// The brush's alpha as its Parameters shape it, upright: the Alpha section's Parameters picture
+pub(crate) fn alpha_image(brush: &BrushSettings, image: Option<&ImageRes>, size: [usize; 2], pixels_per_point: f32, tints: &[[u8; 3]]) -> ColorImage {
+    stamp_image(&BrushSettings { angle: 0.0, ..brush.clone() }, image, size, pixels_per_point, tints)
+}
+
 /// A row of the brush's dabs across a `size` strip, scattered by its four jitters; dabs shrink as Position Jitter grows so the scatter stays inside
 pub(crate) fn jitter_image(brush: &BrushSettings, image: Option<&ImageRes>, size: [usize; 2], _pixels_per_point: f32, tints: &[[u8; 3]]) -> ColorImage {
     let spaced = BrushSettings { spacing: brush.spacing.max(STRIP_DAB_SPACING), follow_path: false, flow: 1.0, opacity: 1.0, ..brush.clone() };

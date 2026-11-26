@@ -1,10 +1,10 @@
 //! The layer toolbar's Add mask items that add a mask with an effect in it (a bitmap, a height combination) and Add effect's colour selection
 
 use serde_json::Value;
-use texturecraft_core::{BlendMode, EffectKind, Sampling, Source};
+use texturecraft_core::{BlendMode, Channel, EffectKind, Sampling, Source};
 use texturecraft_paint::alphas;
 
-use crate::commands::{CommandSpec, bad, has_layer, strp};
+use crate::commands::{CommandSpec, bad, has_layer, layer_param, strp};
 use crate::mask_cmds::{color_selection, mask_target, new_compare, push_effect_as, push_own_mask_effect};
 use crate::{Result, Session, cmd};
 
@@ -24,9 +24,9 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add mask with height combination",
             ["Layers", "Mask"],
             None,
-            "{layer?} → {effect} — a compare mask (this layer's height greater than the layers below it, hardness 0.9) in the layer's mask (a new one if it has none); selected",
+            "{layer?} → {effect} — a compare mask (this layer's height greater than the layers below it, hardness 0.9) in the layer's mask (a new one if it has none); selected. The layer's height channel, if it has one, blends Normal",
             has_layer,
-            |s, p| push_own_mask_effect(s, p, new_compare(), "Add mask with height combination", |_| Ok(()))
+            |s, p| push_own_mask_effect(s, p, new_compare(), "Add mask with height combination", |s| height_blends_normal(s, p))
         ),
         cmd!(
             "effect.add.colorSelection",
@@ -38,6 +38,16 @@ pub fn specs() -> Vec<CommandSpec> {
             |s, p| push_effect_as(s, &mask_target(p), color_selection("effect.add.colorSelection", p)?, BlendMode::Normal, "Add color selection")
         ),
     ]
+}
+
+/// Where a height-combination mask shows the layer, the layer's height replaces the height below instead of mixing with it
+fn height_blends_normal(s: &mut Session, p: &Value) -> Result<()> {
+    let id = layer_param(s, "mask.add.heightCombination", p)?;
+    if let Some(blend) = s.doc.project.layers.get_mut(&id).and_then(|layer| layer.channels.get_mut(&Channel::Height)) {
+        blend.mode = BlendMode::Normal;
+    }
+
+    Ok(())
 }
 
 /// A mask fill reading an image resource or a library alpha, in one undo step with the alpha's resource

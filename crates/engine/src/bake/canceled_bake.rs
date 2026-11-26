@@ -31,7 +31,9 @@ impl Session {
         self.edit("Bake mesh maps", |session| {
             session.store_bake_maps(texture_set, finished.resolution, height, finished.maps, Some((&kept_sources, painted_stroke)))
         })?;
-        self.log.info("Baker", format!("Kept {} baked maps of texture set {texture_set} from the canceled bake", kept.len()));
+        // Named like the Texture Set List and the progress footer, which count sets from 1
+        let name = self.doc.project.texture_sets.get(texture_set).map_or_else(|| format!("{}", texture_set + 1), |set| set.name.clone());
+        self.log.info("Baker", format!("Kept {} baked maps of texture set {name} from the canceled bake", kept.len()));
         Ok(kept)
     }
 }

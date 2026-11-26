@@ -159,3 +159,18 @@ fn the_rows_icon_turns_auto_rebake_on_for_its_map_and_off_again() {
     harness.run_steps(2);
     assert_eq!(auto_rebake(&harness), None);
 }
+
+#[test]
+fn no_rebake_starts_while_the_pointer_is_held_so_a_paused_drag_stays_one_undo_step() {
+    let mut harness = harness(64);
+    change_settings(&mut harness, json!({ "positionMode": "boundingBox" }));
+
+    // Held still well past the settle time, as a hand pausing mid-drag
+    let corner = egui::pos2(1590.0, 990.0);
+    harness.drag_at(corner);
+    harness.run_steps(120);
+    assert!(harness.state().bake.is_none(), "the edit is not over while the press lasts");
+
+    harness.drop_at(corner);
+    super::step_until(&mut harness, "the rebake after the release", |app| app.bake.is_some());
+}

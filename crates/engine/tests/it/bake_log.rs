@@ -158,3 +158,17 @@ fn a_canceled_bake_keeps_the_out_of_date_mark_of_a_map_it_did_not_finish() {
     assert_eq!(kept, [BakedMap::Id]);
     assert!(!session.bake_changes(0, BakedMap::Position).is_empty(), "Position still has its old pixels, so it stays out of date");
 }
+
+#[test]
+fn a_canceled_bakes_log_line_names_the_set_as_the_texture_set_list_does() {
+    let mut session = sample_session(256, 64).unwrap();
+    let stored = session.baked(0).cloned().unwrap();
+    let (map, data) = stored.maps.iter().next().map(|(map, data)| (*map, data.clone())).unwrap();
+    let finished = BakedMaps { resolution: stored.resolution, maps: [(map, data)].into() };
+
+    session.keep_canceled_bake(0, finished, &Default::default(), 0).unwrap();
+
+    let name = session.doc.project.texture_sets[0].name.clone();
+    let line = session.log.iter().find(|line| line.contains("canceled bake")).map(|line| line.message.clone()).unwrap();
+    assert!(line.contains(&format!("texture set {name} ")), "the first set is not numbered 0: {line}");
+}

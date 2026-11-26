@@ -46,6 +46,12 @@ pub(crate) fn poll(app: &mut TextureCraftApp, ctx: &egui::Context) {
 
     let now = app.last_time;
     ctx.request_repaint_after(std::time::Duration::from_secs_f64(SETTLE_SECONDS));
+
+    // A held press (a slider dragged and paused) is still editing: the wait starts once it is let go
+    if ctx.input(|input| input.pointer.any_down()) {
+        app.auto_rebake.pending = Some((waiting, now));
+        return;
+    }
     match &app.auto_rebake.pending {
         Some((seen, since)) if *seen == waiting && now - since >= SETTLE_SECONDS => {}
         Some((seen, _)) if *seen == waiting => return,

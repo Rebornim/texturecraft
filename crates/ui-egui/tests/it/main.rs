@@ -59,6 +59,7 @@ mod layer_rename;
 mod layer_toolbar;
 mod layers_panel;
 mod levels_editor;
+mod library_theme;
 mod log_panel_680;
 mod mask_export;
 mod mask_fill_rows;

@@ -31,6 +31,7 @@ mod decal_drop;
 mod display_settings;
 pub mod dock;
 pub mod docking;
+mod library_theme;
 mod drawn_icon;
 mod environment_picker;
 mod exact_entry_open;

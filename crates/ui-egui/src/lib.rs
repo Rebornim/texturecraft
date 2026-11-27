@@ -80,6 +80,7 @@ mod levels_display;
 mod levels_editor;
 mod levels_handle;
 mod levels_properties;
+mod library_theme;
 mod line_snap;
 mod list_action;
 pub mod log_panel;

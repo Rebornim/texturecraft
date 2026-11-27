@@ -590,7 +590,7 @@ mod tests {
     fn uv_padding_rebuilds_the_viewport_padding_and_undoes() {
         let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
         let mode = |s: &Session| crate::inspect::texture_set(s, 0)["uvPadding"].clone();
-        let crosses_seams = |s: &Session| s.caches[0].padding.flat.is_some();
+        let crosses_seams = |s: &Session| !s.caches[0].padding.crossed.is_empty();
         assert_eq!((mode(&s), crosses_seams(&s)), (json!("3d"), true));
         s.update();
 

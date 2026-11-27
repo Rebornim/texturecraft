@@ -4886,33 +4886,35 @@ fn store_below(cache: &mut [f32], lanes: &[Lane], stride: usize, o: usize, acc: 
 pub fn pad_tiles(out: &mut Composite, padding: &crate::PaddingMaps, tiles: &[(u32, u32)]) -> std::collections::BTreeSet<(u32, u32)> {
     let mut written = std::collections::BTreeSet::new();
     let (w, h) = (out.resolution, out.height);
-    if (padding.all.width, padding.all.height) != (w, h) {
+    if padding.size() != (w, h) {
         return written;
     }
 
-    let (nx, ny) = (w.div_ceil(TILE) as i64, h.div_ceil(TILE) as i64);
-    let mut set = std::collections::BTreeSet::new();
+    // The tiles and their neighbours, which padding reaches into
+    let (tiles_across, tiles_down) = (w.div_ceil(TILE) as i64, h.div_ceil(TILE) as i64);
+    let mut near_tiles = std::collections::BTreeSet::new();
     for &(tx, ty) in tiles {
         for dy in -1..=1i64 {
             for dx in -1..=1i64 {
                 let (x, y) = (tx as i64 + dx, ty as i64 + dy);
-                if x >= 0 && y >= 0 && x < nx && y < ny {
-                    set.insert((x as u32, y as u32));
+                if x >= 0 && y >= 0 && x < tiles_across && y < tiles_down {
+                    near_tiles.insert((x as u32, y as u32));
                 }
             }
         }
     }
-    let set: Vec<(u32, u32)> = set.into_iter().collect();
+    let near_tiles: Vec<(u32, u32)> = near_tiles.into_iter().collect();
+
     for (channel, img) in out.channels.iter_mut() {
         let comps = img.comps();
         let src: &TileImage = img;
-        let dilation = padding.for_channel(*channel);
+        let across_seams = crate::PaddingMaps::crosses_seams(*channel);
 
         // Each tile pads from the original image, so parallel writes stay independent
-        let padded: Vec<((u32, u32), Vec<u16>)> = set
+        let padded: Vec<((u32, u32), Vec<u16>)> = near_tiles
             .par_iter()
             .filter_map(|&(tx, ty)| {
-                let mut data: Option<Vec<u16>> = None;
+                let mut padded_tile: Option<Vec<u16>> = None;
                 for ly in 0..TILE {
                     for lx in 0..TILE {
                         let (x, y) = (tx * TILE + lx, ty * TILE + ly);
@@ -4920,24 +4922,24 @@ pub fn pad_tiles(out: &mut Composite, padding: &crate::PaddingMaps, tiles: &[(u3
                             continue;
                         }
 
-                        let Some((sx, sy)) = dilation.source(x, y) else { continue };
+                        let Some((sx, sy)) = padding.source(across_seams, x, y) else { continue };
                         if (sx, sy) == (x, y) {
                             continue;
                         }
 
-                        let v = src.get(sx, sy);
-                        let d = data.get_or_insert_with(|| src.tile(tx, ty).map_or_else(|| vec![0; TILE_AREA * comps], <[u16]>::to_vec));
-                        let o = (ly * TILE + lx) as usize * comps;
-                        if let Some(px) = d.get_mut(o..o + comps) {
-                            px.copy_from_slice(&v[..comps]);
+                        let source_texel = src.get(sx, sy);
+                        let tile_data = padded_tile.get_or_insert_with(|| src.tile(tx, ty).map_or_else(|| vec![0; TILE_AREA * comps], <[u16]>::to_vec));
+                        let offset = (ly * TILE + lx) as usize * comps;
+                        if let Some(texel) = tile_data.get_mut(offset..offset + comps) {
+                            texel.copy_from_slice(&source_texel[..comps]);
                         }
                     }
                 }
-                Some(((tx, ty), data?))
+                Some(((tx, ty), padded_tile?))
             })
             .collect();
-        for ((tx, ty), d) in padded {
-            img.set_tile(tx, ty, Some(std::sync::Arc::new(d)));
+        for ((tx, ty), tile_data) in padded {
+            img.set_tile(tx, ty, Some(std::sync::Arc::new(tile_data)));
             written.insert((tx, ty));
         }
     }
@@ -6436,7 +6438,7 @@ soft {soft:?}"
         out.channels.get_mut(&Channel::Roughness).unwrap().set(10, 10, &[to_u16(0.9)]);
         let mut covered = vec![false; 64 * 64];
         covered[10 * 64 + 10] = true;
-        let padding = crate::PaddingMaps { all: texturecraft_texel::DilationMap::new(&covered, 64, 64, Some(4)), flat: None };
+        let padding = crate::PaddingMaps { flat: texturecraft_texel::DilationMap::new(&covered, 64, 64, Some(4)), crossed: Vec::new() };
         pad_tiles(&mut out, &padding, &[(0, 0)]);
         assert!((out.value(Channel::Roughness, 12, 12)[0] - 0.9).abs() < 1e-3);
         assert!(out.value(Channel::Roughness, 30, 30)[0] < 0.1 || !out.channels[&Channel::Roughness].is_allocated(0, 0));

@@ -1,5 +1,7 @@
 //! UV padding across seams (3D): texels past a UV seam continue the surface from the seam's other side
 
+use std::collections::HashMap;
+
 use texturecraft_geom::{UvSeam, glam::Vec2};
 use texturecraft_texel::dilate::{DilationMap, NONE};
 
@@ -8,13 +10,15 @@ use crate::texel_edge::TexelEdge;
 /// Farthest a padding texel reaches across a seam, in texels; farther ones keep their nearest covered texel
 pub const SEAM_REACH: u32 = 32;
 
-/// Point every padding texel just outside a seam at the texel as far inside the seam's other side
-pub(crate) fn cross_seams(map: &mut DilationMap, covered: &[bool], reach: u32, block: (u32, u32), seams: &[UvSeam]) {
-    let (width, height) = (map.width, map.height);
+/// The padding texels of `flat` just outside a seam, each with the texel as far inside the seam's other side: (texel, source) indices sorted by texel
+pub(crate) fn cross_seams(flat: &DilationMap, covered: &[bool], reach: u32, block: (u32, u32), seams: &[UvSeam]) -> Vec<(u32, u32)> {
+    let (width, height) = (flat.width, flat.height);
     let size = Vec2::new(width as f32, height as f32);
     let block_of = |x: u32, y: u32| (x.checked_div(block.0).unwrap_or(0), y.checked_div(block.1).unwrap_or(0));
     let is_covered = |x: u32, y: u32| covered.get((y * width + x) as usize).copied().unwrap_or(false);
-    let mut crossed_at = vec![f32::INFINITY; map.src.len()];
+
+    // Each crossed texel's source and how far outside its seam it is; a nearer seam replaces it
+    let mut crossed: HashMap<u32, (u32, f32)> = HashMap::new();
     for seam in seams {
         for (near, far) in [(seam.sides[0], seam.sides[1]), (seam.sides[1], seam.sides[0])] {
             let (Some(near_edge), Some(far_edge)) = (TexelEdge::new(near, size), TexelEdge::new(far, size)) else {
@@ -28,15 +32,16 @@ pub(crate) fn cross_seams(map: &mut DilationMap, covered: &[bool], reach: u32, b
             let (x1, y1) = (high.x.ceil().min(size.x) as u32, high.y.ceil().min(size.y) as u32);
             for y in y0..y1 {
                 for x in x0..x1 {
-                    let index = (y * width + x) as usize;
-                    let Some(&source) = map.src.get(index) else { continue };
-                    if source == NONE || source == index as u32 {
+                    let index = y * width + x;
+                    let Some(&flat_source) = flat.src.get(index as usize) else { continue };
+                    if flat_source == NONE || flat_source == index {
                         continue;
                     }
 
                     let point = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
                     let Some((along, outside)) = near_edge.outside(point) else { continue };
-                    if outside > reach || outside >= crossed_at.get(index).copied().unwrap_or(0.0) {
+                    let (source, crossed_at) = crossed.get(&index).copied().unwrap_or((flat_source, f32::INFINITY));
+                    if outside > reach || outside >= crossed_at {
                         continue;
                     }
 
@@ -59,14 +64,15 @@ pub(crate) fn cross_seams(map: &mut DilationMap, covered: &[bool], reach: u32, b
                     }
 
                     let (target_x, target_y) = (target.x as u32, target.y as u32);
-                    if is_covered(target_x, target_y)
-                        && let (Some(destination), Some(at)) = (map.src.get_mut(index), crossed_at.get_mut(index))
-                    {
-                        *destination = target_y * width + target_x;
-                        *at = outside;
+                    if is_covered(target_x, target_y) {
+                        crossed.insert(index, (target_y * width + target_x, outside));
                     }
                 }
             }
         }
     }
+
+    let mut sources: Vec<(u32, u32)> = crossed.into_iter().map(|(texel, (source, _))| (texel, source)).collect();
+    sources.sort_unstable();
+    sources
 }

@@ -977,20 +977,19 @@ pub fn render_planned_maps(input: &ExportInput, options: &ExportOptions, planned
             data.par_chunks_mut(w as usize * component_count).enumerate().for_each(|(row_y, row)| {
                 let y = y0 + row_y as u32;
                 for (column, x) in (x0..x0 + w).enumerate() {
-                    let at = |flat: bool| {
+                    let at = |across_seams: bool| {
                         if sampler.covered(x, y) {
                             return Some(At::Texel(x, y));
                         }
 
-                        let dilation_map = padding.as_ref().map(|padding| if flat { padding.flat() } else { &padding.all });
-                        match dilation_map.and_then(|d| d.source(x, y)) {
+                        match padding.as_ref().and_then(|padding| padding.source(across_seams, x, y)) {
                             Some((sx, sy)) => Some(At::Texel(sx, sy)),
                             None => beyond_default.then_some(At::Default),
                         }
                     };
 
                     // Only normals use the sample cache, and they all sample the 2D padding
-                    let (at_all, at_flat) = (at(false), at(true));
+                    let (at_all, at_flat) = (at(true), at(false));
                     let mut cache = None;
                     for (component, (_, source)) in channel_layout.iter().enumerate() {
                         let Some(at) = (if pads_flat.get(component).copied().unwrap_or(false) { at_flat } else { at_all }) else { continue };
@@ -1006,7 +1005,7 @@ pub fn render_planned_maps(input: &ExportInput, options: &ExportOptions, planned
             if diffuse {
                 let known: Vec<bool> = (y0..y0 + h)
                     .flat_map(|y| (x0..x0 + w).map(move |x| (x, y)))
-                    .map(|(x, y)| sampler.covered(x, y) || padding.as_ref().is_some_and(|padding| padding.all.source(x, y).is_some()))
+                    .map(|(x, y)| sampler.covered(x, y) || padding.as_ref().is_some_and(|padding| padding.flat.source(x, y).is_some()))
                     .collect();
 
                 // Keep diffusion within each UV tile when rendering an atlas

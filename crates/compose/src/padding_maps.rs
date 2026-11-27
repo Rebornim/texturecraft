@@ -1,4 +1,4 @@
-//! A texture set's UV padding maps, one per kind of channel
+//! A texture set's UV padding: from island edges, and across seams for the texels past one
 
 use texturecraft_core::{Channel, ChannelKind, UvPaddingMode};
 use texturecraft_geom::UvSeam;
@@ -6,36 +6,48 @@ use texturecraft_texel::dilate::DilationMap;
 
 use crate::seam_padding::{SEAM_REACH, cross_seams};
 
-/// A texture set's padding maps: `all` for its channels, `flat` for tangent-space normals
+/// A texture set's padding: `flat` for every texel, with the few texels past a seam listed apart in `crossed`
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaddingMaps {
-    pub all: DilationMap,
-    /// Padding from island edges (2D) always: a tangent-space normal turns with its island, so it can't continue across a seam
-    pub flat: Option<DilationMap>,
+    /// Padding from island edges (2D), which tangent-space normals always take: a normal turns with its island, so it can't continue across a seam
+    pub flat: DilationMap,
+    /// Across seams (3D): (texel, source texel) indices of the padding texels that continue from a seam's other side, sorted by texel
+    pub crossed: Vec<(u32, u32)>,
 }
 
 impl PaddingMaps {
-    /// The maps for `mode`: `covered` texels of a `width × height` set padded up to `max_dist` texels inside each `block`
+    /// The padding for `mode`: `covered` texels of a `width × height` set padded up to `max_dist` texels inside each `block`
     pub fn new(mode: UvPaddingMode, covered: &[bool], (width, height): (u32, u32), max_dist: Option<u32>, block: (u32, u32), seams: &[UvSeam]) -> PaddingMaps {
         let flat = DilationMap::in_rectangular_blocks(covered, width, height, max_dist, block);
-        match mode {
-            UvPaddingMode::Space2d => PaddingMaps { all: flat, flat: None },
-            UvPaddingMode::Space3d => {
-                let mut all = flat.clone();
-                cross_seams(&mut all, covered, max_dist.map_or(SEAM_REACH, |d| d.min(SEAM_REACH)), block, seams);
-                PaddingMaps { all, flat: Some(flat) }
-            }
+        let crossed = match mode {
+            UvPaddingMode::Space2d => Vec::new(),
+            UvPaddingMode::Space3d => cross_seams(&flat, covered, max_dist.map_or(SEAM_REACH, |d| d.min(SEAM_REACH)), block, seams),
+        };
+        PaddingMaps { flat, crossed }
+    }
+
+    /// Texels across and down
+    pub fn size(&self) -> (u32, u32) {
+        (self.flat.width, self.flat.height)
+    }
+
+    /// Whether `channel` pads across seams; tangent-space normals pad from island edges
+    pub fn crosses_seams(channel: Channel) -> bool {
+        channel.kind() != ChannelKind::NormalMap
+    }
+
+    /// The covered texel padding (x, y), itself when covered; `across_seams` takes the seams' other sides
+    pub fn source(&self, across_seams: bool, x: u32, y: u32) -> Option<(u32, u32)> {
+        let source = self.flat.source(x, y)?;
+        if !across_seams || source == (x, y) || self.crossed.is_empty() {
+            return Some(source);
         }
-    }
 
-    /// The map padding tangent-space normals
-    pub fn flat(&self) -> &DilationMap {
-        self.flat.as_ref().unwrap_or(&self.all)
-    }
-
-    /// The map padding `channel`
-    pub fn for_channel(&self, channel: Channel) -> &DilationMap {
-        if channel.kind() == ChannelKind::NormalMap { self.flat() } else { &self.all }
+        let (texel, width) = (y * self.flat.width + x, self.flat.width);
+        match self.crossed.binary_search_by_key(&texel, |(crossed_texel, _)| *crossed_texel) {
+            Ok(found) => self.crossed.get(found).map(|(_, crossed_source)| (crossed_source % width, crossed_source / width)),
+            Err(_) => Some(source),
+        }
     }
 }
 
@@ -61,15 +73,19 @@ mod tests {
         let (covered, seams) = two_islands();
         let space_3d = PaddingMaps::new(UvPaddingMode::Space3d, &covered, (32, 8), Some(4), (0, 0), &seams);
         let space_2d = PaddingMaps::new(UvPaddingMode::Space2d, &covered, (32, 8), Some(4), (0, 0), &seams);
-        let island = |map: &DilationMap, x: u32| map.source(x, 3).map(|(source_x, _)| if source_x < 16 { "left" } else { "right" });
+        let island = |padding: &PaddingMaps, across_seams: bool, x: u32| {
+            padding.source(across_seams, x, 3).map(|(source_x, _)| if source_x < 16 { "left" } else { "right" })
+        };
 
         // Just right of the left island, then just left of the right island
-        assert_eq!((island(&space_3d.all, 13), island(&space_3d.all, 18)), (Some("right"), Some("left")));
-        assert_eq!((island(&space_2d.all, 13), island(&space_2d.all, 18)), (Some("left"), Some("right")));
-        assert_eq!(space_3d.for_channel(Channel::Normal), &space_2d.all);
-        assert_eq!(space_3d.for_channel(Channel::BaseColor), &space_3d.all);
+        assert_eq!((island(&space_3d, true, 13), island(&space_3d, true, 18)), (Some("right"), Some("left")));
+        assert_eq!((island(&space_2d, true, 13), island(&space_2d, true, 18)), (Some("left"), Some("right")));
+        assert_eq!((island(&space_3d, false, 13), island(&space_3d, false, 18)), (Some("left"), Some("right")));
+        assert!(PaddingMaps::crosses_seams(Channel::BaseColor) && !PaddingMaps::crosses_seams(Channel::Normal));
 
-        // Away from the seam, both modes pad from the near island
-        assert_eq!(island(&space_3d.all, 2), Some("left"));
+        // Away from the seam, both modes pad from the near island, and only texels between the islands are kept apart
+        assert_eq!(island(&space_3d, true, 2), Some("left"));
+        assert!(!space_3d.crossed.is_empty() && space_2d.crossed.is_empty());
+        assert!(space_3d.crossed.iter().all(|(texel, _)| (12..20).contains(&(texel % 32))));
     }
 }

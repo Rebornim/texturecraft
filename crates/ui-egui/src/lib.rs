@@ -16,6 +16,7 @@ mod bake_preset;
 pub mod bake_presets;
 mod bake_report;
 mod bake_scene;
+mod channel_manager;
 mod color_management;
 mod color_picker;
 mod color_selection_editor;

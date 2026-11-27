@@ -35,6 +35,7 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!("textureSet.channel.add", "Add channel", [], None, "{ts?, channel}", always, |s, p| channel(s, p, true)),
         cmd!("textureSet.channel.remove", "Remove channel", [], None, "{ts?, channel}", always, |s, p| channel(s, p, false)),
+        cmd!("textureSet.channels", "Add or remove channels", [], None, "{ts?, add?: [channel], remove?: [channel], allSets?}", always, channels),
         cmd!("textureSet.channel.format", "Set channel format", [], None, "{ts?, channel, format}", always, channel_format),
         cmd!("textureSet.visible", "Toggle texture set visibility", [], None, "{ts?, visible?}", always, visible),
         cmd!(
@@ -245,6 +246,43 @@ fn channel(s: &mut Session, p: &Value, add: bool) -> Result<Value> {
     Ok(Value::Null)
 }
 
+/// Add and remove several channels in one undo step, on one texture set or on all of them
+fn channels(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "textureSet.channels";
+    let list = |key: &str| -> Result<Vec<Channel>> {
+        match p.get(key) {
+            None | Some(Value::Null) => Ok(Vec::new()),
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|item| {
+                    let name = item.as_str().ok_or_else(|| bad(cmd, format!("`{key}` lists channel names")))?;
+                    Channel::parse(name).ok_or_else(|| bad(cmd, format!("unknown channel `{name}`")))
+                })
+                .collect(),
+            Some(_) => Err(bad(cmd, format!("`{key}` must be a list of channels"))),
+        }
+    };
+    let add = list("add")?;
+    let remove = list("remove")?;
+    if remove.contains(&Channel::BaseColor) {
+        return Err(bad(cmd, "base color can't be removed"));
+    }
+    if let Some(both) = add.iter().find(|c| remove.contains(c)) {
+        return Err(bad(cmd, format!("{} is both added and removed", both.label())));
+    }
+    let sets: Vec<usize> = if boolp(p, "allSets").unwrap_or(false) { (0..s.set_count()).collect() } else { vec![ts_param(s, p, cmd)?] };
+    s.edit("Add or remove channels", |s| {
+        for &ts in &sets {
+            for &c in &add {
+                add_channel(s, ts, c)?;
+            }
+            s.doc.project.texture_set_mut(ts)?.channels.retain(|(c, _)| !remove.contains(c));
+        }
+        Ok(())
+    })?;
+    Ok(json!({ "ts": sets }))
+}
+
 /// Store a channel in another format; layer data keeps its precision, so a wider format brings back what was painted
 fn channel_format(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "textureSet.channel.format";
@@ -391,6 +429,29 @@ fn settings(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channels_add_and_remove_together_in_one_undo_step_on_every_set() {
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+        let has = |s: &Session, ts: usize, c: Channel| s.doc.project.texture_sets[ts].has_channel(c);
+        assert!(has(&s, 1, Channel::Height) && !has(&s, 1, Channel::User3));
+        let edit = json!({"add": ["emissive", "User3"], "remove": ["height"], "allSets": true});
+        crate::execute(&mut s, "textureSet.channels", &edit).unwrap();
+        for ts in 0..2 {
+            assert!(has(&s, ts, Channel::Emissive) && has(&s, ts, Channel::User3) && !has(&s, ts, Channel::Height), "set {ts}");
+        }
+        crate::execute(&mut s, "edit.undo", &json!({})).unwrap();
+        for ts in 0..2 {
+            assert!(!has(&s, ts, Channel::Emissive) && !has(&s, ts, Channel::User3) && has(&s, ts, Channel::Height), "set {ts}");
+        }
+
+        // Without allSets only the chosen set changes
+        crate::execute(&mut s, "textureSet.channels", &json!({"ts": 1, "add": ["ior"]})).unwrap();
+        assert!(has(&s, 1, Channel::Ior) && !has(&s, 0, Channel::Ior));
+        assert!(crate::execute(&mut s, "textureSet.channels", &json!({"remove": ["baseColor"]})).is_err());
+        assert!(crate::execute(&mut s, "textureSet.channels", &json!({"add": ["ior"], "remove": ["ior"]})).is_err());
+        assert!(crate::execute(&mut s, "textureSet.channels", &json!({"add": ["nope"]})).is_err());
+    }
 
     #[test]
     fn visibility_shows_hides_inverts_and_solos() {

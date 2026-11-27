@@ -1540,6 +1540,7 @@ const MESH_MAP_FILE_TEXT_SIZE: f32 = 10.5;
 const MESH_MAP_MENU_ICON_SIZE: f32 = 13.0;
 
 pub(crate) fn texture_set_settings(app: &mut TextureCraftApp, ui: &mut Ui) {
+    crate::channel_manager::ChannelManager::show(app, &ui.ctx().clone());
     let tokens = Tokens::get(ui.ctx());
     let set_index = app.session.ts();
     let Some(set) = app.session.doc.project.texture_sets.get(set_index).cloned() else { return };
@@ -1590,14 +1591,10 @@ pub(crate) fn texture_set_settings(app: &mut TextureCraftApp, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.label(caption(tr("Channels")));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.menu_button(tr("Add channel"), |ui| {
-                    for channel in Channel::ALL {
-                        if !set.has_channel(channel) && ui.button(tr(channel.label())).clicked() {
-                            app.run("textureSet.channel.add", json!({"ts": set_index, "channel": channel.id()}));
-                            ui.close();
-                        }
-                    }
-                });
+                let manage = ui.button(tr("Add or remove channels"));
+                if manage.clicked() {
+                    crate::channel_manager::ChannelManager::open(app, &manage, set_index);
+                }
             });
         });
 

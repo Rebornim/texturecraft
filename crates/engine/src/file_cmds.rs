@@ -741,6 +741,8 @@ impl Session {
 
         next.modified = true;
         next.project_id = self.project_id;
+        // The painted boxes moved with the document, and a bake tells a newer stroke by this count
+        next.painted_strokes = self.painted_strokes;
         let preserved = preserve_strokes.then(|| crate::preserve::preserve_strokes(self, &mut next));
 
         // Keep the stored source in the current session until reimport succeeds

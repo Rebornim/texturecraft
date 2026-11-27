@@ -161,6 +161,22 @@ fn undoing_the_rebake_of_a_stroke_makes_its_box_due_again() {
 }
 
 #[test]
+fn a_bake_after_a_mesh_reimport_takes_the_strokes_painted_before_it() {
+    let quad = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nf 1/1 2/2 3/3\nf 1/1 3/3 4/4\n";
+    let mut session = Session::from_mesh_bytes_with_uvs("quad.obj", quad.as_bytes(), 64, "quad", None, false).unwrap();
+    session.add_high_poly_bytes("quad_high.obj", quad.replace("v 1 1 0", "v 1 1 0.1").into_bytes()).unwrap();
+    execute(&mut session, "bake.run", &json!({ "resolution": 32, "maps": ["position"], "dilation": 0 })).unwrap();
+    execute(&mut session, "bake.autoRebake", &json!({ "map": "position" })).unwrap();
+    execute(&mut session, "bake.skew.paint", &json!({ "points": [[0.5, 0.5]], "radius": 0.05, "size": 64 })).unwrap();
+
+    session.reimport_mesh(None, false).unwrap();
+    execute(&mut session, "bake.run", &json!({})).unwrap();
+
+    let painted: Vec<_> = session.auto_rebake_painted().into_iter().map(|(set, map, _, _)| (set, map)).collect();
+    assert!(painted.is_empty(), "the bake after the reimport took the stroke: {painted:?}");
+}
+
+#[test]
 fn a_failed_bake_keeps_the_painted_box_of_the_sets_it_rolled_back() {
     let mut session = sample_session(256, 64).unwrap();
     session.add_high_poly_bytes("detail_high.obj", b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".to_vec()).unwrap();

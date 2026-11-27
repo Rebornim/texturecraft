@@ -1,14 +1,12 @@
 //! Compact widgets matching the app's look: labelled slim sliders, icon buttons, section
 //! headers, channel toggle chips and color swatches.
 
-mod press_edit;
-
 use egui::{Color32, CornerRadius, Rect, Response, RichText, Sense, Stroke, StrokeKind, Ui, Vec2, vec2};
 
 use crate::drawn_icon::DrawnIcon;
 use crate::i18n::tr;
+use crate::press_edit::PressEdit;
 use crate::theme::Tokens;
-use press_edit::PressEdit;
 
 /// The drag-and-drop payload of type `T` released on `resp` this frame. Unlike
 /// [`Response::dnd_release_payload`] (which clears a payload of any type), it leaves payloads

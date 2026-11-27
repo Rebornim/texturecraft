@@ -46,7 +46,6 @@ pub use model_patch::settings_patch;
 pub use painted_region::PaintedRegion;
 pub use streamed_bake::StreamedBake;
 pub use streamed_map::StreamedMap;
-pub use texturecraft_bake::NamePair;
 pub use texturecraft_bake::*;
 
 use crate::CommandSpec;

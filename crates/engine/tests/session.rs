@@ -697,6 +697,91 @@ fn projection_tool_paints_the_stencil_colors() {
     assert!(right[1] > 0.8 && right[0] < 0.2, "right {right:?}");
 }
 
+/// The stencil tests' texture size, to turn a picked UV into a texel
+const TEXTURE_SIZE: u32 = 256;
+
+/// Side of the stencil black on its left half and white on its right
+const STENCIL_SIZE: u32 = 16;
+
+/// The view's row over the sphere the stencil tests paint along
+const DAB_Y: f32 = 200.0;
+
+/// A dab behind the stencil's black half
+const BLACK_DAB_X: f32 = 150.0;
+
+/// A dab behind the stencil's white half
+const WHITE_DAB_X: f32 = 250.0;
+
+/// Imports a stencil black on its left half and white on its right, returning its resource name
+fn half_black_stencil(session: &mut Session) -> String {
+    let stencil = image::RgbaImage::from_fn(STENCIL_SIZE, STENCIL_SIZE, |x, _| {
+        if x < STENCIL_SIZE / 2 { image::Rgba([0, 0, 0, 255]) } else { image::Rgba([255, 255, 255, 255]) }
+    });
+    let mut png = Vec::new();
+    stencil.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+
+    session.import_resource_bytes("half.png", png).unwrap()
+}
+
+/// The composite base color under the view's point at `x` on the dab row
+fn base_color_at(session: &Session, x: f32) -> [f32; 3] {
+    let hit = session.pick(Vec2::new(x, DAB_Y), session.viewport).unwrap();
+    let texel = |coordinate: f32| (coordinate * TEXTURE_SIZE as f32) as u32;
+
+    session.caches[0].composite.value(Channel::BaseColor, texel(hit.uv.x), texel(hit.uv.y))
+}
+
+#[test]
+fn the_paint_tool_paints_its_own_color_through_the_stencils_gray() {
+    let mut session = session_at(TEXTURE_SIZE);
+    let name = half_black_stencil(&mut session);
+    execute(&mut session, "tool.paint", &Value::Null).unwrap();
+    execute(&mut session, "tool.material", &json!({"channel": "baseColor", "color": [1.0, 0.0, 0.0]})).unwrap();
+    execute(&mut session, "tool.stencil", &json!({"image": name, "scale": 1.0, "tile": true})).unwrap();
+    execute(&mut session, "tool.brush", &json!({"size": 6, "hardness": 90})).unwrap();
+    let left_before = base_color_at(&session, BLACK_DAB_X);
+
+    for x in [BLACK_DAB_X, WHITE_DAB_X] {
+        execute(&mut session, "tool.stroke", &json!({"points": [[x, DAB_Y]]})).unwrap();
+    }
+
+    let (left, right) = (base_color_at(&session, BLACK_DAB_X), base_color_at(&session, WHITE_DAB_X));
+    assert_eq!(left, left_before, "black stencil blocks the paint");
+    assert!(right[0] > 0.8 && right[1] < 0.2 && right[2] < 0.2, "white stencil lets the tool's red through: {right:?}");
+}
+
+#[test]
+fn a_mask_stroke_shows_through_the_stencil_while_painting_as_it_commits() {
+    let mut session = session_at(TEXTURE_SIZE);
+    let name = half_black_stencil(&mut session);
+
+    // A red fill under a white mask the stroke paints black
+    execute(&mut session, "layer.add.fill", &json!({"color": [1.0, 0.0, 0.0]})).unwrap();
+    execute(&mut session, "mask.add.white", &Value::Null).unwrap();
+    session.target = texturecraft_engine::StackTarget::Mask;
+    session.tool.mask_value = 0.0;
+    execute(&mut session, "tool.paint", &Value::Null).unwrap();
+    execute(&mut session, "tool.stencil", &json!({"image": name, "scale": 1.0, "tile": true})).unwrap();
+    execute(&mut session, "tool.brush", &json!({"size": 6, "hardness": 90})).unwrap();
+    session.update();
+    let (left_before, right_before) = (base_color_at(&session, BLACK_DAB_X), base_color_at(&session, WHITE_DAB_X));
+
+    // A stroke from behind the stencil's black half to its white half
+    let viewport = session.viewport;
+    session.begin_stroke(Vec2::new(BLACK_DAB_X, DAB_Y), viewport, 1.0).unwrap();
+    session.continue_stroke(Vec2::new(WHITE_DAB_X, DAB_Y), 1.0);
+    session.update();
+    let (left_preview, right_preview) = (base_color_at(&session, BLACK_DAB_X), base_color_at(&session, WHITE_DAB_X));
+    assert_eq!(left_preview, left_before, "black stencil hides the live stroke");
+    assert_ne!(right_preview, right_before, "white stencil shows the live stroke");
+
+    session.end_stroke().unwrap();
+    session.update();
+    let (left_committed, right_committed) = (base_color_at(&session, BLACK_DAB_X), base_color_at(&session, WHITE_DAB_X));
+    assert_eq!(left_committed, left_before, "black stencil blocks the committed stroke");
+    assert_ne!(right_committed, right_before, "white stencil lets the committed stroke through");
+}
+
 #[test]
 fn smart_materials_save_and_load_with_pixels() {
     let mut s = Session::new_project("t", primitives::material_ball(), "builtin:material_ball", None, 256).unwrap();

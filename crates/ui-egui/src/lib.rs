@@ -173,6 +173,8 @@ mod soft_box;
 mod source_choice;
 mod source_slot;
 pub mod state;
+mod stencil_choice;
+mod stencil_sheet;
 mod surface_paint_point;
 pub mod symmetry;
 pub mod theme;

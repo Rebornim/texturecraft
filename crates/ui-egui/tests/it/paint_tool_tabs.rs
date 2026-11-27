@@ -36,10 +36,9 @@ fn tab_selected(harness: &Harness<'_, TextureCraftApp>, tab: &str) -> bool {
 #[test]
 fn the_tabs_jump_within_one_page_of_the_tools_sections() {
     let mut harness = paint_harness("paint");
-    for tab in ["Brush", "Alpha", "Material"] {
+    for tab in ["Brush", "Alpha", "Stencil", "Material"] {
         assert!(harness.query_by_role_and_label(Role::Tab, tab).is_some(), "the {tab} tab");
     }
-    assert!(harness.query_by_role_and_label(Role::Tab, "Stencil").is_none(), "the Paint tool has no stencil yet");
     assert!(tab_selected(&harness, "Brush"), "the page opens on its first section");
     let flow_before = harness.get_by_label("Flow").rect().top();
 
@@ -52,8 +51,13 @@ fn the_tabs_jump_within_one_page_of_the_tools_sections() {
 }
 
 #[test]
-fn the_projection_tool_has_a_stencil_tab() {
-    let harness = paint_harness("projection");
+fn every_brush_tool_has_a_stencil_tab_and_polygon_fill_none() {
+    for tool in ["paint", "eraser", "projection", "smudge", "clone"] {
+        let harness = paint_harness(tool);
 
-    assert!(harness.query_by_role_and_label(Role::Tab, "Stencil").is_some());
+        assert!(harness.query_by_role_and_label(Role::Tab, "Stencil").is_some(), "{tool}");
+    }
+
+    let harness = paint_harness("polygonFill");
+    assert!(harness.query_by_role_and_label(Role::Tab, "Stencil").is_none(), "polygon fill paints no strokes");
 }

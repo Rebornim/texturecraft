@@ -3206,7 +3206,7 @@ fn sheet_scroll_end_snapshots() {
     save(&mut harness, &output_dir, "sheet-end-scrolled-medium");
 }
 
-/// The paint tool's Properties: the Brush tab with every section open and scrolled down, the Alpha and Material tabs, a stencil on the Projection tool, a mask's Grayscale tab, the right-click popup, and the Clone and Eraser tools' tabs; `TC_UI_THEMES` set adds the dark and light themes
+/// The paint tool's Properties: the Brush tab with every section open and scrolled down, its presets, pen button and Alignment list mid-use, the Alpha tab with its picker open, the Material tab with a pill hovered, a stencil on the Projection tool, a mask's Grayscale tab, the right-click popup, and the Clone and Eraser tools' tabs; `TC_UI_THEMES` set adds the dark and light themes
 #[test]
 #[ignore]
 fn paint_tool_properties_snapshots() {
@@ -3287,18 +3287,8 @@ fn paint_tool_properties_snapshots() {
             harness.run_steps(2);
         }
     }
-    harness.get_by_label_contains("Brush presets").scroll_to_me();
-    harness.run_steps(3);
-    save(&mut harness, &output_dir, "paint-brush-open");
-    harness.get_all_by_label("Particles").max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap().scroll_to_me();
-    harness.run_steps(6);
-    save(&mut harness, &output_dir, "paint-brush-scrolled");
-
     let themes = std::env::var_os("TC_UI_THEMES").is_some();
-    let tab = |harness: &mut Harness<'_, TextureCraftApp>, tab: &str, name: &str| {
-        harness.run_steps(2);
-        harness.get_by_role_and_label(egui::Role::Tab, tab).click();
-        harness.run_steps(6);
+    let shoot = |harness: &mut Harness<'_, TextureCraftApp>, name: &str| {
         save(harness, &output_dir, name);
         if themes {
             for (brightness, theme) in [(Brightness::Dark, "dark"), (Brightness::Light, "light")] {
@@ -3308,9 +3298,59 @@ fn paint_tool_properties_snapshots() {
             harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
         }
     };
+    let hover = |harness: &mut Harness<'_, TextureCraftApp>, role: egui::Role, label: &str| {
+        let at = harness.get_by_role_and_label(role, label).rect().center();
+        harness.hover_at(at);
+        harness.run_steps(40);
+    };
+    let open = |harness: &mut Harness<'_, TextureCraftApp>, role: egui::Role, label: &str| {
+        harness.get_by_role_and_label(role, label).scroll_to_me();
+        harness.run_steps(6);
+        harness.get_by_role_and_label(role, label).click();
+        harness.run_steps(6);
+    };
+    let close = |harness: &mut Harness<'_, TextureCraftApp>| {
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(4);
+    };
+    harness.get_by_label_contains("Brush presets").scroll_to_me();
+    harness.run_steps(3);
+    shoot(&mut harness, "paint-brush-open");
+    open(&mut harness, egui::Role::Button, "Brush presets");
+    shoot(&mut harness, "paint-presets-open");
+    close(&mut harness);
+    hover(&mut harness, egui::Role::CheckBox, "Size pen pressure");
+    shoot(&mut harness, "paint-size-pen-hover");
+    harness.get_by_role_and_label(egui::Role::CheckBox, "Size pen pressure").click();
+    harness.run_steps(6);
+    shoot(&mut harness, "paint-size-pen-off");
+    harness.get_by_role_and_label(egui::Role::CheckBox, "Size pen pressure").click();
+    harness.run_steps(4);
+    open(&mut harness, egui::Role::ComboBox, "Tangent | Wrap");
+    shoot(&mut harness, "paint-alignment-open");
+    close(&mut harness);
+    harness.get_all_by_label("Particles").max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap().scroll_to_me();
+    harness.run_steps(6);
+    shoot(&mut harness, "paint-brush-scrolled");
+
+    let tab = |harness: &mut Harness<'_, TextureCraftApp>, tab: &str, name: &str| {
+        harness.run_steps(2);
+        harness.get_by_role_and_label(egui::Role::Tab, tab).click();
+        harness.run_steps(6);
+        shoot(harness, name);
+    };
     tab(&mut harness, "Brush", "paint-brush-top");
     tab(&mut harness, "Alpha", "paint-alpha");
+    open(&mut harness, egui::Role::ComboBox, "Round");
+    let star =
+        harness.query_all_by_role_and_label(egui::Role::ListBoxOption, "Star").map(|node| node.rect()).min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
+    harness.hover_at(star.center());
+    harness.run_steps(6);
+    shoot(&mut harness, "paint-alpha-picker");
+    close(&mut harness);
     tab(&mut harness, "Material", "paint-material");
+    hover(&mut harness, egui::Role::CheckBox, "Height");
+    shoot(&mut harness, "paint-material-pill-hover");
 
     execute(&mut harness.state_mut().session, "tool.select", &json!({"tool": "eraser"})).unwrap();
     tab(&mut harness, "Material", "eraser-material");
@@ -3323,7 +3363,7 @@ fn paint_tool_properties_snapshots() {
     harness.run_steps(3);
     harness.get_by_role_and_label(egui::Role::ComboBox, "No Tiling").click();
     harness.run_steps(4);
-    save(&mut harness, &output_dir, "projection-stencil-tiling-open");
+    shoot(&mut harness, "projection-stencil-tiling-open");
     harness.get_by_label("H and V Tiling").click();
     harness.run_steps(4);
     save(&mut harness, &output_dir, "projection-stencil-tiled");
@@ -3345,5 +3385,5 @@ fn paint_tool_properties_snapshots() {
         harness.run_steps(2);
     }
     harness.run_steps(6);
-    save(&mut harness, &output_dir, "paint-popup");
+    shoot(&mut harness, "paint-popup");
 }

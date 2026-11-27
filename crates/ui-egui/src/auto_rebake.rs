@@ -70,7 +70,7 @@ pub(crate) fn poll(app: &mut TextureCraftApp, ctx: &egui::Context) {
 
 /// Rebake only the map of `rebake`'s texture set in the background, shown in the Baking Log like any bake
 fn start(app: &mut TextureCraftApp, rebake: Due) {
-    let (set, map) = (rebake.0, rebake.1);
+    let (set, map, ..) = rebake;
 
     // Restore the previous view before the rebake takes it over
     app.live_preview.release(&mut app.session);

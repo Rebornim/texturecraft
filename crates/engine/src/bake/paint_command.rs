@@ -86,6 +86,8 @@ const MAX_POINTS: usize = 100_000;
 /// Brush radius in UV units: the default, and the smallest that still paints
 const DEFAULT_RADIUS: f32 = 0.03;
 const MIN_RADIUS: f32 = 0.00001;
+/// Brush hardness when a call gives none: halfway between a soft and a hard edge
+const DEFAULT_HARDNESS: f32 = 0.5;
 /// Side of a new paint map in texels: the default, and the range a call may ask for
 const DEFAULT_PAINT_SIZE: u64 = 1024;
 const PAINT_SIZES: std::ops::RangeInclusive<u64> = 16..=4096;
@@ -110,7 +112,7 @@ fn paint(session: &mut Session, parameters: &Value, target: BakePaintTarget) -> 
 
     let value = number(parameters, "value", 1.0, 0.0, 1.0)?;
     let radius = number(parameters, "radius", DEFAULT_RADIUS, MIN_RADIUS, 1.0)?;
-    let hardness = number(parameters, "hardness", 0.5, 0.0, 1.0)?;
+    let hardness = number(parameters, "hardness", DEFAULT_HARDNESS, 0.0, 1.0)?;
     let strength = number(parameters, "strength", 1.0, 0.0, 1.0)?;
     let size = match parameters.get("size") {
         None => DEFAULT_PAINT_SIZE,

@@ -22,26 +22,26 @@ impl Session {
     /// Note that the bake paint of `texture_set` changed inside `uv_min`..`uv_max` (the whole map when `None`)
     pub(super) fn note_bake_paint(&mut self, texture_set: usize, uv_box: Option<(Vec2, Vec2)>) {
         let (uv_min, uv_max) = uv_box.unwrap_or((Vec2::ZERO, Vec2::ONE));
-        let (uv_min, uv_max) = match self.painted_regions.get(&texture_set) {
+        let (uv_min, uv_max) = match self.doc.painted_regions.get(&texture_set) {
             Some(region) => (region.uv_min.min(uv_min), region.uv_max.max(uv_max)),
             None => (uv_min, uv_max),
         };
         self.painted_strokes += 1;
-        self.painted_regions.insert(texture_set, PaintedRegion { uv_min, uv_max, stroke: self.painted_strokes });
+        self.doc.painted_regions.insert(texture_set, PaintedRegion { uv_min, uv_max, stroke: self.painted_strokes });
     }
 
     /// Forget the painted box of `texture_set` once its auto-rebake map is baked again, unless a stroke came after `painted_stroke`
     pub(super) fn forget_painted_region(&mut self, texture_set: usize, stored: &[BakedMap], painted_stroke: u64) {
         let auto = self.doc.project.texture_sets.get(texture_set).and_then(|set| set.auto_rebake);
-        let painted_since = self.painted_regions.get(&texture_set).is_some_and(|region| region.stroke > painted_stroke);
+        let painted_since = self.doc.painted_regions.get(&texture_set).is_some_and(|region| region.stroke > painted_stroke);
         if !painted_since && auto.is_none_or(|map| stored.contains(&map)) {
-            self.painted_regions.remove(&texture_set);
+            self.doc.painted_regions.remove(&texture_set);
         }
     }
 
     /// Baked auto-rebake maps changed only by painting since, as (set, map, what a bake reads now, newest stroke)
     pub fn auto_rebake_painted(&self) -> Vec<(usize, BakedMap, BakeSource, u64)> {
-        let regions = self.painted_regions.iter();
+        let regions = self.doc.painted_regions.iter();
         regions
             .filter_map(|(index, region)| {
                 let set = self.doc.project.texture_sets.get(*index)?;
@@ -56,7 +56,7 @@ impl Session {
     /// A task that bakes `map` again only where painting changed it, keeping the rest; else the whole map
     pub fn bake_painted_task(&self, texture_set: usize, map: BakedMap) -> Result<crate::BakeTask> {
         let mut task = self.bake_task_for(texture_set, &self.auto_rebake_maps(texture_set, map))?;
-        let Some(region) = self.painted_regions.get(&texture_set) else { return Ok(task) };
+        let Some(region) = self.doc.painted_regions.get(&texture_set) else { return Ok(task) };
         let (width, height) = task.settings.common.output_size();
         let stored =
             self.doc.baked.get(&texture_set).filter(|stored| stored.resolution == width && stored.height(map) == height && stored.maps.contains_key(&map));

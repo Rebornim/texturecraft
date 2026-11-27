@@ -77,6 +77,7 @@ pub(crate) fn one_set_document(src_set: &TextureSet, name: &str) -> Document {
         pixels: PixelStore::default(),
         baked: BTreeMap::new(),
         resources: BTreeMap::new(),
+        painted_regions: Default::default(),
     }
 }
 
@@ -145,6 +146,7 @@ impl Session {
             project: project_file.project,
             pixels: project_file.pixels,
             baked: BTreeMap::new(),
+            painted_regions: Default::default(),
             resources,
         };
 

@@ -33,6 +33,8 @@ pub struct Document {
     pub resources: BTreeMap<String, Arc<Vec<u8>>>,
     /// High-definition meshes and cage for baking (saved inside the project)
     pub bake_meshes: crate::BakeMeshes,
+    /// Where skew or cage painting changed each texture set since its auto-rebake map was baked; undo brings a box back with the maps baked before it
+    pub(crate) painted_regions: BTreeMap<usize, crate::bake::PaintedRegion>,
 }
 
 /// Derived per-texture-set data (rebuilt when the mesh or resolution changes).
@@ -427,8 +429,6 @@ pub struct Session {
     pub(crate) source: Arc<Mesh>,
     /// Fingerprint of `source`'s geometry, once a bake or an out-of-date check needs it
     pub(crate) low_poly_fingerprint: std::sync::OnceLock<u64>,
-    /// Where skew or cage painting changed each texture set since its auto-rebake map was baked
-    pub(crate) painted_regions: std::collections::BTreeMap<usize, crate::bake::PaintedRegion>,
     /// Skew and cage strokes so far
     pub(crate) painted_strokes: u64,
     pub bvh: Arc<Bvh>,
@@ -534,7 +534,6 @@ impl Session {
             project_id: next_mesh_id(),
             source,
             low_poly_fingerprint: Default::default(),
-            painted_regions: Default::default(),
             painted_strokes: 0,
             mesh,
             bvh: Arc::new(bvh),
@@ -656,6 +655,7 @@ impl Session {
                 pixels: PixelStore::default(),
                 baked: BTreeMap::new(),
                 resources: BTreeMap::new(),
+                painted_regions: Default::default(),
             },
             mesh,
             mesh_source,

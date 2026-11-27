@@ -43,10 +43,13 @@ impl Session {
     /// The auto-rebake maps that are out of date now, as (texture set, map, what a bake would read now)
     pub fn auto_rebake_due(&self) -> Vec<(usize, BakedMap, BakeSource)> {
         let sets = self.doc.project.texture_sets.iter().enumerate();
-        sets.filter_map(|(index, set)| Some((index, set.auto_rebake?)))
-            .filter(|(index, map)| !self.bake_changes(*index, *map).is_empty())
-            .filter_map(|(index, map)| Some((index, map, self.bake_source(index, map).ok()?)))
-            .collect()
+        sets.filter_map(|(index, set)| {
+            let map = set.auto_rebake?;
+            let record = set.bake_sources.get(&map).filter(|_| set.baked.contains(&map))?;
+            let current = self.bake_source(index, map).ok()?;
+            (!record.changes(&current).is_empty()).then_some((index, map, current))
+        })
+        .collect()
     }
 
     /// The maps an auto-rebake of `map` bakes: that map alone, or with every checked map once the output size changed (storing a new size drops the old maps)

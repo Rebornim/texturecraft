@@ -289,6 +289,7 @@ impl Session {
                 pixels: project_file.pixels,
                 baked: project_file.baked,
                 resources,
+                painted_regions: Default::default(),
             },
             mesh,
             project_file.mesh,

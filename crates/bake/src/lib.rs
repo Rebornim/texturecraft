@@ -24,8 +24,8 @@ pub use high_poly::HighPoly;
 pub(crate) use mesh_extent::MeshExtent;
 pub use name_pair::NamePair;
 pub use progress::Progress;
-pub use region_bake::RegionBake;
-pub use texel_box::{TexelBox, region_keeps_pixels};
+pub use region_bake::{RegionBake, region_keeps_pixels};
+pub use texel_box::TexelBox;
 
 mod map;
 mod skew;

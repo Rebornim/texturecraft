@@ -1,11 +1,14 @@
 //! Compact widgets matching the app's look: labelled slim sliders, icon buttons, section
 //! headers, channel toggle chips and color swatches.
 
+mod press_edit;
+
 use egui::{Color32, CornerRadius, Rect, Response, RichText, Sense, Stroke, StrokeKind, Ui, Vec2, vec2};
 
 use crate::drawn_icon::DrawnIcon;
 use crate::i18n::tr;
 use crate::theme::Tokens;
+use press_edit::PressEdit;
 
 /// The drag-and-drop payload of type `T` released on `resp` this frame. Unlike
 /// [`Response::dnd_release_payload`] (which clears a payload of any type), it leaves payloads
@@ -50,13 +53,6 @@ pub(crate) fn press_edit(ui: &Ui, id: egui::Id, changed: bool) -> Option<bool> {
         };
         changed.then_some(merge)
     })
-}
-
-/// The press an editor's last change belonged to, and the frame it was seen in
-#[derive(Clone, Copy)]
-struct PressEdit {
-    press: u64,
-    frame: u64,
 }
 
 /// [`slider`] for a value re-read from the document every frame: `Some(merge)` on every frame

@@ -141,6 +141,26 @@ fn a_stroke_painted_while_the_rebake_runs_waits_for_the_next_one() {
 }
 
 #[test]
+fn undoing_the_rebake_of_a_stroke_makes_its_box_due_again() {
+    let mut session = super::bake::leaning_session(true);
+    execute(&mut session, "bake.run", &json!({ "maps": ["position"], "dilation": 2 })).unwrap();
+    execute(&mut session, "bake.autoRebake", &json!({ "map": "position" })).unwrap();
+    execute(&mut session, "bake.skew.paint", &json!({ "points": [[0.3, 0.3]], "radius": 0.05, "size": 64 })).unwrap();
+    let mut task = session.bake_painted_task(0, BakedMap::Position).unwrap();
+    task.tracer = None;
+    let output = task.run_streaming(&Progress::new(), &mut |_| {}).unwrap();
+    session.apply_streamed_bake(0, output).unwrap();
+    assert!(session.auto_rebake_painted().is_empty(), "the rebake took the stroke");
+
+    session.undo().unwrap();
+
+    let painted: Vec<_> = session.auto_rebake_painted().into_iter().map(|(set, map, _, _)| (set, map)).collect();
+    assert_eq!(painted, [(0, BakedMap::Position)], "the map is back to its pixels from before the stroke, which is still painted");
+    session.redo().unwrap();
+    assert!(session.auto_rebake_painted().is_empty(), "redo brings the rebake back");
+}
+
+#[test]
 fn a_failed_bake_keeps_the_painted_box_of_the_sets_it_rolled_back() {
     let mut session = sample_session(256, 64).unwrap();
     session.add_high_poly_bytes("detail_high.obj", b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".to_vec()).unwrap();

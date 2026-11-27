@@ -19,9 +19,3 @@ impl TexelBox {
         }
     }
 }
-
-/// Whether a region bake gives `map` a whole bake's pixels: not for maps scaled by their whole range or read from neighbours
-pub fn region_keeps_pixels(map: texturecraft_core::BakedMap) -> bool {
-    use texturecraft_core::BakedMap;
-    !matches!(map, BakedMap::Curvature | BakedMap::Height | BakedMap::Thickness)
-}

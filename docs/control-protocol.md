@@ -335,8 +335,8 @@ own). Imported maps, and maps saved before this record existed, never show:
 (the active one by default), replacing its previous one, or turns it off with `null`; it is saved
 with the project and shows as the set's `autoRebake` in `project.inspect`. While the desktop or web
 app is in Bake mode, an auto-rebake map that goes out of date is baked again on its own in the
-background, alone (with every checked map when the output size changed), once what it is baked from has stopped changing for half a second; a change during
-that bake restarts it. A skew or cage stroke (`bake.skew.paint`, `bake.cage.paint`) on a set that
+background, alone (with every checked map when the output size changed), once what it is baked
+from has stopped changing for half a second; a change during that bake restarts it. A skew or cage stroke (`bake.skew.paint`, `bake.cage.paint`) on a set that
 bakes from a high poly makes the app bake its auto-rebake map again only inside the stroke's UV
 box, keeping the rest; maps scaled by their whole range (curvature, height, thickness) are baked
 whole. The first `bake.skew.paint` stroke of a set (no skew map yet) turns Auto-rebake on for its

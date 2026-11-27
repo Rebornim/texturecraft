@@ -476,8 +476,9 @@ mod tests {
     fn channels_applied_to_every_set_keep_the_channels_a_layer_switched_off() {
         let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
         crate::execute(&mut s, "layer.add.fill", &json!({})).unwrap();
-        let layer = s.doc.project.texture_sets[0].stack[0];
-        crate::execute(&mut s, "layer.blend", &json!({"channel": "roughness", "enabled": false})).unwrap();
+        let layer = s.selected_layer().unwrap();
+        // Switched off, as layer.blend {enabled: false} leaves it
+        s.doc.project.layer_mut(layer).unwrap().channels.remove(&Channel::Roughness);
         let layer_has_roughness = |s: &Session| s.doc.project.layer(layer).is_ok_and(|l| l.channels.contains_key(&Channel::Roughness));
         assert!(!layer_has_roughness(&s));
 

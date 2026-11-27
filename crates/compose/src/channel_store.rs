@@ -1,5 +1,7 @@
 //! What a channel's storage format keeps of a composited value
 
+use std::sync::OnceLock;
+
 use texturecraft_core::{ChannelFormat, lum};
 use texturecraft_texel::{linear_to_srgb, srgb_to_linear};
 
@@ -14,12 +16,18 @@ pub(crate) fn stored(format: ChannelFormat, signed: bool, mut value: [f32; 3], c
 fn stored_value(format: ChannelFormat, signed: bool, component: f32) -> f32 {
     let value = if signed { component * 0.5 + 0.5 } else { component };
     let unit = |unit_value: f32| if signed { unit_value * 2.0 - 1.0 } else { unit_value };
-    let steps = |unit_value: f32| (unit_value.clamp(0.0, 1.0) * 255.0).round() / 255.0;
+    let step = |unit_value: f32| (unit_value.clamp(0.0, 1.0) * 255.0).round();
     match format {
-        ChannelFormat::Rgb8 | ChannelFormat::L8 => unit(steps(value)),
-        ChannelFormat::Srgb8 => unit(srgb_to_linear(steps(linear_to_srgb(value.clamp(0.0, 1.0))))),
+        ChannelFormat::Rgb8 | ChannelFormat::L8 => unit(step(value) / 255.0),
+        ChannelFormat::Srgb8 => unit(srgb8_linear().get(step(linear_to_srgb(value.clamp(0.0, 1.0))) as usize).copied().unwrap_or(0.0)),
         ChannelFormat::L16 | ChannelFormat::Rgb16 | ChannelFormat::L16F | ChannelFormat::Rgb16F | ChannelFormat::L32F | ChannelFormat::Rgb32F => component,
     }
+}
+
+/// The linear value of each 8-bit sRGB step, so storing a colour decodes no sRGB per texel
+fn srgb8_linear() -> &'static [f32; 256] {
+    static LINEAR: OnceLock<[f32; 256]> = OnceLock::new();
+    LINEAR.get_or_init(|| std::array::from_fn(|step| srgb_to_linear(step as f32 / 255.0)))
 }
 
 #[cfg(test)]

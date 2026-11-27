@@ -54,8 +54,6 @@ pub(crate) fn brush_section(app: &mut TextureCraftApp, sheet: &mut PropertySheet
     if let Some(menu) = menu {
         brush_presets_popover(app, sheet.ui, menu);
     }
-    sheet.dim_line(tr("Ctrl+right-drag in a view sets the size and hardness, Ctrl+left-drag the flow and angle."));
-    sheet.dim_line(tr("Ctrl+Shift+right-drag: size and hardness in fine steps."));
 
     let tokens = Tokens::get(sheet.ui.ctx());
     let image = app.session.tool.brush.alpha_image.as_ref().and_then(|name| app.session.images.get(name)).cloned();

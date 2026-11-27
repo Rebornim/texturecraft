@@ -41,12 +41,11 @@ const POSITION_JITTER_PERCENT_RANGE: RangeInclusive<f32> = 0.0..=400.0;
 
 const PERCENT_RANGE: RangeInclusive<f32> = 0.0..=100.0;
 
-/// The ranges of Stamp depth, Gravity, particles per stamp, a particle's lifetime in steps and the lazy mouse distance in pixels
+/// The ranges of Stamp depth, Gravity, particles per stamp, and a particle's lifetime in steps
 const STAMP_DEPTH_RANGE: RangeInclusive<f32> = 0.05..=4.0;
 const GRAVITY_RANGE: RangeInclusive<f32> = 0.0..=2.0;
 const PARTICLE_COUNT_RANGE: RangeInclusive<f32> = 1.0..=16.0;
 const PARTICLE_LIFETIME_RANGE: RangeInclusive<f32> = 1.0..=128.0;
-const LAZY_DISTANCE_RANGE: RangeInclusive<f32> = 0.0..=200.0;
 
 /// Width of the brush presets list
 const PRESETS_WIDTH: f32 = 230.0;
@@ -154,14 +153,6 @@ pub(crate) fn brush_section(app: &mut TextureCraftApp, sheet: &mut PropertySheet
         whole_slider(sheet, tr("Count per stamp"), &mut particles.count, PARTICLE_COUNT_RANGE);
         whole_slider(sheet, tr("Lifetime (steps)"), &mut particles.lifetime, PARTICLE_LIFETIME_RANGE);
         sheet.slider(tr("Gravity"), &mut particles.gravity, GRAVITY_RANGE, 2);
-    }
-
-    let band = sheet.band(tr("Lazy mouse"), false, Some(brush.lazy != defaults.lazy), None);
-    if band.reset {
-        brush.lazy = defaults.lazy;
-    }
-    if band.open {
-        sheet.slider(tr("Lazy mouse distance"), &mut brush.lazy, LAZY_DISTANCE_RANGE, 0);
     }
 
     *brush = brush.sanitized();

@@ -3273,11 +3273,11 @@ fn paint_tool_properties_snapshots() {
     tool.brush = default_brush;
     tool.values = default_values;
 
-    // The top bar has a Lazy mouse button too: Properties is the rightmost
+    // The top bar has labels of the same names: Properties is the rightmost
     let in_properties = |harness: &Harness<'_, TextureCraftApp>, label: &str| {
         harness.get_all_by_label(label).map(|node| node.rect().center()).max_by(|a, b| a.x.total_cmp(&b.x)).unwrap()
     };
-    for header in ["Particles", "Lazy mouse"] {
+    for header in ["Particles"] {
         harness.get_all_by_label(header).max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap().scroll_to_me();
         harness.run_steps(3);
         let at = in_properties(&harness, header);
@@ -3290,7 +3290,7 @@ fn paint_tool_properties_snapshots() {
     harness.get_by_label_contains("Brush presets").scroll_to_me();
     harness.run_steps(3);
     save(&mut harness, &output_dir, "paint-brush-open");
-    harness.get_all_by_label("Lazy mouse").max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap().scroll_to_me();
+    harness.get_all_by_label("Particles").max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap().scroll_to_me();
     harness.run_steps(6);
     save(&mut harness, &output_dir, "paint-brush-scrolled");
 

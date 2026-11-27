@@ -751,6 +751,28 @@ fn the_paint_tool_paints_its_own_color_through_the_stencils_gray() {
 }
 
 #[test]
+fn the_eraser_erases_only_through_the_stencils_gray() {
+    let mut session = session_at(TEXTURE_SIZE);
+    let name = half_black_stencil(&mut session);
+    execute(&mut session, "tool.paint", &Value::Null).unwrap();
+    execute(&mut session, "tool.material", &json!({"channel": "baseColor", "color": [1.0, 0.0, 0.0]})).unwrap();
+    execute(&mut session, "tool.brush", &json!({"size": 6, "hardness": 90})).unwrap();
+    for x in [BLACK_DAB_X, WHITE_DAB_X] {
+        execute(&mut session, "tool.stroke", &json!({"points": [[x, DAB_Y]]})).unwrap();
+    }
+    let (left_painted, right_painted) = (base_color_at(&session, BLACK_DAB_X), base_color_at(&session, WHITE_DAB_X));
+
+    execute(&mut session, "tool.eraser", &Value::Null).unwrap();
+    execute(&mut session, "tool.stencil", &json!({"image": name, "scale": 1.0, "tile": true})).unwrap();
+    for x in [BLACK_DAB_X, WHITE_DAB_X] {
+        execute(&mut session, "tool.stroke", &json!({"points": [[x, DAB_Y]]})).unwrap();
+    }
+
+    assert_eq!(base_color_at(&session, BLACK_DAB_X), left_painted, "black stencil keeps the paint from the eraser");
+    assert_ne!(base_color_at(&session, WHITE_DAB_X), right_painted, "white stencil lets the eraser through");
+}
+
+#[test]
 fn a_mask_stroke_shows_through_the_stencil_while_painting_as_it_commits() {
     let mut session = session_at(TEXTURE_SIZE);
     let name = half_black_stencil(&mut session);

@@ -2147,9 +2147,9 @@ fn tool_properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     });
 }
 
-/// The sections of [`tool_properties`]: Stencil for the brush tools it shapes
+/// The sections of [`tool_properties`]: Stencil for the brush tools it shapes, except while they paint the quick mask
 fn tool_sections(app: &TextureCraftApp) -> Vec<PaintSection> {
-    PaintSection::page(app.session.tool.tool.uses_stencil(), targets_content(app))
+    PaintSection::page(crate::viewport::stencil_applies(app), targets_content(app))
 }
 
 fn clone_section(app: &mut TextureCraftApp, ui: &mut Ui) {

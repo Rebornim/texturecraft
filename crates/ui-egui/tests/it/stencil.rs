@@ -1,4 +1,4 @@
-//! The brush tools' stencil: an Assets image dropped on its slot, position fields, Tiling mode and the section reset in the tool panel, S + Shift + left-drag to turn it in snapped steps, and the 2D view saying that projection paints in the 3D view
+//! The brush tools' stencil: an Assets image dropped on its slot, position fields, Tiling mode and the section reset in the tool panel, S + Shift + left-drag to turn it in snapped steps, the 2D view saying that projection paints in the 3D view, and no stencil while the quick mask is painted
 
 use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, vec2};
@@ -180,6 +180,25 @@ fn s_shift_left_drag_turns_the_stencil_in_snapped_steps_without_painting() {
     assert_ne!(free.rotation % 15.0, 0.0, "a free turn is not snapped: {}", free.rotation);
     assert_eq!(free.center, turned.center);
     assert_eq!(history(&harness), steps);
+}
+
+#[test]
+fn the_stencil_hides_and_stays_put_while_the_quick_mask_is_painted() {
+    let (mut harness, name) = tool_app(Tool::Paint);
+    texturecraft_engine::execute(&mut harness.state_mut().session, "tool.stencil", &json!({"image": name})).unwrap();
+    texturecraft_engine::execute(&mut harness.state_mut().session, "viewport.quickMask", &json!({"enabled": true})).unwrap();
+    texturecraft_engine::execute(&mut harness.state_mut().session, "viewport.quickMask.edit", &json!({"editing": true})).unwrap();
+    harness.run_steps(REDRAW_FRAMES);
+    let from = harness.state().viewport_rect.center();
+    let before = harness.state().session.tool.stencil.clone().unwrap();
+
+    assert!(harness.query_by_role_and_label(Role::Tab, "Stencil").is_none(), "quick mask strokes skip the stencil, so it has no tab");
+    drag_holding(&mut harness, &[Key::S], Modifiers::SHIFT, from, vec2(100.0, -40.0));
+    assert_eq!(harness.state().session.tool.stencil.clone().unwrap().rotation, before.rotation, "S + drag leaves it alone");
+
+    texturecraft_engine::execute(&mut harness.state_mut().session, "viewport.quickMask.edit", &json!({"editing": false})).unwrap();
+    harness.run_steps(REDRAW_FRAMES);
+    assert!(harness.query_by_role_and_label(Role::Tab, "Stencil").is_some(), "back when the quick mask is done");
 }
 
 #[test]

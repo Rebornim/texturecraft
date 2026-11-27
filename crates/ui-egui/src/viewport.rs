@@ -784,7 +784,7 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
         app.ui.mode == crate::state::Mode::Painting && ui.input(|input| input.key_down(STENCIL_KEY)) && !crate::framework::widget_has_keyboard(ui.ctx());
 
     // Only an equipped brush tool that can act moves the stencil: it isn't drawn otherwise
-    let stencil_moves = tool_acts(app) && app.session.tool.tool.uses_stencil();
+    let stencil_moves = tool_acts(app) && stencil_applies(app);
     let stencil_drag = s_held && stencil_moves && app.session.tool.stencil.is_some();
     if stencil_drag || adjusting || holding {
         // The stencil, the brush or the held Move on model button changes instead of the camera
@@ -1180,7 +1180,7 @@ fn bake_visualization(app: &TextureCraftApp) -> Option<texturecraft_render::Bake
 
 /// Draw the stencil of the equipped brush tool in Paint Mode
 fn stencil_overlay(app: &mut TextureCraftApp, ui: &Ui, rect: Rect) {
-    if !tool_acts(app) || !app.session.tool.tool.uses_stencil() {
+    if !tool_acts(app) || !stencil_applies(app) {
         return;
     }
     let Some(stencil) = app.session.tool.stencil.clone() else { return };
@@ -1754,6 +1754,11 @@ fn clone_marker_at(ui: &Ui, rect: Rect, center: Pos2) {
         painter.line_segment([center - vec2(11.0, 0.0), center + vec2(11.0, 0.0)], Stroke::new(stroke_width, color));
         painter.line_segment([center - vec2(0.0, 11.0), center + vec2(0.0, 11.0)], Stroke::new(stroke_width, color));
     }
+}
+
+/// Whether the equipped tool's strokes go through the stencil: quick mask strokes never do, so it isn't shown or moved then
+pub(crate) fn stencil_applies(app: &TextureCraftApp) -> bool {
+    app.session.tool.tool.uses_stencil() && !app.session.quick_mask.editing
 }
 
 /// Whether the active tool can act on the selection now: a greyed tool ignores clicks, keys and drags in the views

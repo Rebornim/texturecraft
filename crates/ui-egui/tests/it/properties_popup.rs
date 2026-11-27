@@ -201,6 +201,27 @@ fn it_shows_what_the_properties_panel_shows() {
     assert!(!in_popup("Minimum Size (%)"), "not the brush's");
 }
 
+#[test]
+fn its_brush_pictures_and_the_docked_panels_keep_their_own_textures() {
+    let mut harness = harness();
+    let center = view_center(&harness);
+    click(&mut harness, PointerButton::Secondary, center);
+
+    assert!(is_open(&harness));
+
+    let previews = |harness: &Harness<'_, TextureCraftApp>| {
+        let mut ids: Vec<_> =
+            harness.ctx.tex_manager().read().allocated().filter(|(_, texture)| texture.name == "brush_stroke_preview").map(|(id, _)| *id).collect();
+        ids.sort_unstable_by_key(|id| format!("{id:?}"));
+        ids
+    };
+    let before = previews(&harness);
+    harness.run_steps(SETTLE_FRAMES);
+
+    assert_eq!(before.len(), 2, "one stroke preview for the docked panel and one for the popup");
+    assert_eq!(previews(&harness), before, "neither is drawn again while the brush stays the same");
+}
+
 /// Whether the jump tab `name` inside `area` is the lit one
 fn tab_lit(harness: &Harness<'_, TextureCraftApp>, area: egui::Rect, name: &str) -> bool {
     let tab = harness.get_all_by_role_and_label(Role::Tab, name).find(|tab| area.contains_rect(tab.rect()));

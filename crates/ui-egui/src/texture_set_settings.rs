@@ -329,6 +329,7 @@ mod tests {
             if harness.state().resize.is_none() {
                 break;
             }
+
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         harness.run_steps(2);

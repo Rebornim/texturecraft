@@ -1203,6 +1203,7 @@ fn tile_local((x, y): (f32, f32), (block, tile): ([u32; 2], [u32; 2])) -> Option
     if local[0] >= size[0] || local[1] >= size[1] {
         return None;
     }
+
     Some((origin, [(local[0] + 0.5) / size[0], (local[1] + 0.5) / size[1]], size))
 }
 

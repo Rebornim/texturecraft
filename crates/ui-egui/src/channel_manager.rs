@@ -136,6 +136,7 @@ impl ChannelManager {
             // Other sets may differ from this one: send the whole list so every set ends up the same
             return (on, off.into_iter().filter(|c| *c != Channel::BaseColor).collect());
         }
+
         (on.into_iter().filter(|c| !set.has_channel(*c)).collect(), off.into_iter().filter(|c| set.has_channel(*c)).collect())
     }
 

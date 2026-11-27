@@ -278,6 +278,7 @@ impl TextureSet {
         if self.tile_resolutions.is_empty() {
             return (self.resolution, self.height());
         }
+
         let block = self.block_resolution();
         (block, block)
     }
@@ -823,15 +824,18 @@ impl Project {
         if self.format_version > FORMAT_VERSION {
             return Err(CoreError::Invalid(format!("project format {} is newer than this TextureCraft supports ({FORMAT_VERSION})", self.format_version)));
         }
+
         if let Some(t) = self.texture_sets.iter().find(|t| !t.uv_tiles.is_empty() && (t.tile_grid().is_none() || !t.uv_tiles.is_sorted_by(|a, b| a < b))) {
             return Err(CoreError::Invalid(format!("texture set \"{}\" has invalid UV tiles {:?}", t.name, t.uv_tiles)));
         }
+
         let bad_tile_res = |t: &TextureSet| {
             t.tile_resolutions.iter().any(|(u, r)| !t.uv_tiles.contains(u) || !r.is_power_of_two() || !(MIN_RESOLUTION..=MAX_RESOLUTION).contains(r))
         };
         if let Some(t) = self.texture_sets.iter().find(|t| bad_tile_res(t)) {
             return Err(CoreError::Invalid(format!("texture set \"{}\" has invalid UV tile resolutions {:?}", t.name, t.tile_resolutions)));
         }
+
         let bad_height = |set: &TextureSet| {
             set.resolution_height
                 .is_some_and(|height| !height.is_power_of_two() || !(MIN_RESOLUTION..=MAX_RESOLUTION).contains(&height) || !set.tile_resolutions.is_empty())
@@ -839,6 +843,7 @@ impl Project {
         if let Some(set) = self.texture_sets.iter().find(|set| bad_height(set)) {
             return Err(CoreError::Invalid(format!("texture set \"{}\" has an invalid height {:?}", set.name, set.resolution_height)));
         }
+
         let mut seen = BTreeSet::new();
         for ts in 0..self.texture_sets.len() {
             for (id, depth) in self.walk(ts) {

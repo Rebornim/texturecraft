@@ -175,6 +175,7 @@ impl ResizeTask {
         if set.resolution_height.is_some() && !set.tile_resolutions.is_empty() {
             return Err(bad("textureSet.resolution", "a texture set whose UV tiles have their own sizes stays square"));
         }
+
         crate::session::check_size(set)?;
         let size = set.size();
         let mut log = crate::log::SessionLog::new();
@@ -280,6 +281,7 @@ fn channels(s: &mut Session, p: &Value) -> Result<Value> {
     if remove.contains(&Channel::BaseColor) {
         return Err(bad(cmd, "base color can't be removed"));
     }
+
     if let Some(both) = add.iter().find(|c| remove.contains(c)) {
         return Err(bad(cmd, format!("{} is both added and removed", both.label())));
     }

@@ -427,6 +427,7 @@ fn tile_row(ui: &mut Ui, set: usize, udim: u32, resolution: u32, set_width: u32,
     if let Some(size) = picked {
         return Some(TileAction::Resize(size));
     }
+
     (response.clicked() || response.secondary_clicked()).then_some(TileAction::Select)
 }
 
@@ -435,6 +436,7 @@ fn shader_column_width(ui: &Ui, row_width: f32) -> f32 {
     if row_width < SHADER_MIN_ROW_WIDTH {
         return 0.0;
     }
+
     dropdown_width(ui, tr(INSTANCE_NAME)) + DROPDOWN_GAP
 }
 
@@ -511,6 +513,7 @@ fn edit_field(ui: &mut Ui, state: &mut ListState, rect: Rect, size: f32) -> Opti
     if !response.lost_focus() {
         return None;
     }
+
     let edit = state.edit.take()?;
     (!ui.input(|input| input.key_pressed(egui::Key::Escape))).then_some(edit.2)
 }
@@ -573,6 +576,7 @@ mod tests {
             if harness.state().resize.is_none() {
                 break;
             }
+
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         harness.run_steps(2);

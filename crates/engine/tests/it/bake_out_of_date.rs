@@ -99,3 +99,38 @@ fn a_setting_changed_while_the_bake_runs_leaves_the_new_map_out_of_date() {
     assert!(streamed_once.load(Ordering::Relaxed));
     assert_eq!(changes(&session), [BakeChange::MapSettings]);
 }
+
+/// Two quads side by side, one texture set each, lifted by `lift` where a high poly or cage stands off the low poly
+fn two_parts(lift: f32) -> String {
+    let mut obj = String::new();
+    for left in [0.0, 2.0] {
+        let right = left + 1.0;
+        obj += &format!("v {left} 0 {lift}\nv {right} 0 {lift}\nv {right} 1 {lift}\nv {left} 1 {lift}\n");
+    }
+    obj += "vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\n";
+    obj += "usemtl Left\nf 1/1 2/2 3/3\nf 1/1 3/3 4/4\nusemtl Right\nf 5/1 6/2 7/3\nf 5/1 7/3 8/4\n";
+    obj
+}
+
+#[test]
+fn a_reopened_project_keeps_every_sets_maps_up_to_date() {
+    let mut session = Session::from_mesh_bytes_with_uvs("parts.obj", two_parts(0.0).as_bytes(), 128, "parts", None, false).unwrap();
+    session.add_high_poly_bytes("parts_high.obj", two_parts(0.05).into_bytes()).unwrap();
+    session.set_cage_bytes("parts_cage.obj", two_parts(0.2).into_bytes()).unwrap();
+    for texture_set in &mut session.doc.project.texture_sets {
+        texture_set.bake.cage.kind = CageType::CustomFile;
+    }
+    execute(&mut session, "bake.run", &json!({ "ts": "all", "resolution": 32, "maps": ["position", "normal"], "dilation": 0 })).unwrap();
+    execute(&mut session, "bake.autoRebake", &json!({ "ts": 1, "map": "normal" })).unwrap();
+    let records = |session: &Session| session.doc.project.texture_sets.iter().map(|set| set.bake_sources.clone()).collect::<Vec<_>>();
+    assert_eq!(session.set_count(), 2);
+    assert!(records(&session).iter().all(|sources| sources.len() == 2), "both maps of both sets are recorded");
+
+    let reopened = Session::from_project_bytes(&session.to_project_bytes().unwrap()).unwrap();
+
+    assert_eq!(records(&reopened), records(&session), "the records are saved as they were");
+    for texture_set in 0..reopened.set_count() {
+        assert!(reopened.out_of_date_maps(texture_set).is_empty(), "set {texture_set}: {:?}", reopened.out_of_date_maps(texture_set));
+    }
+    assert!(reopened.auto_rebake_due().is_empty(), "opening the project starts no rebake");
+}

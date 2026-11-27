@@ -2135,7 +2135,6 @@ fn tool_sections(app: &TextureCraftApp) -> Vec<PaintSection> {
 }
 
 fn clone_section(app: &mut TextureCraftApp, ui: &mut Ui) {
-    let tk = Tokens::get(ui.ctx());
     ui.label(caption(tr("Clone")));
     ui.horizontal(|ui| {
         ui.label(tr("Copy from"));
@@ -2148,6 +2147,7 @@ fn clone_section(app: &mut TextureCraftApp, ui: &mut Ui) {
             }
         }
     });
+
     let mut aligned = app.session.tool.clone_aligned;
     if ui
         .checkbox(&mut aligned, tr("Aligned"))
@@ -2156,39 +2156,47 @@ fn clone_section(app: &mut TextureCraftApp, ui: &mut Ui) {
     {
         app.run("tool.brush", json!({"cloneAligned": aligned}));
     }
-    let Some(src) = app.session.tool.clone_source else {
-        ui.label(RichText::new(tr("Hold V and click the mesh to set the source, then paint elsewhere to copy it.")).color(tk.text_dim));
+
+    let Some(source) = app.session.tool.clone_source else {
+        ui.label(tr("Source: none")).on_hover_text(tr("Hold V and click the mesh to set the source, then paint elsewhere to copy it."));
         return;
     };
 
-    ui.horizontal(|ui| {
-        ui.label(trf("Source  U {u}  V {v}", &[("u", &format!("{:.3}", src.uv[0])), ("v", &format!("{:.3}", src.uv[1]))]));
-        if ui.small_button(tr("Clear")).clicked() {
-            app.run("tool.cloneSource", json!({"clear": true}));
-        }
-    });
     let hint = if !app.session.tool.clone_aligned {
         tr("Not aligned: every stroke starts at the source. V + click sets a new source.")
-    } else if src.offset.is_some() {
+    } else if source.offset.is_some() {
         tr("Aligned: the offset set by the first stroke is kept. V + click sets a new source.")
     } else {
         tr("The first stroke sets the offset from the source.")
     };
-    ui.label(RichText::new(hint).size(10.5).color(tk.text_dim));
+    ui.horizontal(|ui| {
+        ui.label(trf("Source  U {u}  V {v}", &[("u", &format!("{:.3}", source.uv[0])), ("v", &format!("{:.3}", source.uv[1]))])).on_hover_text(hint);
+        if ui.small_button(tr("Clear")).clicked() {
+            app.run("tool.cloneSource", json!({"clear": true}));
+        }
+    });
 }
 
+/// Space between the smudge strength and the channels it drags
+const SMUDGE_CHANNELS_GAP: f32 = 4.0;
+
+/// Full value of the smudge strength slider, the 0..100 scale `tool.brush` takes
+const SMUDGE_STRENGTH_PERCENT: f32 = 100.0;
+
 fn smudge_section(app: &mut TextureCraftApp, ui: &mut Ui) {
-    let tk = Tokens::get(ui.ctx());
     ui.label(caption(tr("Smudge")));
-    let mut v = app.session.tool.smudge_strength * 100.0;
-    if slider(ui, tr("Strength"), &mut v, 0.0..=100.0, 0).changed() {
-        app.session.tool.smudge_strength = (v / 100.0).clamp(0.0, 1.0);
+
+    let mut strength_percent = app.session.tool.smudge_strength * SMUDGE_STRENGTH_PERCENT;
+    let strength = slider(ui, tr("Strength"), &mut strength_percent, 0.0..=SMUDGE_STRENGTH_PERCENT, 0);
+    if strength.on_hover_text(tr("Drags the layer stack's values along the stroke into the selected layer.")).changed() {
+        app.run("tool.brush", json!({"smudgeStrength": strength_percent}));
     }
-    ui.label(RichText::new(tr("Drags the layer stack's values along the stroke into the selected layer.")).size(10.5).color(tk.text_dim));
-    ui.add_space(4.0);
-    ui.label(tr("Channels dragged"));
+
+    ui.add_space(SMUDGE_CHANNELS_GAP);
+    ui.label(tr("Channels dragged")).on_hover_text(tr(
+        "These are the brush's material channels, the same ones Paint writes and the Material tab shows. A channel the selected layer does not have is skipped.",
+    ));
     material_channel_chips(app, ui);
-    ui.label(RichText::new(tr("These are the brush's material channels, the same ones Paint writes and the Material tab shows. A channel the selected layer does not have is skipped.")).size(10.5).color(tk.text_dim));
 }
 
 fn path_section(app: &mut TextureCraftApp, ui: &mut Ui) {

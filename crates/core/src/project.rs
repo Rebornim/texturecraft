@@ -940,6 +940,19 @@ mod tests {
     }
 
     #[test]
+    fn older_sets_without_the_new_fields_open_square_with_2d_padding_and_smooth_normals() {
+        let mut v = serde_json::to_value(TextureSet::new("a", 0, 256)).unwrap();
+        for field in ["resolution_height", "format_precision", "height_to_normal", "uv_padding"] {
+            v.as_object_mut().unwrap().remove(field);
+        }
+
+        let old: TextureSet = serde_json::from_value(v).unwrap();
+
+        assert_eq!(old.size(), (256, 256));
+        assert_eq!((old.uv_padding, old.height_to_normal), (UvPaddingMode::Space2d, HeightToNormalMethod::Smooth));
+    }
+
+    #[test]
     fn sets_keep_16_bits_until_a_format_is_set_also_in_older_files() {
         let new = TextureSet::new("a", 0, 128);
         let mut v = serde_json::to_value(&new).unwrap();

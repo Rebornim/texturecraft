@@ -506,6 +506,29 @@ mod tests {
     }
 
     #[test]
+    fn a_sets_size_formats_and_settings_survive_save_and_reopen() {
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+        crate::execute(&mut s, "textureSet.resolution", &json!({"ts": 1, "resolution": 256, "height": 128})).unwrap();
+        crate::execute(&mut s, "textureSet.channel.format", &json!({"ts": 1, "channel": "roughness", "format": "L8"})).unwrap();
+        crate::execute(&mut s, "textureSet.channels", &json!({"ts": 1, "add": ["user7", "coatTangent"]})).unwrap();
+        let settings =
+            json!({"ts": 1, "normalMixing": "replace", "aoMixing": "none", "heightToNormal": "sharp", "uvPadding": "2d", "description": "Ünïcode 説明"});
+        crate::execute(&mut s, "textureSet.settings", &settings).unwrap();
+        let inspect = |s: &mut Session, ts: usize| crate::execute(s, "textureSet.inspect", &json!({"ts": ts})).unwrap();
+        let (first, second) = (inspect(&mut s, 0), inspect(&mut s, 1));
+
+        let mut back = Session::from_project_bytes(&s.to_project_bytes().unwrap()).unwrap();
+
+        for (ts, before) in [(0, first), (1, second)] {
+            let after = inspect(&mut back, ts);
+            for key in ["resolution", "height", "size", "channels", "normalMixing", "aoMixing", "heightToNormal", "uvPadding", "description"] {
+                assert_eq!(after[key], before[key], "set {ts} {key}");
+            }
+        }
+        assert_ne!(inspect(&mut back, 0)["uvPadding"], inspect(&mut back, 1)["uvPadding"], "each set keeps its own settings");
+    }
+
+    #[test]
     fn rename_reset_restores_the_mesh_material_name() {
         let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
         let original = crate::execute(&mut s, "textureSet.inspect", &json!({"ts": 1})).unwrap()["name"].clone();

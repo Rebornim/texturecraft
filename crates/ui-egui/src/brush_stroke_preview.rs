@@ -53,7 +53,8 @@ impl BrushStrokePreview {
         let pixels_per_point = ctx.pixels_per_point();
         let size = [(rect.width() * pixels_per_point).round().max(1.0) as usize, (rect.height() * pixels_per_point).round().max(1.0) as usize];
         let tints: Vec<[u8; 3]> = (0..size[0]).map(|x| tint((x as f32 + 0.5) / size[0] as f32)).collect();
-        let id = Id::unique(key);
+        // The docked panel and the right-click popup draw the same picture at their own widths: one cache each
+        let id = Id::unique(key).with(painter.layer_id());
         let cached = ctx.data(|data| data.get_temp::<BrushStrokePreview>(id)).filter(|preview| {
             preview.brush == *brush && preview.size == size && preview.tints == tints && preview.image.as_ref().map(Arc::as_ptr) == image.map(Arc::as_ptr)
         });

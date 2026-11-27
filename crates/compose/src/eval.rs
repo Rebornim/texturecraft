@@ -94,11 +94,31 @@ pub struct Stencil {
     pub rotation: f32,
     /// Repeat the image beyond its bounds (otherwise nothing is painted outside it).
     pub tile: bool,
+    /// The Projection tool paints the image's colors; every other tool paints through its gray
+    pub colors: bool,
 }
 
 impl Stencil {
     /// Linear color and alpha of the stencil at world point `p` (None outside the image).
     pub fn sample_world(&self, p: Vec3) -> Option<([f32; 3], f32)> {
+        let s = self.sample_raw(p)?;
+        let rgb = if self.image.srgb { [s[0], s[1], s[2]].map(texturecraft_texel::srgb_to_linear) } else { [s[0], s[1], s[2]] };
+        Some((rgb, s[3].clamp(0.0, 1.0)))
+    }
+
+    /// How much paint passes at world point `p` when the stencil masks a stroke: its gray times its alpha, read as stored like a brush alpha image (0 outside the image)
+    pub fn mask_world(&self, p: Vec3) -> f32 {
+        let Some([r, g, b, a]) = self.sample_raw(p) else { return 0.0 };
+        ((0.2126 * r + 0.7152 * g + 0.0722 * b) * a).clamp(0.0, 1.0)
+    }
+
+    /// The paint a stroke receives at world point `p`: the stencil's color (Projection only) and the factor scaling the stroke there, None where nothing is painted
+    pub fn paint_world(&self, p: Vec3) -> Option<(Option<[f32; 3]>, f32)> {
+        if self.colors { self.sample_world(p).map(|(color, alpha)| (Some(color), alpha)) } else { Some((None, self.mask_world(p))) }
+    }
+
+    /// The stored image value under world point `p` (None outside the image)
+    fn sample_raw(&self, p: Vec3) -> Option<[f32; 4]> {
         let c = self.view_proj * p.extend(1.0);
         if c.w <= 1e-6 {
             return None;
@@ -112,9 +132,7 @@ impl Stencil {
             return None;
         }
 
-        let s = self.image.sample(lx * 0.5 + 0.5, 0.5 - ly * 0.5);
-        let rgb = if self.image.srgb { [s[0], s[1], s[2]].map(texturecraft_texel::srgb_to_linear) } else { [s[0], s[1], s[2]] };
-        Some((rgb, s[3].clamp(0.0, 1.0)))
+        Some(self.image.sample(lx * 0.5 + 0.5, 0.5 - ly * 0.5))
     }
 }
 
@@ -4277,12 +4295,12 @@ impl<'a, 'b> Texel<'a, 'b> {
         let pv = if preview { self.inp.preview } else { None };
         let mut sa = pv.map(|p| (self.stroke * p.opacity).clamp(0.0, 1.0)).unwrap_or(0.0);
 
-        // Projection: the stencil's alpha shapes the stroke and its color is the base color
+        // The stencil shapes the stroke; on the Projection tool its color is the base color
         let stencil = match pv.and_then(|p| p.stencil.as_ref()) {
             Some(st) if sa > 0.0 => {
-                let s = self.world().and_then(|w| st.sample_world(w));
+                let s = self.world().and_then(|w| st.paint_world(w));
                 sa *= s.map(|(_, a)| a).unwrap_or(0.0);
-                s.map(|(c, _)| c)
+                s.and_then(|(c, _)| c)
             }
             _ => None,
         };

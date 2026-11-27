@@ -90,7 +90,7 @@ fn blend_tile(dst: &mut [u16], components: usize, stroke_alpha: &[u16], (tx, ty)
             match per_texel(x, y) {
                 Some((color, alpha_factor)) => {
                     weight *= alpha_factor;
-                    stencil = Some(color);
+                    stencil = color;
                 }
                 None => continue,
             }
@@ -318,8 +318,8 @@ fn mask_blend<'a>(gray: &'a MaskGray, value: &'a [f32; 1]) -> Blend<'a> {
     Blend { kind: ChannelKind::Scalar, value, stencil_color: false, carried: None, gray }
 }
 
-/// Per-texel override of a stroke: `(x, y)` → (base color, alpha factor), None = no paint.
-pub type TexelFn<'a> = &'a (dyn Fn(u32, u32) -> Option<([f32; 3], f32)> + Sync);
+/// Per-texel override of a stroke: `(x, y)` → (base color, alpha factor), None = no paint; a None color keeps the stroke's own value
+pub type TexelFn<'a> = &'a (dyn Fn(u32, u32) -> Option<(Option<[f32; 3]>, f32)> + Sync);
 
 /// The stroke being committed: its alpha, touched tiles, opacity cap and mode.
 #[derive(Clone, Copy)]
@@ -328,7 +328,7 @@ pub struct CommitSource<'a> {
     pub tiles: &'a BTreeSet<(u32, u32)>,
     pub opacity: f32,
     pub erase: bool,
-    /// Projection tool: base color and alpha per texel from a stencil.
+    /// The stencil: alpha per texel and, on the Projection tool, base color
     pub per_texel: Option<TexelFn<'a>>,
     /// Clone and smudge: straight values per channel carried by the stroke (replace `values`).
     pub carried: Option<&'a BTreeMap<Channel, TileImage>>,

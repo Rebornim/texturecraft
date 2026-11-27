@@ -107,6 +107,12 @@ pub enum Tool {
 impl Tool {
     pub const ALL: [Tool; 9] =
         [Tool::Paint, Tool::Eraser, Tool::Projection, Tool::PolygonFill, Tool::Smudge, Tool::Clone, Tool::ColorPicker, Tool::Path, Tool::GeometryMask];
+
+    /// The brush tools whose strokes the stencil shapes
+    pub fn uses_stencil(self) -> bool {
+        matches!(self, Tool::Paint | Tool::Eraser | Tool::Projection | Tool::Smudge | Tool::Clone)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Tool::Paint => "Paint",
@@ -178,7 +184,7 @@ impl ViewMode {
     }
 }
 
-/// A screen-pinned image for the Projection tool (a stencil).
+/// A screen-pinned image the brush tools paint through (a stencil)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StencilState {
     /// Image resource name.
@@ -249,7 +255,7 @@ pub struct ToolState {
     /// Polygon fill boxes in the 3D view select only the polygons the camera sees
     #[serde(default = "default_fill_visible_only")]
     pub fill_visible_only: bool,
-    /// Stencil used by the Projection tool.
+    /// Stencil the brush tools paint through (the Projection tool paints its colors)
     #[serde(default)]
     pub stencil: Option<StencilState>,
     /// Placement the next stencil starts with: the last stencil's, kept when the stencil is

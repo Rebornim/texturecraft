@@ -2099,7 +2099,7 @@ fn tool_header(app: &mut TextureCraftApp, ui: &mut Ui) {
         ui.separator();
     }
 
-    // The Projection tool's stencil has its own section
+    // A tool's own settings, above the sections every brush tool shares
     let tool_section: Option<fn(&mut TextureCraftApp, &mut Ui)> = match app.session.tool.tool {
         Tool::Clone => Some(clone_section),
         Tool::Smudge => Some(smudge_section),
@@ -2127,11 +2127,12 @@ fn tool_properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     };
     PropertySheet::show(ui, "tool_sheet", |sheet| {
         for section in tool_sections(app) {
-            let menu = sheet.section(section.title(), section == PaintSection::Brush);
+            // The Stencil caption carries its own reset
+            let menu = if section == PaintSection::Stencil { None } else { sheet.section(section.title(), section == PaintSection::Brush) };
             match section {
                 PaintSection::Brush => crate::brush_sheet::brush_section(app, sheet, menu),
                 PaintSection::Alpha => crate::alpha_sheet::alpha_section(app, sheet),
-                PaintSection::Stencil => legacy(sheet, app, stencil_section),
+                PaintSection::Stencil => crate::stencil_sheet::stencil_section(app, sheet),
                 PaintSection::Material => legacy(sheet, app, material_controls),
                 PaintSection::Grayscale => crate::mask_paint_panel::grayscale_section(app, sheet),
             }
@@ -2139,65 +2140,9 @@ fn tool_properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     });
 }
 
-/// The sections of [`tool_properties`]: only the Projection tool uses a stencil
+/// The sections of [`tool_properties`]: Stencil for the brush tools it shapes
 fn tool_sections(app: &TextureCraftApp) -> Vec<PaintSection> {
-    PaintSection::page(app.session.tool.tool == Tool::Projection, targets_content(app))
-}
-
-/// How far the Position sliders move the stencil's center from the middle of the view (NDC; -1..1 is the view)
-const STENCIL_POSITION_RANGE: f32 = 2.0;
-
-fn stencil_section(app: &mut TextureCraftApp, ui: &mut Ui) {
-    let tk = Tokens::get(ui.ctx());
-    let names: Vec<String> = app.session.doc.resources.keys().cloned().collect();
-    let current = app.session.tool.stencil.as_ref().map(|s| s.image.clone()).unwrap_or_else(|| tr("None").into());
-    let row = ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt("stencil_img").width(170.0).selected_text(current.clone()).show_ui(ui, |ui| {
-            if ui.selectable_label(app.session.tool.stencil.is_none(), tr("None")).clicked() {
-                app.run("tool.stencil", json!({"clear": true}));
-            }
-            for n in &names {
-                if ui.selectable_label(*n == current, n).clicked() {
-                    app.run("tool.stencil", json!({"image": n}));
-                }
-            }
-        });
-        import_button(app, ui);
-    });
-
-    // An image from the Assets panel dropped on the row becomes the stencil
-    let row_response = row.response.interact(Sense::hover()).on_hover_text(tr("Drop an image from the Assets panel here to use it as the stencil"));
-    if let Some(name) = image_drop(ui, &row_response) {
-        app.run("tool.stencil", json!({"image": name}));
-    }
-    if names.is_empty() {
-        ui.label(RichText::new(tr("Import an image (File > Import resources) to project it onto the mesh.")).color(tk.text_dim));
-        return;
-    }
-
-    if let Some(st) = app.session.tool.stencil.as_mut() {
-        slider(ui, tr("Scale"), &mut st.scale, 0.05..=4.0, 2);
-        slider(ui, tr("Rotation"), &mut st.rotation, 0.0..=360.0, 0);
-        slider(ui, tr("Position X"), &mut st.center[0], -STENCIL_POSITION_RANGE..=STENCIL_POSITION_RANGE, 2);
-        slider(ui, tr("Position Y"), &mut st.center[1], -STENCIL_POSITION_RANGE..=STENCIL_POSITION_RANGE, 2);
-        if ui.button(tr("Reset stencil")).on_hover_text(tr("Put the stencil back in the middle of the view at its starting size and rotation")).clicked() {
-            st.reset_placement();
-        }
-        slider(ui, tr("Overlay opacity"), &mut st.opacity, 0.0..=1.0, 2);
-        ui.checkbox(&mut st.tile, tr("Tile"));
-        ui.label(
-            RichText::new(tr("S + left-drag rotates (with Shift in 15° steps), S + right-drag scales, S + middle-drag moves; or use Position X / Y."))
-                .size(10.5)
-                .color(tk.text_dim),
-        );
-    }
-}
-
-fn import_button(app: &mut TextureCraftApp, ui: &mut Ui) {
-    if ui.small_button(tr("Import...")).clicked() {
-        let ctx = ui.ctx().clone();
-        crate::menus::invoke(app, &ctx, "resource.import");
-    }
+    PaintSection::page(app.session.tool.tool.uses_stencil(), targets_content(app))
 }
 
 fn clone_section(app: &mut TextureCraftApp, ui: &mut Ui) {

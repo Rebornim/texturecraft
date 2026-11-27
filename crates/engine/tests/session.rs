@@ -698,6 +698,33 @@ fn projection_tool_paints_the_stencil_colors() {
 }
 
 #[test]
+fn the_paint_tool_paints_its_own_color_through_the_stencils_gray() {
+    let mut s = session();
+    let mut png = Vec::new();
+    let img = image::RgbaImage::from_fn(16, 16, |x, _| if x < 8 { image::Rgba([0, 0, 0, 255]) } else { image::Rgba([255, 255, 255, 255]) });
+    img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let name = s.import_resource_bytes("half.png", png).unwrap();
+    execute(&mut s, "tool.paint", &Value::Null).unwrap();
+    execute(&mut s, "tool.material", &json!({"channel": "baseColor", "color": [1.0, 0.0, 0.0]})).unwrap();
+    execute(&mut s, "tool.stencil", &json!({"image": name, "scale": 1.0, "tile": true})).unwrap();
+    execute(&mut s, "tool.brush", &json!({"size": 6, "hardness": 90})).unwrap();
+    let vp = s.viewport;
+    let at = |s: &Session, x: f32| {
+        let hit = s.pick(texturecraft_engine::geom::glam::Vec2::new(x, 200.0), vp).unwrap();
+        s.caches[0].composite.value(Channel::BaseColor, (hit.uv.x * 256.0) as u32, (hit.uv.y * 256.0) as u32)
+    };
+    let left_before = at(&s, 150.0);
+
+    for x in [150.0f32, 250.0] {
+        execute(&mut s, "tool.stroke", &json!({"points": [[x, 200.0]]})).unwrap();
+    }
+
+    let (left, right) = (at(&s, 150.0), at(&s, 250.0));
+    assert_eq!(left, left_before, "black stencil blocks the paint");
+    assert!(right[0] > 0.8 && right[1] < 0.2 && right[2] < 0.2, "white stencil lets the tool's red through: {right:?}");
+}
+
+#[test]
 fn smart_materials_save_and_load_with_pixels() {
     let mut s = Session::new_project("t", primitives::material_ball(), "builtin:material_ball", None, 256).unwrap();
     s.viewport = texturecraft_engine::geom::glam::Vec2::new(400.0, 400.0);

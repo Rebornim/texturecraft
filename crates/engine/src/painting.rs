@@ -259,7 +259,8 @@ impl Session {
             Some(PaintTarget::Mask(effect)) if pickup.is_some() => self.doc.project.effect(effect).map(|(owner, _)| owner),
             _ => None,
         };
-        let stencil = if tool == Tool::Projection && !quick_mask { self.capture_stencil(viewport) } else { None };
+        // The 2D view doesn't show the stencil, so there it shapes only the Projection tool
+        let stencil = if !quick_mask && tool.uses_stencil() && (tool == Tool::Projection || !uv_mode) { self.capture_stencil(viewport) } else { None };
         let problem = if !erase && values.is_empty() && matches!(target, Some(PaintTarget::Layer(_))) {
             Some("no channel enabled to paint: enable channels in the tool's material")
         } else if tool == Tool::Projection && !quick_mask && stencil.is_none() && !uv_mode {
@@ -400,7 +401,8 @@ impl Session {
         let image = self.images.get(&st.image)?.clone();
         let aspect = viewport.x.max(1.0) / viewport.y.max(1.0);
         let (center, half, rotation) = st.placement(image.width as f32 / image.height.max(1) as f32, aspect);
-        Some(texturecraft_compose::Stencil { image, view_proj: self.camera.view_proj(aspect), center, half, rotation, tile: st.tile })
+        let colors = self.tool.tool == Tool::Projection;
+        Some(texturecraft_compose::Stencil { image, view_proj: self.camera.view_proj(aspect), center, half, rotation, tile: st.tile, colors })
     }
 
     /// Painting is paused while a bake preview shows the baked maps instead of the material.
@@ -739,8 +741,7 @@ impl Session {
     }
 }
 
-/// Run `f` with stroke `st` as a commit source over `tiles` (the Projection tool's stencil
-/// colors and alpha come from the surface under each texel).
+/// Run `f` with stroke `st` as a commit source over `tiles` (the stencil's alpha and, on the Projection tool, its colors come from the surface under each texel)
 fn with_commit_source<R>(
     st: &ActiveStroke,
     gbuf: Option<&texturecraft_geom::UvGBuffer>,
@@ -748,10 +749,10 @@ fn with_commit_source<R>(
     tiles: &BTreeSet<(u32, u32)>,
     f: impl FnOnce(CommitSource) -> R,
 ) -> R {
-    let stencil_fn = |x: u32, y: u32| -> Option<([f32; 3], f32)> {
+    let stencil_fn = |x: u32, y: u32| -> Option<(Option<[f32; 3]>, f32)> {
         let g = gbuf?;
         let p = g.surface(mesh, (y * g.width + x) as usize)?.pos;
-        st.stencil.as_ref()?.sample_world(p)
+        st.stencil.as_ref()?.paint_world(p)
     };
     let per_texel: Option<texturecraft_paint::TexelFn> = if st.stencil.is_some() { Some(&stencil_fn) } else { None };
     let carried = st.canvas.pickup.as_ref().map(|p| &p.values);

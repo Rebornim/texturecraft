@@ -64,7 +64,7 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!(
             "tool.stencil",
-            "Projection stencil",
+            "Stencil",
             [],
             None,
             "{image?: resource name, center?: [x,y] NDC, scale?: 0.01..10, rotation?: degrees, tile?, opacity?, clear?: bool}",

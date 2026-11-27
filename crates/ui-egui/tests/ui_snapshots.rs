@@ -3319,6 +3319,15 @@ fn paint_tool_properties_snapshots() {
     execute(&mut harness.state_mut().session, "tool.select", &json!({"tool": "projection"})).unwrap();
     execute(&mut harness.state_mut().session, "tool.stencil", &json!({"image": image})).unwrap();
     tab(&mut harness, "Stencil", "projection-stencil");
+    execute(&mut harness.state_mut().session, "tool.stencil", &json!({"rotation": 15.0, "center": [0.1, -0.05]})).unwrap();
+    harness.run_steps(3);
+    harness.get_by_role_and_label(egui::Role::ComboBox, "No Tiling").click();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "projection-stencil-tiling-open");
+    harness.get_by_label("H and V Tiling").click();
+    harness.run_steps(4);
+    save(&mut harness, &output_dir, "projection-stencil-tiled");
+    execute(&mut harness.state_mut().session, "tool.stencil", &json!({"clear": true})).unwrap();
 
     execute(&mut harness.state_mut().session, "tool.select", &json!({"tool": "paint"})).unwrap();
     let layer = harness.state().session.selected_layer().map(|id| id.0);

@@ -23,7 +23,7 @@ use crate::state::ViewLayout;
 use crate::theme::Tokens;
 use crate::toolbar::{MAX_BRUSH_SIZE, MIN_BRUSH_SIZE};
 
-/// Hold this key with the Projection tool to rotate, scale or move the stencil with the mouse
+/// Hold this key with a brush tool to rotate, scale or move the stencil with the mouse
 pub const STENCIL_KEY: egui::Key = egui::Key::S;
 /// Hold this key with the Clone tool and click to set the source
 pub const CLONE_SOURCE_KEY: egui::Key = egui::Key::V;
@@ -305,7 +305,7 @@ const BAKE_PAINT_CURSOR_MIN_RADIUS: f32 = 2.0;
 const BAKE_PAINT_CURSOR_STROKE: f32 = 1.0;
 const BAKE_PAINT_CURSOR_ALPHA: u8 = 200;
 
-/// The projection stencil's dashed outline: width, white alpha, dash and gap, in points
+/// The stencil's dashed outline: width, white alpha, dash and gap, in points
 const STENCIL_OUTLINE_STROKE: f32 = 1.0;
 const STENCIL_OUTLINE_ALPHA: u8 = 120;
 const STENCIL_OUTLINE_DASH: f32 = 5.0;
@@ -778,13 +778,13 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     let holding = crate::move_on_model::holding(app, ui.ctx());
     let navigating = !adjusting && !holding && (alt || ui.input(|input| input.pointer.middle_down() || input.pointer.secondary_down()));
 
-    // Navigation; S + drag moves the projection stencil instead, below
+    // Navigation; S + drag moves the stencil instead, below
     let delta = ui.input(|input| input.pointer.delta());
     let s_held =
         app.ui.mode == crate::state::Mode::Painting && ui.input(|input| input.key_down(STENCIL_KEY)) && !crate::framework::widget_has_keyboard(ui.ctx());
 
-    // Only an equipped Projection tool that can act moves its stencil: it isn't drawn otherwise
-    let stencil_moves = tool_acts(app) && app.session.tool.tool == Tool::Projection;
+    // Only an equipped brush tool that can act moves the stencil: it isn't drawn otherwise
+    let stencil_moves = tool_acts(app) && app.session.tool.tool.uses_stencil();
     let stencil_drag = s_held && stencil_moves && app.session.tool.stencil.is_some();
     if stencil_drag || adjusting || holding {
         // The stencil, the brush or the held Move on model button changes instead of the camera
@@ -1178,9 +1178,9 @@ fn bake_visualization(app: &TextureCraftApp) -> Option<texturecraft_render::Bake
     Some(visualization)
 }
 
-/// Draw the projection stencil in Paint Mode
+/// Draw the stencil of the equipped brush tool in Paint Mode
 fn stencil_overlay(app: &mut TextureCraftApp, ui: &Ui, rect: Rect) {
-    if !tool_acts(app) || app.session.tool.tool != Tool::Projection {
+    if !tool_acts(app) || !app.session.tool.tool.uses_stencil() {
         return;
     }
     let Some(stencil) = app.session.tool.stencil.clone() else { return };
@@ -1188,25 +1188,13 @@ fn stencil_overlay(app: &mut TextureCraftApp, ui: &Ui, rect: Rect) {
 
     // Where the stencil's corners land on screen
     let texture = app.thumbs.stencil(ui.ctx(), &stencil.image, &image);
-    let aspect = rect.width() / rect.height().max(1.0);
-    let (center, half_size, rotation) = stencil.placement(image.width as f32 / image.height.max(1) as f32, aspect);
-    let to_screen = |x: f32, y: f32| pos2(rect.left() + (x * 0.5 + 0.5) * rect.width(), rect.top() + (0.5 - y * 0.5) * rect.height());
-    let (sine, cosine) = rotation.sin_cos();
-    let corner = |x: f32, y: f32| {
-        let (x, y) = (x * half_size[0], y * half_size[1]);
-        to_screen(center[0] + x * cosine - y * sine, center[1] + x * sine + y * cosine)
-    };
-
+    let image_aspect = image.width as f32 / image.height.max(1) as f32;
     let tint = Color32::from_white_alpha((stencil.opacity * f32::from(u8::MAX)) as u8);
-    let mut mesh = egui::Mesh::with_texture(texture.id());
-    for (x, y, u, v) in [(-1.0, 1.0, 0.0, 0.0), (1.0, 1.0, 1.0, 0.0), (1.0, -1.0, 1.0, 1.0), (-1.0, -1.0, 0.0, 1.0)] {
-        mesh.vertices.push(egui::epaint::Vertex { pos: corner(x, y), uv: pos2(u, v), color: tint });
-    }
-    mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
     let painter = ui.painter_at(rect);
-    painter.add(egui::Shape::mesh(mesh));
+    let [top_left, top_right, bottom_right, bottom_left] =
+        crate::stencil_sheet::paint_stencil(&painter, rect, texture.id(), &stencil, image_aspect, tint, false);
 
-    let outline = vec![corner(-1.0, 1.0), corner(1.0, 1.0), corner(1.0, -1.0), corner(-1.0, -1.0), corner(-1.0, 1.0)];
+    let outline = vec![top_left, top_right, bottom_right, bottom_left, top_left];
     let outline_stroke = Stroke::new(STENCIL_OUTLINE_STROKE, Color32::from_white_alpha(STENCIL_OUTLINE_ALPHA));
     painter.add(egui::Shape::dashed_line(&outline, outline_stroke, STENCIL_OUTLINE_DASH, STENCIL_OUTLINE_GAP));
 }

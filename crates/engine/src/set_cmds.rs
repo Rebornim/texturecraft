@@ -288,8 +288,11 @@ fn channels(s: &mut Session, p: &Value) -> Result<Value> {
 
     s.edit("Add or remove channels", |s| {
         for &ts in &sets {
+            // A channel the set already has keeps its layers' channel switches
             for &c in &add {
-                add_channel(s, ts, c)?;
+                if !s.doc.project.texture_set(ts)?.has_channel(c) {
+                    add_channel(s, ts, c)?;
+                }
             }
             s.doc.project.texture_set_mut(ts)?.channels.retain(|(c, _)| !remove.contains(c));
         }
@@ -467,6 +470,23 @@ mod tests {
         assert!(crate::execute(&mut s, "textureSet.channels", &json!({"remove": ["baseColor"]})).is_err());
         assert!(crate::execute(&mut s, "textureSet.channels", &json!({"add": ["ior"], "remove": ["ior"]})).is_err());
         assert!(crate::execute(&mut s, "textureSet.channels", &json!({"add": ["nope"]})).is_err());
+    }
+
+    #[test]
+    fn channels_applied_to_every_set_keep_the_channels_a_layer_switched_off() {
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+        crate::execute(&mut s, "layer.add.fill", &json!({})).unwrap();
+        let layer = s.doc.project.texture_sets[0].stack[0];
+        crate::execute(&mut s, "layer.blend", &json!({"channel": "roughness", "enabled": false})).unwrap();
+        let layer_has_roughness = |s: &Session| s.doc.project.layer(layer).is_ok_and(|l| l.channels.contains_key(&Channel::Roughness));
+        assert!(!layer_has_roughness(&s));
+
+        // Apply to all Texture Sets sends every ticked channel, the ones the sets already have too
+        let ticked: Vec<&str> = s.doc.project.texture_sets[0].channel_list().iter().map(|c| c.id()).chain(["ior"]).collect();
+        crate::execute(&mut s, "textureSet.channels", &json!({"add": ticked, "allSets": true})).unwrap();
+
+        assert!(s.doc.project.texture_sets.iter().all(|set| set.has_channel(Channel::Ior)));
+        assert!(!layer_has_roughness(&s), "the layer's roughness stays off");
     }
 
     #[test]

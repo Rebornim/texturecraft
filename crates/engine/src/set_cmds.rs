@@ -588,15 +588,16 @@ mod tests {
 
     #[test]
     fn uv_padding_rebuilds_the_viewport_padding_and_undoes() {
-        let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
-        let mode = |s: &Session| crate::inspect::texture_set(s, 0)["uvPadding"].clone();
-        let crosses_seams = |s: &Session| !s.caches[0].padding.crossed.is_empty();
+        // The ball's second set has texels just past its seams at this size
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 512).unwrap();
+        let mode = |s: &Session| crate::inspect::texture_set(s, 1)["uvPadding"].clone();
+        let crosses_seams = |s: &Session| !s.caches[1].padding.crossed.is_empty();
         assert_eq!((mode(&s), crosses_seams(&s)), (json!("3d"), true));
         s.update();
 
-        crate::execute(&mut s, "textureSet.settings", &json!({"ts": 0, "uvPadding": "2d"})).unwrap();
+        crate::execute(&mut s, "textureSet.settings", &json!({"ts": 1, "uvPadding": "2d"})).unwrap();
         assert_eq!((mode(&s), crosses_seams(&s)), (json!("2d"), false));
-        assert!(!s.caches[0].dirty.is_empty(), "the set recomposites with its new padding");
+        assert!(!s.caches[1].dirty.is_empty(), "the set recomposites with its new padding");
         assert!(crate::execute(&mut s, "textureSet.settings", &json!({"uvPadding": "4d"})).is_err());
 
         crate::execute(&mut s, "edit.undo", &Value::Null).unwrap();

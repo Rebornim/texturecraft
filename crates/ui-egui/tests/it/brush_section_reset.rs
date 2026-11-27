@@ -18,7 +18,7 @@ const SETTLE_FRAMES: usize = 3;
 type SectionReset = fn(&mut BrushSettings, &BrushSettings);
 
 /// Each band's title, a label shown only while it is open, whether it starts open, and its reset
-const SECTIONS: [(&str, &str, bool, SectionReset); 7] = [
+const SECTIONS: [(&str, &str, bool, SectionReset); 6] = [
     ("Size", "Minimum Size (%)", true, |brush, defaults| {
         (brush.size, brush.size_pressure, brush.min_size, brush.spacing) = (defaults.size, defaults.size_pressure, defaults.min_size, defaults.spacing)
     }),
@@ -33,7 +33,6 @@ const SECTIONS: [(&str, &str, bool, SectionReset); 7] = [
             (defaults.alignment, defaults.backface_culling, defaults.angle_fade, defaults.screen_space, defaults.depth)
     }),
     ("Particles", "Gravity", false, |brush, defaults| brush.particles = defaults.particles),
-    ("Lazy mouse", "Lazy mouse distance", false, |brush, defaults| brush.lazy = defaults.lazy),
 ];
 
 /// A valid brush with every section field changed and a custom alpha that resets must preserve
@@ -81,7 +80,7 @@ fn app_with_brush(brush: BrushSettings) -> Harness<'static, TextureCraftApp> {
     harness
 }
 
-/// The band titled `title` in Properties: the rightmost, as the top bar has a Size and a Lazy mouse too
+/// The band titled `title` in Properties: the rightmost, as the top bar has a Size too
 fn band<'tree>(harness: &'tree Harness<'_, TextureCraftApp>, title: &str) -> egui_kittest::Node<'tree> {
     harness
         .query_all_by_role(egui::Role::Button)
@@ -106,6 +105,13 @@ fn click_reset(harness: &mut Harness<'_, TextureCraftApp>, title: &str) {
 
     reset_icon(harness, title).click();
     harness.run_steps(SETTLE_FRAMES);
+}
+
+#[test]
+fn the_lazy_mouse_is_set_only_in_the_top_bar() {
+    let harness = app_with_brush(BrushSettings::default());
+
+    assert_eq!(harness.query_all_by_label("Lazy mouse").count(), 1, "the top bar's button, no band in Properties");
 }
 
 #[test]

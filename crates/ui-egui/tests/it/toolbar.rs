@@ -24,12 +24,17 @@ fn toolbar_harness(width: f32, tool: Tool) -> Harness<'static, TextureCraftApp> 
 }
 
 fn size_label(harness: &Harness<'_, TextureCraftApp>) -> (egui::Pos2, egui::Rect) {
+    bar_label(harness, "Size")
+}
+
+/// Where the top bar paints the slider label `label`, and that text's clip
+fn bar_label(harness: &Harness<'_, TextureCraftApp>, label: &str) -> (egui::Pos2, egui::Rect) {
     harness
         .output()
         .shapes
         .iter()
         .find_map(|shape| match &shape.shape {
-            egui::Shape::Text(text) if text.galley.text() == "Size" => Some((text.pos, shape.clip_rect)),
+            egui::Shape::Text(text) if text.galley.text() == label => Some((text.pos, shape.clip_rect)),
             _ => None,
         })
         .unwrap()
@@ -86,6 +91,25 @@ fn arrows_and_wheel_scroll_without_changing_the_brush() {
     harness.run_steps(30);
     assert!(size_label(&harness).0.x < start - 50.0);
     assert_eq!(harness.state().session.tool.brush, brush);
+}
+
+#[test]
+fn the_spacing_slider_reaches_as_far_as_the_properties_one() {
+    let mut harness = toolbar_harness(1600.0, Tool::Paint);
+    let (label, _) = bar_label(&harness, "Spacing");
+    let from = label + egui::vec2(4.0, 8.0);
+    let past_the_end = from + egui::vec2(400.0, 0.0);
+
+    harness.hover_at(from);
+    harness.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    harness.run_steps(2);
+    harness.hover_at(past_the_end);
+    harness.run_steps(2);
+    harness.event(egui::Event::PointerButton { pos: past_the_end, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    harness.run_steps(2);
+
+    // Properties' Spacing goes to 1000 % of the diameter
+    assert!(harness.state().session.tool.brush.spacing > 2.0, "past the 200 % the top bar used to stop at");
 }
 
 #[test]

@@ -2116,15 +2116,6 @@ fn tool_header(app: &mut TextureCraftApp, ui: &mut Ui) {
 /// The tool's sections, one page under the panel's jump tabs
 fn tool_properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     legacy_body(ui, |ui| tool_header(app, ui));
-
-    // Rows not yet laid out by the sheet keep the spacing they were made with
-    let item_spacing = ui.spacing().item_spacing;
-    let legacy = |sheet: &mut PropertySheet<'_>, app: &mut TextureCraftApp, body: fn(&mut TextureCraftApp, &mut Ui)| {
-        sheet.ui.scope(|ui| {
-            ui.spacing_mut().item_spacing = item_spacing;
-            legacy_body(ui, |ui| body(app, ui));
-        });
-    };
     PropertySheet::show(ui, "tool_sheet", |sheet| {
         for section in tool_sections(app) {
             // The Stencil caption carries its own reset
@@ -2133,7 +2124,7 @@ fn tool_properties(app: &mut TextureCraftApp, ui: &mut Ui) {
                 PaintSection::Brush => crate::brush_sheet::brush_section(app, sheet, menu),
                 PaintSection::Alpha => crate::alpha_sheet::alpha_section(app, sheet),
                 PaintSection::Stencil => crate::stencil_sheet::stencil_section(app, sheet),
-                PaintSection::Material => legacy(sheet, app, material_controls),
+                PaintSection::Material => crate::material_sheet::material_section(app, sheet),
                 PaintSection::Grayscale => crate::mask_paint_panel::grayscale_section(app, sheet),
             }
         }
@@ -2321,8 +2312,7 @@ const CHIPS_GAP: f32 = 4.0;
 /// Room right of the tool's colour swatch, like a linked material's
 const TOOL_SWATCH_RIGHT_MARGIN: f32 = LINK_SWATCH_RIGHT_MARGIN;
 
-/// One chip per channel of the texture set, on while the tool's material has it enabled; returns the channels.
-/// The Material tab and the Smudge panel both draw these, so they share one set of flags.
+/// One chip per channel of the texture set, on while the tool's material has it enabled (the flags the Material section's pills show); returns the channels
 fn material_channel_chips(app: &mut TextureCraftApp, ui: &mut Ui) -> Vec<Channel> {
     let channels = app.session.doc.project.texture_set(app.session.ts()).map(|set| set.channel_list()).unwrap_or_default();
     ui.horizontal_wrapped(|ui| {
@@ -2337,7 +2327,7 @@ fn material_channel_chips(app: &mut TextureCraftApp, ui: &mut Ui) -> Vec<Channel
     channels
 }
 
-/// The tool's material: channel chips, then each enabled channel's value
+/// Polygon fill's material: channel chips, then each enabled channel's value
 fn material_controls(app: &mut TextureCraftApp, ui: &mut Ui) {
     use texturecraft_engine::core::ChannelKind;
 
@@ -2377,10 +2367,6 @@ fn material_controls(app: &mut TextureCraftApp, ui: &mut Ui) {
                 }
             }
         }
-    }
-
-    if app.session.tool.tool == Tool::Eraser {
-        ui.label(RichText::new(tr("The eraser removes paint from the enabled channels.")).color(tokens.text_dim));
     }
 }
 

@@ -89,6 +89,7 @@ mod mask_preview_image;
 mod mask_source_choice;
 mod material_orb;
 mod material_preview_image;
+mod material_sheet;
 pub mod menus;
 mod mesh_export_options;
 #[cfg(not(target_arch = "wasm32"))]

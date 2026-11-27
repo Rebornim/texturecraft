@@ -1,6 +1,7 @@
 use egui::{Align2, CornerRadius, FontId, Painter, Rect, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};
 use egui_phosphor::regular as ic;
 
+use super::slot_ends::SlotEnds;
 use super::switch_control::PILL_SIZE;
 use super::{ButtonIcon, CONTROL_RADIUS, PropertySheet, ROW_HEIGHT, SlotResponse, TEXT_SIZE};
 use crate::theme::semibold;
@@ -73,31 +74,32 @@ impl PropertySheet<'_> {
         self.open_card();
         self.scope = self.named_id("slot", name);
         self.space(SLOT_CARD_TOP);
-        self.slot_row(thumbnail, name, source, on, clear, reset.then_some(true))
+        self.slot_row(thumbnail, name, source, SlotEnds { on, clear, reset: reset.then_some(true), pickable: true })
     }
 
     /// [`Self::slot`] whose ⟲ always shows beside the ×, faint and inert while what it restores is at its defaults (`changed` false)
     pub(crate) fn slot_restorable(&mut self, thumbnail: &dyn Fn(&Painter, Rect), name: &str, source: &str, changed: bool) -> SlotResponse {
         self.open_card();
         self.space(SLOT_CARD_TOP);
-        self.slot_row(thumbnail, name, source, None, true, Some(changed))
+        self.slot_row(thumbnail, name, source, SlotEnds { on: None, clear: true, reset: Some(changed), pickable: true })
+    }
+
+    /// A slot card whose one source can't be swapped (a brush's uniform channel): the row picks nothing, its ⟲ is faint and inert while at the defaults (`changed` false)
+    pub(crate) fn slot_fixed(&mut self, thumbnail: &dyn Fn(&Painter, Rect), name: &str, source: &str, changed: bool) -> SlotResponse {
+        self.open_card();
+        self.scope = self.named_id("slot", name);
+        self.space(SLOT_CARD_TOP);
+        self.slot_row(thumbnail, name, source, SlotEnds { on: None, clear: false, reset: Some(changed), pickable: false })
     }
 
     /// [`Self::slot`]'s row inside the card open now (an input a mode adds, under that mode), not a card of its own
     pub(crate) fn slot_in_card(&mut self, thumbnail: &dyn Fn(&Painter, Rect), name: &str, source: &str, clear: bool) -> SlotResponse {
-        self.slot_row(thumbnail, name, source, None, clear, None)
+        self.slot_row(thumbnail, name, source, SlotEnds { on: None, clear, reset: None, pickable: true })
     }
 
-    /// A slot row: thumbnail, name over source, then ⟲ (`Some(changed)`), × and the toggle on the right; the row opens the source list
-    fn slot_row(
-        &mut self,
-        thumbnail: &dyn Fn(&Painter, Rect),
-        name: &str,
-        source: &str,
-        on: Option<&mut bool>,
-        clear: bool,
-        reset: Option<bool>,
-    ) -> SlotResponse {
+    /// A slot row: thumbnail, name over source, then ⟲ (`Some(changed)`), × and the toggle on the right; the row opens the source list when `pickable`
+    fn slot_row(&mut self, thumbnail: &dyn Fn(&Painter, Rect), name: &str, source: &str, ends: SlotEnds<'_>) -> SlotResponse {
+        let SlotEnds { on, clear, reset, pickable } = ends;
         let rect = self.take(SLOT_HEIGHT);
         let center_y = rect.top() + SLOT_HEIGHT / 2.0;
         let enabled = on.as_deref().copied().unwrap_or(true);
@@ -109,8 +111,16 @@ impl PropertySheet<'_> {
         // The picker spans the card while the trailing glyphs keep their own hit areas
         let row = self.bled_row(rect);
         let pick_id = self.next_id();
-        let pick = self.ui.interact(row, pick_id, Sense::click());
-        pick.widget_info(|| egui::WidgetInfo { current_text_value: Some(source.to_owned()), ..egui::WidgetInfo::labeled(egui::Role::ComboBox, true, name) });
+        let pick = self.ui.interact(row, pick_id, if pickable { Sense::click() } else { Sense::hover() });
+        if pickable {
+            pick.widget_info(|| egui::WidgetInfo {
+                current_text_value: Some(source.to_owned()),
+                ..egui::WidgetInfo::labeled(egui::Role::ComboBox, true, name)
+            });
+        } else {
+            // A label's words are its value, so the name and source read as one
+            pick.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, false, format!("{name}: {source}")));
+        }
         let mut result = SlotResponse { pick, clear: false, reset: false, toggled: false };
 
         let tokens = self.tokens;
@@ -119,7 +129,7 @@ impl PropertySheet<'_> {
         painter.rect_stroke(
             thumb,
             CornerRadius::ZERO,
-            Stroke::new(1.0, if result.pick.hovered() { tokens.accent } else { tokens.field_border }),
+            Stroke::new(1.0, if pickable && result.pick.hovered() { tokens.accent } else { tokens.field_border }),
             StrokeKind::Inside,
         );
         let text_x = thumb.right() + THUMB_TO_NAME;

@@ -87,7 +87,7 @@ pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     }
 
     let tokens = Tokens::get(ui.ctx());
-    let mut state = ListState::load(ui.ctx());
+    let mut state = ListState::load(ui.ctx(), (app.session.project_id, app.session.mesh_id));
 
     let rows: Vec<SetRow> = (0..app.session.doc.project.texture_sets.len())
         .filter_map(|index| {
@@ -626,6 +626,27 @@ mod tests {
         harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::F10);
         harness.run_steps(3);
         assert!(harness.query_by_role_and_label(egui::Role::Button, "Edit Description").is_some(), "Shift+F10 opens the row's menu");
+    }
+
+    #[test]
+    fn a_rename_under_way_is_dropped_when_another_project_replaces_this_one() {
+        let mut harness = harness("material_ball");
+        let original = harness.state().session.doc.project.texture_sets[1].name.clone();
+        harness.get_by_role_and_label(egui::Role::ListItem, &original).focus();
+        harness.run_steps(2);
+        harness.key_press(egui::Key::F2);
+        harness.run_steps(3);
+        harness.event(egui::Event::Text("z".into()));
+        harness.run_steps(1);
+
+        // Another project with the same texture sets takes this one's place mid-edit
+        let geometry = texturecraft_engine::geom::primitives::builtin("material_ball").unwrap();
+        harness.state_mut().session = texturecraft_engine::Session::new_project("Other", geometry, "builtin:material_ball", None, 128).unwrap();
+        harness.run_steps(3);
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(3);
+
+        assert_eq!(harness.state().session.doc.project.texture_sets[1].name, original, "the new project's set keeps its name");
     }
 
     #[test]

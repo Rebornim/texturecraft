@@ -46,7 +46,8 @@ pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     crate::channel_manager::ChannelManager::show(app, &ui.ctx().clone());
     let set_index = app.session.ts();
     let Some(set) = app.session.doc.project.texture_sets.get(set_index).cloned() else { return };
-    let tile = crate::texture_set_list::ListState::load(ui.ctx()).tile.filter(|(set, _)| *set == set_index).map(|(_, udim)| udim);
+    let list = crate::texture_set_list::ListState::load(ui.ctx(), (app.session.project_id, app.session.mesh_id));
+    let tile = list.tile.filter(|(picked_set, udim)| *picked_set == set_index && set.uv_tiles.contains(udim)).map(|(_, udim)| udim);
     egui::ScrollArea::vertical().id_salt("tss").show(ui, |ui| {
         PropertySheet::show(ui, ("texture_set_settings", set_index), |sheet| {
             general(app, sheet, set_index, &set, tile);

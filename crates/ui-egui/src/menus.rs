@@ -503,6 +503,10 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
     let picker_open = crate::color_picker::open_window(ctx).is_some();
 
     let nothing_focused = !crate::framework::widget_has_keyboard(ctx);
+    // A dialog closes on Escape itself
+    let modal_open = ctx.memory(|memory| memory.top_modal_layer().is_some());
+    let over_set_list = crate::texture_set_list::pointer_over(ctx);
+    let mut set_list_keys = (false, false);
     let log_copies = crate::log_panel::takes_copy(app, ctx);
     let commands_to_invoke = ctx.input_mut(|input| {
         // egui's label selection copies on these events at the end of the frame
@@ -521,6 +525,12 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
         if app.ui.windows.export && app.ui.export.tab == 1 && app.ui.export.ask.is_none() && input.consume_key(Modifiers::NONE, Key::F2) {
             app.ui.export.rename_key = true;
         }
+        // Over the texture set list, F2 renames the selected set and Shift+F10 or the Menu key opens its menu, before
+        // the 3D view and Render mode bindings
+        if over_set_list {
+            let menu = input.consume_key(Modifiers::SHIFT, Key::F10) || input.consume_key(Modifiers::NONE, Key::Menu);
+            set_list_keys = (input.consume_key(Modifiers::NONE, Key::F2), menu);
+        }
         let commands = app.bindings.dispatch(input);
         for copy in copies {
             if !input.events.contains(&copy) {
@@ -538,7 +548,7 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
         }
 
         // The open list or the picker window closes on this Escape itself
-        let escape_is_free = !popup_open && !picker_open;
+        let escape_is_free = !popup_open && !picker_open && !modal_open;
         if confirming_reset {
             // Its keys were handled before the shortcuts ran
         } else if app.ui.export.ask.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
@@ -573,6 +583,7 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
     if cancel_point_pick {
         crate::generator_point_pick::set(ctx, None);
     }
+    crate::texture_set_list::take_keys(ctx, set_list_keys.0, set_list_keys.1);
 
     for id in &commands_to_invoke {
         run_shortcut(app, ctx, id);

@@ -380,11 +380,12 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     let name = if boolp(p, "reset") == Some(true) {
         s.original_set_name(ts).ok_or_else(|| bad("textureSet.rename", "the mesh has no material name for this set"))?.to_string()
     } else {
-        strp(p, "name")
-            .map(str::trim)
-            .filter(|name| !name.is_empty() && name.chars().count() <= MAX_NAME_CHARS)
-            .ok_or_else(|| bad("textureSet.rename", "`name` or `reset: true` is required"))?
-            .to_string()
+        let name = strp(p, "name").map(str::trim).filter(|name| !name.is_empty());
+        let name = name.ok_or_else(|| bad("textureSet.rename", "`name` or `reset: true` is required"))?;
+        if name.chars().count() > MAX_NAME_CHARS {
+            return Err(bad("textureSet.rename", format!("`name` is at most {MAX_NAME_CHARS} characters")));
+        }
+        name.to_string()
     };
     s.edit("Rename texture set", |s| {
         s.doc.project.texture_set_mut(ts)?.name = name;
@@ -541,6 +542,15 @@ mod tests {
         crate::execute(&mut s, "textureSet.rename", &json!({"ts": 1, "reset": true})).unwrap();
         assert_eq!(crate::execute(&mut s, "textureSet.inspect", &json!({"ts": 1})).unwrap()["name"], original);
         assert!(crate::execute(&mut s, "textureSet.rename", &json!({"ts": 1})).is_err());
+    }
+
+    #[test]
+    fn a_too_long_name_is_refused_for_its_length_not_as_missing() {
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+        let long = "n".repeat(MAX_NAME_CHARS + 1);
+        let error = crate::execute(&mut s, "textureSet.rename", &json!({"ts": 1, "name": long})).unwrap_err().to_string();
+        assert!(error.contains("at most") && !error.contains("required"), "{error}");
+        assert!(crate::execute(&mut s, "textureSet.rename", &json!({"ts": 1, "name": "n".repeat(MAX_NAME_CHARS)})).is_ok());
     }
 
     #[test]

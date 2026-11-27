@@ -391,4 +391,26 @@ mod tests {
         assert!(marked("Base weight"), "a channel the shader ignores is marked");
         assert!(!marked("User0"), "a user channel is not");
     }
+
+    #[test]
+    fn escape_closes_the_channel_window_with_nothing_focused_and_drops_its_ticks() {
+        let mut harness = harness("material_ball");
+        let had = harness.state().session.doc.project.texture_sets[0].has_channel(Channel::User0);
+        click(&mut harness, egui::Role::Button, "Add or remove channels");
+        harness.run_steps(4);
+        click(&mut harness, egui::Role::CheckBox, "User0");
+        // As after a click on the dialog's empty space: no control keeps the keyboard
+        let ctx = harness.ctx.clone();
+        ctx.memory_mut(|memory| {
+            if let Some(focused) = memory.focused() {
+                memory.surrender_focus(focused);
+            }
+        });
+        harness.run_steps(2);
+
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(4);
+        assert!(harness.query_by_role_and_label(egui::Role::CheckBox, "User0").is_none(), "the window closed");
+        assert_eq!(harness.state().session.doc.project.texture_sets[0].has_channel(Channel::User0), had, "nothing was applied");
+    }
 }

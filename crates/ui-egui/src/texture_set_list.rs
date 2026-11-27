@@ -159,7 +159,23 @@ pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
             }
         }
     });
+    state.hovered = ui.ui_contains_pointer().then(|| ui.ctx().cumulative_pass_nr());
     state.store(ui.ctx());
+}
+
+/// Whether the pointer was over the list in the last pass, so F2 and the menu keys are the list's and not their bindings
+pub(crate) fn pointer_over(ctx: &egui::Context) -> bool {
+    // A list no longer drawn (another tab, no project) has none
+    ListState::stored(ctx).and_then(|state| state.hovered).is_some_and(|pass| pass + 1 == ctx.cumulative_pass_nr())
+}
+
+/// Hands the selected row F2 (`rename`) or Shift+F10 or the Menu key (`menu`), read before the shortcuts ran
+pub(crate) fn take_keys(ctx: &egui::Context, rename: bool, menu: bool) {
+    if let Some(mut state) = ListState::stored(ctx).filter(|_| rename || menu) {
+        state.rename_key |= rename;
+        state.menu_key |= menu;
+        state.store(ctx);
+    }
 }
 
 /// Visibility menu and solo at the left, the descriptions menu at the right
@@ -327,18 +343,20 @@ fn set_row(app: &mut TextureCraftApp, ui: &mut Ui, state: &mut ListState, index:
         }
     }
 
-    // F2 renames the focused row, as a double click does
-    let rename_key = response.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F2));
+    // F2 renames the focused row, or the selected one with the pointer over the list, as a double click does
+    let rename_key = (selected && std::mem::take(&mut state.rename_key))
+        || (response.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F2)));
     if response.double_clicked() || rename_key {
         action = Some(RowAction::Edit(RowEdit::Name));
     } else if action.is_none() && (response.clicked() || response.secondary_clicked()) {
         action = Some(RowAction::Select);
     }
-    context_menu(ui, &response, row, tokens).or(action)
+    let menu_key = selected && std::mem::take(&mut state.menu_key);
+    context_menu(ui, &response, row, menu_key, tokens).or(action)
 }
 
-/// The row's right-click menu (Shift+F10 or the Menu key on a focused row), in the toolbar menus' look
-fn context_menu(ui: &Ui, response: &Response, row: &SetRow, tokens: &Tokens) -> Option<RowAction> {
+/// The row's right-click menu in the toolbar menus' look, also from Shift+F10 or the Menu key (`menu_key` over the list)
+fn context_menu(ui: &Ui, response: &Response, row: &SetRow, menu_key: bool, tokens: &Tokens) -> Option<RowAction> {
     let renamed = row.original_name.as_ref().is_some_and(|original| *original != row.name);
     let visibility = if row.visible { (ic::EYE_SLASH, "Hide Texture Set") } else { (ic::EYE, "Show Texture Set") };
     let entries = [
@@ -361,9 +379,9 @@ fn context_menu(ui: &Ui, response: &Response, row: &SetRow, tokens: &Tokens) -> 
 
     // A menu opened from the keyboard has no pointer to open at: it hangs under the row while it stays open
     let from_keyboard = response.id.with("ts_menu_from_keyboard");
-    let menu_key =
+    let pressed =
         |input: &mut egui::InputState| input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10) || input.consume_key(egui::Modifiers::NONE, egui::Key::Menu);
-    if response.has_focus() && ui.input_mut(menu_key) {
+    if menu_key || (response.has_focus() && ui.input_mut(pressed)) {
         ui.data_mut(|data| data.insert_temp(from_keyboard, true));
         popup = popup.open_memory(Some(egui::SetOpenCommand::Bool(true)));
     } else if !popup.is_open() {
@@ -515,7 +533,9 @@ fn edit_field(ui: &mut Ui, state: &mut ListState, rect: Rect, size: f32) -> Opti
     }
 
     let edit = state.edit.take()?;
-    (!ui.input(|input| input.key_pressed(egui::Key::Escape))).then_some(edit.2)
+    // Raw Escape: with the field's focus gone, the window's cancel takes it from egui's input
+    let escaped = ui.input(|input| input.raw.events.iter().any(|event| matches!(event, egui::Event::Key { key: egui::Key::Escape, pressed: true, .. })));
+    (!escaped).then_some(edit.2)
 }
 
 /// A glyph button of the list: dim glyph, bright and framed when hovered or lit
@@ -630,6 +650,45 @@ mod tests {
         harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::F10);
         harness.run_steps(3);
         assert!(harness.query_by_role_and_label(egui::Role::Button, "Edit Description").is_some(), "Shift+F10 opens the row's menu");
+    }
+
+    #[test]
+    fn escape_drops_a_rename_under_way() {
+        let mut harness = harness("material_ball");
+        let original = harness.state().session.doc.project.texture_sets[1].name.clone();
+        click(&mut harness, egui::Role::ListItem, &original, egui::PointerButton::Secondary);
+        click(&mut harness, egui::Role::Button, "Edit Name", egui::PointerButton::Primary);
+        harness.run_steps(3);
+        harness.event(egui::Event::Text("q".into()));
+        harness.run_steps(1);
+
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(3);
+        assert_eq!(harness.state().session.doc.project.texture_sets[1].name, original);
+    }
+
+    #[test]
+    fn over_the_list_f2_renames_the_selected_set_and_shift_f10_opens_its_menu() {
+        // A clicked row has no keyboard focus, so these keys would otherwise reach the 3D view and Render mode
+        let mut harness = harness("material_ball");
+        let original = harness.state().session.doc.project.texture_sets[1].name.clone();
+        let layout = harness.state().ui.layout;
+        click(&mut harness, egui::Role::ListItem, &original, egui::PointerButton::Primary);
+        harness.key_press(egui::Key::F2);
+        harness.run_steps(3);
+        harness.event(egui::Event::Text("w".into()));
+        harness.run_steps(1);
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(3);
+        let renamed = harness.state().session.doc.project.texture_sets[1].name.clone();
+        assert!(renamed != original && renamed.contains('w'), "{renamed}");
+        assert!(harness.state().ui.layout == layout, "the viewers layout stayed");
+
+        let mode = harness.state().ui.mode;
+        harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::F10);
+        harness.run_steps(3);
+        assert!(harness.query_by_role_and_label(egui::Role::Button, "Edit Description").is_some(), "Shift+F10 opens the row's menu");
+        assert!(harness.state().ui.mode == mode, "the mode stayed");
     }
 
     #[test]

@@ -14,6 +14,11 @@ pub(crate) struct ListState {
     pub(crate) folded: BTreeSet<usize>,
     /// Set and UDIM of the selected UV tile row
     pub(crate) tile: Option<(usize, u32)>,
+    /// The last pass that drew the list with the pointer over it
+    pub(crate) hovered: Option<u64>,
+    /// F2 or the menu key came while the pointer was over the list: the selected row takes it in this pass
+    pub(crate) rename_key: bool,
+    pub(crate) menu_key: bool,
 }
 
 impl ListState {
@@ -28,7 +33,12 @@ impl ListState {
             return state;
         }
 
-        ListState { owner, descriptions: state.descriptions, ..ListState::default() }
+        ListState { owner, descriptions: state.descriptions, hovered: state.hovered, ..ListState::default() }
+    }
+
+    /// The stored state, whatever project it belongs to
+    pub(crate) fn stored(ctx: &egui::Context) -> Option<Self> {
+        ctx.data(|data| data.get_temp::<Self>(Self::id()))
     }
 
     pub(crate) fn store(self, ctx: &egui::Context) {

@@ -20,6 +20,7 @@ use crate::past_end::PastEnd;
 use crate::property_sheet::{PropertySheet, SectionScope};
 use crate::shelf::{Asset, ShelfDrag};
 use crate::source_choice::SourceChoice;
+use crate::tabbed_page::TabbedPage;
 use crate::theme::{Tokens, caption};
 use crate::widgets::{chip, color_swatch, combo, dnd_release, elided, icon_button, press_edit, section, slider, slider_edit};
 
@@ -1884,6 +1885,7 @@ pub(crate) fn properties(app: &mut TextureCraftApp, ui: &mut Ui) {
     if let Some(tabs) = properties_tabs(app) {
         crate::property_sheet::section_tabs(ui, scope, 0, &tabs);
     }
+    pinned_brush_preview(app, ui);
 
     let selection = properties_selection(app);
     crate::property_sheet::in_scope(ui, scope, |ui| {
@@ -1924,6 +1926,14 @@ pub(crate) fn properties_scrolled(app: &mut TextureCraftApp, ui: &mut Ui, area: 
 
 /// The tabs over the panel when it shows a fill layer's, a mask fill effect's or a paint tool's sections, which they jump between
 pub(crate) fn properties_tabs(app: &TextureCraftApp) -> Option<Vec<(&'static str, &'static str)>> {
+    Some(match tabbed_page(app)? {
+        TabbedPage::Fill { mask } => crate::fill_panel::fill_tabs(mask).to_vec(),
+        TabbedPage::Tool => tool_sections(app).into_iter().map(|section| (section.icon(), section.title())).collect(),
+    })
+}
+
+/// The page under the panel's jump tabs, if it shows one
+fn tabbed_page(app: &TextureCraftApp) -> Option<TabbedPage> {
     if !app.session.project_open || app.session.tool.tool == Tool::PolygonFill && app.session.tool_usable(Tool::PolygonFill) {
         return None;
     }
@@ -1932,19 +1942,25 @@ pub(crate) fn properties_tabs(app: &TextureCraftApp) -> Option<Vec<(&'static str
     let layer = app.session.selected_layer().and_then(|id| project.layers.get(&id));
     let tool_shown = match (layer, app.session.target) {
         (Some(layer), StackTarget::Content) if matches!(layer.kind, LayerKind::Fill(_)) => {
-            return matches!(&layer.kind, LayerKind::Fill(fill) if fill.projection.placed().is_none()).then(|| crate::fill_panel::fill_tabs(false).to_vec());
+            return matches!(&layer.kind, LayerKind::Fill(fill) if fill.projection.placed().is_none()).then_some(TabbedPage::Fill { mask: false });
         }
         (Some(_), StackTarget::Effect(effect)) => match project.effect(effect).map(|(_, effect)| &effect.kind) {
             Some(EffectKind::Paint | EffectKind::Path(_)) => true,
-            _ => return mask_fill_of(project, effect).map(|_| crate::fill_panel::fill_tabs(true).to_vec()),
+            _ => return mask_fill_of(project, effect).map(|_| TabbedPage::Fill { mask: true }),
         },
         (Some(layer), StackTarget::Content) => !layer.is_group() && layer.instance_source().is_none(),
         _ => true,
     };
 
     // Everything else shows the tool's sections where the tool can paint
-    let tool_shown = tool_shown && app.session.tool_usable(app.session.tool.tool);
-    tool_shown.then(|| tool_sections(app).into_iter().map(|section| (section.icon(), section.title())).collect())
+    (tool_shown && app.session.tool_usable(app.session.tool.tool)).then_some(TabbedPage::Tool)
+}
+
+/// The brush preview under the tool's jump tabs: it stays in view while the sections scroll under it
+pub(crate) fn pinned_brush_preview(app: &TextureCraftApp, ui: &mut Ui) {
+    if tabbed_page(app) == Some(TabbedPage::Tool) {
+        legacy_body(ui, |ui| brush_preview(app, ui));
+    }
 }
 
 /// Effect `effect`'s source, projection and sampling when it is a mask fill the Properties panel lays out like a fill (a decal's placed fill keeps its own rows)
@@ -2057,13 +2073,12 @@ const STROKE_GRAY_SAMPLES: u32 = 64;
 /// Gap under the brush preview
 const BRUSH_PREVIEW_GAP: f32 = 4.0;
 
-/// The brush preview, then what only this tool has
-fn tool_header(app: &mut TextureCraftApp, ui: &mut Ui) {
+/// The brush's own stroke in the colour it paints, and a sphere with the tool's material
+fn brush_preview(app: &TextureCraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     let content = targets_content(app);
-
-    // Brush preview: the brush's own stroke in the colour it paints, and a sphere with the tool's material
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), BRUSH_PREVIEW_HEIGHT), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), BRUSH_PREVIEW_HEIGHT), Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, tr("Brush preview")));
     let painter = ui.painter();
     painter.rect_filled(rect, BRUSH_PREVIEW_CORNER_RADIUS, tokens.viewport);
     let half_width = rect.width() * 0.5;
@@ -2091,13 +2106,16 @@ fn tool_header(app: &mut TextureCraftApp, ui: &mut Ui) {
         BrushStrokePreview::paint(ui.ctx(), painter, stroke_rect, brush, image, mask_tint);
     }
     ui.add_space(BRUSH_PREVIEW_GAP);
+}
 
+/// What only this tool has, above the sections every brush tool shares
+fn tool_header(app: &mut TextureCraftApp, ui: &mut Ui) {
+    let tokens = Tokens::get(ui.ctx());
     if app.session.quick_mask.editing {
         ui.label(RichText::new(tr("Editing the quick mask: strokes paint where painting is allowed. Press U to finish.")).color(tokens.text_dim));
         ui.separator();
     }
 
-    // A tool's own settings, above the sections every brush tool shares
     let tool_section: Option<fn(&mut TextureCraftApp, &mut Ui)> = match app.session.tool.tool {
         Tool::Clone => Some(clone_section),
         Tool::Smudge => Some(smudge_section),

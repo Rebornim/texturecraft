@@ -1,4 +1,4 @@
-//! A paint tool's Properties: one page of sections under jump tabs, Brush · Alpha · (Stencil) · Material
+//! A paint tool's Properties: one page of sections under jump tabs, Brush · Alpha · (Stencil) · Material, below a brush preview that stays put
 
 use egui::accesskit::Role;
 use egui_kittest::Harness;
@@ -60,4 +60,18 @@ fn every_brush_tool_has_a_stencil_tab_and_polygon_fill_none() {
 
     let harness = paint_harness("polygonFill");
     assert!(harness.query_by_role_and_label(Role::Tab, "Stencil").is_none(), "polygon fill paints no strokes");
+}
+
+#[test]
+fn the_brush_preview_stays_under_the_tabs_while_the_sections_scroll() {
+    let mut harness = paint_harness("paint");
+    let preview_before = harness.get_by_label("Brush preview").rect();
+    let flow_before = harness.get_by_label("Flow").rect().top();
+
+    harness.get_by_role_and_label(Role::Tab, "Material").click();
+    harness.run_steps(SCROLL_FRAMES);
+
+    assert!(harness.get_by_label("Flow").rect().top() < flow_before, "the sections scrolled");
+    assert_eq!(harness.get_by_label("Brush preview").rect(), preview_before, "the preview stayed where it was");
+    assert!(preview_before.top() >= harness.get_by_role_and_label(Role::Tab, "Material").rect().bottom(), "under the tabs");
 }

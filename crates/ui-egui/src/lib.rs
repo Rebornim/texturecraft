@@ -178,6 +178,7 @@ mod stencil_choice;
 mod stencil_sheet;
 mod surface_paint_point;
 pub mod symmetry;
+mod tabbed_page;
 pub mod theme;
 pub mod thumbs;
 mod tile_edits;

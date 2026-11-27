@@ -106,6 +106,7 @@ mod temp_dir;
 mod template_invert;
 mod templates_681;
 mod tool_availability;
+mod tool_material;
 mod tool_settings_saved;
 mod toolbar;
 mod user_smart_mask;

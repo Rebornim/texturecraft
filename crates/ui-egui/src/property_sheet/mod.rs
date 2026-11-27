@@ -47,6 +47,7 @@ mod size_columns;
 mod size_columns_response;
 mod slider;
 mod slot;
+mod slot_ends;
 mod slot_response;
 mod source_card;
 mod stack_slider;

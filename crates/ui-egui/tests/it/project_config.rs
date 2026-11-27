@@ -526,7 +526,8 @@ fn the_normal_map_format_changes_on_ok_and_shows_in_the_texture_set_panel() {
     h.state_mut().ui.dock.focus(texturecraft_ui_egui::docking::Panel::TextureSetSettings);
     h.run_steps(3);
 
-    assert!(h.query_all_by_value("DirectX").next().is_some(), "the Texture Set Settings panel shows the project's format");
+    // The panel's dropdown shows the project's format (the project window is closed by now)
+    assert!(h.query_all_by_role_and_label(Role::ComboBox, "DirectX").next().is_some(), "the Texture Set Settings panel shows the project's format");
 
     // One undo step puts it back
     h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);

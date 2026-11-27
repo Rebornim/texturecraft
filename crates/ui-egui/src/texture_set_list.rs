@@ -9,6 +9,7 @@ use crate::TextureCraftApp;
 use crate::i18n::{tr, trf};
 use crate::layer_toolbar::{AddItem, ItemIcon, MENU_PADDING, MenuIcon, Pick, menu_button, menu_frame, menu_row, menu_width};
 use crate::property_sheet::option_row;
+use crate::shader_settings::INSTANCE_NAME;
 use crate::theme::{Tokens, semibold};
 use crate::widgets::elided;
 
@@ -78,9 +79,6 @@ const PLACEHOLDER_FADE: f32 = 0.7;
 const FOCUS_INSET: f32 = 2.0;
 /// Space between a dropdown and its list
 const MENU_GAP: f32 = 1.0;
-
-/// The project's one shader, which every set uses
-const SHADER_NAME: &str = "Main shader";
 
 pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     // The empty state lists nothing
@@ -274,7 +272,7 @@ fn set_row(app: &mut TextureCraftApp, ui: &mut Ui, state: &mut ListState, index:
         tokens.text
     };
     if rect.width() >= SHADER_MIN_ROW_WIDTH {
-        let shader = tr(SHADER_NAME);
+        let shader = tr(INSTANCE_NAME);
         let name = trf("Shader of {name}", &[("name", &row.name)]);
         let dropdown = row_dropdown(ui, ("ts_shader", index), pos2(right, rect.center().y), (shader, &name), true, tokens, |ui| {
             let _ = option_row(ui, shader, true);
@@ -437,7 +435,7 @@ fn shader_column_width(ui: &Ui, row_width: f32) -> f32 {
     if row_width < SHADER_MIN_ROW_WIDTH {
         return 0.0;
     }
-    dropdown_width(ui, tr(SHADER_NAME)) + DROPDOWN_GAP
+    dropdown_width(ui, tr(INSTANCE_NAME)) + DROPDOWN_GAP
 }
 
 fn dropdown_width(ui: &Ui, text: &str) -> f32 {

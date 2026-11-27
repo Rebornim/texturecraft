@@ -173,6 +173,7 @@ pub mod state;
 mod surface_paint_point;
 pub mod symmetry;
 mod texture_set_list;
+mod texture_set_settings;
 pub mod theme;
 pub mod thumbs;
 mod tile_edits;
@@ -940,18 +941,22 @@ impl TextureCraftApp {
         self.session.bake_preview_end();
     }
 
-    /// Resize texture set `ts` to `resolution` texels across on a worker thread, keeping its
-    /// shape (the document changes when it is done, as one undo step).
-    pub fn start_resize(&mut self, ts: usize, resolution: u32) {
+    /// Resize texture set `ts` to `width` texels across on a worker thread, keeping its shape: one undo step once done
+    pub fn start_resize(&mut self, ts: usize, width: u32) {
+        let height = self.session.doc.project.texture_set(ts).map_or(width, |set| {
+            let scaled = u64::from(set.height()) * u64::from(width) / u64::from(set.resolution.max(1));
+            u32::try_from(scaled).unwrap_or(u32::MAX).clamp(texturecraft_engine::core::MIN_RESOLUTION, texturecraft_engine::core::MAX_RESOLUTION)
+        });
+        self.start_resize_to(ts, width, height);
+    }
+
+    /// [`Self::start_resize`] to `width` by `height`
+    pub fn start_resize_to(&mut self, ts: usize, width: u32, height: u32) {
         if self.resize.is_some() {
             return;
         }
 
-        let height = self.session.doc.project.texture_set(ts).map_or(resolution, |set| {
-            let scaled = u64::from(set.height()) * u64::from(resolution) / u64::from(set.resolution.max(1));
-            u32::try_from(scaled).unwrap_or(u32::MAX).clamp(texturecraft_engine::core::MIN_RESOLUTION, texturecraft_engine::core::MAX_RESOLUTION)
-        });
-        match self.session.resize_task_to(ts, resolution, height) {
+        match self.session.resize_task_to(ts, width, height) {
             Ok(task) => {
                 let progress = Arc::new(Progress::new());
                 let p = progress.clone();

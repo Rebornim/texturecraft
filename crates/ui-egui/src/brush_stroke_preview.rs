@@ -24,8 +24,7 @@ const STROKE_PRESSURE: std::ops::RangeInclusive<f32> = 0.35..=1.0;
 const STROKE_WIDTH_PER_ROOT_SIZE: f32 = 70.0;
 const STROKE_WIDTH: std::ops::RangeInclusive<f32> = 2.0..=32.0;
 
-/// The rendered stroke and what it was rendered from, kept in egui's memory so a frame with the same brush reuses it
-#[derive(Clone)]
+/// The rendered stroke and what it was rendered from, kept in egui's memory behind an `Arc` so a frame with the same brush reuses it without copying it
 pub(crate) struct BrushStrokePreview {
     brush: BrushSettings,
     image: Option<Arc<ImageRes>>,
@@ -52,23 +51,30 @@ impl BrushStrokePreview {
     ) {
         let pixels_per_point = ctx.pixels_per_point();
         let size = [(rect.width() * pixels_per_point).round().max(1.0) as usize, (rect.height() * pixels_per_point).round().max(1.0) as usize];
-        let tints: Vec<[u8; 3]> = (0..size[0]).map(|x| tint((x as f32 + 0.5) / size[0] as f32)).collect();
+        let column_tint = |x: usize| tint((x as f32 + 0.5) / size[0] as f32);
+
         // The docked panel and the right-click popup draw the same picture at their own widths: one cache each
         let id = Id::unique(key).with(painter.layer_id());
-        let cached = ctx.data(|data| data.get_temp::<BrushStrokePreview>(id)).filter(|preview| {
-            preview.brush == *brush && preview.size == size && preview.tints == tints && preview.image.as_ref().map(Arc::as_ptr) == image.map(Arc::as_ptr)
+        let cached = ctx.data(|data| data.get_temp::<Arc<BrushStrokePreview>>(id)).filter(|preview| {
+            preview.brush == *brush
+                && preview.size == size
+                && preview.image.as_ref().map(Arc::as_ptr) == image.map(Arc::as_ptr)
+                && preview.tints.iter().enumerate().all(|(x, shown)| *shown == column_tint(x))
         });
-        let preview = match cached {
-            Some(preview) => preview,
+
+        let texture = match cached {
+            Some(preview) => preview.texture.id(),
             None => {
+                let tints: Vec<[u8; 3]> = (0..size[0]).map(column_tint).collect();
                 let picture = render(brush, image.map(|image| &**image), size, pixels_per_point, &tints);
                 let texture = ctx.load_texture(key, picture, TextureOptions::LINEAR);
+                let texture_id = texture.id();
                 let preview = BrushStrokePreview { brush: brush.clone(), image: image.cloned(), tints, size, texture };
-                ctx.data_mut(|data| data.insert_temp(id, preview.clone()));
-                preview
+                ctx.data_mut(|data| data.insert_temp(id, Arc::new(preview)));
+                texture_id
             }
         };
-        painter.image(preview.texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        painter.image(texture, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
     }
 }
 

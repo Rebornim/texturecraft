@@ -75,3 +75,21 @@ fn the_brush_preview_stays_under_the_tabs_while_the_sections_scroll() {
     assert_eq!(harness.get_by_label("Brush preview").rect(), preview_before, "the preview stayed where it was");
     assert!(preview_before.top() >= harness.get_by_role_and_label(Role::Tab, "Material").rect().bottom(), "under the tabs");
 }
+
+#[test]
+fn the_brush_preview_keeps_its_picture_until_the_paint_colour_changes() {
+    let mut harness = paint_harness("paint");
+    let pictures = |harness: &Harness<'_, TextureCraftApp>| -> Vec<egui::TextureId> {
+        harness.ctx.tex_manager().read().allocated().filter(|(_, texture)| texture.name == "brush_stroke_preview").map(|(id, _)| *id).collect()
+    };
+    let first = pictures(&harness);
+
+    harness.run_steps(SCROLL_FRAMES);
+    assert_eq!(pictures(&harness), first, "an unchanged brush reuses its picture");
+
+    execute(&mut harness.state_mut().session, "tool.material", &json!({"channel": "baseColor", "color": [0.0, 0.0, 1.0]})).unwrap();
+    harness.run_steps(SCROLL_FRAMES);
+    let recoloured = pictures(&harness);
+    assert_eq!(recoloured.len(), 1, "the old picture is released");
+    assert_ne!(recoloured, first, "a new colour draws a new picture");
+}

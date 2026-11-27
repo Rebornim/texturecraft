@@ -3,7 +3,7 @@
 //! act on every selected layer in one undo step.
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{LayerId, LayerKind};
+use texturecraft_engine::core::{BlendMode, Channel, LayerId, LayerKind};
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::layer_selection::stack_rows;
 use texturecraft_engine::{Session, execute};
@@ -522,4 +522,20 @@ fn moving_layers_into_a_folder_in_another_set_preserves_the_document() {
         assert_eq!(s.doc.project, before);
         assert_eq!(s.history_labels(), history);
     }
+}
+
+#[test]
+fn a_rows_controls_act_on_its_layer_with_no_layer_selected() {
+    let mut s = session();
+    let [a, ..] = four(&mut s);
+    // An undo can leave no layer selected; the row's eye and blend menu still name their layer
+    s.selected.clear();
+
+    execute(&mut s, "layer.visible", &json!({"layer": a.0, "visible": false})).unwrap();
+    execute(&mut s, "layer.blend", &json!({"layer": a.0, "channel": "baseColor", "mode": "Multiply"})).unwrap();
+    let layer = s.doc.project.layer(a).unwrap();
+    assert!(!layer.visible, "the eye hid its layer");
+    assert_eq!(layer.blend(Channel::BaseColor).map(|b| b.mode), Some(BlendMode::Multiply), "the blend menu changed its layer");
+    assert_eq!(s.selected_layer(), None, "the selection stays as it was");
+    assert!(execute(&mut s, "layer.visible", &Value::Null).is_err(), "with no layer named, nothing is selected to act on");
 }

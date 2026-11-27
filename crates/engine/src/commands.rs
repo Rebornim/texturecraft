@@ -188,6 +188,29 @@ pub fn check_enabled(spec: &CommandSpec, s: &Session) -> std::result::Result<(),
     (spec.enabled)(s)
 }
 
+/// [`check_enabled`] for a run with `params`: a command that takes `layer` is checked as if the
+/// layer it names were the selected one, so a row's own controls work with no layer selected
+/// (after an undo, say).
+fn check_enabled_for(spec: &CommandSpec, s: &mut Session, params: &Value) -> std::result::Result<(), String> {
+    let refused = match check_enabled(spec, s) {
+        Ok(()) => return Ok(()),
+        Err(why) => why,
+    };
+    let named = u64p(params, "layer").map(texturecraft_core::LayerId).filter(|_| spec.params.contains("layer?"));
+    let Some((id, ts)) = named.and_then(|id| s.doc.project.locate(id).map(|(ts, _, _)| (id, ts))) else { return Err(refused) };
+    if ts != s.ts() {
+        return Err(refused);
+    }
+
+    let selected = s.selected.insert(ts, id);
+    let named_refused = check_enabled(spec, s);
+    match selected {
+        Some(old) => s.selected.insert(ts, old),
+        None => s.selected.remove(&ts),
+    };
+    named_refused
+}
+
 pub fn find(id: &str) -> Option<&'static CommandSpec> {
     command_specs().iter().find(|c| c.id == id)
 }
@@ -196,7 +219,7 @@ pub fn find(id: &str) -> Option<&'static CommandSpec> {
 /// `merge: true` its edits continue the previous undo step of the same label (drags).
 pub fn execute(s: &mut Session, id: &str, params: &Value) -> Result<Value> {
     let spec = find(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
-    check_enabled(spec, s).map_err(|why| EngineError::Disabled { cmd: id.to_string(), why })?;
+    check_enabled_for(spec, s, params).map_err(|why| EngineError::Disabled { cmd: id.to_string(), why })?;
     let outer = std::mem::replace(&mut s.merge_edits, boolp(params, "merge").unwrap_or(false));
     let result = (spec.run)(s, params);
     s.merge_edits = outer;

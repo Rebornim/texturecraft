@@ -53,14 +53,14 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
 pub(crate) const FIRST_TILE: u32 = *UDIM_RANGE.start();
 
 /// Use `images` (by UV tile; one at [`FIRST_TILE`] without UV tiles) as mesh map `map` of set `ts` in the caller's edit; returns its width
-pub(crate) fn use_images(session: &mut Session, command: &str, ts: usize, map: BakedMap, images: &BTreeMap<u32, Arc<ImageRes>>) -> Result<u32> {
-    let texture_set = session.doc.project.texture_set(ts)?;
-    let grid = texture_set.tile_grid();
-    if let Some(tile) = texture_set.uv_tiles.iter().find(|tile| grid.is_some() && !images.contains_key(tile)) {
+pub(crate) fn use_images(session: &mut Session, command: &str, texture_set: usize, map: BakedMap, images: &BTreeMap<u32, Arc<ImageRes>>) -> Result<u32> {
+    let set = session.doc.project.texture_set(texture_set)?;
+    let grid = set.tile_grid();
+    if let Some(tile) = set.uv_tiles.iter().find(|tile| grid.is_some() && !images.contains_key(tile)) {
         return Err(bad(command, format!("no image for UV tile {tile}")));
     }
 
-    let (width, height) = image_map_size(session, command, ts)?;
+    let (width, height) = image_map_size(session, command, texture_set)?;
 
     // Bent normals are tangent-space maps like the normal map, so both follow the project's normal format
     let flip_green = matches!(map, BakedMap::Normal | BakedMap::BentNormal) && session.doc.project.normal_format == NormalFormat::DirectX;
@@ -74,11 +74,11 @@ pub(crate) fn use_images(session: &mut Session, command: &str, ts: usize, map: B
         }),
     };
 
-    let entry = session.doc.baked.entry(ts).or_default();
+    let entry = session.doc.baked.entry(texture_set).or_default();
     entry.resolution = width;
     entry.maps.insert(map, Arc::new(data));
     // An imported map is never out of date: nothing records what it was made from
-    let set = session.doc.project.texture_set_mut(ts)?;
+    let set = session.doc.project.texture_set_mut(texture_set)?;
     set.baked.insert(map);
     set.bake_sources.remove(&map);
     Ok(width)
@@ -158,16 +158,16 @@ fn resample(comps: usize, (w, h): (u32, u32), flip_green: bool, sample: impl Fn(
 
 fn clear(session: &mut Session, params: &Value) -> Result<Value> {
     const COMMAND: &str = "textureSet.meshMap.clear";
-    let ts = ts_param(session, params, COMMAND)?;
+    let texture_set = ts_param(session, params, COMMAND)?;
     let map = map_param(params, COMMAND)?;
-    if !session.doc.baked.get(&ts).is_some_and(|baked| baked.maps.contains_key(&map)) {
-        return Err(bad(COMMAND, format!("texture set {ts} has no {} map", map.id())));
+    if !session.doc.baked.get(&texture_set).is_some_and(|baked| baked.maps.contains_key(&map)) {
+        return Err(bad(COMMAND, format!("texture set {texture_set} has no {} map", map.id())));
     }
     session.edit("Clear mesh map", |session| {
-        if let Some(baked) = session.doc.baked.get_mut(&ts) {
+        if let Some(baked) = session.doc.baked.get_mut(&texture_set) {
             baked.maps.remove(&map);
         }
-        let set = session.doc.project.texture_set_mut(ts)?;
+        let set = session.doc.project.texture_set_mut(texture_set)?;
         set.baked.remove(&map);
         set.bake_sources.remove(&map);
         Ok(())

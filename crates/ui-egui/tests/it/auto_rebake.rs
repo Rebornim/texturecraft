@@ -165,8 +165,8 @@ fn no_rebake_starts_while_the_pointer_is_held_so_a_paused_drag_stays_one_undo_st
     let mut harness = harness(64);
     change_settings(&mut harness, json!({ "positionMode": "boundingBox" }));
 
-    // Held still well past the settle time, as a hand pausing mid-drag
-    let corner = egui::pos2(1590.0, 990.0);
+    // Held still well past the settle time, as a hand pausing mid-drag, in the window's corner where no control takes the press
+    let corner = harness.ctx.content_rect().right_bottom() - egui::vec2(10.0, 10.0);
     harness.drag_at(corner);
     harness.run_steps(120);
     assert!(harness.state().bake.is_none(), "the edit is not over while the press lasts");

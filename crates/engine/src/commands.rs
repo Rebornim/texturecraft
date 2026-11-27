@@ -31,7 +31,7 @@ impl CommandSpec {
     /// that only return data or do nothing without parameters, and the ones that replace the
     /// open project (the menu asks to save first).
     pub fn bindable(&self) -> bool {
-        const NOT_FROM_A_KEY: [&str; 13] = [
+        const NOT_FROM_A_KEY: [&str; 14] = [
             "project.inspect",
             "project.templates",
             "project.new",
@@ -43,6 +43,7 @@ impl CommandSpec {
             "textureSet.parts",
             "bake.settings",
             "bake.preview",
+            "bake.log",
             "camera.set",
             "textureSet.settings",
         ];
@@ -372,7 +373,18 @@ mod tests {
         ] {
             assert!(!bindable(id), "{id} needs a parameter");
         }
-        for id in ["layer.move", "layer.list", "project.inspect", "edit.history", "export.presets", "tool.state", "project.new", "camera.set", "layer.blend"] {
+        for id in [
+            "layer.move",
+            "layer.list",
+            "project.inspect",
+            "edit.history",
+            "export.presets",
+            "tool.state",
+            "project.new",
+            "camera.set",
+            "layer.blend",
+            "bake.log",
+        ] {
             assert!(!bindable(id), "{id} is a query or has several forms");
         }
     }

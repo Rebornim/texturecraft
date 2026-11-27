@@ -311,17 +311,17 @@ impl Session {
         self.record_bake_sources(texture_set, recorded, &stored)
     }
 
-    /// Bake texture set `ts` now (blocking), on the CPU when `cpu`; returns where the rays ran
-    pub fn bake_now(&mut self, ts: usize, cpu: bool) -> Result<String> {
-        let mut task = self.bake_task(ts)?;
+    /// Bake texture set `texture_set` now (blocking), on the CPU when `cpu`; returns where the rays ran
+    pub fn bake_now(&mut self, texture_set: usize, cpu: bool) -> Result<String> {
+        let mut task = self.bake_task(texture_set)?;
         if cpu {
             task.tracer = None;
         }
 
         let output = task.run(&Progress::new())?;
         let tracer = output.tracer.clone();
-        self.edit("Bake mesh maps", |session| session.store_bake(ts, output, Some((&task.sources, task.painted_stroke))))?;
-        self.log.info("Baker", format!("Baked texture set {ts} ({tracer})"));
+        self.edit("Bake mesh maps", |session| session.store_bake(texture_set, output, Some((&task.sources, task.painted_stroke))))?;
+        self.log.info("Baker", format!("Baked texture set {texture_set} ({tracer})"));
         Ok(tracer)
     }
 

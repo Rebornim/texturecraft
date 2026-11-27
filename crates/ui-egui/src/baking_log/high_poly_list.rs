@@ -43,6 +43,7 @@ fn set_row(ui: &mut Ui, set: usize, name: &str) -> bool {
         open = !open;
         ui.data_mut(|data| data.insert_temp(id, open));
     }
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(open));
 
     let painter = ui.painter();
     if response.hovered() {

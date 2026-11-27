@@ -1,7 +1,7 @@
 //! The Baking Log panel: the latest bake, map by map
 
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use texturecraft_engine::bake::{BakeHighState, BakeLogHigh, BakeLogMap, BakeLogMatching, BakeMapState, NamePair};
 use texturecraft_engine::core::{BakeResolution, BakedMap};
 use texturecraft_ui_egui::TextureCraftApp;
@@ -174,10 +174,13 @@ fn the_high_poly_tab_lists_each_sets_high_poly_files_under_a_row_that_folds() {
     harness.run_steps(3);
     let set_name = harness.state().session.doc.project.texture_sets[0].name.clone();
     harness.get_by_label("ball_high.obj, Loaded");
+    let set_row = format!("{set_name}, High poly files");
+    assert_eq!(harness.get_by_label(&set_row).accesskit_node().data().is_expanded(), Some(true));
 
-    harness.get_by_label(&format!("{set_name}, High poly files")).click();
+    harness.get_by_label(&set_row).click();
     harness.run_steps(3);
     assert!(harness.query_by_label("ball_high.obj, Loaded").is_none(), "a folded set hides its files");
+    assert_eq!(harness.get_by_label(&set_row).accesskit_node().data().is_expanded(), Some(false), "the row says it is folded");
 }
 
 #[test]

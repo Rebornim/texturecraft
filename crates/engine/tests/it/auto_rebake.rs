@@ -109,8 +109,8 @@ fn a_skew_stroke_rebakes_only_its_box_and_the_box_matches_a_whole_bake() {
     let pixels = output.maps[&BakedMap::Position].chunks(components).zip(before.chunks(components)).zip(whole.chunks(components));
     let mut changed = 0;
     for (index, ((rebaked, kept), baked_whole)) in pixels.enumerate() {
+        assert_eq!(rebaked, baked_whole, "texel {index} matches a whole bake");
         if region.contains(index % width, index / width) {
-            assert_eq!(rebaked, baked_whole, "texel {index} inside the box");
             changed += usize::from(rebaked != kept);
         } else {
             assert_eq!(rebaked, kept, "texel {index} outside the box");
@@ -163,7 +163,7 @@ fn undoing_the_rebake_of_a_stroke_makes_its_box_due_again() {
 #[test]
 fn a_bake_after_a_mesh_reimport_takes_the_strokes_painted_before_it() {
     let quad = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nf 1/1 2/2 3/3\nf 1/1 3/3 4/4\n";
-    let mut session = Session::from_mesh_bytes_with_uvs("quad.obj", quad.as_bytes(), 64, "quad", None, false).unwrap();
+    let mut session = Session::from_mesh_bytes_with_uvs("quad.obj", quad.as_bytes(), 128, "quad", None, false).unwrap();
     session.add_high_poly_bytes("quad_high.obj", quad.replace("v 1 1 0", "v 1 1 0.1").into_bytes()).unwrap();
     execute(&mut session, "bake.run", &json!({ "resolution": 32, "maps": ["position"], "dilation": 0 })).unwrap();
     execute(&mut session, "bake.autoRebake", &json!({ "map": "position" })).unwrap();

@@ -33,7 +33,7 @@ pub struct Document {
     pub resources: BTreeMap<String, Arc<Vec<u8>>>,
     /// High-definition meshes and cage for baking (saved inside the project)
     pub bake_meshes: crate::BakeMeshes,
-    /// Where skew or cage painting changed each texture set since its auto-rebake map was baked; undo brings a box back with the maps baked before it
+    /// Where skew or cage painting changed each texture set since its auto-rebake map was baked; undo brings a box back with the maps baked before it, and it is not saved
     pub(crate) painted_regions: BTreeMap<usize, crate::bake::PaintedRegion>,
 }
 

@@ -281,7 +281,13 @@ fn map_row(ui: &mut Ui, row: &BakeLogMap) -> (Rect, bool) {
         BakeMapState::Failed(_) => (ic::X_CIRCLE, tokens.danger, tr("Not baked")),
         BakeMapState::Canceled => (ic::WARNING, tokens.warning, tr("Canceled")),
     };
+    let reason = match &row.state {
+        BakeMapState::Failed(reason) => Some(reason.as_str()),
+        BakeMapState::Canceled => Some(tr("The bake was canceled before this map was kept.")),
+        _ => None,
+    };
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, format!("{name}, {state}")));
+    describe(ui, &response, reason);
     let open = row.state.is_issue().then(|| open_settings_button(ui, rect, (row.texture_set, row.map), &name));
     let row_hovered = response.hovered() || open.as_ref().is_some_and(|open| open.hovered());
 
@@ -307,11 +313,6 @@ fn map_row(ui: &mut Ui, row: &BakeLogMap) -> (Rect, bool) {
         }
     }
 
-    let reason = match &row.state {
-        BakeMapState::Failed(reason) => Some(reason.as_str()),
-        BakeMapState::Canceled => Some(tr("The bake was canceled before this map was kept.")),
-        _ => None,
-    };
     if let Some(reason) = reason {
         response.on_hover_ui(|ui| {
             ui.label(egui::RichText::new(state).font(semibold(NAME_SIZE)).color(tokens.text));
@@ -320,6 +321,13 @@ fn map_row(ui: &mut Ui, row: &BakeLogMap) -> (Rect, bool) {
     }
     let open_clicked = open.is_some_and(|open| open.clicked());
     (rect, open_clicked)
+}
+
+/// Give a row's node the `reason` its tooltip shows, so a screen reader reads it without hovering
+pub(super) fn describe(ui: &Ui, response: &egui::Response, reason: Option<&str>) {
+    if let Some(reason) = reason {
+        ui.ctx().accesskit_node_builder(response.id, |node| node.set_description(reason));
+    }
 }
 
 /// The open-settings arrow's square at the right end of `row`; it shows only while the row is hovered or it has focus

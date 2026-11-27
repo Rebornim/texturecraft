@@ -50,7 +50,13 @@ fn pair_row(ui: &mut Ui, pair: &NamePair) {
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
     let no_match = tr("No match");
     let name = format!("{}, {}", pair.low.as_deref().unwrap_or(no_match), pair.high.as_deref().unwrap_or(no_match));
+    let reason = match (&pair.low, &pair.high) {
+        (Some(low), None) => Some(trf("No high poly part pairs with {part} by name, so it bakes from none.", &[("part", low)])),
+        (None, Some(high)) => Some(trf("No low poly part pairs with {part} by name, so no texture set bakes from it.", &[("part", high)])),
+        _ => None,
+    };
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &name));
+    super::describe(ui, &response, reason.as_deref());
 
     let painter = ui.painter();
     if response.hovered() {
@@ -65,11 +71,6 @@ fn pair_row(ui: &mut Ui, pair: &NamePair) {
     }
     rule(ui, rect);
 
-    let reason = match (&pair.low, &pair.high) {
-        (Some(low), None) => Some(trf("No high poly part pairs with {part} by name, so it bakes from none.", &[("part", low)])),
-        (None, Some(high)) => Some(trf("No low poly part pairs with {part} by name, so no texture set bakes from it.", &[("part", high)])),
-        _ => None,
-    };
     if let Some(reason) = reason {
         response.on_hover_ui(|ui| {
             ui.label(egui::RichText::new(no_match).font(semibold(NAME_SIZE)).color(tokens.text));

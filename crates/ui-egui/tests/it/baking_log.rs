@@ -57,6 +57,20 @@ fn the_baking_process_tab_lists_each_set_and_map_with_how_it_went() {
 }
 
 #[test]
+fn a_failed_rows_reason_is_read_without_hovering() {
+    let mut harness = harness();
+
+    bake_with_set_1_failing(&mut harness, &[BakedMap::Id]);
+
+    let app = harness.state();
+    let row = app.session.bake_log.maps.iter().find(|row| row.texture_set == 1).unwrap();
+    let BakeMapState::Failed(reason) = &row.state else { panic!("set 1's bake failed: {:?}", row.state) };
+    let label = format!("{} ID, Not baked", row.set_name);
+    let node = harness.get_by_label(&label);
+    assert_eq!(node.accesskit_node().description().as_deref(), Some(reason.as_str()), "the row's node carries its tooltip's reason");
+}
+
+#[test]
 fn a_one_map_bake_lists_only_that_map() {
     let mut harness = harness();
 

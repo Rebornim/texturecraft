@@ -70,7 +70,13 @@ fn file_row(ui: &mut Ui, row: &BakeLogHigh) {
         BakeHighState::Failed(_) => (ic::X_CIRCLE, tokens.danger, tr("Not loaded")),
         BakeHighState::Canceled => (ic::WARNING, tokens.warning, tr("Canceled")),
     };
+    let reason = match &row.state {
+        BakeHighState::Failed(reason) => Some(reason.as_str()),
+        BakeHighState::Canceled => Some(tr("The bake was canceled before this file was loaded.")),
+        _ => None,
+    };
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, format!("{}, {state}", row.file)));
+    super::describe(ui, &response, reason);
 
     let painter = ui.painter();
     if response.hovered() {
@@ -85,11 +91,6 @@ fn file_row(ui: &mut Ui, row: &BakeLogHigh) {
     };
     painter.text(pos2(rect.left() + NAME_LEFT + FILE_INDENT, center_y), Align2::LEFT_CENTER, &row.file, font, color);
 
-    let reason = match &row.state {
-        BakeHighState::Failed(reason) => Some(reason.as_str()),
-        BakeHighState::Canceled => Some(tr("The bake was canceled before this file was loaded.")),
-        _ => None,
-    };
     if let Some(reason) = reason {
         response.on_hover_ui(|ui| {
             ui.label(egui::RichText::new(state).font(semibold(NAME_SIZE)).color(tokens.text));

@@ -734,7 +734,8 @@ fn a_baked_maps_row_shows_out_of_date_once_its_settings_change() {
 
     execute(&mut harness.state_mut().session, "bake.settings", &json!({ "dilation": 4 })).unwrap();
     harness.run_steps(3);
-    harness.get_by_label("Out of date: Position");
+    let description = harness.get_by_label("Out of date: Position").accesskit_node().description();
+    assert!(description.is_some_and(|reasons| !reasons.is_empty()), "what changed is read without hovering");
     assert!(harness.query_by_label("Out of date: Normal").is_none(), "never baked: not out of date");
 }
 

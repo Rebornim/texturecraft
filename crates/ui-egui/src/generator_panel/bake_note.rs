@@ -52,9 +52,12 @@ fn note(app: &mut TextureCraftApp, ui: &mut Ui, (texture_set, map): (usize, Bake
     let checked = app.session.doc.project.texture_sets.get(texture_set).is_some_and(|set| set.bake.maps.is_enabled(map));
 
     ui.label(RichText::new(glyph).color(tokens.warning));
-    ui.add(egui::Label::new(&text).truncate()).on_hover_ui(|ui| {
+    let reasons = reasons(changes, checked);
+    let line = ui.add(egui::Label::new(&text).truncate());
+    ui.ctx().accesskit_node_builder(line.id, |node| node.set_description(reasons.join(" ")));
+    line.on_hover_ui(|ui| {
         ui.label(RichText::new(title).font(semibold(TOOLTIP_TEXT_SIZE)).color(tokens.text));
-        for reason in reasons(changes, checked) {
+        for reason in reasons {
             ui.label(RichText::new(reason).size(TOOLTIP_TEXT_SIZE).color(tokens.text_dim));
         }
     });

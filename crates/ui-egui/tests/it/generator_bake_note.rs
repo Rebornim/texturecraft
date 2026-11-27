@@ -1,7 +1,7 @@
 //! The generator's note when a mesh map it reads is not baked or out of date, and its Bake button
 
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::json;
 use texturecraft_engine::core::{BakedMap, LayerId};
 use texturecraft_engine::geom::primitives;
@@ -40,7 +40,8 @@ fn run_to_the_end(harness: &mut Harness<'static, TextureCraftApp>) {
 #[test]
 fn the_note_shows_while_the_curvature_map_is_missing_or_out_of_date_only() {
     let mut harness = harness();
-    harness.get_by_label("Curvature map not baked");
+    let description = harness.get_by_label("Curvature map not baked").accesskit_node().description();
+    assert!(description.is_some_and(|reasons| !reasons.is_empty()), "why the note shows is read without hovering");
 
     execute(&mut harness.state_mut().session, "bake.run", &json!({ "maps": ["curvature"] })).unwrap();
     harness.run_steps(3);

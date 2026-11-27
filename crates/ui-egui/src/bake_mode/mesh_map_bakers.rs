@@ -487,21 +487,23 @@ fn header_button(ui: &mut Ui, glyph: &str, text: &str) -> egui::Response {
     response
 }
 
-/// The yellow clock on the corner of `thumbnail`, of a map that `changes` made out of date since its bake; hovering the thumbnail tells what changed
+/// The yellow clock on the corner of `thumbnail`, of a map that `changes` made out of date since its bake; hovering the thumbnail, or its node's description, tells what changed
 fn out_of_date_mark(ui: &mut Ui, thumbnail: Rect, name: &str, changes: &[BakeChange]) {
     let tokens = Tokens::get(ui.ctx());
     let response = ui.interact(thumbnail, ui.scope_id().with("out_of_date"), Sense::hover());
     let title = tr("Out of date");
     let label = trf("Out of date: {map}", &[("map", &name)]);
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &label));
+    let reasons: Vec<&str> = changes.iter().map(|change| tr(bake_change_reason(*change))).collect();
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_description(reasons.join(" ")));
     let badge = thumbnail.right_bottom() - vec2(CLOCK_BADGE_RADIUS, CLOCK_BADGE_RADIUS) * 0.5;
     ui.painter().circle_filled(badge, CLOCK_BADGE_RADIUS, tokens.panel);
     ui.painter().text(badge, Align2::CENTER_CENTER, icon::CLOCK, FontId::proportional(CLOCK_BADGE_RADIUS * 2.0), tokens.warning);
 
     response.on_hover_ui(|ui| {
         ui.label(RichText::new(title).font(semibold(TOOLTIP_TEXT_SIZE)).color(tokens.text));
-        for change in changes {
-            ui.label(RichText::new(tr(bake_change_reason(*change))).size(TOOLTIP_TEXT_SIZE).color(tokens.text_dim));
+        for reason in reasons {
+            ui.label(RichText::new(reason).size(TOOLTIP_TEXT_SIZE).color(tokens.text_dim));
         }
     });
 }

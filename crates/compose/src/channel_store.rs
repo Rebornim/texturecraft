@@ -55,6 +55,15 @@ mod tests {
     }
 
     #[test]
+    fn srgb8_keeps_the_same_steps_as_decoding_each_one() {
+        for value in (0..=1000).map(|step| step as f32 / 1000.0) {
+            let decoded = srgb_to_linear((linear_to_srgb(value) * 255.0).round() / 255.0);
+
+            assert_eq!(stored(ChannelFormat::Srgb8, false, [value; 3], 3)[0], decoded, "at {value}");
+        }
+    }
+
+    #[test]
     fn grey_formats_turn_colours_grey_and_signed_values_keep_their_sign() {
         let grey = stored(ChannelFormat::L16, false, [1.0, 0.0, 0.0], 3);
 

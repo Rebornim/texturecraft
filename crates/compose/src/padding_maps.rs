@@ -6,13 +6,15 @@ use texturecraft_texel::dilate::DilationMap;
 
 use crate::seam_padding::{SEAM_REACH, cross_seams};
 
-/// A texture set's padding: `flat` for every texel, with the few texels past a seam listed apart in `crossed`
+/// A texture set's padding: `flat` for every texel, with the few texels past a seam listed apart in `crossed` by row
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaddingMaps {
     /// Padding from island edges (2D), which tangent-space normals always take: a normal turns with its island, so it can't continue across a seam
     pub flat: DilationMap,
     /// Across seams (3D): (texel, source texel) indices of the padding texels that continue from a seam's other side, sorted by texel
     pub crossed: Vec<(u32, u32)>,
+    /// Where each row's texels start in `crossed`, one more than the rows (empty without any), so a lookup searches one row
+    pub(crate) row_starts: Vec<u32>,
 }
 
 impl PaddingMaps {
@@ -23,7 +25,9 @@ impl PaddingMaps {
             UvPaddingMode::Space2d => Vec::new(),
             UvPaddingMode::Space3d => cross_seams(&flat, covered, max_dist.map_or(SEAM_REACH, |d| d.min(SEAM_REACH)), block, seams),
         };
-        PaddingMaps { flat, crossed }
+        let row_starts =
+            if crossed.is_empty() { Vec::new() } else { (0..=height).map(|y| crossed.partition_point(|(texel, _)| *texel < y * width) as u32).collect() };
+        PaddingMaps { flat, crossed, row_starts }
     }
 
     /// Texels across and down
@@ -39,13 +43,17 @@ impl PaddingMaps {
     /// The covered texel padding (x, y), itself when covered; `across_seams` takes the seams' other sides
     pub fn source(&self, across_seams: bool, x: u32, y: u32) -> Option<(u32, u32)> {
         let source = self.flat.source(x, y)?;
-        if !across_seams || source == (x, y) || self.crossed.is_empty() {
+        if !across_seams || source == (x, y) {
             return Some(source);
         }
 
         let (texel, width) = (y * self.flat.width + x, self.flat.width);
-        match self.crossed.binary_search_by_key(&texel, |(crossed_texel, _)| *crossed_texel) {
-            Ok(found) => self.crossed.get(found).map(|(_, crossed_source)| (crossed_source % width, crossed_source / width)),
+        let row = match (self.row_starts.get(y as usize), self.row_starts.get(y as usize + 1)) {
+            (Some(&start), Some(&end)) => self.crossed.get(start as usize..end as usize).unwrap_or_default(),
+            _ => &[],
+        };
+        match row.binary_search_by_key(&texel, |(crossed_texel, _)| *crossed_texel) {
+            Ok(found) => row.get(found).map(|(_, crossed_source)| (crossed_source % width, crossed_source / width)),
             Err(_) => Some(source),
         }
     }

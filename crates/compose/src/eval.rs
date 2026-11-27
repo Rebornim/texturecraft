@@ -6438,7 +6438,7 @@ soft {soft:?}"
         out.channels.get_mut(&Channel::Roughness).unwrap().set(10, 10, &[to_u16(0.9)]);
         let mut covered = vec![false; 64 * 64];
         covered[10 * 64 + 10] = true;
-        let padding = crate::PaddingMaps { flat: texturecraft_texel::DilationMap::new(&covered, 64, 64, Some(4)), crossed: Vec::new() };
+        let padding = crate::PaddingMaps { flat: texturecraft_texel::DilationMap::new(&covered, 64, 64, Some(4)), crossed: Vec::new(), row_starts: Vec::new() };
         pad_tiles(&mut out, &padding, &[(0, 0)]);
         assert!((out.value(Channel::Roughness, 12, 12)[0] - 0.9).abs() < 1e-3);
         assert!(out.value(Channel::Roughness, 30, 30)[0] < 0.1 || !out.channels[&Channel::Roughness].is_allocated(0, 0));

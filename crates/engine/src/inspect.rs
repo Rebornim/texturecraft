@@ -264,6 +264,8 @@ pub fn texture_set(session: &Session, index: usize) -> Value {
             })
         })
         .collect();
+    let out_of_date: std::collections::BTreeMap<_, Vec<_>> =
+        session.out_of_date_maps(index).into_iter().map(|(map, changes)| (map.id(), changes.iter().map(|change| change.id()).collect())).collect();
     json!({
         "index": index,
         "name": texture_set.name,
@@ -276,7 +278,7 @@ pub fn texture_set(session: &Session, index: usize) -> Value {
         "layers": session.doc.project.walk(index).len(),
         "parts": crate::set_cmds::parts(session, index),
         "baked": crate::project_cmds::baked_json(session.doc.baked.get(&index)),
-        "outOfDate": session.out_of_date_maps(index).into_iter().map(|(map, changes)| (map.id(), changes.iter().map(|change| change.id()).collect::<Vec<_>>())).collect::<std::collections::BTreeMap<_, _>>(),
+        "outOfDate": out_of_date,
         "autoRebake": texture_set.auto_rebake.map(texturecraft_core::BakedMap::id),
         "visible": texture_set.visible,
         "active": index == session.ts(),

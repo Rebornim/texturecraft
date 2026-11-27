@@ -20,7 +20,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Inspect texture set",
             [],
             None,
-            "{ts?} → {index, name, resolution, height, size: [w, h], uvTiles: [UDIM numbers] (empty: no UV tiles), tiles: [{udim, block: [x, y]}], channels, layers, baked, visible, active}",
+            "{ts?} → {index, name, originalName, description, resolution, height, size: [w, h], blockResolution, uvTiles: [UDIM numbers] (empty: no UV tiles), tiles: [{udim, block: [x, y], resolution, bakeEnabled}], channels: [{channel, format, shaded}], layers, parts, baked, visible, normalMixing, aoMixing, heightToNormal, uvPadding, active}",
             always,
             |s, p| Ok(crate::inspect::texture_set(s, ts_param(s, p, "textureSet.inspect")?))
         ),
@@ -47,7 +47,15 @@ pub fn specs() -> Vec<CommandSpec> {
             always,
             visibility
         ),
-        cmd!("textureSet.rename", "Rename texture set", [], None, "{ts?, name}", always, rename),
+        cmd!(
+            "textureSet.rename",
+            "Rename texture set",
+            [],
+            None,
+            "{ts?, name} or {ts?, reset: true} (back to the mesh material's name, `originalName` in inspect)",
+            always,
+            rename
+        ),
         cmd!(
             "textureSet.settings",
             "Texture set settings",
@@ -121,9 +129,9 @@ pub(crate) fn select_set(s: &mut Session, ts: usize) -> Result<()> {
 
 fn resolution(s: &mut Session, p: &Value) -> Result<Value> {
     let ts = ts_param(s, p, "textureSet.resolution")?;
-    let r = u64p(p, "resolution").ok_or_else(|| bad("textureSet.resolution", "`resolution` is required"))?;
-    let height = u64p(p, "height").unwrap_or(r);
-    let task = s.resize_task_to(ts, u32::try_from(r).unwrap_or(0), u32::try_from(height).unwrap_or(0))?;
+    let width = u64p(p, "resolution").ok_or_else(|| bad("textureSet.resolution", "`resolution` is required"))?;
+    let height = u64p(p, "height").unwrap_or(width);
+    let task = s.resize_task_to(ts, u32::try_from(width).unwrap_or(0), u32::try_from(height).unwrap_or(0))?;
     let out = task.run(&texturecraft_bake::Progress::new())?;
     s.apply_resize(out)
 }
@@ -190,12 +198,12 @@ impl ResizeOutput {
 }
 
 impl Session {
-    /// Prepare resizing texture set `ts` to a square `resolution` (a power of two, 128..8192).
+    /// Prepare resizing texture set `ts` to a square `resolution` (a power of two, 128..8192)
     pub fn resize_task(&mut self, ts: usize, resolution: u32) -> Result<ResizeTask> {
         self.resize_task_to(ts, resolution, resolution)
     }
 
-    /// Prepare resizing texture set `ts` to `width × height` texels (powers of two, 128..8192).
+    /// Prepare resizing texture set `ts` to `width × height` texels (powers of two, 128..8192)
     pub fn resize_task_to(&mut self, ts: usize, width: u32, height: u32) -> Result<ResizeTask> {
         let (resolution, height) = (check_resolution(width)?, check_resolution(height)?);
         self.doc.project.texture_set(ts)?;
@@ -262,15 +270,19 @@ fn channels(s: &mut Session, p: &Value) -> Result<Value> {
             Some(_) => Err(bad(cmd, format!("`{key}` must be a list of channels"))),
         }
     };
+
     let add = list("add")?;
     let remove = list("remove")?;
+
     if remove.contains(&Channel::BaseColor) {
         return Err(bad(cmd, "base color can't be removed"));
     }
     if let Some(both) = add.iter().find(|c| remove.contains(c)) {
         return Err(bad(cmd, format!("{} is both added and removed", both.label())));
     }
+
     let sets: Vec<usize> = if boolp(p, "allSets").unwrap_or(false) { (0..s.set_count()).collect() } else { vec![ts_param(s, p, cmd)?] };
+
     s.edit("Add or remove channels", |s| {
         for &ts in &sets {
             for &c in &add {
@@ -280,6 +292,7 @@ fn channels(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(())
     })?;
+
     Ok(json!({ "ts": sets }))
 }
 
@@ -291,6 +304,7 @@ fn channel_format(s: &mut Session, p: &Value) -> Result<Value> {
     let name = strp(p, "format").ok_or_else(|| bad(cmd, "`format` is required"))?;
     let all = || ChannelFormat::ALL.map(ChannelFormat::label).join(", ");
     let format = ChannelFormat::parse(name).ok_or_else(|| bad(cmd, format!("unknown format {name:?} ({})", all())))?;
+
     s.edit("Channel format", |s| {
         if s.doc.project.texture_set_mut(ts)?.set_channel_format(c, format) {
             Ok(())
@@ -298,6 +312,7 @@ fn channel_format(s: &mut Session, p: &Value) -> Result<Value> {
             Err(bad(cmd, format!("the texture set has no {} channel", c.label())))
         }
     })?;
+
     let float = matches!(format, ChannelFormat::L16F | ChannelFormat::Rgb16F | ChannelFormat::L32F | ChannelFormat::Rgb32F);
     Ok(if float { json!({"note": "float formats are stored at 16 bits for now, and values stay in the channel's range"}) } else { Value::Null })
 }
@@ -305,11 +320,8 @@ fn channel_format(s: &mut Session, p: &Value) -> Result<Value> {
 /// Add channel `c` to texture set `ts` (no-op when present) and enable it on the set's layers.
 /// Call inside [`Session::edit`].
 pub(crate) fn add_channel(s: &mut Session, ts: usize, c: Channel) -> Result<()> {
-    let set = s.doc.project.texture_set_mut(ts)?;
-    if !set.has_channel(c) {
-        set.channels.push((c, ChannelFormat::default_for(c)));
-        set.channels.sort_by_key(|(c, _)| c.index());
-    }
+    s.doc.project.texture_set_mut(ts)?.add_channel(c);
+
     // Existing layers get the new channel enabled.
     let ids: Vec<_> = s.doc.project.walk(ts).into_iter().map(|(id, _)| id).collect();
     for id in ids {
@@ -349,13 +361,23 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "visible": s.doc.project.texture_sets.iter().map(|t| t.visible).collect::<Vec<_>>() }))
 }
 
+/// Longest texture set name and description, in characters
+const MAX_NAME_CHARS: usize = 128;
+const MAX_DESCRIPTION_CHARS: usize = 4096;
+/// Highest height strength a set takes
+const MAX_HEIGHT_STRENGTH: f32 = 100.0;
+
 fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     let ts = ts_param(s, p, "textureSet.rename")?;
-    let name = strp(p, "name")
-        .map(str::trim)
-        .filter(|n| !n.is_empty() && n.chars().count() <= 128)
-        .ok_or_else(|| bad("textureSet.rename", "`name` is required"))?
-        .to_string();
+    let name = if boolp(p, "reset") == Some(true) {
+        s.original_set_name(ts).ok_or_else(|| bad("textureSet.rename", "the mesh has no material name for this set"))?.to_string()
+    } else {
+        strp(p, "name")
+            .map(str::trim)
+            .filter(|name| !name.is_empty() && name.chars().count() <= MAX_NAME_CHARS)
+            .ok_or_else(|| bad("textureSet.rename", "`name` or `reset: true` is required"))?
+            .to_string()
+    };
     s.edit("Rename texture set", |s| {
         s.doc.project.texture_set_mut(ts)?.name = name;
         Ok(())
@@ -363,44 +385,32 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(Value::Null)
 }
 
+impl Session {
+    /// The name set `ts` had when the mesh loaded: its material's name in the mesh
+    pub fn original_set_name(&self, ts: usize) -> Option<&str> {
+        let set = self.doc.project.texture_sets.get(ts)?;
+        self.mesh.materials.get(set.material).map(String::as_str).filter(|name| !name.trim().is_empty())
+    }
+}
+
 fn settings(s: &mut Session, p: &Value) -> Result<Value> {
     let ts = ts_param(s, p, "textureSet.settings")?;
-    let nf = normal_format_param("textureSet.settings", p)?;
-    let ao_mixing_before = s.doc.project.texture_set(ts)?.ao_mixing;
-    let normal_mixing = match strp(p, "normalMixing") {
-        None => None,
-        Some("combine") => Some(NormalMixing::Combine),
-        Some("replace") => Some(NormalMixing::Replace),
-        Some(other) => return Err(bad("textureSet.settings", format!("unknown normal mixing {other:?} (combine or replace)"))),
-    };
-    let ao_mixing = match strp(p, "aoMixing") {
-        None => None,
-        Some("multiply") => Some(AoMixing::Multiply),
-        Some("none") => Some(AoMixing::None),
-        Some(other) => return Err(bad("textureSet.settings", format!("unknown ambient occlusion mixing {other:?} (multiply or none)"))),
-    };
-    let height_to_normal = match strp(p, "heightToNormal") {
-        None => None,
-        Some("sharp") => Some(HeightToNormalMethod::Sharp),
-        Some("smooth") => Some(HeightToNormalMethod::Smooth),
-        Some(other) => return Err(bad("textureSet.settings", format!("unknown height to normal method {other:?} (sharp or smooth)"))),
-    };
-    let uv_padding = match strp(p, "uvPadding") {
-        None => None,
-        Some("3d") => Some(UvPaddingMode::Space3d),
-        Some("2d") => Some(UvPaddingMode::Space2d),
-        Some(other) => return Err(bad("textureSet.settings", format!("unknown UV padding {other:?} (3d or 2d)"))),
-    };
+    let normal_format = normal_format_param("textureSet.settings", p)?;
+    let normal_mixing = choice_param(p, "normalMixing", "normal mixing", NormalMixing::parse, &NormalMixing::ALL.map(NormalMixing::id))?;
+    let ao_mixing = choice_param(p, "aoMixing", "ambient occlusion mixing", AoMixing::parse, &AoMixing::ALL.map(AoMixing::id))?;
+    let height_to_normal =
+        choice_param(p, "heightToNormal", "height to normal method", HeightToNormalMethod::parse, &HeightToNormalMethod::ALL.map(HeightToNormalMethod::id))?;
+    let uv_padding = choice_param(p, "uvPadding", "UV padding", UvPaddingMode::parse, &UvPaddingMode::ALL.map(UvPaddingMode::id))?;
     s.edit("Texture set settings", |s| {
-        if let Some(n) = nf {
-            s.doc.project.normal_format = n;
+        if let Some(format) = normal_format {
+            s.doc.project.normal_format = format;
         }
         let set = s.doc.project.texture_set_mut(ts)?;
-        if let Some(d) = strp(p, "description") {
-            set.description = d.chars().take(4096).collect();
+        if let Some(description) = strp(p, "description") {
+            set.description = description.chars().take(MAX_DESCRIPTION_CHARS).collect();
         }
-        if let Some(h) = f32p(p, "heightStrength") {
-            set.height_strength = h.clamp(0.0, 100.0);
+        if let Some(strength) = f32p(p, "heightStrength") {
+            set.height_strength = strength.clamp(0.0, MAX_HEIGHT_STRENGTH);
         }
         if let Some(mixing) = normal_mixing {
             set.normal_mixing = mixing;
@@ -416,14 +426,14 @@ fn settings(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(())
     })?;
-
-    // The viewport's occlusion texture mixes the baked map in: resend the set
-    if s.doc.project.texture_set(ts)?.ao_mixing != ao_mixing_before
-        && let Some(cache) = s.caches.get_mut(ts)
-    {
-        cache.upload.extend(texturecraft_compose::all_tiles(cache.size.0, cache.size.1));
-    }
     Ok(Value::Null)
+}
+
+/// The optional setting `key` of `textureSet.settings`, one of `ids`
+fn choice_param<T>(p: &Value, key: &str, what: &str, parse: fn(&str) -> Option<T>, ids: &[&str]) -> Result<Option<T>> {
+    let Some(id) = strp(p, key) else { return Ok(None) };
+
+    parse(id).map(Some).ok_or_else(|| bad("textureSet.settings", format!("unknown {what} {id:?} ({})", ids.join(" or "))))
 }
 
 #[cfg(test)]
@@ -451,6 +461,18 @@ mod tests {
         assert!(crate::execute(&mut s, "textureSet.channels", &json!({"remove": ["baseColor"]})).is_err());
         assert!(crate::execute(&mut s, "textureSet.channels", &json!({"add": ["ior"], "remove": ["ior"]})).is_err());
         assert!(crate::execute(&mut s, "textureSet.channels", &json!({"add": ["nope"]})).is_err());
+    }
+
+    #[test]
+    fn rename_reset_restores_the_mesh_material_name() {
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+        let original = crate::execute(&mut s, "textureSet.inspect", &json!({"ts": 1})).unwrap()["name"].clone();
+        crate::execute(&mut s, "textureSet.rename", &json!({"ts": 1, "name": "Renamed"})).unwrap();
+        let inspect = crate::execute(&mut s, "textureSet.inspect", &json!({"ts": 1})).unwrap();
+        assert_eq!((&inspect["name"], &inspect["originalName"]), (&json!("Renamed"), &original));
+        crate::execute(&mut s, "textureSet.rename", &json!({"ts": 1, "reset": true})).unwrap();
+        assert_eq!(crate::execute(&mut s, "textureSet.inspect", &json!({"ts": 1})).unwrap()["name"], original);
+        assert!(crate::execute(&mut s, "textureSet.rename", &json!({"ts": 1})).is_err());
     }
 
     #[test]
@@ -516,7 +538,10 @@ mod tests {
     #[test]
     fn channel_format_changes_what_the_viewport_holds_and_undoes() {
         let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
-        let format = |s: &Session| crate::inspect::texture_set(s, 0)["channels"][2]["format"].clone();
+        let format = |s: &Session| {
+            let channels = crate::inspect::texture_set(s, 0)["channels"].clone();
+            channels.as_array().and_then(|list| list.iter().find(|entry| entry["channel"] == "roughness")).map(|entry| entry["format"].clone())
+        };
         let roughness = |s: &mut Session| {
             s.update();
             let img = &s.caches[0].composite.channels[&Channel::Roughness];
@@ -524,15 +549,17 @@ mod tests {
             img.tile(tile.0, tile.1).map(<[u16]>::to_vec).unwrap_or_default()
         };
         crate::execute(&mut s, "textureSet.channel.format", &json!({"channel": "roughness", "format": "L16"})).unwrap();
+        // A roughness off the 8-bit grid, so 8 bits visibly round it
         crate::execute(&mut s, "layer.add.fill", &json!({"roughness": 0.3013})).unwrap();
         let sixteen = roughness(&mut s);
-        assert_eq!(format(&s), json!("L16"));
+        assert_eq!(format(&s), Some(json!("L16")));
 
         crate::execute(&mut s, "textureSet.channel.format", &json!({"channel": "Roughness", "format": "l8"})).unwrap();
         let eight = roughness(&mut s);
-        assert_eq!(format(&s), json!("L8"));
+        assert_eq!(format(&s), Some(json!("L8")));
         assert_ne!(eight, sixteen, "the composite holds 8 bits");
-        assert!(eight.iter().all(|v| v % 257 == 0), "every texel is on an 8-bit step");
+        let eight_bit_step = u16::MAX / u16::from(u8::MAX);
+        assert!(eight.iter().all(|v| v % eight_bit_step == 0), "every texel is on an 8-bit step");
 
         let float = crate::execute(&mut s, "textureSet.channel.format", &json!({"channel": "height", "format": "L32F"})).unwrap();
         assert!(float["note"].is_string(), "a float format says it holds 16 bits");
@@ -540,7 +567,23 @@ mod tests {
         assert!(crate::execute(&mut s, "textureSet.channel.format", &json!({"channel": "roughness", "format": "L4"})).is_err());
         assert!(crate::execute(&mut s, "textureSet.channel.format", &json!({"channel": "emissive", "format": "L8"})).is_err());
         crate::execute(&mut s, "edit.undo", &Value::Null).unwrap();
-        assert_eq!((format(&s), roughness(&mut s)), (json!("L16"), sixteen));
+        assert_eq!((format(&s), roughness(&mut s)), (Some(json!("L16")), sixteen));
+    }
+
+    #[test]
+    fn channels_added_after_a_format_is_set_keep_16_bits() {
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+        let format = |s: &Session, id: &str| {
+            let channels = crate::inspect::texture_set(s, 0)["channels"].clone();
+            channels.as_array().and_then(|list| list.iter().find(|entry| entry["channel"] == id)).map(|entry| entry["format"].clone())
+        };
+        crate::execute(&mut s, "textureSet.channel.format", &json!({"ts": 0, "channel": "roughness", "format": "L8"})).unwrap();
+
+        crate::execute(&mut s, "textureSet.channel.add", &json!({"ts": 0, "channel": "user3"})).unwrap();
+        crate::execute(&mut s, "textureSet.channels", &json!({"ts": 0, "add": ["user4"]})).unwrap();
+
+        assert_eq!((format(&s, "user3"), format(&s, "user4")), (Some(json!("L16")), Some(json!("L16"))));
+        assert_eq!(format(&s, "roughness"), Some(json!("L8")), "the set format stays");
     }
 
     #[test]

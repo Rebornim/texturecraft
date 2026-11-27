@@ -168,10 +168,11 @@ pub fn default_workspace() -> Workspace {
     // The Assets split keeps four tiles visible at the reference window width
     const ASSETS_SPLIT_RATIO: f32 = 0.16;
     const VIEWPORT_SPLIT_RATIO: f32 = 0.80;
-    const TEXTURE_SET_SPLIT_RATIO: f32 = 0.125;
+    // Three texture set rows show at the default window height
+    const TEXTURE_SET_SPLIT_RATIO: f32 = 0.2;
 
     // Leave room for three layer rows and the fill's channel controls
-    const LAYERS_SPLIT_RATIO: f32 = 0.31;
+    const LAYERS_SPLIT_RATIO: f32 = 0.34;
 
     let column = split(
         Axis::Y,

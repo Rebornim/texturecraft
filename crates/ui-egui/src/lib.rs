@@ -172,6 +172,7 @@ mod source_slot;
 pub mod state;
 mod surface_paint_point;
 pub mod symmetry;
+mod texture_set_list;
 pub mod theme;
 pub mod thumbs;
 mod tile_edits;

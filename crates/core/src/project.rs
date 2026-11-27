@@ -350,6 +350,18 @@ impl TextureSet {
         self.channels.iter().map(|(channel, format)| (*channel, held(*format))).collect()
     }
 
+    /// Add channel `c` in its default format (16-bit or more until a format is set, see [`TextureSet::formats`]); false when present
+    pub fn add_channel(&mut self, c: Channel) -> bool {
+        if self.has_channel(c) {
+            return false;
+        }
+
+        let format = ChannelFormat::default_for(c);
+        self.channels.push((c, if self.format_precision { format.at_least_16_bit() } else { format }));
+        self.channels.sort_by_key(|(c, _)| c.index());
+        true
+    }
+
     /// Store channel `target` in `format` (false when the set lacks it); the other channels keep what they hold
     pub fn set_channel_format(&mut self, target: Channel, format: ChannelFormat) -> bool {
         if !self.has_channel(target) {

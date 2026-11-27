@@ -264,6 +264,8 @@ pub fn texture_set(session: &Session, index: usize) -> Value {
     json!({
         "index": index,
         "name": texture_set.name,
+        "originalName": session.original_set_name(index),
+        "description": texture_set.description,
         "resolution": texture_set.resolution,
         "height": texture_set.height(),
         "size": texture_set.size(),
@@ -275,22 +277,10 @@ pub fn texture_set(session: &Session, index: usize) -> Value {
         "parts": crate::set_cmds::parts(session, index),
         "baked": crate::project_cmds::baked_json(session.doc.baked.get(&index)),
         "visible": texture_set.visible,
-        "normalMixing": match texture_set.normal_mixing {
-            texturecraft_core::NormalMixing::Combine => "combine",
-            texturecraft_core::NormalMixing::Replace => "replace",
-        },
-        "aoMixing": match texture_set.ao_mixing {
-            texturecraft_core::AoMixing::Multiply => "multiply",
-            texturecraft_core::AoMixing::None => "none",
-        },
-        "heightToNormal": match texture_set.height_to_normal {
-            texturecraft_core::HeightToNormalMethod::Sharp => "sharp",
-            texturecraft_core::HeightToNormalMethod::Smooth => "smooth",
-        },
-        "uvPadding": match texture_set.uv_padding {
-            texturecraft_core::UvPaddingMode::Space3d => "3d",
-            texturecraft_core::UvPaddingMode::Space2d => "2d",
-        },
+        "normalMixing": texture_set.normal_mixing.id(),
+        "aoMixing": texture_set.ao_mixing.id(),
+        "heightToNormal": texture_set.height_to_normal.id(),
+        "uvPadding": texture_set.uv_padding.id(),
         "active": index == session.ts(),
     })
 }

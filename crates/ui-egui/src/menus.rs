@@ -528,6 +528,8 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
             crate::import_resources::keys_in(app, input, nothing_focused, popup_open);
         } else if !popup_open && app.picking_color.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.picking_color = None;
+        } else if escape_is_free && app.layer_pick_list.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
+            app.layer_pick_list = None;
         } else if escape_is_free && app.properties_popup.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.properties_popup = None;
         } else if escape_is_free && crate::rail_popup::is_visible(app) && input.consume_key(Modifiers::NONE, Key::Escape) {

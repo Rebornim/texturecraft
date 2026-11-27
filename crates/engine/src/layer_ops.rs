@@ -236,7 +236,7 @@ fn flatten(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "layer": id.0 }))
 }
 
-/// Flatten `folder` of texture set `ts` into a new fill layer above it, reading one image per channel it lays down, with its mask baked into a painted mask; the folder is hidden and kept
+/// Flatten `folder` of texture set `ts` into a new fill layer above it, reading one image per channel it lays down, with its mask baked into a painted mask; the folder is hidden and kept, and the new layer shows only if the folder did
 fn flatten_folder(s: &mut Session, ts: usize, folder: &Layer) -> Result<Value> {
     s.update();
     let size = s.caches.get(ts).ok_or_else(|| EngineError::Other("texture set not ready".into()))?.size;
@@ -260,6 +260,7 @@ fn flatten_folder(s: &mut Session, ts: usize, folder: &Layer) -> Result<Value> {
         // Only the channels the folder lays down, at its opacity (a folder mixes its result in by opacity alone, whatever its blend mode): a channel without an image would cover the stack with its default
         let channels: Vec<Channel> = fill.sources.keys().copied().collect();
         let mut layer = Layer::new(s.doc.project.alloc_id(), format!("{} (flattened)", folder.name), LayerKind::Fill(fill), &channels);
+        layer.visible = folder.visible;
         for (channel, blend) in &mut layer.channels {
             blend.opacity = folder.blend(*channel).map_or(1.0, |folder_blend| folder_blend.opacity);
         }

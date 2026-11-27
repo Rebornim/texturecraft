@@ -97,3 +97,38 @@ fn a_flattened_folder_bakes_a_mask_that_reads_the_layers_below() {
 
     assert!(largest_difference(&composite(&mut s), &before) < TOLERANCE, "{}", largest_difference(&composite(&mut s), &before));
 }
+
+/// Inside a folder, layers blending with Multiply, Screen or Overlay over the layers below the folder hide each part of the stack by a different amount: the flattened layer still shows what they did
+#[test]
+fn a_flattened_folder_looks_the_same_when_its_layers_blend_with_the_layers_below_it() {
+    for mode in ["multiply", "screen", "overlay"] {
+        let mut s = session();
+        id(execute(&mut s, "layer.add.fill", &json!({"color": [0.2, 0.5, 0.8], "roughness": 0.4})).unwrap());
+        let folder = id(execute(&mut s, "layer.add.group", &Value::Null).unwrap());
+        let inner = id(execute(&mut s, "layer.add.fill", &json!({"color": [0.9, 0.3, 0.1], "roughness": 0.7})).unwrap());
+        for channel in ["baseColor", "roughness"] {
+            execute(&mut s, "layer.blend", &json!({"layer": inner, "channel": channel, "mode": mode})).unwrap();
+        }
+        let before = composite(&mut s);
+
+        execute(&mut s, "layer.flatten", &json!({"layer": folder})).unwrap();
+
+        assert!(largest_difference(&composite(&mut s), &before) < TOLERANCE, "{mode}: {}", largest_difference(&composite(&mut s), &before));
+    }
+}
+
+/// A hidden folder shows nothing, so the layer it flattens into is hidden too
+#[test]
+fn a_hidden_folder_flattens_into_a_hidden_layer() {
+    let mut s = session();
+    id(execute(&mut s, "layer.add.fill", &json!({"color": [0.0, 0.0, 1.0]})).unwrap());
+    let folder = id(execute(&mut s, "layer.add.group", &Value::Null).unwrap());
+    id(execute(&mut s, "layer.add.fill", &json!({"color": [1.0, 0.2, 0.0]})).unwrap());
+    execute(&mut s, "layer.visible", &json!({"layer": folder, "visible": false})).unwrap();
+    let before = composite(&mut s);
+
+    let flat = id(execute(&mut s, "layer.flatten", &json!({"layer": folder})).unwrap());
+
+    assert!(!s.doc.project.layer(LayerId(flat)).unwrap().visible, "the new layer is hidden like the folder");
+    assert!(largest_difference(&composite(&mut s), &before) < TOLERANCE, "the image does not change");
+}

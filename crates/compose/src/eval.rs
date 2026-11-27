@@ -1369,6 +1369,17 @@ fn below_plan<'a>(
         return Vec::new();
     }
 
+    stack_plan_below(inp, draw, channels, (tile_x, tile_y), fields)
+}
+
+/// Plan the whole stack up to a draw, whatever the draw reads
+fn stack_plan_below<'a>(
+    inp: &EvaluationInputs<'a>,
+    draw: (LayerId, usize),
+    channels: &[Channel],
+    (tile_x, tile_y): (u32, u32),
+    fields: Option<&'a Fields>,
+) -> Vec<Node<'a>> {
     let Ok(set) = inp.project.texture_set(inp.ts) else { return Vec::new() };
     let compare_effects = layer_mask(inp.project, draw.0).into_iter().flat_map(|mask| mask.effects.iter());
     let planned = compared_channels(compare_effects, channels.to_vec());
@@ -4988,6 +4999,26 @@ pub fn flatten_layer(inputs: &Inputs, id: LayerId, tiles: &[(u32, u32)]) -> Opti
     Some(out.into_iter().flatten().collect())
 }
 
+/// The premultiplied value and coverage (last) of a Normal layer that shows `shown` over `under`, covering at least `coverage`, with straight values inside `range` (Multiply or Overlay hide each component by a different amount, so the coverage grows where a straight value would leave it); None where it shows the stack as it is
+fn normal_over(under: &[f32; 3], shown: &[f32; 3], coverage: f32, comps: usize, (low, high): (f32, f32)) -> Option<[f32; 4]> {
+    let needed = under.iter().zip(shown).take(comps).fold(coverage, |needed, (under, shown)| {
+        let change = shown - under;
+        let room = if change > 0.0 { high - under } else { under - low };
+        if change.abs() <= f32::EPSILON || room <= 0.0 { needed } else { needed.max(change.abs() / room) }
+    });
+    let coverage = needed.min(1.0);
+    if coverage <= 0.0 {
+        return None;
+    }
+
+    // Over `under`, the layer shows its premultiplied value plus what it leaves of the stack
+    let mut premultiplied = [0.0, 0.0, 0.0, coverage];
+    for ((slot, under), shown) in premultiplied.iter_mut().zip(under).zip(shown).take(comps) {
+        *slot = shown - (1.0 - coverage) * under;
+    }
+    Some(premultiplied)
+}
+
 /// One tile of a flattened folder's mask: (tile, mask value + coverage data)
 pub type FlatMaskTile = ((u32, u32), Vec<u16>);
 
@@ -5017,7 +5048,7 @@ pub fn flatten_folder(inputs: &Inputs, id: LayerId, tiles: &[(u32, u32)]) -> Opt
             let nodes = plan(&visible_inputs, &[id], &channels, tx, ty, 0, Some(&fields));
             let Some(node) = nodes.first() else { return (Vec::new(), None) };
             let Content::Group(children) = &node.content else { return (Vec::new(), None) };
-            let below = below_plan(&visible_inputs, (id, 0), &planned_channels, (tx, ty), Some(&fields), node.lights);
+            let below = stack_plan_below(&visible_inputs, (id, 0), &planned_channels, (tx, ty), Some(&fields));
 
             // One value + coverage buffer per channel the folder plans; signed channels start at their middle
             let mut buffers: Vec<(Channel, Vec<u16>, bool)> = node
@@ -5039,29 +5070,30 @@ pub fn flatten_folder(inputs: &Inputs, id: LayerId, tiles: &[(u32, u32)]) -> Opt
             for (x, y, offset) in tile_texels(inputs.gbuf, tx, ty) {
                 // The texel with the stack below the folder run once, so masks and fills that read it or its anchors find them
                 let mut over_below = Texel::new(&visible_inputs, x, y, offset, 0.0);
-                if !below.is_empty() {
-                    over_below.anchors_below(&below, (id, 0));
-                }
+                over_below.anchors_below(&below, (id, 0));
+                let stack_below = over_below.below.unwrap_or_else(|| Channel::ALL.map(Channel::default_value));
 
-                // Laid over an all-0 and an all-1 stack, the layers show their premultiplied value and how much of the stack they hide
-                let over = |background: f32| {
+                // The layers over an all-0 and an all-1 stack show how much of the stack they hide, and over the real stack what they show there
+                let over = |mut stack: Acc| {
                     let mut texel = over_below.clone();
-                    let mut stack: Acc = [[background; 3]; NCH];
                     texel.eval(children, &mut stack);
                     stack
                 };
-                let (low, high) = (over(0.0), over(1.0));
+                let (low, high, shown) = (over([[0.0; 3]; NCH]), over([[1.0; 3]; NCH]), over(stack_below));
                 for (planned, (channel, buffer, laid_down)) in node.chans.iter().zip(buffers.iter_mut()) {
-                    let (Some(premultiplied), Some(shown)) = (low.get(planned.ch), high.get(planned.ch)) else { continue };
-                    let comps = planned.comps.min(3);
-                    let hidden = premultiplied.iter().zip(shown).take(comps).map(|(low, high)| 1.0 - (high - low)).sum::<f32>() / comps as f32;
-                    let coverage = hidden.clamp(0.0, 1.0);
-                    if coverage <= 0.0 {
+                    let (Some(low), Some(high), Some(shown), Some(under)) =
+                        (low.get(planned.ch), high.get(planned.ch), shown.get(planned.ch), stack_below.get(planned.ch))
+                    else {
                         continue;
-                    }
+                    };
+                    let comps = planned.comps.min(3);
+                    let hidden = low.iter().zip(high).take(comps).map(|(low, high)| 1.0 - (high - low)).sum::<f32>() / comps as f32;
+                    let range = if channel.kind() == ChannelKind::Signed { (-1.0, 1.0) } else { (0.0, 1.0) };
+                    let Some(premultiplied) = normal_over(under, shown, hidden.clamp(0.0, 1.0), comps, range) else { continue };
 
                     *laid_down = true;
                     let Some(pixel) = buffer.get_mut(offset * (planned.comps + 1)..(offset + 1) * (planned.comps + 1)) else { continue };
+                    let coverage = premultiplied[3];
                     for (slot, value) in pixel.iter_mut().zip(premultiplied.iter().take(planned.comps)) {
                         *slot = if channel.kind() == ChannelKind::Signed { to_u16_signed(*value) } else { to_u16(*value) };
                     }

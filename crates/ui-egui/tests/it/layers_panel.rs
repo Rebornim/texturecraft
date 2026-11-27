@@ -543,7 +543,7 @@ fn properties_top(h: &Harness<'_, TextureCraftApp>) -> f32 {
     h.query_all(by().role(egui::Role::Tab).label_contains("Properties")).next().map(|tab| tab.rect().top()).unwrap_or(f32::MAX)
 }
 
-/// Holding R and clicking the model lists the layers laying something down there instead of painting with the current tool; a row of the list, clicked or reached with the arrow keys and Enter, selects its layer
+/// Holding R and clicking the model lists the layers laying something down there instead of painting with the current tool; a row of the list, clicked or reached with the arrow keys and Enter, selects its layer, and Escape closes it
 #[test]
 fn r_and_a_click_on_the_model_list_the_layers_there_and_a_row_selects_one_without_painting() {
     let (mut h, _) = harness();
@@ -585,4 +585,12 @@ fn r_and_a_click_on_the_model_list_the_layers_there_and_a_row_selects_one_withou
 
     assert_eq!(h.state().session.selected_layer(), Some(upper), "the clicked row's layer is selected");
     assert_eq!(h.state().session.history_labels().len(), steps, "no stroke was painted");
+
+    // The first Escape moves egui's focus off the top row: the list must close on it all the same
+    open_list(&mut h);
+    h.key_press(egui::Key::Escape);
+    h.run_steps(SETTLE_FRAMES);
+
+    assert!(h.state().layer_pick_list.is_none(), "Escape closes the list");
+    assert_eq!(h.state().session.selected_layer(), Some(upper), "and selects nothing");
 }

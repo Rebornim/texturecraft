@@ -130,7 +130,10 @@ pub(crate) fn select_set(s: &mut Session, ts: usize) -> Result<()> {
 fn resolution(s: &mut Session, p: &Value) -> Result<Value> {
     let ts = ts_param(s, p, "textureSet.resolution")?;
     let width = u64p(p, "resolution").ok_or_else(|| bad("textureSet.resolution", "`resolution` is required"))?;
-    let height = u64p(p, "height").unwrap_or(width);
+    let height = match p.get("height") {
+        None | Some(Value::Null) => width,
+        Some(_) => u64p(p, "height").ok_or_else(|| bad("textureSet.resolution", "`height` must be a number of texels"))?,
+    };
     let task = s.resize_task_to(ts, u32::try_from(width).unwrap_or(0), u32::try_from(height).unwrap_or(0))?;
     let out = task.run(&texturecraft_bake::Progress::new())?;
     s.apply_resize(out)
@@ -431,9 +434,12 @@ fn settings(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// The optional setting `key` of `textureSet.settings`, one of `ids`
 fn choice_param<T>(p: &Value, key: &str, what: &str, parse: fn(&str) -> Option<T>, ids: &[&str]) -> Result<Option<T>> {
-    let Some(id) = strp(p, key) else { return Ok(None) };
-
-    parse(id).map(Some).ok_or_else(|| bad("textureSet.settings", format!("unknown {what} {id:?} ({})", ids.join(" or "))))
+    let unknown = |value: &Value| bad("textureSet.settings", format!("unknown {what} {value} ({})", ids.join(" or ")));
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value @ Value::String(id)) => parse(id).map(Some).ok_or_else(|| unknown(value)),
+        Some(other) => Err(unknown(other)),
+    }
 }
 
 #[cfg(test)]
@@ -461,6 +467,22 @@ mod tests {
         assert!(crate::execute(&mut s, "textureSet.channels", &json!({"remove": ["baseColor"]})).is_err());
         assert!(crate::execute(&mut s, "textureSet.channels", &json!({"add": ["ior"], "remove": ["ior"]})).is_err());
         assert!(crate::execute(&mut s, "textureSet.channels", &json!({"add": ["nope"]})).is_err());
+    }
+
+    #[test]
+    fn malformed_size_and_setting_values_are_refused_and_change_nothing() {
+        let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+        crate::execute(&mut s, "textureSet.resolution", &json!({"ts": 0, "resolution": 256, "height": 128})).unwrap();
+        let before = s.doc.project.texture_sets[0].clone();
+
+        assert!(crate::execute(&mut s, "textureSet.resolution", &json!({"ts": 0, "resolution": 512, "height": "256"})).is_err());
+        for (key, value) in [("normalMixing", json!(1)), ("aoMixing", json!(true)), ("heightToNormal", json!(["sharp"])), ("uvPadding", json!(2))] {
+            let mut params = json!({"ts": 0});
+            params[key] = value.clone();
+            assert!(crate::execute(&mut s, "textureSet.settings", &params).is_err(), "{key}: {value}");
+        }
+
+        assert_eq!(s.doc.project.texture_sets[0], before);
     }
 
     #[test]

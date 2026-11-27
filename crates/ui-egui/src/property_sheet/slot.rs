@@ -122,7 +122,7 @@ impl PropertySheet<'_> {
             });
         } else {
             // A label's words are its value, so the name and source read as one
-            pick.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, false, format!("{name}: {source}")));
+            pick.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, format!("{name}: {source}")));
         }
         let mut result = SlotResponse { pick, clear: false, reset: false, toggled: false };
 

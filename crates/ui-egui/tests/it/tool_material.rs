@@ -89,3 +89,12 @@ fn the_eraser_picks_its_channels_without_value_cards() {
     assert!(harness.query_by_role_and_label(Role::Button, "Base color").is_none(), "the eraser paints no colour");
     assert!(harness.query_by_role_and_label(Role::Slider, "Roughness").is_none());
 }
+
+#[test]
+fn a_channel_cards_name_is_not_read_as_unavailable() {
+    let harness = material_section("paint");
+    let named = |node: &egui_kittest::Node<'_>| node.accesskit_node().value().is_some_and(|value| value.starts_with("Metallic: "));
+    let card = harness.query_all_by_role(Role::Label).find(named).unwrap();
+
+    assert!(!card.accesskit_node().is_disabled(), "the card's reset and value row answer, so its name must not read as unavailable");
+}

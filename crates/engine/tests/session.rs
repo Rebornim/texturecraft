@@ -805,6 +805,35 @@ fn a_mask_stroke_shows_through_the_stencil_while_painting_as_it_commits() {
 }
 
 #[test]
+fn a_live_paint_stroke_shows_through_the_stencil_on_every_channel_it_paints() {
+    let mut session = session_at(TEXTURE_SIZE);
+    let name = half_black_stencil(&mut session);
+    execute(&mut session, "tool.paint", &Value::Null).unwrap();
+    execute(&mut session, "tool.material", &json!({"channel": "baseColor", "color": [1.0, 0.0, 0.0]})).unwrap();
+    execute(&mut session, "tool.material", &json!({"channel": "roughness", "value": 0.0})).unwrap();
+    execute(&mut session, "tool.stencil", &json!({"image": name, "scale": 1.0, "tile": true})).unwrap();
+    execute(&mut session, "tool.brush", &json!({"size": 6, "hardness": 90})).unwrap();
+    let channel_at = |session: &Session, channel: Channel, x: f32| {
+        let hit = session.pick(Vec2::new(x, DAB_Y), session.viewport).unwrap();
+        let texel = |coordinate: f32| (coordinate * TEXTURE_SIZE as f32) as u32;
+        session.caches[0].composite.value(channel, texel(hit.uv.x), texel(hit.uv.y))
+    };
+    let before =
+        [Channel::BaseColor, Channel::Roughness].map(|channel| (channel_at(&session, channel, BLACK_DAB_X), channel_at(&session, channel, WHITE_DAB_X)));
+
+    // A stroke from behind the stencil's black half to its white half, shown before it commits
+    let viewport = session.viewport;
+    session.begin_stroke(Vec2::new(BLACK_DAB_X, DAB_Y), viewport, 1.0).unwrap();
+    session.continue_stroke(Vec2::new(WHITE_DAB_X, DAB_Y), 1.0);
+    session.update();
+
+    for (channel, (left_before, right_before)) in [Channel::BaseColor, Channel::Roughness].into_iter().zip(before) {
+        assert_eq!(channel_at(&session, channel, BLACK_DAB_X), left_before, "black stencil hides the live {channel:?}");
+        assert_ne!(channel_at(&session, channel, WHITE_DAB_X), right_before, "white stencil shows the live {channel:?}");
+    }
+}
+
+#[test]
 fn smart_materials_save_and_load_with_pixels() {
     let mut s = Session::new_project("t", primitives::material_ball(), "builtin:material_ball", None, 256).unwrap();
     s.viewport = texturecraft_engine::geom::glam::Vec2::new(400.0, 400.0);

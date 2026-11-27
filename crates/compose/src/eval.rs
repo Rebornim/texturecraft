@@ -67,6 +67,9 @@ const MIN_BOUNDS_EXTENT: f32 = 1e-6;
 /// Stack values being composited, per channel.
 type Acc = [[f32; 3]; NCH];
 
+/// What the live stroke's stencil lets through at a texel ([`Stencil::paint_world`])
+type StencilPaint = Option<(Option<[f32; 3]>, f32)>;
+
 /// How tall a baked height of 1 stands, as a fraction of a UV tile, when Baked Lighting Stylized tilts normals by its slope
 const HEIGHT_RELIEF: f32 = 1.0 / 32.0;
 
@@ -3042,6 +3045,8 @@ struct Texel<'a, 'b> {
     tape: Tape<'b>,
     /// The copy of a symmetric fill being sampled: the surface point and normal it sees, and its image's flip
     copy: Option<(usize, FillCopy)>,
+    /// The live stroke's stencil sampled here once for every channel (None until a channel reads it)
+    stencil_paint: Option<StencilPaint>,
 }
 
 /// What a layer contributes (its mask, its content value and coverage per channel): evaluated
@@ -3077,7 +3082,22 @@ type ChannelContents = [Option<([f32; 3], f32)>; NCH];
 
 impl<'a, 'b> Texel<'a, 'b> {
     fn new(inp: &'b Inputs<'a>, x: u32, y: u32, o: usize, stroke: f32) -> Self {
-        Texel { inp, x, y, o, res: inp.gbuf.width, coords: None, stroke, stop: None, anchors: Vec::new(), below: None, lit: None, tape: Tape::Off, copy: None }
+        Texel {
+            inp,
+            x,
+            y,
+            o,
+            res: inp.gbuf.width,
+            coords: None,
+            stroke,
+            stop: None,
+            anchors: Vec::new(),
+            below: None,
+            lit: None,
+            tape: Tape::Off,
+            copy: None,
+            stencil_paint: None,
+        }
     }
 
     /// Run `f` with `tape` as this texel's tape.
@@ -3218,6 +3238,24 @@ impl<'a, 'b> Texel<'a, 'b> {
     /// World position of this texel as the fill copy being sampled sees it (None when uncovered)
     fn world(&self) -> Option<Vec3> {
         self.surface((self.y * self.inp.gbuf.width + self.x) as usize).map(|s| s.pos)
+    }
+
+    /// What the live stroke's `stencil` lets through here, sampled once for all of the texel's channels
+    fn stencil_paint(&mut self, stencil: &Stencil) -> StencilPaint {
+        let sample = |texel: &Self| texel.world().and_then(|world| stencil.paint_world(world));
+
+        // A symmetric fill's copy sees another surface point, so only the texel's own sample is kept
+        if self.copy.is_some() {
+            return sample(self);
+        }
+
+        if let Some(paint) = self.stencil_paint {
+            return paint;
+        }
+
+        let paint = sample(self);
+        self.stencil_paint = Some(paint);
+        paint
     }
 
     /// The surface at G-buffer index `i`, as the fill copy being sampled sees it
@@ -3952,7 +3990,7 @@ impl<'a, 'b> Texel<'a, 'b> {
                         if let Some(stencil) = preview.stencil.as_ref()
                             && stroke > 0.0
                         {
-                            stroke *= self.world().and_then(|world| stencil.paint_world(world)).map_or(0.0, |(_, factor)| factor);
+                            stroke *= self.stencil_paint(stencil).map_or(0.0, |(_, factor)| factor);
                         }
 
                         if preview.erase {
@@ -4319,7 +4357,7 @@ impl<'a, 'b> Texel<'a, 'b> {
         // The stencil shapes the stroke; on the Projection tool its color is the base color
         let stencil_color = match stroke_preview.and_then(|stroke| stroke.stencil.as_ref()) {
             Some(stencil) if stroke_alpha > 0.0 => {
-                let stencil_paint = self.world().and_then(|world| stencil.paint_world(world));
+                let stencil_paint = self.stencil_paint(stencil);
                 stroke_alpha *= stencil_paint.map(|(_, factor)| factor).unwrap_or(0.0);
                 stencil_paint.and_then(|(color, _)| color)
             }

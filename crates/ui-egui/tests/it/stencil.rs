@@ -228,3 +228,23 @@ fn the_2d_view_says_projection_paints_in_3d_and_paints_nothing() {
     drag_holding(&mut harness, &[], Modifiers::NONE, from, vec2(60.0, 0.0));
     assert!(history(&harness) > steps, "the paint tool paints there");
 }
+
+#[test]
+fn picking_another_stencil_releases_the_last_ones_overlay_texture() {
+    let (mut harness, _) = tool_app(Tool::Paint);
+    let stencil_textures = |harness: &Harness<'_, TextureCraftApp>| {
+        harness.ctx.tex_manager().read().allocated().filter(|(_, texture)| texture.name.starts_with("stencil:")).count()
+    };
+
+    // Three distinct images picked in turn, each drawn over the view
+    for gray in [64, 128, 192] {
+        let mut png = Vec::new();
+        let image = image::RgbaImage::from_pixel(IMAGE_SIZE, IMAGE_SIZE, image::Rgba([gray, gray, gray, 255]));
+        image.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        let name = harness.state_mut().session.import_resource_bytes(&format!("stencil_{gray}.png"), png).unwrap();
+        texturecraft_engine::execute(&mut harness.state_mut().session, "tool.stencil", &json!({ "image": name })).unwrap();
+        harness.run_steps(REDRAW_FRAMES);
+    }
+
+    assert_eq!(stencil_textures(&harness), 1, "only the current stencil keeps its big texture");
+}

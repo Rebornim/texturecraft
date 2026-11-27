@@ -36,6 +36,8 @@ const GENERATOR_SET_KEY_PREFIX: &str = "generator-set:";
 const SAVED_FILE_KEY_PREFIX: &str = "saved-";
 /// Largest stencil preview dimension in pixels
 const STENCIL_MAX_SIZE_PX: f32 = 1024.0;
+/// The `images` key prefix of a stencil preview
+const STENCIL_KEY_PREFIX: &str = "stencil:";
 /// Big hover previews kept at most (the least recently shown go first)
 const BIG_PREVIEWS_KEPT: usize = 32;
 
@@ -77,12 +79,15 @@ pub struct Thumbs {
 impl Thumbs {
     /// A larger cached texture of an image resource for the stencil overlay (up to 1024 px)
     pub fn stencil(&mut self, ctx: &egui::Context, name: &str, image: &Arc<ImageRes>) -> TextureHandle {
-        let key = format!("stencil:{name}");
+        let key = format!("{STENCIL_KEY_PREFIX}{name}");
         if let Some((cached_image, texture)) = self.images.get(&key)
             && cached_image.ptr_eq(&Arc::downgrade(image))
         {
             return texture.clone();
         }
+
+        // Only the current stencil is drawn this big, so a new one releases the last one's texture
+        self.images.retain(|cached_key, _| !cached_key.starts_with(STENCIL_KEY_PREFIX));
 
         let scale = (STENCIL_MAX_SIZE_PX / image.width.max(image.height).max(1) as f32).min(1.0);
         let (w, h) = (((image.width as f32 * scale) as usize).max(1), ((image.height as f32 * scale) as usize).max(1));
@@ -148,7 +153,7 @@ impl Thumbs {
 
         self.images_revision = Some(revision);
         self.images.retain(|key, (cached_image, _)| {
-            let name = key.strip_prefix("stencil:").unwrap_or(key);
+            let name = key.strip_prefix(STENCIL_KEY_PREFIX).unwrap_or(key);
             images.get(name).is_some_and(|image| cached_image.ptr_eq(&Arc::downgrade(image)))
         });
     }

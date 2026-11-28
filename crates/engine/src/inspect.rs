@@ -2,7 +2,7 @@
 //! without a screenshot.
 
 use serde_json::{Value, json};
-use texturecraft_core::{Effect, EffectKind, Fill, Filter, Generator, Layer, LayerKind, NormalFormat, Projection, Sampling, Source};
+use texturecraft_core::{Effect, EffectKind, Fill, Filter, Generator, GeneratorKind, Layer, LayerKind, NormalFormat, Projection, Sampling, Source};
 
 use crate::Session;
 use crate::session::StackTarget;
@@ -162,6 +162,9 @@ fn generator_json(generator: &Generator) -> Value {
     if let Some(light) = &generator.light {
         out["light"] = json!(light);
     }
+    if generator.on_earlier_model() && matches!(generator.kind, GeneratorKind::Position | GeneratorKind::Direction) {
+        out["direction"] = json!(generator.direction);
+    }
     if let Some(texture) = &generator.texture {
         out["texture"] = json!(texture);
     }
@@ -261,6 +264,10 @@ pub fn texture_set(session: &Session, index: usize) -> Value {
             })
         })
         .collect();
+
+    let out_of_date: std::collections::BTreeMap<_, Vec<_>> =
+        session.out_of_date_maps(index).into_iter().map(|(map, changes)| (map.id(), changes.iter().map(|change| change.id()).collect())).collect();
+
     json!({
         "index": index,
         "name": texture_set.name,
@@ -273,6 +280,8 @@ pub fn texture_set(session: &Session, index: usize) -> Value {
         "layers": session.doc.project.walk(index).len(),
         "parts": crate::set_cmds::parts(session, index),
         "baked": crate::project_cmds::baked_json(session.doc.baked.get(&index)),
+        "outOfDate": out_of_date,
+        "autoRebake": texture_set.auto_rebake.map(texturecraft_core::BakedMap::id),
         "visible": texture_set.visible,
         "active": index == session.ts(),
     })

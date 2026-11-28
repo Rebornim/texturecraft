@@ -3,6 +3,7 @@
 //! the shortcut editor window (Help ▸ Shortcuts list) and the Edit ▸ Settings ▸ Shortcuts page.
 
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use crate::shortcut_dispatch::Dispatcher;
 use craft_keymap::{Active, Chord, CommandDef, CommandRef, ConflictKind, KeyInput, Layout, Lookup, Mods, Overrides, Platform, Scope, Scopes};
@@ -40,6 +41,22 @@ pub static NOT_AVAILABLE_ACTIONS: [(&str, Binding); 2] = [
     ("file.reimportMesh", Binding { id: "ui.pauseEngine", group: "Commands", label: "Pause Engine Computation", default: Some("Shift+Esc") }),
     ("viewport.frame", Binding { id: "ui.toggleAnimation", group: "Viewport", label: "Toggle animation", default: Some("Space") }),
 ];
+
+/// Shortcut reference rows shown before Reimport mesh. Their example keys stay available to bind.
+pub const REFERENCE_ACTIONS: [Binding; 7] = [
+    Binding { id: "ui.manipulator.toggle", group: "Viewport", label: "Toggle transform handles", default: Some("Q") },
+    Binding { id: "ui.manipulator.grow", group: "Viewport", label: "Enlarge transform handles", default: None },
+    Binding { id: "ui.manipulator.shrink", group: "Viewport", label: "Shrink transform handles", default: Some("-") },
+    Binding { id: "ui.manipulator.space", group: "Viewport", label: "Switch transform coordinate space", default: Some("T") },
+    Binding { id: "ui.warpEdit", group: "Viewport", label: "Toggle warp editing", default: Some("Shift+V") },
+    Binding { id: "ui.manipulator.translate", group: "Viewport", label: "Move with transform handles", default: Some("W") },
+    Binding { id: "ui.manipulator.rotate", group: "Viewport", label: "Rotate with transform handles", default: Some("E") },
+];
+
+fn unavailable_before(id: &str) -> impl Iterator<Item = &'static Binding> + '_ {
+    let reference = if id == "file.reimportMesh" { REFERENCE_ACTIONS.as_slice() } else { &[] };
+    reference.iter().chain(NOT_AVAILABLE_ACTIONS.iter().filter(move |(before, _)| *before == id).map(|(_, row)| row))
+}
 
 /// The shortcut list's first rows, in the reference's order. The `>` and `<` of the reference are
 /// the shifted Period and Comma keys.
@@ -222,14 +239,15 @@ pub struct Bindings {
     stored: Keymap,
     map: craft_keymap::Keymap,
     dispatcher: Dispatcher,
+    conflicts: OnceLock<BTreeMap<&'static str, &'static Binding>>,
 }
 
 impl Default for Bindings {
     fn default() -> Bindings {
         let stored = Keymap::new();
         let map = resolved(&stored, Platform::current());
-        // Held keys repeat their command. Copy, Cut and Paste events count as Ctrl+C, X and V.
-        Bindings { stored, map, dispatcher: Dispatcher::default() }
+
+        Bindings { stored, map, dispatcher: Dispatcher::default(), conflicts: OnceLock::new() }
     }
 }
 
@@ -239,6 +257,7 @@ impl Bindings {
         if self.stored != *keymap || self.map.platform() != platform {
             self.stored = keymap.clone();
             self.map = resolved(keymap, platform);
+            self.conflicts.take();
         }
     }
 
@@ -275,14 +294,22 @@ impl Bindings {
         matches!(self.map.lookup(&Chord::new(Mods::SHIFT, key), false, &Active::NONE), Lookup::None)
     }
 
-    /// Another binding on the same shortcut as `b`.
-    fn conflict(&self, b: &Binding) -> Option<&'static Binding> {
+    /// The first conflicting action for each shortcut, computed only when an editor needs it.
+    fn conflicts(&self) -> &BTreeMap<&'static str, &'static Binding> {
+        self.conflicts.get_or_init(|| bindings().iter().filter_map(|binding| self.find_conflict(binding).map(|other| (binding.id, other))).collect())
+    }
+
+    fn conflict(&self, binding: &Binding) -> Option<&'static Binding> {
+        self.conflicts().get(binding.id).copied()
+    }
+
+    fn find_conflict(&self, b: &Binding) -> Option<&'static Binding> {
         let clash = self.map.conflicts_with(&CommandRef::new(b.id)).into_iter().find(|c| c.kind == ConflictKind::Clash);
         if let Some(clash) = clash {
             return bindings().iter().find(|x| x.id == clash.b.0.id);
         }
 
-        // The rows the reference lists and TextureCraft cannot run yet still own their keys
+        // Keep the existing reserved shortcuts for paused computation and animation
         let mine = parse(shortcut(&self.stored, b)?)?;
         NOT_AVAILABLE_ACTIONS.iter().map(|(_, row)| row).find(|row| row.default.and_then(parse) == Some(mine))
     }
@@ -369,7 +396,7 @@ pub fn shown(text: &str) -> &str {
 /// Whether the shortcuts in `edited` (kept in step with the working copy) have an item that
 /// shares its shortcut with another.
 pub(crate) fn has_conflict(edited: &Bindings) -> bool {
-    bindings().iter().any(|b| edited.conflict(b).is_some())
+    !edited.conflicts().is_empty()
 }
 
 /// Follow `keymap` with the checker of the Settings window.
@@ -399,6 +426,7 @@ pub(crate) fn actions_page(ui: &mut egui::Ui, keymap: &mut Keymap, recorder: &Bi
         }
         capture = None;
     }
+
     follow(edited, keymap, &ctx);
 
     let cell = |ui: &mut egui::Ui, width: f32, add: &mut dyn FnMut(&mut egui::Ui)| {
@@ -408,7 +436,6 @@ pub(crate) fn actions_page(ui: &mut egui::Ui, keymap: &mut Keymap, recorder: &Bi
         });
     };
 
-    // A pencil that cannot be used yet
     let locked_pencil = |ui: &mut egui::Ui, action: &str| {
         let edit = trf("Edit the shortcut of {item}", &[("item", &tr(action))]);
         ui.add_enabled_ui(false, |ui| icon_button(ui, ic::PENCIL_SIMPLE, &edit, false, 20.0)).inner.on_disabled_hover_text(tr(NOT_AVAILABLE));
@@ -428,9 +455,10 @@ pub(crate) fn actions_page(ui: &mut egui::Ui, keymap: &mut Keymap, recorder: &Bi
     ui.label(caption(tr("Actions")));
     ui.add_space(4.0);
     for (i, b) in bindings().iter().enumerate() {
-        for (_, row) in NOT_AVAILABLE_ACTIONS.iter().filter(|(before, _)| *before == b.id) {
+        for row in unavailable_before(b.id) {
             locked_row(ui, row.label, row.default.unwrap_or(""));
         }
+
         let waiting = capture == Some(i);
         ui.horizontal(|ui| {
             cell(ui, 300.0, &mut |ui| {
@@ -485,8 +513,8 @@ pub(crate) fn actions_page(ui: &mut egui::Ui, keymap: &mut Keymap, recorder: &Bi
     });
 }
 
-/// The first key press this frame as a shortcut. A plain Escape while none of TextureCraft's widgets has the keyboard
-/// is the window's cancel, which the recorder takes as the Escape that cancels it.
+/// The first key press this frame as a shortcut, including Escape routed to the window's cancel.
+/// Keep the press's modifiers so only plain Escape cancels recording.
 fn pressed(ctx: &egui::Context, bindings: &Bindings) -> Option<KeyboardShortcut> {
     let platform = craft_keymap::egui::platform(ctx);
     let press = ctx.input(|i| {
@@ -495,7 +523,14 @@ fn pressed(ctx: &egui::Context, bindings: &Bindings) -> Option<KeyboardShortcut>
             _ => None,
         })
     });
-    press.or_else(|| crate::framework::take_window_cancel(ctx).then(|| KeyboardShortcut::new(Modifiers::NONE, Key::Escape)))
+
+    press.or_else(|| {
+        crate::framework::take_window_cancel(ctx).then(|| {
+            let modifiers = craft_ui::runtime::keys::escape_mods(ctx).unwrap_or(Mods::NONE);
+
+            Chord::new(modifiers, craft_keymap::Key::Escape).to_egui_shortcut()
+        })
+    })
 }
 
 /// The shortcut editor window.
@@ -519,6 +554,7 @@ pub fn window(app: &mut TextureCraftApp, ctx: &egui::Context) {
         }
         capture = None;
     }
+
     app.bindings.sync(&app.ui.keymap, craft_keymap::egui::platform(ctx));
     let mut filter: String = ctx.data(|d| d.get_temp(filter_id)).unwrap_or_default();
     let mut open = true;
@@ -532,7 +568,7 @@ pub fn window(app: &mut TextureCraftApp, ctx: &egui::Context) {
                 }
             });
         });
-        let clashes = bindings().iter().filter(|b| app.bindings.conflict(b).is_some()).count();
+        let clashes = app.bindings.conflicts().len();
         if clashes > 0 {
             ui.label(
                 RichText::new(format!("{} {}", ic::WARNING, trf("{n} items share a shortcut; the first one listed wins.", &[("n", &clashes)])))
@@ -544,7 +580,7 @@ pub fn window(app: &mut TextureCraftApp, ctx: &egui::Context) {
         egui::ScrollArea::vertical().max_height(420.0).auto_shrink([false, true]).show(ui, |ui| {
             egui::Grid::new("keymap_grid").num_columns(3).striped(true).spacing(vec2(10.0, 4.0)).show(ui, |ui| {
                 for (i, b) in bindings().iter().enumerate() {
-                    for (_, row) in NOT_AVAILABLE_ACTIONS.iter().filter(|(before, _)| *before == b.id) {
+                    for row in unavailable_before(b.id) {
                         let key = row.default.unwrap_or("");
                         if !needle.is_empty() && ![row.label, row.group, tr(row.label), tr(row.group), key].iter().any(|t| t.to_lowercase().contains(&needle)) {
                             continue;
@@ -558,6 +594,7 @@ pub fn window(app: &mut TextureCraftApp, ctx: &egui::Context) {
                         ui.add_enabled(false, button).on_disabled_hover_text(tr(NOT_AVAILABLE));
                         ui.end_row();
                     }
+
                     let current = shortcut(&app.ui.keymap, b);
                     let current_text = current.map(shown);
                     if !needle.is_empty()

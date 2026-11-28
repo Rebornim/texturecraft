@@ -2,8 +2,11 @@
 //! Keep feature tests in their own modules; the standalone session.rs target remains available.
 
 mod add_mask_items;
+mod auto_rebake;
 mod bake;
 mod bake_checks;
+mod bake_log;
+mod bake_out_of_date;
 mod bake_resolution;
 mod bake_settings;
 mod bake_tiles;
@@ -46,6 +49,7 @@ mod generator_wear;
 mod gradient_map;
 mod high_poly_missed;
 mod instances;
+mod ior_specular;
 mod layer_multi_select;
 mod mask_clone_smudge;
 mod mask_export;
@@ -63,6 +67,7 @@ mod perf;
 mod polygon_fill;
 mod project_recovery;
 mod rebuilt_uv_layout;
+mod resource_updater;
 mod resources_used;
 mod sample;
 mod solo;

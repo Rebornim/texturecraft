@@ -14,11 +14,13 @@ mod import_row;
 mod library_location;
 mod project_config;
 mod resource_usage;
+mod resources_updater;
 pub use import_resources::ImportResources;
 pub use import_row::ImportRow;
 pub use library_location::LibraryLocation;
 pub use project_config::ProjectConfig;
 pub use resource_usage::ResourceUsage;
+pub use resources_updater::ResourcesUpdater;
 
 mod console_line;
 mod export_job;
@@ -107,6 +109,9 @@ pub struct Windows {
     /// File > Import resources: the files added so far, imported by Import.
     #[serde(skip)]
     pub import_resources: Option<ImportResources>,
+    /// The Resources Updater: the project's image resources and whether their files changed on disk.
+    #[serde(skip)]
+    pub resources_updater: Option<ResourcesUpdater>,
     /// What waits on the unsaved-changes dialog: save, don't save or cancel.
     #[serde(skip)]
     pub unsaved: Option<Unsaved>,
@@ -162,7 +167,8 @@ pub struct Prefs {
     pub reserved_cores: u32,
     /// Maximum decompressed project size accepted on open, in GiB (at least one).
     pub project_open_limit_gib: u32,
-    /// Percent of the free RAM a project save may hold at once (desktop; 1 to 100).
+    /// Percentage of free RAM available to a project save on desktop (0 to 100).
+    /// A stored zero uses the minimum budget of 1%.
     pub save_ram_percent: u8,
     /// Worker threads for painting, baking and export (desktop; 0: one per logical CPU). Read at
     /// startup, before the first parallel job.
@@ -182,6 +188,21 @@ pub struct Prefs {
     /// The plain background of the 3D and 2D views at Environment Opacity 0 (Settings > General >
     /// Background color): the color at the top and at the bottom, linear RGB.
     pub background: [[f32; 3]; 2],
+    /// The 3D view draws the X, Y and Z axes in its corner.
+    pub show_world_axes: bool,
+    /// Settings > General > Show keyboard helper. Stored only: TextureCraft has no keyboard helper yet.
+    pub show_keyboard_helper: bool,
+    /// Settings > General > Only display the selected material when painting. Stored only: the
+    /// views always show every texture set.
+    pub only_selected_material_when_painting: bool,
+    /// Settings > Baking options > Save preprocessed scene files. Stored only: bakes keep no
+    /// preprocessed scene files.
+    pub save_preprocessed_scene_files: bool,
+    /// Settings > Baking options > Enable live preview baking process.
+    pub live_preview_baking: bool,
+    /// Settings > Preview options > Local cache directory (desktop). Empty or relative uses the
+    /// app's default cache directory. Stored only until TextureCraft has a preview cache.
+    pub local_cache_directory: String,
 }
 
 /// The orbit speed the built-in navigation runs at.
@@ -195,7 +216,7 @@ impl Default for Prefs {
             ui_scale: 1.0,
             autosave_minutes: 10,
             recent_projects_limit: 10,
-            language: "en".into(),
+            language: crate::i18n::SYSTEM_LANGUAGE.into(),
             viewport_texture: 0,
             brightness: crate::theme::Brightness::default(),
             accent: crate::theme::Accent::default(),
@@ -213,6 +234,12 @@ impl Default for Prefs {
             gpu_raytracing: true,
             libraries: Vec::new(),
             background: texturecraft_render::DEFAULT_BACKGROUND,
+            show_world_axes: true,
+            show_keyboard_helper: true,
+            only_selected_material_when_painting: false,
+            save_preprocessed_scene_files: true,
+            live_preview_baking: true,
+            local_cache_directory: String::new(),
         }
     }
 }
@@ -513,7 +540,7 @@ fn default_true() -> bool {
 }
 
 /// The bake layout's version: saved bake docks from an older one load as `Dock::for_baking`
-const BAKE_LAYOUT_VERSION: u32 = 2;
+const BAKE_LAYOUT_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UiState {
@@ -558,6 +585,10 @@ pub struct UiState {
     /// Window ▸ Hide UI (Tab): only the viewport.
     pub hide_ui: bool,
     pub windows: Windows,
+    /// Mesh Export Options: compute smooth normals on the exported copy, not the project.
+    /// Off by default so an export keeps the project's authored normals unless the user opts in.
+    #[serde(default)]
+    pub mesh_recompute_normals: bool,
     pub uv_zoom: f32,
     pub uv_pan: [f32; 2],
     /// The 2D view's turn, counter-clockwise on screen in radians (Alt+left drag)
@@ -646,6 +677,12 @@ pub struct UiState {
     /// The Log panel's shown channel tab
     #[serde(default)]
     pub log_channel: crate::log_panel::LogChannel,
+    /// The Baking Log panel's shown tab
+    #[serde(default)]
+    pub baking_log_tab: crate::baking_log::BakingLogTab,
+    /// Whether the Baking Log keeps only the rows with an issue
+    #[serde(default)]
+    pub baking_log_issues_only: bool,
     /// The project template the last New project was created from (name or label)
     #[serde(default)]
     pub last_template: String,
@@ -712,6 +749,12 @@ impl UiState {
         self.rail_panel = None;
     }
 
+    /// Reset the workspace and return the interface to the system language.
+    pub(crate) fn reset_ui(&mut self) {
+        self.adopt_layout(Self::default());
+        self.prefs.language.clear();
+    }
+
     /// Take `layout`'s panels, windows and view settings, keeping this state's dialogs, settings, files and shelf query
     pub fn adopt_layout(&mut self, layout: UiState) {
         let keep = std::mem::replace(self, layout);
@@ -726,6 +769,7 @@ impl UiState {
         }
 
         self.export = keep.export;
+        self.mesh_recompute_normals = keep.mesh_recompute_normals;
         self.recent = keep.recent;
         self.last_template = keep.last_template;
         self.prefs = keep.prefs;
@@ -765,6 +809,7 @@ impl Default for UiState {
             selected_baked_map: None,
             hide_ui: false,
             windows: Windows::default(),
+            mesh_recompute_normals: false,
             uv_zoom: 1.0,
             uv_pan: [0.0, 0.0],
             uv_rotation: 0.0,
@@ -800,6 +845,8 @@ impl Default for UiState {
             bake_preset_name: String::new(),
             layout_dialog: None,
             log_channel: crate::log_panel::LogChannel::default(),
+            baking_log_tab: crate::baking_log::BakingLogTab::default(),
+            baking_log_issues_only: false,
             last_template: String::new(),
             log_selection: Default::default(),
             log_anchor: None,
@@ -847,6 +894,15 @@ mod tests {
     }
 
     #[test]
+    fn mesh_export_normal_choice_defaults_off_for_older_saved_states() {
+        assert!(!UiState::default().mesh_recompute_normals);
+        let mut saved = serde_json::to_value(UiState::default()).unwrap();
+        saved.as_object_mut().unwrap().remove("mesh_recompute_normals");
+        let loaded: UiState = serde_json::from_value(saved).unwrap();
+        assert!(!loaded.mesh_recompute_normals, "older states keep the project's stored normals unless the user opts in");
+    }
+
+    #[test]
     fn adopting_a_layout_keeps_recent_files_and_user_settings() {
         use crate::frame_gizmo::warp_toolbar::{GizmoMode, GizmoSpace, WarpToolbarSettings};
 
@@ -855,7 +911,9 @@ mod tests {
         ui.warp_toolbar = warp_toolbar;
         ui.export.preset = "Mine".into();
         ui.keymap.insert("file.save".into(), "F5".into());
+        ui.mesh_recompute_normals = false;
         let mut layout = UiState::default();
+        layout.mesh_recompute_normals = true;
         layout.dock.close(crate::docking::Panel::Assets);
 
         ui.adopt_layout(layout);
@@ -864,6 +922,7 @@ mod tests {
         assert_eq!(ui.recent, vec!["a.tcraft".to_string()]);
         assert_eq!(ui.export.preset, "Mine");
         assert_eq!(ui.keymap.get("file.save").map(String::as_str), Some("F5"));
+        assert!(!ui.mesh_recompute_normals, "a layout does not change the user's export setting");
         assert_eq!(ui.warp_toolbar, warp_toolbar, "loading a layout keeps the user's warp settings");
     }
 
@@ -960,6 +1019,24 @@ mod tests {
             reloaded.sync_mode_dock();
             assert_eq!(reloaded, ui, "a current layout is not reset again");
         }
+    }
+
+    #[test]
+    fn a_saved_bake_dock_with_the_log_at_the_bottom_gets_the_baking_log_there() {
+        use crate::docking::Panel;
+
+        let mut ui = UiState { mode: Mode::Baking, ..UiState::default() };
+        ui.sync_mode_dock();
+        ui.dock.close(Panel::BakingLog);
+        ui.dock.focus(Panel::Log);
+        let mut saved = serde_json::to_value(&ui).unwrap();
+        saved["bake_layout_version"] = serde_json::json!(2);
+
+        let mut loaded: UiState = serde_json::from_value(saved).unwrap();
+        loaded.sync_mode_dock();
+
+        assert!(loaded.dock.is_visible(Panel::BakingLog), "the Baking Log takes the bottom of the bake layout");
+        assert!(!loaded.dock.is_open(Panel::Log), "the general Log stays in Window > Views");
     }
 
     #[test]

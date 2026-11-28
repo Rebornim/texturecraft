@@ -70,6 +70,7 @@ pub(crate) fn one_set_document(src_set: &TextureSet, name: &str) -> Document {
     set.tile_resolutions = src_set.tile_resolutions.clone();
     set.channels = src_set.channels.clone();
     project.texture_sets.push(set);
+
     Document {
         bake_meshes: Default::default(),
         bake_paint: BTreeMap::new(),
@@ -77,6 +78,7 @@ pub(crate) fn one_set_document(src_set: &TextureSet, name: &str) -> Document {
         pixels: PixelStore::default(),
         baked: BTreeMap::new(),
         resources: BTreeMap::new(),
+        painted_regions: Default::default(),
     }
 }
 
@@ -99,7 +101,7 @@ impl Session {
         images_used(&mini.project, root, &mut used, 0);
         let resources = used.into_iter().filter_map(|name| self.doc.resources.get(&name).map(|bytes| (name, Arc::clone(bytes)))).collect();
 
-        let snapshot = texturecraft_formats::ProjectFile {
+        let snapshot = texturecraft_formats::ProjectFile::<Arc<Vec<u8>>> {
             project: mini.project,
             pixels: mini.pixels,
             baked: BTreeMap::new(),
@@ -145,6 +147,7 @@ impl Session {
             project: project_file.project,
             pixels: project_file.pixels,
             baked: BTreeMap::new(),
+            painted_regions: Default::default(),
             resources,
         };
 

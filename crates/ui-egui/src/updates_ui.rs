@@ -73,10 +73,9 @@ fn result_window_shows(status: &Status, prompt_open: bool) -> bool {
     !prompt_open && !matches!(status, Status::Idle)
 }
 
-/// Whether an update may install and close the app: the project has no unsaved changes and no
-/// stroke, bake or resize is running.
+/// Whether an update can restart the app with all edits saved and pending work finished.
 fn safe_to_close(app: &TextureCraftApp) -> bool {
-    !app.session.modified && !app.session.stroke_active() && app.bake.is_none() && app.resize.is_none() && app.high_poly_job.is_none()
+    !app.session.modified && !app.session.stroke_active() && app.save_job.is_none() && app.bake.is_none() && app.resize.is_none() && app.high_poly_job.is_none()
 }
 
 /// One pass of the update flow, before the dialog host runs: answers the result dialog closed in
@@ -298,7 +297,8 @@ mod tests {
         assert!(!safe_to_close(h.state()), "unsaved changes");
         h.state_mut().session.modified = false;
 
-        h.state_mut().bake = Some(crate::BakeJob { queue: Vec::new(), current: None, total: 0, mesh_id: 0, only: None });
+        h.state_mut().bake = Some(crate::BakeJob { queue: Vec::new(), current: None, total: 0, mesh_id: 0, only: None, rebake: None });
+
         assert!(!safe_to_close(h.state()), "a bake");
         h.state_mut().bake = None;
 
@@ -318,6 +318,19 @@ mod tests {
         assert!(!safe_to_close(h.state()), "a stroke");
         h.state_mut().session.cancel_stroke();
         assert!(safe_to_close(h.state()));
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("project.tcraft");
+        assert!(h.state_mut().start_save(path.to_str().unwrap(), true, false, false));
+        assert!(!safe_to_close(h.state()), "the accepted archive write must finish before restarting");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while h.state().save_job.is_some() && std::time::Instant::now() < deadline {
+            h.step();
+        }
+
+        assert!(safe_to_close(h.state()));
+        assert!(path.exists());
     }
 
     #[test]

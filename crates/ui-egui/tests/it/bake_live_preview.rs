@@ -106,6 +106,31 @@ fn switching_the_preview_off_hides_it() {
 }
 
 #[test]
+fn disabling_live_preview_in_preferences_releases_the_picture_and_can_be_reenabled() {
+    let mut harness = harness();
+
+    for resolution in [BakeResolution::R256, BakeResolution::R128] {
+        let state = harness.state_mut();
+        state.ui.bake_visualization.map_preview_size = resolution;
+        state.ui.prefs.live_preview_baking = true;
+
+        assert!(wait_for_preview(&mut harness, |size| size == resolution.pixels()).is_some());
+        let pixels = &harness.state().session.bake_preview_baked(0).unwrap().maps[&BakedMap::AmbientOcclusion];
+        let picture = std::sync::Arc::downgrade(pixels);
+        let bytes = pixels.len() * std::mem::size_of::<f32>();
+
+        harness.state_mut().ui.prefs.live_preview_baking = false;
+        harness.run_steps(3);
+
+        let remaining_owners = picture.strong_count();
+        eprintln!("preview resolution: {resolution:?}, published bytes: {bytes}, owners after disabling: {remaining_owners}");
+        assert!(!harness.state().session.bake_preview_active());
+        assert_eq!(remaining_owners, 0, "disabling the preview releases its image");
+        assert_ne!(harness.state().session.view, texturecraft_engine::ViewMode::MeshMap(BakedMap::AmbientOcclusion));
+    }
+}
+
+#[test]
 fn pictures_keep_coming_while_the_slider_is_still_moving() {
     let mut harness = harness();
 

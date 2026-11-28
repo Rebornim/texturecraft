@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BakeSettings, BakeSyncGroup, BakedMap, Channel, ChannelFormat, ContentsOffset, CoreError, Effect, Layer, LayerId, LayerKind, Result};
+use crate::{BakeSettings, BakeSource, BakeSyncGroup, BakedMap, Channel, ChannelFormat, ContentsOffset, CoreError, Effect, Layer, LayerId, LayerKind, Result};
 
 pub use crate::env_alignment::EnvAlignment;
 pub use crate::shadow_mode::ShadowMode;
@@ -69,6 +69,12 @@ pub struct TextureSet {
     /// Mesh maps that have been baked (pixels live with the engine / project file).
     #[serde(default)]
     pub baked: BTreeSet<BakedMap>,
+    /// What each baked map was baked from; a map without a record (imported, or older project) is never out of date
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bake_sources: BTreeMap<BakedMap, BakeSource>,
+    /// The one mesh map the app rebakes by itself when what it is baked from changes
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_rebake: Option<BakedMap>,
     #[serde(default = "yes")]
     pub visible: bool,
     /// UDIM numbers of the UV tiles this set paints, ascending (UV tiles mode);
@@ -171,6 +177,8 @@ impl TextureSet {
             height_strength: 1.0,
             bake: BakeSettings::default(),
             baked: BTreeSet::new(),
+            bake_sources: BTreeMap::new(),
+            auto_rebake: None,
             visible: true,
             uv_tiles: Vec::new(),
             bake_excluded_tiles: BTreeSet::new(),
@@ -185,6 +193,19 @@ impl TextureSet {
 
     pub fn has_enabled_bake_tiles(&self) -> bool {
         self.uv_tiles.is_empty() || self.uv_tiles.iter().any(|tile| !self.bake_excluded_tiles.contains(tile))
+    }
+
+    /// Fingerprint of the shared bake settings (not the set's check) and baked UV tiles (not their working resolutions)
+    pub fn bake_settings_fingerprint(&self) -> u64 {
+        let mut common = self.bake.common;
+        common.is_enabled = true;
+        let shared = (common, &self.bake.high_poly, &self.bake.cage, &self.bake.skew, &self.uv_tiles, &self.bake_excluded_tiles);
+        crate::fingerprint(serde_json::to_string(&shared).unwrap_or_default().as_bytes())
+    }
+
+    /// Fingerprint of `map`'s own bake settings (not whether it is checked)
+    pub fn map_settings_fingerprint(&self, map: BakedMap) -> u64 {
+        crate::fingerprint(self.bake.maps.parameters_json(map).to_string().as_bytes())
     }
 
     /// Height strength for slopes measured over the whole texture width (the viewport shader,
@@ -316,8 +337,10 @@ pub struct DisplaySettings {
     pub scatter_color: [f32; 3],
     /// Subsurface scattering mean free path as a fraction of the mesh's bounding radius.
     pub scatter_radius: f32,
-    /// Index of refraction of transmissive surfaces (where the Transmission channel is painted).
+    /// Index of refraction for transmission and, when enabled, dielectric reflectance.
     pub ior: f32,
+    /// Use IOR to determine dielectric reflectance at normal incidence in Metallic/Roughness.
+    pub ior_specular: bool,
     /// Depth of field of the viewport and the path tracer (thin lens).
     pub dof: DepthOfField,
     /// The selected fill's projection gizmos show in the 3D view (the Projection row's eye)
@@ -381,10 +404,34 @@ pub const ENVIRONMENTS: [&str; 6] = ["Studio Soft", "Studio Contrast", "Overcast
 /// Prefix of [`DisplaySettings::environment`] naming an image resource.
 pub const ENV_RESOURCE_PREFIX: &str = "resource:";
 
+/// Original dielectric F0 multiplier for the Specular Level channel.
+pub const LEGACY_DIELECTRIC_F0_SCALE: f32 = 0.08;
+
+/// Project limits for the index of refraction.
+pub const MIN_INDEX_OF_REFRACTION: f32 = 1.0;
+pub const MAX_INDEX_OF_REFRACTION: f32 = 3.0;
+
 impl DisplaySettings {
     /// The image resource used as the environment, if any.
     pub fn environment_resource(&self) -> Option<&str> {
         self.environment.strip_prefix(ENV_RESOURCE_PREFIX)
+    }
+
+    /// Multiplier for Specular Level in the Metallic/Roughness model.
+    pub fn dielectric_f0_scale(&self) -> f32 {
+        if !self.ior_specular || self.spec_gloss || !self.ior.is_finite() {
+            return LEGACY_DIELECTRIC_F0_SCALE;
+        }
+
+        const AIR_INDEX_OF_REFRACTION: f32 = 1.0;
+        // Specular Level 0.5 corresponds to OpenPBR specular weight 1
+        const SPECULAR_LEVEL_TO_WEIGHT_SCALE: f32 = 2.0;
+        let ior = self.ior.clamp(MIN_INDEX_OF_REFRACTION, MAX_INDEX_OF_REFRACTION);
+        let contrast = ior - AIR_INDEX_OF_REFRACTION;
+        let index_sum = ior + AIR_INDEX_OF_REFRACTION;
+
+        // Square before dividing so IOR 1.5 rounds to the legacy multiplier
+        SPECULAR_LEVEL_TO_WEIGHT_SCALE * contrast.powi(2) / index_sum.powi(2)
     }
 }
 
@@ -416,6 +463,7 @@ impl Default for DisplaySettings {
             scatter_color: [1.0, 0.4, 0.25],
             scatter_radius: 0.1,
             ior: 1.5,
+            ior_specular: false,
             dof: DepthOfField::default(),
             projection_gizmos: true,
         }
@@ -452,6 +500,10 @@ pub struct Project {
     /// The project's colour swatches (linear RGB), in the order they were added; projects without any save none
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub swatches: Vec<[f32; 3]>,
+    /// The files image resources were imported from, by resource name (the Resources Updater
+    /// reads them again). Resources made in the app or imported without a file path have none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub resource_sources: BTreeMap<String, crate::ResourceSource>,
 }
 
 impl Project {
@@ -470,6 +522,7 @@ impl Project {
             display: DisplaySettings::default(),
             cameras: Vec::new(),
             swatches: Vec::new(),
+            resource_sources: BTreeMap::new(),
         }
     }
 
@@ -815,6 +868,28 @@ mod tests {
         let mut p = Project::new("t", "builtin:sphere");
         p.texture_sets.push(TextureSet::new("Body", 0, 512));
         p
+    }
+
+    #[test]
+    fn enabling_ior_at_the_default_preserves_legacy_reflectance() {
+        let mut display = DisplaySettings::default();
+        let legacy = display.dielectric_f0_scale();
+
+        display.ior_specular = true;
+
+        assert_eq!(display.dielectric_f0_scale(), legacy);
+    }
+
+    #[test]
+    fn dielectric_reflectance_clamps_ior_and_falls_back_for_non_finite_values() {
+        let scale_at = |ior| DisplaySettings { ior, ior_specular: true, ..DisplaySettings::default() }.dielectric_f0_scale();
+
+        assert_eq!(scale_at(0.5), scale_at(1.0));
+        assert_eq!(scale_at(1.0), 0.0);
+        assert!(scale_at(1.5) < scale_at(3.0));
+        assert_eq!(scale_at(4.0), scale_at(3.0));
+        assert_eq!(scale_at(f32::NAN), LEGACY_DIELECTRIC_F0_SCALE);
+        assert_eq!(scale_at(f32::INFINITY), LEGACY_DIELECTRIC_F0_SCALE);
     }
 
     #[test]

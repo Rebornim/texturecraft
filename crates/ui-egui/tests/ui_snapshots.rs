@@ -89,6 +89,9 @@ fn empty_start_snapshot() {
     harness.get_by_label("Edit").click();
     harness.run_steps(3);
     harness.get_by_label("Settings").click();
+    harness.run_steps(3);
+    harness.get_by_label("Recent projects limit").scroll_to_me();
+    harness.run_steps(3);
     save(&mut harness, &output_dir, "settings-recent-project-limit");
     assert!(!harness.get_by_label("Recent projects limit").accesskit_node().is_disabled());
 }

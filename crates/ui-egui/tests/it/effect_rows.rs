@@ -7,6 +7,8 @@ use texturecraft_engine::core::LayerId;
 use texturecraft_engine::execute;
 use texturecraft_ui_egui::TextureCraftApp;
 
+use super::layers_panel::click_selected_content_thumbnail;
+
 fn id(v: Value, key: &str) -> u64 {
     v[key].as_u64().unwrap()
 }
@@ -42,6 +44,7 @@ fn dragging_an_effect_row_reorders_its_stack() {
         .with_context_setup(texturecraft_ui_egui::framework::install_headless)
         .build_eframe(|creation_context| TextureCraftApp::new(creation_context, session));
     harness.run_steps(4);
+    click_selected_content_thumbnail(&mut harness);
     let order =
         |harness: &Harness<'_, TextureCraftApp>| harness.state().session.doc.project.layers[&layer].content_effects.iter().map(|e| e.id.0).collect::<Vec<_>>();
     assert_eq!(order(&harness), [a, b, c]);
@@ -74,6 +77,7 @@ fn an_effect_row_sets_its_blend_mode_and_opacity() {
         .with_context_setup(texturecraft_ui_egui::framework::install_headless)
         .build_eframe(|creation_context| TextureCraftApp::new(creation_context, session));
     harness.run_steps(4);
+    click_selected_content_thumbnail(&mut harness);
     let effect_of = |harness: &Harness<'_, TextureCraftApp>| harness.state().session.doc.project.layers[&layer].content_effects[0].clone();
 
     assert_eq!(effect, effect_of(&harness).id.0);
@@ -123,6 +127,7 @@ fn an_opacity_drag_starting_without_a_change_is_its_own_undo_step() {
         .with_context_setup(texturecraft_ui_egui::framework::install_headless)
         .build_eframe(|creation_context| TextureCraftApp::new(creation_context, session));
     harness.run_steps(4);
+    click_selected_content_thumbnail(&mut harness);
     let effect_of = |harness: &Harness<'_, TextureCraftApp>| harness.state().session.doc.project.layers[&layer].content_effects[0].clone();
 
     let history = harness.state().session.history_labels().len();
@@ -165,6 +170,7 @@ fn an_effect_rows_blending_options_reach_every_channel() {
         .with_context_setup(texturecraft_ui_egui::framework::install_headless)
         .build_eframe(|creation_context| TextureCraftApp::new(creation_context, session));
     harness.run_steps(4);
+    click_selected_content_thumbnail(&mut harness);
     let effect_of = |harness: &Harness<'_, TextureCraftApp>| harness.state().session.doc.project.layers[&layer].content_effects[0].clone();
 
     assert_eq!(effect_of(&harness).blend_of(Some(Channel::Roughness)).mode, BlendMode::Normal);

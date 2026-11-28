@@ -414,9 +414,10 @@ fn set_highlight(ui: &Ui, texture_set: usize) -> SetHighlight {
 /// Show what the GPU side reported (each message once while its toast is up).
 fn gpu_report_toasts(app: &mut TextureCraftApp, reports: crate::gpu::GpuReports) {
     let names: Vec<String> = reports.memory.iter().filter_map(|ts| app.session.doc.project.texture_sets.get(*ts).map(|t| t.name.clone())).collect();
+
     if !names.is_empty() {
-        // One sticky notice for every set the GPU could not hold (they are not retried, so the
-        // notice stays until dismissed); after a dismissal, a new one names only the new sets.
+        // Failed allocations are not retried, so keep a notice until the user dismisses it
+        // Start a new list on the first failure after dismissal
         let (sets, shown) = &mut app.gpu_memory;
         let current = shown.take().filter(|text| app.toasts.iter().any(|t| &t.text == text));
         match &current {
@@ -430,7 +431,7 @@ fn gpu_report_toasts(app: &mut TextureCraftApp, reports: crate::gpu::GpuReports)
         }
         let text = match sets.as_slice() {
             [one] => trf(
-                "Not enough GPU memory to show texture set \"{name}\" fully: lower the viewport Texture resolution in Settings. Painting and export are not affected.",
+                "Not enough GPU memory to show texture set \"{name}\" fully: lower the Texture resolution in Display Settings › Render settings. Painting and export are not affected.",
                 &[("name", one)],
             ),
             many => {
@@ -443,7 +444,7 @@ fn gpu_report_toasts(app: &mut TextureCraftApp, reports: crate::gpu::GpuReports)
                     list.push_str(", ...");
                 }
                 trf(
-                    "Not enough GPU memory to show {count} texture sets fully ({names}): lower the viewport Texture resolution in Settings. Painting and export are not affected.",
+                    "Not enough GPU memory to show {count} texture sets fully ({names}): lower the Texture resolution in Display Settings › Render settings. Painting and export are not affected.",
                     &[("count", &many.len()), ("names", &list)],
                 )
             }
@@ -1157,7 +1158,10 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     solo_notice(app, ui, rect);
     view_header(app, ui, rect, "v3d");
     mask_view_badge(app, ui, rect);
-    axis_gizmo(ui, rect, app, None);
+    if app.ui.prefs.show_world_axes {
+        axis_gizmo(ui, rect, app, None);
+    }
+
     crate::nav_buttons::show(app, ui, rect, crate::nav_buttons::NavView::Scene);
 }
 
@@ -2959,8 +2963,9 @@ mod tests {
         let session = &mut harness.state_mut().session;
         let instance = execute(session, "layer.instance", &json!({"layer": original.layer.0, "ts": 1})).unwrap()["layer"].clone();
 
-        // The source effect remains a valid inherited target when selection changes to its instance
-        assert!(execute(session, "layer.select", &json!({"layer": instance, "target": effect.0})).is_err());
+        // The source effect is a valid inherited target when selection changes to its instance
+        execute(session, "layer.select", &json!({"layer": instance, "target": effect.0})).unwrap();
+        assert_eq!(session.target, texturecraft_engine::StackTarget::Effect(effect));
 
         assert_eq!(session.ts(), 1);
         assert_eq!(session.selected_layer().unwrap().0, instance.as_u64().unwrap());

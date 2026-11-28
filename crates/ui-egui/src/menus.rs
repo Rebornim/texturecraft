@@ -148,6 +148,11 @@ fn tooltip_of(id: &str) -> Option<&'static str> {
 
 /// Whether an item can run now
 pub fn enabled(app: &TextureCraftApp, id: &str) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    if app.save_job.is_some() && crate::manual_save::is_save(id) {
+        return false;
+    }
+
     if UNAVAILABLE.contains(&id) {
         return false;
     }

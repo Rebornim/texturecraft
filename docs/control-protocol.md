@@ -20,9 +20,10 @@ one just above itself. `effect.copy {effect?}` and `effect.cut {effect?}` put an
 layer clipboard, and `effect.paste {layer?, target?}` adds it to another layer's content or mask.
 `layer.select {layers: [id], layer?}` selects several layers of one texture set at once (`layer`
 is the active one), and `{layer, range: true}` / `{layer, toggle: true}` do what Shift+click and
-Ctrl+click do in the Layers panel. `layer.select {all: true}` (Ctrl+A with the pointer over the
-Layers panel) selects every shown row of the active texture set: the folder rows and the layers
-of open folders, not the layers of collapsed ones. `{layer, toggle: true}` on the only selected
+Ctrl+click do in the Layers panel. `layer.select {layer, target}` takes `content`, `mask`, or
+the ID of an effect on the layer or on the mask it draws with. `layer.select {all: true}`
+(Ctrl+A with the pointer over the Layers panel) selects every shown row of the active texture
+set, including folder rows and layers in open folders. `{layer, toggle: true}` on the only selected
 layer leaves nothing selected. `layer.visible {layers, layer}` gives every listed layer the
 opposite of `layer`'s visibility (the Layers panel's eye uses `{layer}` and acts on that layer
 only). `layer.group` puts the new folder at the place and in the folder of the topmost selected
@@ -239,14 +240,14 @@ keeps its state in a throwaway file.
 | `session.inspect` | | project, mesh, texture sets, layer stack, tool, camera, display, history |
 | `ui.inspect` | | UI state, viewport rect, fps, bake progress (`baking`, 0..1), the running bake's stage (`bakeStatus`, e.g. "Baking Ambient Occlusion (2/4)") and live preview (`bakePreview`, see *Live bake preview*), toasts, `titleBar` (who draws the title bar this run: `app`, `integrated` on macOS, or `system`) |
 | `ui.menu.list` | | the menu catalog: `{menu, submenu, label, id, shortcut, implemented, enabled, checked}` |
-| `ui.menu.invoke` | `{id}` | behaves like a menu click (may open a window; `ui.resetUi` opens its question; `file.exportMesh` opens the Mesh Export Options prompt, whose Export asks for the file; `ui.view.export` opens the right bar's Export panel). `{"id": "ui.layout.apply", "name": "<layout>"}` switches to a legacy named panel layout (still accessible through assigned shortcuts) (panels only; mode, zoom and wireframes stay) and errors when no layout has that name. `ui.layout.save` still saves the active mode; `ui.layout.save.painting`, `ui.layout.save.rendering` and `ui.layout.save.baking` ask where to save only that mode's panels and view arrangement as a JSON file (without preferences or recent projects); loading preserves the other modes, `ui.layout.load` asks for one to load ("Load UI Layout"); `ui.toolbar.docks` and `ui.toolbar.tools` show or hide the right bar and the painting tools; the disabled Snooze Autosave and Resources Updater buttons stay visible when Tools is off; `ui.view.renderer` toggles the Renderer Settings panel (Rendering Mode only). `{"id": "ui.layout.swap"}` swaps the 3D and 2D views of the split layout (F4) |
+| `ui.menu.invoke` | `{id}` | behaves like a menu click (may open a window; `ui.resetUi` opens its question; `file.exportMesh` opens the Mesh Export Options prompt, whose Export asks for the file; `ui.view.export` opens the right bar's Export panel). `{"id": "ui.layout.apply", "name": "<layout>"}` switches to a legacy named panel layout (still accessible through assigned shortcuts) (panels only; mode, zoom and wireframes stay) and errors when no layout has that name. `ui.layout.save` still saves the active mode; `ui.layout.save.painting`, `ui.layout.save.rendering` and `ui.layout.save.baking` ask where to save only that mode's panels and view arrangement as a JSON file (without preferences or recent projects); loading preserves the other modes, `ui.layout.load` asks for one to load ("Load UI Layout"); `ui.toolbar.docks` and `ui.toolbar.tools` show or hide the right bar and the painting tools; the disabled Snooze Autosave button and the Resources Updater button (enabled while a project is open) stay visible when Tools is off; `ui.view.renderer` toggles the Renderer Settings panel (Rendering Mode only). `{"id": "ui.layout.swap"}` swaps the 3D and 2D views of the split layout (F4) |
 | `ui.menu.invoke` id `project.sample` | `{id}` | File > Open Sample Project opens a picker for a `.tcraft` file. On desktop, it copies any missing bundled samples (currently `Material Ball.tcraft`) into `Samples` under the data folder and opens the picker there. If preparation fails, it shows an error and opens the picker without a start folder. In the browser, the picker uses local files. The direct `project.sample` engine command generates a sample for automation. |
 | `ui.menu.invoke` id `ui.saveAsTemplate` | `{id}` | File > More Save Options > Save As Template opens a save dialog in the user templates folder. The choice supplies the file path and template name to `project.template.save`. `ui.saveReduced` (Save and Reduce File Size) is listed as not implemented and not enabled |
 | `ui.menu.invoke` ids `ui.help.releaseNotes`, `ui.help.showLog`, `ui.help.exportLog` | `{id}` | Help > Release Notes opens the releases page in the browser; Help > Show Log opens the current desktop run's rolling `log.txt` in the system text-file handler; Help > Export Log exports the session log with each entry’s recorded UTC time, severity and source (a save dialog on desktop with a `Log_TextureCraft_<version>_<date>_<os>_<gpuMode>.txt` name, a download on the web) |
 | `ui.menu.invoke` id `ui.wireframe` | `{id}` | Show mesh wireframe: shows or hides the mesh wireframe in the 3D and 2D views (the Display Settings check box). It has no menu entry and no default key; bind it in Settings > Shortcuts. The key bindings `camera.next` and `camera.previous` (Select next camera `>`, Select previous camera `<`) and `ui.mode.bake` (F8) run the same commands as before |
-| `ui.reset` | | resets the panels, view layout, zoom and every other view setting at once, without the question the Reset UI menu item asks; settings and shortcuts stay |
+| `ui.reset` | | resets the panels, view settings and interface language without asking for confirmation. Other preferences and shortcuts stay |
 | `ui.bake.start` | `{ts?: index \| [indices]}` (default: the sets ticked in Bake mode) | Opens Bake mode and bakes in the background like the Bake button: the 3D view shows the maps landing on the model as they finish (see *Live bake preview*). → the `bake.preview` state. Errors when a bake is already running |
-| `ui.bake.cancel` | | Stops the running bake; the set being baked keeps the maps it had, sets already finished stay applied, and the previous view mode comes back |
+| `ui.bake.cancel` | | Stops the running bake and restores the previous view mode. Finished sets stay applied. Eligible maps from the current set are kept in one undo step (see *Live bake preview*) |
 | `ui.set` | fields of the UI state, e.g. `{"layout": "Only3D"}`; `dock` is the panel layout, a craft-ui docking `Workspace` (`{version, layout: {root, floating}, hidden}`; `root` is a tree of `Split`, `Tabs` and `Stack` nodes over the panels `Viewport`, `Assets`, `TextureSetList`, `Layers`, `TextureSetSettings`, `Properties`, `Display`, `Shader`, `History`, `Log`, `BakingLog`, `MeshMapBakers`, `BakeMaps`, `BakeSettings`, `Export` and `Renderer` (a floating window holding one right-bar panel is that panel undocked); `hidden` lists where each closed panel was, so reopening it puts it back; a layout that does not read or has no docked `Viewport` becomes the default), `prefs` the settings (`{"language": "ja", "viewport_texture": 1, "brightness": "light", "accent": "blue"}`; missing fields take their defaults; `brightness` is `dark`, `mediumDark` (default), `mediumLight` or `light`, `accent` `copper` (default), `coral`, `blue`, `violet`, `green`, `amber` or `pink`, applied on the next frame; `system_title_bar` `true` has the system draw the title bar from the next start), `keymap` the custom shortcuts (`{"file.save": "F5"}`, `""` unbinds), `log_channel` the Log panel's tab (`General` or `Assets`) | `null` |
 | `viewport.screenshot` | `{view?: "3d" \| "2d"}` | `{width, height, png}` (PNG, base64) |
 | `ui.screenshot` | | `{width, height, png}` of the whole window, after the next frame |
@@ -258,6 +259,7 @@ The empty-project menus keep Recent Projects openable with Clear disabled when t
 `ui.recent.clear` clears that list. More Save Options is disabled until a project is open.
 Help > Shortcuts list opens Settings on its Shortcuts page. Window > Reset UI restores the
 Assets, Layers, Properties, Texture Set List and Texture Set Settings panels and both toolbars.
+It also restores Default (System Language).
 Baking Log and the bake/render settings views are disabled without a project. Import resources
 can open its dialog on desktop without a project; importing still requires an open project,
 and the dialog explains that asset-library import is not available yet.
@@ -288,8 +290,9 @@ bake of its own, so with a high poly the transfer rays are cast once per map; th
 same as a single bake's. `bake.run` and the CLI bake all maps at once and never show a preview.
 
 The streamed maps are held by the session, not the document: nothing enters the undo history
-until a texture set's bake is applied (one undo step); a cancelled bake leaves the set it was baking
-as it was, while sets that finished before the cancel stay applied. When
+until a texture set's bake is applied (one undo step); a cancelled bake applies the maps the set it was
+baking had finished in one undo step. A changed output size, a replaced mesh, or a worker failure
+discards the current set's partial results. Sets that finished before the cancel stay applied. When
 the bake ends, is cancelled or Bake mode is left, the view mode that was in use comes back.
 Bake setup overlays are hidden during the preview so they cannot cover the maps; their visibility
 settings take effect again when the preview ends.
@@ -311,6 +314,41 @@ also `session.inspect`'s `bakePreview`:
 `{"active": false}` when no bake is shown; setting `show` then is an error. Drive a bake with
 `ui.bake.start` and poll `ui.inspect`'s `bakeStatus` / `bakePreview` (and `viewport.screenshot`)
 until `baking` is `null`.
+
+`bake.log` `{}` returns the latest bake map by map, as the Baking Log shows it (empty before the first bake).
+A map's `state` is `waiting`, `baking`, `baked`, `failed` (with the error as `reason`) or `canceled`.
+`highPolys` lists the high poly files of each set that bakes from them; a file's `state` is `waiting`,
+`loading`, `loaded`, `failed` (with the error as `reason`) or `canceled`. `matching` lists each low poly
+part with the high poly part it bakes from, then the high poly parts no set paired with; a `null` side is a part
+with no partner. It is `null` when no set of the bake matches by mesh name:
+
+```json
+{"running": false, "maps": [{"textureSet": 0, "setName": "Body", "map": "normal", "state": "baked"},
+ {"textureSet": 1, "setName": "Head", "map": "normal", "state": "failed", "reason": "texture set Head has no UV tiles selected for baking"}],
+ "highPolys": [{"textureSet": 0, "setName": "Body", "file": "body_high.fbx", "state": "loaded"}],
+ "matching": {"lowSuffix": "_low", "highSuffix": "_high",
+  "pairs": [{"low": "Arm_low", "high": "Arm_high"}, {"low": "Strap_low", "high": null}]}}
+```
+
+Each texture set in `project.inspect` / `session.inspect` lists its out-of-date mesh maps as
+`outOfDate`: map id → what changed since that map was baked, any of `lowPoly`, `highPoly`, `cage`,
+`settings` (the bake settings every map shares, or the UV tiles baked) and `mapSettings` (the map's
+own). The low-poly inputs include its tangent frame. For Opacity and material-color ID maps that
+read the low poly's material, a change to the packed mesh file also counts as `lowPoly`.
+Imported maps, and maps saved before this record existed, never show:
+`"outOfDate": {"ambientOcclusion": ["mapSettings"]}`.
+
+`bake.autoRebake` `{ts?, map: id | null}` turns on Auto-rebake for one mesh map of a texture set
+(the active one by default), replacing its previous one, or turns it off with `null`; it is saved
+with the project and shows as the set's `autoRebake` in `project.inspect`. While the desktop or web
+app is in Bake mode, an auto-rebake map that goes out of date is baked again on its own in the
+background, alone (with every checked map when the output size changed), once what it is baked
+from has stopped changing for half a second; a change during that bake restarts it. A skew or cage stroke (`bake.skew.paint`, `bake.cage.paint`) on a set that
+bakes from a high poly makes the app bake its auto-rebake map again only inside the stroke's UV
+box and pads the result. Curvature, height, thickness, UV-tiled sets, and resized maps bake
+whole. The first `bake.skew.paint` stroke of a set (no skew map yet) turns Auto-rebake on for its
+`normal` map when the set has none, in the stroke's undo step. The headless CLI does not rebake by
+itself: run `bake.run` there.
 
 A minimal client (Python, for illustration):
 
@@ -343,10 +381,16 @@ Other preferences set through `ui.set {"prefs": {...}}`: `language` (`""` follow
 language), `work_threads` (worker threads for painting, baking and export; 0 uses every logical
 CPU; read at startup), `rotation_speed` (default 2), `zoom_speed` and `wheel_speed` (default 1,
 each from 0.1 to 10) with `zoom_inverse` and `wheel_inverse`, `gpu_raytracing` (false keeps bake
-rays on the CPU) and `libraries` (the folders the shelf scans for saved smart materials and masks).
+rays on the CPU), `show_world_axes` (the 3D view's X, Y and Z corner, default true) and `libraries`
+(the folders the shelf scans for saved smart materials and masks). `live_preview_baking` enables
+the automatic Bake mode map preview when the panel's Map Preview switch is also on.
+`show_keyboard_helper`, `only_selected_material_when_painting`, `save_preprocessed_scene_files` and
+`local_cache_directory` are stored preferences for future use. For `local_cache_directory`, an
+empty or relative path selects the app's per-user cache directory, or the profile cache for Nightly.
 For example, the `libraries` field can contain `[{"name": "Studio", "path": "/assets/studio"}]`.
 Use an absolute path on the host running TextureCraft. To change one preference, read `state.prefs`
 with `ui.inspect`, update that field and send the full `prefs` object to `ui.set`.
+A `prefs` object without `language` sets the system language (`""`), the default.
 
 ## MCP server
 
@@ -357,7 +401,8 @@ with `ui.inspect`, update that field and send the full `prefs` object to `ui.set
   them: `--read-root <dir>` for `project_open` / `mesh_import` / `mesh_reimport` / `bake_mesh_add`,
   `--write-root <dir>` for `project_save` / `material_save` / `textures_export` / `mesh_export`
   (`--automation-read-root` / `--automation-write-root`, as in the other crafting apps, are the
-  same flags). Without roots there is no file access. `..`, absolute
+  same flags). Headless mcp refuses to start unless both roots are set; file access is only
+  below them. `..`, absolute
   paths, drive letters, device names and symlink or junction escapes are refused.
 - **Bridge**: `--bridge <port>` forwards to a running `texturecraft --control <port>` (token from
   `--token`, `TEXTURECRAFT_CONTROL_TOKEN` or the app's token file). The app reads and writes its
@@ -365,7 +410,8 @@ with `ui.inspect`, update that field and send the full `prefs` object to `ui.set
   File › Save.
 
 Through `command_run`, every `file.*` command but `file.close` and `file.removeUnused` (and
-`file.reimportMesh` without a `path`) is refused, and so is any command given a `path` or `dir`, at the top level or in
+`file.reimportMesh` without a `path`) is refused, and so are `resource.status`, `resource.update` and `resource.relink` (they read
+the files a project names) and any command given a `path` or `dir`, at the top level or in
 a `files` entry (`resource.import`, `material.save`, `material.load`, `textureSet.meshMap.import`, …), in both modes: use the workspace tools below. `resource.text`
 takes a font family, not a path: it reads only the system's font folders.
 
@@ -387,7 +433,7 @@ With `rebuildUvs: true`, the project file saves the generated layout. Reopening 
 | `project_save` | `{path?}` | `.tcraft` (appended if missing), relative to the write root |
 | `mesh_import` | `{path, resolution?}` | New project from .glb/.gltf/.fbx/.dae/.usd/.usda/.usdc/.usdz/.abc/.obj/.ply/.stl; a .gltf's buffers and images and a loose USD layer's textures are read from its folder |
 | `mesh_reimport` | `{path?, preserveStrokes?}` | Reimport the mesh from a file, or (no path) from the project's own copy; bridge mode supports only the latter |
-| `mesh_export` | `{path, format?}` | The mesh as obj, glb, usda, usdc or usdz below the write root (obj: its .mtl and textures, usda / usdc: textures next to it) → `{path, textures?}` |
+| `mesh_export` | `{path, format?, recomputeNormals?}` | The mesh as obj, glb, usda, usdc or usdz below the write root; `recomputeNormals: true` writes smooth area-weighted normals on the exported copy (default false) (obj: its .mtl and textures, usda / usdc: textures next to it) → `{path, textures?}` |
 | `bake_mesh_add` | `{path, cage?}` | Add a high-definition mesh for baking, or set the cage → `{name, meshes}` |
 | `resource_import` | `{path}` | Image resource (png, jpg, tga, tif, bmp, webp, exr, hdr) → its name, for `layer.add.image` / `tool.stencil`, or as a mesh map instead of baking it: `textureSet.meshMap.set {ts?, map, image}` (`textureSet.meshMap.clear {ts?, map}` empties the slot); call it once per baked map file (the desktop app's `textureSet.meshMap.import`, which takes host paths, is refused through `command_run`) |
 | `material_save` | `{path, layer?, name?}` | A layer or folder as a `.tcmat` smart material below the write root |
@@ -462,7 +508,7 @@ File access follows `--read-root` / `--write-root` as for MCP.
 | `project.save` | `{path?}` |
 | `mesh.import` | `{path, resolution?, name?}` |
 | `mesh.reimport` | `{path?, preserveStrokes?}` |
-| `mesh.export` | `{path, format?}` |
+| `mesh.export` | `{path, format?, recomputeNormals?}` |
 | `bake.mesh.add` | `{path, cage?}` |
 | `resource.import` | `{path}` |
 | `material.save` | `{path, layer?, name?}` |
@@ -486,6 +532,31 @@ Brush preset operations are engine commands. Send each through `command.run` wit
 printf '%s\n' '{"id":1,"method":"command.run","params":{"id":"project.new","params":{"mesh":"torus"}}}' \
               '{"id":2,"method":"render","params":{"width":512,"height":512}}' | texturecraft-cli serve
 ```
+
+## Resources Updater
+
+An image resource read from a file remembers that file (its absolute path and modification time,
+saved with the project): `resource.import {path}`, the images `file.importPbrFolder` stores unchanged
+(not ORM channels split out, not archive entries), the images of `file.importMaterialX` and the files of
+`textureSet.meshMap.import` (with their mesh map: an update resamples it while it still holds what the
+old file gave it, so a bake or another image set over it since is kept). The shelf's Resources Updater
+window lists the project's images and linked MaterialCraft packages. It checks image files when it opens, on
+Refresh, twice a second while it stays open, once after a project opens and when the app gets the
+focus back; a notice ("N resources changed on disk", with an Update button) appears when the set of
+outdated resources differs from the last notice. A file whose size matches but whose time changed is
+read once. Its verdict is kept until its size or time changes again. When the file has no usable
+modification time, each check compares its contents.
+
+| Command | Params and result |
+|---|---|
+| `resource.status` | `{}` → `{resources: [{name, status, path?, error?}], total, outdated}`; `status` is `outdated` (the file's size or contents differ from the resource), `missing` (the file is gone or unreadable, `error` says why), `upToDate`, `noSource` (made in the app or imported without a path) or `material` (the package of a linked MaterialCraft material, stored in the project without a source file); outdated first, then by name. An equal-size file is compared when its modification time changed or is unknown |
+| `resource.update` | `{names?: [name]}` (default: every outdated resource) → `{updated, failed: [{name, error}]}`: reads the files again and replaces the resources' bytes and pixels under the same names, so every layer, mask and view using them recomposites; one undo step, none when nothing changed. A file that cannot be read fails alone; when none could be read the command is an error. Unknown names and resources without a file are refused |
+| `resource.relink` | `{name, path}` → `{name, path}`: an image resource takes the image file's pixels (within the image import limits) and follows that file from then on; one undo step |
+
+For linked fill layers, `material.link.cook` refreshes the separate cooked image maps from the stored package.
+
+These commands read host paths stored in the project, so MCP and `serve` refuse them through
+`command_run`; the desktop app's control channel and the trusted local CLI run them.
 
 ## PBR texture folders
 
@@ -631,6 +702,10 @@ None is an undo step.
 `display.set` also takes `alignment` (`world` or `camera`: the environment, and the key light with it,
 turns with the camera about the vertical axis), `shadowMode` (`intensive`, `average` or `lightweight`, the
 default: the shadow map's resolution) and `shadowOpacity` (0 to 1, default 1: how dark the shadows are).
+Set `iorSpecular` to true to derive the Metallic Roughness surface reflectance at normal incidence
+from `ior` (clamped to 1–3). Specular Level scales this reflectance in the viewport, both path
+tracers and F0 map export. Path-traced transmission uses its own Fresnel calculation for glass
+interfaces. The setting defaults to false and is saved with the project and its templates.
 
 `viewport.view {mode: "image", image: <image resource>}` shows a project image as it is, stretched over
 the UV square, on the mesh and in the 2D view (the view picker's "Other..."). `display.set {soloUnlit}`
@@ -719,15 +794,15 @@ set.
 ## CLI
 
 ```sh
-texturecraft-cli --version                                   # TextureCraft 0.1.0 (abc1234 2026-10-14)
+texturecraft-cli --version                                   # texturecraft-cli 0.1.0 (abc1234 2026-10-14)
 texturecraft-cli info model.glb                              # triangles, materials, UV report
 texturecraft-cli info project.tcraft                         # texture sets, layers, baked maps
-texturecraft-cli commands --filter mask
+texturecraft-cli commands --filter mask --json
 texturecraft-cli new builtin:material_ball ball.tcraft --resolution 1024 --sample   # mesh maps baked at ≤ 1024 px
 texturecraft-cli new model.glb model.tcraft --resolution 2048
-texturecraft-cli run ball.tcraft layer.add.fill '{"color":"#c08040","metallic":1}' -o ball.tcraft
+texturecraft-cli run ball.tcraft layer.add.fill '{"color":"#c08040","metallic":1}' -o ball.tcraft --in-place
 texturecraft-cli batch script.json
-texturecraft-cli bake model.tcraft --resolution 2048 --maps ambientOcclusion,curvature,thickness
+texturecraft-cli bake model.tcraft --resolution 2048 --maps ambientOcclusion,curvature,thickness --in-place
 texturecraft-cli export model.tcraft out/ --preset "Unreal Engine (Packed)" --format png --size 2048
 texturecraft-cli render ball.tcraft ball.png --size 1280x800 --view 3d --yaw 30 --pitch 15
 texturecraft-cli render scene.tcraft hero.png --size 1200x900 --camera Hero --samples 2048   # a saved camera (camera.add), path traced
@@ -748,5 +823,24 @@ steps or an object with an optional input and output (paths relative to the curr
 }
 ```
 
-Errors print `texturecraft-cli <command>: error: …` and exit 1; usage errors exit 2. The CLI is a
-console program and never opens a window; `render` needs a GPU or software adapter.
+The CLI is a console program and never opens a window; `render` needs a GPU or software adapter.
+
+`texturecraft-cli` follows [RFC-0018](https://github.com/storytold/craft-contrib/blob/main/rfcs/0018-cli-conventions.md)
+(command-line conventions); `texturecraft-cli --help` and `<subcommand> --help` are the reference for every flag.
+Exit status: 0 success, 1 a command failed, 2 a usage error (an unknown or repeated flag, a bad value, flags that
+conflict or that the subcommand doesn't use, all checked before any file is touched), and 128 plus the signal number
+when a signal ends the process. Errors are `error: <message>` on stderr. `--version`/`-V` work on every subcommand
+(`texturecraft-cli 0.6.1 (<commit> <date>)`, with no `version` subcommand), and no arguments print the help on
+stderr and exit 2. `info`, `run`, `batch` and `bake` print JSON because agents read it; `commands --json` prints the
+list as JSON where it prints a table without it.
+
+- **Environment.** `TEXTURECRAFT_CONTROL_TOKEN` is the one variable the CLI reads for a flag (`mcp --bridge`'s
+  `--token`; `serve --port` reads it for its own token). The flag wins, an empty or blank variable counts as unset,
+  and `--help` never shows its value. No variable grants file access (roots come from `--read-root`/`--write-root`)
+  or replaces a file. The app's own `TEXTURECRAFT_NO_PREFS` is a setting of the app, not a flag fallback.
+- **Replacing files.** `run -o` and `bake -o` onto the project they opened, and `bake` of a project without `-o`,
+  need `--in-place`; `render` and `new` never replace their input, and `bake` of a mesh needs `-o`.
+- **Packages.** The Linux packages (deb, rpm, tar.gz) and the FreeBSD package install `texturecraft-cli`'s man pages
+  and its bash, zsh and fish completions. Nightly packages ship no CLI, so none; macOS and Windows are outside
+  RFC-0018's scope.
+- **Not yet.** The ast-grep scan of RFC-0018 section 3 is not switched on.

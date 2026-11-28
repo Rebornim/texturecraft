@@ -1,6 +1,8 @@
 //! The dialog that adds and removes a texture set's channels: every channel by group, ticked when the set has it
 
-use egui::{Align2, CornerRadius, FontId, Rect, RichText, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use std::sync::Arc;
+
+use egui::{Align2, CornerRadius, FontId, Galley, Rect, RichText, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use egui_phosphor::regular as icon;
 use serde_json::json;
 use texturecraft_engine::core::{Channel, ChannelGroup, TextureSet};
@@ -101,11 +103,17 @@ impl ChannelManager {
             let width = (ctx.content_rect().width() - 2.0 * EDGE_AIR).clamp(1.0, DIALOG_WIDTH);
             ui.set_width(width);
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            let footer = FooterLayout::new(ui, &tokens);
             let closed = title_bar(ui, &tokens, opening);
             ui.add_space(BODY_AIR);
-            egui::ScrollArea::both().auto_shrink([false, true]).max_height(ctx.content_rect().height() * MAX_HEIGHT_SHARE).show(ui, |ui| manager.columns(ui));
+
+            // The list gets what the title bar, the footer and the air between them leave, so Apply stays in a short window
+            let window = ctx.content_rect().height();
+            let room = window - TITLE_BAR_HEIGHT - BODY_AIR - FOOTER_AIR - footer.height - EDGE_AIR;
+            let max_height = (window * MAX_HEIGHT_SHARE).min(room).max(0.0);
+            egui::ScrollArea::both().auto_shrink([false, true]).max_height(max_height).show(ui, |ui| manager.columns(ui));
             ui.add_space(FOOTER_AIR);
-            let (apply, cancel) = manager.footer(ui, &tokens);
+            let (apply, cancel) = manager.footer(ui, &tokens, footer);
             ui.add_space(EDGE_AIR);
             (apply, cancel || closed)
         });
@@ -203,20 +211,9 @@ impl ChannelManager {
     }
 
     /// "Apply to all Texture Sets", the ⊘ legend, then Cancel and Apply at the right; returns (Apply, Cancel) clicked
-    fn footer(&mut self, ui: &mut Ui, tokens: &Tokens) -> (bool, bool) {
-        let width = ui.available_width();
-        let label = tr("Apply to all Texture Sets");
-        let text = ui.painter().layout_no_wrap(label.to_owned(), FontId::proportional(TEXT_SIZE), tokens.text);
-        let legend_text = ui.painter().layout_no_wrap(tr("Not used by the shader").to_owned(), FontId::proportional(SMALL_TEXT_SIZE), tokens.text_dim);
-
-        let left_width = EDGE_AIR + CHECK_SIZE + CHECK_TO_LABEL + text.size().x + LEGEND_GAP + SMALL_TEXT_SIZE + LEGEND_GLYPH_TO_TEXT + legend_text.size().x;
-
-        // A narrow footer puts the buttons on a row of their own, and the legend under the check when the two don't fit side by side
-        let legend_below = width < left_width + EDGE_AIR;
-        let stacked = legend_below || width < left_width + BUTTON_GAP + 2.0 * BUTTON_SIZE.x + 2.0 * EDGE_AIR;
-        let rows = 1.0 + f32::from(u8::from(legend_below)) + f32::from(u8::from(stacked));
-        let height = rows * BUTTON_SIZE.y + (rows - 1.0) * BUTTON_GAP;
-        let (row, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    fn footer(&mut self, ui: &mut Ui, tokens: &Tokens, layout: FooterLayout) -> (bool, bool) {
+        let FooterLayout { label, text, legend_text, legend_below, height } = layout;
+        let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
         ui.painter().hline(row.x_range(), row.top() - FOOTER_AIR / 2.0, Stroke::new(1.0, tokens.separator));
         let center_y = row.top() + BUTTON_SIZE.y / 2.0;
 
@@ -239,6 +236,33 @@ impl ChannelManager {
         let apply = Rect::from_min_size(pos2(row.right() - EDGE_AIR - BUTTON_SIZE.x, row.bottom() - BUTTON_SIZE.y), BUTTON_SIZE);
         let cancel = apply.translate(vec2(-(BUTTON_SIZE.x + BUTTON_GAP), 0.0));
         (dialog_button(ui, tokens, apply, tr("Apply")), dialog_button(ui, tokens, cancel, tr("Cancel")))
+    }
+}
+
+/// The footer's texts and rows, worked out before the channel list so the list can leave the footer its height
+struct FooterLayout {
+    label: &'static str,
+    text: Arc<Galley>,
+    legend_text: Arc<Galley>,
+    legend_below: bool,
+    height: f32,
+}
+
+impl FooterLayout {
+    fn new(ui: &Ui, tokens: &Tokens) -> Self {
+        let width = ui.available_width();
+        let label = tr("Apply to all Texture Sets");
+        let text = ui.painter().layout_no_wrap(label.to_owned(), FontId::proportional(TEXT_SIZE), tokens.text);
+        let legend_text = ui.painter().layout_no_wrap(tr("Not used by the shader").to_owned(), FontId::proportional(SMALL_TEXT_SIZE), tokens.text_dim);
+
+        let left_width = EDGE_AIR + CHECK_SIZE + CHECK_TO_LABEL + text.size().x + LEGEND_GAP + SMALL_TEXT_SIZE + LEGEND_GLYPH_TO_TEXT + legend_text.size().x;
+
+        // A narrow footer puts the buttons on a row of their own, and the legend under the check when the two don't fit side by side
+        let legend_below = width < left_width + EDGE_AIR;
+        let stacked = legend_below || width < left_width + BUTTON_GAP + 2.0 * BUTTON_SIZE.x + 2.0 * EDGE_AIR;
+        let rows = 1.0 + f32::from(u8::from(legend_below)) + f32::from(u8::from(stacked));
+        let height = rows * BUTTON_SIZE.y + (rows - 1.0) * BUTTON_GAP;
+        FooterLayout { label, text, legend_text, legend_below, height }
     }
 }
 

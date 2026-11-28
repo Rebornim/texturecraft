@@ -469,6 +469,30 @@ mod tests {
     }
 
     #[test]
+    fn a_short_channel_window_keeps_apply_on_screen() {
+        // A narrow window stacks the footer to three rows: the channel list must leave room for all of them
+        let mut harness = harness("material_ball");
+        click(&mut harness, egui::Role::Button, "Add or remove channels");
+        harness.set_size(vec2(300.0, 400.0));
+        harness.run_steps(5);
+
+        let screen = harness.ctx.content_rect();
+        let apply: Vec<_> = harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.galley.text() == "Apply" => Some(text.visual_bounding_rect()),
+                _ => None,
+            })
+            .collect();
+        assert!(!apply.is_empty(), "the footer paints Apply");
+        for painted in apply {
+            assert!(screen.contains_rect(painted), "Apply at {painted:?} falls outside the window {screen:?}");
+        }
+    }
+
+    #[test]
     fn escape_closes_the_channel_window_with_nothing_focused_and_drops_its_ticks() {
         let mut harness = harness("material_ball");
         let had = harness.state().session.doc.project.texture_sets[0].has_channel(Channel::User0);

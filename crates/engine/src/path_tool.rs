@@ -125,11 +125,13 @@ impl PathState {
         (&self.points, self.corner_flags(), self.closed, self.fill, self.uv) == (&other.points, other.corner_flags(), other.closed, other.fill, other.uv)
     }
 
-    /// Empty the tool for the next path: no points, open, nothing selected or edited
+    /// Empty the tool for the next path: no points, open unless it fills, nothing selected or edited
     pub fn clear(&mut self) {
         self.points.clear();
         self.corners.clear();
-        self.closed = false;
+
+        // Filling is a tool mode (Filled path): its outline stays closed for the next path
+        self.closed = self.fill;
         self.selected = None;
         self.editing = None;
         self.edited = false;
@@ -145,7 +147,7 @@ impl PathState {
                 self.corners.remove(i);
             }
         }
-        if self.closed && self.points.len() < 3 {
+        if self.closed && !self.fill && self.points.len() < 3 {
             self.closed = false;
         }
     }

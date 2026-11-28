@@ -36,6 +36,7 @@ impl CommandSpec {
             "project.templates",
             "project.new",
             "tool.state",
+            "tool.variants",
             "text.fonts",
             "export.presets",
             "edit.history",
@@ -126,6 +127,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(crate::effect_clipboard::specs());
         v.extend(crate::effect_blending_cmds::specs());
         v.extend(crate::tool_cmds::specs());
+        v.extend(crate::tool_variant_cmds::specs());
         v.extend(crate::brush_preset_cmds::specs());
         v.extend(crate::path_tool::specs());
         v.extend(crate::view_cmds::specs());
@@ -352,6 +354,8 @@ mod tests {
             "effect.add.paint",
             "file.save",
             "tool.paint",
+            "tool.variant.physicalPaint",
+            "tool.variant.pathFilled",
             "camera.add",
             "effect.duplicate",
             "effect.paste",
@@ -382,6 +386,7 @@ mod tests {
             "edit.history",
             "export.presets",
             "tool.state",
+            "tool.variants",
             "project.new",
             "camera.set",
             "layer.blend",

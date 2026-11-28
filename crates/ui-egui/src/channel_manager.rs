@@ -210,8 +210,12 @@ impl ChannelManager {
         let legend_text = ui.painter().layout_no_wrap(tr("Not used by the shader").to_owned(), FontId::proportional(SMALL_TEXT_SIZE), tokens.text_dim);
 
         let left_width = EDGE_AIR + CHECK_SIZE + CHECK_TO_LABEL + text.size().x + LEGEND_GAP + SMALL_TEXT_SIZE + LEGEND_GLYPH_TO_TEXT + legend_text.size().x;
-        let stacked = width < left_width + BUTTON_GAP + 2.0 * BUTTON_SIZE.x + 2.0 * EDGE_AIR;
-        let height = if stacked { 2.0 * BUTTON_SIZE.y + BUTTON_GAP } else { BUTTON_SIZE.y };
+
+        // A narrow footer puts the buttons on a row of their own, and the legend under the check when the two don't fit side by side
+        let legend_below = width < left_width + EDGE_AIR;
+        let stacked = legend_below || width < left_width + BUTTON_GAP + 2.0 * BUTTON_SIZE.x + 2.0 * EDGE_AIR;
+        let rows = 1.0 + f32::from(u8::from(legend_below)) + f32::from(u8::from(stacked));
+        let height = rows * BUTTON_SIZE.y + (rows - 1.0) * BUTTON_GAP;
         let (row, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
         ui.painter().hline(row.x_range(), row.top() - FOOTER_AIR / 2.0, Stroke::new(1.0, tokens.separator));
         let center_y = row.top() + BUTTON_SIZE.y / 2.0;
@@ -227,10 +231,10 @@ impl ChannelManager {
         ui.painter().galley(pos2(check.right() + CHECK_TO_LABEL, center_y - text.size().y / 2.0), text, tokens.text);
         paint_keyboard_focus(ui, &response, tokens);
 
-        let legend = hit.right() + LEGEND_GAP;
-        let glyph = ui.painter().text(pos2(legend, center_y), Align2::LEFT_CENTER, icon::PROHIBIT, FontId::proportional(SMALL_TEXT_SIZE), tokens.text_dim);
+        let legend = if legend_below { pos2(check.left(), center_y + BUTTON_SIZE.y + BUTTON_GAP) } else { pos2(hit.right() + LEGEND_GAP, center_y) };
+        let glyph = ui.painter().text(legend, Align2::LEFT_CENTER, icon::PROHIBIT, FontId::proportional(SMALL_TEXT_SIZE), tokens.text_dim);
         let text_left = glyph.right() + LEGEND_GLYPH_TO_TEXT;
-        ui.painter().galley(pos2(text_left, center_y - legend_text.size().y / 2.0), legend_text, tokens.text_dim);
+        ui.painter().galley(pos2(text_left, legend.y - legend_text.size().y / 2.0), legend_text, tokens.text_dim);
 
         let apply = Rect::from_min_size(pos2(row.right() - EDGE_AIR - BUTTON_SIZE.x, row.bottom() - BUTTON_SIZE.y), BUTTON_SIZE);
         let cancel = apply.translate(vec2(-(BUTTON_SIZE.x + BUTTON_GAP), 0.0));

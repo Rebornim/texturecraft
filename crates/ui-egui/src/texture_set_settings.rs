@@ -447,6 +447,28 @@ mod tests {
     }
 
     #[test]
+    fn a_narrow_channel_window_keeps_its_legend_inside_the_footer() {
+        let mut harness = harness("material_ball");
+        click(&mut harness, egui::Role::Button, "Add or remove channels");
+        harness.set_size(vec2(300.0, 600.0));
+        harness.run_steps(5);
+
+        let legend: Vec<_> = harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.galley.text() == "Not used by the shader" => Some((clipped.clip_rect, text.visual_bounding_rect())),
+                _ => None,
+            })
+            .collect();
+        assert!(!legend.is_empty(), "the footer paints its legend");
+        for (clip, painted) in legend {
+            assert!(clip.contains_rect(painted), "the legend at {painted:?} is cut off by {clip:?}");
+        }
+    }
+
+    #[test]
     fn escape_closes_the_channel_window_with_nothing_focused_and_drops_its_ticks() {
         let mut harness = harness("material_ball");
         let had = harness.state().session.doc.project.texture_sets[0].has_channel(Channel::User0);

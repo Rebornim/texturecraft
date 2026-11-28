@@ -1606,7 +1606,6 @@ fn filter_extent(radius: f32, op: Op, inputs: &Inputs) -> (u32, u32) {
     // Three box passes reach three radii; the gathering filters one radius plus a bilinear texel. A
     // mirror or transform reads anywhere in its block, so it reaches the block's longer side
     let reach = match op {
-        Op::Mirror { .. } | Op::Transform { .. } => (radius_texels + 1).max(inputs.block_size().into_iter().max().unwrap_or(0)),
         _ if is_box_blur(op) => 3 * radius_texels,
         _ => radius_texels + 1,
     };
@@ -4909,7 +4908,6 @@ pub fn pad_tiles(out: &mut Composite, padding: &crate::PaddingMaps, tiles: &[(u3
         }
 
         // Padding across a seam can continue from this tile into one far away
-        near_tiles.extend(padding.tiles_crossed_from((tx, ty)));
     }
     let near_tiles: Vec<(u32, u32)> = near_tiles.into_iter().collect();
 

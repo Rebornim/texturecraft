@@ -295,7 +295,7 @@ impl SourceRef {
         match self {
             SourceRef::Channel { channel, .. } => channel.kind() == ChannelKind::NormalMap,
             SourceRef::Virtual { map, .. } => matches!(map, VirtualMap::NormalOpenGl | VirtualMap::NormalDirectX | VirtualMap::HeightNormal),
-            SourceRef::Baked { map, .. } => matches!(map, BakedMap::Normal | BakedMap::BentNormal),
+            SourceRef::Baked { map, .. } => *map == BakedMap::Normal,
             SourceRef::Constant(_) => false,
         }
     }
@@ -614,7 +614,6 @@ pub fn list_outputs(project: &Project, ts: usize, mesh_name: &str, opts: &Export
     let grid = set.tile_grid();
     let (block_resolution, block_size) = (set.block_resolution(), set.block_size());
     let scale = |side| scale_export_side(side, block_resolution, opts.size);
-    check_scaled_size(set, (scale(block_size.0), scale(block_size.1)))?;
     for (i, map) in opts.preset.maps.iter().enumerate() {
         if !map.channels.iter().any(|(_, s)| source_present(set, s)) {
             continue;
@@ -925,7 +924,6 @@ pub fn render_planned_maps(input: &ExportInput, options: &ExportOptions, planned
     }
 
     // Before any image buffer is allocated
-    check_scaled_size(set, (scale_export_side(tile_res, tile_res, options.size), scale_export_side(tile_height, tile_res, options.size)))?;
 
     // Padding stays inside each UV tile
     let padding_maps = |max_dist| PaddingMaps::new(set.uv_padding, input.coverage, (width, height), max_dist, (tile_res, tile_height), input.seams);

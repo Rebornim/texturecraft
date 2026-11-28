@@ -68,9 +68,6 @@ fn general(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, ts: usize, 
     let typing_id = sheet.ui.scope_id().with(("tss_description_typing", ts));
     let focused = sheet.ui.memory(|memory| memory.focused());
     let typing = sheet.ui.data(|data| data.get_temp::<Option<egui::Id>>(typing_id)).flatten();
-    if typing.is_some() && typing != focused {
-        sheet.ui.data_mut(|data| data.remove::<Option<egui::Id>>(typing_id));
-    }
     if changed {
         let merge = typing.is_some() && typing == focused;
         sheet.ui.data_mut(|data| data.insert_temp(typing_id, focused));

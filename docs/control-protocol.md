@@ -175,7 +175,8 @@ through `tool.brush` too and come back with it: `angleFade` (`[from, to]` in deg
 `backfaceCulling` on, faces turned further than `from` from the view fade out until `to`),
 `screenSpace` (Size Space Viewport: the size follows the view instead of the object) and
 `stampDepth` (0.05..4). `sizePressure` (default `true`) lets pen pressure shrink the size towards
-`minSize`; `false` keeps every stamp at full size.
+`minSize`. Setting `sizePressure` to `false` removes pen-pressure scaling. In 3D, `jitterSize`
+still varies stamp size independently.
 
 Bake mode applies an edit in Common Settings or Mesh Map Settings to the texture sets sharing that
 group's settings: Common Settings, and each map's settings, are shared by any set of texture sets

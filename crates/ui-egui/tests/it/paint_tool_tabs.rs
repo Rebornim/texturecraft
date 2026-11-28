@@ -133,3 +133,42 @@ fn the_brush_preview_ignores_values_of_disabled_channels() {
         assert!(preview_meshes(&harness).1 == enabled.1, "re-enabling {channel} restores its stored value in the sphere");
     }
 }
+
+#[test]
+fn the_brush_preview_uses_neutral_coverage_while_editing_the_quick_mask() {
+    let mut harness = paint_harness("paint");
+    let stroke_texture = |harness: &Harness<'_, TextureCraftApp>| {
+        let preview = harness.get_by_role_and_label(Role::Image, "Brush preview").rect();
+        harness
+            .output()
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Mesh(mesh) if preview.contains_rect(mesh.calc_bounds()) && mesh.calc_bounds().right() <= preview.center().x => {
+                    Some(mesh.texture_id)
+                }
+                _ => None,
+            })
+            .unwrap()
+    };
+    execute(&mut harness.state_mut().session, "tool.material", &json!({"channel": "baseColor", "color": [0.0, 0.0, 1.0]})).unwrap();
+    harness.step();
+    let blue = stroke_texture(&harness);
+
+    execute(&mut harness.state_mut().session, "viewport.quickMask", &json!({"enabled": true})).unwrap();
+    execute(&mut harness.state_mut().session, "viewport.quickMask.edit", &json!({"editing": true})).unwrap();
+    harness.step();
+
+    let coverage = stroke_texture(&harness);
+    assert_ne!(coverage, blue, "editing the quick mask redraws the blue stroke as coverage");
+
+    execute(&mut harness.state_mut().session, "tool.material", &json!({"channel": "baseColor", "color": [1.0, 1.0, 1.0]})).unwrap();
+    harness.step();
+
+    assert_eq!(stroke_texture(&harness), coverage, "material changes do not tint the quick mask stroke");
+
+    execute(&mut harness.state_mut().session, "viewport.quickMask.edit", &json!({"editing": false})).unwrap();
+    harness.step();
+
+    assert_eq!(stroke_texture(&harness), coverage, "the quick mask preview uses the same neutral stroke as white paint");
+}

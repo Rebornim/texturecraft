@@ -2087,7 +2087,7 @@ const STROKE_GRAY_SAMPLES: u32 = 64;
 /// Gap under the brush preview
 const BRUSH_PREVIEW_GAP: f32 = 4.0;
 
-/// The brush's own stroke in the colour it paints, and a sphere with the tool's material
+/// The brush's stroke in its target's tint, with a material sphere for content targets
 fn brush_preview(app: &TextureCraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     let content = targets_content(app);
@@ -2101,17 +2101,15 @@ fn brush_preview(app: &TextureCraftApp, ui: &mut Ui) {
     let brush = &tool.brush;
     let image = brush.alpha_image.as_ref().and_then(|name| app.session.images.get(name));
 
-    if content {
-        let channel_value = |channel| if tool.enabled.contains(&channel) { tool.values.get(&channel).copied() } else { None };
-        let base_color = channel_value(Channel::BaseColor).unwrap_or(PREVIEW_FALLBACK_BASE_COLOR);
+    let channel_value = |channel| if tool.enabled.contains(&channel) { tool.values.get(&channel).copied() } else { None };
+    let base_color = content.then(|| channel_value(Channel::BaseColor).unwrap_or(PREVIEW_FALLBACK_BASE_COLOR));
+
+    if app.session.quick_mask.editing {
+        // The quick mask stores coverage independently of the tool's material and mask gray
+        BrushStrokePreview::paint(ui.ctx(), painter, stroke_rect, brush, image, |_| [u8::MAX; 3]);
+    } else if let Some(base_color) = base_color {
         let srgb = base_color.map(|linear| (linear_to_srgb(linear) * 255.0 + 0.5) as u8);
         BrushStrokePreview::paint(ui.ctx(), painter, stroke_rect, brush, image, |_| srgb);
-
-        // The sphere sits in the middle of the preview's right half
-        let metallic = channel_value(Channel::Metallic).map_or(crate::thumbs::SPHERE_DEFAULT_METALLIC, |metallic| metallic[0]);
-        let roughness = channel_value(Channel::Roughness).map_or(crate::thumbs::SPHERE_DEFAULT_ROUGHNESS, |roughness| roughness[0]);
-        let center = pos2(rect.left() + half_width * 1.5, rect.center().y);
-        crate::thumbs::paint_material_sphere(painter, center, PREVIEW_SPHERE_RADIUS, base_color, metallic, roughness);
     } else {
         // A mask paints gray: an image-backed one is read across the stroke
         let gray = app.session.mask_gray();
@@ -2121,6 +2119,15 @@ fn brush_preview(app: &TextureCraftApp, ui: &mut Ui) {
         };
         BrushStrokePreview::paint(ui.ctx(), painter, stroke_rect, brush, image, mask_tint);
     }
+
+    if let Some(base_color) = base_color {
+        // The sphere sits in the middle of the preview's right half
+        let metallic = channel_value(Channel::Metallic).map_or(crate::thumbs::SPHERE_DEFAULT_METALLIC, |metallic| metallic[0]);
+        let roughness = channel_value(Channel::Roughness).map_or(crate::thumbs::SPHERE_DEFAULT_ROUGHNESS, |roughness| roughness[0]);
+        let center = pos2(rect.left() + half_width * 1.5, rect.center().y);
+        crate::thumbs::paint_material_sphere(painter, center, PREVIEW_SPHERE_RADIUS, base_color, metallic, roughness);
+    }
+
     ui.add_space(BRUSH_PREVIEW_GAP);
 }
 

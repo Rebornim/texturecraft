@@ -265,6 +265,7 @@ impl Channel {
             Channel::Normal | Channel::CoatNormal => [0.5, 0.5, 1.0],
             Channel::Opacity | Channel::AmbientOcclusion => [1.0; 3],
             Channel::SpecularLevel | Channel::Glossiness => [0.5; 3],
+
             // F0 of a common dielectric (4 %)
             Channel::Specular => [0.04; 3],
             Channel::BaseWeight | Channel::SpecularWeight | Channel::SpecularColor | Channel::TransmissionColor | Channel::CoatColor => [1.0; 3],
@@ -547,11 +548,20 @@ impl Channel {
         }
     }
 
-    /// Parse an id, label or short label (case-insensitive, spaces/underscores ignored).
+    /// Parse an id, label or short label, ignoring case, spaces, underscores and hyphens.
     pub fn parse(s: &str) -> Option<Channel> {
-        let norm = |x: &str| x.to_ascii_lowercase().replace([' ', '_', '-'], "");
-        let want = norm(s);
-        Channel::ALL.into_iter().find(|c| norm(c.id()) == want || norm(c.label()) == want || norm(c.short()) == want || norm(&format!("{c:?}")) == want)
+        if let Some(channel) = Channel::ALL.into_iter().find(|channel| channel.id().eq_ignore_ascii_case(s)) {
+            return Some(channel);
+        }
+
+        let normalize = |name: &str| name.to_ascii_lowercase().replace([' ', '_', '-'], "");
+        let wanted = normalize(s);
+        Channel::ALL.into_iter().find(|channel| {
+            normalize(channel.id()) == wanted
+                || normalize(channel.label()) == wanted
+                || normalize(channel.short()) == wanted
+                || normalize(&format!("{channel:?}")) == wanted
+        })
     }
 
     /// Position in [`Channel::ALL`] (the declaration order)
@@ -647,6 +657,7 @@ mod tests {
             assert_eq!(Channel::parse(c.label()), Some(c));
             assert_eq!(Channel::parse(c.short()), Some(c));
         }
+
         assert_eq!(Channel::parse("base color"), Some(Channel::BaseColor));
         assert_eq!(Channel::parse("nope"), None);
     }
@@ -661,13 +672,16 @@ mod tests {
                 assert!(prev.is_none_or(|p| p == c), "`{name}` names both {prev:?} and {c:?}");
             }
         }
+
         for c in Channel::LOBES {
             assert!(Channel::ALL.contains(&c));
-            // Tints, roughnesses and the flat coat normal only matter once their lobe has weight.
+
+            // Tints, roughnesses and the flat coat normal only matter once their lobe has weight
             let off =
                 matches!(c, Channel::CoatRoughness | Channel::SheenColor | Channel::SheenRoughness | Channel::CoatNormal) || c.default_value() == [0.0; 3];
             assert!(off, "{c:?} must default to an inactive lobe");
         }
+
         assert_eq!(Channel::parse("sheen color"), Some(Channel::SheenColor));
         assert_eq!(Channel::parse("coatWeight"), Some(Channel::CoatWeight));
     }
@@ -678,6 +692,7 @@ mod tests {
             assert_eq!(ChannelFormat::parse(&f.label().to_lowercase()), Some(f));
             assert!(f.at_least_16_bit().is_grey() == f.is_grey());
         }
+
         assert_eq!(ChannelFormat::parse("RGB4"), None);
     }
 
@@ -689,6 +704,7 @@ mod tests {
             let json = serde_json::to_string(&c).unwrap_or_default();
             assert_eq!(serde_json::from_str::<Channel>(&json).ok(), Some(c));
         }
+
         assert!(Channel::LOBES.iter().chain(&Channel::DEFAULT_SET).all(|c| c.is_shaded()));
         assert_eq!(Channel::parse("User31"), Some(Channel::User31));
         assert_eq!(Channel::parse("thin-film weight"), Some(Channel::ThinFilmWeight));

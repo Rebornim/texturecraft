@@ -18,9 +18,13 @@ use template_library::TemplateLibrary;
 
 /// OUTPUT TEMPLATES with the user template "Mine" selected
 fn harness(library: &TemplateLibrary) -> Harness<'static, TextureCraftApp> {
+    harness_at(library, egui::vec2(1600.0, 960.0))
+}
+
+fn harness_at(library: &TemplateLibrary, size: egui::Vec2) -> Harness<'static, TextureCraftApp> {
     let session = texturecraft_engine::sample_session(256, 64).unwrap();
     let mut h = Harness::builder()
-        .with_size(egui::vec2(1600.0, 960.0))
+        .with_size(size)
         .with_context_setup(texturecraft_ui_egui::framework::install_headless)
         .build_eframe(|cc| TextureCraftApp::new(cc, session));
     h.state_mut().ui.prefs.language = "en".into();
@@ -98,24 +102,38 @@ fn right_click(h: &mut Harness<'_, TextureCraftApp>, label: &str) {
 fn the_tab_shows_the_preset_tools_and_map_editor() {
     let library = TemplateLibrary::new("layout");
     let mut h = harness(&library);
-    for text in ["Presets", "Naming pattern", "Current preset:", "Output maps", "Create:", "Drop an input map onto a channel to assign it to that output."] {
+    for text in ["Presets", "Naming pattern", "Current preset:", "Output maps", "Create:"] {
         assert!(h.query_by_label(text).is_some(), "{text}");
     }
+    let hint = "Drop an input map onto a channel to assign it to that output.";
+
+    assert!(h.query_by_label(hint).is_none(), "the drag hint is no line under the cards");
+    let metallic = h.get_by_role_and_label(egui::Role::ListItem, "Metallic").rect().center();
+    h.hover_at(metallic);
+    h.run_steps(30);
+
+    assert!(h.query_by_label(hint).is_some(), "a map entry's tooltip says how to use it");
+    h.hover_at(egui::pos2(1.0, 1.0));
+    h.run_steps(4);
+
     assert!(h.get_all_by_role(egui::Role::ComboBox).any(|c| c.value().as_deref() == Some("OpenPBR")));
     let maps = h.state().session.export_preset("Mine").unwrap().maps.len();
     let ts = h.state().session.ts();
     let plan = h.state_mut().run("export.plan", json!({"preset": "Mine", "ts": ts})).unwrap();
     let exported = plan.as_array().unwrap().len();
-    assert!(h.query_by_label(&format!("{exported} output maps will be exported.")).is_some());
+
+    assert!(h.query_by_label(&format!("{exported} output maps will be exported")).is_some());
     for create in ["Gray", "RGB", "R+G+B", "RGB+A", "R+G+B+A"] {
         assert!(h.query_by_label(create).is_some(), "{create}");
     }
     click(&mut h, "R+G+B+A");
+
     assert_eq!(h.state().session.export_preset("Mine").unwrap().maps.len(), maps + 1, "Create adds an output map");
 
     let info = h.get_by_label(egui_phosphor::regular::INFO).rect().center();
     h.hover_at(info);
     h.run_steps(30);
+
     assert!(h.query_by_label("Choose how the input maps are named in this editor.").is_some());
     assert!(h.query_by_label("The active texture set’s shader can affect the available map names.").is_some());
 }
@@ -152,12 +170,17 @@ fn the_right_click_menu_renames_and_removes_user_templates_only() {
         assert!(!h.get_by_label(item).accesskit_node().is_disabled(), "{item}");
     }
     click(&mut h, "Rename");
+
     assert_eq!(h.state().ui.export.renaming.as_deref(), Some("Mine"));
     h.key_press(egui::Key::Escape);
     h.run_steps(4);
 
+    assert!(h.state().ui.export.renaming.is_none(), "Escape ends the rename");
+    assert!(h.state().ui.windows.export, "and leaves the window open");
+
     right_click(&mut h, "Mine");
     click(&mut h, "Remove");
+
     assert!(matches!(&h.state().ui.export.ask, Some(texturecraft_ui_egui::export_templates::Ask::Delete(n)) if n == "Mine"));
     h.state_mut().ui.export.ask = None;
     h.run_steps(2);
@@ -191,17 +214,19 @@ fn the_preview_ignores_a_texture_sets_output_map_settings() {
     h.state_mut().run("export.preset.save", json!({ "preset": two })).unwrap();
     let own = "Unreal Engine (Packed)".to_string();
     let mut o = texturecraft_ui_egui::state::SetExport { preset: Some(own.clone()), maps_template: own, ..Default::default() };
-    o.maps.insert(2, texturecraft_ui_egui::state::MapExport { enabled: false, file_type: None });
+    o.maps.insert(2, texturecraft_ui_egui::state::MapExport { enabled: false, file_type: None, size: None });
     let ts = h.state().session.ts();
     h.state_mut().ui.export.sets.insert(ts, o);
     h.state_mut().ui.export.preset = "Two".into();
     h.run_steps(4);
+
     assert!(h.query_by_label_contains("Not saved").is_none(), "the preview plans the template on show");
     let plan = h.state_mut().run("export.plan", json!({"preset": "Two", "ts": ts})).unwrap();
     for index in 0..2 {
         let file = plan.as_array().unwrap().iter().find(|f| f["map"] == index).unwrap()["file"].as_str().unwrap().to_string();
         hover_name_field(&mut h, index);
         let planned = format!("{} {file}", egui_phosphor::regular::ARROW_RIGHT);
+
         assert!(h.query_all_by_label(&planned).next().is_some(), "map {index} shows its own file {file}");
     }
 }
@@ -211,7 +236,7 @@ fn texture_set_overrides_follow_a_renamed_template_and_drop_a_removed_one() {
     let library = TemplateLibrary::new("follow");
     let mut h = harness(&library);
     let mut o = texturecraft_ui_egui::state::SetExport { preset: Some("Mine".into()), maps_template: "Mine".into(), ..Default::default() };
-    o.maps.insert(1, texturecraft_ui_egui::state::MapExport { enabled: false, file_type: None });
+    o.maps.insert(1, texturecraft_ui_egui::state::MapExport { enabled: false, file_type: None, size: None });
 
     // The override is there when the window opens
     h.state_mut().ui.windows.export = false;
@@ -229,19 +254,23 @@ fn texture_set_overrides_follow_a_renamed_template_and_drop_a_removed_one() {
     h.state_mut().ui.export.renaming = Some("Yours".into());
     h.key_press(egui::Key::Enter);
     h.run_steps(4);
+
     assert_eq!(h.state().ui.export.preset, "Yours");
     let o = h.state().ui.export.sets[&0].clone();
+
     assert_eq!((o.preset.as_deref(), o.maps_template.as_str()), (Some("Yours"), "Yours"), "the set keeps its template and map ticks");
     assert_eq!(o.maps.len(), 1);
 
     right_click(&mut h, "Yours");
     click(&mut h, "Remove");
     click(&mut h, "Delete");
+
     assert!(h.state().session.export_preset("Yours").is_none());
     assert!(!h.state().ui.export.sets.contains_key(&0), "the set exports with the global settings again");
 
     // Cancel goes back to the settings the window opened with, minus the removed template
     click(&mut h, "Cancel");
+
     assert!(h.state().ui.export.sets.values().all(|o| o.preset.as_deref() != Some("Yours") && o.preset.as_deref() != Some("Mine")));
 }
 
@@ -260,11 +289,12 @@ fn the_footer_counts_only_the_maps_the_texture_set_exports() {
     h.run_steps(4);
     let ts = h.state().session.ts();
     let plan = h.state_mut().run("export.plan", json!({"preset": "Mine", "ts": ts})).unwrap();
+
     assert_eq!(plan.as_array().unwrap().len(), 1, "the sample set has no sheen: {plan}");
     hover_name_field(&mut h, 1);
     assert!(h.query_all_by_label_contains("Not exported").next().is_some(), "the sheen row says so");
-    assert!(h.query_by_label("1 output maps will be exported.").is_some());
-    assert!(h.query_by_label("2 output maps will be exported.").is_none());
+    assert!(h.query_by_label("1 output maps will be exported").is_some());
+    assert!(h.query_by_label("2 output maps will be exported").is_none());
 }
 
 #[test]
@@ -273,13 +303,14 @@ fn per_map_settings_follow_their_map_when_the_template_reorders_it() {
     let mut h = harness(&library);
 
     // The first texture set leaves out the template's first map
-    let off = MapExport { enabled: false, file_type: None };
+    let off = MapExport { enabled: false, file_type: None, size: None };
     h.state_mut().ui.export.sets.insert(0, SetExport { maps_template: "Mine".into(), maps: [(0, off.clone())].into(), ..SetExport::default() });
     h.run_steps(2);
     let first = h.state().session.export_preset("Mine").unwrap().maps[0].file.clone();
     move_map(&mut h, 0, "Move down");
     assert_eq!(h.state().session.export_preset("Mine").unwrap().maps[1].file, first, "the map moved down");
     let maps = h.state().ui.export.sets.get(&0).map(|o| o.maps.clone()).unwrap_or_default();
+
     assert_eq!(maps, [(1, off)].into(), "the setting moved with its map");
 }
 
@@ -287,7 +318,7 @@ fn per_map_settings_follow_their_map_when_the_template_reorders_it() {
 fn a_draft_in_the_same_order_as_the_external_save_remaps_from_that_order() {
     let library = TemplateLibrary::new("stale");
     let mut h = harness(&library);
-    let off = MapExport { enabled: false, file_type: None };
+    let off = MapExport { enabled: false, file_type: None, size: None };
     h.state_mut().ui.export.sets.insert(0, SetExport { maps_template: "Mine".into(), maps: [(0, off.clone())].into(), ..SetExport::default() });
     h.run_steps(2);
     let saved = h.state().session.export_preset("Mine").unwrap();
@@ -309,8 +340,10 @@ fn a_draft_in_the_same_order_as_the_external_save_remaps_from_that_order() {
     h.run_steps(2);
     move_map(&mut h, 0, "Move down");
     let now = h.state().session.export_preset("Mine").unwrap();
+
     assert_eq!(now.maps[1].file, saved.maps[1].file, "{:?}", now.maps.iter().map(|m| &m.file).collect::<Vec<_>>());
     let maps = h.state().ui.export.sets.get(&0).map(|o| o.maps.clone()).unwrap_or_default();
+
     assert_eq!(maps, [(1, off)].into(), "counted from the agent's order, not the edit's old base");
 }
 
@@ -324,7 +357,7 @@ fn a_retained_draft_keeps_overrides_with_maps_after_an_external_reorder() {
     let mut external = saved.clone();
     external.maps.swap(0, 1);
     harness.state_mut().run("export.preset.save", json!({"preset": external})).unwrap();
-    let disabled = MapExport { enabled: false, file_type: None };
+    let disabled = MapExport { enabled: false, file_type: None, size: None };
     harness.state_mut().ui.export.sets.insert(0, SetExport { maps_template: "Mine".into(), maps: [(0, disabled.clone())].into(), ..SetExport::default() });
     harness.run_steps(3);
 
@@ -334,17 +367,18 @@ fn a_retained_draft_keeps_overrides_with_maps_after_an_external_reorder() {
     harness.run_steps(4);
 
     let current = harness.state().session.export_preset("Mine").unwrap();
+
     assert_eq!(current, saved, "the corrected draft was saved in its own order");
     assert_eq!(harness.state().ui.export.sets[&0].maps, [(1, disabled)].into());
 }
 
 #[test]
-fn the_tab_row_holds_the_naming_pattern_and_the_bottom_bar_only_cancels() {
+fn the_tab_row_holds_the_naming_pattern_and_the_bottom_bar_has_no_count_or_reset() {
     let library = TemplateLibrary::new("bottom-bar");
     let h = harness(&library);
 
     let naming = h.get_by_label("Naming pattern").rect();
-    let tabs = h.get_by_label("OUTPUT TEMPLATES").rect();
+    let tabs = h.get_by_role_and_label(egui::Role::Tab, "Output templates").rect();
     let presets = h.get_by_label("Presets").rect();
 
     assert!(naming.center().y < presets.top() && (naming.center().y - tabs.center().y).abs() < tabs.height(), "on the tab row: {naming:?}");
@@ -353,13 +387,13 @@ fn the_tab_row_holds_the_naming_pattern_and_the_bottom_bar_only_cancels() {
         assert!(h.query_by_label(absent).is_none(), "{absent}");
     }
     assert!(h.query_by_label_contains("textures selected for export").is_none());
-    for greyed in ["Save settings", "Export"] {
+    for active in ["Save settings", "Export", "Cancel"] {
         // The rail at the right edge has an Export button of its own
         let button =
-            h.get_all_by_role(egui::Role::Button).rfind(|b| b.rect().max.x < RAIL_LEFT_EDGE && b.accesskit_node().label().as_deref() == Some(greyed)).unwrap();
-        assert!(button.accesskit_node().is_disabled(), "{greyed}");
+            h.get_all_by_role(egui::Role::Button).rfind(|b| b.rect().max.x < RAIL_LEFT_EDGE && b.accesskit_node().label().as_deref() == Some(active)).unwrap();
+
+        assert!(!button.accesskit_node().is_disabled(), "{active}");
     }
-    assert!(!h.get_all_by_label("Cancel").last().unwrap().accesskit_node().is_disabled());
 }
 
 #[test]
@@ -426,6 +460,7 @@ fn the_map_lists_stand_in_three_panes_with_their_groups_and_names() {
     let h = harness(&library);
 
     let input = h.get_by_label("Input maps").rect();
+
     // A built-in template is called "Mesh maps" too: the pane's title comes after the Presets list
     let mesh = h.get_all_by_label("Mesh maps").last().unwrap().rect();
     let converted = h.get_by_label("Converted maps").rect();
@@ -508,6 +543,31 @@ fn a_color_map_dropped_on_the_rgb_swatch_offers_rgb_channels() {
 }
 
 #[test]
+fn escape_in_a_file_name_field_leaves_the_field_and_keeps_the_window() {
+    let library = TemplateLibrary::new("escape-in-a-field");
+    let mut h = harness(&library);
+    let field = name_field(&h, 0).center();
+    h.hover_at(field);
+    for pressed in [true, false] {
+        h.event(Event::PointerButton { pos: field, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        h.step();
+    }
+    h.run_steps(4);
+
+    assert!(h.ctx.egui_wants_keyboard_input(), "the field has the keyboard");
+
+    h.key_press(egui::Key::Escape);
+    h.run_steps(4);
+
+    assert!(h.state().ui.windows.export, "the window stays open");
+    assert!(!h.ctx.egui_wants_keyboard_input(), "the field let go of the keyboard");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(4);
+
+    assert!(!h.state().ui.windows.export, "a second Escape is Cancel");
+}
+
+#[test]
 fn escape_closes_the_from_popup_without_assigning() {
     let library = TemplateLibrary::new("drop-escape");
     let mut h = harness(&library);
@@ -526,6 +586,7 @@ fn escape_closes_the_from_popup_without_assigning() {
 
     assert!(h.query_by_label("Which part of Metallic?").is_none(), "Escape closes the popup");
     assert!(h.state().ui.export.pending_drop.is_none());
+    assert!(h.state().ui.windows.export, "the window stays open");
     assert_eq!(h.state().session.export_preset("Mine").unwrap(), before, "nothing was assigned");
 }
 
@@ -605,7 +666,7 @@ fn on_a_small_screen_an_rgba_row_keeps_its_controls_in_the_window() {
     click(&mut h, "R+G+B+A");
 
     let input_maps = h.get_by_label("Input maps").rect();
-    let removes: Vec<egui::Rect> = h.get_all_by_label("Remove this output").map(|node| node.rect()).collect();
+    let removes: Vec<egui::Rect> = h.get_all_by_label_contains("Remove output ").map(|node| node.rect()).collect();
     let alpha = last_window_button(&h, "A: Empty (writes white)").rect();
 
     assert!(!removes.is_empty());
@@ -623,12 +684,121 @@ fn on_a_small_screen_an_rgba_row_keeps_its_controls_in_the_window() {
     // The row's file format list starts right of its last swatch instead of covering it
     let format =
         h.get_all_by_role(egui::Role::Button).rfind(|button| button.accesskit_node().label().is_some_and(|label| label.starts_with("png"))).unwrap().rect();
+
     assert!(alpha.right() <= format.left(), "the swatches and the lists do not overlap: {alpha:?} {format:?}");
 
     // The panes stay inside the window: the side pane ends where the bottom bar's buttons end
     let cancel = h.get_all_by_label("Cancel").last().unwrap().rect();
     let export = last_window_button(&h, "Export").rect();
     let converted = h.get_by_label("Converted maps").rect();
+
     assert!(cancel.max.x <= 1000.0 && cancel.max.y <= 700.0, "{cancel:?}");
     assert!(converted.left() < export.right() && converted.right() <= export.right() + 1.0, "{converted:?} {export:?}");
+}
+
+#[test]
+fn a_narrow_template_editor_keeps_the_alpha_swatch_clear_of_the_file_type_menu() {
+    let library = TemplateLibrary::new("narrow-template-editor");
+    let mut harness = harness_at(&library, egui::vec2(800.0, 480.0));
+    let create = harness.get_by_role_and_label(egui::Role::Button, "R+G+B+A");
+    create.scroll_to_me();
+    harness.run_steps(4);
+
+    click(&mut harness, "R+G+B+A");
+    let alpha = last_window_button(&harness, "A: Empty (writes white)").rect();
+    let format = harness
+        .get_all_by_role(egui::Role::Button)
+        .rfind(|button| button.accesskit_node().label().is_some_and(|label| label.starts_with("png")))
+        .unwrap()
+        .rect();
+
+    assert!(alpha.right() <= format.left(), "alpha {alpha:?} overlaps format {format:?}");
+}
+
+#[test]
+fn hovering_a_channel_swatch_shows_the_file_its_output_writes() {
+    let library = TemplateLibrary::new("map-preview");
+    let mut h = harness(&library);
+    let swatch =
+        h.get_all_by_role(egui::Role::Button).find(|b| b.accesskit_node().label().is_some_and(|l| l.starts_with("B: Metallic"))).unwrap().rect().center();
+    let pictures = h.query_all_by_role(egui::Role::Image).count();
+    let roughness_lines = h.query_all_by_label("Roughness, gray value").count();
+    let file_names = h.query_all_by_label_contains("OcclusionRoughnessMetallic.png").count();
+
+    assert!(h.query_by_label_contains(" · png").is_none(), "nothing shows before the hover");
+
+    h.hover_at(swatch);
+    h.run_steps(30);
+
+    assert!(h.query_all_by_label_contains("OcclusionRoughnessMetallic.png").count() > file_names, "the file's name");
+    assert!(h.query_by_label_contains(" · png").is_some(), "the file's size and type");
+    assert!(h.query_all_by_role(egui::Role::Image).count() > pictures, "the file and its channels, small");
+    assert!(h.query_all_by_label("Roughness, gray value").count() > roughness_lines, "another channel's source is named");
+}
+
+#[test]
+fn leaving_output_templates_releases_pictures_from_each_hovered_map() {
+    let library = TemplateLibrary::new("preview-lifetime");
+    let mut h = harness(&library);
+    let previews = |h: &Harness<'_, TextureCraftApp>| {
+        h.ctx.tex_manager().read().allocated().filter(|(_, texture)| texture.name.starts_with("export_map_preview_")).count()
+    };
+    let hover_map = |h: &mut Harness<'_, TextureCraftApp>, name: &str| {
+        let swatch = h
+            .get_all_by_role(egui::Role::Button)
+            .find(|button| button.accesskit_node().label().is_some_and(|label| label.starts_with(name)))
+            .unwrap_or_else(|| panic!("no swatch for {name}"))
+            .rect();
+        h.hover_at(swatch.center());
+        h.run_steps(30);
+    };
+
+    hover_map(&mut h, "B: Metallic");
+    let first = previews(&h);
+
+    assert!(first > 0);
+    hover_map(&mut h, "RGB: Base color");
+    assert!(previews(&h) > first);
+
+    click(&mut h, "Settings");
+
+    assert_eq!(previews(&h), 0);
+
+    click(&mut h, "Output templates");
+    hover_map(&mut h, "B: Metallic");
+    assert_eq!(previews(&h), first);
+    click(&mut h, "Cancel");
+
+    assert_eq!(previews(&h), 0);
+
+    h.state_mut().ui.windows.export = true;
+    h.run_steps(4);
+    click(&mut h, "Output templates");
+    hover_map(&mut h, "B: Metallic");
+    assert_eq!(previews(&h), first);
+
+    h.key_press(egui::Key::Escape);
+    h.run_steps(4);
+
+    assert!(!h.state().ui.windows.export);
+    assert_eq!(previews(&h), 0);
+}
+
+#[test]
+fn feedback_template_preview_counts_overrides_only_for_its_own_maps() {
+    let library = TemplateLibrary::new("preview-map-overrides");
+    let mut h = harness(&library);
+    let ts = h.state().session.ts();
+    let plan = h.state_mut().run("export.plan", json!({"ts": ts, "preset": "Mine"})).unwrap();
+    let initial = plan.as_array().unwrap().len();
+    assert!(initial > 0);
+    let disabled = MapExport { enabled: false, ..MapExport::default() };
+    h.state_mut().ui.export.sets.insert(ts, SetExport { maps_template: "Mine".into(), maps: [(0, disabled)].into(), ..SetExport::default() });
+
+    h.run_steps(4);
+
+    assert!(h.query_by_label(&format!("{} output maps will be exported", initial - 1)).is_some());
+    h.state_mut().ui.export.sets.get_mut(&ts).unwrap().preset = Some("Separate maps".into());
+    h.run_steps(4);
+    assert!(h.query_by_label(&format!("{initial} output maps will be exported")).is_some());
 }

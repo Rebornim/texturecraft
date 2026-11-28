@@ -95,7 +95,7 @@ pub(crate) fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
             Some(SetRow {
                 name: set.name.clone(),
                 description: set.description.clone(),
-                original_name: app.session.original_set_name(index).map(str::to_owned),
+                renamed: app.session.original_set_name(index).is_some_and(|original| original != set.name),
                 width: set.resolution,
                 height: set.height(),
                 visible: set.visible,
@@ -357,12 +357,11 @@ fn set_row(app: &mut TextureCraftApp, ui: &mut Ui, state: &mut ListState, index:
 
 /// The row's right-click menu in the toolbar menus' look, also from Shift+F10 or the Menu key (`menu_key` over the list)
 fn context_menu(ui: &Ui, response: &Response, row: &SetRow, menu_key: bool, tokens: &Tokens) -> Option<RowAction> {
-    let renamed = row.original_name.as_ref().is_some_and(|original| *original != row.name);
     let visibility = if row.visible { (ic::EYE_SLASH, "Hide Texture Set") } else { (ic::EYE, "Show Texture Set") };
     let entries = [
         (visibility.0, visibility.1, true, RowAction::ToggleVisible),
         (ic::PENCIL_SIMPLE, "Edit Name", true, RowAction::Edit(RowEdit::Name)),
-        (ic::ARROW_COUNTER_CLOCKWISE, "Reset Name to Original", renamed, RowAction::ResetName),
+        (ic::ARROW_COUNTER_CLOCKWISE, "Reset Name to Original", row.renamed, RowAction::ResetName),
         (ic::NOTE_PENCIL, "Edit Description", true, RowAction::Edit(RowEdit::Description)),
     ];
     let items = entries.map(|(glyph, short, enabled, _)| AddItem {
@@ -520,6 +519,7 @@ fn size_list(ui: &mut Ui, current: u32) -> Option<u32> {
 fn edit_field(ui: &mut Ui, state: &mut ListState, rect: Rect, size: f32) -> Option<String> {
     let (_, _, text, needs_focus) = state.edit.as_mut()?;
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+
     // The text sits where the drawn name or description sat, centred in the field
     let font = FontId::proportional(size);
     let text_height = ui.fonts_mut(|fonts| fonts.row_height(&font));
@@ -533,6 +533,7 @@ fn edit_field(ui: &mut Ui, state: &mut ListState, rect: Rect, size: f32) -> Opti
     }
 
     let edit = state.edit.take()?;
+
     // Raw Escape: with the field's focus gone, the window's cancel takes it from egui's input
     let escaped = ui.input(|input| input.raw.events.iter().any(|event| matches!(event, egui::Event::Key { key: egui::Key::Escape, pressed: true, .. })));
     (!escaped).then_some(edit.2)
@@ -573,6 +574,7 @@ mod tests {
     /// Presses and lets go on `label`'s node through the real pointer path, as a person's click lands on a control drawn over its row
     fn click(harness: &mut Harness<'static, TextureCraftApp>, role: egui::Role, label: &str, button: egui::PointerButton) {
         let rect = harness.get_by_role_and_label(role, label).rect();
+
         // A row's middle is under its size dropdown in a narrow panel: aim at its name
         let at = if role == egui::Role::ListItem { egui::pos2(rect.left() + rect.width() * 0.25, rect.center().y) } else { rect.center() };
         let modifiers = egui::Modifiers::NONE;
@@ -590,20 +592,36 @@ mod tests {
 
         click(&mut harness, egui::Role::ComboBox, &format!("128, Size of {name}"), egui::PointerButton::Primary);
         click(&mut harness, egui::Role::ListBoxOption, "512", egui::PointerButton::Primary);
-        // The resize runs on a worker, as the settings' size does
-        for _ in 0..200 {
-            harness.run_steps(1);
-            if harness.state().resize.is_none() {
-                break;
-            }
 
-            std::thread::sleep(std::time::Duration::from_millis(10));
+        // Wait for the worker and let the next frame apply its actual result
+        if let Some(resize) = harness.state_mut().resize.as_mut() {
+            let result = resize.rx.recv_timeout(std::time::Duration::from_secs(30)).expect("resize worker did not send a result");
+            let (sender, receiver) = std::sync::mpsc::channel();
+            assert!(sender.send(result).is_ok(), "resize completion could not be forwarded");
+            resize.rx = receiver;
         }
+
         harness.run_steps(2);
 
+        assert!(harness.state().resize.is_none(), "the app consumed the resize result");
         let sets = &harness.state().session.doc.project.texture_sets;
         assert!(sets[1].resolution > 128 && sets[1].height() == sets[1].resolution, "the set grew and stayed square");
         assert_eq!(sets[0].resolution, 128, "the other set kept its size");
+    }
+
+    #[test]
+    fn a_width_change_cannot_distort_a_set_at_the_height_limit() {
+        let mut harness = harness("material_ball");
+        let app = harness.state_mut();
+
+        for (width, height, picked_width) in [(256, 128, MIN_RESOLUTION), (128, 256, MAX_RESOLUTION)] {
+            texturecraft_engine::execute(&mut app.session, "textureSet.resolution", &json!({"resolution": width, "height": height})).unwrap();
+
+            app.start_resize(0, picked_width);
+
+            assert!(app.resize.is_none(), "an unrepresentable height must not start a resize worker");
+            assert_eq!(app.session.doc.project.texture_sets[0].size(), (width, height));
+        }
     }
 
     #[test]
@@ -614,6 +632,7 @@ mod tests {
         click(&mut harness, egui::Role::ListItem, &original, egui::PointerButton::Secondary);
         click(&mut harness, egui::Role::Button, "Edit Name", egui::PointerButton::Primary);
         harness.run_steps(3);
+
         // The field took focus, so typed text goes to it
         harness.event(egui::Event::Text("x".into()));
         harness.run_steps(1);

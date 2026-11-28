@@ -412,6 +412,7 @@ mod tests {
         assert!(execute(&mut s, "textureSet.tile.resolution", &json!({"tile": 1002, "resolution": 128})).is_err());
         s.undo().unwrap();
         assert_eq!(s.doc.project.texture_sets[0].size(), (512, 256));
+
         // A set whose tiles have their own sizes stays square
         execute(&mut s, "textureSet.tile.resolution", &json!({"tile": 1002, "resolution": 128})).unwrap();
         assert!(execute(&mut s, "textureSet.resolution", &json!({"resolution": 256, "height": 128})).is_err());

@@ -468,8 +468,7 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
         return;
     }
 
-    // A plain Escape or Enter while no widget of TextureCraft's has the keyboard is the window's cancel or submit: back
-    // in egui's input, it runs the Escape and Enter handlers below, the shortcuts and the Path tool's keys
+    // Forward unclaimed Escape and Enter to window shortcuts and tool handlers
     for (key, taken) in [(Key::Escape, crate::framework::take_window_cancel(ctx)), (Key::Enter, crate::framework::take_window_submit(ctx))] {
         if taken {
             let escape = craft_ui::runtime::keys::escape_mods(ctx).filter(|_| key == Key::Escape);
@@ -483,7 +482,7 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
     }
 
     // The dispatcher reads clipboard events as shortcuts; a pasted image also means Ctrl+V
-    // Unless bound, Shift+Delete and Shift+Insert become Ctrl+X and Ctrl+V
+    // Unbound Shift+Delete and Shift+Insert use the standard cut and paste shortcuts
     ctx.input_mut(|input| {
         let held = input.modifiers;
         let aliases: Vec<_> = input
@@ -495,14 +494,15 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
         input.events.extend(aliases);
     });
 
-    // Let the innermost popup consume Escape before cancelling the active tool
-    // (the drop popup of the Output templates tab is open without registering with egui, and reads Escape itself)
+    // Give the innermost popup first use of Escape
+    // The output template popup handles Escape outside egui’s popup registry
     let popup_open = egui::Popup::is_any_open(ctx) || app.ui.export.pending_drop.is_some();
     let point_pick_armed = crate::generator_point_pick::armed(ctx).is_some();
     let mut cancel_point_pick = false;
     let picker_open = crate::color_picker::open_window(ctx).is_some();
 
     let nothing_focused = !crate::framework::widget_has_keyboard(ctx);
+
     // A dialog closes on Escape itself
     let modal_open = ctx.memory(|memory| memory.top_modal_layer().is_some());
     let over_set_list = crate::texture_set_list::pointer_over(ctx);
@@ -525,12 +525,13 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
         if app.ui.windows.export && app.ui.export.tab == 1 && app.ui.export.ask.is_none() && input.consume_key(Modifiers::NONE, Key::F2) {
             app.ui.export.rename_key = true;
         }
-        // Over the texture set list, F2 renames the selected set and Shift+F10 or the Menu key opens its menu, before
-        // the 3D view and Render mode bindings
+
+        // Give the hovered texture set list first use of its rename and menu keys
         if over_set_list {
             let menu = input.consume_key(Modifiers::SHIFT, Key::F10) || input.consume_key(Modifiers::NONE, Key::Menu);
             set_list_keys = (input.consume_key(Modifiers::NONE, Key::F2), menu);
         }
+
         let commands = app.bindings.dispatch(input);
         for copy in copies {
             if !input.events.contains(&copy) {
@@ -547,11 +548,14 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
             app.session.tool.brush.size = (app.session.tool.brush.size * scale).clamp(MIN_BRUSH_SIZE, MAX_BRUSH_SIZE);
         }
 
-        // The open list or the picker window closes on this Escape itself
+        let export = &app.ui.export;
         let escape_is_free = !popup_open && !picker_open && !modal_open;
+
+        // Local export inputs handle Escape during drawing
+        let export_input_active = app.ui.windows.export && (export.field_had_keyboard || export.pending_drop.is_some() || export.renaming.is_some());
         if confirming_reset {
             // Its keys were handled before the shortcuts ran
-        } else if app.ui.export.ask.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if escape_is_free && export.ask.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
             // The Output templates question: Escape answers it with the safe choice
             app.ui.export.ask = None;
         } else if app.ui.windows.project_config.is_some() {
@@ -561,19 +565,25 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
         } else if app.ui.windows.import_resources.is_some() {
             #[cfg(not(target_arch = "wasm32"))]
             crate::import_resources::keys_in(app, input, nothing_focused, popup_open);
-        } else if !popup_open && app.picking_color.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if popup_open || modal_open || export_input_active {
+            // The open list, dialog or export input handles the key
+        } else if app.picking_color.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.picking_color = None;
-        } else if !popup_open && point_pick_armed && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if point_pick_armed && input.consume_key(Modifiers::NONE, Key::Escape) {
             cancel_point_pick = true;
-        } else if escape_is_free && app.properties_popup.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if !escape_is_free {
+            // The picker window handles the key
+        } else if app.properties_popup.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.properties_popup = None;
-        } else if escape_is_free && crate::rail_popup::is_visible(app) && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if crate::rail_popup::is_visible(app) && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.ui.rail_panel = None;
-        } else if escape_is_free && app.picking_id_color.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if app.picking_id_color.is_some() && input.consume_key(Modifiers::NONE, Key::Escape) {
             crate::id_color_pick::IdColorPick::end(app);
-        } else if escape_is_free && app.picking_symmetry_plane && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if app.picking_symmetry_plane && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.picking_symmetry_plane = false;
-        } else if escape_is_free && app.ui.mode == Mode::Painting && input.consume_key(Modifiers::NONE, Key::Escape) {
+        } else if app.ui.windows.export {
+            crate::export_window::keys_in(app, input);
+        } else if app.ui.mode == Mode::Painting && input.consume_key(Modifiers::NONE, Key::Escape) {
             app.session.cancel_stroke();
             app.session.cancel_path();
         }

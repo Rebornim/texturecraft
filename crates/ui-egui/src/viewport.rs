@@ -399,6 +399,7 @@ fn shade(app: &TextureCraftApp) -> Shade {
         wireframe: wireframe_shown(&app.ui, polygon_fill_tool),
         wireframe_3d: wireframe_shown(&app.ui, polygon_fill_tool),
         background: app.ui.prefs.background,
+
         // Polygon fill's own wireframe keeps its look when the user's opacity hides the switch's wireframe
         wireframe_opacity: if app.ui.mesh_wireframe { app.ui.wireframe_opacity / 100.0 } else { POLYGON_FILL_WIREFRAME_OPACITY },
         ..Shade::from_project(&app.session.doc.project)

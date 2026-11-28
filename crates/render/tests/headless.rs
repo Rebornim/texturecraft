@@ -1,5 +1,6 @@
 use texturecraft_compose::{DisplayKind, ImageRes};
-use texturecraft_geom::glam::Vec3;
+use texturecraft_core::DisplaySettings;
+use texturecraft_geom::glam::{Quat, Vec3};
 use texturecraft_geom::{OrbitCamera, primitives};
 use texturecraft_render::headless::Headless;
 use texturecraft_render::renderer::TAA_SAMPLES;
@@ -46,16 +47,26 @@ impl Img {
 /// The id `setup` uploads the material ball under
 const MESH_ID: u64 = 1;
 
-/// A headless renderer with the material ball framed in a 480×360 view (None without a GPU).
-fn setup() -> Option<(Headless, Frame)> {
-    let Ok(mut h) = Headless::new() else {
+const TEST_TEXTURE_RESOLUTION: u32 = 256;
+
+fn headless_renderer() -> Option<Headless> {
+    let Ok(headless) = Headless::new() else {
         eprintln!("skipping: no GPU adapter");
         return None;
     };
-    eprintln!("headless adapter: {:?}", h.device.adapter_info());
+
+    eprintln!("headless adapter: {:?}", headless.device.adapter_info());
+    Some(headless)
+}
+
+/// A headless renderer with the material ball framed in a 480×360 view (None without a GPU).
+fn setup() -> Option<(Headless, Frame)> {
+    let mut h = headless_renderer()?;
     let mesh = primitives::material_ball();
     h.renderer.set_mesh(&h.device, &h.queue, &mesh, MESH_ID);
-    h.renderer.set_texture_sets(&h.device, &h.queue, &[((256, 256), 0), ((256, 256), 1)], 2);
+    let dimensions = (TEST_TEXTURE_RESOLUTION, TEST_TEXTURE_RESOLUTION);
+    h.renderer.set_texture_sets(&h.device, &h.queue, &[(dimensions, 0), (dimensions, 1)], 2);
+
     let mut cam = OrbitCamera { yaw: 0.6, pitch: 0.25, ..OrbitCamera::default() };
     let (lo, hi) = mesh.bounds();
     cam.frame(lo, hi);
@@ -262,17 +273,40 @@ fn the_combined_normal_view_shows_the_shading_normal_unlit() {
 
 #[test]
 fn the_height_y_factor_steepens_slopes_down_the_texture_only() {
-    let Some((mut h, frame)) = setup() else { return };
-    let normal_view = shaded(&frame, |s| s.view_mode = 4);
-    let doubled = shaded(&normal_view, |s| s.height_y_factor = 2.0);
+    let Some(mut headless) = headless_renderer() else { return };
 
-    upload_height(&mut h, |x, _| [x as f32 / 256.0, 0.0, 0.0, 0.0]);
-    let (across, across_doubled) = (render(&mut h, &normal_view, "height_across"), render(&mut h, &doubled, "height_across_y_doubled"));
-    upload_height(&mut h, |_, y| [y as f32 / 256.0, 0.0, 0.0, 0.0]);
-    let (down, down_doubled) = (render(&mut h, &normal_view, "height_down"), render(&mut h, &doubled, "height_down_y_doubled"));
+    // An orthographic plane gives both ramps a uniform UV footprint
+    let resolution = TEST_TEXTURE_RESOLUTION;
+    let mesh = primitives::plane(2.0, 1);
+    headless.renderer.set_mesh(&headless.device, &headless.queue, &mesh, MESH_ID);
+    headless.renderer.set_texture_sets(&headless.device, &headless.queue, &[((resolution, resolution), 0)], 1);
+    let camera = OrbitCamera { free: true, orient: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2), ortho: true, distance: 2.0, ..OrbitCamera::default() };
+    let normal_view = Frame {
+        view_id: 1,
+        size: [resolution; 2],
+        kind: ViewKind::Scene,
+        camera,
+        shade: Shade { view_mode: 4, ..Shade::default() },
+        visible: vec![true],
+        overlay: Vec::new(),
+    };
+    let doubled = shaded(&normal_view, |shade| shade.height_y_factor = 2.0);
+    let center = resolution / 2;
+    let flat = render(&mut headless, &normal_view, "height_flat").at(center, center);
 
+    upload_height_to_sets(&mut headless, &[0], |x, _| [x as f32 / resolution as f32, 0.0, 0.0, 0.0]);
+    let across = render(&mut headless, &normal_view, "height_across");
+    let across_doubled = render(&mut headless, &doubled, "height_across_y_doubled");
+
+    assert_ne!(across.at(center, center)[0], flat[0], "the horizontal ramp tilts the normal");
     assert_same(&across, &across_doubled, "a slope across the texture keeps its tilt");
-    assert_ne!(down.px, down_doubled.px, "a slope down the texture tilts more");
+
+    upload_height_to_sets(&mut headless, &[0], |_, y| [y as f32 / resolution as f32, 0.0, 0.0, 0.0]);
+    let vertical_tilt = |image: Img| image.at(center, center)[2].abs_diff(flat[2]);
+    let down = vertical_tilt(render(&mut headless, &normal_view, "height_down"));
+    let down_doubled = vertical_tilt(render(&mut headless, &doubled, "height_down_y_doubled"));
+
+    assert!(down > 0 && down_doubled > down, "the vertical ramp tilts farther from flat ({down} → {down_doubled})");
 }
 
 #[test]
@@ -753,10 +787,21 @@ fn bench_1080p() {
 
 /// Fill the height texture of both 256² sets: `f(x, y)` → (height, F0 r, g, b).
 fn upload_height(h: &mut Headless, f: impl Fn(u32, u32) -> [f32; 4]) {
-    for ts in 0..2 {
-        for (tx, ty) in (0..16).map(|i| (i % 4, i / 4)) {
-            let bytes: Vec<u8> = (0..64 * 64).flat_map(|i| f(tx * 64 + i % 64, ty * 64 + i / 64)).flat_map(|v| half::f16::from_f32(v).to_le_bytes()).collect();
-            h.renderer.upload_tile(&h.device, &h.queue, ts, DisplayKind::Height, tx, ty, &bytes);
+    upload_height_to_sets(h, &[0, 1], f);
+}
+
+fn upload_height_to_sets(headless: &mut Headless, sets: &[usize], texel: impl Fn(u32, u32) -> [f32; 4]) {
+    use texturecraft_texel::TILE;
+
+    let tiles_per_side = TEST_TEXTURE_RESOLUTION / TILE;
+    for (tile_x, tile_y) in (0..tiles_per_side.pow(2)).map(|index| (index % tiles_per_side, index / tiles_per_side)) {
+        let bytes: Vec<u8> = (0..TILE * TILE)
+            .flat_map(|index| texel(tile_x * TILE + index % TILE, tile_y * TILE + index / TILE))
+            .flat_map(|value| half::f16::from_f32(value).to_le_bytes())
+            .collect();
+
+        for &texture_set in sets {
+            headless.renderer.upload_tile(&headless.device, &headless.queue, texture_set, DisplayKind::Height, tile_x, tile_y, &bytes);
         }
     }
 }
@@ -802,6 +847,31 @@ fn specular_glossiness_takes_f0_from_the_specular_color() {
     let sg = render(&mut h, &shaded(&frame, |s| s.spec_gloss = true), "shader_spec_gloss_gold");
     assert!(warmth(&sg) > warmth(&mr) + 10.0, "a gold F0 tints the reflections ({} vs {})", warmth(&sg), warmth(&mr));
     assert!(sg.mean(200, 100, 280, 180) > 20.0);
+}
+
+#[test]
+fn ior_specular_changes_dielectric_reflections_in_the_viewport_only_for_metallic_roughness() {
+    let Some((mut h, frame)) = setup() else { return };
+
+    // A dark, glossy dielectric at full Specular Level shows mostly its F0
+    fill(&mut h, &[0, 1], DisplayKind::BaseColor, &[5, 5, 5, 255]);
+    fill(&mut h, &[0, 1], DisplayKind::Orm, &[255, 38, 0, 255]);
+    let mut view = |ior: f32, ior_specular: bool, spec_gloss: bool, name: &str| {
+        // Without temporal anti-aliasing each frame is the same still image
+        let display = DisplaySettings { ior, ior_specular, spec_gloss, taa: false, ..DisplaySettings::default() };
+        render(&mut h, &Frame { shade: Shade::from_display(&display), ..frame.clone() }, name)
+    };
+
+    let legacy = view(1.8, false, false, "ior_specular_off");
+    let opt_in = view(1.8, true, false, "ior_specular_on");
+    let default_ior = view(1.5, true, false, "ior_specular_default_ior");
+    let spec_gloss_off = view(1.8, false, true, "ior_specular_spec_gloss_off");
+    let spec_gloss_on = view(1.8, true, true, "ior_specular_spec_gloss_on");
+
+    let (brighter, darker) = (opt_in.mean(200, 100, 280, 180), legacy.mean(200, 100, 280, 180));
+    assert!(brighter > darker + 2.0, "IOR 1.8 reflects more than the legacy F0 ({brighter} vs {darker})");
+    assert_same(&default_ior, &legacy, "IOR 1.5 keeps the legacy reflectance");
+    assert_eq!(spec_gloss_on.px, spec_gloss_off.px, "Specular/Glossiness takes F0 from the Specular color");
 }
 
 #[test]

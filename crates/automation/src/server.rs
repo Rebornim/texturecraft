@@ -141,6 +141,9 @@ pub struct MeshExportParams {
     /// written next to it) or usdz (textures packaged); default: from the extension, else obj.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+    /// Replace stored normals with smooth area-weighted normals on the exported copy (default false).
+    #[serde(default, rename = "recomputeNormals", skip_serializing_if = "Option::is_none")]
+    pub recompute_normals: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -174,6 +177,9 @@ pub struct ExportParams {
     /// Settings for individual maps in the selected template.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub maps: Option<Vec<ExportMapParams>>,
+    /// Write shader settings for the exported sets (true) or the specified texture set indexes.
+    #[serde(default, rename = "shaderParameters", skip_serializing_if = "Option::is_none")]
+    pub shader_parameters: Option<Value>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]

@@ -330,7 +330,6 @@ fn channel_format(s: &mut Session, p: &Value) -> Result<Value> {
 pub(crate) fn add_channel(s: &mut Session, ts: usize, c: Channel) -> Result<()> {
     s.doc.project.texture_set_mut(ts)?.add_channel(c);
 
-    // Existing layers get the new channel enabled.
     let ids: Vec<_> = s.doc.project.walk(ts).into_iter().map(|(id, _)| id).collect();
     for id in ids {
         if let Ok(l) = s.doc.project.layer_mut(id) {
@@ -385,6 +384,7 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
         if name.chars().count() > MAX_NAME_CHARS {
             return Err(bad("textureSet.rename", format!("`name` is at most {MAX_NAME_CHARS} characters")));
         }
+
         name.to_string()
     };
     s.edit("Rename texture set", |s| {
@@ -480,6 +480,7 @@ mod tests {
         let mut s = Session::new_project("t", texturecraft_geom::primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
         crate::execute(&mut s, "layer.add.fill", &json!({})).unwrap();
         let layer = s.selected_layer().unwrap();
+
         // Switched off, as layer.blend {enabled: false} leaves it
         s.doc.project.layer_mut(layer).unwrap().channels.remove(&Channel::Roughness);
         let layer_has_roughness = |s: &Session| s.doc.project.layer(layer).is_ok_and(|l| l.channels.contains_key(&Channel::Roughness));
@@ -628,6 +629,7 @@ mod tests {
             img.tile(tile.0, tile.1).map(<[u16]>::to_vec).unwrap_or_default()
         };
         crate::execute(&mut s, "textureSet.channel.format", &json!({"channel": "roughness", "format": "L16"})).unwrap();
+
         // A roughness off the 8-bit grid, so 8 bits visibly round it
         crate::execute(&mut s, "layer.add.fill", &json!({"roughness": 0.3013})).unwrap();
         let sixteen = roughness(&mut s);

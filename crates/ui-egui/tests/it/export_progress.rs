@@ -2,6 +2,7 @@
 //! progress bar with Cancel Export, and the window staying open.
 
 use egui_kittest::Harness;
+use egui_kittest::kittest::NodeT;
 use egui_kittest::kittest::Queryable as _;
 use serde_json::json;
 use texturecraft_ui_egui::TextureCraftApp;
@@ -50,6 +51,7 @@ fn export_shows_progress_logs_the_steps_and_keeps_the_window_open() {
     assert_eq!(h.state().ui.export.tab, 2, "Export switches to LIST OF EXPORTS");
     h.run_steps(1);
     assert!(h.query_by_label("Cancel Export").is_some());
+    assert_eq!(h.get_by_role(egui::Role::ProgressIndicator).accesskit_node().live(), egui::accesskit::Live::Polite);
     assert!(h.query_by_label("Cancel").is_none(), "the progress bar replaces the buttons");
     assert_eq!(console(&h).first().map(String::as_str), Some("Preparing texture export"));
 
@@ -134,7 +136,7 @@ fn the_list_is_a_tree_per_texture_set_with_the_console_beside_it() {
     assert!(h.query_all_by_label("256x256 (Texture Set size)").next().is_some());
     assert!(h.query_all_by_label("png").next().is_some() && h.query_all_by_label("16 bits").next().is_some());
     assert!(h.query_by_label("Include all").is_none() && h.query_by_label("Reset all").is_none());
-    assert!(h.query_by_label("CONSOLE").is_some());
+    assert!(h.query_by_label("Console").is_some());
 
     // A row's tooltip is the full path
     let preset = h.state().ui.export.preset.clone();
@@ -143,15 +145,48 @@ fn the_list_is_a_tree_per_texture_set_with_the_console_beside_it() {
     let at = h.get_by_label(&file).rect().center();
     h.hover_at(at);
     h.run_steps(30);
+
     assert!(h.query_by_label(&dir.join(&file).display().to_string()).is_some());
 
     // The strip at the console's edge hides it, then shows it again
     h.get_by_role_and_label(egui::Role::Button, "Hide Console").click();
     h.run_steps(4);
-    assert!(h.state().ui.export.console_hidden && h.query_by_label("CONSOLE").is_none());
+
+    assert!(h.state().ui.export.console_hidden && h.query_by_label("Console").is_none());
     h.get_by_role_and_label(egui::Role::Button, "Show Console").click();
     h.run_steps(4);
+
     assert!(!h.state().ui.export.console_hidden);
+}
+
+#[test]
+fn long_filenames_leave_the_export_details_reachable_by_scrolling() {
+    let (mut h, _) = harness("wide-tree");
+    let name = "Wide".repeat(44);
+    h.state_mut().session.doc.project.texture_sets[0].name.clone_from(&name);
+    h.state_mut().ui.export.tab = 2;
+    h.run_steps(4);
+    let bits_label = "16 bits";
+    let bits_fit = |h: &Harness<'_, TextureCraftApp>| {
+        h.output().shapes.iter().any(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.text() == bits_label => clipped.clip_rect.contains_rect(text.visual_bounding_rect()),
+            _ => false,
+        })
+    };
+    assert!(!bits_fit(&h), "the bit-depth column starts beyond the viewport");
+    h.get_by_role_and_label(egui::Role::DisclosureTriangle, &name).focus();
+    h.run_steps(3);
+    assert!(h.get_by_role_and_label(egui::Role::DisclosureTriangle, &name).is_focused());
+
+    for _ in 0..12 {
+        h.key_press(egui::Key::ArrowRight);
+        h.run_steps(2);
+    }
+    h.run_steps(10);
+
+    assert!(bits_fit(&h), "horizontal keyboard scrolling brings bit depth into the viewport");
+    assert!(h.query_all_by_label(bits_label).next().is_some(), "bit depth has an accessibility label");
+    assert!(h.query_by_label("Console").is_some());
 }
 
 #[test]
@@ -198,6 +233,21 @@ fn the_settings_at_export_are_kept_while_it_runs() {
 }
 
 #[test]
+fn changing_only_the_height_stops_a_frozen_export_before_writing() {
+    let (mut h, directory) = harness("height-change");
+    click(&mut h, "Export");
+    let next_set = h.state().ui.export.job.as_ref().unwrap().pending[0].0;
+    let set = &mut h.state_mut().session.doc.project.texture_sets[next_set];
+    set.set_size(set.resolution, 128);
+
+    finish(&mut h);
+
+    assert_eq!(exports(&h), 0);
+    assert!(console(&h).iter().any(|line| line.contains("planned files") && line.contains("changed")));
+    assert!(!directory.exists());
+}
+
+#[test]
 fn texture_sets_writing_the_same_file_name_do_not_start_an_export() {
     let (mut h, dir) = harness("clash");
 
@@ -218,6 +268,40 @@ fn texture_sets_writing_the_same_file_name_do_not_start_an_export() {
     assert!(console(&h).iter().any(|l| l.contains("both export same.png")), "{:?}", console(&h));
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&library);
+}
+
+#[test]
+fn a_texture_set_cannot_export_into_another_sets_psd_file() {
+    use texturecraft_ui_egui::state::SetExport;
+
+    let (mut h, _) = harness("psd-folder-clash");
+    let scratch = tempfile::tempdir().unwrap();
+    let dir = scratch.path().join("textures");
+    let library = tempfile::tempdir().unwrap();
+    let app = h.state_mut();
+    app.ui.export.dir = dir.display().to_string();
+    app.session.load_export_presets(library.path().to_path_buf());
+    let psd = json!({"name": "Layered", "maps": [
+        {"file": "roughness", "format": "Psd", "bit_depth": 8, "channels": [["L", {"Channel": {"channel": "Roughness"}}]]}
+    ]});
+    app.run("export.preset.save", json!({"preset": psd})).unwrap();
+    let plan = app.run("export.plan", json!({"preset": "Layered", "ts": 0})).unwrap();
+    let file_name = plan[0]["file"].as_str().unwrap();
+    let nested = json!({"name": "Nested", "maps": [
+        {"file": format!("{file_name}/detail"), "format": "Png", "bit_depth": 8, "channels": [["L", {"Channel": {"channel": "Roughness"}}]]}
+    ]});
+    app.run("export.preset.save", json!({"preset": nested})).unwrap();
+    app.ui.export.preset = "Layered".into();
+    app.ui.export.sets.insert(1, SetExport { preset: Some("Nested".into()), ..Default::default() });
+    h.run_steps(4);
+
+    click(&mut h, "Export");
+    finish(&mut h);
+
+    assert!(h.state().ui.export.job.is_none());
+    assert_eq!(exports(&h), 0, "the full selection must be checked before starting");
+    assert!(!dir.exists());
+    assert!(console(&h).iter().any(|line| line.contains("folder")), "{:?}", console(&h));
 }
 
 #[test]

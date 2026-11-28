@@ -225,9 +225,9 @@ impl Headless {
 
     /// Export the working mesh to `path` (obj, glb, usda, usdc or usdz, from `format` or the
     /// extension); obj writes its .mtl and textures, usda and usdc their textures, next to it.
-    pub fn export_mesh(&mut self, path: &str, format: Option<&str>) -> Result<Value, AutomationError> {
+    pub fn export_mesh(&mut self, path: &str, format: Option<&str>, recompute_normals: bool) -> Result<Value, AutomationError> {
         self.require_project()?;
-        let out = self.session.mesh_export(path, format)?;
+        let out = self.session.mesh_export_with_normals(path, format, recompute_normals)?;
         let dir = Path::new(&out.path).parent().and_then(|d| d.to_str()).filter(|d| !d.is_empty()).unwrap_or(".");
         self.create_dir_all(dir)?;
         let mut textures = Vec::new();
@@ -289,25 +289,50 @@ impl Headless {
     }
 
     /// Export textures to `dir` (`file.exportTextures` params: preset, ts, format, padding, size…).
-    pub fn export(&mut self, p: &Value) -> Result<Value, AutomationError> {
+    pub fn export(&mut self, params: &Value) -> Result<Value, AutomationError> {
+        use texturecraft_engine::shader_parameters::{shader_parameters_param, shader_parameters_sidecar};
+
         self.require_project()?;
-        let dir = p.get("dir").and_then(Value::as_str).filter(|d| !d.is_empty()).ok_or_else(|| bad("`dir` is required"))?;
-        let opts = file_cmds::export_options(&self.session, p, "textures.export")?;
-        let n = self.session.set_count();
-        let sets: Vec<usize> = match p.get("ts") {
-            None | Some(Value::Null) => (0..n).collect(),
-            Some(Value::String(a)) if a == "all" => (0..n).collect(),
-            Some(v) => vec![v.as_u64().and_then(|t| usize::try_from(t).ok()).filter(|t| *t < n).ok_or_else(|| bad(format!("invalid `ts` {v}")))?],
+        let dir = params.get("dir").and_then(Value::as_str).filter(|dir| !dir.is_empty()).ok_or_else(|| bad("`dir` is required"))?;
+        let options = file_cmds::export_options(&self.session, params, "textures.export")?;
+        let set_count = self.session.set_count();
+        let sets: Vec<usize> = match params.get("ts") {
+            None | Some(Value::Null) => (0..set_count).collect(),
+            Some(Value::String(selection)) if selection == "all" => (0..set_count).collect(),
+            Some(value) => vec![
+                value
+                    .as_u64()
+                    .and_then(|index| usize::try_from(index).ok())
+                    .filter(|index| *index < set_count)
+                    .ok_or_else(|| bad(format!("invalid `ts` {value}")))?,
+            ],
         };
-        let files = self.session.export_files(&sets, &opts)?;
+        let shader_sets = shader_parameters_param(&self.session.doc.project, params, &sets, "textures.export")?;
+
+        let files = self.session.export_files(&sets, &options)?;
+        let sidecar = shader_sets.map(|sets| shader_parameters_sidecar(&self.session.doc.project, &sets, &files));
         self.create_dir_all(dir)?;
         let mut written = Vec::new();
-        for f in &files {
-            let path = join(dir, &f.name);
-            self.write(&path, &f.bytes)?;
+        let mut warnings = Vec::new();
+        for file in files {
+            let path = join(dir, &file.name);
+            self.write(&path, &file.bytes)?;
             written.push(path);
+            warnings.extend(file.warnings);
         }
-        let warnings: Vec<&String> = files.iter().flat_map(|f| &f.warnings).collect();
+
+        if let Some(sidecar) = sidecar {
+            let result = sidecar.and_then(|file| {
+                let path = join(dir, &file.name);
+                self.write(&path, &file.bytes).map_err(|error| error.to_string())?;
+                Ok(path)
+            });
+            match result {
+                Ok(path) => written.push(path),
+                Err(error) => warnings.push(format!("The shader settings file was not written: {error}")),
+            }
+        }
+
         Ok(json!({ "files": written, "warnings": warnings }))
     }
 

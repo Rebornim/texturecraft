@@ -504,11 +504,13 @@ fn neighbourhood_filters(effects: &[Effect], res: u32, channel: Option<Channel>)
             }
             EffectKind::Filter(Filter::HighPass { radius, space, alpha }) => Some((index, texels(*radius), Op::HighPass { space: *space, alpha: *alpha })),
             EffectKind::Filter(Filter::EdgeDetect { width }) => Some((index, texels(*width), Op::Edge)),
+
             // Three box passes ramp an edge over about twice their radius
             EffectKind::Filter(Filter::Bevel { width, .. }) => Some((index, texels(*width * 0.5), Op::Bevel)),
             EffectKind::Filter(Filter::Glow { radius, amount }) => Some((index, texels(*radius), Op::Glow(*amount))),
             EffectKind::Filter(Filter::Mosaic { size, alpha }) => Some((index, texels(*size), Op::Mosaic { alpha: *alpha })),
             EffectKind::Filter(Filter::Fxaa { alpha }) => Some((index, FXAA_SEARCH as f32 + 1.0, Op::Fxaa { alpha: *alpha })),
+
             // Both the direction search and the ellipse can reach twice the radius
             EffectKind::Filter(Filter::AnisotropicKuwahara(kuwahara)) if kuwahara.radius > 0.0 => {
                 Some((index, texels(kuwahara.radius.min(AnisotropicKuwahara::MAX_RADIUS)) * (2.0 + kuwahara.tensor_reach()) + 1.0, Op::Kuwahara(*kuwahara)))
@@ -536,6 +538,7 @@ fn neighbourhood_filters(effects: &[Effect], res: u32, channel: Option<Channel>)
 
             // A mirror reads anywhere in its UV tile
             EffectKind::Filter(Filter::Mirror(mirror)) => Some((index, res as f32, Op::Mirror { mirror: *mirror })),
+
             // A transform reads anywhere in its UV tile; one that changes nothing is skipped
             EffectKind::Filter(Filter::Transform(transform)) if !transform.is_identity() => {
                 Some((index, res as f32, Op::Transform { transform: *transform, affine: transform.affine() }))
@@ -1600,11 +1603,12 @@ fn unpad(data: &[f32], comps: usize, (w, h): (usize, usize), (pad_x, pad_y): (us
 /// A neighbourhood filter's radius in whole texels and how many texels around a texel it reads
 fn filter_extent(radius: f32, op: Op, inputs: &Inputs) -> (u32, u32) {
     let longest_side = inputs.gbuf.width.max(inputs.gbuf.height);
+
     // Clamped so a hostile radius can't overflow the region arithmetic
     let radius_texels = radius.round().clamp(1.0, longest_side as f32) as u32;
 
-    // Three box passes reach three radii; the gathering filters one radius plus a bilinear texel. A
-    // mirror or transform reads anywhere in its block, so it reaches the block's longer side
+    // Three box passes reach three radii and gathering filters reach one radius plus a bilinear texel
+    // Mirror and transform can read across the whole block
     let reach = match op {
         Op::Mirror { .. } | Op::Transform { .. } => (radius_texels + 1).max(inputs.block_size().into_iter().max().unwrap_or(0)),
         _ if is_box_blur(op) => 3 * radius_texels,
@@ -4931,6 +4935,7 @@ pub fn pad_tiles(out: &mut Composite, padding: &crate::PaddingMaps, tiles: &[(u3
                         }
 
                         let Some((sx, sy)) = padding.source(across_seams, x, y) else { continue };
+
                         if (sx, sy) == (x, y) {
                             continue;
                         }
@@ -6467,11 +6472,20 @@ soft {soft:?}"
         let at = |x: f32, y: f32| Vec2::new(x / width as f32, y / height as f32);
         let seam = UvSeam {
             sides: [
-                UvSeamSide { start: at(60.0, 0.0), end: at(60.0, height as f32), interior: at(4.0, 0.0) },
-                UvSeamSide { start: at(404.0, 0.0), end: at(404.0, height as f32), interior: at(460.0, 0.0) },
+                UvSeamSide { triangle: 0, start: at(60.0, 0.0), end: at(60.0, height as f32), interior: at(4.0, 0.0) },
+                UvSeamSide { triangle: 1, start: at(404.0, 0.0), end: at(404.0, height as f32), interior: at(460.0, 0.0) },
             ],
         };
-        let padding = crate::PaddingMaps::new(texturecraft_core::UvPaddingMode::Space3d, &covered, (width, height), Some(4), (0, 0), &[seam]);
+        let triangles: Vec<_> = covered
+            .iter()
+            .enumerate()
+            .map(|(pixel, covered)| if *covered { u32::from(pixel % width as usize > 400) } else { texturecraft_geom::NO_TRI })
+            .collect();
+        let mesh = texturecraft_geom::primitives::plane(1.0, 1);
+        let partition = texturecraft_geom::TrianglePartition::new(&mesh, 0, |_, _| Vec::<u32>::new());
+        let seam_input = crate::SeamPaddingInput::new(vec![seam], &triangles, partition);
+
+        let padding = crate::PaddingMaps::new(texturecraft_core::UvPaddingMode::Space3d, &covered, (width, height), Some(4), (0, 0), Some(&seam_input));
 
         let mut out = Composite::with_size(&[Channel::Roughness], width, height);
         let paint = |out: &mut Composite, xs: std::ops::RangeInclusive<u32>, value: f32| {

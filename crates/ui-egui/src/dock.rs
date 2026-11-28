@@ -101,6 +101,7 @@ pub(crate) fn layers(app: &mut TextureCraftApp, ui: &mut Ui) {
         let material = response.dnd_hover_payload::<ShelfDrag>().is_some_and(|drag| drag.asset.is_material());
         if response.dnd_hover_payload::<u64>().is_some() || material {
             ui.painter().line_segment([rect.left_top(), rect.right_top()], Stroke::new(DROP_STROKE, tokens.accent));
+            crate::shelf_drag_ghost::accept(ui.ctx());
         }
     });
     select_all_layers(app, ui);
@@ -700,6 +701,7 @@ fn layer_row(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, depth: usize
     }
     if row.drag_started() && !renaming {
         row.dnd_set_drag_payload(layer.id.0);
+        crate::shelf_drag_ghost::start_layer(ui.ctx(), &layer.name);
     }
 
     // A folder midpoint accepts child drops; a smart mask replaces the current mask
@@ -714,6 +716,11 @@ fn layer_row(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, depth: usize
     let moving = row.dnd_hover_payload::<u64>().is_some_and(|dragged| !in_drag(app, *dragged));
     let drop_stroke = Stroke::new(DROP_LINE_WIDTH, tokens.accent);
     let shelf_material = shelf.as_ref().is_some_and(Asset::is_material);
+    let shelf_mask = matches!(shelf, Some(Asset::SmartMask(_) | Asset::SavedMask(_)));
+    let shelf_filter = matches!(shelf, Some(Asset::Filter(_))) && !layer.is_group();
+    if moving || shelf_material || shelf_mask || shelf_filter {
+        crate::shelf_drag_ghost::accept(&row.ctx);
+    }
     if moving || shelf_material {
         if inside {
             painter.rect_stroke(rect, THUMBNAIL_ROUNDING, drop_stroke, egui::StrokeKind::Inside);
@@ -722,9 +729,9 @@ fn layer_row(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, depth: usize
         } else {
             painter.line_segment([rect.left_top(), rect.right_top()], drop_stroke);
         }
-    } else if matches!(shelf, Some(Asset::SmartMask(_) | Asset::SavedMask(_))) {
+    } else if shelf_mask {
         painter.rect_stroke(mask_rect.expand(HIGHLIGHT_OUTSET), THUMBNAIL_ROUNDING, drop_stroke, egui::StrokeKind::Outside);
-    } else if matches!(shelf, Some(Asset::Filter(_))) && !layer.is_group() {
+    } else if shelf_filter {
         painter.rect_stroke(rect, THUMBNAIL_ROUNDING, drop_stroke, egui::StrokeKind::Inside);
     }
     if let Some(dragged) = dnd_release::<u64>(&row)
@@ -1286,7 +1293,7 @@ fn layer_context_menu(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, con
     let layer_id = layer.id.0;
     let keymap = app.ui.keymap.clone();
 
-    // The row menu can act on several selected layers. A thumbnail identifies one layer.
+    // A thumbnail menu always acts on its own layer
     let several = if content_thumbnail { None } else { selection_with(app, layer.id) };
     let run = |app: &mut TextureCraftApp, ui: &mut Ui, label: &str, id: &str, params: Value, enabled: bool| {
         let mut button = egui::Button::new(label);
@@ -1379,7 +1386,7 @@ fn layer_context_menu(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, con
 
 /// Mask management is available from the row and directly from the mask thumbnail.
 fn mask_management_menu(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer, mask_thumbnail: bool) {
-    // An instance inherits its source mask until it has its own.
+    // An instance inherits its source mask until it has its own
     let project = &app.session.doc.project;
     let mask = project.layers.get(&project.mask_owner(layer.id)).and_then(|owner| owner.mask.as_ref());
     let (has_mask, mask_on) = (mask.is_some(), mask.is_some_and(|mask| mask.enabled));
@@ -1571,7 +1578,7 @@ pub(crate) fn image_drop(ui: &Ui, resp: &egui::Response) -> Option<String> {
         return None;
     }
 
-    ui.painter().rect_stroke(resp.rect.shrink(1.0), 3.0, Stroke::new(2.0, Tokens::get(ui.ctx()).accent), egui::StrokeKind::Inside);
+    crate::shelf_drag_ghost::outline_target(ui, resp.rect);
     match dnd_release::<ShelfDrag>(resp).map(|d| d.asset.clone()) {
         Some(Asset::Texture(name)) => Some(name),
         _ => None,
@@ -2532,12 +2539,12 @@ fn fill_properties(app: &mut TextureCraftApp, ui: &mut Ui, layer: &Layer) {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn open_link_in_materialcraft(app: &mut TextureCraftApp, layer: LayerId, link: &texturecraft_engine::core::MaterialLink) {
     let ext = texturecraft_engine::link_cmds::source_extension(&link.package);
-    let path = std::env::temp_dir().join(format!("{}.{ext}", texturecraft_engine::formats::export::sanitize_file_stem(&link.name)));
+    let file_name = format!("{}.{ext}", texturecraft_engine::formats::export::sanitize_file_stem(&link.name));
     let opened = app
         .session
         .link_package(layer)
-        .and_then(|package| std::fs::write(&path, package.as_slice()).map_err(|err| texturecraft_engine::EngineError::Other(err.to_string())))
-        .and_then(|()| texturecraft_engine::link_cmds::open_in_materialcraft(&path));
+        .and_then(|package| texturecraft_engine::link_cmds::stage_handoff_package(&file_name, package.as_slice()))
+        .and_then(|path| texturecraft_engine::link_cmds::open_in_materialcraft(&path));
     match opened {
         Ok(()) => app.toast(tr("Opened in MaterialCraft: use File > Send to TextureCraft there to bring your changes back"), false),
         Err(e) => app.toast(e.to_string(), true),

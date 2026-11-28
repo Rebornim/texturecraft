@@ -52,7 +52,7 @@ fn the_window_has_the_reference_size() {
     let h = harness(egui::vec2(1600.0, 960.0));
     let reset = window_button_rect(&h, "Reset all", 1600.0);
     let export = window_button_rect(&h, "Export", 1600.0);
-    let tabs = h.get_by_label("SETTINGS").rect();
+    let tabs = h.get_by_role_and_label(egui::Role::Tab, "Settings").rect();
 
     let width = export.max.x - reset.min.x;
     let height = export.max.y - tabs.min.y;

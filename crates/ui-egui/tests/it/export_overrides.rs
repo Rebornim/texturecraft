@@ -33,13 +33,13 @@ fn click(h: &mut Harness<'_, TextureCraftApp>, label: &str) {
 
 /// Open the General Export Parameters menu
 fn page_menu(h: &mut Harness<'_, TextureCraftApp>) {
-    h.get_all_by_label(egui_phosphor::regular::LIST_CHECKS).nth(1).unwrap().click();
+    h.get_by_label("General Export Parameters menu").click();
     h.run_steps(4);
 }
 
 /// The `row`th "Enable override" button (Output template, File type, Size, Padding)
 fn toggle(h: &mut Harness<'_, TextureCraftApp>, row: usize) {
-    h.get_all_by_label("Enable override").nth(row).unwrap().click();
+    h.get_all_by_label_contains("Enable override for ").nth(row).unwrap().click();
     h.run_steps(4);
 }
 
@@ -63,13 +63,33 @@ fn png_width(path: &std::path::Path) -> u32 {
 #[test]
 fn a_texture_set_page_shows_what_it_inherits() {
     let h = harness();
+
     assert_eq!(h.state().ui.export.page, Some(0));
-    assert!(h.get_all_by_label("Enable override").count() >= 4, "four rows, then the output maps");
+    assert!(h.get_all_by_label_contains("Enable override for ").count() >= 4, "four rows, then the output maps");
     let own = h.state().session.doc.project.texture_sets[0].resolution;
     for text in ["Document channels + Normal + AO (No Alpha)", "Based on output template", &format!("{own}x{own} (Texture Set size)"), "Dilation infinite"] {
         assert!(h.query_by_label(text).is_some(), "{text}");
     }
     assert!(h.query_by_label("*").is_none(), "no override yet");
+}
+
+#[test]
+fn rectangular_export_sizes_follow_the_plan_in_settings_and_the_file_list() {
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    session.doc.project.texture_sets[0].set_size(256, 128);
+    let mut h = harness_with_session(session);
+
+    assert!(h.query_by_label("256x128 (Texture Set size)").is_some());
+    toggle(&mut h, 2);
+    let size = h.get_all_by_role(egui::Role::ComboBox).find(|node| node.value().as_deref() == Some("256x128 (Texture Set size)")).unwrap();
+    size.click();
+    h.run_steps(4);
+    click(&mut h, "128x64");
+
+    h.state_mut().ui.export.tab = 2;
+    h.run_steps(4);
+
+    assert!(h.query_all_by_label("128x64").next().is_some());
 }
 
 #[test]
@@ -301,4 +321,20 @@ fn an_empty_file_type_override_keeps_the_template_types_under_a_global_one() {
     (e.format, e.bit_depth) = ("png".into(), 8);
     h.run_steps(4);
     assert!(h.query_all_by_label("png   16 bits").next().is_some(), "the set still writes the template's types");
+}
+
+#[test]
+fn keyboard_size_override_changes_only_the_size_row() {
+    let mut harness = harness();
+    let size = harness.state().session.doc.project.texture_sets[0].block_resolution();
+
+    harness.get_by_role_and_label(egui::Role::Button, "Enable override for Size").focus();
+    harness.run_steps(2);
+    harness.key_press(egui::Key::Space);
+    harness.run_steps(4);
+
+    let settings = overrides(&harness);
+
+    assert_eq!(settings.size, Some(size));
+    assert!(settings.preset.is_none() && settings.file_type.is_none() && settings.padding.is_none() && settings.maps.is_empty());
 }

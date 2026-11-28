@@ -20,6 +20,8 @@ pub struct ExportJob {
     /// Also write the mesh and materials as a USD asset with the last texture set, as ticked when
     /// Export was clicked.
     pub usd_asset: bool,
+    /// Also write the shader parameters with the last texture set, listing every texture set of the export, as ticked when Export was clicked
+    pub shader_parameters: bool,
     /// The params of the texture sets written so far, for the USD asset.
     pub sent: Vec<serde_json::Value>,
     /// Warning messages already shown in this export.

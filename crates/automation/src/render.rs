@@ -214,6 +214,7 @@ pub fn shade(s: &Session) -> Shade {
         height_to_normal: active_set.map_or_else(Default::default, |t| t.height_to_normal),
         view_mode,
         channel,
+
         // Only the 2D view uses this default
         wireframe: true,
         ..Shade::from_project(&s.doc.project)

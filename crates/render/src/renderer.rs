@@ -25,6 +25,7 @@ use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
 use texturecraft_compose::{DisplayKind, ImageRes};
+use texturecraft_core::project::LEGACY_DIELECTRIC_F0_SCALE;
 use texturecraft_core::{Channel, DisplaySettings, EnvAlignment, Project, ToneMapping};
 use texturecraft_geom::glam::{Mat4, Vec3};
 use texturecraft_geom::{Mesh, OrbitCamera};
@@ -219,6 +220,8 @@ pub struct Shade {
     pub scatter: [f32; 3],
     /// Index of refraction of the Transmission channel.
     pub ior: f32,
+    /// Multiplier for Specular Level when shading a dielectric in Metallic/Roughness.
+    pub dielectric_f0_scale: f32,
     /// Depth of field (3D material view): focus depth along the view axis (0: the orbit
     /// target) and lens radius as a fraction of the mesh's bounding radius.
     pub dof: Option<[f32; 2]>,
@@ -255,6 +258,7 @@ impl Shade {
             env_blur: d.env_blur,
             env_opacity: d.env_opacity,
             ao_intensity: d.ao_intensity,
+
             // The key light (on with shadows), in environment space
             light: if d.shadows { [0.5, 0.8, 0.4, 2.5] } else { [0.0; 4] },
             shadows: d.shadows,
@@ -271,6 +275,7 @@ impl Shade {
             taa: d.taa,
             scatter: scatter_wrap(d),
             ior: d.ior,
+            dielectric_f0_scale: d.dielectric_f0_scale(),
             dof: d.dof.enabled.then_some([d.dof.focus_distance, d.dof.aperture]),
             displacement: d.displacement,
             solo_lit: !d.solo_unlit,
@@ -330,6 +335,7 @@ impl Default for Shade {
             taa: false,
             scatter: scatter_wrap(&DisplaySettings::default()),
             ior: 1.5,
+            dielectric_f0_scale: LEGACY_DIELECTRIC_F0_SCALE,
             dof: None,
             sss_blur: None,
             refraction: false,
@@ -2135,6 +2141,7 @@ impl Renderer {
             ],
             light: [light.x, light.y, light.z, lw],
             light_vp: shadow_vp.unwrap_or(Mat4::IDENTITY).to_cols_array_2d(),
+
             // Offset by 1.5 shadow texels to avoid self-shadowing
             shadow: [
                 if shadow_vp.is_some() { 1.0 } else { 0.0 },
@@ -2147,7 +2154,7 @@ impl Renderer {
             fwd: [fwd.x, fwd.y, fwd.z, 0.0],
             disp: [disp[0], disp[1], disp[2], if s.height_in_normal { 1.0 } else { 0.0 }],
             height_slope: [1.0, s.height_y_factor, 0.0, 0.0],
-            refr: [if refraction { 1.0 } else { 0.0 }, (BEHIND_LEVELS - 1) as f32, REFRACTION_DEPTH * radius, 0.0],
+            refr: [if refraction { 1.0 } else { 0.0 }, (BEHIND_LEVELS - 1) as f32, REFRACTION_DEPTH * radius, s.dielectric_f0_scale],
             highlight: highlight_globals(s.highlight, HIGHLIGHT_OPACITY, s, data),
             highlight_shift: highlight_shift(frame.size),
             set_hover: highlight_globals(s.set_hover, SET_HOVER_OPACITY, s, data),

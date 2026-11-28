@@ -571,6 +571,7 @@ fn uv_tiles_are_shown_read_only() {
 
     hover_uv_tile_box(&mut h);
     assert!(h.query_by_label_contains("No UV tiles").is_none());
+
     // The hint's own text, not the Texture Sets list's tile rows
     assert!(h.query_all_by_label_contains("1001").any(|node| node.accesskit_node().role() == Role::Label), "the tile list of a UDIM project");
 }

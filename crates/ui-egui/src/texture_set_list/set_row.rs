@@ -2,8 +2,8 @@
 pub(crate) struct SetRow {
     pub(crate) name: String,
     pub(crate) description: String,
-    /// The mesh material's name, when the set has one to go back to
-    pub(crate) original_name: Option<String>,
+    /// Whether the row can restore its original mesh material name
+    pub(crate) renamed: bool,
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) visible: bool,

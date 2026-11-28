@@ -26,7 +26,11 @@ pub struct SetExport {
 impl SetExport {
     /// Whether anything is overridden (the set is marked "*").
     pub fn any(&self) -> bool {
-        self.preset.is_some() || self.file_type.is_some() || self.size.is_some() || self.padding.is_some() || self.maps.values().any(|m| m.file_type.is_some())
+        self.preset.is_some()
+            || self.file_type.is_some()
+            || self.size.is_some()
+            || self.padding.is_some()
+            || self.maps.values().any(|m| m.file_type.is_some() || m.size.is_some())
     }
 
     /// Whether the set exports as the global settings say (no override, every map ticked).

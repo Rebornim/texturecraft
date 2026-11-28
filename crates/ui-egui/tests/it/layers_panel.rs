@@ -447,6 +447,7 @@ fn thumbnail_menus_apply_actions_to_the_clicked_layer_and_stack() {
         layer
     };
     h.run_steps(3);
+
     assert_eq!(h.state().session.selected_layer(), Some(selected));
 
     let at = thumb(&h, "Masked fill", true);
@@ -455,19 +456,22 @@ fn thumbnail_menus_apply_actions_to_the_clicked_layer_and_stack() {
     h.get_by_label("Toggle mask").click();
     h.run_steps(3);
     let project = &h.state().session.doc.project;
+
     assert!(!project.layers[&clicked].mask.as_ref().unwrap().enabled);
     assert!(project.layers[&selected].mask.as_ref().unwrap().enabled);
     assert_eq!(h.state().session.target, StackTarget::Mask);
 
-    // The same layer's mask is still selected when its material menu opens.
+    // Opening the material menu must preserve the selected mask
     let at = thumb(&h, "Masked fill", false);
     right_click(&mut h, at);
     assert!(h.query_by_label("Toggle mask").is_none());
+
     // The same items as the toolbar's Add effect on the content: a generator can't go there, so it is greyed
     assert!(h.get_by_label_contains("Add generator").accesskit_node().is_disabled());
     h.get_by_label_contains("Add levels").click();
     h.run_steps(3);
     let layer = &h.state().session.doc.project.layers[&clicked];
+
     assert_eq!(layer.content_effects.len(), 2);
     assert_eq!(layer.mask.as_ref().unwrap().effects.len(), 1);
 }

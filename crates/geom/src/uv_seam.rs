@@ -2,7 +2,8 @@
 
 use std::collections::HashMap;
 
-use crate::{Mesh, UvSeamSide};
+use crate::triangle_partition::CORNER_GRID_STEPS;
+use crate::{Mesh, TrianglePartition, UvSeamSide};
 
 /// Edge ends closer than this share a UV position
 const SAME_UV: f32 = 1e-5;
@@ -16,10 +17,7 @@ pub struct UvSeam {
 impl UvSeam {
     /// The seams between triangles of `material`
     pub fn of_material(mesh: &Mesh, material: usize) -> Vec<UvSeam> {
-        // Corners within a millionth of the mesh size are the same 3D point
-        let (minimum, maximum) = mesh.bounds();
-        let tolerance = (maximum - minimum).length().max(1e-6) * 1e-6;
-        let position_key = |index: usize| mesh.positions.get(index).map(|position| position.to_array().map(|value| (value / tolerance).round() as i64));
+        let tolerance = position_tolerance(mesh);
         let mut first_sides = HashMap::new();
         let mut seams = Vec::new();
         for triangle in mesh.triangles_of(material) {
@@ -27,9 +25,11 @@ impl UvSeam {
                 continue;
             };
 
+            let triangle = triangle as u32;
+
             for edge in 0..3 {
                 let (first, second, third) = (corners[edge], corners[(edge + 1) % 3], corners[(edge + 2) % 3]);
-                let (Some(first_key), Some(second_key)) = (position_key(first), position_key(second)) else {
+                let (Some(first_key), Some(second_key)) = (position_key(mesh, first, tolerance), position_key(mesh, second, tolerance)) else {
                     continue;
                 };
 
@@ -44,9 +44,9 @@ impl UvSeam {
 
                 // Each side starts at the corner with the smaller key, so both sides run the same way
                 let (key, side) = if first_key <= second_key {
-                    ((first_key, second_key), UvSeamSide { start: first_uv, end: second_uv, interior })
+                    ((first_key, second_key), UvSeamSide { triangle, start: first_uv, end: second_uv, interior })
                 } else {
-                    ((second_key, first_key), UvSeamSide { start: second_uv, end: first_uv, interior })
+                    ((second_key, first_key), UvSeamSide { triangle, start: second_uv, end: first_uv, interior })
                 };
                 let Some(other) = first_sides.insert(key, side) else {
                     continue;
@@ -60,6 +60,37 @@ impl UvSeam {
 
         seams
     }
+
+    /// Islands for seam padding, joined only where both the UVs and the surface continue
+    pub fn islands_of(mesh: &Mesh, material: usize) -> TrianglePartition {
+        let tolerance = position_tolerance(mesh);
+        TrianglePartition::new(mesh, material, |mesh, triangle| {
+            let corner_key = |index| {
+                let position = position_key(mesh, index, tolerance)?;
+                let uv = (*mesh.uvs.get(index)? * CORNER_GRID_STEPS).round().to_array().map(|step| step as i64);
+                Some((position, uv))
+            };
+            let Some([first, second, third]) = mesh.tri(triangle).map(|corners| corners.map(corner_key)) else { return Vec::new() };
+            let [Some(first), Some(second), Some(third)] = [first, second, third] else { return Vec::new() };
+
+            [(first, second), (second, third), (third, first)]
+                .into_iter()
+                .filter(|(start, end)| start != end)
+                .map(|(start, end)| (start.min(end), start.max(end)))
+                .collect()
+        })
+    }
+}
+
+fn position_tolerance(mesh: &Mesh) -> f32 {
+    // Weld positions within a millionth of the mesh size
+    const RELATIVE_WELD_TOLERANCE: f32 = 1e-6;
+    let (minimum, maximum) = mesh.bounds();
+    (maximum - minimum).length().max(RELATIVE_WELD_TOLERANCE) * RELATIVE_WELD_TOLERANCE
+}
+
+fn position_key(mesh: &Mesh, index: usize, tolerance: f32) -> Option<[i64; 3]> {
+    mesh.positions.get(index).map(|position| position.to_array().map(|value| (value / tolerance).round() as i64))
 }
 
 #[cfg(test)]

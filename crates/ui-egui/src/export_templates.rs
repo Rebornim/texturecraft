@@ -4,7 +4,7 @@
 //! Maps dragged from the Input maps, Mesh maps and Converted maps panes onto an output map's
 //! channel swatches fill its channels.
 
-use egui::{Color32, RichText, Ui, vec2};
+use egui::{Color32, Rect, RichText, Ui, pos2, vec2};
 use egui_phosphor::regular as ic;
 use serde_json::{Value, json};
 use texturecraft_engine::core::{BakedMap, Channel};
@@ -12,15 +12,20 @@ use texturecraft_engine::formats::export::{FILE_TOKENS, MAX_PRESET_NAME, sanitiz
 use texturecraft_engine::formats::{Dest, ExportPreset, FileFormat, MapSpec, SourceRef, VirtualMap};
 
 use crate::TextureCraftApp;
+use crate::export_window::{ExportLook, GUTTER, TAB_ROW_HEIGHT, drawn, template_label};
 use crate::i18n::{n_, tr, trf};
-use crate::theme::{Tokens, caption};
+use crate::theme::Tokens;
 use crate::unavailable::NOT_AVAILABLE;
-use crate::widgets::{chip, icon_button_without_tooltip};
+use crate::widgets::chip;
 
 mod channel_target;
 mod map_drag;
 mod map_lists;
+mod map_preview_cache;
+mod map_preview_pictures;
+mod output_card;
 mod pending_drop;
+mod planned_output;
 mod row_edit;
 mod source_pick;
 mod swatch_look;
@@ -28,83 +33,197 @@ mod swatch_look;
 pub use channel_target::ChannelTarget;
 use map_drag::MapDrag;
 use map_lists::{CONVERTED_MAPS, INPUT_MAPS, MESH_MAPS, MapEntry};
+use map_preview_cache::MapPreviewCache;
+use map_preview_pictures::MapPreviewPictures;
+use output_card::OutputCard;
 pub use pending_drop::PendingDrop;
+use planned_output::PlannedOutput;
 use row_edit::RowEdit;
 use source_pick::SourcePick;
 use swatch_look::SwatchLook;
 
-const ICON_POINTS: f32 = 20.0;
-/// Width of the Presets list
-const LIST_WIDTH_POINTS: f32 = 220.0;
-/// The tab's width in the reference-size window: a narrower window narrows the side panes in
-/// proportion, so the output rows keep their room
-const REFERENCE_TAB_WIDTH_POINTS: f32 = 1085.0;
-/// The middle column's least width, and room for the separators and their spacing
-const MIN_OUTPUTS_WIDTH_POINTS: f32 = 200.0;
-const SEPARATOR_ALLOWANCE_POINTS: f32 = 6.0;
-/// Width of the Input maps pane
-const INPUTS_WIDTH_POINTS: f32 = 170.0;
-/// Width of the pane with Mesh maps above Converted maps
-const SIDE_MAPS_WIDTH_POINTS: f32 = 165.0;
-/// Share of the side pane's height that Mesh maps take; Converted maps get the rest
-const MESH_MAPS_SHARE: f32 = 0.45;
 const RENAME_ID: &str = "exp_rename";
-/// The name "+" gives a new template, as in the reference
+/// Initial name for a new template
 const NEW_PRESET: &str = "new_export_preset";
 
-/// Height of a Presets list row, and where its icon and name start
-const PRESET_ROW_HEIGHT_POINTS: f32 = 18.0;
-const PRESET_ICON_INDENT_POINTS: f32 = 2.0;
-const PRESET_TEXT_INDENT_POINTS: f32 = 20.0;
+// Layout in points from the window content's top left corner, the side panes from its right edge, measured on the locked mock
 
-/// Height of a map list entry, the gap between entries, and where its marker and name sit
-const ENTRY_HEIGHT_POINTS: f32 = 21.0;
-const ENTRY_GAP_POINTS: f32 = 2.0;
-const ENTRY_TEXT_INDENT_POINTS: f32 = 22.0;
-const ENTRY_TEXT_SIZE_POINTS: f32 = 12.0;
-const MARKER_INDENT_POINTS: f32 = 10.0;
-const MARKER_SIZE_POINTS: f32 = 10.0;
+/// Width of the Presets column
+const PRESETS_WIDTH: f32 = 216.2;
+/// Middle of the column titles
+const HEADER_Y: f32 = 73.0;
+/// Centre of the Presets header's first glyph, from the column's right edge
+const PRESET_ICON_FROM_RIGHT: f32 = 14.0;
+/// Step between the Presets header's glyphs
+const PRESET_ICON_STEP: f32 = 22.0;
+/// Size of the Presets header's glyphs
+const PRESET_ICON_SIZE: f32 = 13.0;
+/// Top of the lists under the titles
+const LIST_TOP: f32 = 88.0;
+/// Height of a Presets row
+const PRESET_ROW_HEIGHT: f32 = 20.0;
+/// Centre of a Presets row's file glyph
+const PRESET_ICON_X: f32 = 16.0;
+/// Where a Presets row's name starts
+const PRESET_NAME_LEFT: f32 = 26.3;
+/// Size of a Presets row's file glyph
+const PRESET_ROW_ICON_SIZE: f32 = 12.0;
+/// The column titles' left edge, inside their column
+const TITLE_INDENT: f32 = 7.5;
+
+/// The middle column's margin to the dividers on both sides
+const MIDDLE_MARGIN: f32 = 10.0;
+/// Middle of the Current preset line
+const CURRENT_PRESET_Y: f32 = 69.0;
+/// Gap after "Current preset:"
+const NAME_GAP: f32 = 5.0;
+/// From the template's name to its lock's centre
+const LOCK_GAP: f32 = 12.0;
+/// Middle of the Output maps row
+const OUTPUT_MAPS_Y: f32 = 106.0;
+/// The air around a Create button's name
+const CREATE_PADDING: f32 = 22.0;
+/// Gap between the Create buttons
+const CREATE_GAP: f32 = 6.0;
+/// Gap before "Create:"
+const CREATE_LABEL_GAP: f32 = 2.0;
+/// Top of the first output map card
+const CARDS_TOP: f32 = 127.0;
+/// The count strip's top, above the body's bottom
+const COUNT_TOP_ABOVE_BOTTOM: f32 = 24.0;
+/// The count strip's bottom, above the body's bottom
+const COUNT_BOTTOM_ABOVE_BOTTOM: f32 = 1.0;
+/// The count's indent in its strip
+const COUNT_TEXT_INDENT: f32 = 6.0;
+
+/// Height of an output map card
+const CARD_HEIGHT: f32 = 48.0;
+/// Gap below a card
+const CARD_GAP: f32 = 6.0;
+/// Corner radius of a card
+const CARD_RADIUS: u8 = 3;
+/// Inset of a card's swatches from its top and bottom
+const CARD_INSET: f32 = 6.0;
+/// Centre of a card's grip
+const GRIP_X: f32 = 10.0;
+/// Width of the grip's click area
+const GRIP_WIDTH: f32 = 16.0;
+/// Size of the grip's glyph
+const GRIP_SIZE: f32 = 14.0;
+/// Where a card's file name field starts
+const NAME_FIELD_LEFT: f32 = 20.0;
+/// Width of the file name field
+const NAME_FIELD_WIDTH: f32 = 150.0;
+/// The file name field's least width in a narrow window
+const MIN_NAME_FIELD_WIDTH: f32 = 60.0;
+/// Gap before the "$" button
+const DOLLAR_GAP: f32 = 4.0;
+/// Width of the "$" button
+const DOLLAR_WIDTH: f32 = 22.0;
+/// Gap between "$" and the swatches
+const SWATCHES_GAP: f32 = 8.0;
+/// The lists' and icons' rows, above and below the card's middle
+const CARD_ROW_OFFSET: f32 = 10.0;
+/// Centre of a card's icons, from its right edge
+const CARD_ICON_FROM_RIGHT: f32 = 14.0;
+/// From the icons to the lists' chevrons
+const CARD_CHEVRON_STEP: f32 = 22.0;
+/// Gap between a list's value and its chevron
+const CARD_VALUE_GAP: f32 = 8.0;
+/// Size of a card's icons
+const CARD_ICON_SIZE: f32 = 12.0;
+/// Values the cards' lists line up on, so cards with shorter ones keep the same column
+const CARD_VALUE_SAMPLES: [&str; 3] = ["png", "8 bits", "16 bits"];
+
+/// The Input maps divider, from the window's right edge
+const INPUTS_DIVIDER_FROM_RIGHT: f32 = 342.3;
+/// The Mesh maps divider, from the window's right edge
+const SIDE_DIVIDER_FROM_RIGHT: f32 = 161.9;
+/// Where the Input maps pane starts after its divider
+const PANE_FROM_DIVIDER: f32 = 2.0;
+/// Where it ends before the next one
+const INPUTS_END_BEFORE_DIVIDER: f32 = 3.5;
+/// Where the Mesh maps pane starts after its divider
+const SIDE_PANE_FROM_DIVIDER: f32 = 4.0;
+/// The divider between Mesh maps and Converted maps, below the body's middle
+const SIDE_SPLIT_BELOW_MIDDLE: f32 = 10.0;
+/// Gap between Mesh maps' last row and that divider
+const MESH_BOTTOM_GAP: f32 = 6.0;
+/// Middle of Converted maps' title, below the divider
+const CONVERTED_TITLE_Y: f32 = 18.0;
+/// Top of Converted maps' rows, below the divider
+const CONVERTED_ROWS_TOP: f32 = 33.0;
+/// A map entry's inset in its pane
+const ENTRY_INSET: f32 = 3.0;
+/// Height of a map entry
+const ENTRY_HEIGHT: f32 = 20.0;
+/// Pitch of the map entries
+const ENTRY_PITCH: f32 = 21.0;
+/// Height of a group's name row
+const GROUP_HEIGHT: f32 = 18.0;
+/// Indent of the titles and group names
+const GROUP_INDENT: f32 = 4.0;
+/// Where a used map's square starts
+const MARKER_LEFT: f32 = 9.0;
+/// Side of that square
+const MARKER_SIZE: f32 = 10.0;
+/// Its corner radius
+const MARKER_RADIUS: u8 = 1;
+/// How much lighter its edge is than its fill
+const MARKER_EDGE_LIGHTEN: u8 = 40;
+/// Where a map entry's name starts
+const ENTRY_NAME_LEFT: f32 = 25.0;
 /// How strongly a map TextureCraft does not have yet is dimmed
 const UNAVAILABLE_FADE: f32 = 0.6;
 
-/// An output map row: padding, gap below it, grip width, file name field width, icon size
-const ROW_MARGIN_POINTS: f32 = 6.0;
-const ROW_GAP_POINTS: f32 = 4.0;
-const GRIP_WIDTH_POINTS: f32 = 5.0;
-const NAME_FIELD_WIDTH_POINTS: f32 = 150.0;
-const ROW_ICON_POINTS: f32 = 16.0;
-/// Width the "Output maps" title and the Create buttons need on one row
-const OUTPUT_MAPS_ROW_WIDTH_POINTS: f32 = 420.0;
-/// The narrowest file name field, the "$" button and the format, bit depth and icon columns at a
-/// row's right end, and the gaps between a row's controls (besides the swatches')
-const MIN_NAME_FIELD_WIDTH_POINTS: f32 = 60.0;
-const DOLLAR_BUTTON_WIDTH_POINTS: f32 = 22.0;
-const ROW_LISTS_WIDTH_POINTS: f32 = 100.0;
-const ROW_GAPS: f32 = 4.0;
-/// The accent frame around a drop target: its stroke and its gap to the target
+/// Naming pattern's info glyph, from the window's right edge
+const NAMING_INFO_FROM_RIGHT: f32 = 20.8;
+/// Its dropdown's left edge, from the window's right edge
+const NAMING_COMBO_LEFT_FROM_RIGHT: f32 = 182.4;
+/// Its dropdown's right edge, from the window's right edge
+const NAMING_COMBO_RIGHT_FROM_RIGHT: f32 = 34.0;
+/// Its label's right edge, from the window's right edge
+const NAMING_LABEL_FROM_RIGHT: f32 = 188.0;
+/// Size of the info glyph
+const INFO_SIZE: f32 = 14.0;
+
+/// The accent-free frame around a drop target: its stroke and its gap to the target
 const DROP_HIGHLIGHT_STROKE_POINTS: f32 = 1.5;
 const DROP_HIGHLIGHT_GAP_POINTS: f32 = 2.0;
 /// Side of the corner mark of an inverted swatch
 const INVERTED_MARK_POINTS: f32 = 8.0;
+/// A swatch's file preview: the file's width, and the side of each channel's picture beside it
+const PREVIEW_FILE_WIDTH_POINTS: f32 = 150.0;
+const PREVIEW_CHANNEL_WIDTH_POINTS: f32 = 34.0;
 
-/// A channel swatch: its side, the label's size and offset from the top, and the bars that show
-/// which channels of the source it reads
-const SWATCH_SIZE_POINTS: f32 = 32.0;
-const SWATCH_TEXT_SIZE_POINTS: f32 = 11.0;
-const SWATCH_TEXT_TOP_POINTS: f32 = 3.0;
-const SWATCH_BAR_WIDTH_POINTS: f32 = 18.0;
-const SWATCH_BAR_HEIGHT_POINTS: f32 = 2.0;
-const SWATCH_BAR_BOTTOM_POINTS: f32 = 9.0;
+/// Width of a channel swatch; its height is the card's less its inset
+const SWATCH_WIDTH: f32 = 34.0;
+/// Gap between swatches
+const SWATCH_GAP: f32 = 2.0;
+/// Middle of a swatch's letters, from its top
+const SWATCH_LABEL_Y: f32 = 11.0;
+/// A swatch's underline: its inset from the sides
+const SWATCH_BAR_INSET: f32 = 6.0;
+/// Its top, from the swatch's bottom
+const SWATCH_BAR_BOTTOM: f32 = 10.0;
+/// Its height
+const SWATCH_BAR_HEIGHT: f32 = 2.0;
 
-/// Swatch colours: one hue per map, spread by the golden ratio so neighbours differ, muted to
-/// keep the white label readable
+/// Golden-ratio spacing keeps neighbouring map hues distinct
 const HUE_STEP: f32 = 0.618_034;
 const SWATCH_SATURATION: f32 = 0.45;
-const SWATCH_VALUE_DARK: f32 = 0.42;
-const SWATCH_VALUE_LIGHT: f32 = 0.62;
+const SWATCH_VALUE: f32 = 0.42;
 
-/// The bars of the R, G and B channels a swatch reads
-const COMPONENT_COLORS: [Color32; 3] = [Color32::from_rgb(220, 70, 70), Color32::from_rgb(80, 190, 90), Color32::from_rgb(80, 120, 230)];
+/// The underline of R
+const BAR_RED: Color32 = Color32::from_rgb(230, 70, 70);
+/// The underline of G
+const BAR_GREEN: Color32 = Color32::from_rgb(80, 200, 90);
+/// The underline of B
+const BAR_BLUE: Color32 = Color32::from_rgb(80, 130, 240);
+/// The underline of A
+const BAR_ALPHA: Color32 = Color32::from_rgb(220, 220, 220);
+/// The underline of RGB and gray
+const BAR_WHOLE: Color32 = Color32::WHITE;
 
 /// What a cleared channel writes: black, or opaque in the alpha channel
 const CLEARED_VALUE: f32 = 0.0;
@@ -179,8 +298,6 @@ const CONSTANT_DRAG_SPEED: f64 = 0.005;
 /// The naming patterns the input maps can be shown with (the reference's second one names
 /// another vendor's material and is left out)
 const NAMING_PATTERNS: [&str; 1] = ["OpenPBR"];
-/// Width of the Naming pattern list
-const NAMING_PATTERN_WIDTH_POINTS: f32 = 150.0;
 
 /// `s` reading component `k` (only 3-component sources have more than one).
 fn with_component(s: &SourceRef, k: u8) -> SourceRef {
@@ -336,43 +453,50 @@ enum MapAction {
     Remove(usize),
 }
 
-/// The Output templates tab: template list, the selected template's outputs, then the Input maps
-/// pane and the pane with Mesh maps above Converted maps.
-pub fn tab(app: &mut TextureCraftApp, ui: &mut Ui, builtins: &[ExportPreset]) {
+pub(crate) fn clear_map_previews(ctx: &egui::Context) {
+    MapPreviewCache::clear(ctx);
+}
+
+/// The Output templates tab in `body`: presets, outputs, Input maps, then Mesh maps above Converted maps
+pub fn tab(app: &mut TextureCraftApp, ui: &mut Ui, body: Rect, builtins: &[ExportPreset]) {
+    // Four swatches and the type menu share a row between the two map panes
+    const MIN_EDITOR_WIDTH: f32 = 960.0;
+    const MIN_EDITOR_HEIGHT: f32 = CARDS_TOP + 2.0 * CARD_HEIGHT + COUNT_TOP_ABOVE_BOTTOM;
+    let minimum = vec2(MIN_EDITOR_WIDTH, MIN_EDITOR_HEIGHT);
+    if body.width() >= minimum.x && body.height() >= minimum.y {
+        template_panes(app, ui, body, builtins);
+        return;
+    }
+
+    ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
+        egui::ScrollArea::both().id_salt("export_template_editor").auto_shrink([false; 2]).show(ui, |ui| {
+            let (content, _) = ui.allocate_exact_size(ui.available_size().max(minimum), egui::Sense::hover());
+            template_panes(app, ui, content, builtins);
+        });
+    });
+}
+
+fn template_panes(app: &mut TextureCraftApp, ui: &mut Ui, body: Rect, builtins: &[ExportPreset]) {
     sync_draft(app);
-    let height = ui.available_height();
+    let top = body.top() - TAB_ROW_HEIGHT;
     let names = crate::export_window::template_groups(app, builtins).1;
-    let scale = (ui.available_width() / REFERENCE_TAB_WIDTH_POINTS).min(1.0);
-    let (list_width, inputs_width, side_width) = (LIST_WIDTH_POINTS * scale, INPUTS_WIDTH_POINTS * scale, SIDE_MAPS_WIDTH_POINTS * scale);
-    let mut list_action = None;
-    ui.vertical(|ui| {
-        ui.set_width(list_width);
-        ui.set_height(height);
-        list_action = preset_list(app, ui, &names);
-    });
-    ui.separator();
-    ui.vertical(|ui| {
-        // Leave room for the two map panes and three separators
-        let panes = inputs_width + side_width + 8.0 * ui.spacing().item_spacing.x + SEPARATOR_ALLOWANCE_POINTS;
-        ui.set_width((ui.available_width() - panes).max(MIN_OUTPUTS_WIDTH_POINTS));
-        ui.set_height(height);
-        outputs(app, ui);
-    });
+    let presets_right = body.left() + PRESETS_WIDTH;
+    let inputs_divider = body.right() - INPUTS_DIVIDER_FROM_RIGHT;
+    let side_divider = body.right() - SIDE_DIVIDER_FROM_RIGHT;
+    for x in [presets_right, inputs_divider, side_divider] {
+        drawn::divider(ui, Rect::from_min_max(pos2(x, body.top()), pos2(x + 1.0, body.bottom())));
+    }
+
+    let list_action = preset_list(app, ui, Rect::from_min_max(body.min, pos2(presets_right, body.bottom())), top, &names);
+    let middle = Rect::from_min_max(pos2(presets_right + 1.0 + MIDDLE_MARGIN, body.top()), pos2(inputs_divider - MIDDLE_MARGIN, body.bottom()));
+    ui.scope(|ui| outputs(app, ui, middle, top));
 
     // The panes mark the maps the selected template's outputs read
-    let marked = marked_sources(app, &Tokens::get(ui.ctx()));
-    ui.separator();
-    ui.vertical(|ui| {
-        ui.set_width(inputs_width);
-        ui.set_height(height);
-        input_maps(ui, &marked);
-    });
-    ui.separator();
-    ui.vertical(|ui| {
-        ui.set_width(side_width);
-        ui.set_height(height);
-        mesh_and_converted_maps(ui, height, &marked);
-    });
+    let marked = marked_sources(app);
+    let inputs = Rect::from_min_max(pos2(inputs_divider + PANE_FROM_DIVIDER, body.top()), pos2(side_divider - INPUTS_END_BEFORE_DIVIDER, body.bottom()));
+    input_maps(ui, inputs, top, &marked);
+    let side = Rect::from_min_max(pos2(side_divider + SIDE_PANE_FROM_DIVIDER, body.top()), body.max);
+    mesh_and_converted_maps(ui, side, top, &marked);
     if let Some(a) = list_action {
         apply(app, ui.ctx(), a);
     }
@@ -388,93 +512,105 @@ pub fn select(app: &mut TextureCraftApp, name: String) {
     }
 }
 
-/// "Naming pattern" with its info icon, at the right end of the tab row (laid out right to left)
-pub(crate) fn naming_pattern(ui: &mut Ui) {
-    let tk = Tokens::get(ui.ctx());
-    ui.label(RichText::new(ic::INFO).color(tk.text_dim)).on_hover_ui(|ui| {
+/// "Naming pattern", its list and its info glyph at the tab row's right end
+pub(crate) fn naming_pattern(ui: &mut Ui, window_right: f32, y: f32) {
+    let look = ExportLook::get(ui.ctx());
+    let info_at = pos2(window_right - NAMING_INFO_FROM_RIGHT, y);
+    drawn::glyph(ui, info_at, ic::INFO, INFO_SIZE, look.text_dim);
+    let info = ui.interact(Rect::from_center_size(info_at, vec2(INFO_SIZE, INFO_SIZE)), ui.scope_id().with("exp_naming_info"), egui::Sense::hover());
+    info.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, ic::INFO));
+    info.on_hover_ui(|ui| {
         ui.label(tr("Choose how the input maps are named in this editor."));
         ui.label(tr("The active texture set’s shader can affect the available map names."));
     });
-    egui::ComboBox::from_id_salt("exp_naming").width(NAMING_PATTERN_WIDTH_POINTS).selected_text(NAMING_PATTERNS[0]).show_ui(ui, |ui| {
+    let combo = drawn::control_rect(window_right - NAMING_COMBO_LEFT_FROM_RIGHT, window_right - NAMING_COMBO_RIGHT_FROM_RIGHT, y);
+    drawn::combo(ui, combo, "exp_naming", NAMING_PATTERNS[0], |ui| {
         for p in NAMING_PATTERNS {
             let _ = ui.selectable_label(true, p);
         }
     });
-    ui.label(tr("Naming pattern"));
+    let label = tr("Naming pattern");
+    let left = window_right - NAMING_LABEL_FROM_RIGHT - drawn::text_width(ui, label, false);
+    drawn::label_at(ui, left, y, label, look.text, false);
 }
 
-/// The Presets list: the templates sorted by name (built-in and user); a right click offers
-/// Rename, Duplicate and Remove, F2 renames
-fn preset_list(app: &mut TextureCraftApp, ui: &mut Ui, names: &[String]) -> Option<ListAction> {
+/// The Presets list in `column` with its header's tools; a right click offers Rename, Duplicate and Remove, F2 renames
+fn preset_list(app: &mut TextureCraftApp, ui: &mut Ui, column: Rect, top: f32, names: &[String]) -> Option<ListAction> {
+    let look = ExportLook::get(ui.ctx());
     let mut act = None;
-    let sel = app.ui.export.preset.clone();
+    let selected_name = app.ui.export.preset.clone();
     let user = app.ui.export.draft.is_some();
-    ui.horizontal(|ui| {
-        ui.label(caption(tr("Presets")));
+    drawn::label_at(ui, column.left() + TITLE_INDENT, top + HEADER_Y, tr("Presets"), look.text, true);
 
-        // Copy, "−" and "+" from left to right, without tooltips as in the reference
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if icon_button_without_tooltip(ui, ic::PLUS, tr("New template"), false, ICON_POINTS).clicked() {
-                act = Some(ListAction::New);
-            }
-            if ui.add_enabled_ui(user, |ui| icon_button_without_tooltip(ui, ic::MINUS, tr("Delete the selected template"), false, ICON_POINTS)).inner.clicked()
-            {
-                act = Some(ListAction::Remove(sel.clone()));
-            }
-            if icon_button_without_tooltip(ui, ic::COPY, tr("Duplicate the selected template"), false, ICON_POINTS).clicked() {
-                act = Some(ListAction::Duplicate(sel.clone()));
-            }
-
-            // TextureCraft's template files: a focusable menu, as the row's right click is pointer only
-            let actions = icon_button_without_tooltip(ui, ic::DOTS_THREE, tr("Template actions"), false, ICON_POINTS);
-            let opened_now = actions.clicked();
-            egui::Popup::menu(&actions).id(ui.make_persistent_id("exp_template_actions")).show(|ui| template_file_items(ui, &mut act, true, opened_now));
-        });
-    });
-    ui.add_space(2.0);
-    if std::mem::take(&mut app.ui.export.rename_key) && user {
-        act = Some(ListAction::StartRename(sel.clone()));
+    // Template actions, Duplicate, "−" and "+" from left to right, without tooltips as in the reference
+    let icon_at = |slot_from_right: f32| pos2(column.right() - PRESET_ICON_FROM_RIGHT - slot_from_right * PRESET_ICON_STEP, top + HEADER_Y);
+    if drawn::icon_button(ui, icon_at(0.0), ic::PLUS, PRESET_ICON_SIZE, tr("New template"), true, false).clicked() {
+        act = Some(ListAction::New);
     }
-    egui::ScrollArea::vertical().id_salt("exp_presets").auto_shrink([false; 2]).show(ui, |ui| {
-        for name in names {
-            let is_user = app.session.export_presets.list.iter().any(|p| p.name == *name);
-            match app.ui.export.renaming.as_mut().filter(|_| *name == sel) {
-                Some(buf) => {
-                    let r = ui.add(egui::TextEdit::singleline(buf).id(egui::Id::unique(RENAME_ID)).desired_width(f32::INFINITY));
-                    if r.lost_focus() {
-                        act = Some(if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                            ListAction::Select(name.clone())
-                        } else {
-                            ListAction::Rename(buf.clone())
+    if drawn::icon_button(ui, icon_at(1.0), ic::MINUS, PRESET_ICON_SIZE, tr("Delete the selected template"), user, false).clicked() {
+        act = Some(ListAction::Remove(selected_name.clone()));
+    }
+    if drawn::icon_button(ui, icon_at(2.0), ic::COPY, PRESET_ICON_SIZE, tr("Duplicate the selected template"), true, false).clicked() {
+        act = Some(ListAction::Duplicate(selected_name.clone()));
+    }
+
+    // TextureCraft's template files: a focusable menu, as the row's right click is pointer only
+    let actions = drawn::icon_button(ui, icon_at(3.0), ic::DOTS_THREE, PRESET_ICON_SIZE, tr("Template actions"), true, false);
+    let opened_now = actions.clicked();
+    egui::Popup::menu(&actions).id(ui.make_persistent_id("exp_template_actions")).show(|ui| template_file_items(ui, &mut act, true, opened_now));
+    if std::mem::take(&mut app.ui.export.rename_key) && user {
+        act = Some(ListAction::StartRename(selected_name.clone()));
+    }
+
+    // The rows scroll, the scroll bar in its strip at the column's right
+    let rows = Rect::from_min_max(pos2(column.left(), top + LIST_TOP), column.max);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rows), |ui| {
+        egui::ScrollArea::vertical().id_salt("exp_presets").auto_shrink([false; 2]).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let width = rows.width() - GUTTER;
+            for name in names {
+                let is_user = app.session.export_presets.list.iter().any(|preset| preset.name == *name);
+                let (rect, _) = ui.allocate_exact_size(vec2(width, PRESET_ROW_HEIGHT), egui::Sense::hover());
+                match app.ui.export.renaming.as_mut().filter(|_| *name == selected_name) {
+                    Some(name_buffer) => {
+                        let field = egui::TextEdit::singleline(name_buffer).id(egui::Id::unique(RENAME_ID)).margin(vec2(PRESET_NAME_LEFT, 0.0));
+                        let rename_field = ui.put(rect, field);
+                        if rename_field.lost_focus() {
+                            act = Some(if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                                ListAction::Select(name.clone())
+                            } else {
+                                ListAction::Rename(name_buffer.clone())
+                            });
+                        }
+                    }
+                    None => {
+                        let label = template_label(&app.session, name);
+                        let response = preset_row(ui, rect, name, label, *name == selected_name, is_user).on_hover_text(name);
+                        if response.double_clicked() && is_user {
+                            act = Some(ListAction::StartRename(name.clone()));
+                        } else if response.clicked() {
+                            act = Some(ListAction::Select(name.clone()));
+                        }
+                        response.context_menu(|ui| {
+                            let read_only = tr("Built-in templates are read-only: duplicate one to edit it");
+                            if ui.add_enabled(is_user, egui::Button::new(tr("Rename"))).on_disabled_hover_text(read_only).clicked() {
+                                act = Some(ListAction::StartRename(name.clone()));
+                            }
+                            if ui.button(tr("Duplicate")).clicked() {
+                                act = Some(ListAction::Duplicate(name.clone()));
+                            }
+                            if ui.add_enabled(is_user, egui::Button::new(tr("Remove"))).on_disabled_hover_text(read_only).clicked() {
+                                act = Some(ListAction::Remove(name.clone()));
+                            }
+
+                            // TextureCraft's template files, after the reference's entries
+                            ui.separator();
+                            template_file_items(ui, &mut act, *name == selected_name, false);
                         });
                     }
                 }
-                None => {
-                    let r = preset_row(ui, name, *name == sel).on_hover_text(name);
-                    if r.double_clicked() && is_user {
-                        act = Some(ListAction::StartRename(name.clone()));
-                    } else if r.clicked() {
-                        act = Some(ListAction::Select(name.clone()));
-                    }
-                    r.context_menu(|ui| {
-                        let read_only = tr("Built-in templates are read-only: duplicate one to edit it");
-                        if ui.add_enabled(is_user, egui::Button::new(tr("Rename"))).on_disabled_hover_text(read_only).clicked() {
-                            act = Some(ListAction::StartRename(name.clone()));
-                        }
-                        if ui.button(tr("Duplicate")).clicked() {
-                            act = Some(ListAction::Duplicate(name.clone()));
-                        }
-                        if ui.add_enabled(is_user, egui::Button::new(tr("Remove"))).on_disabled_hover_text(read_only).clicked() {
-                            act = Some(ListAction::Remove(name.clone()));
-                        }
-
-                        // TextureCraft's template files, after the reference's entries
-                        ui.separator();
-                        template_file_items(ui, &mut act, *name == sel, false);
-                    });
-                }
             }
-        }
+        });
     });
     act
 }
@@ -497,25 +633,23 @@ fn template_file_items(ui: &mut Ui, act: &mut Option<ListAction>, with_export: b
     }
 }
 
-/// A Presets list row: a document icon and the name (cut with "…" when long), the selected one in
-/// the accent colour
-fn preset_row(ui: &mut Ui, name: &str, selected: bool) -> egui::Response {
-    let tokens = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), PRESET_ROW_HEIGHT_POINTS), egui::Sense::click());
-    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, name));
-
+/// A Presets row: a locked file glyph for a built-in template, the name cut with "…", the selected one in bold
+fn preset_row(ui: &mut Ui, rect: Rect, name: &str, label: &str, selected: bool, is_user: bool) -> egui::Response {
+    let look = ExportLook::get(ui.ctx());
+    let response = ui.interact(rect, ui.scope_id().with(("exp_preset_row", name)), egui::Sense::click());
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, label));
     let painter = ui.painter();
-    if response.hovered() {
-        painter.rect_filled(rect, tokens.radius, tokens.row_hover);
+    if selected {
+        painter.rect_filled(rect, 0.0, look.chrome);
+    } else if response.hovered() {
+        painter.rect_filled(rect, 0.0, look.raised);
     }
-    let font = egui::TextStyle::Body.resolve(ui.style());
-    painter.text(rect.left_center() + vec2(PRESET_ICON_INDENT_POINTS, 0.0), egui::Align2::LEFT_CENTER, ic::FILE_TEXT, font.clone(), tokens.text_dim);
-    let color = if selected { tokens.accent } else { tokens.text };
-    let mut job = egui::text::LayoutJob::simple_singleline(name.to_string(), font, color);
-    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - PRESET_TEXT_INDENT_POINTS);
-    let galley = painter.layout_job(job);
-    let top_left = egui::pos2(rect.left() + PRESET_TEXT_INDENT_POINTS, rect.center().y - galley.size().y / 2.0);
-    painter.galley(top_left, galley, color);
+    let icon = if is_user { ic::FILE_TEXT } else { ic::FILE_LOCK };
+    drawn::glyph(ui, pos2(rect.left() + PRESET_ICON_X, rect.center().y), icon, PRESET_ROW_ICON_SIZE, look.text_dim);
+    let shown = drawn::fitted(ui, label, rect.width() - PRESET_NAME_LEFT, false, selected);
+    let color = if selected { look.text } else { look.list_text };
+    drawn::text_at(ui, rect.left() + PRESET_NAME_LEFT, rect.center().y, &shown, color, selected);
+    drawn::paint_focus(ui, &response);
     response
 }
 
@@ -549,7 +683,7 @@ fn perform(app: &mut TextureCraftApp, ctx: &egui::Context, act: ListAction) {
         }
         ListAction::Duplicate(name) => {
             if let Some(p) = app.session.export_preset(&name) {
-                let name = format!("{}_copy", p.name).chars().take(MAX_PRESET_NAME).collect();
+                let name = format!("{}_copy", template_label(&app.session, &name)).chars().take(MAX_PRESET_NAME).collect();
                 save_new(app, &ExportPreset { name, ..p });
             }
         }
@@ -733,9 +867,9 @@ pub fn load_library(app: &mut TextureCraftApp, storage: Option<&dyn eframe::Stor
         app.session.log.warnings(texturecraft_engine::log::LIBRARY_SOURCE, skipped.into_iter().map(|w| format!("Export template skipped: {w}")));
     }
     #[cfg(target_arch = "wasm32")]
-    for p in storage.and_then(|s| eframe::get_value::<Vec<ExportPreset>>(s, STORAGE_KEY)).unwrap_or_default() {
-        if let Ok(v) = serde_json::to_value(&p) {
-            app.run("export.preset.save", json!({ "preset": v, "unique": true }));
+    for preset in storage.and_then(|s| eframe::get_value::<Vec<ExportPreset>>(s, STORAGE_KEY)).unwrap_or_default() {
+        if let Err(error) = app.session.export_presets.restore(preset) {
+            app.session.log.warnings(texturecraft_engine::log::LIBRARY_SOURCE, [format!("Export template skipped: {error}")]);
         }
     }
 }
@@ -751,89 +885,105 @@ pub fn save_library(app: &TextureCraftApp, storage: &mut dyn eframe::Storage) {
     let _ = (app, storage);
 }
 
-/// The selected template's output maps (editable for user templates).
-fn outputs(app: &mut TextureCraftApp, ui: &mut Ui) {
+/// The selected template's output maps in `column`, editable for user templates
+fn outputs(app: &mut TextureCraftApp, ui: &mut Ui, column: Rect, top: f32) {
+    let look = ExportLook::get(ui.ctx());
     let tokens = Tokens::get(ui.ctx());
     let (mut preset, editable) = match (&app.ui.export.draft, selected(app)) {
         (Some(d), _) => (d.clone(), true),
         (None, Some(b)) => (b, false),
         (None, None) => {
-            ui.label(RichText::new(tr("Select an output template")).color(tokens.text_dim));
+            MapPreviewCache::clear(ui.ctx());
+            drawn::label_at(ui, column.left(), top + CURRENT_PRESET_Y, tr("Select an output template"), look.text_dim, false);
             return;
         }
     };
-    let preview = preview_names(app, &preset);
+    let params = plan_params(app, &preset);
+    let preview = match &params {
+        Ok(params) => MapPreviewCache::plan(app, ui.ctx(), params),
+        Err(error) => {
+            MapPreviewCache::clear(ui.ctx());
+            Err(error.clone())
+        }
+    };
     let mut edit = RowEdit::default();
 
-    // The selected template in a strip, "Current preset:" in bold
-    egui::Frame::new().fill(tokens.row).inner_margin(ROW_MARGIN_POINTS).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(tr("Current preset:")).strong().color(tokens.text_strong));
-            ui.label(&preset.name);
-            if !editable {
-                ui.label(RichText::new(ic::LOCK_SIMPLE).color(tokens.text_dim)).on_hover_text(tr("Built-in templates are read-only: duplicate one to edit it"));
-            }
-        });
-    });
+    // "Current preset:" in bold, the template's name, a lock on a built-in one
+    let y = top + CURRENT_PRESET_Y;
+    let title = tr("Current preset:");
+    let name_left = column.left() + drawn::text_width(ui, title, true) + NAME_GAP;
+    drawn::label_at(ui, column.left(), y, title, look.text, true);
+    let name = drawn::label_at(ui, name_left, y, template_label(&app.session, &app.ui.export.preset), look.text, false);
+    if !editable {
+        let lock_at = pos2(name.rect.right() + LOCK_GAP, y);
+        drawn::glyph(ui, lock_at, ic::LOCK_SIMPLE, CARD_ICON_SIZE, look.text_dim);
+        let lock =
+            ui.interact(Rect::from_center_size(lock_at, vec2(CARD_ICON_SIZE, CARD_ICON_SIZE)), ui.scope_id().with("exp_preset_lock"), egui::Sense::hover());
+        lock.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, tr("Read-only template")));
+        lock.on_hover_text(tr("Built-in templates are read-only: duplicate one to edit it"));
+    }
 
-    // "Output maps", with the Create buttons at the right end of the same row, or of the next one
-    // when the column is too narrow for both
-    let create_buttons = |ui: &mut Ui, edit: &mut RowEdit| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_enabled_ui(editable, |ui| {
-                for (label, layout, split, file) in CREATE.iter().rev() {
-                    if ui.button(tr(label)).clicked() {
-                        edit.action = Some(MapAction::Add(*layout, *split, file));
-                    }
-                }
-                ui.label(RichText::new(tr("Create:")).color(tokens.text_dim));
-            });
-        });
-    };
-    if ui.available_width() >= OUTPUT_MAPS_ROW_WIDTH_POINTS {
-        ui.horizontal(|ui| {
-            ui.label(caption(tr("Output maps")));
-            create_buttons(ui, &mut edit);
-        });
-    } else {
-        ui.label(caption(tr("Output maps")));
-        ui.horizontal(|ui| create_buttons(ui, &mut edit));
+    // A built-in template's cards and buttons keep their full look: the lock says they are read-only
+    ui.visuals_mut().disabled_alpha = 1.0;
+    let y = top + OUTPUT_MAPS_Y;
+    drawn::label_at(ui, column.left(), y, tr("Output maps"), look.text, true);
+    let mut right = column.right();
+    for (label, layout, split, file) in CREATE.iter().rev() {
+        let width = drawn::text_width(ui, tr(label), false) + CREATE_PADDING;
+        if drawn::button(ui, drawn::control_rect(right - width, right, y), tr(label), false, editable).clicked() {
+            edit.action = Some(MapAction::Add(*layout, *split, file));
+        }
+        right -= width + CREATE_GAP;
     }
-    if let Err(e) = &preview {
-        ui.label(RichText::new(trf("Not saved: {error}", &[("error", e)])).color(tokens.danger).size(11.0));
-    }
+    let create = tr("Create:");
+    drawn::label_at(ui, right - CREATE_LABEL_GAP - drawn::text_width(ui, create, false), y, create, look.text, false);
+
     let mut changed = false;
     let map_count = preset.maps.len();
     let mut split = app.ui.export.draft_split.clone();
     split.resize(map_count, false);
 
-    // Leave room for the footer text and the framed count below
-    let footer = 2.0 * ui.text_style_height(&egui::TextStyle::Body) + 3.0 * ui.spacing().item_spacing.y + 2.0 * ROW_MARGIN_POINTS;
-    egui::ScrollArea::vertical().id_salt("exp_outputs").auto_shrink([false; 2]).max_height((ui.available_height() - footer).max(60.0)).show(ui, |ui| {
-        ui.add_enabled_ui(editable, |ui| {
-            // Every row takes the column's width, not the width a wider row before it left
-            let row_width = ui.available_width();
-            for ((index, map), row_split) in preset.maps.iter_mut().enumerate().zip(split.iter_mut()) {
-                let file = preview.as_ref().ok().and_then(|names| names.get(index).cloned().flatten());
-                let planned = match file {
-                    Some(file) => format!("{} {file}", ic::ARROW_RIGHT),
-                    None => tr("Not exported: no source in this texture set").to_string(),
-                };
-                changed |= ui.allocate_ui(vec2(row_width, 0.0), |ui| output_row(ui, index, map_count, map, row_split, &planned, &mut edit)).inner;
-                ui.add_space(ROW_GAP_POINTS);
-            }
+    // The cards scroll between the header and the count strip; their lists line up on one column
+    let strip =
+        Rect::from_min_max(pos2(column.left(), column.bottom() - COUNT_TOP_ABOVE_BOTTOM), pos2(column.right(), column.bottom() - COUNT_BOTTOM_ABOVE_BOTTOM));
+    let cards = Rect::from_min_max(pos2(column.left(), top + CARDS_TOP), pos2(column.right(), strip.top() - CARD_GAP));
+    let values =
+        preset.maps.iter().flat_map(|map| [map.format.extension().to_string(), crate::export_window::depth_label(Some(map.format), map.bit_depth, false)]);
+    let value_width = values.chain(CARD_VALUE_SAMPLES.map(str::to_string)).map(|value| drawn::text_width(ui, &value, false)).fold(0.0, f32::max);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(cards), |ui| {
+        egui::ScrollArea::vertical().id_salt("exp_outputs").auto_shrink([false; 2]).show(ui, |ui| {
+            let height = map_count as f32 * (CARD_HEIGHT + CARD_GAP);
+            let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), egui::Sense::hover());
+            ui.add_enabled_ui(editable, |ui| {
+                for ((index, map), row_split) in preset.maps.iter_mut().enumerate().zip(split.iter_mut()) {
+                    let planned = preview.as_ref().ok().and_then(|outputs| outputs.get(index)).and_then(Option::as_ref);
+                    let top = area.top() + index as f32 * (CARD_HEIGHT + CARD_GAP);
+                    let card = Rect::from_min_size(pos2(area.left(), top), vec2(area.width(), CARD_HEIGHT));
+                    let row = OutputCard { index, count: map_count, value_width };
+                    changed |= output_row(ui, card, &row, map, row_split, planned, &mut edit);
+                }
+            });
         });
     });
-    ui.label(RichText::new(tr("Drop an input map onto a channel to assign it to that output.")).color(tokens.text_dim));
 
-    // Count only maps that have sources in the current set
-    if let Ok(names) = &preview {
-        let exported = names.iter().flatten().count();
-        egui::Frame::new().fill(tokens.field).inner_margin(ROW_MARGIN_POINTS).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.label(trf("{n} output maps will be exported.", &[("n", &exported)]));
-        });
+    // The hovered output's pictures show from the next frame on
+    if let (Some(index), Ok(params), Ok(plan)) = (edit.hovered_output, &params, &preview)
+        && plan.get(index).is_some_and(Option::is_some)
+    {
+        MapPreviewCache::fill(app, ui.ctx(), params, index);
+    }
+
+    // Count only maps that have sources in the current set; an edit that cannot be saved says why there
+    ui.painter().rect_filled(strip, 0.0, look.control);
+    let text_left = strip.left() + COUNT_TEXT_INDENT;
+    match &preview {
+        Ok(planned) => {
+            let exported = planned.iter().flatten().count();
+            drawn::label_at(ui, text_left, strip.center().y, &trf("{n} output maps will be exported", &[("n", &exported)]), look.text, false);
+        }
+        Err(e) => {
+            drawn::label_at(ui, text_left, strip.center().y, &trf("Not saved: {error}", &[("error", e)]), tokens.danger, false);
+        }
     }
     if !editable {
         return;
@@ -916,92 +1066,157 @@ fn commit(app: &mut TextureCraftApp, preset: ExportPreset, mut origin: Vec<Optio
     app.ui.export.draft_maps = origin;
 }
 
-/// The file each map produces for the current texture set with the dialog's settings (None:
-/// the set has none of the map's sources), via `export.plan`.
-fn preview_names(app: &mut TextureCraftApp, preset: &ExportPreset) -> Result<Vec<Option<String>>, String> {
-    let mut p = crate::export_window::set_params(app, app.session.ts());
-    p["preset"] = serde_json::to_value(preset).map_err(|e| e.to_string())?;
+/// The `export.plan` and `export.preview` params of `preset` for the current texture set with the window's settings
+fn plan_params(app: &TextureCraftApp, preset: &ExportPreset) -> Result<Value, String> {
+    let mut params = crate::export_window::set_params(app, app.session.ts());
+    let export = &app.ui.export;
+    let same_template = params.get("preset").and_then(Value::as_str) == Some(export.preset.as_str());
 
-    // The set's map overrides apply only to its own template
-    if let Some(p) = p.as_object_mut() {
-        p.remove("maps");
+    if !same_template && let Some(params) = params.as_object_mut() {
+        params.remove("maps");
+    } else if let (Some(_), Some(maps)) = (&export.draft, params.get_mut("maps").and_then(Value::as_array_mut)) {
+        // Draft positions have no override until they map to a saved output
+        maps.retain_mut(|settings| {
+            let Some(saved_index) = settings["map"].as_u64().and_then(|index| usize::try_from(index).ok()) else { return false };
+            let Some(draft_index) = export.draft_maps.iter().position(|origin| *origin == Some(saved_index)) else { return false };
+
+            settings["map"] = json!(draft_index);
+            true
+        });
     }
-    let plan = texturecraft_engine::execute(&mut app.session, "export.plan", &p).map_err(|e| e.to_string())?;
-    let mut names = vec![None; preset.maps.len()];
-    for f in plan.as_array().into_iter().flatten() {
-        let map = f.get("map").and_then(Value::as_u64).and_then(|i| usize::try_from(i).ok());
-        if let (Some(slot), Some(file)) = (map.and_then(|i| names.get_mut(i)), f.get("file").and_then(Value::as_str)) {
-            *slot = Some(file.to_string());
-        }
-    }
-    Ok(names)
+
+    params["preset"] = serde_json::to_value(preset).map_err(|error| error.to_string())?;
+    Ok(params)
 }
 
-/// One output map row: drag grip, file name, "$", the channel swatches, then file type, bit depth,
-/// duplicate and remove. `planned` is the file it writes for the current texture set.
-fn output_row(ui: &mut Ui, index: usize, count: usize, map: &mut MapSpec, split: &mut bool, planned: &str, edit: &mut RowEdit) -> bool {
-    let tokens = Tokens::get(ui.ctx());
-    let mut changed = false;
-    let frame = egui::Frame::new().fill(tokens.row).corner_radius(tokens.radius).inner_margin(ROW_MARGIN_POINTS).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+/// The file each map of `params`' template writes for the texture set (None: no sources), via `export.plan`; a PSD's maps each get the file and their layer
+fn planned_outputs(app: &mut TextureCraftApp, params: &Value) -> Result<Vec<Option<PlannedOutput>>, String> {
+    let plan = texturecraft_engine::execute(&mut app.session, "export.plan", params).map_err(|e| e.to_string())?;
+    let map_count = params.pointer("/preset/maps").and_then(Value::as_array).map_or(0, Vec::len);
+    let index = |value: &Value| value.get("map").and_then(Value::as_u64).and_then(|i| usize::try_from(i).ok());
 
-            // The name field gives way in a narrow window, so the swatches and lists stay in the row
-            let swatches = swatch_targets(map, *split).len() as f32;
-            let spacing = ui.spacing().item_spacing.x;
-            let others = GRIP_WIDTH_POINTS + DOLLAR_BUTTON_WIDTH_POINTS + swatches * (SWATCH_SIZE_POINTS + spacing) + ROW_LISTS_WIDTH_POINTS;
-            let name_width = (ui.available_width() - others - ROW_GAPS * spacing).clamp(MIN_NAME_FIELD_WIDTH_POINTS, NAME_FIELD_WIDTH_POINTS);
+    let mut outputs: Vec<Option<PlannedOutput>> = vec![None; map_count];
+    let tile_files = tr("UV tile files");
+    for file in plan.as_array().into_iter().flatten() {
+        let Some(name) = file.get("file").and_then(Value::as_str) else { continue };
 
-            grip(ui, index, count, edit);
-            let name = ui.add(egui::TextEdit::singleline(&mut map.file).desired_width(name_width)).on_hover_ui(|ui| {
-                ui.label(tr("File name without extension; variables insert names"));
-                ui.label(planned);
+        let tiled = file["tile"].is_number();
+        let display_name = if tiled { file["udimPattern"].as_str().unwrap_or(tile_files) } else { name };
+        let mut remember = |entry: &Value, layer_name: Option<&str>| {
+            let Some(slot) = index(entry).and_then(|index| outputs.get_mut(index)) else { return };
+
+            if let Some(previous) = slot {
+                // Some disambiguated or truncated paths have no common tile pattern
+                if tiled && previous.file != display_name && previous.file != tile_files {
+                    previous.file = tile_files.into();
+                }
+                return;
+            }
+
+            *slot = Some(PlannedOutput {
+                file: match layer_name {
+                    Some(layer_name) if !tiled => format!("{name} › {layer_name}"),
+                    _ => display_name.to_owned(),
+                },
+                tiled,
+                dimensions: (file["size"].as_u64().unwrap_or(0), file["height"].as_u64().unwrap_or(0)),
+                format: file.get("format").and_then(Value::as_str).and_then(FileFormat::from_extension),
+                bit_depth: file.get("bitDepth").and_then(Value::as_u64).and_then(|depth| u8::try_from(depth).ok()).unwrap_or(0),
+                dithering: file.get("dithering").and_then(Value::as_bool).unwrap_or(false),
             });
-            changed |= name.changed();
-            changed |= token_menu(ui, &mut map.file);
-            changed |= channel_swatches(ui, index, map, split, edit);
-
-            // The lists and icons at the row's right end: file format and duplicate, bit depth and remove
-            ui.add_space((ui.available_width() - ROW_LISTS_WIDTH_POINTS).max(0.0));
-            ui.vertical(|ui| {
-                ui.horizontal(|ui| {
-                    changed |= format_menu(ui, map);
-                    if icon_button_without_tooltip(ui, ic::COPY, tr("Duplicate this output"), false, ROW_ICON_POINTS).clicked() {
-                        edit.action = Some(MapAction::Duplicate(index));
-                    }
-                });
-                ui.horizontal(|ui| {
-                    changed |= depth_menu(ui, map);
-                    if icon_button_without_tooltip(ui, ic::X, tr("Remove this output"), false, ROW_ICON_POINTS).clicked() {
-                        edit.action = Some(MapAction::Remove(index));
-                    }
-                });
-            });
-        });
-    });
-
-    // Another row's grip dropped here moves that row here (the type check keeps a map list drop)
-    let row = frame.response;
-    let row_dragged_over = row.dnd_hover_payload::<MapDrag>().is_some_and(|from| from.0 != index);
-    if row_dragged_over {
-        drop_highlight(ui, row.rect, &tokens);
+        };
+        match file.get("layers").and_then(Value::as_array).filter(|layers| !layers.is_empty()) {
+            Some(layers) => {
+                for layer in layers {
+                    remember(layer, layer.get("name").and_then(Value::as_str));
+                }
+            }
+            None => remember(file, None),
+        }
     }
-    if row_dragged_over && let Some(from) = row.dnd_release_payload::<MapDrag>() {
+
+    Ok(outputs)
+}
+
+/// One output map card: grip, file name, "$", swatches, then file type over bit depth beside duplicate and remove
+fn output_row(ui: &mut Ui, card: Rect, row: &OutputCard, map: &mut MapSpec, split: &mut bool, planned: Option<&PlannedOutput>, edit: &mut RowEdit) -> bool {
+    let look = ExportLook::get(ui.ctx());
+    let index = row.index;
+
+    // The card takes a dragged row before its controls, which sit above it
+    let card_response = ui.interact(card, ui.scope_id().with(("exp_card", index)), egui::Sense::hover());
+    ui.painter().rect_filled(card, CARD_RADIUS, look.control);
+    let mid = card.center().y;
+    let mut changed = false;
+    grip(ui, Rect::from_center_size(pos2(card.left() + GRIP_X, mid), vec2(GRIP_WIDTH, card.height())), index, row.count, edit);
+
+    // The name field gives way in a narrow window, so the swatches and lists keep their room
+    let swatches_width = swatch_targets(map, *split).len() as f32 * (SWATCH_WIDTH + SWATCH_GAP);
+    let lists_width = CARD_ICON_FROM_RIGHT + CARD_CHEVRON_STEP + CARD_VALUE_GAP + row.value_width + SWATCHES_GAP;
+    let room = card.width() - NAME_FIELD_LEFT - DOLLAR_GAP - DOLLAR_WIDTH - SWATCHES_GAP - swatches_width - lists_width;
+    let name_width = room.clamp(MIN_NAME_FIELD_WIDTH, NAME_FIELD_WIDTH);
+    let name_rect = drawn::control_rect(card.left() + NAME_FIELD_LEFT, card.left() + NAME_FIELD_LEFT + name_width, mid);
+    changed |= name_field(ui, name_rect, index, &mut map.file, planned);
+    let dollar = drawn::control_rect(name_rect.right() + DOLLAR_GAP, name_rect.right() + DOLLAR_GAP + DOLLAR_WIDTH, mid);
+    changed |= token_menu(ui, dollar, index, &mut map.file);
+    let swatches = Rect::from_min_max(pos2(dollar.right() + SWATCHES_GAP, card.top() + CARD_INSET), pos2(card.right(), card.bottom() - CARD_INSET));
+    changed |= channel_swatches(ui, swatches, index, map, split, planned, edit);
+
+    // The right block: file type over bit depth on one column, duplicate over remove beside them
+    let icon_x = card.right() - CARD_ICON_FROM_RIGHT;
+    let chevron_x = icon_x - CARD_CHEVRON_STEP;
+    let value_left = chevron_x - CARD_VALUE_GAP - row.value_width;
+    let (upper, lower) = (mid - CARD_ROW_OFFSET, mid + CARD_ROW_OFFSET);
+    changed |= format_menu(ui, (value_left, chevron_x, upper), index, map);
+    changed |= depth_menu(ui, (value_left, chevron_x, lower), index, map);
+    let duplicate = trf("Duplicate output {number}", &[("number", &(index + 1))]);
+    if drawn::icon_button(ui, pos2(icon_x, upper), ic::COPY, CARD_ICON_SIZE, &duplicate, ui.is_enabled(), false).clicked() {
+        edit.action = Some(MapAction::Duplicate(index));
+    }
+    let remove = trf("Remove output {number}", &[("number", &(index + 1))]);
+    if drawn::icon_button(ui, pos2(icon_x, lower), ic::X, CARD_ICON_SIZE, &remove, ui.is_enabled(), false).clicked() {
+        edit.action = Some(MapAction::Remove(index));
+    }
+
+    // Another card's grip dropped here moves that card here (the type check keeps a map list drop)
+    let row_dragged_over = card_response.dnd_hover_payload::<MapDrag>().is_some_and(|from| from.0 != index);
+    if row_dragged_over {
+        drop_highlight(ui, card);
+    }
+    if row_dragged_over && let Some(from) = card_response.dnd_release_payload::<MapDrag>() {
         edit.action = Some(MapAction::Move { from: from.0, to: index });
     }
     changed
 }
 
-/// The grip at a row's left: drag it onto another row to move the map there; the arrow keys and
-/// its right-click menu move it one place
-fn grip(ui: &mut Ui, index: usize, count: usize, edit: &mut RowEdit) {
-    let tokens = Tokens::get(ui.ctx());
+/// The file name field; until it is typed in it shows the name's end, cut with "…"; true when it changed
+fn name_field(ui: &mut Ui, rect: Rect, index: usize, file: &mut String, planned: Option<&PlannedOutput>) -> bool {
+    let look = ExportLook::get(ui.ctx());
+    let id = ui.scope_id().with(("exp_map_name", index));
+    let typing = ui.memory(|memory| memory.has_focus(id));
+    let text_color = if typing { look.text } else { Color32::TRANSPARENT };
+    let field = egui::TextEdit::singleline(file).id(id).margin(vec2(drawn::VALUE_INSET, 0.0)).background_color(look.control).text_color(text_color);
+    let response = ui.put(rect, field).on_hover_ui(|ui| {
+        ui.label(tr("File name without extension; variables insert names"));
+        ui.label(planned_text(planned));
+    });
+    if !typing {
+        let shown = drawn::fitted(ui, file, rect.width() - 2.0 * drawn::VALUE_INSET, true, false);
+        let color = if drawn::looks_disabled(ui, ui.is_enabled()) { look.text_dim } else { look.text };
+        drawn::text_at(ui, rect.left() + drawn::VALUE_INSET, rect.center().y, &shown, color, false);
+    }
+    response.changed()
+}
+
+/// A card's grip: drag it onto another card, or use the arrow keys or its menu, to move the map
+fn grip(ui: &mut Ui, rect: Rect, index: usize, count: usize, edit: &mut RowEdit) {
+    let look = ExportLook::get(ui.ctx());
     let enabled = ui.is_enabled();
-    let (rect, response) = ui.allocate_exact_size(vec2(GRIP_WIDTH_POINTS, SWATCH_SIZE_POINTS), egui::Sense::click_and_drag());
+    let response = ui.interact(rect, ui.scope_id().with(("exp_grip", index)), if enabled { egui::Sense::click_and_drag() } else { egui::Sense::hover() });
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, tr("Reorder")));
-    let color = if response.hovered() || response.dragged() { tokens.text } else { tokens.text_dim };
-    ui.painter().rect_filled(rect, 1.0, color);
+    let color = if enabled && (response.hovered() || response.dragged()) { look.text } else { look.text_dim };
+    drawn::glyph(ui, rect.center(), ic::DOTS_SIX_VERTICAL, GRIP_SIZE, color);
+    drawn::paint_focus(ui, &response);
     let response = response.on_hover_cursor(egui::CursorIcon::Grab);
     response.dnd_set_drag_payload(MapDrag(index));
 
@@ -1030,10 +1245,12 @@ fn grip(ui: &mut Ui, index: usize, count: usize, edit: &mut RowEdit) {
     }
 }
 
-/// The "$" button: the file name variables in the reference's order, then $channel
-fn token_menu(ui: &mut Ui, file: &mut String) -> bool {
+/// The "$" button in `rect`: the file name variables in the reference's order, then $channel
+fn token_menu(ui: &mut Ui, rect: Rect, index: usize, file: &mut String) -> bool {
     let mut changed = false;
-    let menu = ui.menu_button("$", |ui| {
+    let id = ui.scope_id().with(("exp_tokens", index));
+    let button = drawn::button_with_id(ui, id, rect, "$", "$", false, ui.is_enabled()).on_hover_text(tr("Insert a variable"));
+    egui::Popup::menu(&button).show(|ui| {
         let mut add = |ui: &mut Ui, token: &str| {
             if ui.button(RichText::new(token).monospace()).clicked() {
                 file.push_str(token);
@@ -1052,14 +1269,15 @@ fn token_menu(ui: &mut Ui, file: &mut String) -> bool {
             add(ui, token);
         }
     });
-    menu.response.on_hover_text(tr("Insert a variable"));
     changed
 }
 
-/// The file type menu of an output map ("png˅")
-fn format_menu(ui: &mut Ui, map: &mut MapSpec) -> bool {
+/// The file type menu of an output map ("png ⌄") at `place`: (value's left, chevron's centre, middle)
+fn format_menu(ui: &mut Ui, (left, chevron, y): (f32, f32, f32), index: usize, map: &mut MapSpec) -> bool {
     let mut changed = false;
-    let menu = ui.menu_button(RichText::new(format!("{} {}", map.format.extension(), ic::CARET_DOWN)), |ui| {
+    let id = ui.scope_id().with(("exp_map_format", index));
+    let menu = drawn::text_dropdown(ui, id, left, chevron, y, map.format.extension()).on_hover_text(tr("File format"));
+    egui::Popup::menu(&menu).show(|ui| {
         for extension in MAP_FILE_TYPES {
             let Some(format) = FileFormat::from_extension(extension) else {
                 ui.add_enabled(false, egui::Button::selectable(false, extension)).on_disabled_hover_text(tr(NOT_AVAILABLE));
@@ -1077,16 +1295,17 @@ fn format_menu(ui: &mut Ui, map: &mut MapSpec) -> bool {
             }
         }
     });
-    menu.response.on_hover_text(tr("File format"));
     changed
 }
 
-/// The bit depth menu of an output map ("8 bits˅"); templates do not keep dithering yet
-fn depth_menu(ui: &mut Ui, map: &mut MapSpec) -> bool {
+/// The bit depth menu of an output map ("8 bits ⌄"); templates do not keep dithering yet
+fn depth_menu(ui: &mut Ui, (left, chevron, y): (f32, f32, f32), index: usize, map: &mut MapSpec) -> bool {
     let format = map.format;
     let mut changed = false;
     let shown = crate::export_window::depth_label(Some(format), map.bit_depth, false);
-    let menu = ui.menu_button(RichText::new(format!("{shown} {}", ic::CARET_DOWN)), |ui| {
+    let id = ui.scope_id().with(("exp_map_depth", index));
+    let menu = drawn::text_dropdown(ui, id, left, chevron, y, &shown).on_hover_text(tr("Bit depth"));
+    egui::Popup::menu(&menu).show(|ui| {
         for (depth, dithering) in crate::export_window::depth_options(format) {
             let label = crate::export_window::depth_label(Some(format), depth, dithering);
             if dithering {
@@ -1098,7 +1317,6 @@ fn depth_menu(ui: &mut Ui, map: &mut MapSpec) -> bool {
             }
         }
     });
-    menu.response.on_hover_text(tr("Bit depth"));
     changed
 }
 
@@ -1239,8 +1457,8 @@ fn swatch_tooltip(map: &MapSpec, source: &SourceRef, target: ChannelTarget, inve
     }
 }
 
-/// The colour of a map on swatches and list markers (None for constants)
-fn source_color(source: &SourceRef, tokens: &Tokens) -> Option<Color32> {
+/// A map's colour on swatches and list markers (None for constants)
+fn source_color(source: &SourceRef) -> Option<Color32> {
     let channels = Channel::ALL.len();
     let converted = VirtualMap::ALL.len();
     let index = match source {
@@ -1249,28 +1467,89 @@ fn source_color(source: &SourceRef, tokens: &Tokens) -> Option<Color32> {
         SourceRef::Baked { map, .. } => channels + converted + BakedMap::ALL.iter().position(|m| m == map)?,
         SourceRef::Constant(_) => return None,
     };
+
     let hue = (index as f32 * HUE_STEP).fract();
-    let value = if tokens.dark { SWATCH_VALUE_DARK } else { SWATCH_VALUE_LIGHT };
-    Some(egui::ecolor::Hsva::new(hue, SWATCH_SATURATION, value, 1.0).into())
+    Some(egui::ecolor::Hsva::new(hue, SWATCH_SATURATION, SWATCH_VALUE, 1.0).into())
 }
 
-/// The bars under a swatch's letters: red, green and blue for a colour map's RGB, else the one
-/// channel read (white for gray)
-fn swatch_bars(map: &MapSpec, source: &SourceRef, target: ChannelTarget, tokens: &Tokens) -> Vec<Color32> {
-    match source {
-        SourceRef::Constant(_) => Vec::new(),
-        _ if source.components() == 3 && target == ChannelTarget::Rgb && rgb_spread(map) => COMPONENT_COLORS.to_vec(),
-        _ if source.components() == 3 => COMPONENT_COLORS.get(usize::from(component_of(source))).copied().into_iter().collect(),
-        _ => vec![tokens.text_strong],
+/// The underline of a swatch: the colour of the channel its letters name (white for RGB and gray)
+fn swatch_bar(target: ChannelTarget) -> Color32 {
+    match target {
+        ChannelTarget::One(Dest::R) => BAR_RED,
+        ChannelTarget::One(Dest::G) => BAR_GREEN,
+        ChannelTarget::One(Dest::B) => BAR_BLUE,
+        ChannelTarget::One(Dest::A) => BAR_ALPHA,
+        ChannelTarget::Rgb | ChannelTarget::One(Dest::L) => BAR_WHOLE,
     }
 }
 
-/// An output map's channel swatches: drop targets for the map lists. A click opens Clear channel
-/// (and Separate R, G and B on R, G, B), a right click TextureCraft's own tools.
-fn channel_swatches(ui: &mut Ui, index: usize, map: &mut MapSpec, split: &mut bool, edit: &mut RowEdit) -> bool {
+/// "→ <file>", or why the output writes nothing
+fn planned_text(planned: Option<&PlannedOutput>) -> String {
+    match planned {
+        Some(planned) => format!("{} {}", ic::ARROW_RIGHT, planned.file),
+        None => tr("Not exported: no source in this texture set").to_string(),
+    }
+}
+
+/// Below a swatch's tooltip: the file its output writes, each channel with its source, then the file's size and type (built-in templates' swatches show it too)
+fn output_preview(ui: &mut Ui, index: usize, map: &MapSpec, planned: Option<&PlannedOutput>) {
     let tokens = Tokens::get(ui.ctx());
+    ui.separator();
+    let Some(planned) = planned else {
+        ui.label(RichText::new(planned_text(None)).color(tokens.text_dim));
+        return;
+    };
+
+    let title = if planned.tiled { trf("Atlas preview: {file}", &[("file", &planned.file)]) } else { planned.file.clone() };
+    ui.label(RichText::new(title).color(tokens.text_strong));
+    if let Some(Some(pictures)) = MapPreviewCache::get(ui.ctx(), index) {
+        preview_pictures(ui, map, &pictures);
+    }
+
+    let file_type = planned.format.map_or("", FileFormat::extension);
+    let depth = crate::export_window::depth_label(planned.format, planned.bit_depth, planned.dithering);
+    let (width, height) = planned.dimensions;
+    let details = if planned.tiled { format!("{file_type} {depth}") } else { format!("{width} x {height} · {file_type} {depth}") };
+    ui.label(RichText::new(details).color(tokens.text_dim));
+}
+
+/// The file's picture with each channel's grey picture, letter and source beside it
+fn preview_pictures(ui: &mut Ui, map: &MapSpec, pictures: &MapPreviewPictures) {
+    let tokens = Tokens::get(ui.ctx());
+    let picture = |texture, width: f32| egui::Image::new(texture).fit_to_exact_size(vec2(width, width * pictures.aspect)).corner_radius(tokens.radius);
+    ui.horizontal_top(|ui| {
+        ui.add(picture(&pictures.file, PREVIEW_FILE_WIDTH_POINTS));
+        if pictures.channels.is_empty() {
+            return;
+        }
+
+        ui.vertical(|ui| {
+            for (dest, texture) in &pictures.channels {
+                let target = ChannelTarget::One(*dest);
+                let gray = ChannelTarget::One(Dest::L);
+                let source_target = match dest {
+                    Dest::R | Dest::G | Dest::B if source_of(map, gray).is_some() => gray,
+                    _ => target,
+                };
+                let fallback = SourceRef::Constant(if *dest == Dest::A { CLEARED_ALPHA } else { CLEARED_VALUE });
+                let source = source_of(map, source_target).unwrap_or(&fallback);
+                let inverted = source_target.dests().iter().any(|dest| map.inverted.contains(dest));
+
+                ui.horizontal(|ui| {
+                    ui.add(picture(texture, PREVIEW_CHANNEL_WIDTH_POINTS));
+                    ui.label(RichText::new(target_label(target)).color(tokens.text_strong));
+                    ui.label(RichText::new(swatch_tooltip(map, source, source_target, inverted)).color(tokens.text_dim));
+                });
+            }
+        });
+    });
+}
+
+/// A card's channel swatches from `area`'s left: drop targets for the map lists, with click and right-click menus
+fn channel_swatches(ui: &mut Ui, area: Rect, index: usize, map: &mut MapSpec, split: &mut bool, planned: Option<&PlannedOutput>, edit: &mut RowEdit) -> bool {
     let mut changed = false;
     let shows_split = *split || !rgb_collapsed(map);
+    let mut left = area.left();
     for (slot, target) in swatch_targets(map, *split).into_iter().enumerate() {
         let Some(source) = source_of(map, target).cloned() else { continue };
 
@@ -1281,18 +1560,27 @@ fn channel_swatches(ui: &mut Ui, index: usize, map: &mut MapSpec, split: &mut bo
         if inverted {
             name = trf("{swatch}, inverted", &[("swatch", &name)]);
         }
-        let look = SwatchLook { fill: source_color(&source, &tokens), bars: swatch_bars(map, &source, target, &tokens), inverted };
-        let response = swatch(ui, label, &name, &look).on_hover_ui(|ui| {
+        let constant = matches!(source, SourceRef::Constant(_));
+        let look = SwatchLook { fill: source_color(&source), bar: (!constant).then(|| swatch_bar(target)), inverted };
+        let rect = Rect::from_min_max(pos2(left, area.top()), pos2(left + SWATCH_WIDTH, area.bottom()));
+        left += SWATCH_WIDTH + SWATCH_GAP;
+        let response = swatch(ui, ui.scope_id().with(("exp_swatch", index, slot)), rect, label, &name, &look);
+        if response.contains_pointer() {
+            edit.hovered_output = Some(index);
+        }
+        let hover = |ui: &mut Ui| {
             ui.label(&tooltip);
             if inverted {
                 ui.label(tr("Inverted"));
             }
-        });
+            output_preview(ui, index, map, planned);
+        };
+        let response = response.on_hover_ui(hover).on_disabled_hover_ui(hover);
 
         // A map dragged over the swatch, or dropped on it; a row's grip passes through to its row
         let map_dragged_over = response.dnd_hover_payload::<SourceRef>().is_some();
         if map_dragged_over {
-            drop_highlight(ui, response.rect.expand(DROP_HIGHLIGHT_GAP_POINTS), &tokens);
+            drop_highlight(ui, response.rect.expand(DROP_HIGHLIGHT_GAP_POINTS));
         }
         if map_dragged_over && let Some(input) = response.dnd_release_payload::<SourceRef>() {
             edit.pending = Some(PendingDrop { map: index, target, source: (*input).clone(), position: response.rect.center_bottom() });
@@ -1372,35 +1660,41 @@ fn set_constant(map: &mut MapSpec, target: ChannelTarget, value: f32) {
     }
 }
 
-/// The accent frame around a drop target under a dragged map or row
-fn drop_highlight(ui: &Ui, rect: egui::Rect, tokens: &Tokens) {
-    ui.painter().rect_stroke(rect, tokens.radius, egui::Stroke::new(DROP_HIGHLIGHT_STROKE_POINTS, tokens.accent), egui::StrokeKind::Outside);
+/// The frame round a drop target, in the text colour: the accent is Export's alone
+fn drop_highlight(ui: &Ui, rect: Rect) {
+    let look = ExportLook::get(ui.ctx());
+    ui.painter().rect_stroke(rect, CARD_RADIUS, egui::Stroke::new(DROP_HIGHLIGHT_STROKE_POINTS, look.text), egui::StrokeKind::Outside);
 }
 
-/// One channel swatch: `label` on top, filled with the source's colour, bars below for the
-/// channels it reads, a corner mark when inverted
-fn swatch(ui: &mut Ui, label: &str, name: &str, look: &SwatchLook) -> egui::Response {
-    let tokens = Tokens::get(ui.ctx());
+/// One channel swatch `id`: its letters, the source's colour, its channel's underline, a corner mark when inverted
+fn swatch(ui: &mut Ui, id: egui::Id, rect: Rect, label: &str, name: &str, swatch_look: &SwatchLook) -> egui::Response {
+    let look = ExportLook::get(ui.ctx());
     let enabled = ui.is_enabled();
-    let (rect, response) = ui.allocate_exact_size(vec2(SWATCH_SIZE_POINTS, SWATCH_SIZE_POINTS), egui::Sense::click());
+    let response = ui.interact(rect, id, egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, name));
 
     let painter = ui.painter();
-    let border = if response.hovered() { tokens.accent } else { tokens.button_border };
-    painter.rect(rect, tokens.radius, look.fill.unwrap_or(tokens.button), egui::Stroke::new(1.0, border), egui::StrokeKind::Inside);
-    let label_font = egui::FontId::proportional(SWATCH_TEXT_SIZE_POINTS);
-    painter.text(rect.center_top() + vec2(0.0, SWATCH_TEXT_TOP_POINTS), egui::Align2::CENTER_TOP, label, label_font, tokens.text_strong);
-    let bar_width = SWATCH_BAR_WIDTH_POINTS / look.bars.len().max(1) as f32;
-    let left = rect.center().x - SWATCH_BAR_WIDTH_POINTS / 2.0;
-    for (k, color) in look.bars.iter().enumerate() {
-        let min = egui::pos2(left + k as f32 * bar_width, rect.bottom() - SWATCH_BAR_BOTTOM_POINTS);
-        painter.rect_filled(egui::Rect::from_min_size(min, vec2(bar_width, SWATCH_BAR_HEIGHT_POINTS)), 0.0, *color);
+    let fill = swatch_look.fill.unwrap_or(look.raised);
+    painter.rect_filled(rect, 0.0, fill);
+    if response.hovered() {
+        painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, look.text_dim), egui::StrokeKind::Inside);
     }
-    if look.inverted {
+    let lettering = look.lettering_on(fill);
+    painter.text(pos2(rect.center().x, rect.top() + SWATCH_LABEL_Y), egui::Align2::CENTER_CENTER, label, drawn::font(false), lettering);
+    if let Some(bar) = swatch_look.bar {
+        let bottom = rect.bottom() - SWATCH_BAR_BOTTOM;
+        painter.rect_filled(
+            Rect::from_min_max(pos2(rect.left() + SWATCH_BAR_INSET, bottom), pos2(rect.right() - SWATCH_BAR_INSET, bottom + SWATCH_BAR_HEIGHT)),
+            0.0,
+            bar,
+        );
+    }
+    if swatch_look.inverted {
         let corner = rect.right_top();
         let mark = vec![corner, corner - vec2(INVERTED_MARK_POINTS, 0.0), corner + vec2(0.0, INVERTED_MARK_POINTS)];
-        painter.add(egui::Shape::convex_polygon(mark, tokens.text_strong, egui::Stroke::NONE));
+        painter.add(egui::Shape::convex_polygon(mark, lettering, egui::Stroke::NONE));
     }
+    drawn::paint_focus(ui, &response);
     response
 }
 
@@ -1488,79 +1782,92 @@ fn source_channel_popup(ui: &Ui, pending: &mut Option<PendingDrop>, maps: &mut [
 }
 
 /// The maps the selected template's outputs read, with their colours, for the panes' markers
-fn marked_sources(app: &TextureCraftApp, tokens: &Tokens) -> Vec<(SourceRef, Color32)> {
+fn marked_sources(app: &TextureCraftApp) -> Vec<(SourceRef, Color32)> {
     let Some(preset) = app.ui.export.draft.clone().or_else(|| selected(app)) else { return Vec::new() };
 
     let sources = preset.maps.iter().flat_map(|map| map.channels.iter().map(|(_, source)| source));
-    sources.filter_map(|source| source_color(source, tokens).map(|color| (source.clone(), color))).collect()
+    sources.filter_map(|source| source_color(source).map(|color| (source.clone(), color))).collect()
 }
 
-/// The Input maps pane: the input maps in their groups
-fn input_maps(ui: &mut Ui, marked: &[(SourceRef, Color32)]) {
-    ui.label(caption(tr("Input maps")));
-    egui::ScrollArea::vertical().id_salt("exp_inputs").auto_shrink([false; 2]).show(ui, |ui| {
+/// A pane's title at `left`, on the column titles' line
+fn pane_title(ui: &mut Ui, left: f32, y: f32, title: &str) {
+    let look = ExportLook::get(ui.ctx());
+    drawn::label_at(ui, left + GROUP_INDENT, y, title, look.text, true);
+}
+
+/// A pane's entries scrolling in `area`, the scroll bar in its strip at the right
+fn pane_list(ui: &mut Ui, area: Rect, id: &str, add: impl FnOnce(&mut Ui, f32)) {
+    ui.scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
+        egui::ScrollArea::vertical().id_salt(id).auto_shrink([false; 2]).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            add(ui, area.width() - GUTTER);
+        });
+    });
+}
+
+/// The Input maps pane in `pane`: the input maps in their groups
+fn input_maps(ui: &mut Ui, pane: Rect, top: f32, marked: &[(SourceRef, Color32)]) {
+    let look = ExportLook::get(ui.ctx());
+    pane_title(ui, pane.left(), top + HEADER_Y, tr("Input maps"));
+    let list = Rect::from_min_max(pos2(pane.left(), top + LIST_TOP), pane.max);
+    pane_list(ui, list, "exp_inputs", |ui, width| {
         for (group, entries) in INPUT_MAPS.iter() {
-            ui.label(RichText::new(tr(group)).italics());
-            map_entries(ui, entries, marked, false);
+            let (rect, _) = ui.allocate_exact_size(vec2(width, GROUP_HEIGHT), egui::Sense::hover());
+            drawn::label_at(ui, rect.left() + GROUP_INDENT, rect.center().y, tr(group), look.text_dim, false);
+            map_entries(ui, width, entries, marked);
         }
     });
 }
 
-/// The side pane: Mesh maps above Converted maps (in the highlight colour, as in the reference)
-fn mesh_and_converted_maps(ui: &mut Ui, height: f32, marked: &[(SourceRef, Color32)]) {
-    ui.label(caption(tr("Mesh maps")));
-    egui::ScrollArea::vertical()
-        .id_salt("exp_mesh_maps")
-        .auto_shrink([false; 2])
-        .max_height(height * MESH_MAPS_SHARE)
-        .show(ui, |ui| map_entries(ui, &MESH_MAPS, marked, false));
-    ui.separator();
-    ui.label(caption(tr("Converted maps")));
-    egui::ScrollArea::vertical().id_salt("exp_converted_maps").auto_shrink([false; 2]).show(ui, |ui| map_entries(ui, &CONVERTED_MAPS, marked, true));
+/// The side pane in `pane`: Mesh maps above Converted maps, a divider between them
+fn mesh_and_converted_maps(ui: &mut Ui, pane: Rect, top: f32, marked: &[(SourceRef, Color32)]) {
+    pane_title(ui, pane.left(), top + HEADER_Y, tr("Mesh maps"));
+    let split = pane.center().y + SIDE_SPLIT_BELOW_MIDDLE;
+    let mesh = Rect::from_min_max(pos2(pane.left(), top + LIST_TOP), pos2(pane.right(), split - MESH_BOTTOM_GAP));
+    pane_list(ui, mesh, "exp_mesh_maps", |ui, width| map_entries(ui, width, &MESH_MAPS, marked));
+    drawn::divider(ui, Rect::from_min_max(pos2(pane.left() - 1.0, split), pos2(pane.right(), split + 1.0)));
+    pane_title(ui, pane.left(), split + CONVERTED_TITLE_Y, tr("Converted maps"));
+    let converted = Rect::from_min_max(pos2(pane.left(), split + CONVERTED_ROWS_TOP), pane.max);
+    pane_list(ui, converted, "exp_converted_maps", |ui, width| map_entries(ui, width, &CONVERTED_MAPS, marked));
 }
 
-fn map_entries(ui: &mut Ui, entries: &[MapEntry], marked: &[(SourceRef, Color32)], converted: bool) {
-    let tokens = Tokens::get(ui.ctx());
-    let text_color = if converted { tokens.warning } else { tokens.text };
+fn map_entries(ui: &mut Ui, width: f32, entries: &[MapEntry], marked: &[(SourceRef, Color32)]) {
     for (name, source) in entries {
         let marker = source.as_ref().and_then(|source| marked.iter().find(|(used, _)| same_source(used, source)).map(|(_, color)| *color));
-        map_entry(ui, tr(name), source.as_ref(), text_color, marker);
+        map_entry(ui, width, tr(name), source.as_ref(), marker);
     }
 }
 
-/// A map list entry to drag onto an output channel, with the colour marker of an output map that
-/// reads it; a map TextureCraft does not have yet is greyed and cannot be dragged
-fn map_entry(ui: &mut Ui, name: &str, source: Option<&SourceRef>, text_color: Color32, marker: Option<Color32>) {
-    let tokens = Tokens::get(ui.ctx());
+/// A map list entry to drag onto a channel; a used map shows a square of its colour, a missing one is greyed
+fn map_entry(ui: &mut Ui, width: f32, name: &str, source: Option<&SourceRef>, marker: Option<Color32>) {
+    let look = ExportLook::get(ui.ctx());
     let available = source.is_some();
     let sense = if available { egui::Sense::drag() } else { egui::Sense::hover() };
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ENTRY_HEIGHT_POINTS), sense);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, ENTRY_PITCH), sense);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ListItem, available, name));
 
+    let row = Rect::from_min_max(pos2(rect.left() + ENTRY_INSET, rect.top()), pos2(rect.right(), rect.top() + ENTRY_HEIGHT));
     let painter = ui.painter();
-    let row = rect.shrink2(vec2(0.0, ENTRY_GAP_POINTS / 2.0));
-    painter.rect_filled(row, 0.0, if available && response.hovered() { tokens.row_hover } else { tokens.row });
+    painter.rect_filled(row, 0.0, if available && response.hovered() { look.raised } else { look.control });
     if let Some(color) = marker {
-        painter.rect_filled(
-            egui::Rect::from_center_size(row.left_center() + vec2(MARKER_INDENT_POINTS, 0.0), egui::Vec2::splat(MARKER_SIZE_POINTS)),
-            1.0,
-            color,
+        let square = Rect::from_min_size(pos2(rect.left() + MARKER_LEFT, row.center().y - MARKER_SIZE / 2.0), vec2(MARKER_SIZE, MARKER_SIZE));
+        let edge = Color32::from_rgb(
+            color.r().saturating_add(MARKER_EDGE_LIGHTEN),
+            color.g().saturating_add(MARKER_EDGE_LIGHTEN),
+            color.b().saturating_add(MARKER_EDGE_LIGHTEN),
         );
+        painter.rect(square, MARKER_RADIUS, color, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
     }
-    let color = if available { text_color } else { tokens.text_dim.gamma_multiply(UNAVAILABLE_FADE) };
-    painter.text(
-        row.left_center() + vec2(ENTRY_TEXT_INDENT_POINTS, 0.0),
-        egui::Align2::LEFT_CENTER,
-        name,
-        egui::FontId::proportional(ENTRY_TEXT_SIZE_POINTS),
-        color,
-    );
+    let color = if available { look.text } else { look.text_dim.gamma_multiply(UNAVAILABLE_FADE) };
+    let shown = drawn::fitted(ui, name, row.right() - rect.left() - ENTRY_NAME_LEFT, false, false);
+    drawn::text_at(ui, rect.left() + ENTRY_NAME_LEFT, row.center().y, &shown, color, false);
     let Some(source) = source else {
         response.on_hover_text(tr(NOT_AVAILABLE));
         return;
     };
 
-    let response = response.on_hover_cursor(egui::CursorIcon::Grab);
+    // How to use the entry is its tooltip, not a line under the cards
+    let response = response.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text(tr("Drop an input map onto a channel to assign it to that output."));
     response.dnd_set_drag_payload(source.clone());
     if response.dragged()
         && let Some(at) = response.interact_pointer_pos()
@@ -1577,6 +1884,75 @@ mod tests {
 
     fn ch(channel: Channel, component: u8) -> SourceRef {
         SourceRef::Channel { channel, component }
+    }
+
+    #[test]
+    fn feedback_preview_follows_draft_maps_to_their_saved_overrides() {
+        use crate::state::{MapExport, SetExport};
+        use egui_kittest::Harness;
+
+        let session = texturecraft_engine::sample_session(256, 64).unwrap();
+        let mut harness = Harness::builder().with_context_setup(crate::framework::install_headless).build_eframe(|cc| TextureCraftApp::new(cc, session));
+        let app = harness.state_mut();
+        let ts = app.session.ts();
+        app.session.doc.project.texture_sets[ts].set_size(256, 128);
+        let saved = app.session.export_preset("Unreal Engine (Packed)").unwrap();
+        let mut draft = saved.clone();
+        draft.maps = vec![saved.maps[1].clone(), new_map(Layout::Gray, "New"), saved.maps[0].clone()];
+        let resized = MapExport { size: Some(128), ..MapExport::default() };
+        let disabled = MapExport { enabled: false, ..MapExport::default() };
+        app.ui.export.preset = saved.name.clone();
+        app.ui.export.sets.insert(
+            ts,
+            SetExport {
+                maps_template: saved.name,
+                maps: [(0, resized), (1, disabled), (2, MapExport { size: Some(512), ..MapExport::default() })].into(),
+                ..SetExport::default()
+            },
+        );
+        app.ui.export.draft = Some(draft.clone());
+        app.ui.export.draft_maps = vec![Some(1), None, Some(0)];
+
+        let params = plan_params(app, &draft).unwrap();
+        let outputs = planned_outputs(app, &params).unwrap();
+
+        assert!(outputs[0].is_none(), "the disabled map stays disabled in its new position");
+        assert_eq!(outputs[2].as_ref().unwrap().dimensions, (128, 64));
+        assert_eq!(params["maps"].as_array().unwrap().len(), 2, "the new map and the removed map get no override");
+    }
+
+    #[test]
+    fn tiled_raster_and_psd_previews_describe_the_whole_atlas() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable as _;
+        use texturecraft_engine::Session;
+        use texturecraft_engine::geom::primitives::udim_plane;
+
+        let session = Session::new_project("Tiles", udim_plane(), "builtin:udim_plane", None, 128).unwrap();
+        let mut harness = Harness::builder().with_context_setup(crate::framework::install_headless).build_eframe(|cc| TextureCraftApp::new(cc, session));
+        let app = harness.state_mut();
+        let mut preset = app.session.export_preset("Separate maps").unwrap();
+        preset.maps.truncate(2);
+        preset.maps[0].file = "Raster".into();
+        preset.maps[0].format = FileFormat::Png;
+        preset.maps[1].file = "Group/Layer.$udim".into();
+        preset.maps[1].format = FileFormat::Psd;
+        let mut ambiguous = preset.maps[0].clone();
+        ambiguous.file = "Literal_UDIMTOKEN.$udim".into();
+        preset.maps.push(ambiguous);
+        let params = json!({"ts": 0, "preset": preset});
+
+        let outputs = planned_outputs(app, &params).unwrap();
+        let preview = Harness::builder().with_context_setup(crate::framework::install_headless).build_ui(|ui| {
+            for (index, map) in preset.maps.iter().enumerate() {
+                output_preview(ui, index, map, outputs[index].as_ref());
+            }
+        });
+
+        assert!(preview.query_by_label("Atlas preview: Raster.<UDIM>.png").is_some());
+        assert!(preview.query_by_label_contains("<UDIM>.psd").is_some());
+        assert!(preview.query_by_label("Atlas preview: UV tile files").is_some());
+        assert!(preview.query_by_label_contains("128 x 128").is_none(), "the tile size must not describe the whole atlas");
     }
 
     #[test]

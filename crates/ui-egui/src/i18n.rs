@@ -37,7 +37,7 @@ pub struct Language {
     pub english: &'static str,
 }
 
-const COUNT: usize = 10;
+const COUNT: usize = 11;
 
 pub static LANGUAGES: [Language; COUNT] = [
     Language { code: "en", name: "English", english: "English" },
@@ -46,6 +46,7 @@ pub static LANGUAGES: [Language; COUNT] = [
     Language { code: "es", name: "Español", english: "Spanish" },
     Language { code: "pt-BR", name: "Português (Brasil)", english: "Portuguese (Brazil)" },
     Language { code: "it", name: "Italiano", english: "Italian" },
+    Language { code: "ru", name: "Русский", english: "Russian" },
     Language { code: "ja", name: "日本語", english: "Japanese" },
     Language { code: "zh-Hans", name: "简体中文", english: "Chinese (Simplified)" },
     Language { code: "ko", name: "한국어", english: "Korean" },
@@ -93,6 +94,19 @@ pub(crate) fn baked_map_label(map: texturecraft_engine::core::BakedMap) -> &'sta
         BakedMap::Height => n_("Height"),
         BakedMap::BentNormal => n_("Bent Normals"),
         BakedMap::Opacity => n_("Opacity"),
+    }
+}
+
+/// Why a baked map is out of date: one sentence for what changed after its bake
+pub(crate) fn bake_change_reason(change: texturecraft_engine::core::BakeChange) -> &'static str {
+    use texturecraft_engine::core::BakeChange;
+
+    match change {
+        BakeChange::LowPoly => n_("The mesh changed after this bake."),
+        BakeChange::HighPoly => n_("The high poly files changed after this bake."),
+        BakeChange::Cage => n_("The cage changed after this bake."),
+        BakeChange::Settings => n_("The common bake settings changed after this bake."),
+        BakeChange::MapSettings => n_("This map's bake settings changed after this bake."),
     }
 }
 
@@ -261,6 +275,9 @@ mod tests {
         keys.extend(BlendMode::all().map(|mode| mode.label()));
         keys.extend(texturecraft_engine::formats::export::VirtualMap::ALL.iter().map(|map| map.label()));
         keys.extend(texturecraft_engine::Tool::ALL.iter().map(|tool| tool.label()));
+        keys.extend(texturecraft_engine::ResourceStatus::ALL.iter().map(|status| status.label()));
+        let notice = crate::toast_action::ToastAction::UpdateResources { project: 0 };
+        keys.extend([notice.label(), notice.accessible_name()]);
         keys.extend(texturecraft_engine::HISTORY_TEMPLATES);
         keys.extend(ProceduralKind::ALL.iter().map(|kind| kind.label()));
         keys.extend(GeneratorKind::ALL.iter().map(|kind| kind.label()));
@@ -434,9 +451,18 @@ mod tests",
         assert_eq!(trf("Saved {path}", &[("path", &"a.tcraft")]), "Saved a.tcraft");
         assert_eq!(trf("{a} of {b} {c}", &[("a", &1), ("b", &2)]), "1 of 2 {c}");
         assert_eq!(trf("{unclosed", &[]), "{unclosed");
-        for (locale, code) in
-            [("de-AT", "de"), ("pt_PT.UTF-8", "pt-BR"), ("zh-Hant-TW", "zh-Hans"), ("ja", "ja"), ("ko_KR", "ko"), ("ar-EG", "ar"), ("nl-NL", "en"), ("", "en")]
-        {
+        for (locale, code) in [
+            ("de-AT", "de"),
+            ("pt_PT.UTF-8", "pt-BR"),
+            ("zh-Hant-TW", "zh-Hans"),
+            ("ja", "ja"),
+            ("ko_KR", "ko"),
+            ("ar-EG", "ar"),
+            ("ru-SK", "ru"),
+            ("ru_RU.UTF-8", "ru"),
+            ("nl-NL", "en"),
+            ("", "en"),
+        ] {
             assert_eq!(language_for_locale(locale), code, "{locale}");
         }
         set_language("de");

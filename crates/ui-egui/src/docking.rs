@@ -28,6 +28,9 @@ use crate::theme::Tokens;
 pub enum Panel {
     Viewport,
     Assets,
+    /// A second Assets panel with its own search, type and folder (the Assets panel's folder button)
+    AssetsSecond,
+
     // Saved layouts name the bake panels by their earlier names
     #[serde(rename = "BakeMaps")]
     MeshMapSettings,
@@ -81,7 +84,7 @@ impl Panel {
         use crate::state::Mode;
         match self {
             Self::MeshMapSettings | Self::CommonSettings | Self::MeshMapBakers | Self::BakingLog => mode == Mode::Baking,
-            Self::Assets | Self::Layers | Self::Properties | Self::TextureSetSettings | Self::Export => mode == Mode::Painting,
+            Self::Assets | Self::AssetsSecond | Self::Layers | Self::Properties | Self::TextureSetSettings | Self::Export => mode == Mode::Painting,
             Self::History => mode != Mode::Rendering,
             Self::Shader => mode != Mode::Baking,
             Self::Renderer => mode == Mode::Rendering,
@@ -89,9 +92,10 @@ impl Panel {
         }
     }
 
-    pub const ALL: [Panel; 16] = [
+    pub const ALL: [Panel; 17] = [
         Panel::Viewport,
         Panel::Assets,
+        Panel::AssetsSecond,
         Panel::MeshMapSettings,
         Panel::CommonSettings,
         Panel::MeshMapBakers,
@@ -112,6 +116,9 @@ impl Panel {
         match self {
             Panel::Viewport => "Viewport",
             Panel::Assets => "Assets",
+
+            // The second panel shows every type at first, so it's named for that, as the reference names it
+            Panel::AssetsSecond => "All",
             Panel::MeshMapSettings => "Mesh Map Settings",
             Panel::CommonSettings => "Common Settings",
             Panel::MeshMapBakers => "Mesh Map Bakers",
@@ -168,6 +175,7 @@ pub fn default_workspace() -> Workspace {
     // The Assets split keeps four tiles visible at the reference window width
     const ASSETS_SPLIT_RATIO: f32 = 0.16;
     const VIEWPORT_SPLIT_RATIO: f32 = 0.80;
+
     // Three texture set rows show at the default window height
     const TEXTURE_SET_SPLIT_RATIO: f32 = 0.2;
 
@@ -187,8 +195,8 @@ pub fn default_workspace() -> Workspace {
         split(Axis::X, SplitSize::Ratio(VIEWPORT_SPLIT_RATIO), tabs(&[Viewport]), column),
     );
     let mut hidden: Vec<(Panel, Location<Panel>)> = Panel::ALL.into_iter().filter_map(|panel| Some((panel, floating_location(panel.float_rect()?)))).collect();
-    for panel in [MeshMapSettings, CommonSettings, MeshMapBakers] {
-        hidden.push((panel, Location::new(Some(TextureSetList), DockPlacement::tab(None))));
+    for (panel, anchor) in [(MeshMapSettings, TextureSetList), (CommonSettings, TextureSetList), (MeshMapBakers, TextureSetList), (AssetsSecond, Assets)] {
+        hidden.push((panel, Location::new(Some(anchor), DockPlacement::tab(None))));
     }
 
     Workspace::from_parts(Layout::new(Some(root), Vec::new()), hidden, Vec::new())
@@ -309,27 +317,28 @@ impl Dock {
         self.replaced_unreadable
     }
 
-    /// Texture sets over the bakers, the two settings tabs, the log under both, then the viewport
+    /// Texture sets over the bakers, the two settings tabs, the Baking Log under both, then the viewport
     pub(crate) fn for_baking() -> Self {
         let painting = default_workspace();
         let mut hidden = painting.hidden().to_vec();
-        for panel in [Panel::Assets, Panel::Layers, Panel::TextureSetSettings, Panel::Properties] {
+        for panel in [Panel::Assets, Panel::AssetsSecond, Panel::Layers, Panel::TextureSetSettings, Panel::Properties] {
             if let Ok(location) = painting.layout().location(&panel) {
                 hidden.push((panel, location));
             }
         }
 
-        let bake_panels = [Panel::MeshMapSettings, Panel::CommonSettings, Panel::MeshMapBakers, Panel::Log];
+        let bake_panels = [Panel::MeshMapSettings, Panel::CommonSettings, Panel::MeshMapBakers, Panel::BakingLog];
         hidden.retain(|(panel, _)| !bake_panels.contains(panel));
 
         let gutter_width = f32::from(crate::theme::GUTTER);
         let list_column = split(Axis::Y, SplitSize::Ratio(TEXTURE_SET_LIST_SHARE), tabs(&[Panel::TextureSetList]), tabs(&[Panel::MeshMapBakers]));
         let settings_column = tabs(&[Panel::CommonSettings, Panel::MeshMapSettings]);
         let columns = split(Axis::X, SplitSize::FixedFirst(BAKERS_COLUMN_WIDTH), list_column, settings_column);
-        let columns_over_log = split(Axis::Y, SplitSize::FixedSecond(BAKING_LOG_HEIGHT), columns, tabs(&[Panel::Log]));
+        let columns_over_log = split(Axis::Y, SplitSize::FixedSecond(BAKING_LOG_HEIGHT), columns, tabs(&[Panel::BakingLog]));
         let columns_width = BAKERS_COLUMN_WIDTH + gutter_width + SETTINGS_COLUMN_WIDTH;
         let root = split(Axis::X, SplitSize::FixedFirst(columns_width), columns_over_log, tabs(&[Panel::Viewport]));
         let workspace = Workspace::from_parts(Layout::new(Some(root), Vec::new()), hidden, painting.floated().to_vec());
+
         Dock { workspace, raise: None, replaced_unreadable: false }
     }
 
@@ -392,27 +401,34 @@ impl Dock {
     }
 }
 
-/// What the dock area keeps between passes: the workspace it shows and the panels' specs.
+/// What the dock area keeps between passes: the workspace it shows and the panels' specs
 #[derive(Default)]
 pub(crate) struct LiveDock {
     shown: Option<Arc<Workspace>>,
     specs: Tracked<DockSpecs>,
-    /// The panel whose floating window takes over the held press in the next pass, with the grab point inside the window.
+    /// The panel whose floating window takes over the held press in the next pass, with the grab point inside the window
     continue_move: Option<(Panel, egui::Vec2)>,
+    /// The OS windows of the floating panels, as the last pass's dock drew them
+    floating_windows: Vec<ViewportId>,
 }
 
 impl LiveDock {
-    /// Asks the next pass's dock to let the window holding `panel` follow the held pointer from `grab`.
+    /// The OS windows the last pass's dock drew floating panels in
+    pub(crate) fn floating_windows(&self) -> &[ViewportId] {
+        &self.floating_windows
+    }
+
+    /// Asks the next pass's dock to let the window holding `panel` follow the held pointer from `grab`
     pub(crate) fn hand_over(&mut self, panel: Panel, grab: egui::Vec2) {
         self.continue_move = Some((panel, grab));
     }
 
-    /// The `Arc` the dock shows for `workspace`: the last one while the arrangement is the same,
-    /// so an idle pass keeps the workspace's revision and the dock reads no spec.
+    /// The `Arc` the dock shows for `workspace`: the last one while the arrangement is the same, so an idle pass reads no spec
     fn shown(&mut self, workspace: &Workspace) -> Arc<Workspace> {
         if let Some(shown) = self.shown.as_ref().filter(|shown| ***shown == *workspace) {
             return Arc::clone(shown);
         }
+
         let shown = Arc::new(workspace.clone());
         self.shown = Some(Arc::clone(&shown));
         shown
@@ -471,7 +487,7 @@ pub(crate) fn input_blocked(app: &TextureCraftApp, context: &egui::Context) -> b
     modal
 }
 
-/// Draw the dock (viewport and panels) into `ui`.
+/// Draw the dock (viewport and panels) into `ui`
 pub fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     // Rendering keeps disabled panels visible because it shares the painting dock
     let dock_mode = if app.ui.mode == crate::state::Mode::Rendering { crate::state::Mode::Painting } else { app.ui.mode };
@@ -485,12 +501,13 @@ pub fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     let context = ui.ctx().clone();
     refresh_specs(app);
     let shown = app.docks.shown(&app.ui.dock.workspace);
-    // The specs leave the app while its panels borrow it, and come back with their revision.
+
+    // Move the specs out so the dock can borrow the app to draw panels
     let specs = std::mem::take(&mut app.docks.specs);
     let hand_over = app.docks.continue_move.take();
     let raise = app.ui.dock.raise.take();
-    // Panels arrange in a split tree around the viewport; floating title bars only move windows.
-    // Each closable tab has its close button, as each group header had one for its shown panel.
+
+    // Keep drag targets on the dock so a floating title bar only moves its window
     let config = DockConfig::default().new_dock_zones(false).title_bar_docks(false).tab_close_buttons(true);
     let (output, focused_windows) = {
         let tokens = Tokens::get(&context);
@@ -505,7 +522,10 @@ pub fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
         let output = area.show(ui);
         (output, panels.focused_windows)
     };
+
     app.docks.specs = specs;
+    app.docks.floating_windows.clear();
+    app.docks.floating_windows.extend(output.windows.iter().map(|(_, viewport)| *viewport));
 
     // The popup needs the viewport the dock recorded this frame
     crate::rail_popup::show(app, &context);
@@ -518,6 +538,7 @@ pub fn show(app: &mut TextureCraftApp, ui: &mut Ui) {
     }
     #[cfg(target_arch = "wasm32")]
     let _ = focused_windows;
+
     if let Some(error) = &output.error {
         log::warn!("docking: {:?}", error.error);
     }
@@ -590,7 +611,8 @@ fn min_size(panel: Panel) -> Vec2 {
 /// The body of every panel except the viewport, in the dock or on the rail
 pub(crate) fn panel_body(app: &mut TextureCraftApp, ui: &mut Ui, panel: Panel) {
     // No project open: the library and the log work, the other panels about a project stay empty
-    let works_empty = matches!(panel, Panel::Assets | Panel::Log | Panel::Layers | Panel::TextureSetList | Panel::Properties | Panel::Export);
+    let works_empty =
+        matches!(panel, Panel::Assets | Panel::AssetsSecond | Panel::Log | Panel::Layers | Panel::TextureSetList | Panel::Properties | Panel::Export);
     if !app.session.project_open && !works_empty {
         return;
     }
@@ -600,6 +622,7 @@ pub(crate) fn panel_body(app: &mut TextureCraftApp, ui: &mut Ui, panel: Panel) {
     egui::Frame::new().inner_margin(margin).show(ui, |ui| match panel {
         Panel::MeshMapSettings => crate::bake_mode::mesh_map_settings_panel(app, ui),
         Panel::Assets => crate::shelf::body(app, ui),
+        Panel::AssetsSecond => crate::shelf_second::body(app, ui),
         Panel::CommonSettings => crate::bake_mode::common_settings_panel(app, ui),
         Panel::MeshMapBakers => crate::bake_mode::mesh_map_bakers_panel(app, ui),
         Panel::TextureSetList if app.ui.mode == crate::state::Mode::Baking => crate::bake_mode::texture_sets(app, ui),
@@ -613,13 +636,7 @@ pub(crate) fn panel_body(app: &mut TextureCraftApp, ui: &mut Ui, panel: Panel) {
         Panel::Shader => crate::shader_settings::body(app, ui),
         Panel::History => crate::windows::history(app, ui),
         Panel::Log => crate::log_panel::body(app, ui),
-        Panel::BakingLog => {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for entry in app.session.log.entries().iter().filter(|entry| entry.source == "Baker") {
-                    ui.label(entry.line());
-                }
-            });
-        }
+        Panel::BakingLog => crate::baking_log::body(app, ui),
         Panel::Export => crate::export_panel::body(app, ui),
         Panel::Renderer => crate::render_mode::settings_body(app, ui),
         Panel::Viewport => {}
@@ -760,16 +777,17 @@ mod tests {
     }
 
     #[test]
-    fn the_bake_dock_round_trips_with_the_log_under_both_settings_columns() {
+    fn the_bake_dock_round_trips_with_the_baking_log_under_both_settings_columns() {
         let dock = Dock::for_baking();
         assert!(validate(dock.workspace()).is_ok());
         assert_eq!(
             panels_of(dock.workspace()),
-            [Panel::TextureSetList, Panel::MeshMapBakers, Panel::CommonSettings, Panel::MeshMapSettings, Panel::Log, Panel::Viewport]
+            [Panel::TextureSetList, Panel::MeshMapBakers, Panel::CommonSettings, Panel::MeshMapSettings, Panel::BakingLog, Panel::Viewport]
         );
         assert!(dock.is_visible(Panel::CommonSettings) && !dock.is_visible(Panel::MeshMapSettings));
 
         let back: Dock = serde_json::from_str(&serde_json::to_string(&dock).unwrap()).unwrap();
+
         assert_eq!(back, dock);
     }
 

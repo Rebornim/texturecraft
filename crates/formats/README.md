@@ -106,9 +106,13 @@ pub fn preset_to_json(preset: &ExportPreset) -> Result<String>;
   collisions get `_2`, `_3`, … plus a warning.
 - A map is written only when one of its sources has data in the texture set (channel present,
   map baked, …); alpha from a missing channel is dropped.
-- Formats: PNG 8/16, JPEG 8 (q 95), JNG 8 (JPEG colour, deflate alpha), PGM 8/16 (gray; colour
-  becomes luminance), TGA 8, TIFF 8/16/32f, BMP 8, WebP 8 (lossless), PSD 8/16 (merged image, no
-  layers; alpha is an extra alpha channel, not transparency), EXR 16f/32f (`Y`, `YA`, `RGB`, `RGBA`, ZIP), HDR 32f. 8-bit files can be dithered
+- Formats: PNG 8/16, JPEG 8 (q 95), JNG 8 (JPEG colour,
+  deflate alpha), PGM 8/16 (gray; colour becomes luminance), TGA 8, TIFF 8/16/32f, BMP 8,
+  WebP 8 (lossless), PSD 8/16, EXR 16f/32f (`Y`, `YA`, `RGB`, `RGBA`, ZIP), HDR 32f.
+  PSD writes one file per texture set or UV tile, with each output map stored as a layer.
+  For tiled sets, `ExportOptions::atlas` writes one document for the whole set. Smaller maps
+  keep their sizes and align to the top left of the canvas. A `/` in a map
+  name creates a layer group inside the PSD. 8-bit files can be dithered
   (`ExportOptions::dither`, an 8×8 ordered pattern). When `ExportOptions::color_space` is unset,
   color maps default to sRGB in integer files and linear Rec.709 in float files. An explicit
   override can select another supported space. PGM writes sRGB or linear Rec.709 luminance and
@@ -137,8 +141,23 @@ Built-in presets (each one lists the public specification its packing follows in
 | OpenPBR (separate maps) | one map per OpenPBR Surface input the set has: `base_color`, `base_metalness`, `specular_roughness`, `specular_roughness_anisotropy`, `coat_weight`, `coat_roughness`, `fuzz_weight`, `fuzz_color`, `fuzz_roughness`, `transmission_weight`, `subsurface_weight`, `emission_color`, `geometry_opacity`, `geometry_normal` (OpenGL), `height` (16-bit) |
 | Unity URP Lit (Metallic Smoothness) | `BaseMap`, `MetallicMap` (R metal, A smoothness), `NormalMap` (OpenGL), `OcclusionMap`, `EmissionMap` |
 | USD Preview Surface (separate maps) | one map per UsdPreviewSurface input the set has, named like it: `diffuseColor`, `emissiveColor`, `metallic`, `roughness`, `normal` (OpenGL), `occlusion`, `opacity`, `clearcoat`, `clearcoatRoughness` |
+| Unreal Engine Subsurface Profile (Packed) | `BaseColor` (no alpha), `OcclusionRoughnessMetallic`, `Normal` (DirectX), `SubsurfaceMask` (scatter weight, for the Opacity input) |
+| glTF Specular Glossiness (archived extension) | `Diffuse` (A = opacity), `SpecularGlossiness` (RGB specular, A glossiness, from the set's own channels), `Normal` (OpenGL), `Occlusion`, `Emissive` |
+| Redshift Standard Material (separate maps) | separate maps for the listed inputs when the set supplies their sources: `BaseColor`, `Metalness`, `ReflectionRoughness`, `Normal` (OpenGL), `EmissionColor`, `Opacity`, `SubsurfaceWeight`, `CoatWeight`, `CoatRoughness`, `SheenWeight`, `SheenColor`, `SheenRoughness` |
+| Roblox SurfaceAppearance (separate maps) | `Color` (A = opacity), `Normal` (OpenGL), `Metalness`, `Roughness` |
+| Sketchfab Metalness (separate maps) | `BaseColor` (no alpha), `Metalness`, `Roughness`, `Normal` (DirectX), `AmbientOcclusion`, `Emission` |
 | Separate maps | one file per channel, gray where scalar, height 16-bit |
 | Mesh maps | every baked map (`$channel` = map id), 16-bit |
+
+The preset column gives the stable automation and saved-setting names. When a user preset shares
+a table name, that name selects the user preset so saved settings keep working. To select the
+built-in through automation, pass the exact `name` from its `builtin: true` entry in
+`export.presets`.
+
+The export window describes four templates by their output. **Packed maps with a scattering mask**
+targets Unreal Engine's subsurface input. **Separate coat, sheen and scattering maps** targets Redshift.
+**Four maps with opacity in color** targets Roblox, and **Six maps with a negative-Y normal**
+targets Sketchfab.
 
 ### Project file (`project_file`)
 

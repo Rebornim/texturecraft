@@ -729,6 +729,246 @@ fn smart_material_shelf_snapshot() {
     save(&mut harness, &output_dir, "smart-material-hover");
 }
 
+/// Writes `name` and, beside it, where the pointer is (`<name>.pointer.txt`: x y), so a picture can draw the system's pointer
+fn save_with_pointer(harness: &mut Harness<'_, TextureCraftApp>, dir: &Path, name: &str) {
+    save(harness, dir, name);
+    if let Some(pointer) = harness.ctx.input(|input| input.pointer.hover_pos()) {
+        std::fs::write(dir.join(format!("{name}.pointer.txt")), format!("{} {}", pointer.x, pointer.y)).unwrap();
+    }
+}
+
+/// Assets types the pass 2 snapshots show, as indexes into the Assets panel's type row
+const SMART_MATERIALS_TYPE: usize = 1;
+const BRUSHES_TYPE: usize = 4;
+const TEXTURES_TYPE: usize = 6;
+
+/// A move from a pressed tile or row long enough to start a drag
+const DRAG_START: egui::Vec2 = egui::vec2(12.0, 12.0);
+
+/// A point in the window's top bar, so no tile shows its hover outline
+const AWAY_FROM_TILES: egui::Pos2 = egui::pos2(800.0, 40.0);
+
+/// How far down the window a point is inside Properties
+const PROPERTIES_HEIGHT_SHARE: f32 = 0.75;
+
+/// The panes' edge drag: steps and points per step
+const EDGE_DRAG_STEPS: usize = 4;
+const EDGE_DRAG_STEP: f32 = 15.0;
+
+/// Assets pass 2, every screen mid-interaction (menus, submenu, favorites, custom preview, drag ghost, refresh popup, second panel); `TC_UI_THEMES` adds dark and light
+#[test]
+#[ignore]
+fn assets_pass_two_snapshots() {
+    use egui::{Event, Modifiers, PointerButton, Role, vec2};
+    use texturecraft_engine::materials::MATERIALS;
+    use texturecraft_ui_egui::file_dialogs::Answer;
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let files = std::env::temp_dir().join(format!("texturecraft-assets-pass-two-{}", std::process::id()));
+    std::fs::create_dir_all(&files).unwrap();
+    let brushes = files.join("brushes");
+    let plate = files.join("rust_plate.png");
+    image::RgbaImage::from_fn(128, 128, |x, y| {
+        let grain = ((x * 7 + y * 13) % 23) as u8 * 3;
+        image::Rgba([120 + grain, 66 + grain / 2, 38, 255])
+    })
+    .save(&plate)
+    .unwrap();
+    let preview = files.join("brushed_preview.png");
+    image::RgbaImage::from_fn(160, 120, |x, y| {
+        let line = 140 + ((y * 37 + x / 9) % 41) as u8;
+        image::Rgba([line, line, line + 8, 255])
+    })
+    .save(&preview)
+    .unwrap();
+    let show_in = if cfg!(target_os = "windows") {
+        "Show in Explorer..."
+    } else if cfg!(target_os = "macos") {
+        "Show in Finder..."
+    } else {
+        "Show in file manager..."
+    };
+
+    let mut themes = vec![(Brightness::MediumDark, "medium")];
+    if std::env::var_os("TC_UI_THEMES").is_some() {
+        themes.extend([(Brightness::Dark, "dark"), (Brightness::Light, "light")]);
+    }
+    for (brightness, theme) in themes {
+        let session = texturecraft_engine::sample_session(256, 64).unwrap();
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(1600.0, 960.0))
+            .with_pixels_per_point(1.0)
+            // The system draws the pointer, not the app
+            .with_render_cursor(false)
+            .wgpu()
+            .build_eframe(|context| TextureCraftApp::new(context, session));
+        let app = harness.state_mut();
+        app.ui.prefs.brightness = brightness;
+        app.ui.prefs.language = "en".into();
+        let theme_brushes = brushes.join(theme);
+        std::fs::create_dir_all(&theme_brushes).unwrap();
+        app.session.brush_presets.dir = Some(theme_brushes);
+        app.run("brush.preset.store", serde_json::json!({"name": "Ink soft"})).unwrap();
+        let image = app.run("resource.import", serde_json::json!({"path": plate.to_str().unwrap()})).unwrap()["name"].as_str().unwrap().to_string();
+        let answer = preview.clone();
+        app.file_dialogs.set_override(Some(Box::new(move |_| Answer::Paths(vec![answer.clone()]))));
+        app.ui.shelf_tab = SMART_MATERIALS_TYPE;
+        let context = harness.ctx.clone();
+        let started = std::time::Instant::now();
+        loop {
+            harness.run_steps(1);
+            let thumbnails = &mut harness.state_mut().thumbs;
+            if MATERIALS.iter().filter(|material| material.smart).all(|material| thumbnails.material(&context, material.id).is_some()) {
+                break;
+            }
+
+            assert!(started.elapsed() < std::time::Duration::from_secs(120), "smart material thumbnails did not arrive");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let shot = |harness: &mut Harness<'_, TextureCraftApp>, name: &str| save_with_pointer(harness, &output_dir, &format!("assets-{name}-{theme}"));
+        let right_click = |harness: &mut Harness<'_, TextureCraftApp>, tile: &str| {
+            harness.get_all_by_label(tile).next().unwrap_or_else(|| panic!("no tile {tile}")).click_secondary();
+            harness.run_steps(3);
+        };
+        let close_menu = |harness: &mut Harness<'_, TextureCraftApp>| {
+            harness.key_press(egui::Key::Escape);
+            harness.run_steps(3);
+        };
+
+        // 01: a built-in smart material, a row hovered; 03: its greyed Show in
+        right_click(&mut harness, "Brass Tarnished");
+        harness.get_by_label("Export resource...").hover();
+        shot(&mut harness, "01-menu-built-in");
+        harness.get_by_label("Show in").hover();
+        harness.run_steps(30);
+        shot(&mut harness, "03-show-in-built-in");
+        close_menu(&mut harness);
+
+        // 04: two favorites, the newest first, then a favorite's menu; 08: a custom preview on a third tile
+        for tile in ["Gold Dirty", "Bronze Statue"] {
+            right_click(&mut harness, tile);
+            harness.get_by_label("Add to favorites").click();
+            harness.run_steps(3);
+        }
+        right_click(&mut harness, "Brass Tarnished");
+        harness.get_by_label("Set custom preview...").click();
+        harness.run_steps(3);
+        settle_thumbnails(&mut harness);
+        harness.hover_at(AWAY_FROM_TILES);
+        shot(&mut harness, "04-favorites-and-custom-preview");
+        right_click(&mut harness, "Bronze Statue");
+        harness.get_by_label("Remove from favorites").hover();
+        shot(&mut harness, "04-menu-favorite");
+        close_menu(&mut harness);
+
+        // 05: the drag ghost over the layer stack (takes a material) and over Properties (doesn't)
+        let viewport_right = harness.state().viewport_rect.max.x;
+        let layer = harness.get_all_by_role(Role::ListItem).find(|row| row.rect().min.x > viewport_right).expect("a layer row").rect().center();
+
+        // Properties fills the right column under the layer stack, in the window's lower part
+        let properties = egui::pos2(layer.x, harness.ctx.content_rect().height() * PROPERTIES_HEIGHT_SHARE);
+        let tile = harness.get_all_by_label("Gold Dirty").next().unwrap().rect().center();
+        harness.event(Event::PointerButton { pos: tile, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        harness.run_steps(2);
+        harness.hover_at(tile + DRAG_START);
+        harness.run_steps(2);
+        for (target, name) in [(layer, "05-drag-valid-layer-stack"), (properties, "05-drag-not-valid-properties")] {
+            harness.hover_at(target);
+            harness.run_steps(2);
+            shot(&mut harness, name);
+        }
+        harness.event(Event::PointerButton { pos: properties, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        harness.run_steps(3);
+
+        // 09: a layer dragged in the layer stack over another row (takes it) and over Properties (doesn't)
+        harness.state_mut().run("layer.add.paint", serde_json::json!({"name": "Dragged layer"})).unwrap();
+        harness.run_steps(3);
+        let dragged = harness.get_by_role_and_label(Role::ListItem, "Dragged layer").rect().center();
+        let rows: Vec<_> = harness.get_all_by_role(Role::ListItem).filter(|row| row.rect().min.x > viewport_right).map(|row| row.rect().center()).collect();
+        let other = *rows.iter().find(|at| at.y > dragged.y).expect("a row below it");
+        harness.event(Event::PointerButton { pos: dragged, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        harness.run_steps(2);
+        harness.hover_at(dragged + DRAG_START);
+        harness.run_steps(2);
+        for (target, name) in [(other, "09-layer-drag-valid-row"), (properties, "09-layer-drag-not-valid-properties")] {
+            harness.hover_at(target);
+            harness.run_steps(2);
+            shot(&mut harness, name);
+        }
+        harness.event(Event::PointerButton { pos: properties, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        harness.run_steps(3);
+
+        // 02: a project image and a saved brush; 03: Show in open on the image
+        harness.state_mut().ui.shelf_tab = TEXTURES_TYPE;
+        settle_thumbnails(&mut harness);
+        right_click(&mut harness, &image);
+        harness.get_by_label("Reload").hover();
+        shot(&mut harness, "02-menu-project-image");
+        harness.get_by_label("Show in").click();
+        harness.run_steps(3);
+        harness.get_by_label(show_in).hover();
+        shot(&mut harness, "03-show-in-image");
+        close_menu(&mut harness);
+        harness.state_mut().ui.shelf_tab = BRUSHES_TYPE;
+        settle_thumbnails(&mut harness);
+        right_click(&mut harness, "Ink soft");
+        harness.get_by_label("Replace with the current brush").hover();
+        shot(&mut harness, "02-menu-saved-brush");
+        close_menu(&mut harness);
+
+        // 06: the refresh popup, then with an i hovered
+        harness.state_mut().ui.shelf_tab = SMART_MATERIALS_TYPE;
+        harness.run_steps(3);
+        harness.get_all_by_label("Refresh").next().unwrap().click();
+        harness.run_steps(3);
+        harness.get_by_label("Update Assets panel").hover();
+        shot(&mut harness, "06-refresh-popup");
+        harness.get_by_label("Reads your saved assets from disk again every few minutes, so new and changed ones show here.").hover();
+        harness.run_steps(30);
+        shot(&mut harness, "06-refresh-info");
+        close_menu(&mut harness);
+
+        // 10: both filter panes open, their edge with the grid dragged wider
+        harness.state_mut().ui.shelf_panes.saved_searches = true;
+        harness.state_mut().ui.shelf_panes.filter_by_path = true;
+        harness.run_steps(3);
+        let edge = harness.get_by_label("Resize Assets filter panes and grid").rect().center();
+        harness.hover_at(edge);
+        harness.run_steps(1);
+        harness.event(Event::PointerButton { pos: edge, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        harness.run_steps(1);
+        for step in 1..=EDGE_DRAG_STEPS {
+            harness.hover_at(edge + vec2(EDGE_DRAG_STEP * step as f32, 0.0));
+            harness.run_steps(1);
+        }
+        shot(&mut harness, "10-panes-edge-drag");
+        harness.event(Event::PointerButton {
+            pos: edge + vec2(EDGE_DRAG_STEP * EDGE_DRAG_STEPS as f32, 0.0),
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        });
+        harness.state_mut().ui.shelf_panes.saved_searches = false;
+        harness.state_mut().ui.shelf_panes.filter_by_path = false;
+        harness.run_steps(3);
+
+        // 07: the folder button hovered, then the second panel searching "brick"
+        harness.get_by_label("New Assets panel").hover();
+        harness.run_steps(30);
+        shot(&mut harness, "07-folder-button");
+        harness.get_all_by_label("New Assets panel").next().unwrap().click();
+        harness.run_steps(3);
+        let left_of_view = harness.state().viewport_rect.min.x;
+        harness.get_all_by_role(Role::TextInput).find(|field| field.rect().max.x < left_of_view).expect("the second panel's search").click();
+        harness.run_steps(2);
+        harness.event(Event::Text("brick".into()));
+        settle_thumbnails(&mut harness);
+        shot(&mut harness, "07-second-panel");
+    }
+    std::fs::remove_dir_all(files).unwrap();
+}
+
 /// Compact nested rows must keep their content, mask and effect controls in the panel.
 #[test]
 #[ignore]
@@ -981,12 +1221,7 @@ fn panel_header_snapshots() {
         save(&mut harness, &output_dir, &format!("panel-header-{name}"));
     }
     harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
-    let close = harness
-        .get_all_by_label("Close Panel")
-        .map(|node| node.rect())
-        .filter(|rect| rect.min.x > 1200.0)
-        .max_by(|a, b| a.min.y.total_cmp(&b.min.y))
-        .expect("the Properties header's close button");
+    let close = harness.get_by_role_and_label(egui::Role::Button, "Close Properties - Fill").rect();
     harness.hover_at(close.center());
     save(&mut harness, &output_dir, "panel-header-close-hovered");
 }
@@ -1060,12 +1295,7 @@ fn default_layout_snapshots() {
         save(&mut harness, &output_dir, &format!("default-layout-{name}"));
     }
     harness.state_mut().ui.prefs.brightness = Brightness::MediumDark;
-    let properties_close = harness
-        .get_all_by_label("Close Panel")
-        .map(|node| node.rect())
-        .filter(|rect| rect.min.x > 1200.0)
-        .max_by(|a, b| a.min.y.total_cmp(&b.min.y))
-        .expect("the Properties header's close button");
+    let properties_close = harness.get_by_role_and_label(egui::Role::Button, "Close Properties - Fill").rect();
     harness.hover_at(egui::pos2(properties_close.center().x - 120.0, properties_close.min.y - 6.0));
     save(&mut harness, &output_dir, "default-layout-split-hovered");
 }
@@ -3206,4 +3436,94 @@ fn sheet_scroll_end_snapshots() {
     }
     harness.run_steps(30);
     save(&mut harness, &output_dir, "sheet-end-scrolled-medium");
+}
+
+/// The Export textures window on each tab at its mocks' size; TC_SNAPSHOT_THEME=medium (default), dark or light
+#[test]
+#[ignore]
+fn export_window_snapshots() {
+    use texturecraft_ui_egui::state::{FileType, MapExport, SetExport};
+
+    // Below General Export Parameters, where the 1112x662 window draws nothing
+    const EMPTY_SPOT: egui::Pos2 = egui::pos2(736.0, 530.0);
+
+    let Some(output_dir) = std::env::var_os("TC_UI_SNAPSHOTS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let (brightness, theme) = match std::env::var("TC_SNAPSHOT_THEME").as_deref() {
+        Ok("dark") => (Brightness::Dark, "dark"),
+        Ok("light") => (Brightness::Light, "light"),
+        _ => (Brightness::MediumDark, "medium"),
+    };
+
+    // Ball and Base, then enough texture sets that the set list scrolls
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    let template = session.doc.project.texture_sets[0].clone();
+    while session.doc.project.texture_sets.len() < 60 {
+        let mut set = template.clone();
+        set.name = format!("Set {}", session.doc.project.texture_sets.len() + 1);
+        session.doc.project.texture_sets.push(set);
+    }
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1112.0, 662.0))
+        .with_pixels_per_point(2.0)
+        .with_context_setup(texturecraft_ui_egui::framework::install_headless)
+        .wgpu()
+        .build_eframe(|cc| TextureCraftApp::new(cc, session));
+    harness.state_mut().ui.prefs.language = "en".into();
+    harness.state_mut().ui.prefs.brightness = brightness;
+    harness.set_render_cursor(false);
+    {
+        let e = &mut harness.state_mut().ui.export;
+        e.dir = "/home/user/Documents/TextureCraft/export".into();
+        e.preset = "Document channels + Normal + AO (No Alpha)".into();
+        e.padding = "infinite".into();
+        e.skip = vec![4];
+    }
+    harness.state_mut().ui.windows.export = true;
+    harness.run_steps(4);
+    let color_space = harness.get_all_by_role(egui::Role::ComboBox).find(|combo| combo.value().as_deref() == Some("Default")).unwrap().rect();
+    harness.hover_at(color_space.center());
+    harness.run_steps(30);
+    save(&mut harness, &output_dir, &format!("ep-settings-global-{theme}"));
+    harness.hover_at(egui::pos2(1.0, 1.0));
+
+    harness.get_all_by_role(egui::Role::ComboBox).find(|combo| combo.value().as_deref() == Some("Based on output template")).unwrap().click();
+    harness.run_steps(3);
+    save(&mut harness, &output_dir, &format!("ep-settings-file-type-open-{theme}"));
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+
+    // The closed list keeps the keyboard focus (and its ring) until a click lands on the page's empty column
+    harness.hover_at(EMPTY_SPOT);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: EMPTY_SPOT, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        harness.step();
+    }
+    harness.hover_at(egui::pos2(1.0, 1.0));
+    harness.run_steps(3);
+
+    // Base with its own size and its height map as 32-bit exr
+    {
+        let e = &mut harness.state_mut().ui.export;
+        e.page = Some(1);
+        let mut set = SetExport { size: Some(1024), ..SetExport::default() };
+        set.maps_template = e.preset.clone();
+        let template = texturecraft_engine::formats::builtin_preset(&e.preset).unwrap();
+        let height = template.maps.iter().position(|map| texturecraft_engine::formats::export::channel_label(map) == "height").unwrap();
+        set.maps.insert(height, MapExport { file_type: Some(FileType { format: "exr".into(), bit_depth: 32, dithering: false }), ..MapExport::default() });
+        set.maps.insert(2, MapExport { enabled: false, ..MapExport::default() });
+        e.sets.insert(1, set);
+    }
+    save(&mut harness, &output_dir, &format!("ep-settings-set-{theme}"));
+
+    harness.state_mut().ui.export.page = None;
+    harness.state_mut().ui.export.tab = 1;
+    harness.state_mut().ui.export.preset = "Unreal Engine (Packed)".into();
+    harness.run_steps(3);
+    harness.get_by_role_and_label(egui::Role::Button, "Unreal Engine (Packed)").scroll_to_me();
+    save(&mut harness, &output_dir, &format!("ep-templates-unreal-{theme}"));
+
+    harness.state_mut().ui.export.preset = "Document channels + Normal + AO (No Alpha)".into();
+    harness.state_mut().ui.export.tab = 2;
+    save(&mut harness, &output_dir, &format!("ep-list-{theme}"));
 }

@@ -6,6 +6,8 @@ use texturecraft_engine::core::{BakedMap, Channel, ChannelBlend, NormalFormat};
 use crate::docking::Dock;
 use crate::keymap::Keymap;
 use crate::saved_search::SavedSearch;
+use crate::shelf_custom_preview::ShelfCustomPreview;
+use crate::shelf_favorite::ShelfFavorite;
 use crate::shelf_panes::ShelfPanes;
 use crate::shelf_view::ShelfView;
 
@@ -14,11 +16,13 @@ mod import_row;
 mod library_location;
 mod project_config;
 mod resource_usage;
+mod resources_updater;
 pub use import_resources::ImportResources;
 pub use import_row::ImportRow;
 pub use library_location::LibraryLocation;
 pub use project_config::ProjectConfig;
 pub use resource_usage::ResourceUsage;
+pub use resources_updater::ResourcesUpdater;
 
 mod console_line;
 mod export_job;
@@ -115,6 +119,9 @@ pub struct Windows {
     /// File > Import resources: the files added so far, imported by Import.
     #[serde(skip)]
     pub import_resources: Option<ImportResources>,
+    /// The Resources Updater: the project's image resources and whether their files changed on disk.
+    #[serde(skip)]
+    pub resources_updater: Option<ResourcesUpdater>,
     /// What waits on the unsaved-changes dialog: save, don't save or cancel.
     #[serde(skip)]
     pub unsaved: Option<Unsaved>,
@@ -397,6 +404,9 @@ pub struct ExportUi {
     /// `file.exportTextures`).
     #[serde(default)]
     pub materialx: bool,
+    /// Also write `<project>_shaders.json`: the shader's settings and the texture sets using it (`shaderParameters` of `file.exportTextures`)
+    #[serde(default)]
+    pub shader_parameters: bool,
     /// Texture sets excluded from export.
     pub skip: Vec<usize>,
     /// Per texture set (by index) overrides of the settings above.
@@ -440,6 +450,9 @@ pub struct ExportUi {
     /// Output templates tab: F2 asked to rename the selected preset.
     #[serde(skip)]
     pub rename_key: bool,
+    /// A text field of the window had the keyboard when the last frame ended
+    #[serde(skip)]
+    pub field_had_keyboard: bool,
     /// Output templates tab: the question waiting for an answer (delete, or drop an unsaved edit).
     #[serde(skip)]
     pub ask: Option<crate::export_templates::Ask>,
@@ -471,6 +484,7 @@ impl Default for ExportUi {
             color_space: String::new(),
             usd_asset: false,
             materialx: false,
+            shader_parameters: false,
             skip: Vec::new(),
             sets: Default::default(),
             owner: Vec::new(),
@@ -485,6 +499,7 @@ impl Default for ExportUi {
             pending_drop: None,
             renaming: None,
             rename_key: false,
+            field_had_keyboard: false,
             ask: None,
             opened_with: None,
             job: None,
@@ -496,7 +511,7 @@ impl Default for ExportUi {
 
 /// The LIST OF EXPORTS console's width when the window opens, as in the reference
 fn default_console_width() -> f32 {
-    300.0
+    crate::export_window::CONSOLE_WIDTH
 }
 
 fn default_export_dir() -> String {
@@ -518,6 +533,18 @@ fn default_split_ratio() -> f32 {
 /// Saved searches start with this share of the Assets panel's pane column while Filter by path is open too
 pub(crate) fn default_shelf_panes_split() -> f32 {
     0.45
+}
+
+/// The share of the Assets panel's width the filter panes take until their edge is dragged
+fn default_shelf_panes_share() -> f32 {
+    0.45
+}
+
+fn deserialize_shelf_panes_share<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
+    let share = f32::deserialize(deserializer)?;
+
+    // A finite JSON number can overflow f32 and prevent the next settings save
+    Ok(if share.is_finite() { share } else { default_shelf_panes_share() })
 }
 
 fn deserialize_shelf_panes_split<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
@@ -543,7 +570,7 @@ fn default_true() -> bool {
 }
 
 /// The bake layout's version: saved bake docks from an older one load as `Dock::for_baking`
-const BAKE_LAYOUT_VERSION: u32 = 2;
+const BAKE_LAYOUT_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UiState {
@@ -588,6 +615,10 @@ pub struct UiState {
     /// Window ▸ Hide UI (Tab): only the viewport.
     pub hide_ui: bool,
     pub windows: Windows,
+    /// Mesh Export Options: compute smooth normals on the exported copy, not the project.
+    /// Off by default so an export keeps the project's authored normals unless the user opts in.
+    #[serde(default)]
+    pub mesh_recompute_normals: bool,
     pub uv_zoom: f32,
     pub uv_pan: [f32; 2],
     /// The 2D view's turn, counter-clockwise on screen in radians (Alt+left drag)
@@ -614,9 +645,27 @@ pub struct UiState {
     /// The asset shelf's saved queries, in the order they were saved
     #[serde(default)]
     pub shelf_saved_searches: Vec<SavedSearch>,
+    /// The asset shelf's favorite assets, most recently added first
+    #[serde(default)]
+    pub shelf_favorites: Vec<ShelfFavorite>,
+    /// The asset shelf shows only favorites (the Favorites saved search)
+    #[serde(default)]
+    pub shelf_favorites_only: bool,
+    /// The second Assets panel's search, type and folder, swapped in while it draws
+    #[serde(default)]
+    pub shelf_second: crate::shelf_query::ShelfQuery,
+    /// The asset shelf's automatic updates (its refresh popup)
+    #[serde(default)]
+    pub shelf_updates: crate::shelf_updates::ShelfUpdates,
+    /// Pictures the user picked to show on asset tiles instead of their thumbnails
+    #[serde(default)]
+    pub shelf_custom_previews: Vec<ShelfCustomPreview>,
     /// Saved searches' share of the pane column above Filter by path, set by the splitter between them
     #[serde(default = "default_shelf_panes_split", deserialize_with = "deserialize_shelf_panes_split")]
     pub shelf_panes_split: f32,
+    /// The share of the Assets panel's width the filter panes take
+    #[serde(default = "default_shelf_panes_share", deserialize_with = "deserialize_shelf_panes_share")]
+    pub shelf_panes_share: f32,
     pub props_tab: PropsTab,
     #[serde(default)]
     pub text: TextUi,
@@ -677,6 +726,12 @@ pub struct UiState {
     /// The Log panel's shown channel tab
     #[serde(default)]
     pub log_channel: crate::log_panel::LogChannel,
+    /// The Baking Log panel's shown tab
+    #[serde(default)]
+    pub baking_log_tab: crate::baking_log::BakingLogTab,
+    /// Whether the Baking Log keeps only the rows with an issue
+    #[serde(default)]
+    pub baking_log_issues_only: bool,
     /// The project template the last New project was created from (name or label)
     #[serde(default)]
     pub last_template: String,
@@ -763,6 +818,7 @@ impl UiState {
         }
 
         self.export = keep.export;
+        self.mesh_recompute_normals = keep.mesh_recompute_normals;
         self.recent = keep.recent;
         self.last_template = keep.last_template;
         self.prefs = keep.prefs;
@@ -780,6 +836,11 @@ impl UiState {
         self.shelf_tab = keep.shelf_tab;
         self.shelf_path = keep.shelf_path;
         self.shelf_saved_searches = keep.shelf_saved_searches;
+        self.shelf_favorites = keep.shelf_favorites;
+        self.shelf_favorites_only = keep.shelf_favorites_only;
+        self.shelf_second = keep.shelf_second;
+        self.shelf_custom_previews = keep.shelf_custom_previews;
+        self.shelf_updates = keep.shelf_updates;
     }
 }
 
@@ -802,6 +863,7 @@ impl Default for UiState {
             selected_baked_map: None,
             hide_ui: false,
             windows: Windows::default(),
+            mesh_recompute_normals: false,
             uv_zoom: 1.0,
             uv_pan: [0.0, 0.0],
             uv_rotation: 0.0,
@@ -814,7 +876,13 @@ impl Default for UiState {
             shelf_view: ShelfView::default(),
             shelf_panes: ShelfPanes::default(),
             shelf_saved_searches: Vec::new(),
+            shelf_favorites: Vec::new(),
+            shelf_favorites_only: false,
+            shelf_second: crate::shelf_query::ShelfQuery::default(),
+            shelf_custom_previews: Vec::new(),
+            shelf_updates: crate::shelf_updates::ShelfUpdates::default(),
             shelf_panes_split: default_shelf_panes_split(),
+            shelf_panes_share: default_shelf_panes_share(),
             props_tab: PropsTab::Brush,
             text: TextUi::default(),
             rename: None,
@@ -838,6 +906,8 @@ impl Default for UiState {
             bake_preset_name: String::new(),
             layout_dialog: None,
             log_channel: crate::log_panel::LogChannel::default(),
+            baking_log_tab: crate::baking_log::BakingLogTab::default(),
+            baking_log_issues_only: false,
             last_template: String::new(),
             log_selection: Default::default(),
             log_anchor: None,
@@ -885,6 +955,15 @@ mod tests {
     }
 
     #[test]
+    fn mesh_export_normal_choice_defaults_off_for_older_saved_states() {
+        assert!(!UiState::default().mesh_recompute_normals);
+        let mut saved = serde_json::to_value(UiState::default()).unwrap();
+        saved.as_object_mut().unwrap().remove("mesh_recompute_normals");
+        let loaded: UiState = serde_json::from_value(saved).unwrap();
+        assert!(!loaded.mesh_recompute_normals, "older states keep the project's stored normals unless the user opts in");
+    }
+
+    #[test]
     fn adopting_a_layout_keeps_recent_files_and_user_settings() {
         use crate::frame_gizmo::warp_toolbar::{GizmoMode, GizmoSpace, WarpToolbarSettings};
 
@@ -893,7 +972,9 @@ mod tests {
         ui.warp_toolbar = warp_toolbar;
         ui.export.preset = "Mine".into();
         ui.keymap.insert("file.save".into(), "F5".into());
+        ui.mesh_recompute_normals = false;
         let mut layout = UiState::default();
+        layout.mesh_recompute_normals = true;
         layout.dock.close(crate::docking::Panel::Assets);
 
         ui.adopt_layout(layout);
@@ -902,6 +983,7 @@ mod tests {
         assert_eq!(ui.recent, vec!["a.tcraft".to_string()]);
         assert_eq!(ui.export.preset, "Mine");
         assert_eq!(ui.keymap.get("file.save").map(String::as_str), Some("F5"));
+        assert!(!ui.mesh_recompute_normals, "a layout does not change the user's export setting");
         assert_eq!(ui.warp_toolbar, warp_toolbar, "loading a layout keeps the user's warp settings");
     }
 
@@ -947,15 +1029,26 @@ mod tests {
     }
 
     #[test]
-    fn adopting_a_layout_keeps_the_shelf_query_and_saved_searches() {
-        let saved = crate::saved_search::SavedSearch { name: "rust".into(), filter: "rust".into(), tab: 2, path: vec!["starter".into()] };
-        let mut ui = UiState { shelf_filter: "rust".into(), shelf_tab: 2, shelf_path: vec!["starter".into()], ..UiState::default() };
+    fn adopting_a_layout_keeps_the_shelf_query_saved_searches_favorites_and_custom_previews() {
+        let saved =
+            crate::saved_search::SavedSearch { name: "rust".into(), filter: "rust".into(), tab: 2, path: vec!["starter".into()], favorites_only: false };
+        let favorite = crate::shelf_favorite::ShelfFavorite { kind: "material".into(), id: "gold".into() };
+        let mut ui =
+            UiState { shelf_filter: "rust".into(), shelf_tab: 2, shelf_path: vec!["starter".into()], shelf_favorites_only: true, ..UiState::default() };
         ui.shelf_saved_searches.push(saved.clone());
+        ui.shelf_favorites.push(favorite.clone());
+        let preview = crate::shelf_custom_preview::ShelfCustomPreview { kind: "material".into(), id: "gold".into(), file: "gold.png".into() };
+        ui.shelf_custom_previews.push(preview.clone());
+        ui.shelf_updates.resources = true;
 
         ui.adopt_layout(UiState::default());
 
         assert_eq!((ui.shelf_filter.as_str(), ui.shelf_tab, ui.shelf_path.as_slice()), ("rust", 2, ["starter".to_string()].as_slice()));
         assert_eq!(ui.shelf_saved_searches, [saved]);
+        assert_eq!(ui.shelf_favorites, [favorite], "favorites are the user's own too");
+        assert!(ui.shelf_favorites_only, "the Favorites search is part of the query");
+        assert_eq!(ui.shelf_custom_previews, [preview], "custom previews are the user's own");
+        assert!(ui.shelf_updates.resources, "automatic updates are a setting, not part of a layout");
     }
 
     #[test]
@@ -998,6 +1091,24 @@ mod tests {
             reloaded.sync_mode_dock();
             assert_eq!(reloaded, ui, "a current layout is not reset again");
         }
+    }
+
+    #[test]
+    fn a_saved_bake_dock_with_the_log_at_the_bottom_gets_the_baking_log_there() {
+        use crate::docking::Panel;
+
+        let mut ui = UiState { mode: Mode::Baking, ..UiState::default() };
+        ui.sync_mode_dock();
+        ui.dock.close(Panel::BakingLog);
+        ui.dock.focus(Panel::Log);
+        let mut saved = serde_json::to_value(&ui).unwrap();
+        saved["bake_layout_version"] = serde_json::json!(2);
+
+        let mut loaded: UiState = serde_json::from_value(saved).unwrap();
+        loaded.sync_mode_dock();
+
+        assert!(loaded.dock.is_visible(Panel::BakingLog), "the Baking Log takes the bottom of the bake layout");
+        assert!(!loaded.dock.is_open(Panel::Log), "the general Log stays in Window > Views");
     }
 
     #[test]

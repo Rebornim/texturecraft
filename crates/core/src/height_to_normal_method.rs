@@ -31,10 +31,18 @@ impl HeightToNormalMethod {
     pub fn slope(self, h: impl Fn(i32, i32) -> f32) -> [f32; 2] {
         match self {
             HeightToNormalMethod::Sharp => [(h(1, 0) - h(-1, 0)) * 0.5, (h(0, 1) - h(0, -1)) * 0.5],
-            HeightToNormalMethod::Smooth => [
-                (h(1, -1) + 2.0 * h(1, 0) + h(1, 1) - h(-1, -1) - 2.0 * h(-1, 0) - h(-1, 1)) / 8.0,
-                (h(-1, 1) + 2.0 * h(0, 1) + h(1, 1) - h(-1, -1) - 2.0 * h(0, -1) - h(1, -1)) / 8.0,
-            ],
+            HeightToNormalMethod::Smooth => {
+                // Both axes read the same four corner heights
+                let upper_left = h(-1, -1);
+                let upper_right = h(1, -1);
+                let lower_left = h(-1, 1);
+                let lower_right = h(1, 1);
+
+                [
+                    (upper_right + 2.0 * h(1, 0) + lower_right - upper_left - 2.0 * h(-1, 0) - lower_left) / 8.0,
+                    (lower_left + 2.0 * h(0, 1) + lower_right - upper_left - 2.0 * h(0, -1) - upper_right) / 8.0,
+                ]
+            }
         }
     }
 }

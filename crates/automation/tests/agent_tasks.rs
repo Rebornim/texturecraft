@@ -88,14 +88,15 @@ async fn inspect(c: &Conn) -> Value {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn textures_export_accepts_per_map_settings() {
-    let dir = tmp("map-options");
-    let (client, server) = connect(workspace(&dir)).await;
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+    let (client, server) = connect(workspace(dir)).await;
 
     let result = tool(
         &client,
         "textures_export",
         json!({"dir": "textures", "preset": "glTF PBR Metal Roughness", "maps": [
-            {"map": 0, "format": "pgm", "bitDepth": 16},
+            {"map": 0, "format": "pgm", "bitDepth": 16, "size": 256},
             {"map": 1, "enabled": false}
         ]}),
     )
@@ -104,9 +105,42 @@ async fn textures_export_accepts_per_map_settings() {
     let files = result["files"].as_array().unwrap();
     assert_eq!(files.len(), 2, "{result}");
     let graymap = files.iter().filter_map(Value::as_str).find(|path| path.ends_with(".pgm")).unwrap();
-    assert!(std::fs::read(dir.join(graymap)).unwrap().starts_with(b"P5\n128 128\n65535\n"));
+    assert!(std::fs::read(dir.join(graymap)).unwrap().starts_with(b"P5\n256 256\n65535\n"));
+    let inherited = files.iter().filter_map(Value::as_str).find(|path| path.ends_with(".png")).unwrap();
+    assert_eq!(image::image_dimensions(dir.join(inherited)).unwrap(), (128, 128));
+
     shutdown(client, server).await;
-    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn textures_export_reports_the_shader_sidecar_and_write_failures() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+    let (client, server) = connect(workspace(dir)).await;
+    let params = json!({"dir": "textures", "shaderParameters": [0]});
+
+    let result = tool(&client, "textures_export", params.clone()).await;
+
+    let files = result["files"].as_array().unwrap();
+    let sidecar = files.iter().filter_map(Value::as_str).find(|name| name.ends_with("_shaders.json")).expect("shader settings file");
+    let path = dir.join(sidecar);
+    let settings: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(settings["shaders"][0]["textureSets"].as_array().unwrap().len(), 1);
+    assert!(settings["shaders"][0]["model"].is_string());
+
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    let result = tool(&client, "textures_export", params).await;
+
+    assert!(result["warnings"].as_array().unwrap().iter().any(|warning| warning.as_str().is_some_and(|text| text.contains("shader settings file"))));
+    assert!(result["files"].as_array().unwrap().iter().any(|file| file.as_str().is_some_and(|name| name.ends_with(".png"))));
+
+    let error = tool_err(&client, "textures_export", json!({"dir": "invalid", "shaderParameters": [99]})).await;
+
+    assert!(error.contains("shaderParameters"));
+    assert!(!dir.join("invalid").exists());
+
+    shutdown(client, server).await;
 }
 
 fn top(s: &Value) -> &Value {

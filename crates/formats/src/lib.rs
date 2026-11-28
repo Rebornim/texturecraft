@@ -42,8 +42,8 @@ pub mod project_file;
 pub mod zip_read;
 
 pub use export::{
-    Dest, ExportInput, ExportOptions, ExportPreset, ExportedFile, FileFormat, MapOverride, MapSpec, Padding, PlannedFile, SourceRef, VirtualMap, list_outputs,
-    render_maps, skip_repeated_names,
+    Dest, ExportInput, ExportOptions, ExportPreset, ExportedFile, FileFormat, MAX_PREVIEW_SIDE, MapOverride, MapPreview, MapSpec, Padding, PlannedFile,
+    SourceRef, VirtualMap, list_outputs, render_maps, skip_repeated_names,
 };
 pub use image_res::{DecodedImage, coverage_png, decode_cooked_image, decode_image, decode_image_within, gray16_png, gray16_resource};
 pub use mesh_export::{
@@ -53,7 +53,7 @@ pub use mesh_export::{
 pub use mesh_import::{HighPolyMesh, ImportedMesh, MeshFile, MeshReport, import_high_poly_bytes, import_mesh_bytes, mesh_report, self_contained_mesh};
 #[cfg(not(target_arch = "wasm32"))]
 pub use presets::load_preset;
-pub use presets::{DEFAULT_PRESET, builtin_preset, builtin_presets, preset_from_json, preset_to_json};
+pub use presets::{DEFAULT_PRESET, NEW_BUILTIN_PRESET_NAMES, builtin_preset, builtin_preset_catalog, builtin_presets, preset_from_json, preset_to_json};
 pub use project_file::{
     BakePaintData, DEFAULT_PROJECT_OPEN_LIMIT_GIB, MAX_RESOURCE_NAME_LEN, ProjectFile, RamReservation, load_project_bytes, project_open_limit_gib,
     sanitize_resource_name, save_project_bytes, set_project_open_limit_gib,

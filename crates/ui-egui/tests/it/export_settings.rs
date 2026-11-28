@@ -76,6 +76,47 @@ fn closing_the_window_is_cancel() {
 }
 
 #[test]
+fn escape_is_cancel() {
+    let mut h = harness();
+    h.state_mut().ui.export.size = 2048;
+    h.run_steps(3);
+
+    h.key_press(egui::Key::Escape);
+    h.run_steps(4);
+
+    assert!(!h.state().ui.windows.export);
+    assert_eq!(h.state().ui.export.size, 0, "the opening settings are back");
+}
+
+#[test]
+fn escape_cancels_when_a_button_has_keyboard_focus() {
+    let mut h = harness();
+    h.get_by_role_and_label(egui::Role::Button, "Save settings").focus();
+    h.run_steps(4);
+
+    assert!(h.get_by_role_and_label(egui::Role::Button, "Save settings").is_focused());
+
+    h.key_press(egui::Key::Escape);
+    h.run_steps(4);
+
+    assert!(!h.state().ui.windows.export);
+}
+
+#[test]
+fn escape_in_an_open_dropdown_closes_only_the_dropdown() {
+    let mut h = harness();
+    open_combo(&mut h, "Based on output template");
+
+    assert!(h.query_by_label("png").is_some());
+
+    h.key_press(egui::Key::Escape);
+    h.run_steps(4);
+
+    assert!(h.query_by_label("png").is_none(), "the dropdown closed");
+    assert!(h.state().ui.windows.export, "the window stays open");
+}
+
+#[test]
 fn the_lists_hold_the_reference_entries() {
     let mut h = harness();
     open_combo(&mut h, "Based on output template");
@@ -122,15 +163,18 @@ fn a_saved_legacy_preset_name_resolves_to_its_current_name() {
 fn the_set_list_menu_checks_unchecks_and_inverts() {
     let mut h = harness();
     let sets = h.state().session.set_count();
-    click(&mut h, egui_phosphor::regular::LIST_CHECKS);
+    click(&mut h, "Texture set list menu");
     click(&mut h, "Uncheck all");
+
     assert_eq!(h.state().ui.export.skip.len(), sets);
-    click(&mut h, egui_phosphor::regular::LIST_CHECKS);
+    click(&mut h, "Texture set list menu");
     click(&mut h, "Invert all");
+
     assert!(h.state().ui.export.skip.is_empty());
     h.state_mut().ui.export.skip = vec![0];
-    click(&mut h, egui_phosphor::regular::LIST_CHECKS);
+    click(&mut h, "Texture set list menu");
     click(&mut h, "Check all");
+
     assert!(h.state().ui.export.skip.is_empty());
 }
 
@@ -140,9 +184,8 @@ fn the_output_directory_resets_and_the_dilation_follows_the_padding() {
     let default = h.state().ui.export.dir.clone();
     h.state_mut().ui.export.dir = "/somewhere/else".into();
     h.run_steps(3);
-    hover(&mut h, "R");
-    assert!(h.query_by_label("Reset to default").is_some());
-    click(&mut h, "R");
+    click(&mut h, "Reset to default");
+
     assert_eq!(h.state().ui.export.dir, default);
 
     hover(&mut h, "16");
@@ -152,11 +195,13 @@ fn the_output_directory_resets_and_the_dilation_follows_the_padding() {
     hover(&mut h, "16");
     assert!(h.query_all_by_label("Dilation in pixels").next().is_some());
     click(&mut h, "16");
+
     assert!(h.query_by_label("Dilation (pixels)").is_some());
 
     // A click on the slider sets the width and leaves the menu open
     h.get_by_role(egui::Role::Slider).click();
     h.run_steps(4);
+
     assert_ne!(h.state().ui.export.dilation, 16);
     assert!(h.query_by_label("Dilation (pixels)").is_some(), "the menu stays open");
 }
@@ -173,4 +218,25 @@ fn the_page_reset_puts_the_parameters_back() {
     let e = &h.state().ui.export;
     assert_eq!((e.size, e.padding.as_str()), (0, "infinite"));
     assert_eq!(e.skip, vec![0], "the texture set ticks are not parameters of the page");
+}
+
+#[test]
+fn feedback_escape_clears_a_pick_before_cancelling_export() {
+    let mut h = harness();
+    let pick = egui::Id::unique("export_escape_screen_color_pick");
+    h.state_mut().picking_color = Some(pick);
+    h.state_mut().ui.export.size = 512;
+
+    h.key_press(egui::Key::Escape);
+    h.run_steps(4);
+
+    assert!(h.state().picking_color.is_none(), "the armed pick receives Escape first");
+    assert!(h.query_by_role_and_label(egui::Role::Button, "Save settings").is_some());
+    assert_eq!(h.state().ui.export.size, 512);
+
+    h.key_press(egui::Key::Escape);
+    h.run_steps(4);
+
+    assert!(!h.state().ui.windows.export);
+    assert_eq!(h.state().ui.export.size, 0);
 }

@@ -104,6 +104,7 @@ fn general(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, ts: usize, 
     if sheet.check(tr("UV tiles (UDIM)"), &mut tiled) {
         app.run("textureSet.uvTiles", json!({"ts": ts, "enabled": tiled}));
     }
+
     // The project has one shader: the list holds it
     sheet.dropdown(tr("Shader Instance"), 0, &[0], |_| tr(INSTANCE_NAME).to_owned(), None);
 }
@@ -257,8 +258,10 @@ fn mesh_maps(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, ts: usize
             }]
         };
         let picked = resource_picker::show(&slot.pick, popup, &mut app.thumbs, None, false, tabs);
+
         // A shelf image dropped on the slot becomes this map too
         let dropped = crate::dock::image_drop(sheet.ui, &slot.pick).map(Some);
+
         // The picker's Import... tile is None
         match picked.or(dropped) {
             Some(None) => crate::menus::invoke(app, &sheet.ui.ctx().clone(), "resource.import"),
@@ -322,6 +325,7 @@ mod tests {
 
     fn click(harness: &mut Harness<'static, TextureCraftApp>, role: egui::Role, label: &str) {
         let rect = harness.get_by_role_and_label(role, label).rect();
+
         // A row's middle is under its size dropdown in a narrow panel: aim at its name
         let at = if role == egui::Role::ListItem { egui::pos2(rect.left() + rect.width() * 0.25, rect.center().y) } else { rect.center() };
         click_at(harness, at);
@@ -417,6 +421,7 @@ mod tests {
     fn the_channel_window_marks_unread_material_channels_but_not_user_channels() {
         let mut harness = harness("material_ball");
         click(&mut harness, egui::Role::Button, "Add or remove channels");
+
         // The dialog lays itself out over a few frames before its checks are in the tree
         harness.run_steps(4);
         let marked = |label: &str| harness.get_by_role_and_label(egui::Role::CheckBox, label).accesskit_node().description().is_some();
@@ -426,12 +431,29 @@ mod tests {
     }
 
     #[test]
+    fn a_narrow_window_can_apply_its_channel_selection() {
+        let mut harness = harness("material_ball");
+        click(&mut harness, egui::Role::Button, "Add or remove channels");
+        harness.set_size(vec2(390.0, 600.0));
+        harness.run_steps(5);
+        let viewport = harness.ctx.content_rect();
+        let apply = harness.get_by_role_and_label(egui::Role::Button, "Apply").rect();
+
+        assert!(viewport.contains_rect(apply), "Apply must fit on screen");
+        click(&mut harness, egui::Role::CheckBox, "Base weight");
+        click(&mut harness, egui::Role::Button, "Apply");
+
+        assert!(harness.state().session.doc.project.texture_sets[0].has_channel(Channel::BaseWeight));
+    }
+
+    #[test]
     fn escape_closes_the_channel_window_with_nothing_focused_and_drops_its_ticks() {
         let mut harness = harness("material_ball");
         let had = harness.state().session.doc.project.texture_sets[0].has_channel(Channel::User0);
         click(&mut harness, egui::Role::Button, "Add or remove channels");
         harness.run_steps(4);
         click(&mut harness, egui::Role::CheckBox, "User0");
+
         // As after a click on the dialog's empty space: no control keeps the keyboard
         let ctx = harness.ctx.clone();
         ctx.memory_mut(|memory| {

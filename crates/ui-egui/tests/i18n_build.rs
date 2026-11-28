@@ -3,6 +3,12 @@
 #[allow(dead_code)] // The production build entry point is not invoked by these pure-input tests.
 mod i18n_build;
 
+/// The catalogs' Rust includes alone, which is what these tests assert on; the build itself asks
+/// [`i18n_build::collect`] for the characters its web font cut needs as well.
+fn generate(dir: Option<&std::path::Path>, required: bool) -> Result<String, String> {
+    i18n_build::collect(dir, required).map(|(source, _)| source)
+}
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -23,23 +29,23 @@ impl Drop for Fixture {
 
 #[test]
 fn no_input_is_english_but_required_input_errors() {
-    assert!(!i18n_build::generate(None, false).unwrap().contains("include_str!"));
-    assert!(i18n_build::generate(None, true).is_err());
+    assert!(!generate(None, false).unwrap().contains("include_str!"));
+    assert!(generate(None, true).is_err());
 }
 
 #[test]
 fn invalid_and_relative_checkouts_are_rejected() {
     let fixture = Fixture::new();
-    assert!(i18n_build::generate(Some(&fixture.0.join("missing")), false).is_err());
-    assert!(i18n_build::generate(Some(std::path::Path::new("relative")), false).is_err());
+    assert!(generate(Some(&fixture.0.join("missing")), false).is_err());
+    assert!(generate(Some(std::path::Path::new("relative")), false).is_err());
 }
 
 #[test]
 fn shared_only_locale_is_not_offered_and_required_needs_app_catalog() {
     let fixture = Fixture::new();
     std::fs::write(fixture.0.join("locales/es/common.tsv"), "\tSave\tGuardar\n").unwrap();
-    assert!(!i18n_build::generate(Some(&fixture.0), false).unwrap().contains("include_str!"));
-    assert!(i18n_build::generate(Some(&fixture.0), true).is_err());
+    assert!(!generate(Some(&fixture.0), false).unwrap().contains("include_str!"));
+    assert!(generate(Some(&fixture.0), true).is_err());
 }
 
 #[test]
@@ -47,26 +53,26 @@ fn app_catalog_is_embedded_with_optional_shared_catalog() {
     let fixture = Fixture::new();
     let app = fixture.0.join("locales/es/texturecraft.tsv");
     std::fs::write(&app, "\tLayers\tCapas\n").unwrap();
-    let source = i18n_build::generate(Some(&fixture.0), true).unwrap();
+    let source = generate(Some(&fixture.0), true).unwrap();
     assert!(source.contains("texturecraft.tsv"));
     assert!(source.contains("(\"es\", \"\","));
     let common = fixture.0.join("locales/es/common.tsv");
     std::fs::write(&common, "\tSave\tGuardar\n").unwrap();
-    assert!(i18n_build::generate(Some(&fixture.0), true).unwrap().contains("common.tsv"));
+    assert!(generate(Some(&fixture.0), true).unwrap().contains("common.tsv"));
 }
 
 #[test]
 fn unreadable_catalog_fails_before_generating_rust_source() {
     let fixture = Fixture::new();
     std::fs::write(fixture.0.join("locales/es/texturecraft.tsv"), [0xff, 0xfe]).unwrap();
-    assert!(i18n_build::generate(Some(&fixture.0), true).is_err());
+    assert!(generate(Some(&fixture.0), true).is_err());
 }
 
 #[test]
 fn generated_paths_compile_and_embed_the_catalog_contents() {
     let fixture = Fixture::new();
     std::fs::write(fixture.0.join("locales/es/texturecraft.tsv"), "\tLayers\tCapas\n").unwrap();
-    let generated = i18n_build::generate(Some(&fixture.0), true).unwrap();
+    let generated = generate(Some(&fixture.0), true).unwrap();
     let program = format!(
         "extern crate self as craft_i18n;\npub type Embedded = [(&'static str, &'static str, &'static str)];\n{generated}\nfn main() {{ assert_eq!(CRAFT_I18N[0].2, \"\\tLayers\\tCapas\\n\"); }}"
     );
@@ -93,8 +99,36 @@ fn malformed_utf8_catalogs_and_invalid_rows_fail_during_generation() {
             std::fs::write(fixture.0.join("locales/es/texturecraft.tsv"), "\tLayers\tCapas\n").unwrap();
             std::fs::write(fixture.0.join("locales/es").join(file), invalid).unwrap();
             for required in [false, true] {
-                assert!(i18n_build::generate(Some(&fixture.0), required).is_err(), "accepted {file}: {invalid:?}");
+                assert!(generate(Some(&fixture.0), required).is_err(), "accepted {file}: {invalid:?}");
             }
         }
     }
+}
+
+#[test]
+fn the_catalog_characters_are_the_ones_the_web_font_keeps() {
+    let fixture = Fixture::new();
+    std::fs::write(fixture.0.join("locales/es/texturecraft.tsv"), "\tLayers\tCapas\n").unwrap();
+    std::fs::write(fixture.0.join("locales/es/common.tsv"), "\tSave\tGuardar\n").unwrap();
+    std::fs::create_dir_all(fixture.0.join("locales/ja")).unwrap();
+    std::fs::write(fixture.0.join("locales/ja/texturecraft.tsv"), "\tLayers\t\u{30ec}\u{30a4}\u{30e4}\u{30fc}\n").unwrap();
+
+    // A shared-only locale contributes no characters: its catalog is not embedded
+    std::fs::create_dir_all(fixture.0.join("locales/de")).unwrap();
+    std::fs::write(fixture.0.join("locales/de/common.tsv"), "\tSave\tSpeichern \u{fc}\n").unwrap();
+
+    let (source, characters) = i18n_build::collect(Some(&fixture.0), true).unwrap();
+    assert!(source.contains("texturecraft.tsv"));
+    for used in ['L', 'a', 'y', 'e', 'r', 's', 'C', 'p', 'G', 'u', 'd', '\u{30ec}', '\u{30a4}', '\u{30e4}', '\u{30fc}'] {
+        assert!(characters.contains(&used), "missing {used:?}");
+    }
+    assert!(!characters.contains(&'\u{fc}'), "the shared-only de catalog is not embedded");
+    let mut sorted = characters.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted, characters, "sorted and distinct");
+
+    // Nothing to cut with no checkout: the web build then keeps the faces whole
+    assert_eq!(i18n_build::collect(None, false).unwrap().1, Vec::<char>::new());
+    assert!(i18n_build::collect(None, true).is_err());
 }

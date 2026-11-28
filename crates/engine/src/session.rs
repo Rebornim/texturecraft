@@ -5,11 +5,12 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use texturecraft_compose::{
-    BakedMaps, BelowCache, Composite, PaddingMaps, PaintTarget, PixelStore, StackKey, StrokePreview, covered_tiles, pad_tiles, stack_reads_neighbours,
+    BakedMaps, BelowCache, Composite, PaddingMaps, PaintTarget, PixelStore, SeamPaddingInput, StackKey, StrokePreview, covered_tiles, pad_tiles,
+    stack_reads_neighbours,
 };
 use texturecraft_core::{Channel, ChannelFormat, Layer, LayerId, LayerKind, Project, TextureSet, UvPaddingMode};
 use texturecraft_geom::glam::Vec2;
-use texturecraft_geom::{Bvh, Mesh, OrbitCamera, UvGBuffer, UvSeam};
+use texturecraft_geom::{Bvh, Mesh, OrbitCamera, UvGBuffer};
 use texturecraft_paint::{BrushSettings, EyeDepth, Stroke, StrokeCanvas};
 
 use crate::fill_mode::FillMode;
@@ -32,6 +33,9 @@ pub struct Document {
     pub resources: BTreeMap<String, Arc<Vec<u8>>>,
     /// High-definition meshes and cage for baking (saved inside the project)
     pub bake_meshes: crate::BakeMeshes,
+    /// Skew and cage paint bounds since each set's last Auto-rebake. Undo restores the bounds
+    /// with their maps. The project file omits these bounds.
+    pub(crate) painted_regions: BTreeMap<usize, crate::bake::PaintedRegion>,
 }
 
 /// Derived per-texture-set data (rebuilt when the mesh or resolution changes).
@@ -90,17 +94,19 @@ impl SetCache {
     }
 }
 
-/// The seams `ts`'s UV padding crosses: none for padding from island edges (2D)
-pub(crate) fn padding_seams(mesh: &Mesh, ts: &TextureSet) -> Vec<UvSeam> {
-    match ts.uv_padding {
-        UvPaddingMode::Space3d => UvSeam::of_material(mesh, ts.material),
-        UvPaddingMode::Space2d => Vec::new(),
+/// The geometry needed to continue UV padding across the seams of this set
+pub(crate) fn padding_seams<'a>(mesh: &'a Mesh, set: &TextureSet, grid: &'a UvGBuffer) -> Option<SeamPaddingInput<'a>> {
+    if set.uv_padding == UvPaddingMode::Space2d {
+        return None;
     }
+
+    SeamPaddingInput::of_material(mesh, set.material, &grid.tri)
 }
 
-/// The viewport's padding of `ts`, which stays inside each UV tile
-fn display_padding(mesh: &Mesh, ts: &TextureSet, gbuf: &UvGBuffer) -> PaddingMaps {
-    PaddingMaps::new(ts.uv_padding, &gbuf.coverage_mask(), (gbuf.width, gbuf.height), Some(DISPLAY_PADDING), ts.block_size(), &padding_seams(mesh, ts))
+/// The viewport's padding of `set`, which stays inside each UV tile
+fn display_padding(mesh: &Mesh, set: &TextureSet, grid: &UvGBuffer) -> PaddingMaps {
+    let seams = padding_seams(mesh, set, grid);
+    PaddingMaps::new(set.uv_padding, &grid.coverage_mask(), (grid.width, grid.height), Some(DISPLAY_PADDING), set.block_size(), seams.as_ref())
 }
 
 /// Active tool.
@@ -441,6 +447,12 @@ pub struct Session {
     pub project_id: u64,
     /// The mesh with its own UVs (`mesh` maps UV-tiled sets into their atlas).
     pub(crate) source: Arc<Mesh>,
+    /// Fingerprint of the bake inputs in `source`, computed on first use
+    pub(crate) low_poly_fingerprint: std::sync::OnceLock<u64>,
+    /// Fingerprint of the packed mesh file, computed only for bakes that read its material colors.
+    pub(crate) low_material_file_fingerprint: std::sync::OnceLock<u64>,
+    /// Skew and cage strokes so far
+    pub(crate) painted_strokes: u64,
     pub bvh: Arc<Bvh>,
     /// Original mesh file (saved inside the project); None for built-in meshes.
     pub mesh_source: Option<(String, Arc<Vec<u8>>)>,
@@ -467,6 +479,8 @@ pub struct Session {
     pub solo: Option<crate::Solo>,
     /// The live bake preview while the app bakes (see [`crate::bake_preview`]).
     pub bake_preview: Option<crate::bake_preview::BakePreview>,
+    /// The latest bake, map by map (the Baking Log)
+    pub bake_log: crate::bake::BakeLog,
     /// Viewport size (pixels) used by scripted strokes.
     pub viewport: Vec2,
     pub(crate) stroke: Option<ActiveStroke>,
@@ -478,6 +492,9 @@ pub struct Session {
     pub images: texturecraft_compose::ImageStore,
     /// Resource names whose decoded pixels match a library alpha.
     pub(crate) library_alphas: BTreeSet<String>,
+    /// Resources whose file was read for the Resources Updater, by name: the verdict stays while the file's size and time do
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) resource_checks: std::collections::HashMap<String, crate::resource_check::ResourceCheck>,
     /// Temporary texel mask limiting paint strokes (not saved, not in the history).
     pub quick_mask: crate::quick_mask::QuickMask,
     /// A path sublayer is being repainted from its paths (the only way to paint into one).
@@ -541,6 +558,9 @@ impl Session {
             mesh_id: next_mesh_id(),
             project_id: next_mesh_id(),
             source,
+            low_poly_fingerprint: Default::default(),
+            low_material_file_fingerprint: Default::default(),
+            painted_strokes: 0,
             mesh,
             bvh: Arc::new(bvh),
             mesh_source: mesh_source.map(|(extension, bytes)| (extension, Arc::new(bytes))),
@@ -559,12 +579,15 @@ impl Session {
             view_image: None,
             solo: None,
             bake_preview: None,
+            bake_log: Default::default(),
             viewport: Vec2::new(1280.0, 800.0),
             stroke: None,
             clipboard: None,
             blending_clipboard: None,
             images: Default::default(),
             library_alphas: BTreeSet::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            resource_checks: std::collections::HashMap::new(),
             quick_mask: Default::default(),
             painting_paths: false,
             path_cache: None,
@@ -660,6 +683,7 @@ impl Session {
                 pixels: PixelStore::default(),
                 baked: BTreeMap::new(),
                 resources: BTreeMap::new(),
+                painted_regions: Default::default(),
             },
             mesh,
             mesh_source,
@@ -922,7 +946,7 @@ impl Session {
 
     /// Make caches agree with the project's texture sets (resolution or channel changes).
     pub fn sync_caches(&mut self) {
-        let sets = self.doc.project.texture_sets.clone();
+        let sets = &self.doc.project.texture_sets;
         self.caches.truncate(sets.len());
         for (i, ts) in sets.iter().enumerate() {
             match self.caches.get_mut(i) {
@@ -1013,6 +1037,7 @@ impl Session {
         let (label, restored) = self.undo.pop().ok_or_else(|| EngineError::Other("nothing to undo".into()))?;
         let current = std::mem::replace(&mut self.doc, restored);
         self.after_history(&current);
+        self.forget_replaced_images(&current);
         self.redo.push((label.clone(), current));
         self.sync_images();
         Ok(label)
@@ -1033,12 +1058,15 @@ impl Session {
         let (label, restored) = self.redo.pop().ok_or_else(|| EngineError::Other("nothing to redo".into()))?;
         let current = std::mem::replace(&mut self.doc, restored);
         self.after_history(&current);
+        self.forget_replaced_images(&current);
         self.undo.push((label.clone(), current));
         self.sync_images();
         Ok(label)
     }
 
     fn after_history(&mut self, other: &Document) {
+        self.follow_renamed_resources(other);
+
         // Pending operations may still hold layer IDs from the discarded snapshot
         self.doc.project.next_id = self.doc.project.next_id.max(other.project.next_id);
         self.mark_modified();
@@ -1058,6 +1086,38 @@ impl Session {
         let has_mask = self.selected_layer().and_then(|lid| self.doc.project.layer(self.doc.project.mask_owner(lid)).ok()).is_some_and(|l| l.mask.is_some());
         if self.target == StackTarget::Mask && !has_mask {
             self.target = StackTarget::Content;
+        }
+    }
+
+    /// The image names the tools and the 2D view read, which a resource rename follows
+    pub(crate) fn tool_images_mut(&mut self) -> impl Iterator<Item = &mut String> {
+        [
+            self.tool.stencil.as_mut().map(|stencil| &mut stencil.image),
+            self.tool.brush.alpha_image.as_mut(),
+            self.tool.mask_image.as_mut(),
+            self.view_image.as_mut(),
+        ]
+        .into_iter()
+        .flatten()
+    }
+
+    /// Points tool images at a resource's name on this side of an undone or redone rename
+    fn follow_renamed_resources(&mut self, other: &Document) {
+        let names: Vec<String> = self.tool_images_mut().map(|name| name.clone()).collect();
+        let renames: Vec<(String, String)> = names
+            .into_iter()
+            .filter(|name| !self.doc.resources.contains_key(name))
+            .filter_map(|name| {
+                let bytes = other.resources.get(&name)?;
+                let to = self.doc.resources.iter().find(|(_, here)| Arc::ptr_eq(here, bytes)).map(|(here, _)| here.clone())?;
+                Some((name, to))
+            })
+            .collect();
+
+        for (name, to) in renames {
+            for tool_image in self.tool_images_mut().filter(|tool_image| **tool_image == name) {
+                tool_image.clone_from(&to);
+            }
         }
     }
 

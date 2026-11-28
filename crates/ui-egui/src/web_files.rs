@@ -234,11 +234,14 @@ pub fn project_file_name(app: &TextureCraftApp) -> String {
 fn zip_files(files: Vec<ExportedFile>) -> Result<Vec<u8>, String> {
     let mut zip = craft_zip::Writer::new();
     for f in files {
-        // add_with reserves ZIP64 headers up front, even for small entries.
+        // Reserve ZIP64 headers up front, even for small entries
         zip.add_with(&f.name, craft_zip::Compression::Deflated, |out| out.write_all(&f.bytes)).map_err(|e| e.to_string())?;
     }
     zip.finish().map_err(|e| e.to_string())
 }
+
+#[cfg(any(target_arch = "wasm32", test))]
+use texturecraft_engine::shader_parameters::shader_parameters_sidecar;
 
 #[cfg(target_arch = "wasm32")]
 pub use web::{
@@ -337,9 +340,9 @@ mod web {
     pub fn export_mesh(app: &mut TextureCraftApp, ext: &str) {
         let name = format!("{}.{ext}", sanitize_file_stem(&app.session.doc.project.name));
         let bytes = match ext {
-            "glb" => app.session.mesh_glb_bytes(),
-            "usdz" => app.session.mesh_usd(texturecraft_engine::formats::UsdFormat::Usdz).map(|u| u.bytes),
-            _ => app.session.mesh_obj_bytes(),
+            "glb" => app.session.mesh_glb_bytes_with_normals(app.ui.mesh_recompute_normals),
+            "usdz" => app.session.mesh_usd_with_normals(texturecraft_engine::formats::UsdFormat::Usdz, app.ui.mesh_recompute_normals).map(|u| u.bytes),
+            _ => app.session.mesh_obj_bytes_with_normals(app.ui.mesh_recompute_normals),
         };
         match bytes.map_err(|e| e.to_string()).and_then(|b| download(&name, &b)) {
             Ok(()) => app.toast(trf("Downloaded {name}", &[("name", &name)]), false),
@@ -357,14 +360,24 @@ mod web {
     }
 
     fn export(app: &mut TextureCraftApp, jobs: &[(usize, Value)]) -> Result<String, String> {
-        let mut files = Vec::new();
-        for (set_index, params) in jobs {
-            let options = texturecraft_engine::file_cmds::export_options(&app.session, params, "file.exportTextures").map_err(|e| e.to_string())?;
-            files.extend(app.session.export_files(&[*set_index], &options).map_err(|e| e.to_string())?);
-        }
+        let options = jobs
+            .iter()
+            .map(|(_, params)| texturecraft_engine::file_cmds::export_options(&app.session, params, "file.exportTextures"))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        let jobs_with_options = jobs.iter().zip(&options).map(|((set_index, _), options)| (*set_index, options));
+        let mut files = app.session.export_file_jobs(jobs_with_options).map_err(|error| error.to_string())?;
 
-        // Keep one file for each case-insensitive name in the download
-        texturecraft_engine::formats::skip_repeated_names(&mut files);
+        if app.ui.export.shader_parameters {
+            let sets: Vec<usize> = jobs.iter().map(|(set_index, _)| *set_index).collect();
+            match shader_parameters_sidecar(&app.session.doc.project, &sets, &files) {
+                Ok(sidecar) => files.push(sidecar),
+                Err(error) => {
+                    app.session.log.warnings("MapExporter", [format!("The shader settings file was not written: {error}")]);
+                    app.toast(trf("The shader settings file was not written: {error}", &[("error", &error)]), true);
+                }
+            }
+        }
         app.session.log.warnings("MapExporter", files.iter().flat_map(|file| file.warnings.iter().cloned()));
         let file_count = files.len();
 
@@ -528,6 +541,28 @@ mod tests {
 
         assert_eq!(harness.state().session.doc.bake_meshes.high.len(), 1);
         assert!(harness.state().session.doc.bake_meshes.cage.is_some());
+    }
+
+    #[test]
+    fn shader_sidecar_does_not_take_a_texture_folder_name() {
+        let project = texturecraft_engine::core::Project::new("Chair", "builtin:sphere");
+        let name = "chair_SHADERS.json/Color.png";
+        let mut files = vec![ExportedFile { name: name.into(), bytes: vec![1, 2, 3], width: 1, height: 1, warnings: Vec::new() }];
+
+        let error = shader_parameters_sidecar(&project, &[], &files).unwrap_err();
+
+        assert!(error.contains("Chair_shaders.json"));
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].name, name);
+
+        files[0].name = "Chair_shaders.json_backup/Color.png".into();
+        files.push(shader_parameters_sidecar(&project, &[], &files).unwrap());
+        let bytes = zip_files(files).unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+
+        assert_eq!(archive.len(), 2);
+        assert!(archive.by_name("Chair_shaders.json_backup/Color.png").is_ok());
+        assert!(archive.by_name("Chair_shaders.json").is_ok());
     }
 
     #[test]

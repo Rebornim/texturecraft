@@ -3,10 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use texturecraft_core::{Channel, ChannelKind, UvPaddingMode};
-use texturecraft_geom::UvSeam;
 use texturecraft_texel::TILE;
 use texturecraft_texel::dilate::DilationMap;
 
+use crate::SeamPaddingInput;
 use crate::seam_padding::{SEAM_REACH, cross_seams};
 
 /// A texture set's padding: `flat` for every texel, with the few texels past a seam listed apart in `crossed` by row
@@ -24,12 +24,18 @@ pub struct PaddingMaps {
 
 impl PaddingMaps {
     /// The padding for `mode`: `covered` texels of a `width × height` set padded up to `max_dist` texels inside each `block`
-    pub fn new(mode: UvPaddingMode, covered: &[bool], (width, height): (u32, u32), max_dist: Option<u32>, block: (u32, u32), seams: &[UvSeam]) -> PaddingMaps {
+    pub fn new(
+        mode: UvPaddingMode,
+        covered: &[bool],
+        (width, height): (u32, u32),
+        max_dist: Option<u32>,
+        block: (u32, u32),
+        seams: Option<&SeamPaddingInput<'_>>,
+    ) -> PaddingMaps {
         let flat = DilationMap::in_rectangular_blocks(covered, width, height, max_dist, block);
-        let crossed = match mode {
-            UvPaddingMode::Space2d => Vec::new(),
-            UvPaddingMode::Space3d => cross_seams(&flat, covered, max_dist.map_or(SEAM_REACH, |d| d.min(SEAM_REACH)), block, seams),
-        };
+        let crossed = seams
+            .filter(|_| mode == UvPaddingMode::Space3d)
+            .map_or_else(Vec::new, |seams| cross_seams(&flat, max_dist.map_or(SEAM_REACH, |d| d.min(SEAM_REACH)), block, seams));
         let row_starts =
             if crossed.is_empty() { Vec::new() } else { (0..=height).map(|y| crossed.partition_point(|(texel, _)| *texel < y * width) as u32).collect() };
         let tile_of = |texel: u32| ((texel % width) / TILE, (texel / width) / TILE);
@@ -76,8 +82,8 @@ impl PaddingMaps {
 
 #[cfg(test)]
 mod tests {
-    use texturecraft_geom::UvSeamSide;
     use texturecraft_geom::glam::Vec2;
+    use texturecraft_geom::{NO_TRI, TrianglePartition, UvSeam, UvSeamSide, primitives};
 
     use super::*;
 
@@ -86,16 +92,56 @@ mod tests {
         let (width, height) = (32u32, 8u32);
         let covered = (0..width * height).map(|i| matches!(i % width, 4..=11 | 20..=27)).collect();
         let at = |x: f32, y: f32| Vec2::new(x / width as f32, y / height as f32);
-        let left = UvSeamSide { start: at(12.0, 0.0), end: at(12.0, 8.0), interior: at(4.0, 0.0) };
-        let right = UvSeamSide { start: at(20.0, 0.0), end: at(20.0, 8.0), interior: at(28.0, 0.0) };
+        let left = UvSeamSide { triangle: 0, start: at(12.0, 0.0), end: at(12.0, 8.0), interior: at(4.0, 0.0) };
+        let right = UvSeamSide { triangle: 1, start: at(20.0, 0.0), end: at(20.0, 8.0), interior: at(28.0, 0.0) };
         (covered, vec![UvSeam { sides: [left, right] }])
+    }
+
+    fn islands(seams: Vec<UvSeam>, triangles: &[u32]) -> SeamPaddingInput<'_> {
+        // A synthetic raster supplies its island ids directly
+        let mesh = primitives::plane(1.0, 2);
+        let partition = TrianglePartition::new(&mesh, 0, |_, _| Vec::<u32>::new());
+        SeamPaddingInput::new(seams, triangles, partition)
+    }
+
+    #[test]
+    fn padding_stops_at_the_far_islands_edge() {
+        let (_, seams) = two_islands();
+        let (width, height) = (32, 8);
+        for (gap, far_strip) in [(false, 2), (true, 2), (true, 1)] {
+            let triangles: Vec<_> = (0..width * height)
+                .map(|pixel| match pixel % width {
+                    4..=11 => 0,
+                    20..=21 => 1,
+                    22 if gap => NO_TRI,
+                    22..=27 => far_strip,
+                    _ => NO_TRI,
+                })
+                .collect();
+            let covered: Vec<_> = triangles.iter().map(|id| *id != NO_TRI).collect();
+            let input = islands(seams.clone(), &triangles);
+
+            let padding = PaddingMaps::new(UvPaddingMode::Space3d, &covered, (width, height), Some(4), (0, 0), Some(&input));
+
+            assert_eq!(padding.source(true, 13, 3), Some((21, 3)), "a texel inside the far island continues the seam");
+            assert_eq!(padding.source(true, 15, 3), padding.source(false, 15, 3), "another island is out of reach even with no texel gap");
+        }
     }
 
     #[test]
     fn padding_past_a_seam_continues_from_its_other_side_and_normals_stay_flat() {
         let (covered, seams) = two_islands();
-        let space_3d = PaddingMaps::new(UvPaddingMode::Space3d, &covered, (32, 8), Some(4), (0, 0), &seams);
-        let space_2d = PaddingMaps::new(UvPaddingMode::Space2d, &covered, (32, 8), Some(4), (0, 0), &seams);
+        let triangles: Vec<_> = (0..32 * 8)
+            .map(|pixel| match pixel % 32 {
+                4..=11 => 0,
+                20..=27 => 1,
+                _ => NO_TRI,
+            })
+            .collect();
+        let input = islands(seams, &triangles);
+
+        let space_3d = PaddingMaps::new(UvPaddingMode::Space3d, &covered, (32, 8), Some(4), (0, 0), Some(&input));
+        let space_2d = PaddingMaps::new(UvPaddingMode::Space2d, &covered, (32, 8), Some(4), (0, 0), Some(&input));
         let island = |padding: &PaddingMaps, across_seams: bool, x: u32| {
             padding.source(across_seams, x, 3).map(|(source_x, _)| if source_x < 16 { "left" } else { "right" })
         };

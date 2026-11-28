@@ -1603,8 +1603,13 @@ fn filter_extent(radius: f32, op: Op, inputs: &Inputs) -> (u32, u32) {
     // Clamped so a hostile radius can't overflow the region arithmetic
     let radius_texels = radius.round().clamp(1.0, longest_side as f32) as u32;
 
-    // Three box passes reach three radii; the gathering filters one radius plus a bilinear texel
-    let reach = if is_box_blur(op) { 3 * radius_texels } else { radius_texels + 1 };
+    // Three box passes reach three radii; the gathering filters one radius plus a bilinear texel. A
+    // mirror or transform reads anywhere in its block, so it reaches the block's longer side
+    let reach = match op {
+        Op::Mirror { .. } | Op::Transform { .. } => (radius_texels + 1).max(inputs.block_size().into_iter().max().unwrap_or(0)),
+        _ if is_box_blur(op) => 3 * radius_texels,
+        _ => radius_texels + 1,
+    };
 
     // A shadow also reads the shapes it was moved from
     let moved = match op {
@@ -6680,6 +6685,33 @@ soft {soft:?}"
             let label = filter.label();
             assert!((0..TILE as usize).all(|x| (edge_tile[x] - whole[x]).abs() < 1e-3), "{label}: the edge tile alone\n{edge_tile:?}\nwhole\n{whole:?}");
             assert!((0..WIDTH as usize - period).all(|x| (whole[x] - whole[x + period]).abs() < 0.02), "{label} keeps tiling: {whole:?}");
+        }
+    }
+
+    /// A set taller than wide: a mirror or transform reads anywhere down its block, so a tile composited alone near the bottom matches the whole set
+    #[test]
+    fn a_tile_alone_on_a_tall_set_reads_a_mirror_or_transform_from_the_far_end() {
+        const WIDTH: u32 = 64;
+        const HEIGHT: u32 = 256;
+        let column_of = |out: &Composite| (HEIGHT - TILE..HEIGHT).map(|y| out.value(Channel::Roughness, 20, y)[0]).collect::<Vec<f32>>();
+        let composite = |filter: &Filter, tiles: &[(u32, u32)]| {
+            let mut f = fixture();
+            f.gbuf = UvGBuffer::new(&f.mesh, 0, WIDTH, HEIGHT);
+            f.project.texture_sets[0].set_size(WIDTH, HEIGHT);
+            checker_roughness(&mut f, Some(filter.clone()));
+            let images = ImageStore::default();
+            let mut out = Composite::with_size(&f.project.texture_sets[0].channel_list(), WIDTH, HEIGHT);
+            composite_tiles(&inputs(&f, &images, None), &mut out, tiles);
+            column_of(&out)
+        };
+
+        let mirror = Filter::Mirror(Mirror { mode: texturecraft_core::MirrorMode::AxisY, ..Mirror::LIBRARY });
+        let shift = Filter::Transform(TileTransform { offset: [0.0, 0.25], ..TileTransform::LIBRARY });
+        for filter in [mirror, shift] {
+            let whole = composite(&filter, &all_tiles(WIDTH, HEIGHT));
+            let bottom_tile = composite(&filter, &[(0, HEIGHT / TILE - 1)]);
+            let label = filter.label();
+            assert!(whole.iter().zip(&bottom_tile).all(|(a, b)| (a - b).abs() < 1e-3), "{label}: the bottom tile alone\n{bottom_tile:?}\nwhole\n{whole:?}");
         }
     }
 

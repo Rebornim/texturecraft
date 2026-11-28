@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use texturecraft_compose::PixelStore;
-use texturecraft_core::{LayerId, LayerKind, Project, Source, TextureSet};
+use texturecraft_core::{EffectKind, Fill, LayerId, LayerKind, Project, Source, TextureSet};
 
 use crate::commands::{CommandSpec, always, has_layer};
 use crate::materials::Place;
@@ -36,7 +36,15 @@ fn fe(e: texturecraft_formats::FormatError) -> EngineError {
     EngineError::Other(e.to_string())
 }
 
-/// Image resources a layer subtree uses (fill sources and their patterns, mask or content effects and the images its paths paint with)
+/// The package and cooked maps of the MaterialCraft material linked to `fill`, if any
+fn link_images(fill: &Fill, out: &mut Vec<String>) {
+    if let Some(link) = &fill.link {
+        out.push(link.package.clone());
+        out.extend(link.outputs.values().cloned());
+    }
+}
+
+/// Image resources a layer subtree uses (fill sources and their patterns, linked materials, mask or content effects and the images its paths paint with)
 pub(crate) fn images_used(project: &Project, id: LayerId, out: &mut Vec<String>, depth: usize) {
     if depth > texturecraft_core::project::MAX_DEPTH {
         return;
@@ -46,15 +54,15 @@ pub(crate) fn images_used(project: &Project, id: LayerId, out: &mut Vec<String>,
 
     if let LayerKind::Fill(fill) = &layer.kind {
         out.extend(fill.sources.values().flat_map(Source::images).map(str::to_string));
-        if let Some(link) = &fill.link {
-            out.push(link.package.clone());
-            out.extend(link.outputs.values().cloned());
-        }
+        link_images(fill, out);
     }
 
     for effect in layer.mask.iter().flat_map(|mask| mask.effects.iter()).chain(&layer.content_effects) {
         out.extend(effect.images_read().map(str::to_string));
         out.extend(crate::path_tool::path_images(&effect.kind));
+        if let EffectKind::Material(fill) = &effect.kind {
+            link_images(fill, out);
+        }
     }
 
     for child in layer.children() {

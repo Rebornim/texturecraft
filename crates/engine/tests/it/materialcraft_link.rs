@@ -47,7 +47,7 @@ fn cooked(roughness: f32, wear: f32) -> CookedMaterial {
     CookedMaterial::new(serde_json::from_value(interface).unwrap(), maps, 4)
 }
 
-fn install(session: &mut Session) -> LayerId {
+pub(crate) fn install(session: &mut Session) -> LayerId {
     session.add_cooked_material(&cooked(0.25, 0.5), Arc::new(b"package bytes".to_vec()), "mcmat", Place::Selection).unwrap()
 }
 

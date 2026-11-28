@@ -1,7 +1,7 @@
 //! The images a project reads beyond fill sources: a colour selection's ID map, a filter's image input, the mask brush and its paths
 
 use serde_json::{Value, json};
-use texturecraft_engine::core::{Channel, LayerId};
+use texturecraft_engine::core::{Channel, EffectKind, LayerId, LayerKind};
 use texturecraft_engine::geom::primitives;
 use texturecraft_engine::{Session, execute};
 
@@ -51,6 +51,24 @@ fn removing_unused_resources_keeps_the_images_a_selection_a_filter_input_the_mas
     let reply = execute(&mut session, "file.removeUnused", &Value::Null).unwrap();
 
     assert_eq!(reply["removed"], json!([unused]), "only the image nothing reads goes");
+}
+
+#[test]
+fn removing_unused_resources_keeps_the_package_and_maps_of_a_material_linked_in_a_content_effect() {
+    let mut session = session();
+    let unused = session.import_resource_bytes("unused.png", white_png()).unwrap();
+    let linked = crate::materialcraft_link::install(&mut session);
+    let LayerKind::Fill(fill) = session.doc.project.layer(linked).unwrap().kind.clone() else { panic!("not a fill") };
+
+    // The linked material moves into a content effect of another layer, the only place that uses it
+    let layer = execute(&mut session, "layer.add.fill", &Value::Null).unwrap()["layer"].as_u64().unwrap();
+    let effect = LayerId(execute(&mut session, "effect.add.fill", &json!({"layer": layer, "target": "content"})).unwrap()["effect"].as_u64().unwrap());
+    session.doc.project.effect_mut(effect).unwrap().kind = EffectKind::Material(fill);
+    execute(&mut session, "layer.remove", &json!({"layer": linked.0})).unwrap();
+
+    let reply = execute(&mut session, "file.removeUnused", &Value::Null).unwrap();
+
+    assert_eq!(reply["removed"], json!([unused]), "the linked package and its maps stay");
 }
 
 #[test]

@@ -62,12 +62,17 @@ fn general(app: &mut TextureCraftApp, sheet: &mut PropertySheet<'_>, ts: usize, 
     sheet.section(tr("General Properties"), false);
     sheet.attribute(tr("Name"), &set.name);
 
-    // Typing merges into one undo step until the field loses focus
+    // Typing merges into one undo step until the field loses focus; typing after it comes back starts another
     let mut description = set.description.clone();
-    if sheet.text_field_above(tr("Description"), &mut description) {
-        let typing_id = sheet.ui.scope_id().with(("tss_description_typing", ts));
-        let focused = sheet.ui.memory(|memory| memory.focused());
-        let merge = sheet.ui.data(|data| data.get_temp::<Option<egui::Id>>(typing_id)).flatten().is_some_and(|id| Some(id) == focused);
+    let changed = sheet.text_field_above(tr("Description"), &mut description);
+    let typing_id = sheet.ui.scope_id().with(("tss_description_typing", ts));
+    let focused = sheet.ui.memory(|memory| memory.focused());
+    let typing = sheet.ui.data(|data| data.get_temp::<Option<egui::Id>>(typing_id)).flatten();
+    if typing.is_some() && typing != focused {
+        sheet.ui.data_mut(|data| data.remove::<Option<egui::Id>>(typing_id));
+    }
+    if changed {
+        let merge = typing.is_some() && typing == focused;
         sheet.ui.data_mut(|data| data.insert_temp(typing_id, focused));
         app.run("textureSet.settings", json!({"ts": ts, "description": description, "merge": merge}));
     }
@@ -333,6 +338,34 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         harness.run_steps(2);
+    }
+
+    #[test]
+    fn typing_in_the_description_again_after_leaving_it_is_its_own_undo_step() {
+        let mut harness = harness("material_ball");
+        let description = |harness: &Harness<'static, TextureCraftApp>| harness.state().session.doc.project.texture_sets[0].description.clone();
+        let type_into_description = |harness: &mut Harness<'static, TextureCraftApp>, text: &str| {
+            click(harness, egui::Role::TextInput, "Description");
+            for character in text.chars() {
+                harness.event(egui::Event::Text(character.to_string()));
+                harness.run_steps(1);
+            }
+            let ctx = harness.ctx.clone();
+            ctx.memory_mut(|memory| {
+                if let Some(focused) = memory.focused() {
+                    memory.surrender_focus(focused);
+                }
+            });
+            harness.run_steps(2);
+        };
+
+        type_into_description(&mut harness, "ab");
+        let first = description(&harness);
+        type_into_description(&mut harness, "c");
+        assert!(description(&harness).len() > first.len(), "the second typing landed: {:?}", description(&harness));
+
+        harness.state_mut().session.undo().unwrap();
+        assert_eq!(description(&harness), first, "undo takes back the second typing alone");
     }
 
     #[test]

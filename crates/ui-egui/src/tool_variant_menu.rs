@@ -46,8 +46,8 @@ const ROW_KEYS: egui::EventFilter = egui::EventFilter { tab: true, horizontal_ar
 const FOCUS_CURRENT_ROW: &str = "focus_current_row";
 const FOCUS_IN_MENU: &str = "focus_in_menu";
 
-/// A tool's shelf button: its current variant's icon and the arrow; screen readers get the tool's `name` with the variant as its description
-pub(crate) fn button(ui: &mut Ui, variant: ToolVariant, name: &str, tooltip: &str, selected: bool, size: f32) -> Response {
+/// A tool's shelf button, without a tooltip: its current variant's icon and the arrow; screen readers get the tool's `name` with the variant as its description
+pub(crate) fn button(ui: &mut Ui, variant: ToolVariant, name: &str, selected: bool, size: f32) -> Response {
     let tokens = Tokens::get(ui.ctx());
     let variant_name = tr(variant.label());
     let response = painted_icon_button(ui, name, selected, size, |painter, rect, color, fill| {
@@ -59,7 +59,7 @@ pub(crate) fn button(ui: &mut Ui, variant: ToolVariant, name: &str, tooltip: &st
         painter.text(arrow_centre, Align2::CENTER_CENTER, egui_phosphor::regular::CARET_DOWN, FontId::proportional(size * ARROW_SCALE), arrow_color);
     });
     ui.ctx().accesskit_node_builder(response.id, |node| node.set_description(variant_name));
-    response.on_hover_text(tooltip)
+    response
 }
 
 /// Opens, shows and closes `tool`'s variant menu beside its shelf `button`; true when this frame's click on the button was the menu's, not a selection

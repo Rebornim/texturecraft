@@ -163,6 +163,25 @@ fn plain_click_keeps_the_variant() {
 }
 
 #[test]
+fn shelf_tooltips_name_the_tool_without_its_key() {
+    // Frames past the tooltip delay
+    const TOOLTIP_FRAMES: usize = 60;
+    let mut harness = app_harness(Tool::Paint);
+    harness.state_mut().session.tool.brush.particles.enabled = true;
+    harness.run_steps(2);
+
+    // A tool with variants tips its current variant, a plain tool its name; the key stays in the button's name for screen readers
+    for (tool, tooltip) in [("Paint", "Physical paint"), ("Smudge", "Smudge")] {
+        let button = shelf_button(&harness, tool);
+        let before = harness.query_all_by_label(tooltip).count();
+        harness.hover_at(button.center());
+        harness.run_steps(TOOLTIP_FRAMES);
+        assert_eq!(harness.query_all_by_label(tooltip).count(), before + 1, "hovering {tool} tips {tooltip:?} with no key after it");
+        assert!(harness.get(shelf(tool)).accesskit_node().label().is_some_and(|name| name.ends_with(')')), "the {tool} button's name keeps its key");
+    }
+}
+
+#[test]
 fn menu_follows_the_old_controls() {
     let mut harness = app_harness(Tool::Paint);
 

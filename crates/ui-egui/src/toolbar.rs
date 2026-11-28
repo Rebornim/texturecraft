@@ -14,7 +14,7 @@ use crate::keymap::{shortcut_of, tip};
 use crate::state::{Mode, ViewLayout};
 use crate::theme::{GUTTER, Tokens, card};
 use crate::tool_variant_menu;
-use crate::widgets::{bar_slider, drawn_icon_button, icon_button, icon_button_without_tooltip, icon_dropdown_button, icon_dropdown_button_width};
+use crate::widgets::{ICON_SCALE, bar_slider, icon_button, icon_button_without_tooltip, icon_dropdown_button, icon_dropdown_button_width, painted_icon_button};
 
 const BAR_SPACING: f32 = 10.0;
 const COMPACT_BAR_SPACING: f32 = 4.0;
@@ -486,7 +486,9 @@ pub fn tool_shelf(app: &mut TextureCraftApp, ui: &mut egui::Ui) {
 
                     // Painting shows a tool with variants as its current one, and its variant menu; Baking's brushes have none
                     let variant = if app.ui.mode == Mode::Painting { ToolVariant::current(&app.session.tool, tool) } else { None };
-                    let hint = tip(&app.ui.keymap, tr(tool.label()), &command);
+                    // Screen readers hear the tool's key after its name; the tooltip shows only the name
+                    let name = tip(&app.ui.keymap, tr(tool.label()), &command);
+                    let tooltip = tr(variant.map_or(tool.label(), ToolVariant::label));
                     let (usable, selected) = match app.ui.mode {
                         // In bake mode Paint is the cage or skew brush while one of them is being painted
                         Mode::Baking => {
@@ -501,15 +503,15 @@ pub fn tool_shelf(app: &mut TextureCraftApp, ui: &mut egui::Ui) {
                     };
                     let button = ui
                         .add_enabled_ui(usable, |ui| match (variant, tool) {
-                            (Some(variant), _) => {
-                                let variant_hint = tip(&app.ui.keymap, tr(variant.label()), &command);
-                                tool_variant_menu::button(ui, variant, &hint, &variant_hint, selected, SHELF_BUTTON_SIZE)
-                            }
-                            (None, Tool::ColorPicker) => drawn_icon_button(ui, DrawnIcon::Pipette, &hint, selected, SHELF_BUTTON_SIZE),
-                            (None, _) => icon_button(ui, tool_icon(tool), &hint, selected, SHELF_BUTTON_SIZE),
+                            (Some(variant), _) => tool_variant_menu::button(ui, variant, &name, selected, SHELF_BUTTON_SIZE),
+                            (None, Tool::ColorPicker) => painted_icon_button(ui, &name, selected, SHELF_BUTTON_SIZE, |painter, rect, color, _| {
+                                DrawnIcon::Pipette.paint(painter, rect.center(), SHELF_BUTTON_SIZE * ICON_SCALE, color);
+                            }),
+                            (None, _) => icon_button_without_tooltip(ui, tool_icon(tool), &name, selected, SHELF_BUTTON_SIZE),
                         })
                         .inner
-                        .on_disabled_hover_text(tr(variant.map_or(tool.label(), ToolVariant::label)));
+                        .on_hover_text(tooltip)
+                        .on_disabled_hover_text(tooltip);
                     let opened_menu = variant.is_some() && tool_variant_menu::menu(app, &button, tool);
                     if button.clicked() && !opened_menu && app.ui.mode == Mode::Painting {
                         app.run("tool.select", json!({"tool": tool.id()}));

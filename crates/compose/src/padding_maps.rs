@@ -1,7 +1,10 @@
 //! A texture set's UV padding: from island edges, and across seams for the texels past one
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use texturecraft_core::{Channel, ChannelKind, UvPaddingMode};
 use texturecraft_geom::UvSeam;
+use texturecraft_texel::TILE;
 use texturecraft_texel::dilate::DilationMap;
 
 use crate::seam_padding::{SEAM_REACH, cross_seams};
@@ -15,6 +18,8 @@ pub struct PaddingMaps {
     pub crossed: Vec<(u32, u32)>,
     /// Where each row's texels start in `crossed`, one more than the rows (empty without any), so a lookup searches one row
     pub(crate) row_starts: Vec<u32>,
+    /// For each tile holding a seam's far side, the tiles whose padding continues from it, so a change there repads them however far they are
+    pub(crate) crossed_into: BTreeMap<(u32, u32), BTreeSet<(u32, u32)>>,
 }
 
 impl PaddingMaps {
@@ -27,7 +32,17 @@ impl PaddingMaps {
         };
         let row_starts =
             if crossed.is_empty() { Vec::new() } else { (0..=height).map(|y| crossed.partition_point(|(texel, _)| *texel < y * width) as u32).collect() };
-        PaddingMaps { flat, crossed, row_starts }
+        let tile_of = |texel: u32| ((texel % width) / TILE, (texel / width) / TILE);
+        let mut crossed_into: BTreeMap<(u32, u32), BTreeSet<(u32, u32)>> = BTreeMap::new();
+        for &(texel, source) in &crossed {
+            crossed_into.entry(tile_of(source)).or_default().insert(tile_of(texel));
+        }
+        PaddingMaps { flat, crossed, row_starts, crossed_into }
+    }
+
+    /// The tiles whose padding continues across a seam from texels in `tile`
+    pub fn tiles_crossed_from(&self, tile: (u32, u32)) -> impl Iterator<Item = (u32, u32)> + '_ {
+        self.crossed_into.get(&tile).into_iter().flatten().copied()
     }
 
     /// Texels across and down

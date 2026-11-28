@@ -4887,7 +4887,7 @@ fn store_below(cache: &mut [f32], lanes: &[Lane], stride: usize, o: usize, acc: 
     }
 }
 
-/// UV padding for display: fill uncovered texels in `tiles` and their neighbours from the covered texel `padding` gives each, returning the tiles written
+/// UV padding for display: fill uncovered texels in `tiles`, their neighbours and the tiles padding continues into across a seam from the covered texel `padding` gives each, returning the tiles written
 pub fn pad_tiles(out: &mut Composite, padding: &crate::PaddingMaps, tiles: &[(u32, u32)]) -> std::collections::BTreeSet<(u32, u32)> {
     let mut written = std::collections::BTreeSet::new();
     let (w, h) = (out.resolution, out.height);
@@ -4907,6 +4907,9 @@ pub fn pad_tiles(out: &mut Composite, padding: &crate::PaddingMaps, tiles: &[(u3
                 }
             }
         }
+
+        // Padding across a seam can continue from this tile into one far away
+        near_tiles.extend(padding.tiles_crossed_from((tx, ty)));
     }
     let near_tiles: Vec<(u32, u32)> = near_tiles.into_iter().collect();
 
@@ -6443,10 +6446,50 @@ soft {soft:?}"
         out.channels.get_mut(&Channel::Roughness).unwrap().set(10, 10, &[to_u16(0.9)]);
         let mut covered = vec![false; 64 * 64];
         covered[10 * 64 + 10] = true;
-        let padding = crate::PaddingMaps { flat: texturecraft_texel::DilationMap::new(&covered, 64, 64, Some(4)), crossed: Vec::new(), row_starts: Vec::new() };
+        let padding = crate::PaddingMaps {
+            flat: texturecraft_texel::DilationMap::new(&covered, 64, 64, Some(4)),
+            crossed: Vec::new(),
+            row_starts: Vec::new(),
+            crossed_into: Default::default(),
+        };
         pad_tiles(&mut out, &padding, &[(0, 0)]);
         assert!((out.value(Channel::Roughness, 12, 12)[0] - 0.9).abs() < 1e-3);
         assert!(out.value(Channel::Roughness, 30, 30)[0] < 0.1 || !out.channels[&Channel::Roughness].is_allocated(0, 0));
+    }
+
+    /// Two islands of one 3D edge, tiles apart: repainting the far island repads the near island's padding past the seam
+    #[test]
+    fn padding_past_a_seam_follows_a_change_to_its_other_side_tiles_away() {
+        use texturecraft_geom::{UvSeam, UvSeamSide};
+        let (width, height) = (8 * TILE, TILE);
+        let (left, right) = (4..=59u32, 404..=460u32);
+        let covered: Vec<bool> = (0..width * height).map(|i| left.contains(&(i % width)) || right.contains(&(i % width))).collect();
+        let at = |x: f32, y: f32| Vec2::new(x / width as f32, y / height as f32);
+        let seam = UvSeam {
+            sides: [
+                UvSeamSide { start: at(60.0, 0.0), end: at(60.0, height as f32), interior: at(4.0, 0.0) },
+                UvSeamSide { start: at(404.0, 0.0), end: at(404.0, height as f32), interior: at(460.0, 0.0) },
+            ],
+        };
+        let padding = crate::PaddingMaps::new(texturecraft_core::UvPaddingMode::Space3d, &covered, (width, height), Some(4), (0, 0), &[seam]);
+
+        let mut out = Composite::with_size(&[Channel::Roughness], width, height);
+        let paint = |out: &mut Composite, xs: std::ops::RangeInclusive<u32>, value: f32| {
+            for y in 0..height {
+                for x in xs.clone() {
+                    out.channels.get_mut(&Channel::Roughness).unwrap().set(x, y, &[to_u16(value)]);
+                }
+            }
+        };
+        paint(&mut out, left.clone(), 0.2);
+        paint(&mut out, right.clone(), 0.2);
+        pad_tiles(&mut out, &padding, &all_tiles(width, height));
+
+        // Past the left island's seam edge, padding continues from the right island six tiles away
+        paint(&mut out, right, 0.9);
+        let written = pad_tiles(&mut out, &padding, &[(404 / TILE, 0)]);
+        assert!((out.value(Channel::Roughness, 61, 3)[0] - 0.9).abs() < 1e-3, "{:?}", out.value(Channel::Roughness, 61, 3));
+        assert!(written.contains(&(0, 0)), "the repadded tile is uploaded: {written:?}");
     }
 
     fn content_fx(f: &mut Fixture, id: LayerId, kind: EffectKind) -> LayerId {

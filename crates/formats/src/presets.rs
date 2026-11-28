@@ -94,8 +94,8 @@ pub fn builtin_presets() -> Vec<ExportPreset> {
         }),
         // Spec: https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#metallic-roughness-material
         preset("glTF PBR Metal Roughness", gltf_pbr_maps(|s| format!("$mesh_$textureSet_{s}"))),
-        // Spec: https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#metallic-roughness-material (R occlusion, G roughness, B metallic) and the base color, roughness, metallic and normal inputs of
-        // https://dev.epicgames.com/documentation/en-us/unreal-engine/physically-based-materials-in-unreal-engine
+        // Spec: https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#metallic-roughness-material
+        // Spec: https://dev.epicgames.com/documentation/en-us/unreal-engine/physically-based-materials-in-unreal-engine
         preset(
             "Unreal Engine (Packed)",
             vec![map("BaseColor", 8, base_with_alpha()), map("OcclusionRoughnessMetallic", 8, orm()), map("Normal", 8, normal(VirtualMap::NormalDirectX))],
@@ -219,6 +219,77 @@ pub fn builtin_presets() -> Vec<ExportPreset> {
                 map("clearcoatRoughness", 8, gray(ch(Channel::CoatRoughness, 0))),
             ],
         ),
+        // Spec: https://dev.epicgames.com/documentation/en-us/unreal-engine/subsurface-profile-shading-model-in-unreal-engine (the Opacity input masks the scattering, so the base color has no alpha)
+        preset(
+            "Unreal Engine Subsurface Profile (Packed)",
+            vec![
+                map("BaseColor", 8, rgb(|k| ch(Channel::BaseColor, k))),
+                map("OcclusionRoughnessMetallic", 8, orm()),
+                map("Normal", 8, normal(VirtualMap::NormalDirectX)),
+                map("SubsurfaceMask", 8, gray(ch(Channel::ScatterWeight, 0))),
+            ],
+        ),
+        // Spec: https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Archived/KHR_materials_pbrSpecularGlossiness/README.md (diffuse with alpha, specular RGB with glossiness in A)
+        preset(
+            "glTF Specular Glossiness (archived extension)",
+            vec![
+                map("Diffuse", 8, base_with_alpha()),
+                map("SpecularGlossiness", 8, {
+                    let mut specular_glossiness = rgb(|k| ch(Channel::Specular, k));
+                    specular_glossiness.push((Dest::A, ch(Channel::Glossiness, 0)));
+                    specular_glossiness
+                }),
+                map("Normal", 8, normal(VirtualMap::NormalOpenGl)),
+                map("Occlusion", 8, gray(virt(VirtualMap::AoMixed, 0))),
+                map("Emissive", 8, rgb(|k| ch(Channel::Emissive, k))),
+            ],
+        ),
+        // Spec: https://help.maxon.net/r3d/maya/en-us/Content/html/Standard_Material.html (the Standard Material inputs)
+        // Spec: https://help.maxon.net/r3d/maya/en-us/Content/html/Bump+Map.html (normal maps in OpenGL format)
+        preset("Redshift Standard Material (separate maps)", {
+            let gray8 = |name: &str, c: Channel| map(name, 8, gray(ch(c, 0)));
+            let rgb8 = |name: &str, c: Channel| map(name, 8, rgb(|k| ch(c, k)));
+            vec![
+                rgb8("BaseColor", Channel::BaseColor),
+                gray8("Metalness", Channel::Metallic),
+                gray8("ReflectionRoughness", Channel::Roughness),
+                map("Normal", 8, normal(VirtualMap::NormalOpenGl)),
+                rgb8("EmissionColor", Channel::Emissive),
+                gray8("Opacity", Channel::Opacity),
+                gray8("SubsurfaceWeight", Channel::ScatterWeight),
+                gray8("CoatWeight", Channel::CoatWeight),
+                gray8("CoatRoughness", Channel::CoatRoughness),
+                gray8("SheenWeight", Channel::SheenWeight),
+                rgb8("SheenColor", Channel::SheenColor),
+                gray8("SheenRoughness", Channel::SheenRoughness),
+            ]
+        }),
+        // Spec: https://create.roblox.com/docs/art/modeling/surface-appearance (ColorMap alpha is opacity)
+        // Spec: https://create.roblox.com/docs/art/modeling/texture-specifications (OpenGL normals only; grayscale metalness and roughness)
+        // Spec: https://create.roblox.com/docs/art/modeling/reimport (the file name suffix it assigns to each map)
+        preset(
+            "Roblox SurfaceAppearance (separate maps)",
+            vec![
+                map("Color", 8, base_with_alpha()),
+                map("Normal", 8, normal(VirtualMap::NormalOpenGl)),
+                map("Metalness", 8, gray(ch(Channel::Metallic, 0))),
+                map("Roughness", 8, gray(ch(Channel::Roughness, 0))),
+            ],
+        ),
+        // Spec: https://help.sketchfab.com/en/articles/16152630-pbr-maps (sRGB base color, linear grayscale metalness; no alpha, the docs don't say opacity reads it)
+        // Spec: https://help.sketchfab.com/en/articles/16152634-materials-pbr (roughness, AO and emission channels)
+        // Spec: https://help.sketchfab.com/en/articles/16152621-normal-map-bump-map (DirectX normals by default)
+        preset(
+            "Sketchfab Metalness (separate maps)",
+            vec![
+                map("BaseColor", 8, rgb(|k| ch(Channel::BaseColor, k))),
+                map("Metalness", 8, gray(ch(Channel::Metallic, 0))),
+                map("Roughness", 8, gray(ch(Channel::Roughness, 0))),
+                map("Normal", 8, normal(VirtualMap::NormalDirectX)),
+                map("AmbientOcclusion", 8, gray(virt(VirtualMap::AoMixed, 0))),
+                map("Emission", 8, rgb(|k| ch(Channel::Emissive, k))),
+            ],
+        ),
         preset("Separate maps", Channel::ALL.into_iter().map(channel_map).collect()),
         preset(
             "Mesh maps",
@@ -240,11 +311,27 @@ pub const DEFAULT_PRESET: &str = "Document channels + Normal + AO (No Alpha)";
 /// scripts still use it).
 const OLD_DEFAULT_PRESET: &str = "Document channels + Normal + AO";
 
+/// Names introduced with the export update, which could previously belong to saved user presets.
+pub const NEW_BUILTIN_PRESET_NAMES: [&str; 5] = [
+    "Unreal Engine Subsurface Profile (Packed)",
+    "glTF Specular Glossiness (archived extension)",
+    "Redshift Standard Material (separate maps)",
+    "Roblox SurfaceAppearance (separate maps)",
+    "Sketchfab Metalness (separate maps)",
+];
+
+/// The immutable built-in templates shared by menu and command lookups.
+pub fn builtin_preset_catalog() -> &'static [ExportPreset] {
+    static CATALOG: std::sync::LazyLock<Vec<ExportPreset>> = std::sync::LazyLock::new(builtin_presets);
+    &CATALOG
+}
+
 /// A built-in preset by name (case-insensitive).
 pub fn builtin_preset(name: &str) -> Option<ExportPreset> {
     let name = name.trim();
     let name = if name.eq_ignore_ascii_case(OLD_DEFAULT_PRESET) { DEFAULT_PRESET } else { name };
-    builtin_presets().into_iter().find(|p| p.name.eq_ignore_ascii_case(name))
+
+    builtin_preset_catalog().iter().find(|preset| preset.name.eq_ignore_ascii_case(name)).cloned()
 }
 
 /// Parse and validate a user preset.

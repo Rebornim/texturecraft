@@ -13,13 +13,16 @@ use texturecraft_core::{NormalFormat, PROJECT_EXT};
 use texturecraft_core::{Project, TextureSet};
 use texturecraft_formats::PlannedFile;
 use texturecraft_formats::mesh_import::{MeshUvSource, import_mesh_geometry};
-use texturecraft_formats::{ExportInput, ExportOptions, ExportedFile, FileFormat, MapOverride, Padding, ProjectFile};
+use texturecraft_formats::{ExportInput, ExportOptions, ExportedFile, FileFormat, MapOverride, MapPreview, Padding, ProjectFile};
 use texturecraft_geom::glam::Vec2;
-use texturecraft_geom::{Mesh, primitives};
+use texturecraft_geom::{Mesh, UvGBuffer, primitives};
 
 use crate::commands::{CommandSpec, always, bad, normal_format_param, strp, u64p};
 use crate::session::{Document, Session};
 use crate::{EngineError, Result, cmd};
+
+/// export.preview's picture width when the params name none
+const DEFAULT_PREVIEW_SIDE_PIXELS: u32 = 128;
 
 type BakePaintMaps = BTreeMap<(usize, texturecraft_core::BakePaintTarget), Arc<texturecraft_bake::BakePaintMap>>;
 
@@ -82,7 +85,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Export textures",
             ["File"],
             None,
-            "{dir, preset?: built-in or user preset name, or a preset object {name, maps}, ts?: index|[indexes]|\"all\", format?: bmp|jpeg|jng|pgm|png|targa|tiff|hdr|exr|webp|psd (or the extension), bitDepth?: 8|16|32 (32 is float for tiff, hdr and exr; 16 is half float for exr), dithering?: bool (8-bit files), padding?: none|dilation|dilationDefault|diffusion|infinite, dilation?: px, size?: px, normalFormat?: openGl|directX, maps?: [{map: index into the preset's maps, enabled?: bool (false leaves the map out), format?, bitDepth?, dithering?}] (per map file type and bit depth), colorSpace?: sRGB (default for 8/16-bit files)|Linear Rec.709 (default for exr, hdr)|ACEScg|ACES2065-1 (colour maps are converted, data maps never are; 8/16-bit files clamp to 0-1; a chosen space is also recorded in the colour maps: an ICC profile in PNG, JPEG, TIFF and WebP, the chromaticities in EXR; TGA, BMP, HDR, JNG, PGM and PSD exports warn about missing metadata), reservedNames?: [file names or UDIM patterns] (from earlier commands of the same export, compared ignoring case), materialX?: bool (also write an OpenPBR .mtlx per texture set, reusing compatible OpenPBR maps and writing dedicated textures for the remaining inputs), usdAsset?: true|[export params, one object per texture set (not empty)] (also write <mesh>.usd, a binary USD file, next to the textures: the whole mesh, a UsdPreviewSurface material per texture set whose inputs read the files the export wrote with its output template (base color, roughness, metallic, normal, emissive, opacity, clear coat; packed maps read their own channels); a texture set outside the export has none; true takes this command's ts, options and reservedNames, a list gives each texture set's own `ts`, options and `reservedNames`, a file the texture export skipped is not read, the export window sends it with the last command; a failure is a warning)} → {files, warnings, materialUdimPatterns?}",
+            "{dir, preset?: built-in or user preset name, or a preset object {name, maps}, ts?: index|[indexes]|\"all\", format?: bmp|jpeg|jng|pgm|png|targa|tiff|hdr|exr|webp|psd (or the extension; the maps written as psd are the layers of one <mesh>_<texture set>.psd per texture set and UV tile, which the USD asset and MaterialX don't read), bitDepth?: 8|16|32 (32 is float for tiff, hdr and exr; 16 is half float for exr), dithering?: bool (8-bit files), padding?: none|dilation|dilationDefault|diffusion|infinite, dilation?: px, size?: px, normalFormat?: openGl|directX, maps?: [{map: index into the preset's maps, enabled?: bool (false leaves the map out), format?, bitDepth?, dithering?, size?: px (wins over `size`)}] (per map file type, bit depth and size), colorSpace?: sRGB (default for 8/16-bit files)|Linear Rec.709 (default for exr, hdr)|ACEScg|ACES2065-1 (colour maps are converted, data maps never are; 8/16-bit files clamp to 0-1; a chosen space is also recorded in the colour maps: an ICC profile in PNG, JPEG, TIFF and WebP, the chromaticities in EXR; TGA, BMP, HDR, JNG, PGM and PSD exports warn about missing metadata), reservedNames?: [file names or UDIM patterns] (from earlier commands of the same export, compared ignoring case), materialX?: bool (also write an OpenPBR .mtlx per texture set, reusing compatible OpenPBR maps and writing dedicated textures for the remaining inputs), usdAsset?: true|[export params, one object per texture set (not empty)] (also write <mesh>.usd, a binary USD file, next to the textures: the whole mesh, a UsdPreviewSurface material per texture set whose inputs read the files the export wrote with its output template (base color, roughness, metallic, normal, emissive, opacity, clear coat; packed maps read their own channels); a texture set outside the export has none; true takes this command's ts, options and reservedNames, a list gives each texture set's own `ts`, options and `reservedNames`, a file the texture export skipped is not read, the export window sends it with the last command; a failure is a warning), shaderParameters?: true|[texture set indexes] (also write <project>_shaders.json: the shader's model and settings and the texture sets using it; true lists this command's ts, the export window sends every set of the export with the last command; a failure is a warning)} → {files, warnings, materialUdimPatterns?}",
             always,
             export_textures
         ),
@@ -100,9 +103,18 @@ pub fn specs() -> Vec<CommandSpec> {
             "List export outputs",
             [],
             None,
-            "{preset?: name or preset object, ts?, format?, bitDepth?, dithering?, size?, colorSpace?, maps?} → [{ts, map, file, format, bitDepth, dithering, size, sourceSize, warnings}] (keeps the first file per case-insensitive name and warns about later duplicates)",
+            "{preset?: name or preset object, ts?, format?, bitDepth?, dithering?, size?, colorSpace?, maps?} → [{ts, map, file, tile: UV tile number or null, udimPattern: file pattern with <UDIM> or null, format, bitDepth, dithering, size, sourceSize, warnings, layers: [{map, name}] (a PSD's maps, top first)}] (keeps the first file per case-insensitive name, warns about later duplicates, and rejects file and folder conflicts)",
             always,
             plan
+        ),
+        cmd!(
+            "export.preview",
+            "Preview an output map",
+            [],
+            None,
+            "{map: index into the preset's maps, side?: px (default 128, at most 512), plus the params of export.plan (the first texture set `ts` names)} → {width, height, channels: [\"R\", ...], pixels: [8-bit values as an sRGB file stores them, channels interleaved, row by row]}, or null when the texture set writes no file for the map",
+            always,
+            preview
         ),
     ]
 }
@@ -351,50 +363,118 @@ impl Session {
     }
 
     /// Render every export file for texture sets `sets` (in memory; works on the web). A file
-    /// named like one an earlier set exports is left out, with a warning (see
-    /// [`texturecraft_formats::skip_repeated_names`]).
+    /// named like one an earlier set exports is left out, with a warning.
     pub fn export_files(&mut self, sets: &[usize], opts: &ExportOptions) -> Result<Vec<ExportedFile>> {
-        let mut files = self.render_export_files(sets, opts, |_, plans| plans)?;
-        texturecraft_formats::skip_repeated_names(&mut files);
-        Ok(files)
+        self.export_file_jobs(sets.iter().map(|&set| (set, opts)))
     }
 
+    /// Render one in-memory batch, using each set's own export settings when supplied.
+    pub fn export_file_jobs<'a>(&mut self, jobs: impl IntoIterator<Item = (usize, &'a ExportOptions)>) -> Result<Vec<ExportedFile>> {
+        self.render_export_jobs(jobs, |_, plans| plans)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn render_export_files(
         &mut self,
         sets: &[usize],
         options: &ExportOptions,
+        select: impl FnMut(usize, Vec<PlannedFile>) -> Vec<PlannedFile>,
+    ) -> Result<Vec<ExportedFile>> {
+        self.render_export_jobs(sets.iter().map(|&set| (set, options)), select)
+    }
+
+    fn render_export_jobs<'a>(
+        &mut self,
+        jobs: impl IntoIterator<Item = (usize, &'a ExportOptions)>,
         mut select: impl FnMut(usize, Vec<PlannedFile>) -> Vec<PlannedFile>,
     ) -> Result<Vec<ExportedFile>> {
+        let project = &self.doc.project;
+        let mesh_name = stem_of(project.mesh.trim_start_matches("builtin:"));
+        let mut pending = Vec::new();
+        for (set_index, options) in jobs {
+            let plans = texturecraft_formats::list_outputs(project, set_index, &mesh_name, options).map_err(fe)?;
+            let plans = select(set_index, plans);
+            if !plans.is_empty() {
+                pending.push((set_index, options, plans));
+            }
+        }
+
+        // Keep each winning plan with the options of the job that produced it
+        let plans = pending.iter_mut().enumerate().flat_map(|(job, (_, _, plans))| plans.drain(..).map(move |plan| (job, plan)));
+        let plans = texturecraft_formats::export::keep_first_planned_names(plans);
+        if pending.len() > 1 {
+            texturecraft_formats::export::validate_export_paths(plans.iter().map(|(_, plan)| plan.name.as_str())).map_err(fe)?;
+        }
+
+        for (job, plan) in plans {
+            pending[job].2.push(plan);
+        }
+        pending.retain(|(_, _, plans)| !plans.is_empty());
+
+        let mut psd_bytes = 0;
+        for (set_index, options, plans) in &pending {
+            let set = project.texture_set(*set_index).map_err(|error| EngineError::Other(error.to_string()))?;
+            texturecraft_formats::export::check_psd_batch(set, options, plans, &mut psd_bytes).map_err(fe)?;
+        }
+
         if self.solo.is_none() {
             self.update();
         }
 
-        let mesh_name = stem_of(self.doc.project.mesh.trim_start_matches("builtin:"));
         let mut out = Vec::new();
-        let empty = Default::default();
-        for &set_index in sets {
-            let cache = self.caches.get(set_index).ok_or_else(|| EngineError::Other(format!("no texture set {set_index}")))?;
-            let plans = texturecraft_formats::list_outputs(&self.doc.project, set_index, &mesh_name, options).map_err(fe)?;
-            let plans = select(set_index, plans);
-            if plans.is_empty() {
-                continue;
-            }
-
-            let composite =
-                self.document_composite(set_index, &cache.covered_tiles).ok_or_else(|| EngineError::Other(format!("no texture set {set_index}")))?;
-            let coverage = cache.gbuf.coverage_mask();
-            let input = ExportInput {
-                project: &self.doc.project,
-                ts: set_index,
-                composite: &composite,
-                baked: self.doc.baked.get(&set_index).unwrap_or(&empty),
-                coverage: &coverage,
-                mesh_name: &mesh_name,
-            };
-            out.extend(texturecraft_formats::export::render_planned_maps(&input, options, plans).map_err(fe)?);
+        for (set_index, options, plans) in pending {
+            let files = self.with_export_input(
+                set_index,
+                &mesh_name,
+                |grid| Cow::Owned(grid.coverage_mask()),
+                |input| texturecraft_formats::export::render_planned_maps(input, options, plans).map_err(fe),
+            )?;
+            out.extend(files);
         }
 
         Ok(out)
+    }
+
+    /// Run `with` on texture set `set_index`'s export input: its document composite, coverage and baked maps
+    fn with_export_input<T, Coverage: Clone>(
+        &self,
+        set_index: usize,
+        mesh_name: &str,
+        coverage: impl FnOnce(&UvGBuffer) -> Cow<'_, [Coverage]>,
+        with: impl FnOnce(&ExportInput<Coverage>) -> Result<T>,
+    ) -> Result<T> {
+        let missing = || EngineError::Other(format!("no texture set {set_index}"));
+        let cache = self.caches.get(set_index).ok_or_else(missing)?;
+        let composite = self.document_composite(set_index, &cache.covered_tiles).ok_or_else(missing)?;
+        let coverage = coverage(&cache.gbuf);
+        let empty = Default::default();
+        let input = ExportInput {
+            project: &self.doc.project,
+            ts: set_index,
+            composite: &composite,
+            baked: self.doc.baked.get(&set_index).unwrap_or(&empty),
+            coverage: &coverage,
+            mesh_name,
+        };
+        with(&input)
+    }
+
+    /// A picture of output map `map` for the first texture set named in `params`, with each side at most `side` pixels.
+    /// Returns None when the map writes no file.
+    pub fn export_preview(&mut self, params: &Value, map: usize, side: u32) -> Result<Option<MapPreview>> {
+        let options = export_options(self, params, "export.preview")?;
+        let Some(&set_index) = sets_param(self, params, "export.preview")?.first() else { return Ok(None) };
+
+        if self.solo.is_none() {
+            self.update();
+        }
+        let mesh_name = stem_of(self.doc.project.mesh.trim_start_matches("builtin:"));
+        self.with_export_input(
+            set_index,
+            &mesh_name,
+            |grid| Cow::Borrowed(&grid.tri),
+            |input| MapPreview::sample_triangles(input, &options, map, side).map_err(fe),
+        )
     }
 }
 
@@ -457,12 +537,12 @@ pub fn export_options(session: &Session, params: &Value, cmd: &str) -> Result<Ex
     Ok(options)
 }
 
-/// `maps`: per map `{map: index into the preset's maps, enabled?, format?, bitDepth?, dithering?}`.
+/// `maps`: per map `{map: index into the preset's maps, enabled?, format?, bitDepth?, dithering?, size?}`
 fn map_overrides(params: &Value, map_count: usize, cmd: &str) -> Result<std::collections::BTreeMap<usize, MapOverride>> {
     let mut overrides = std::collections::BTreeMap::new();
     let Some(list) = params.get("maps").filter(|value| !value.is_null()) else { return Ok(overrides) };
 
-    let list = list.as_array().ok_or_else(|| bad(cmd, "`maps` must be a list of {map, enabled?, format?, bitDepth?, dithering?}"))?;
+    let list = list.as_array().ok_or_else(|| bad(cmd, "`maps` must be a list of {map, enabled?, format?, bitDepth?, dithering?, size?}"))?;
     for settings in list {
         let index = u64p(settings, "map").and_then(|value| usize::try_from(value).ok()).filter(|index| *index < map_count);
         let index = index.ok_or_else(|| bad(cmd, format!("`maps`: `map` must be the index of one of the preset's {map_count} maps")))?;
@@ -480,6 +560,10 @@ fn map_overrides(params: &Value, map_count: usize, cmd: &str) -> Result<std::col
         }
         if let Some(dithering) = settings.get("dithering").filter(|value| !value.is_null()) {
             options.dither = Some(dithering.as_bool().ok_or_else(|| bad(cmd, "`maps`: `dithering` must be true or false"))?);
+        }
+        if let Some(size) = settings.get("size").filter(|value| !value.is_null()) {
+            let size = size.as_u64().and_then(|size| u32::try_from(size).ok()).ok_or_else(|| bad(cmd, "`maps`: `size` must be a size in texels"))?;
+            options.size = Some(crate::session::check_resolution(size)?);
         }
 
         overrides.insert(index, options);
@@ -510,6 +594,22 @@ fn set_index(s: &Session, v: &Value, cmd: &str) -> Result<usize> {
     v.as_u64().and_then(|index| usize::try_from(index).ok()).filter(|index| *index < s.set_count()).ok_or_else(|| bad(cmd, "invalid `ts`"))
 }
 
+fn preview(session: &mut Session, params: &Value) -> Result<Value> {
+    let map = u64p(params, "map").and_then(|map| usize::try_from(map).ok());
+    let map = map.ok_or_else(|| bad("export.preview", "`map` (an output map index) is required"))?;
+    let side = u64p(params, "side").map_or(DEFAULT_PREVIEW_SIDE_PIXELS, |side| side.clamp(1, u64::from(texturecraft_formats::MAX_PREVIEW_SIDE)) as u32);
+
+    Ok(match session.export_preview(params, map, side)? {
+        Some(preview) => json!({
+            "width": preview.width,
+            "height": preview.height,
+            "channels": preview.channels.iter().map(|dest| format!("{dest:?}")).collect::<Vec<_>>(),
+            "pixels": preview.pixels,
+        }),
+        None => Value::Null,
+    })
+}
+
 fn plan(session: &mut Session, params: &Value) -> Result<Value> {
     use texturecraft_formats::export::{list_set_outputs, scale_export_side};
 
@@ -527,18 +627,23 @@ fn plan(session: &mut Session, params: &Value) -> Result<Value> {
         let block_size = set.block_resolution();
         for (_, output) in set_outputs {
             let source_size = output.tile.map_or(set.resolution, |tile| set.tile_resolution(tile));
-            let size = scale_export_side(source_size, block_size, options.size);
+
+            // A map's own size wins over the export's; a PSD is the size of its largest layer
+            let size = output.maps().map(|map| scale_export_side(source_size, block_size, options.map_size(map))).max().unwrap_or(source_size);
 
             files.push(json!({
                 "ts": set_index,
                 "map": output.map,
                 "file": output.name,
+                "tile": output.tile,
+                "udimPattern": output.udim_name,
                 "format": output.format.extension(),
                 "bitDepth": output.bit_depth,
                 "dithering": output.dither,
                 "size": size,
                 "sourceSize": source_size,
                 "warnings": output.warnings,
+                "layers": output.layers.iter().map(|layer| json!({ "map": layer.map, "name": layer.name })).collect::<Vec<_>>(),
             }));
         }
     }
@@ -771,6 +876,7 @@ fn export_textures(session: &mut Session, params: &Value) -> Result<Value> {
     let reserved_patterns: Vec<_> = taken_names.keys().filter(|name| name.contains("<udim>")).cloned().collect();
     let material = params.get("materialX").and_then(Value::as_bool).unwrap_or(false);
     let usd_asset = usd_asset_param(session, params, &options, &sets)?;
+    let shader_sets = crate::shader_parameters::shader_parameters_param(&session.doc.project, params, &sets, "file.exportTextures")?;
     let mut warnings = Vec::new();
     let mut udim_patterns = Vec::new();
 
@@ -830,6 +936,22 @@ fn export_textures(session: &mut Session, params: &Value) -> Result<Value> {
     if let Some(exports) = &usd_asset {
         written.extend(write_usd_asset(session, dir, exports, &mut warnings));
     }
+    if let Some(shader_sets) = shader_sets {
+        let name = crate::shader_parameters::shader_parameters_file(&session.doc.project.name);
+        let path = dir.join(&name);
+        let parameters = crate::shader_parameters::shader_parameters(&session.doc.project, &shader_sets);
+
+        // Check the name against this command's files and the earlier commands' `reservedNames`, as the web download and headless export do
+        let roots = written.iter().filter_map(|written| written.strip_prefix(dir).ok()?.components().next()?.as_os_str().to_str());
+        let checked = crate::shader_parameters::check_shader_parameters_name(&name, roots.chain(taken_names.keys().map(String::as_str)));
+
+        // The textures are written by now: a shaders file that fails is a warning, as a failed USD asset is
+        let text = checked.and_then(|()| serde_json::to_vec_pretty(&parameters).map_err(|error| error.to_string()));
+        match text.and_then(|text| texturecraft_formats::write_atomic(&path, &text).map_err(|error| error.to_string())) {
+            Ok(()) => written.push(path),
+            Err(error) => warnings.push(format!("The shader settings file was not written: {error}")),
+        }
+    }
 
     session.log.info("MapExporter", format!("Exported {} textures to {}", written.len(), dir.display()));
     let mut response = json!({ "files": written.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(), "warnings": warnings });
@@ -871,7 +993,7 @@ fn usd_asset_param(session: &Session, params: &Value, options: &ExportOptions, s
 /// warning: the textures of the command are already written.
 #[cfg(not(target_arch = "wasm32"))]
 fn write_usd_asset(session: &Session, dir: &std::path::Path, exports: &[UsdAssetExport], warnings: &mut Vec<String>) -> Option<std::path::PathBuf> {
-    match build_usd_asset(session, dir, exports) {
+    match build_usd_asset(session, dir, exports, warnings) {
         Ok(path) => Some(path),
         Err(error) => {
             warnings.push(format!("{USD_ASSET_FAILED}: {error}"));
@@ -881,7 +1003,7 @@ fn write_usd_asset(session: &Session, dir: &std::path::Path, exports: &[UsdAsset
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn build_usd_asset(session: &Session, dir: &std::path::Path, exports: &[UsdAssetExport]) -> Result<std::path::PathBuf> {
+fn build_usd_asset(session: &Session, dir: &std::path::Path, exports: &[UsdAssetExport], warnings: &mut Vec<String>) -> Result<std::path::PathBuf> {
     use texturecraft_formats::{list_outputs, usd_layer_with_textures, usd_texture_bindings};
     let project = &session.doc.project;
     let mesh_name = stem_of(project.mesh.trim_start_matches("builtin:"));
@@ -902,6 +1024,15 @@ fn build_usd_asset(session: &Session, dir: &std::path::Path, exports: &[UsdAsset
 
             // A map that lost any file (a tile of a UDIM map) is not bound: its `<UDIM>` name would read a file it does not own
             kept.retain(|file| !skipped_maps.contains(&file.map));
+            let mut unsupported = HashSet::new();
+            for file in kept.iter().filter(|file| !file.format.usable_by_usd_asset() && unsupported.insert(file.format)) {
+                let format = file.format.extension().to_ascii_uppercase();
+                let warning =
+                    format!("The USD asset doesn't read {format} files, so the material of texture set \"{}\" leaves out those maps", texture_set.name);
+                if !warnings.contains(&warning) {
+                    warnings.push(warning);
+                }
+            }
             by_set.entry(set).or_insert_with(|| usd_texture_bindings(texture_set, options, project.normal_format, &kept));
         }
     }
@@ -948,8 +1079,20 @@ fn reserve_export_names(
     let mut blocked_maps = HashSet::new();
     plans.retain(|plan| {
         let name = plan.name.to_ascii_lowercase();
-        if reserved_patterns.iter().any(|pattern| udim_matches(pattern, &name)) {
-            blocked_maps.insert(plan.map);
+        let reserved = reserved_patterns.iter().any(|pattern| udim_matches(pattern, &name));
+        if !reserved && let Entry::Vacant(entry) = taken_names.entry(name) {
+            entry.insert(Some(set_index));
+            return true;
+        }
+
+        // A set warning outlives the file that carried it
+        for warning in plan.warnings.iter().filter(|warning| texturecraft_formats::export::is_set_warning(warning)) {
+            if !warnings.contains(warning) {
+                warnings.push(warning.clone());
+            }
+        }
+        blocked_maps.extend(plan.maps());
+        if reserved {
             warnings.push(format!(
                 "\"{}\" was not written: an earlier MaterialX document uses that UDIM pattern. Rename a texture set or change the template file names",
                 plan.name
@@ -957,12 +1100,6 @@ fn reserve_export_names(
             return false;
         }
 
-        if let Entry::Vacant(entry) = taken_names.entry(name) {
-            entry.insert(Some(set_index));
-            return true;
-        }
-
-        blocked_maps.insert(plan.map);
         if fallback {
             warnings.push(format!(
                 "MaterialX: \"{}\" was not written: a file of the chosen template or of an earlier command of this export has the name. Rename a texture set or change the template file names",
@@ -1039,11 +1176,11 @@ fn material_map_options(options: &ExportOptions, project_normal: NormalFormat) -
             continue;
         }
 
-        let mut overrides = MapOverride::default();
+        let settings = replacement.and_then(|(index, _)| options.maps.get(&index));
+        let mut overrides = MapOverride { size: settings.and_then(|settings| settings.size), ..MapOverride::default() };
         let requested_format = replacement.map(|(index, _)| selected_format(index)).or(options.format_override);
         if requested_format.is_none_or(material_format) {
             overrides.format = requested_format;
-            let settings = replacement.and_then(|(index, _)| options.maps.get(&index));
             overrides.bit_depth =
                 settings.and_then(|settings| settings.bit_depth).or(options.bit_depth_override).or_else(|| replacement.map(|(_, selected)| selected.bit_depth));
             overrides.dither = settings.and_then(|settings| settings.dither);

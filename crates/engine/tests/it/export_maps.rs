@@ -105,3 +105,24 @@ fn a_file_name_an_earlier_texture_set_exports_is_not_overwritten() {
     }
     assert_eq!(result["files"].as_array().unwrap().len(), names.len());
 }
+
+#[test]
+fn export_preview_shows_a_packed_map_small_and_nothing_for_a_left_out_one() {
+    let mut s = session();
+    let preset = s.export_preset("Unity HDRP (Mask Map)").unwrap();
+    let mask = preset.maps.iter().position(|map| map.file.contains("MaskMap")).unwrap();
+    let params = json!({"preset": preset.name, "ts": 0, "map": mask, "side": 16});
+
+    let preview = execute(&mut s, "export.preview", &params).unwrap();
+    let (width, height) = (preview["width"].as_u64().unwrap(), preview["height"].as_u64().unwrap());
+
+    assert!(width <= 16 && height > 0, "{preview}");
+    assert_eq!(preview["channels"], json!(["R", "G", "B", "A"]), "the mask map packs four channels");
+    assert_eq!(preview["pixels"].as_array().unwrap().len() as u64, width * height * 4);
+
+    let left_out = json!({"preset": preset.name, "ts": 0, "map": mask, "maps": [{"map": mask, "enabled": false}]});
+
+    assert!(execute(&mut s, "export.preview", &left_out).unwrap().is_null(), "a map the export leaves out has no file to show");
+    assert!(execute(&mut s, "export.preview", &json!({"preset": preset.name})).is_err(), "the map is required");
+    assert!(execute(&mut s, "export.preview", &json!({"preset": preset.name, "map": preset.maps.len()})).is_err());
+}

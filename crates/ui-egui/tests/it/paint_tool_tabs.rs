@@ -85,6 +85,7 @@ fn the_brush_preview_keeps_its_picture_until_the_paint_colour_changes() {
     let first = pictures(&harness);
 
     harness.run_steps(SCROLL_FRAMES);
+
     assert_eq!(pictures(&harness), first, "an unchanged brush reuses its picture");
 
     execute(&mut harness.state_mut().session, "tool.material", &json!({"channel": "baseColor", "color": [0.0, 0.0, 1.0]})).unwrap();

@@ -356,6 +356,7 @@ impl Session {
             erase,
             stencil,
             before,
+            start_revision: self.revision,
             label,
             staging: Staging::default(),
         });
@@ -578,6 +579,12 @@ impl Session {
         }
 
         let gbuf = self.caches.get(stroke.ts).map(|c| c.gbuf.clone());
+        if stroke.stencil.is_some() && !with_commit_source(&stroke, gbuf.as_deref(), &self.mesh, &stroke.canvas.dirty, stencil_allows_stroke) {
+            self.mark_painted(stroke.ts, stroke.target, stroke.canvas.dirty.iter().copied());
+            self.discard_unused_stroke_mask(&stroke);
+            return Ok(());
+        }
+
         let mesh = self.mesh.clone();
         let mut staging = std::mem::take(&mut stroke.staging);
         match stroke.target {
@@ -608,6 +615,32 @@ impl Session {
         // Recompute committed tiles at low priority because the live preview already shows them
         self.mark_settle(stroke.ts, stroke.target, stroke.canvas.dirty.iter().copied());
         Ok(())
+    }
+
+    fn discard_unused_stroke_mask(&mut self, stroke: &ActiveStroke) {
+        // An intervening edit may already have recorded the mask effect
+        if self.revision != stroke.start_revision {
+            return;
+        }
+
+        self.doc.project.next_id = stroke.before.project.next_id;
+        if let Some(PaintTarget::Mask(effect)) = stroke.target
+            && let Some((owner, _)) = self.doc.project.effect(effect)
+            && let Some(previous_layer) = stroke.before.project.layers.get(&owner)
+            && !previous_layer.mask.iter().flat_map(|mask| &mask.effects).any(|previous| previous.id == effect)
+            && let Some(layer) = self.doc.project.layers.get_mut(&owner)
+        {
+            layer.mask = previous_layer.mask.clone();
+
+            // Removing a new mask background can change texels outside the dabs
+            if previous_layer.mask.is_none() {
+                for texture_set in self.doc.project.sets_drawing(owner) {
+                    if let Some(cache) = self.caches.get_mut(texture_set) {
+                        cache.invalidate_all();
+                    }
+                }
+            }
+        }
     }
 
     /// Abandon the active stroke (Esc).
@@ -748,6 +781,28 @@ impl Session {
     pub fn selected_layer_id(&self) -> Option<LayerId> {
         self.selected_layer()
     }
+}
+
+/// Check that some rasterized paint survives the stencil before writing tiles or history.
+fn stencil_allows_stroke(source: CommitSource) -> bool {
+    use texturecraft_texel::{TILE, from_u16};
+
+    let Some(sample_stencil) = source.per_texel else { return true };
+    let opacity = source.opacity.clamp(0.0, 1.0);
+    source.tiles.iter().any(|&(tile_x, tile_y)| {
+        source.alpha.tile(tile_x, tile_y).is_some_and(|alpha| {
+            alpha.iter().enumerate().any(|(index, &coverage)| {
+                let weight = from_u16(coverage) * opacity;
+                if weight <= 0.0 {
+                    return false;
+                }
+
+                let x = tile_x * TILE + index as u32 % TILE;
+                let y = tile_y * TILE + index as u32 / TILE;
+                sample_stencil(x, y).is_some_and(|(_, factor)| weight * factor > 0.0)
+            })
+        })
+    })
 }
 
 /// Run `f` with `stroke` as a commit source over `tiles` (the stencil's alpha and, on the Projection tool, its colors come from the surface under each texel)

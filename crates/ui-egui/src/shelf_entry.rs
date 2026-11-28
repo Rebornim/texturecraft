@@ -13,9 +13,10 @@ use texturecraft_engine::paint::presets::{BrushPreset, PRESETS};
 use texturecraft_engine::smart_masks::{SMART_MASKS, SmartMask};
 
 use crate::TextureCraftApp;
-use crate::i18n::tr;
+use crate::i18n::{n_, tr};
 use crate::shelf::{Asset, Tab, apply};
 use crate::shelf_preview::ShelfPreview;
+use crate::thumbs::Thumbs;
 
 /// Probes per side of the grid that compares a procedural under two seeds, off the pattern's grid lines
 const SEED_PROBES: usize = 4;
@@ -124,6 +125,21 @@ impl ShelfEntry {
         path.len() <= own.len() && path.iter().zip(own).all(|(wanted, have)| wanted == have)
     }
 
+    /// What the asset is used as, lowercase (English, shown through `tr`): the menu's Usages row
+    pub(crate) fn usage(&self) -> &'static str {
+        match self {
+            ShelfEntry::Material(material) if material.smart => n_("smart material"),
+            ShelfEntry::Material(_) => n_("material"),
+            ShelfEntry::SmartMask(_) => n_("smart mask"),
+            ShelfEntry::Filter(_) => n_("filter"),
+            ShelfEntry::Brush(_) | ShelfEntry::SavedBrush { .. } => n_("brush"),
+            ShelfEntry::Alpha(_) => n_("alpha"),
+            ShelfEntry::Procedural(_) => n_("procedural"),
+            ShelfEntry::Environment(_) => n_("environment"),
+            ShelfEntry::Image(_) => n_("texture"),
+        }
+    }
+
     /// The name under the tile, translated where the asset's name is
     pub(crate) fn label(&self) -> &str {
         match self {
@@ -156,23 +172,23 @@ impl ShelfEntry {
     }
 
     /// The thumbnail, or None while it renders
-    pub(crate) fn thumbnail(&self, app: &mut TextureCraftApp, ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    pub(crate) fn thumbnail(&self, thumbs: &mut Thumbs, session: &Session, ctx: &egui::Context) -> Option<egui::TextureHandle> {
         match self {
-            ShelfEntry::Material(material) => app.thumbs.material(ctx, material.id),
-            ShelfEntry::SmartMask(mask) => app.thumbs.smart_mask(ctx, mask.id),
-            ShelfEntry::Filter(filter) => app.thumbs.filter(ctx, filter.id),
-            ShelfEntry::Brush(preset) => app.thumbs.brush_preset(ctx, preset),
-            ShelfEntry::SavedBrush { path: Some(path), .. } => app.thumbs.saved_brush(ctx, path, &app.session.images),
+            ShelfEntry::Material(material) => thumbs.material(ctx, material.id),
+            ShelfEntry::SmartMask(mask) => thumbs.smart_mask(ctx, mask.id),
+            ShelfEntry::Filter(filter) => thumbs.filter(ctx, filter.id),
+            ShelfEntry::Brush(preset) => thumbs.brush_preset(ctx, preset),
+            ShelfEntry::SavedBrush { path: Some(path), .. } => thumbs.saved_brush(ctx, path, &session.images),
             ShelfEntry::SavedBrush { path: None, name, index } => {
-                let brush = &app.session.brush_presets.list.get(*index)?.brush;
-                app.thumbs.session_brush(ctx, name, brush, &app.session.images)
+                let brush = &session.brush_presets.list.get(*index)?.brush;
+                thumbs.session_brush(ctx, name, brush, &session.images)
             }
-            ShelfEntry::Alpha(alpha) => app.thumbs.alpha(ctx, alpha),
-            ShelfEntry::Procedural(kind) => app.thumbs.procedural(ctx, *kind),
-            ShelfEntry::Environment(name) => app.thumbs.environment(ctx, name),
+            ShelfEntry::Alpha(alpha) => thumbs.alpha(ctx, alpha),
+            ShelfEntry::Procedural(kind) => thumbs.procedural(ctx, *kind),
+            ShelfEntry::Environment(name) => thumbs.environment(ctx, name),
             ShelfEntry::Image(name) => {
-                let image = app.session.images.get(name).cloned()?;
-                Some(app.thumbs.image(ctx, name, &image))
+                let image = session.images.get(name)?;
+                Some(thumbs.image(ctx, name, image))
             }
         }
     }

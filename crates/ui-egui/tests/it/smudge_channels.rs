@@ -73,11 +73,13 @@ fn clicking_a_channel_in_the_smudge_panel_turns_it_off_and_on_for_the_material()
 
     smudge_chip(&harness, Channel::Metallic).click();
     harness.run_steps(4);
+
     assert!(!harness.state().session.tool.enabled.contains(&Channel::Metallic));
     assert!(!chip_is_on(&harness, Channel::Metallic));
 
     smudge_chip(&harness, Channel::Metallic).click();
     harness.run_steps(4);
+
     assert!(harness.state().session.tool.enabled.contains(&Channel::Metallic));
     assert!(chip_is_on(&harness, Channel::Metallic));
 }
@@ -85,6 +87,7 @@ fn clicking_a_channel_in_the_smudge_panel_turns_it_off_and_on_for_the_material()
 #[test]
 fn material_tab_and_smudge_panel_stay_in_sync() {
     let mut harness = harness();
+
     // The Smudge panel draws a chip per channel, the Material section a pill
     harness.get_by_role_and_label(Role::CheckBox, "Height").scroll_to_me();
     harness.run_steps(SCROLL_FRAMES);

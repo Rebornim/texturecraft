@@ -2,17 +2,19 @@
 //! dialog's Output templates tab list, read, save and remove. On the desktop the user presets
 //! are mirrored as `<name>.json` files in a library folder (see [`Session::load_export_presets`]).
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 use serde_json::{Value, json};
 use texturecraft_formats::export::{MAX_PRESET_NAME, sanitize_file_stem};
-use texturecraft_formats::{ExportPreset, builtin_preset, builtin_presets, preset_from_json};
+use texturecraft_formats::{ExportPreset, NEW_BUILTIN_PRESET_NAMES, builtin_preset, builtin_preset_catalog, preset_from_json};
 
 use crate::commands::{CommandSpec, always, bad, strp};
 use crate::{Result, Session, cmd};
 
 /// Most user presets kept (and read from the library folder).
 const MAX_USER_PRESETS: usize = 512;
+const BUILTIN_PRESET_PREFIX: &str = "builtin:";
 
 /// The user's export presets.
 #[derive(Clone, Debug, Default)]
@@ -51,6 +53,16 @@ fn same_name(a: &str, b: &str) -> bool {
     a.trim().eq_ignore_ascii_case(b.trim())
 }
 
+/// A qualified selector names a built-in independently of a saved library entry.
+pub fn unqualified_preset_name(name: &str) -> &str {
+    let mut name = name.trim();
+    while name.get(..BUILTIN_PRESET_PREFIX.len()).is_some_and(|prefix| prefix.eq_ignore_ascii_case(BUILTIN_PRESET_PREFIX)) {
+        name = &name[BUILTIN_PRESET_PREFIX.len()..];
+    }
+
+    name
+}
+
 /// Library file stem: two names with the same stem would share a file.
 fn file_key(name: &str) -> String {
     sanitize_file_stem(name.trim()).to_ascii_lowercase()
@@ -63,8 +75,25 @@ impl UserPresets {
 
     /// `name` belongs to a built-in or to a user preset other than `skip` (or shares its file).
     fn taken(&self, name: &str, skip: Option<usize>) -> bool {
-        builtin_preset(name).is_some()
-            || self.list.iter().enumerate().any(|(i, p)| Some(i) != skip && (same_name(&p.name, name) || file_key(&p.name) == file_key(name)))
+        let keeps_name = skip.and_then(|index| self.list.get(index)).is_some_and(|preset| same_name(&preset.name, name));
+        (!keeps_name && builtin_preset(unqualified_preset_name(name)).is_some()) || self.user_name_taken(name, skip)
+    }
+
+    fn user_name_taken(&self, name: &str, skip: Option<usize>) -> bool {
+        let key = file_key(name);
+        self.list.iter().enumerate().any(|(i, preset)| Some(i) != skip && (same_name(&preset.name, name) || file_key(&preset.name) == key))
+    }
+
+    /// Restore a saved preset under the name existing settings use.
+    pub fn restore(&mut self, preset: ExportPreset) -> std::result::Result<(), String> {
+        preset.validate().map_err(|error| error.to_string())?;
+        let reserved = builtin_preset(&preset.name).is_some_and(|builtin| !NEW_BUILTIN_PRESET_NAMES.contains(&builtin.name.as_str()));
+        if reserved || self.user_name_taken(&preset.name, None) || self.list.len() >= MAX_USER_PRESETS {
+            return Err(format!("preset \"{}\" exists already or the library is full", preset.name));
+        }
+
+        self.list.push(preset);
+        Ok(())
     }
 
     /// The first available name, adding a numbered suffix and shortening the base to fit.
@@ -119,7 +148,21 @@ impl UserPresets {
 impl Session {
     /// A built-in or user export preset by name (case-insensitive).
     pub fn export_preset(&self, name: &str) -> Option<ExportPreset> {
-        builtin_preset(name).or_else(|| self.export_presets.find(name).and_then(|i| self.export_presets.list.get(i).cloned()))
+        self.export_presets.find(name).and_then(|index| self.export_presets.list.get(index).cloned()).or_else(|| builtin_preset(unqualified_preset_name(name)))
+    }
+
+    pub fn has_user_export_preset(&self, name: &str) -> bool {
+        self.export_presets.find(name).is_some()
+    }
+
+    /// Use the familiar built-in name unless the user's library already owns that selector.
+    pub fn builtin_export_preset_id<'a>(&self, name: &'a str) -> Cow<'a, str> {
+        let mut id = Cow::Borrowed(name);
+        while self.has_user_export_preset(&id) {
+            id = Cow::Owned(format!("{BUILTIN_PRESET_PREFIX}{id}"));
+        }
+
+        id
     }
 
     /// Use `dir` as the user preset library: read its `*.json` presets (replacing the list) and
@@ -133,10 +176,8 @@ impl Session {
         files.sort();
         let mut lib = UserPresets { list: Vec::new(), dir: Some(dir) };
         for path in files.into_iter().take(MAX_USER_PRESETS) {
-            match texturecraft_formats::load_preset(&path).map_err(|e| e.to_string()) {
-                Ok(p) if lib.taken(&p.name, None) => warnings.push(format!("{}: preset \"{}\" exists already", path.display(), p.name)),
-                Ok(p) => lib.list.push(p),
-                Err(e) => warnings.push(format!("{}: {e}", path.display())),
+            if let Err(error) = texturecraft_formats::load_preset(&path).map_err(|error| error.to_string()).and_then(|preset| lib.restore(preset)) {
+                warnings.push(format!("{}: {error}", path.display()));
             }
         }
         self.export_presets = lib;
@@ -144,10 +185,12 @@ impl Session {
     }
 }
 
-fn list(s: &mut Session, _: &Value) -> Result<Value> {
-    let entry = |p: &ExportPreset, builtin: bool| json!({"name": p.name, "maps": p.maps.len(), "builtin": builtin});
-    let builtins = builtin_presets();
-    Ok(json!(builtins.iter().map(|p| entry(p, true)).chain(s.export_presets.list.iter().map(|p| entry(p, false))).collect::<Vec<_>>()))
+fn list(session: &mut Session, _: &Value) -> Result<Value> {
+    let entry = |name: &str, maps: usize, builtin: bool| json!({"name": name, "maps": maps, "builtin": builtin});
+    let builtins = builtin_preset_catalog().iter().map(|preset| entry(&session.builtin_export_preset_id(&preset.name), preset.maps.len(), true));
+    let custom = session.export_presets.list.iter().map(|preset| entry(&preset.name, preset.maps.len(), false));
+
+    Ok(json!(builtins.chain(custom).collect::<Vec<_>>()))
 }
 
 fn name_param<'a>(p: &'a Value, cmd: &str) -> Result<&'a str> {
@@ -216,11 +259,16 @@ fn save(session: &mut Session, params: &Value) -> Result<Value> {
 fn remove(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "export.preset.remove";
     let name = name_param(p, CMD)?;
-    if builtin_preset(name).is_some() {
-        return Err(bad(CMD, format!("\"{name}\" is a built-in preset and can't be removed")));
-    }
-    let i = s.export_presets.find(name).ok_or_else(|| bad(CMD, format!("no user export preset `{name}`")))?;
-    let removed = s.export_presets.list.remove(i);
+    let Some(index) = s.export_presets.find(name) else {
+        let message = if builtin_preset(unqualified_preset_name(name)).is_some() {
+            format!("\"{name}\" is a built-in preset and can't be removed")
+        } else {
+            format!("no user export preset `{name}`")
+        };
+        return Err(bad(CMD, message));
+    };
+
+    let removed = s.export_presets.list.remove(index);
     s.export_presets.delete(&removed.name);
     Ok(Value::Null)
 }
@@ -407,6 +455,39 @@ mod tests {
         assert!(run(&mut s, "file.exportTextures", json!({"dir": dir.display().to_string(), "preset": "missing"})).is_err());
         assert!(run(&mut s, "file.exportTextures", json!({"dir": dir.display().to_string(), "preset": {"name": "x", "maps": [{"file": "../x", "format": "Png", "bit_depth": 8, "channels": [["L", {"Constant": 1.0}]]}]}})).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn feedback_existing_preset_keeps_its_name_and_export_maps() {
+        let dir = tempfile::tempdir().unwrap();
+        let name = "Roblox SurfaceAppearance (separate maps)";
+        let custom = preset(name);
+        std::fs::write(dir.path().join(format!("{}.json", sanitize_file_stem(name))), custom.to_string()).unwrap();
+        let mut s = session();
+        assert_eq!(run(&mut s, "export.preset.get", json!({"name": name})).unwrap()["maps"].as_array().unwrap().len(), 4);
+
+        let warnings = s.load_export_presets(dir.path().to_path_buf());
+
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(run(&mut s, "export.preset.get", json!({"name": name.to_ascii_lowercase()})).unwrap(), custom);
+        let plan = run(&mut s, "export.plan", json!({"preset": name, "ts": 0})).unwrap();
+
+        assert_eq!(plan.as_array().unwrap().len(), 1);
+        assert!(plan[0]["file"].as_str().unwrap().ends_with("_R.png"));
+
+        let listed = run(&mut s, "export.presets", json!({})).unwrap();
+        let names = listed.as_array().unwrap();
+        assert!(names.iter().any(|entry| entry["name"] == name && entry["builtin"] == false));
+        let builtin = format!("builtin:{name}");
+        assert!(names.iter().any(|entry| entry["name"] == builtin && entry["builtin"] == true));
+        let builtin_plan = run(&mut s, "export.plan", json!({"preset": builtin, "ts": 0})).unwrap();
+
+        assert!(builtin_plan.as_array().unwrap().len() > 1);
+        run(&mut s, "export.preset.save", json!({"preset": custom})).unwrap();
+        run(&mut s, "export.preset.remove", json!({"name": name})).unwrap();
+
+        assert_eq!(run(&mut s, "export.preset.get", json!({"name": name})).unwrap()["maps"].as_array().unwrap().len(), 4);
     }
 
     #[cfg(not(target_arch = "wasm32"))]

@@ -449,7 +449,7 @@ pub fn legible_tint(tint: Color32, background: Color32, text: Color32) -> Color3
 const WCAG_FLARE: f32 = 0.05;
 
 /// The WCAG contrast ratio of two opaque colors (1..21)
-fn contrast_ratio(a: Color32, b: Color32) -> f32 {
+pub(crate) fn contrast_ratio(a: Color32, b: Color32) -> f32 {
     let luminance = |color: Color32| {
         let linear = egui::Rgba::from(color);
 

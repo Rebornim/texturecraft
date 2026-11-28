@@ -197,16 +197,41 @@ fn a_file_type_a_material_cannot_use_falls_back_to_png() {
         )
         .unwrap();
 
+        // A PSD holds every map of the texture set as a layer
         let all = names(&result);
-        assert!(all.iter().any(|f| f.ends_with(&format!("_baseColor.{ext}"))), "{format}: the template's files keep the file type: {all:?}");
+        let template_file = if format == "psd" { ".psd".to_string() } else { format!("_baseColor.{ext}") };
+
+        assert!(all.iter().any(|f| f.ends_with(&template_file)), "{format}: the template's files keep the file type: {all:?}");
         let mtlx = files(&result).into_iter().find(|f| f.ends_with(".mtlx")).unwrap_or_else(|| panic!("{format}: no .mtlx in {all:?}"));
         let text = std::fs::read_to_string(mtlx).unwrap();
         let wanted = if format == "tiff" { "tif" } else { "png" };
+
         assert!(text.contains(&format!("_base_color.{wanted}\"")), "{format}: {text}");
         for file in referenced(&text) {
             assert!(dir.join(&file).is_file(), "{format}: {file} is not in {all:?}");
         }
     }
+}
+
+#[test]
+fn materialx_png_fallback_preserves_the_selected_maps_size() {
+    let mut session = Session::new_project("t", primitives::material_ball(), "builtin:material_ball", None, 128).unwrap();
+    let dir = temp("map-size-fallback");
+    let options = json!({
+        "dir": dir.display().to_string(), "preset": OPENPBR, "ts": 0, "size": 128, "materialX": true,
+        "maps": [{"map": 0, "format": "psd", "size": 256}]
+    });
+
+    let result = execute(&mut session, "file.exportTextures", &options).unwrap();
+
+    let files = files(&result);
+
+    assert!(files.iter().any(|file| file.ends_with(".psd")), "{result}");
+    let base = files.iter().find(|file| file.ends_with("_base_color.png")).unwrap();
+    let roughness = files.iter().find(|file| file.ends_with("_specular_roughness.png")).unwrap();
+
+    assert_eq!(image::image_dimensions(base).unwrap(), (256, 256));
+    assert_eq!(image::image_dimensions(roughness).unwrap(), (128, 128));
 }
 
 #[test]

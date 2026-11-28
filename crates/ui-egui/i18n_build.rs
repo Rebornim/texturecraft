@@ -2,16 +2,17 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-/// Generate Rust includes for the optional catalog checkout; required input must contain app catalogs.
-/// Paths are escaped as Rust strings so Windows separators and spaces remain valid.
-pub fn generate(dir: Option<&Path>, required: bool) -> Result<String, String> {
+/// The catalogs' Rust includes and the distinct characters they use, sorted: the web build cuts
+/// its CJK interface face to those characters.
+pub fn collect(dir: Option<&Path>, required: bool) -> Result<(String, Vec<char>), String> {
     let mut source = String::from("pub static CRAFT_I18N: &craft_i18n::Embedded = &[\n");
     let Some(dir) = dir else {
         if required {
             return Err("CRAFT_I18N_REQUIRED=1 requires CRAFT_I18N_DIR".into());
         }
+
         source.push_str("];\n");
-        return Ok(source);
+        return Ok((source, Vec::new()));
     };
 
     if !dir.is_absolute() {
@@ -32,6 +33,7 @@ pub fn generate(dir: Option<&Path>, required: bool) -> Result<String, String> {
     paths.sort();
     let mut count = 0;
     let mut catalogs = Vec::new();
+    let mut characters = std::collections::HashSet::new();
     for path in paths {
         // Watch directories so adding or removing an app catalog rebuilds the embedding
         println!("cargo::rerun-if-changed={}", path.display());
@@ -52,6 +54,7 @@ pub fn generate(dir: Option<&Path>, required: bool) -> Result<String, String> {
         };
         let (shared, shared_text) = if common.is_file() { embed(&common)? } else { ("\"\"".into(), "") };
         let (app, app_text) = embed(&app)?;
+        characters.extend(shared_text.chars().chain(app_text.chars()));
         let code: &'static str = Box::leak(locale.to_owned().into_boxed_str());
         catalogs.push((code, shared_text, app_text));
         let _ = writeln!(source, "    ({locale:?}, {shared}, {app}),");
@@ -69,25 +72,30 @@ pub fn generate(dir: Option<&Path>, required: bool) -> Result<String, String> {
     }
 
     source.push_str("];\n");
-    Ok(source)
+    let mut characters: Vec<_> = characters.into_iter().collect();
+    characters.sort_unstable();
+    Ok((source, characters))
 }
 
 /// Write the embedding for both desktop and wasm, reporting optional failures as warnings.
 /// Required input errors stop Cargo instead of silently shipping an English-only release.
-pub fn embed() {
+///
+/// Returns the distinct characters the embedded catalogs use: the web build cuts its CJK interface
+/// face to them, since every character kept costs glyph data in the wasm download.
+pub fn embed() -> Vec<char> {
     println!("cargo::rerun-if-env-changed=CRAFT_I18N_DIR");
     println!("cargo::rerun-if-env-changed=CRAFT_I18N_REQUIRED");
     let dir = std::env::var_os("CRAFT_I18N_DIR").map(std::path::PathBuf::from);
     let required = std::env::var("CRAFT_I18N_REQUIRED").is_ok_and(|v| v == "1");
-    let source = match generate(dir.as_deref(), required) {
-        Ok(source) => source,
+    let (source, characters) = match collect(dir.as_deref(), required) {
+        Ok(embedded) => embedded,
         Err(error) => {
             if required {
                 println!("cargo::error={error}");
             } else {
                 println!("cargo::warning=building without craft-i18n: {error}");
             }
-            "pub static CRAFT_I18N: &craft_i18n::Embedded = &[];\n".into()
+            ("pub static CRAFT_I18N: &craft_i18n::Embedded = &[];\n".into(), Vec::new())
         }
     };
 
@@ -95,4 +103,5 @@ pub fn embed() {
     if let Err(error) = std::fs::write(&out, source) {
         println!("cargo::error=writing {}: {error}", out.display());
     }
+    characters
 }

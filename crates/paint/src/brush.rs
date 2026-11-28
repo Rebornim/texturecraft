@@ -433,6 +433,7 @@ mod tests {
     fn size_pressure_off_keeps_a_light_pen_at_full_size() {
         let pressed = BrushSettings { size: 0.1, min_size: 0.2, ..BrushSettings::default() };
         let mouse = BrushSettings { size_pressure: false, ..pressed.clone() };
+
         assert!(pressed.uv_stamp_radius(0.3) < mouse.uv_stamp_radius(0.3));
         assert_eq!(mouse.uv_stamp_radius(0.3), mouse.uv_stamp_radius(1.0));
     }
@@ -441,7 +442,9 @@ mod tests {
     fn settings_saved_before_the_size_pressure_switch_keep_pen_pressure() {
         let mut saved = serde_json::to_value(BrushSettings { size_pressure: false, ..BrushSettings::default() }).unwrap();
         saved.as_object_mut().unwrap().remove("size_pressure");
+
         let loaded: BrushSettings = serde_json::from_value(saved).unwrap();
+
         assert!(loaded.size_pressure);
     }
 

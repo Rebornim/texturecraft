@@ -1,6 +1,5 @@
 //! The Stencil section of a brush tool's Properties: the stencil's slot with its picker, its Tiling mode, and its placement beside a picture of where it sits in the view
 
-use std::f32::consts::SQRT_2;
 use std::ops::RangeInclusive;
 
 use egui::{Color32, CornerRadius, Painter, Pos2, Rect, Stroke, StrokeKind, TextureId, pos2, vec2};
@@ -26,9 +25,6 @@ const POSITION_RANGE: RangeInclusive<f32> = -2.0..=2.0;
 
 /// The Rotation dial's range in degrees
 const ROTATION_RANGE: RangeInclusive<f32> = 0.0..=360.0;
-
-/// Copies a tiled stencil's picture draws each way from the middle one at most, so a tiny stencil stays cheap
-const MAX_PICTURED_TILES: i32 = 12;
 
 /// The view's outline in the placement picture
 const VIEW_OUTLINE_WIDTH: f32 = 1.0;
@@ -190,27 +186,28 @@ pub(crate) fn paint_stencil(
     let to_screen = |x: f32, y: f32| pos2(rect.left() + (x * 0.5 + 0.5) * rect.width(), rect.top() + (0.5 - y * 0.5) * rect.height());
     let (sine, cosine) = rotation.sin_cos();
 
-    // A copy's corner: (x, y) in the image's own -1..1 square, moved `step` whole images along its sides
-    let corner = |x: f32, y: f32, step: (i32, i32)| {
-        let (x, y) = ((x + 2.0 * step.0 as f32) * half_size[0], (y + 2.0 * step.1 as f32) * half_size[1]);
+    let square = [(-1.0, 1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)];
+    let corners = square.map(|(x, y)| {
+        let (x, y) = (x * half_size[0], y * half_size[1]);
         to_screen(center[0] + x * cosine - y * sine, center[1] + x * sine + y * cosine)
-    };
+    });
 
-    // Copies far enough out to cover the view from the stencil's center, at any turn
-    let reach = |half: f32| ((SQRT_2 + center[0].abs().max(center[1].abs())) / (2.0 * half.max(f32::EPSILON))).ceil() as i32;
-    let (reach_x, reach_y) = if tiled { (reach(half_size[0]).min(MAX_PICTURED_TILES), reach(half_size[1]).min(MAX_PICTURED_TILES)) } else { (0, 0) };
     let mut mesh = egui::Mesh::with_texture(texture);
-    for step_x in -reach_x..=reach_x {
-        for step_y in -reach_y..=reach_y {
-            let first = mesh.vertices.len() as u32;
-            for (x, y, u, v) in [(-1.0, 1.0, 0.0, 0.0), (1.0, 1.0, 1.0, 0.0), (1.0, -1.0, 1.0, 1.0), (-1.0, -1.0, 0.0, 1.0)] {
-                mesh.vertices.push(egui::epaint::Vertex { pos: corner(x, y, (step_x, step_y)), uv: pos2(u, v), color: tint });
-            }
-            mesh.indices.extend([0, 1, 2, 0, 2, 3].map(|index| first + index));
-        }
+    for ((x, y), corner) in square.into_iter().zip(corners) {
+        let (position, local_x, local_y) = if tiled {
+            // Map view corners back into stencil space so the sampler repeats at any scale
+            let (dx, dy) = (x - center[0], y - center[1]);
+            (to_screen(x, y), (dx * cosine + dy * sine) / half_size[0].max(f32::EPSILON), (dy * cosine - dx * sine) / half_size[1].max(f32::EPSILON))
+        } else {
+            (corner, x, y)
+        };
+        let uv = pos2(0.5 + local_x * 0.5, 0.5 - local_y * 0.5);
+        mesh.vertices.push(egui::epaint::Vertex { pos: position, uv, color: tint });
     }
+
+    mesh.indices.extend([0, 1, 2, 0, 2, 3]);
     painter.add(egui::Shape::mesh(mesh));
-    [corner(-1.0, 1.0, (0, 0)), corner(1.0, 1.0, (0, 0)), corner(1.0, -1.0, (0, 0)), corner(-1.0, -1.0, (0, 0))]
+    corners
 }
 
 /// A Tiling mode's picture: one square for No Tiling, four for H and V Tiling
@@ -225,5 +222,39 @@ fn paint_tiling(painter: &Painter, rect: Rect, tile: bool, color: Color32) {
     for (direction_x, direction_y) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
         let center = rect.center() + vec2(direction_x * half_step, direction_y * half_step);
         painter.rect_filled(Rect::from_center_size(center, vec2(cell, cell)), CornerRadius::ZERO, color);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_tiny_offset_tiled_stencil_repeats_across_the_placement_picture() {
+        let ctx = egui::Context::default();
+        let view = Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 200.0));
+        let image = std::sync::Arc::new(texturecraft_engine::compose::ImageRes::new(2, 8, vec![[1.0; 4]; 16], false));
+        let stencil = StencilState { center: [2.0, 2.0], scale: 0.05, rotation: 90.0, tile: true, ..StencilState::new("offset") };
+        let texture = crate::thumbs::Thumbs::default().stencil(&ctx, "offset", &image);
+
+        let mut frame = ctx.run_ui(egui::RawInput::default(), |ui| {
+            paint_stencil(ui.painter(), view, texture.id(), &stencil, 0.25, Color32::WHITE, true);
+        });
+        let options = frame.textures_delta.set[&texture.id()][0].options;
+        frame.textures_delta.clear();
+        let mesh = frame
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id() => Some(mesh),
+                _ => None,
+            })
+            .expect("the stencil picture");
+        println!("Tile geometry: {} vertices, {} indices", mesh.vertices.len(), mesh.indices.len());
+
+        assert!(mesh.calc_bounds().contains_rect(view), "the rotated tiles reach the entire view");
+        if mesh.vertices.iter().any(|vertex| !(0.0..=1.0).contains(&vertex.uv.x) || !(0.0..=1.0).contains(&vertex.uv.y)) {
+            assert_eq!(options.wrap_mode, egui::TextureWrapMode::Repeat, "the image repeats outside its first tile");
+        }
     }
 }

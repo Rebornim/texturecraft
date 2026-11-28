@@ -3,7 +3,7 @@
 
 use egui::Key;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::json;
 use texturecraft_ui_egui::TextureCraftApp;
 
@@ -168,4 +168,21 @@ fn the_settings_dropdown_asks_about_an_unfinished_edit_too() {
     h.state_mut().ui.export.draft.as_mut().unwrap().maps[0].file = "$mesh_ok".into();
     texturecraft_ui_egui::export_templates::select(h.state_mut(), "Beta tpl".into());
     assert_eq!(selected(&h), "Beta tpl", "a valid edit switches at once");
+}
+
+#[test]
+fn output_templates_keeps_export_and_save_until_an_edit_does_not_validate() {
+    let library = Library::new("footer-on-templates");
+    let mut h = harness(&library);
+
+    // The window's footer is drawn after the app's own menus, which have an Export too
+    let disabled = |h: &Harness<'_, TextureCraftApp>, label: &str| h.get_all_by_label(label).last().unwrap().accesskit_node().is_disabled();
+
+    assert!(!disabled(&h, "Export"), "Export works from the templates tab");
+    assert!(!disabled(&h, "Save settings"), "Save settings works from the templates tab");
+
+    break_draft(&mut h);
+
+    assert!(disabled(&h, "Export"), "an invalid edit holds Export");
+    assert!(disabled(&h, "Save settings"), "an invalid edit holds Save settings");
 }

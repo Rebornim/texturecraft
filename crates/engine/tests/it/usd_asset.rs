@@ -407,3 +407,17 @@ fn a_mesh_without_materials_gets_a_material_bound_to_the_default_texture_set() {
         assert!(dir.join(&read.file).is_file(), "{} was written", read.file);
     }
 }
+
+#[test]
+fn a_psd_of_layers_is_left_out_of_the_materials_and_said_so() {
+    let mut session = ball();
+    let dir = temp("psd");
+
+    let result = export(&mut session, &dir, json!({"ts": 0, "format": "psd", "usdAsset": true}));
+
+    assert!(files(&result).iter().any(|f| f.ends_with(".psd")), "{result}");
+    let materials = read_back(&session, &dir);
+
+    assert!(materials[material_of(&session, 0)].0.is_empty(), "no input reads the PSD's merged image: {:?}", materials[material_of(&session, 0)]);
+    assert!(result["warnings"].to_string().contains("doesn't read PSD files"), "{result}");
+}

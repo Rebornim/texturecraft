@@ -918,8 +918,9 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
     }
 
     // Depth of field focus pick: a click focuses there instead of painting
-    let focus_pick = focus_picking(ui.ctx()) || point_pick.is_some();
-    if focus_picking(ui.ctx()) {
+    let picking_focus_distance = focus_picking(ui.ctx());
+    let focus_pick = picking_focus_distance || point_pick.is_some();
+    if picking_focus_distance {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
         if !alt
             && response.clicked_by(PointerButton::Primary)
@@ -1011,7 +1012,6 @@ fn view_3d(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, sync: &mut Pendin
 
     let gizmo_handle = gizmo_free && !app.session.stroke_active() && began_on_handle;
 
-    // Painting
     let painting = tool_acts(app)
         && !popup
         && !alt
@@ -1187,18 +1187,19 @@ fn stencil_overlay(app: &mut TextureCraftApp, ui: &Ui, rect: Rect) {
     if !tool_acts(app) || !stencil_applies(app) {
         return;
     }
-    let Some(stencil) = app.session.tool.stencil.clone() else { return };
-    let Some(image) = app.session.images.get(&stencil.image).cloned() else { return };
+
+    let Some(stencil) = &app.session.tool.stencil else { return };
+    let Some(image) = app.session.images.get(&stencil.image) else { return };
 
     // Where the stencil's corners land on screen
-    let texture = app.thumbs.stencil(ui.ctx(), &stencil.image, &image);
+    let texture = app.thumbs.stencil(ui.ctx(), &stencil.image, image);
     let image_aspect = image.width as f32 / image.height.max(1) as f32;
     let tint = Color32::from_white_alpha((stencil.opacity * f32::from(u8::MAX)) as u8);
     let painter = ui.painter_at(rect);
     let [top_left, top_right, bottom_right, bottom_left] =
-        crate::stencil_sheet::paint_stencil(&painter, rect, texture.id(), &stencil, image_aspect, tint, false);
+        crate::stencil_sheet::paint_stencil(&painter, rect, texture.id(), stencil, image_aspect, tint, false);
 
-    let outline = vec![top_left, top_right, bottom_right, bottom_left, top_left];
+    let outline = [top_left, top_right, bottom_right, bottom_left, top_left];
     let outline_stroke = Stroke::new(STENCIL_OUTLINE_STROKE, Color32::from_white_alpha(STENCIL_OUTLINE_ALPHA));
     painter.add(egui::Shape::dashed_line(&outline, outline_stroke, STENCIL_OUTLINE_DASH, STENCIL_OUTLINE_GAP));
 }

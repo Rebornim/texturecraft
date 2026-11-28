@@ -36,7 +36,7 @@ const GENERATOR_SET_KEY_PREFIX: &str = "generator-set:";
 const SAVED_FILE_KEY_PREFIX: &str = "saved-";
 /// Largest stencil preview dimension in pixels
 const STENCIL_MAX_SIZE_PX: f32 = 1024.0;
-/// The `images` key prefix of a stencil preview
+/// The texture name prefix of a stencil preview
 const STENCIL_KEY_PREFIX: &str = "stencil:";
 /// Big hover previews kept at most (the least recently shown go first)
 const BIG_PREVIEWS_KEPT: usize = 32;
@@ -55,6 +55,8 @@ pub struct Thumbs {
     saved_files_epoch: u64,
     images: HashMap<String, (Weak<ImageRes>, TextureHandle)>,
     images_revision: Option<u64>,
+    /// The large preview of the selected stencil, shared by Properties and the viewport
+    stencil: Option<(Weak<ImageRes>, TextureHandle)>,
     preview_session: Option<(u64, u64)>,
     /// Weak identities for images read by configured generator previews
     generator_images: HashMap<String, Weak<ImageRes>>,
@@ -72,6 +74,8 @@ pub struct Thumbs {
     big_shown: VecDeque<String>,
     /// The frame that last took in the worker's results
     received_in_pass: u64,
+    /// Pictures the user picked as asset previews, by file; None for a file that doesn't load
+    custom_previews: HashMap<PathBuf, Option<TextureHandle>>,
     /// Per active generator picture size: the current effect, pending key and last finished picture
     set_pictures: HashMap<(u64, usize), (Option<String>, Option<TextureHandle>)>,
 }
@@ -79,15 +83,14 @@ pub struct Thumbs {
 impl Thumbs {
     /// A larger cached texture of an image resource for the stencil overlay (up to 1024 px)
     pub fn stencil(&mut self, ctx: &egui::Context, name: &str, image: &Arc<ImageRes>) -> TextureHandle {
-        let key = format!("{STENCIL_KEY_PREFIX}{name}");
-        if let Some((cached_image, texture)) = self.images.get(&key)
-            && cached_image.ptr_eq(&Arc::downgrade(image))
+        if let Some((cached_image, texture)) = &self.stencil
+            && std::ptr::eq(cached_image.as_ptr(), Arc::as_ptr(image))
         {
             return texture.clone();
         }
 
-        // Only the current stencil is drawn this big, so a new one releases the last one's texture
-        self.images.retain(|cached_key, _| !cached_key.starts_with(STENCIL_KEY_PREFIX));
+        // Release the previous overlay before allocating its replacement
+        self.stencil = None;
 
         let scale = (STENCIL_MAX_SIZE_PX / image.width.max(image.height).max(1) as f32).min(1.0);
         let (w, h) = (((image.width as f32 * scale) as usize).max(1), ((image.height as f32 * scale) as usize).max(1));
@@ -103,8 +106,8 @@ impl Thumbs {
             }
         }
 
-        let texture = ctx.load_texture(key.clone(), color_image, TextureOptions::LINEAR);
-        self.images.insert(key, (Arc::downgrade(image), texture.clone()));
+        let texture = ctx.load_texture(format!("{STENCIL_KEY_PREFIX}{name}"), color_image, TextureOptions::LINEAR_REPEAT);
+        self.stencil = Some((Arc::downgrade(image), texture.clone()));
         texture
     }
 
@@ -152,14 +155,19 @@ impl Thumbs {
         }
 
         self.images_revision = Some(revision);
-        self.images.retain(|key, (cached_image, _)| {
-            let name = key.strip_prefix(STENCIL_KEY_PREFIX).unwrap_or(key);
-            images.get(name).is_some_and(|image| cached_image.ptr_eq(&Arc::downgrade(image)))
-        });
+        self.images.retain(|name, (cached_image, _)| images.get(name).is_some_and(|image| std::ptr::eq(cached_image.as_ptr(), Arc::as_ptr(image))));
     }
 
     /// Keep project previews only while they refer to current resources or bake maps.
     pub(crate) fn sync_project_previews(&mut self, session: &Session) -> bool {
+        // Clearing the stencil does not advance the session revision
+        if let Some((shown, _)) = &self.stencil {
+            let current = session.tool.stencil.as_ref().and_then(|stencil| session.images.get(&stencil.image));
+            if !current.is_some_and(|image| std::ptr::eq(shown.as_ptr(), Arc::as_ptr(image))) {
+                self.stencil = None;
+            }
+        }
+
         let current = (session.project_id, session.revision);
         let previous = self.preview_session.replace(current);
         if previous == Some(current) {
@@ -319,6 +327,32 @@ impl Thumbs {
         self.rendered.retain(|key, _| current(key));
         self.big_shown.retain(current);
         self.saved_brush_previews.clear();
+        self.custom_previews.clear();
+    }
+
+    /// Release custom textures after their last tile stops using the file
+    pub(crate) fn retain_custom_previews(&mut self, previews: &[crate::shelf_custom_preview::ShelfCustomPreview]) {
+        let in_use: std::collections::HashSet<_> = previews.iter().map(|preview| preview.file.as_path()).collect();
+        self.custom_previews.retain(|file, _| in_use.contains(file.as_path()));
+    }
+
+    /// Load the picture at `file` again next time: the user picked it anew, maybe after changing it
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn forget_custom_preview(&mut self, file: &Path) {
+        self.custom_previews.remove(file);
+    }
+
+    /// The picture at `file` as an asset's custom preview (its centred square), loaded once; None if it doesn't load
+    pub(crate) fn custom_preview(&mut self, ctx: &egui::Context, file: &Path) -> Option<TextureHandle> {
+        self.custom_previews
+            .entry(file.to_path_buf())
+            .or_insert_with(|| {
+                let image = crate::shelf_custom_preview::square(&image::open(file).ok()?);
+                let size = [image.width() as usize, image.height() as usize];
+                let pixels = ColorImage::from_rgba_unmultiplied(size, image.as_raw());
+                Some(ctx.load_texture(format!("custom_preview_{}", file.display()), pixels, TextureOptions::LINEAR))
+            })
+            .clone()
     }
 
     /// Smart mask thumbnail; None until the worker returns it

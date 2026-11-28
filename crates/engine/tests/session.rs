@@ -751,6 +751,88 @@ fn the_paint_tool_paints_its_own_color_through_the_stencils_gray() {
 }
 
 #[test]
+fn a_stroke_blocked_by_a_stencil_keeps_pixels_and_history() {
+    for (tool, alpha) in [("paint", 255), ("projection", 0)] {
+        let mut session = session_at(TEXTURE_SIZE);
+        let stencil = image::RgbaImage::from_pixel(STENCIL_SIZE, STENCIL_SIZE, image::Rgba([0, 0, 0, alpha]));
+        let mut png = Vec::new();
+        stencil.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        let name = session.import_resource_bytes("blocked.png", png).unwrap();
+        execute(&mut session, "tool.select", &json!({"tool": tool})).unwrap();
+        execute(&mut session, "tool.brush", &json!({"size": 6, "hardness": 90})).unwrap();
+        execute(&mut session, "tool.stencil", &json!({"image": name, "scale": 1.0, "tile": true})).unwrap();
+        let layer = session.selected_layer_id().unwrap();
+        execute(&mut session, "layer.add.paint", &Value::Null).unwrap();
+        execute(&mut session, "edit.undo", &Value::Null).unwrap();
+        execute(&mut session, "layer.select", &json!({"layer": layer.0})).unwrap();
+        let history = session.history_labels();
+        let redo = session.redo_labels();
+        let revision = session.revision;
+        let tile_bytes = session.doc.pixels.bytes();
+        let tiles = session.doc.pixels.layers.values().map(texturecraft_texel::TileImage::allocated_count).sum::<usize>();
+        let color = base_color_at(&session, BLACK_DAB_X);
+
+        let stroke = execute(&mut session, "tool.stroke", &json!({"points": [[BLACK_DAB_X, DAB_Y]]})).unwrap();
+        let after_tiles = session.doc.pixels.layers.values().map(texturecraft_texel::TileImage::allocated_count).sum::<usize>();
+        let after_tile_bytes = session.doc.pixels.bytes();
+        println!("{tool}: {tiles} -> {after_tiles} retained tiles, {tile_bytes} -> {after_tile_bytes} retained tile bytes");
+
+        assert!(stroke["stamps"].as_u64().unwrap() > 0);
+        assert_eq!(base_color_at(&session, BLACK_DAB_X), color);
+        assert_eq!(after_tile_bytes, tile_bytes, "{tool} stored empty tiles");
+        assert_eq!(after_tiles, tiles);
+        assert_eq!(session.history_labels(), history);
+        assert_eq!(session.redo_labels(), redo);
+        assert_eq!(session.revision, revision);
+    }
+}
+
+#[test]
+fn a_stroke_blocked_by_a_stencil_drops_its_unused_mask_effect() {
+    let mut session = session_at(TEXTURE_SIZE);
+    let name = half_black_stencil(&mut session);
+    execute(&mut session, "tool.paint", &Value::Null).unwrap();
+    execute(&mut session, "tool.brush", &json!({"size": 6, "hardness": 90})).unwrap();
+    execute(&mut session, "tool.stencil", &json!({"image": name, "scale": 1.0, "tile": true})).unwrap();
+    execute(&mut session, "tool.material", &json!({"channel": "baseColor", "color": [1.0, 0.0, 0.0]})).unwrap();
+    execute(&mut session, "tool.stroke", &json!({"points": [[WHITE_DAB_X, DAB_Y]]})).unwrap();
+    let painted_color = base_color_at(&session, WHITE_DAB_X);
+    let id = session.selected_layer_id().unwrap();
+    session.target = texturecraft_engine::StackTarget::Mask;
+    let history = session.history_labels();
+    let next_id = session.doc.project.next_id;
+    assert!(session.doc.project.layers[&id].mask.is_none());
+
+    session.begin_stroke(Vec2::new(BLACK_DAB_X, DAB_Y), session.viewport, 1.0).unwrap();
+
+    assert!(session.stroke_tiles() > 0);
+    session.caches[0].invalidate_all();
+    session.update();
+    assert_ne!(base_color_at(&session, WHITE_DAB_X), painted_color);
+    session.end_stroke().unwrap();
+    session.update();
+
+    assert!(session.doc.project.layers[&id].mask.is_none());
+    assert_eq!(session.doc.project.next_id, next_id);
+    assert!(session.doc.pixels.masks.is_empty());
+    assert_eq!(session.history_labels(), history);
+    assert_eq!(base_color_at(&session, WHITE_DAB_X), painted_color);
+
+    session.begin_stroke(Vec2::new(BLACK_DAB_X, DAB_Y), session.viewport, 1.0).unwrap();
+
+    assert!(session.stroke_tiles() > 0);
+    execute(&mut session, "layer.rename", &json!({"layer": id.0, "name": "Renamed while painting"})).unwrap();
+    let history_after_rename = session.history_labels();
+
+    session.end_stroke().unwrap();
+
+    assert_eq!(session.doc.project.layers[&id].name, "Renamed while painting");
+    assert!(session.doc.project.layers[&id].mask.is_some());
+    assert_eq!(session.history_labels(), history_after_rename);
+    assert!(session.doc.pixels.masks.is_empty());
+}
+
+#[test]
 fn the_eraser_erases_only_through_the_stencils_gray() {
     let mut session = session_at(TEXTURE_SIZE);
     let name = half_black_stencil(&mut session);

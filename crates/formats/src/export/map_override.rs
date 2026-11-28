@@ -14,10 +14,13 @@ pub struct MapOverride {
     /// Instead of the export's dithering of 8-bit files.
     #[serde(default)]
     pub dither: Option<bool>,
+    /// Output size (power of two) instead of the export's
+    #[serde(default)]
+    pub size: Option<u32>,
 }
 
 impl Default for MapOverride {
     fn default() -> Self {
-        MapOverride { enabled: true, format: None, bit_depth: None, dither: None }
+        MapOverride { enabled: true, format: None, bit_depth: None, dither: None, size: None }
     }
 }

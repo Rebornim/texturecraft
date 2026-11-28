@@ -42,11 +42,19 @@ file runs it; Copy mask to clipboard puts the same mask on the system clipboard 
 grayscale image (the whole tile atlas for a UV-tiled set).
 
 `file.exportTextures`, `export.plan`, the automation `textures.export` method and the MCP
-`textures_export` tool accept `maps: [{map, enabled?, format?, bitDepth?, dithering?}]`.
+`textures_export` tool accept `maps: [{map, enabled?, format?, bitDepth?, dithering?, size?}]`.
 Each entry overrides that map's export settings. The `map` field is its index in the selected
-template. `enabled: false` suppresses that file while reserving its name. When several texture
-sets produce the same name (ignoring case), programmatic and browser exports keep the first file
-and warn about later duplicates. The desktop export window reports the collision before writing.
+template. A map's `size` in pixels overrides the export size. `enabled: false` leaves out a PSD layer
+or suppresses a raster file while reserving its name. When several texture sets produce the same
+name (ignoring case), programmatic and browser exports keep the first file and warn about later
+duplicates. The desktop export window reports the collision before writing. Texture planning
+rejects a selection that uses the same path as both a file and a folder before rendering.
+
+`shaderParameters: true` writes `<project>_shaders.json` beside the textures with the shader
+model, its settings and the names of the exported texture sets. An array of texture set
+indexes selects which sets to list. The desktop command, headless `textures.export` and MCP
+`textures_export` include a written sidecar in `files` and report a sidecar write failure in
+`warnings` after writing the textures.
 
 `file.exportTextures` with `usdAsset` also writes `<mesh>.usd` (binary USD, Crate) next to the textures: the whole mesh
 (every texture set, whatever `ts` selects) with one UsdPreviewSurface material per texture set. A
@@ -77,8 +85,30 @@ shared by different sets.
 `format` accepts the export window's names (`bmp`, `jpeg`, `jng`, `pgm`, `png`, `targa`, `tiff`,
 `hdr`, `exr`, `webp`, `psd`) and their extensions. `bitDepth: 32` selects floating point for
 TIFF, EXR and HDR. `dithering: true` dithers 8-bit integer output with an ordered pattern, and
-`export.plan` reports the effective setting and per-file dimensions (`size` and `sourceSize`, both in pixels). `padding: "diffusion"` dilates by
+`export.plan` reports the effective setting and per-file dimensions (`size` and `sourceSize`, both in pixels).
+Tiled files include their UV tile number in `tile` and, when available, their filename template
+with a `<UDIM>` placeholder in `udimPattern`. These fields are null when they do not apply.
+`export.preview` takes the same parameters plus `map` (an index into the template's maps) and
+`side` (the maximum width or height, in pixels, capped at 512). It returns
+`{width, height, channels, pixels}` for the first texture set named by `ts`, or null when the
+set writes no file for that map. For a UV-tiled set the picture shows the atlas. HDR previews
+list RGB without alpha. TIFF and WebP previews list RGB or RGBA when the encoder stores
+luminance in three channels. PSD previews show the output layer's RGBA channels. The preview uses 8-bit values,
+with sRGB colour channels and linear data channels. Texels outside the UV islands use the
+channel defaults.
+`padding: "diffusion"` dilates by
 `dilation` texels and fills the remaining space with a smooth blend of the island colours.
+
+Layered PSD: the maps written as `psd` are the layers of one `<mesh>_<texture set>.psd` per
+texture set and UV tile (`<mesh>_<texture set>.<UDIM>.psd` for a tiled set), so the template's file
+names don't name the file: they become the layer names, a `/` in one making layer groups. The
+document name is sanitized like other file names and can be shortened or disambiguated (a
+texture-set index suffix when two sets' names give the same stem, as "A B" and "A_B" do), so read
+the actual names from `export.plan`. A PSD that would pass 30000 pixels a side or 2 GiB is left
+out with a warning on the set's first other file (an error when it is the set's only file). In the
+browser, estimates of a PSD's working buffers and of a batch's encoded PSD output are also bounded;
+they don't bound the tab's total memory, as raster outputs and ZIP packaging use memory outside
+them. MaterialX uses compatible companion maps for this format. USD omits their texture bindings and returns a warning.
 
 `effect.set {effect, filter: "blur", radius: 5}` replaces a filter in place, preserving its
 stack position, blend, opacity and visibility. Replacement filters start from defaults plus

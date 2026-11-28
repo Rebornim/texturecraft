@@ -108,10 +108,12 @@ impl Asset {
 }
 
 /// The drag-and-drop payload of a shelf tile.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ShelfDrag {
     pub asset: Asset,
     pub label: String,
+    /// The tile's thumbnail, shown at the pointer while dragging (the name when there is none)
+    pub thumb: Option<egui::TextureHandle>,
 }
 
 /// Apply `asset` the way a shelf click does: a simple material becomes the brush's material (no
@@ -209,7 +211,6 @@ pub fn drop_target(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response
         DecalDrop::show_menu(app, ui, response);
     }
 
-    let tokens = Tokens::get(ui.ctx());
     let accepts = |drag: &ShelfDrag| match drag.asset {
         Asset::Alpha(_) => true,
         Asset::Material(_) | Asset::Library(_) => zone != DropZone::Brush,
@@ -217,8 +218,13 @@ pub fn drop_target(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response
         Asset::SmartMask(_) | Asset::SavedMask(_) | Asset::Filter(_) => false,
     };
     let onto_set = |asset: &Asset| zone == DropZone::View3d && asset.goes_onto_set();
-    if response.dnd_hover_payload::<ShelfDrag>().is_some_and(|drag| accepts(&drag) && !onto_set(&drag.asset)) {
-        ui.painter().rect_stroke(response.rect.shrink(1.0), 3.0, Stroke::new(2.0, tokens.accent), egui::StrokeKind::Inside);
+    if let Some(drag) = response.dnd_hover_payload::<ShelfDrag>().filter(|drag| accepts(drag)) {
+        // The 3D view outlines the set under the pointer itself; its background takes nothing
+        if !onto_set(&drag.asset) {
+            crate::shelf_drag_ghost::outline_target(ui, response.rect);
+        } else if set_under_pointer(app, ui, response).is_some() {
+            crate::shelf_drag_ghost::accept(ui.ctx());
+        }
     }
 
     let pointer = ui.input(|input| input.pointer.interact_pos());
@@ -252,7 +258,6 @@ pub fn drop_target(app: &mut TextureCraftApp, ui: &Ui, response: &egui::Response
 
 /// The Assets panel body (a dock tab)
 pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
-    let ctx = ui.ctx().clone();
     let filter = app.ui.shelf_filter.to_lowercase();
     scan_library(app);
     let all_entries = ShelfEntry::all(app);
@@ -265,30 +270,47 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
 
     let folder = app.ui.shelf_path.clone();
     let picked_tab = app.ui.shelf_tab;
-    let mut matching: Vec<ShelfEntry> = all_entries.into_iter().filter(|entry| entry.matches(&filter)).collect();
+    let mut matching: Vec<_> = {
+        // A duplicated preference keeps the first rank it had on disk
+        let mut ranks = std::collections::HashMap::with_capacity(app.ui.shelf_favorites.len());
+        for (rank, favorite) in app.ui.shelf_favorites.iter().enumerate() {
+            ranks.entry((favorite.kind.as_str(), favorite.id.as_str())).or_insert(rank);
+        }
+
+        all_entries
+            .into_iter()
+            .filter(|entry| entry.matches(&filter))
+            .filter_map(|entry| {
+                let rank = if ranks.is_empty() { None } else { ranks.get(&entry.identity()).copied() };
+                (!app.ui.shelf_favorites_only || rank.is_some()).then_some((entry, rank))
+            })
+            .collect()
+    };
+
     let path_pane_open = app.ui.shelf_panes.filter_by_path;
     let mut applicable = if path_pane_open {
-        crate::shelf_folders::paths(matching.iter().filter(|entry| crate::shelf_tabs::shows(picked_tab, entry.tab())))
+        crate::shelf_folders::paths(matching.iter().map(|(entry, _)| entry).filter(|entry| crate::shelf_tabs::shows(picked_tab, entry.tab())))
     } else {
         Vec::new()
     };
 
     // All libraries includes every result without constructing an asset path
     if !folder.is_empty() {
-        matching.retain(|entry| entry.in_folder(&folder));
+        matching.retain(|(entry, _)| entry.in_folder(&folder));
     }
 
-    let mut counts: Vec<usize> = TABS.iter().map(|(tab, _, _)| matching.iter().filter(|entry| entry.tab() == *tab).count()).collect();
+    let mut counts: Vec<usize> = TABS.iter().map(|(tab, _, _)| matching.iter().filter(|(entry, _)| entry.tab() == *tab).count()).collect();
 
-    // Saved smart materials and masks count toward their tabs even without tiles
-    let in_user_library = folder.len() <= 1 && folder.first().is_none_or(|library| library == crate::shelf_entry::USER);
+    // Saved smart materials and masks count toward their tabs even without tiles; they can't be favorites yet
+    let favorites_only = app.ui.shelf_favorites_only;
+    let in_user_library = !favorites_only && folder.len() <= 1 && folder.first().is_none_or(|library| library == crate::shelf_entry::USER);
     let saved_materials_matching = saved_matching(app, &filter, false);
     let saved_masks_matching = saved_matching(app, &filter, true);
     for (tab, saved) in [(Tab::Smart, saved_materials_matching), (Tab::Masks, saved_masks_matching)] {
         if in_user_library && let Some(count) = TABS.iter().position(|(shown, _, _)| *shown == tab).and_then(|position| counts.get_mut(position)) {
             *count += saved;
         }
-        if path_pane_open && saved > 0 && crate::shelf_tabs::shows(picked_tab, tab) {
+        if path_pane_open && !favorites_only && saved > 0 && crate::shelf_tabs::shows(picked_tab, tab) {
             applicable.push(vec![crate::shelf_entry::USER.to_string()]);
         }
     }
@@ -300,11 +322,14 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
 
     let tab = app.ui.shelf_tab;
     let shown_tab = TABS.get(tab).map(|(shown, _, _)| *shown);
-    let show_user_brushes = crate::shelf_tabs::shows(tab, Tab::Brushes)
+    let show_user_brushes = !favorites_only
+        && crate::shelf_tabs::shows(tab, Tab::Brushes)
         && folder.len() <= 2
         && folder.iter().zip([crate::shelf_entry::USER, "Brushes"]).all(|(selected, part)| selected == part);
-    let mut entries: Vec<ShelfEntry> = matching.into_iter().filter(|entry| crate::shelf_tabs::shows(tab, entry.tab())).collect();
-    entries.sort_by_cached_key(|entry| entry.label().to_lowercase());
+    let mut entries: Vec<_> = matching.into_iter().filter(|(entry, _)| crate::shelf_tabs::shows(tab, entry.tab())).collect();
+
+    // Favorites first, the most recently added first, then by name
+    entries.sort_by_cached_key(|(entry, rank)| (rank.unwrap_or(usize::MAX), entry.label().to_lowercase()));
 
     // The toolbar has its own strip at the panel's bottom, so nothing above it can push it out
     let area = ui.available_rect_before_wrap();
@@ -317,7 +342,7 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
                 ui.set_min_size(vec2(width, grid_rect.height()));
                 crate::shelf_panes::column(app, ui, &paths, &applicable);
             });
-            ui.separator();
+            crate::shelf_panes::edge(app, ui, width, grid_rect.width());
         }
 
         // Saved smart materials are files in the user's library, without folders of their own
@@ -326,11 +351,10 @@ pub fn body(app: &mut TextureCraftApp, ui: &mut Ui) {
         grid(app, ui, &entries, grid_rect.height(), [saved_materials, saved_masks], show_user_brushes, &filter);
     });
     ui.scope_builder(egui::UiBuilder::new().max_rect(toolbar_rect), |ui| crate::shelf_toolbar::show(app, ui));
-    drag_preview(&ctx);
 }
 
 /// The tiles of `entries` in a scroll area `height` high, then user brushes, saved smart materials and saved smart masks when selected
-fn grid(app: &mut TextureCraftApp, ui: &mut Ui, entries: &[ShelfEntry], height: f32, saved: [bool; 2], show_user_brushes: bool, filter: &str) {
+fn grid(app: &mut TextureCraftApp, ui: &mut Ui, entries: &[(ShelfEntry, Option<usize>)], height: f32, saved: [bool; 2], show_user_brushes: bool, filter: &str) {
     let ctx = ui.ctx().clone();
     let view = app.ui.shelf_view;
     let selected: Option<(String, String)> = ctx.data(|data| data.get_temp(egui::Id::unique(SELECTED_TILE)));
@@ -342,9 +366,9 @@ fn grid(app: &mut TextureCraftApp, ui: &mut Ui, entries: &[ShelfEntry], height: 
         .show(ui, |ui| {
             ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
                 tiles(ui, |ui| {
-                    for entry in entries {
+                    for (entry, rank) in entries {
                         let is_selected = selected.as_ref().is_some_and(|(kind, id)| entry.identity() == (kind.as_str(), id.as_str()));
-                        entry_tile(app, ui, &ctx, entry, view, is_selected);
+                        entry_tile(app, ui, &ctx, entry, view, is_selected, rank.is_some());
                     }
                 });
                 if show_user_brushes {
@@ -381,18 +405,6 @@ fn search_field(app: &mut TextureCraftApp, ui: &mut Ui) {
             app.ui.shelf_filter.clear();
         }
     });
-}
-
-/// The dragged asset's name next to the pointer.
-fn drag_preview(ctx: &egui::Context) {
-    let tk = Tokens::get(ctx);
-    let (Some(d), Some(pos)) = (egui::DragAndDrop::payload::<ShelfDrag>(ctx), ctx.input(|i| i.pointer.hover_pos())) else { return };
-    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("shelf_drag")));
-    let galley = p.layout_no_wrap(d.label.clone(), egui::FontId::proportional(11.0), tk.text_strong);
-    let rect = egui::Rect::from_min_size(pos + vec2(14.0, 12.0), galley.size() + vec2(12.0, 6.0));
-    p.rect_filled(rect, 3.0, tk.row_selected);
-    p.rect_stroke(rect, 3.0, Stroke::new(1.0, tk.accent), egui::StrokeKind::Inside);
-    p.galley(rect.min + vec2(6.0, 3.0), galley, tk.text_strong);
 }
 
 pub(crate) fn matches(filter: &str, texts: &[&str]) -> bool {
@@ -493,7 +505,7 @@ fn library(app: &mut TextureCraftApp, ui: &mut Ui, filter: &str, masks: bool) {
             let location = path.display().to_string();
             let asset = if masks { Asset::SavedMask(location) } else { Asset::Library(location) };
             if response.drag_started() {
-                response.dnd_set_drag_payload(ShelfDrag { asset, label: label.to_owned() });
+                response.dnd_set_drag_payload(ShelfDrag { asset, label: label.to_owned(), thumb: None });
             } else {
                 selected.push(asset);
             }
@@ -514,8 +526,8 @@ fn library(app: &mut TextureCraftApp, ui: &mut Ui, filter: &str, masks: bool) {
 #[cfg(target_arch = "wasm32")]
 fn library(_: &mut TextureCraftApp, _: &mut Ui, _: &str, _: bool) {}
 
-/// The tile of `entry`, outlined when `selected`: a click applies it, an image resource has a context menu
-fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry: &ShelfEntry, view: ShelfView, selected: bool) {
+/// The tile of `entry`, outlined when `selected`: a click applies it, a right-click opens its menu
+fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry: &ShelfEntry, view: ShelfView, selected: bool, favorite: bool) {
     // An image removed this frame has nothing to show
     if let ShelfEntry::Image(name) = entry
         && !app.session.images.contains_key(name)
@@ -523,13 +535,13 @@ fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry
         return;
     }
 
-    let texture = entry.thumbnail(app, ctx);
+    let custom_file = crate::shelf_custom_preview::file_for(&app.ui.shelf_custom_previews, entry);
     let asset = entry.asset();
     let session = &app.session;
     let response = tile_in_view(
         ui,
         &mut app.thumbs,
-        |_, _| texture,
+        |ui, thumbs| custom_file.and_then(|file| thumbs.custom_preview(ui.ctx(), file)).or_else(|| entry.thumbnail(thumbs, session, ui.ctx())),
         |thumbs| match entry {
             ShelfEntry::SavedBrush { path: Some(path), .. } => Some(thumbs.saved_brush_preview(path, &session.images)),
             _ => entry.preview(session),
@@ -548,6 +560,10 @@ fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry
     if entry.includes_randomness() {
         randomness_badge(ui.painter(), view.thumbnail_rect(response.rect));
     }
+    if favorite {
+        crate::shelf_favorite::star(ui.painter(), view.thumbnail_rect(response.rect), Tokens::get(ctx).warning);
+        ctx.accesskit_node_builder(response.id, |node| node.set_description(tr("Favorite")));
+    }
 
     if response.clicked() || response.secondary_clicked() {
         let (kind, id) = entry.identity();
@@ -557,18 +573,7 @@ fn entry_tile(app: &mut TextureCraftApp, ui: &mut Ui, ctx: &egui::Context, entry
         entry.activate(app);
     }
 
-    if let ShelfEntry::Image(name) = entry {
-        response.context_menu(|ui| {
-            if ui.button(tr("Add as decal (view center)")).clicked() {
-                app.run("layer.add.decal", json!({"image": name}));
-                ui.close();
-            }
-            if ui.button(tr("Remove resource")).clicked() {
-                app.run("resource.remove", json!({"name": name}));
-                ui.close();
-            }
-        });
-    }
+    crate::shelf_menu::show(app, &response, entry);
 }
 
 /// Asset tile with optional dragging and a larger hover preview, at the medium size
@@ -601,7 +606,7 @@ fn tile_in_view(
     if let Some(asset) = drag
         && response.drag_started()
     {
-        response.dnd_set_drag_payload(ShelfDrag { asset: asset.clone(), label: label.to_string() });
+        response.dnd_set_drag_payload(ShelfDrag { asset: asset.clone(), label: label.to_string(), thumb: texture.clone() });
     }
 
     let painter = ui.painter();

@@ -181,6 +181,7 @@ fn enter_and_space_on_the_focused_reset_icon_reset_only_its_section() {
         let mut harness = app_with_brush(changed_brush());
         reset_icon(&harness, "Size").focus();
         harness.run_steps(SETTLE_FRAMES);
+
         assert!(reset_icon(&harness, "Size").is_focused());
 
         harness.key_press(key);

@@ -177,6 +177,9 @@ pub struct ExportParams {
     /// Settings for individual maps in the selected template.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub maps: Option<Vec<ExportMapParams>>,
+    /// Write shader settings for the exported sets (true) or the specified texture set indexes.
+    #[serde(default, rename = "shaderParameters", skip_serializing_if = "Option::is_none")]
+    pub shader_parameters: Option<Value>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]

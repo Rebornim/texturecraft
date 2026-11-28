@@ -6,6 +6,8 @@ use texturecraft_engine::core::{BakedMap, Channel, ChannelBlend, NormalFormat};
 use crate::docking::Dock;
 use crate::keymap::Keymap;
 use crate::saved_search::SavedSearch;
+use crate::shelf_custom_preview::ShelfCustomPreview;
+use crate::shelf_favorite::ShelfFavorite;
 use crate::shelf_panes::ShelfPanes;
 use crate::shelf_view::ShelfView;
 
@@ -394,6 +396,9 @@ pub struct ExportUi {
     /// `file.exportTextures`).
     #[serde(default)]
     pub materialx: bool,
+    /// Also write `<project>_shaders.json`: the shader's settings and the texture sets using it (`shaderParameters` of `file.exportTextures`)
+    #[serde(default)]
+    pub shader_parameters: bool,
     /// Texture sets excluded from export.
     pub skip: Vec<usize>,
     /// Per texture set (by index) overrides of the settings above.
@@ -437,6 +442,9 @@ pub struct ExportUi {
     /// Output templates tab: F2 asked to rename the selected preset.
     #[serde(skip)]
     pub rename_key: bool,
+    /// A text field of the window had the keyboard when the last frame ended
+    #[serde(skip)]
+    pub field_had_keyboard: bool,
     /// Output templates tab: the question waiting for an answer (delete, or drop an unsaved edit).
     #[serde(skip)]
     pub ask: Option<crate::export_templates::Ask>,
@@ -468,6 +476,7 @@ impl Default for ExportUi {
             color_space: String::new(),
             usd_asset: false,
             materialx: false,
+            shader_parameters: false,
             skip: Vec::new(),
             sets: Default::default(),
             owner: Vec::new(),
@@ -482,6 +491,7 @@ impl Default for ExportUi {
             pending_drop: None,
             renaming: None,
             rename_key: false,
+            field_had_keyboard: false,
             ask: None,
             opened_with: None,
             job: None,
@@ -493,7 +503,7 @@ impl Default for ExportUi {
 
 /// The LIST OF EXPORTS console's width when the window opens, as in the reference
 fn default_console_width() -> f32 {
-    300.0
+    crate::export_window::CONSOLE_WIDTH
 }
 
 fn default_export_dir() -> String {
@@ -515,6 +525,18 @@ fn default_split_ratio() -> f32 {
 /// Saved searches start with this share of the Assets panel's pane column while Filter by path is open too
 pub(crate) fn default_shelf_panes_split() -> f32 {
     0.45
+}
+
+/// The share of the Assets panel's width the filter panes take until their edge is dragged
+fn default_shelf_panes_share() -> f32 {
+    0.45
+}
+
+fn deserialize_shelf_panes_share<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
+    let share = f32::deserialize(deserializer)?;
+
+    // A finite JSON number can overflow f32 and prevent the next settings save
+    Ok(if share.is_finite() { share } else { default_shelf_panes_share() })
 }
 
 fn deserialize_shelf_panes_split<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
@@ -615,9 +637,27 @@ pub struct UiState {
     /// The asset shelf's saved queries, in the order they were saved
     #[serde(default)]
     pub shelf_saved_searches: Vec<SavedSearch>,
+    /// The asset shelf's favorite assets, most recently added first
+    #[serde(default)]
+    pub shelf_favorites: Vec<ShelfFavorite>,
+    /// The asset shelf shows only favorites (the Favorites saved search)
+    #[serde(default)]
+    pub shelf_favorites_only: bool,
+    /// The second Assets panel's search, type and folder, swapped in while it draws
+    #[serde(default)]
+    pub shelf_second: crate::shelf_query::ShelfQuery,
+    /// The asset shelf's automatic updates (its refresh popup)
+    #[serde(default)]
+    pub shelf_updates: crate::shelf_updates::ShelfUpdates,
+    /// Pictures the user picked to show on asset tiles instead of their thumbnails
+    #[serde(default)]
+    pub shelf_custom_previews: Vec<ShelfCustomPreview>,
     /// Saved searches' share of the pane column above Filter by path, set by the splitter between them
     #[serde(default = "default_shelf_panes_split", deserialize_with = "deserialize_shelf_panes_split")]
     pub shelf_panes_split: f32,
+    /// The share of the Assets panel's width the filter panes take
+    #[serde(default = "default_shelf_panes_share", deserialize_with = "deserialize_shelf_panes_share")]
+    pub shelf_panes_share: f32,
     #[serde(default)]
     pub text: TextUi,
     /// Layer being renamed and the edit buffer.
@@ -787,6 +827,11 @@ impl UiState {
         self.shelf_tab = keep.shelf_tab;
         self.shelf_path = keep.shelf_path;
         self.shelf_saved_searches = keep.shelf_saved_searches;
+        self.shelf_favorites = keep.shelf_favorites;
+        self.shelf_favorites_only = keep.shelf_favorites_only;
+        self.shelf_second = keep.shelf_second;
+        self.shelf_custom_previews = keep.shelf_custom_previews;
+        self.shelf_updates = keep.shelf_updates;
     }
 }
 
@@ -822,7 +867,13 @@ impl Default for UiState {
             shelf_view: ShelfView::default(),
             shelf_panes: ShelfPanes::default(),
             shelf_saved_searches: Vec::new(),
+            shelf_favorites: Vec::new(),
+            shelf_favorites_only: false,
+            shelf_second: crate::shelf_query::ShelfQuery::default(),
+            shelf_custom_previews: Vec::new(),
+            shelf_updates: crate::shelf_updates::ShelfUpdates::default(),
             shelf_panes_split: default_shelf_panes_split(),
+            shelf_panes_share: default_shelf_panes_share(),
             text: TextUi::default(),
             rename: None,
             new_project: NewProject::default(),
@@ -968,15 +1019,26 @@ mod tests {
     }
 
     #[test]
-    fn adopting_a_layout_keeps_the_shelf_query_and_saved_searches() {
-        let saved = crate::saved_search::SavedSearch { name: "rust".into(), filter: "rust".into(), tab: 2, path: vec!["starter".into()] };
-        let mut ui = UiState { shelf_filter: "rust".into(), shelf_tab: 2, shelf_path: vec!["starter".into()], ..UiState::default() };
+    fn adopting_a_layout_keeps_the_shelf_query_saved_searches_favorites_and_custom_previews() {
+        let saved =
+            crate::saved_search::SavedSearch { name: "rust".into(), filter: "rust".into(), tab: 2, path: vec!["starter".into()], favorites_only: false };
+        let favorite = crate::shelf_favorite::ShelfFavorite { kind: "material".into(), id: "gold".into() };
+        let mut ui =
+            UiState { shelf_filter: "rust".into(), shelf_tab: 2, shelf_path: vec!["starter".into()], shelf_favorites_only: true, ..UiState::default() };
         ui.shelf_saved_searches.push(saved.clone());
+        ui.shelf_favorites.push(favorite.clone());
+        let preview = crate::shelf_custom_preview::ShelfCustomPreview { kind: "material".into(), id: "gold".into(), file: "gold.png".into() };
+        ui.shelf_custom_previews.push(preview.clone());
+        ui.shelf_updates.resources = true;
 
         ui.adopt_layout(UiState::default());
 
         assert_eq!((ui.shelf_filter.as_str(), ui.shelf_tab, ui.shelf_path.as_slice()), ("rust", 2, ["starter".to_string()].as_slice()));
         assert_eq!(ui.shelf_saved_searches, [saved]);
+        assert_eq!(ui.shelf_favorites, [favorite], "favorites are the user's own too");
+        assert!(ui.shelf_favorites_only, "the Favorites search is part of the query");
+        assert_eq!(ui.shelf_custom_previews, [preview], "custom previews are the user's own");
+        assert!(ui.shelf_updates.resources, "automatic updates are a setting, not part of a layout");
     }
 
     #[test]

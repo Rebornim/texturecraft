@@ -107,7 +107,7 @@ fn an_assets_image_dropped_on_the_stencil_slot_becomes_the_stencil() {
     assert!(harness.state().session.tool.stencil.is_none());
 
     let slot = harness.get_by_role_and_label(Role::ComboBox, "None").rect().center();
-    egui::DragAndDrop::set_payload(&harness.ctx, ShelfDrag { asset: Asset::Texture(name.clone()), label: "Dragged".into() });
+    egui::DragAndDrop::set_payload(&harness.ctx, ShelfDrag { asset: Asset::Texture(name.clone()), label: "Dragged".into(), thumb: None });
     harness.hover_at(slot);
     harness.run_steps(2);
     harness.event(Event::PointerButton { pos: slot, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
@@ -198,6 +198,7 @@ fn the_stencil_hides_and_stays_put_while_the_quick_mask_is_painted() {
 
     texturecraft_engine::execute(&mut harness.state_mut().session, "viewport.quickMask.edit", &json!({"editing": false})).unwrap();
     harness.run_steps(REDRAW_FRAMES);
+
     assert!(harness.query_by_role_and_label(Role::Tab, "Stencil").is_some(), "back when the quick mask is done");
 }
 
@@ -231,20 +232,36 @@ fn the_2d_view_says_projection_paints_in_3d_and_paints_nothing() {
 
 #[test]
 fn picking_another_stencil_releases_the_last_ones_overlay_texture() {
+    const OVERLAY_SIDE_PX: u32 = 1024;
     let (mut harness, _) = tool_app(Tool::Paint);
     let stencil_textures = |harness: &Harness<'_, TextureCraftApp>| {
-        harness.ctx.tex_manager().read().allocated().filter(|(_, texture)| texture.name.starts_with("stencil:")).count()
+        harness
+            .ctx
+            .tex_manager()
+            .read()
+            .allocated()
+            .filter(|(_, texture)| texture.name.starts_with("stencil:"))
+            .fold((0, 0), |(count, bytes), (_, texture)| (count + 1, bytes + texture.size[0] * texture.size[1] * texture.bytes_per_pixel))
     };
 
-    // Three distinct images picked in turn, each drawn over the view
+    // Switch among three full-size overlays
     for gray in [64, 128, 192] {
         let mut png = Vec::new();
-        let image = image::RgbaImage::from_pixel(IMAGE_SIZE, IMAGE_SIZE, image::Rgba([gray, gray, gray, 255]));
+        let image = image::RgbaImage::from_pixel(OVERLAY_SIDE_PX, OVERLAY_SIDE_PX, image::Rgba([gray, gray, gray, 255]));
         image.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
         let name = harness.state_mut().session.import_resource_bytes(&format!("stencil_{gray}.png"), png).unwrap();
         texturecraft_engine::execute(&mut harness.state_mut().session, "tool.stencil", &json!({ "image": name })).unwrap();
         harness.run_steps(REDRAW_FRAMES);
     }
 
-    assert_eq!(stencil_textures(&harness), 1, "only the current stencil keeps its big texture");
+    let (count, bytes) = stencil_textures(&harness);
+    eprintln!("selected stencil retains {count} texture(s) and {bytes} texture bytes");
+    assert_eq!(count, 1, "only the current stencil keeps its big texture");
+
+    texturecraft_engine::execute(&mut harness.state_mut().session, "tool.stencil", &json!({"clear": true})).unwrap();
+    harness.run_steps(REDRAW_FRAMES);
+
+    let (count, bytes) = stencil_textures(&harness);
+    eprintln!("cleared stencil retains {count} texture(s) and {bytes} texture bytes");
+    assert_eq!(count, 0, "clearing the stencil releases its overlay");
 }

@@ -125,6 +125,7 @@ impl TextureCraftApp {
         if let Some(theme) = crate::library_theme::library_theme(ctx, &crate::theme::Tokens::get(ctx)) {
             root = root.library_theme(theme);
         }
+
         // Hide UI on another key leaves Tab to focus traversal and the shortcuts
         root.tab_toggles_chrome = crate::keymap::shortcut_of(&self.ui.keymap, "ui.hideUi") == Some("Tab");
         let app_modal = crate::docking::input_blocked(self, ctx).then_some(ViewportId::ROOT);

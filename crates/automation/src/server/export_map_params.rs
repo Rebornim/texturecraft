@@ -19,4 +19,7 @@ pub struct ExportMapParams {
     /// Override dithering for this map's 8-bit outputs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dithering: Option<bool>,
+    /// Side length in pixels for this map, overriding the export size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u32>,
 }

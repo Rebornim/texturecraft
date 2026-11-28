@@ -169,12 +169,21 @@ mod session_log_file;
 pub mod settings_window;
 pub mod shader_settings;
 pub mod shelf;
+pub mod shelf_custom_preview;
+pub mod shelf_drag_ghost;
+pub mod shelf_drag_ghost_shown;
+pub mod shelf_drag_verdict;
 mod shelf_entry;
+pub mod shelf_favorite;
 mod shelf_folders;
+mod shelf_menu;
 pub mod shelf_panes;
 pub mod shelf_preview;
+pub mod shelf_query;
+pub mod shelf_second;
 mod shelf_tabs;
 mod shelf_toolbar;
+pub mod shelf_updates;
 pub mod shelf_view;
 mod shortcut_dispatch;
 mod slot_thumbnail;
@@ -1301,6 +1310,7 @@ impl eframe::App for TextureCraftApp {
         self.ui.prefs.apply_resource_limits();
 
         control::poll(self, ctx);
+        shelf_updates::tick(self, ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.run_file_dialog_answers();
         web_files::poll(self);
@@ -1450,6 +1460,9 @@ impl eframe::App for TextureCraftApp {
         }
 
         windows::show(self, &ctx);
+
+        // After every drop target has said whether it takes the dragged asset
+        shelf_drag_ghost::show(&ctx);
 
         // Finish after the dock and windows have requested their thumbnails
         self.layer_panel.end(&ctx, &self.session);

@@ -6,4 +6,6 @@ pub(super) struct RowEdit {
     pub(super) action: Option<MapAction>,
     /// A map dropped on a channel swatch, to ask which of its channels to use.
     pub(super) pending: Option<PendingDrop>,
+    /// The output map whose channel swatch the pointer is on, for its file preview
+    pub(super) hovered_output: Option<usize>,
 }

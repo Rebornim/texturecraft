@@ -175,6 +175,7 @@ fn dragging_its_size_slider_changes_the_brush() {
     harness.run_steps(DRAG_STEP_FRAMES);
     harness.drop_at(drop);
     harness.run_steps(SETTLE_FRAMES);
+
     assert!(harness.state().session.tool.brush.size > size, "{size} -> {}", harness.state().session.tool.brush.size);
     assert!(is_open(&harness), "editing it keeps it open");
 }

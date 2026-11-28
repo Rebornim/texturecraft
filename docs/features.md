@@ -187,7 +187,7 @@ Everything TextureCraft does today, by area. What's still missing is in [`ROADMA
   stroke turns it on for the Normal map if the set has no Auto-rebake map.
 - **Export presets** for glTF PBR Metal Roughness, Unreal Engine (packed), Unity HDRP (mask map),
   Unity Standard, Unity URP Lit, USD Preview Surface, Blender (Principled BSDF), Godot 4 (ORM), OpenPBR (with the coat, fuzz,
-  anisotropy, transmission and subsurface maps), separate maps, mesh maps and document channels, in
+  anisotropy, transmission and subsurface maps), Unreal Engine (subsurface profile), glTF specular/glossiness (archived extension), Redshift Standard Material, Roblox SurfaceAppearance, Sketchfab (metalness), separate maps, mesh maps and document channels, in
   PNG, JPEG, JNG, PGM, TGA, TIFF, BMP, WEBP, PSD, EXR or HDR at 8 bits (optionally dithered), 16
   bits or 32-bit float (TIFF, EXR, HDR; 16-bit half float for EXR), with UV padding (dilation,
   infinite, or dilation + diffusion), size override and OpenGL or DirectX normals.

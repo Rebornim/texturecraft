@@ -18,6 +18,7 @@ pub(crate) fn library_theme(ctx: &Context, tokens: &Tokens) -> Option<Arc<ThemeD
     if let Some(def) = kept.filter(|def| def.pins.dark == pins) {
         return Some(def);
     }
+
     let def = Arc::new(app_def(pins)?);
     ctx.data_mut(|data| data.insert_temp(memory_id, Arc::clone(&def)));
     Some(def)

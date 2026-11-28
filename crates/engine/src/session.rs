@@ -370,10 +370,12 @@ pub(crate) struct ActiveStroke {
     /// What a mask stroke paints, resolved once so staging, preview and commit read one image
     pub mask_gray: texturecraft_compose::MaskGray,
     pub erase: bool,
-    /// Projection tool: the stencil captured with the stroke's camera.
+    /// The stencil captured with the stroke's camera.
     pub stencil: Option<texturecraft_compose::Stencil>,
     /// History snapshot taken when the stroke began.
     pub before: Document,
+    /// Document revision before any edits made during the stroke.
+    pub start_revision: u64,
     pub label: String,
     /// The commit's destination tiles, copied as the stroke reaches them.
     pub staging: texturecraft_paint::Staging,
@@ -1035,6 +1037,8 @@ impl Session {
     }
 
     fn after_history(&mut self, other: &Document) {
+        self.follow_renamed_resources(other);
+
         // Pending operations may still hold layer IDs from the discarded snapshot
         self.doc.project.next_id = self.doc.project.next_id.max(other.project.next_id);
         self.mark_modified();
@@ -1044,16 +1048,52 @@ impl Session {
         self.invalidate_changed(other);
 
         // An undone add or duplicate takes the selected effect away
-        if let StackTarget::Effect(e) = self.target
-            && self.doc.project.effect(e).is_none()
+        if let StackTarget::Effect(effect_id) = self.target
+            && self.doc.project.effect(effect_id).is_none()
         {
-            let p = &other.project;
-            let content = p.effect(e).and_then(|(owner, _)| p.layers.get(&owner)).is_some_and(|l| l.content_effects.iter().any(|x| x.id == e));
+            let previous_project = &other.project;
+            let content = previous_project
+                .effect(effect_id)
+                .and_then(|(owner, _)| previous_project.layers.get(&owner))
+                .is_some_and(|layer| layer.content_effects.iter().any(|effect| effect.id == effect_id));
             self.target = if content { StackTarget::Content } else { StackTarget::Mask };
         }
+
         let has_mask = self.selected_layer().and_then(|lid| self.doc.project.layer(self.doc.project.mask_owner(lid)).ok()).is_some_and(|l| l.mask.is_some());
         if self.target == StackTarget::Mask && !has_mask {
             self.target = StackTarget::Content;
+        }
+    }
+
+    /// The image names the tools and the 2D view read, which a resource rename follows
+    pub(crate) fn tool_images_mut(&mut self) -> impl Iterator<Item = &mut String> {
+        [
+            self.tool.stencil.as_mut().map(|stencil| &mut stencil.image),
+            self.tool.brush.alpha_image.as_mut(),
+            self.tool.mask_image.as_mut(),
+            self.view_image.as_mut(),
+        ]
+        .into_iter()
+        .flatten()
+    }
+
+    /// Points tool images at a resource's name on this side of an undone or redone rename
+    fn follow_renamed_resources(&mut self, other: &Document) {
+        let names: Vec<String> = self.tool_images_mut().map(|name| name.clone()).collect();
+        let renames: Vec<(String, String)> = names
+            .into_iter()
+            .filter(|name| !self.doc.resources.contains_key(name))
+            .filter_map(|name| {
+                let bytes = other.resources.get(&name)?;
+                let to = self.doc.resources.iter().find(|(_, here)| Arc::ptr_eq(here, bytes)).map(|(here, _)| here.clone())?;
+                Some((name, to))
+            })
+            .collect();
+
+        for (name, to) in renames {
+            for tool_image in self.tool_images_mut().filter(|tool_image| **tool_image == name) {
+                tool_image.clone_from(&to);
+            }
         }
     }
 

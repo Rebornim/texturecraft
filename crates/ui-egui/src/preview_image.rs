@@ -217,6 +217,7 @@ fn stamp_coverage(
     let jitter_sample = |stamp_index: u32, channel: u32| {
         (stamp_index.wrapping_mul(0x9E37_79B9) ^ channel.wrapping_mul(0x85EB_CA6B)).wrapping_mul(0xC2B2_AE35) as f32 / u32::MAX as f32
     };
+
     // Spacing follows the stamp's own radius, as on the model
     let step = |t: f32| (brush.spacing * 2.0 * radius(t)).max(MIN_STAMP_SPACING_PX);
     let (mut t, mut travelled, mut stamp_index) = (0.0f32, step(0.0), 0u32);

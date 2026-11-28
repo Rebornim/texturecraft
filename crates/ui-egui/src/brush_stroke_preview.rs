@@ -1,6 +1,6 @@
 //! The live stroke at the top of the paint tool's properties: the current brush's own stamps along a hand-drawn gesture
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use egui::{Color32, ColorImage, Context, Id, Painter, Rect, TextureHandle, TextureOptions, pos2, vec2};
 use texturecraft_engine::compose::ImageRes;
@@ -27,9 +27,11 @@ const STROKE_WIDTH: std::ops::RangeInclusive<f32> = 2.0..=32.0;
 /// The rendered stroke and what it was rendered from, kept in egui's memory behind an `Arc` so a frame with the same brush reuses it without copying it
 pub(crate) struct BrushStrokePreview {
     brush: BrushSettings,
-    image: Option<Arc<ImageRes>>,
+    // A hidden picture keeps its texture without owning the decoded alpha
+    image: Option<Weak<ImageRes>>,
     tints: Vec<[u8; 3]>,
     size: [usize; 2],
+    pixels_per_point: f32,
     texture: TextureHandle,
 }
 
@@ -58,7 +60,8 @@ impl BrushStrokePreview {
         let cached = ctx.data(|data| data.get_temp::<Arc<BrushStrokePreview>>(id)).filter(|preview| {
             preview.brush == *brush
                 && preview.size == size
-                && preview.image.as_ref().map(Arc::as_ptr) == image.map(Arc::as_ptr)
+                && preview.pixels_per_point == pixels_per_point
+                && preview.image.as_ref().map(Weak::as_ptr) == image.map(Arc::as_ptr)
                 && preview.tints.iter().enumerate().all(|(x, shown)| *shown == column_tint(x))
         });
 
@@ -69,7 +72,7 @@ impl BrushStrokePreview {
                 let picture = render(brush, image.map(|image| &**image), size, pixels_per_point, &tints);
                 let texture = ctx.load_texture(key, picture, TextureOptions::LINEAR);
                 let texture_id = texture.id();
-                let preview = BrushStrokePreview { brush: brush.clone(), image: image.cloned(), tints, size, texture };
+                let preview = BrushStrokePreview { brush: brush.clone(), image: image.map(Arc::downgrade), tints, size, pixels_per_point, texture };
                 ctx.data_mut(|data| data.insert_temp(id, Arc::new(preview)));
                 texture_id
             }
@@ -184,5 +187,51 @@ mod tests {
         let full = BrushSettings { min_size: 1.0, size_pressure: true, ..brush.clone() };
 
         assert!(paint(&brush) == paint(&full), "a mouse brush draws no taper");
+    }
+
+    #[test]
+    fn changing_display_scale_redraws_a_stroke_at_the_same_pixel_size() {
+        let ctx = Context::default();
+        let brush = BrushSettings::default();
+        let draw = |scale: f32| {
+            let mut input = egui::RawInput::default();
+            input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(scale);
+            let rect = Rect::from_min_size(egui::Pos2::ZERO, vec2(SIZE[0] as f32, SIZE[1] as f32) / scale);
+            let mut frame = ctx.run_ui(input, |ui| BrushStrokePreview::paint(&ctx, ui.painter(), rect, &brush, None, |_| [255; 3]));
+            let upload = frame.textures_delta.set.values().flatten().find(|delta| delta.image.size() == SIZE).map(|delta| delta.image.clone());
+            frame.textures_delta.clear();
+            upload
+        };
+
+        let first = draw(1.0).expect("first picture");
+        let scaled = draw(2.0).expect("redrawn picture");
+        let reused = draw(2.0);
+
+        let (egui::ImageData::Color(first), egui::ImageData::Color(scaled)) = (first, scaled);
+        assert_ne!(first.pixels, scaled.pixels, "stroke width and margins follow the display scale");
+        assert!(reused.is_none(), "an unchanged display reuses the picture");
+    }
+
+    #[test]
+    fn cached_pictures_release_each_decoded_alpha_when_its_owner_drops_it() {
+        const ALPHA_SIDE_PX: u32 = 1024;
+        let ctx = Context::default();
+        let brush = BrushSettings::default();
+        let rect = Rect::from_min_size(egui::Pos2::ZERO, vec2(48.0, 32.0));
+        let mut former_alphas = Vec::new();
+
+        for (layer_name, gray) in [("docked", 0.25), ("popup", 0.75)] {
+            let pixels = vec![[gray, gray, gray, 1.0]; (ALPHA_SIDE_PX * ALPHA_SIDE_PX) as usize];
+            let alpha = Arc::new(ImageRes::new(ALPHA_SIDE_PX, ALPHA_SIDE_PX, pixels, false));
+            let layer = egui::LayerId::new(egui::Order::Middle, Id::unique(layer_name));
+            let painter = ctx.layer_painter(layer);
+
+            BrushStrokePreview::paint(&ctx, &painter, rect, &brush, Some(&alpha), |_| [255; 3]);
+            former_alphas.push(Arc::downgrade(&alpha));
+        }
+
+        let retained_bytes: usize = former_alphas.iter().filter_map(|alpha| alpha.upgrade()).map(|alpha| std::mem::size_of_val(alpha.rgba.as_slice())).sum();
+        eprintln!("cached pictures retain {retained_bytes} decoded alpha bytes");
+        assert_eq!(retained_bytes, 0, "pictures must not own decoded alpha pixels");
     }
 }

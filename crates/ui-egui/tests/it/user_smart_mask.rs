@@ -75,6 +75,7 @@ fn a_saved_smart_mask_is_listed_with_the_smart_masks_and_applies_to_the_selected
     harness.state_mut().ui.shelf_path = vec!["user".into()];
     harness.state_mut().ui.shelf_tab = SMART_MATERIALS_TYPE;
     harness.run_steps(3);
+
     assert!(harness.query_by_label_contains("Zebra Saved").is_none(), "it is not a smart material");
 
     harness.state_mut().ui.shelf_tab = SMART_MASKS_TYPE;

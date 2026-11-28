@@ -1295,6 +1295,23 @@ fn an_export_size_that_scales_a_tall_set_past_the_largest_side_is_refused() {
 }
 
 #[test]
+fn a_psd_scaled_past_the_largest_side_leaves_the_sets_other_maps() {
+    let mut fx = Fx::new(&default_channels());
+    fx.project.texture_sets[0].set_size(RES, RES * 4);
+    let mut options = one_map(FileFormat::Png, 8, roughness());
+    let mut psd = options.preset.maps[0].clone();
+    (psd.file, psd.format, psd.bit_depth, psd.channels) = ("layered".into(), FileFormat::Psd, 8, rgba_half_alpha());
+    options.preset.maps.push(psd);
+    options.size = Some(MAX_IMAGE_SIZE / 2);
+    options.maps.insert(0, MapOverride { size: Some(MAX_IMAGE_SIZE / 4), ..MapOverride::default() });
+
+    let plan = list_outputs(&fx.project, 0, "sphere", &options).unwrap();
+
+    assert!(plan.len() == 1 && plan[0].format == FileFormat::Png, "{plan:?}");
+    assert!(plan[0].warnings.iter().any(|warning| is_set_warning(warning)), "{:?}", plan[0].warnings);
+}
+
+#[test]
 fn psd_plan_rejects_a_version_one_atlas_over_its_dimension_limit() {
     let mut fx = Fx::new(&default_channels());
 

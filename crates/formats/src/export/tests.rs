@@ -1170,6 +1170,18 @@ fn psd_holds_the_merged_image_planar() {
 }
 
 #[test]
+fn an_export_size_that_scales_a_tall_set_past_the_largest_side_is_refused() {
+    let mut fx = Fx::new(&default_channels());
+    fx.project.texture_sets[0].set_size(RES, RES * 4);
+    let mut options = one_map(FileFormat::Png, 8, roughness());
+    options.size = Some(MAX_IMAGE_SIZE / 2);
+    assert!(list_outputs(&fx.project, 0, "sphere", &options).is_err(), "the height would be twice the largest side");
+
+    options.size = Some(MAX_IMAGE_SIZE / 4);
+    assert_eq!(list_outputs(&fx.project, 0, "sphere", &options).unwrap().len(), 1, "a tall export within the largest side is kept");
+}
+
+#[test]
 fn psd_plan_rejects_a_version_one_atlas_over_its_dimension_limit() {
     let mut fx = Fx::new(&default_channels());
     fx.project.texture_sets[0].uv_tiles = vec![1001, 1002];

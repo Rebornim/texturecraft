@@ -32,7 +32,11 @@ pub(crate) fn cross_seams(flat: &DilationMap, reach: u32, block: (u32, u32), inp
             let (x1, y1) = (high.x.ceil().min(size.x) as u32, high.y.ceil().min(size.y) as u32);
             let mut side_islands = None;
             for y in y0..y1 {
-                for x in x0..x1 {
+                // Only the texel centres in the band beside the seam can be within its reach
+                let Some((low_x, high_x)) = near_edge.band_span(reach, y as f32 + 0.5) else { continue };
+                let row_x0 = ((low_x - 0.5).floor().max(0.0) as u32).max(x0);
+                let row_x1 = ((high_x + 0.5).ceil().max(0.0) as u32).min(x1);
+                for x in row_x0..row_x1 {
                     let index = y * width + x;
                     let Some(&flat_source) = flat.src.get(index as usize) else { continue };
 

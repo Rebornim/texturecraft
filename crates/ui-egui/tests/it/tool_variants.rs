@@ -7,6 +7,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::{By, NodeT, Queryable, by};
 use serde_json::json;
 use texturecraft_engine::Tool;
+use texturecraft_engine::tool_variant::ToolVariant;
 use texturecraft_ui_egui::TextureCraftApp;
 use texturecraft_ui_egui::state::Mode;
 
@@ -21,19 +22,29 @@ fn app_harness(tool: Tool) -> Harness<'static, TextureCraftApp> {
     harness
 }
 
-fn shelf_button(harness: &Harness<'_, TextureCraftApp>, name: &str) -> Rect {
-    harness.get(shelf(name)).rect()
-}
-
 /// The shelf button named `name`, with or without its shortcut after it
 fn shelf(name: &str) -> By<'_> {
     let named = move |label: &str| label == name || label.strip_prefix(name).is_some_and(|rest| rest.starts_with(" ("));
     by().role(Role::Button).predicate(move |node| node.label().is_some_and(|label| named(&label)))
 }
 
+fn shelf_button(harness: &Harness<'_, TextureCraftApp>, name: &str) -> Rect {
+    harness.get(shelf(name)).rect()
+}
+
 /// The variant the shelf button of the tool named `tool` shows: its description for screen readers
 fn shown_variant(harness: &Harness<'_, TextureCraftApp>, tool: &str) -> Option<String> {
     harness.get(shelf(tool)).accesskit_node().description()
+}
+
+fn key(harness: &mut Harness<'_, TextureCraftApp>, key: Key, modifiers: Modifiers) {
+    harness.event(Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
+    harness.run_steps(2);
+}
+
+/// The open menu's row named `name` has the keyboard focus
+fn row_focused(harness: &Harness<'_, TextureCraftApp>, name: &str) -> bool {
+    harness.get(by().role(Role::RadioButton).label(name)).is_focused()
 }
 
 /// A press and release at `position`, each in its own frame, as a hand clicks
@@ -47,6 +58,21 @@ fn click_at(harness: &mut Harness<'_, TextureCraftApp>, position: Pos2) {
     harness.run_steps(2);
 }
 
+/// One frame at `seconds` past a fixed start, so a test controls how long a press lasts
+fn step_at(harness: &mut Harness<'_, TextureCraftApp>, seconds: f64) {
+    const START_SECONDS: f64 = 100.0;
+    harness.input_mut().time = Some(START_SECONDS + seconds);
+    harness.step();
+}
+
+/// The pointer moved to `position` and pressed there, at `seconds`
+fn press_at(harness: &mut Harness<'_, TextureCraftApp>, position: Pos2, seconds: f64) {
+    harness.hover_at(position);
+    step_at(harness, seconds);
+    harness.event(Event::PointerButton { pos: position, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    step_at(harness, seconds);
+}
+
 /// A click on the arrow in the button's lower-right corner
 fn click_arrow(harness: &mut Harness<'_, TextureCraftApp>, button: Rect) {
     click_at(harness, button.right_bottom() - vec2(3.0, 3.0));
@@ -54,8 +80,9 @@ fn click_arrow(harness: &mut Harness<'_, TextureCraftApp>, button: Rect) {
 
 /// The open menu's rows, by name, with whether each is the current variant
 fn menu_rows(harness: &Harness<'_, TextureCraftApp>) -> Vec<(String, bool)> {
+    let is_variant = |label: &str| ToolVariant::ALL.iter().any(|variant| variant.label() == label);
     harness
-        .query_all(by().role(Role::RadioButton))
+        .query_all(by().role(Role::RadioButton).predicate(move |node| node.label().is_some_and(|label| is_variant(&label))))
         .filter_map(|node| Some((node.accesskit_node().label()?, node.accesskit_node().toggled() == Some(Toggled::True))))
         .collect()
 }
@@ -129,8 +156,7 @@ fn plain_click_keeps_the_variant() {
     assert_eq!(harness.state().session.tool.tool, Tool::Paint);
     assert!(harness.state().session.tool.brush.particles.enabled, "selecting the tool keeps its variant");
 
-    harness.event(Event::Key { key: Key::Num2, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
-    harness.run_steps(2);
+    key(&mut harness, Key::Num2, Modifiers::NONE);
     assert_eq!(harness.state().session.tool.tool, Tool::Eraser);
     assert!(harness.state().session.tool.brush.particles.enabled, "the tool's key keeps its variant too");
     assert_eq!(shown_variant(&harness, "Eraser").as_deref(), Some("Physical eraser"));
@@ -183,4 +209,115 @@ fn baking_shelf_has_no_variant_arrows() {
     assert!(menu_rows(&harness).is_empty(), "leaving painting closes the menu");
     click_arrow(&mut harness, paint);
     assert!(menu_rows(&harness).is_empty());
+}
+
+#[test]
+fn hold_and_right_click_open_the_menu() {
+    let mut harness = app_harness(Tool::Eraser);
+    let paint = shelf_button(&harness, "Paint").center();
+
+    harness.event(Event::PointerButton { pos: paint, button: PointerButton::Secondary, pressed: true, modifiers: Modifiers::NONE });
+    harness.event(Event::PointerButton { pos: paint, button: PointerButton::Secondary, pressed: false, modifiers: Modifiers::NONE });
+    harness.run_steps(2);
+    assert!(!menu_rows(&harness).is_empty(), "a right click opens the menu");
+    key(&mut harness, Key::Escape, Modifiers::NONE);
+    assert!(menu_rows(&harness).is_empty());
+
+    // A press of a quarter second is still a click; the menu opens once it has lasted 0.4 s, shown from the frame after (egui sizes a new popup first)
+    press_at(&mut harness, paint, 0.0);
+    step_at(&mut harness, 0.25);
+    assert!(menu_rows(&harness).is_empty(), "a short press is still a click");
+    step_at(&mut harness, 0.5);
+    step_at(&mut harness, 0.55);
+    assert!(!menu_rows(&harness).is_empty(), "a held press opens the menu");
+    assert_eq!(harness.state().session.tool.tool, Tool::Eraser);
+}
+
+#[test]
+fn releasing_a_hold_neither_selects_nor_closes() {
+    let mut harness = app_harness(Tool::Eraser);
+    let paint = shelf_button(&harness, "Paint").center();
+    press_at(&mut harness, paint, 0.0);
+    step_at(&mut harness, 0.5);
+    step_at(&mut harness, 0.55);
+    assert!(!menu_rows(&harness).is_empty());
+
+    // Released within egui's click time, so egui reports it as a click
+    harness.event(Event::PointerButton { pos: paint, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    step_at(&mut harness, 0.6);
+    step_at(&mut harness, 0.7);
+
+    assert!(!menu_rows(&harness).is_empty(), "the menu stays for a row to be picked");
+    assert_eq!(harness.state().session.tool.tool, Tool::Eraser, "the hold's release is not a click on the tool");
+}
+
+#[test]
+fn keyboard_opens_picks_and_returns_focus() {
+    let mut harness = app_harness(Tool::Paint);
+    harness.get(shelf("Paint")).focus();
+    harness.run_steps(2);
+    assert_eq!(harness.get(shelf("Paint")).accesskit_node().data().is_expanded(), Some(false), "the button says it has a closed menu");
+
+    key(&mut harness, Key::ArrowDown, Modifiers::ALT);
+    assert!(row_focused(&harness, "Paint"), "the menu opens on the current variant");
+    assert_eq!(harness.get(shelf("Paint")).accesskit_node().data().is_expanded(), Some(true));
+    key(&mut harness, Key::ArrowDown, Modifiers::NONE);
+    assert!(row_focused(&harness, "Physical paint"));
+    key(&mut harness, Key::ArrowDown, Modifiers::NONE);
+    assert!(row_focused(&harness, "Physical paint"), "the last row keeps the focus in the menu");
+
+    key(&mut harness, Key::Enter, Modifiers::NONE);
+    assert!(harness.state().session.tool.brush.particles.enabled, "Enter picks the focused row");
+    assert!(menu_rows(&harness).is_empty());
+    assert!(harness.get(shelf("Paint")).is_focused(), "the focus goes back to the button");
+
+    key(&mut harness, Key::F10, Modifiers::SHIFT);
+    assert!(row_focused(&harness, "Physical paint"));
+    key(&mut harness, Key::Escape, Modifiers::NONE);
+    assert!(menu_rows(&harness).is_empty());
+    assert!(harness.get(shelf("Paint")).is_focused(), "Escape closes the menu back to the button");
+
+    key(&mut harness, Key::Menu, Modifiers::NONE);
+    assert!(row_focused(&harness, "Physical paint"));
+    key(&mut harness, Key::Tab, Modifiers::NONE);
+    assert!(menu_rows(&harness).is_empty(), "Tab leaves the menu");
+    assert!(harness.get(shelf("Paint")).is_focused(), "and lands on the button, so the next Tab goes on from there");
+    assert_eq!(harness.state().session.tool.tool, Tool::Paint);
+}
+
+#[test]
+fn variant_of_an_unusable_tool_is_disabled() {
+    let mut harness = app_harness(Tool::Eraser);
+    assert!(texturecraft_ui_egui::menus::enabled(harness.state(), "tool.variant.physicalPaint"));
+    let button = shelf_button(&harness, "Paint");
+    click_arrow(&mut harness, button);
+    assert!(!menu_rows(&harness).is_empty());
+
+    // A fill layer's content takes no paint
+    let session = &mut harness.state_mut().session;
+    let fill = texturecraft_engine::execute(session, "layer.add.fill", &json!({})).unwrap()["layer"].as_u64().unwrap();
+    texturecraft_engine::execute(session, "layer.select", &json!({"layer": fill, "target": "content"})).unwrap();
+    harness.run_steps(3);
+
+    assert!(menu_rows(&harness).is_empty(), "the menu of a tool that can no longer act closes");
+    assert!(!texturecraft_ui_egui::menus::enabled(harness.state(), "tool.variant.physicalPaint"), "its variants are greyed like the tool");
+    let context = harness.ctx.clone();
+    texturecraft_ui_egui::menus::invoke(harness.state_mut(), &context, "tool.variant.physicalPaint");
+    assert!(!harness.state().session.tool.brush.particles.enabled, "so a key bound to one does nothing");
+}
+
+#[test]
+fn filled_path_survives_apply() {
+    let mut harness = app_harness(Tool::Path);
+    let button = shelf_button(&harness, "Path");
+    click_arrow(&mut harness, button);
+    harness.get(by().role(Role::RadioButton).label("Filled path")).click();
+    harness.run_steps(3);
+
+    harness.state_mut().run("tool.path", json!({"uvPoints": [[0.3, 0.3], [0.7, 0.3], [0.7, 0.7], [0.3, 0.7]], "commit": true}));
+    harness.run_steps(2);
+
+    let button = shelf_button(&harness, "Path");
+    click_arrow(&mut harness, button);
+    assert_eq!(menu_rows(&harness), [("Paint along path".to_owned(), false), ("Filled path".to_owned(), true)], "Apply keeps the filled path");
 }

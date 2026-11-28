@@ -132,10 +132,10 @@ fn mesh_reimport_clears_log_selection_within_the_same_project() {
 #[test]
 fn assets_has_a_greyed_filter_button_with_the_hint() {
     let mut h = app();
-    assert!(h.query_by_label(egui_phosphor::regular::WARNING).is_none(), "GENERAL has no filter button");
+    assert!(h.query_by_label("Warnings").is_none(), "GENERAL has no filter button");
     h.get_by_label("ASSETS").click();
     h.run_steps(3);
-    let button = h.get_by_label(egui_phosphor::regular::WARNING);
+    let button = h.get_by_label("Warnings");
     assert!(button.accesskit_node().is_disabled());
     let at = button.rect().center();
     h.hover_at(egui::pos2(1.0, 1.0));
@@ -153,6 +153,31 @@ fn the_log_tabs_split_the_panel_width() {
 
     assert!((general.width() - assets.width()).abs() < 1.0, "{general:?} {assets:?}");
     assert!((general.right() - assets.left()).abs() < 1.0, "{general:?} {assets:?}");
+}
+
+/// The list's scrollbar keeps a gap to the list's frame, which ends where the tabs end
+#[test]
+fn the_log_scroll_bar_stands_clear_of_the_list_frame() {
+    let h = app();
+    let (general, assets) = (h.get_by_label("GENERAL").rect(), h.get_by_label("ASSETS").rect());
+    let bars = h.get_all_by_role(egui::accesskit::Role::ScrollBar).filter(|bar| bar.rect().left() > general.left() && bar.rect().right() <= assets.right());
+    let bar = bars.max_by(|a, b| a.rect().height().total_cmp(&b.rect().height())).expect("the list's scroll bar").rect();
+
+    // The frame ends where the tab strip ends; its 1 point line and 1 point padding come before its inside
+    let frame_inside = assets.right() - 2.0;
+    assert!(bar.right() < frame_inside, "{bar:?} {assets:?}");
+}
+
+/// A line longer than the panel stays on one row
+#[test]
+fn a_long_line_stays_one_row() {
+    let mut h = app();
+    h.state_mut().session.log.info("Exporter", "long ".repeat(400));
+    h.run_steps(3);
+
+    let long = line(&h, &format!("[Exporter] {}", "long ".repeat(400))).rect();
+    let short = line(&h, "[Exporter] first").rect();
+    assert!((long.height() - short.height()).abs() < 1.0, "{long:?} {short:?}");
 }
 
 #[test]

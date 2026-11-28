@@ -51,8 +51,9 @@ pub(crate) fn button(ui: &mut Ui, variant: ToolVariant, name: &str, tooltip: &st
     let tokens = Tokens::get(ui.ctx());
     let variant_name = tr(variant.label());
     let response = painted_icon_button(ui, name, selected, size, |painter, rect, color, fill| {
-        // At rest the button is clear over the shelf card; the arrow stays quieter than the icon until the button lights up
-        let (ground, arrow_color) = if fill == Color32::TRANSPARENT { (tokens.panel, tokens.text_dim) } else { (fill, color) };
+        // Clear at rest over the shelf card, a greyed fill faded over it; the arrow stays quieter than the icon until the button lights up
+        let (ground, arrow_color) =
+            if fill == Color32::TRANSPARENT { (tokens.panel, tokens.text_dim) } else { (tokens.panel.lerp_to_gamma(fill, painter.opacity()), color) };
         tool_variant_icon::paint(painter, rect, variant, color, ground);
         let arrow_centre = rect.right_bottom() - vec2(size, size) * ARROW_INSET_SCALE;
         painter.text(arrow_centre, Align2::CENTER_CENTER, egui_phosphor::regular::CARET_DOWN, FontId::proportional(size * ARROW_SCALE), arrow_color);

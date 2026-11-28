@@ -572,7 +572,7 @@ fn view_header(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, id: &str) {
     let names: Vec<String> = app.session.doc.project.cameras.iter().map(|camera| camera.name.clone()).collect();
     let shown = current.and_then(|index| names.get(index)).map_or(tr(DEFAULT_CAMERA), String::as_str);
     if project_open {
-        egui::ComboBox::from_id_salt(format!("{id}_cam")).width(VIEW_PICKER_WIDTH).selected_text(shown).show_ui(&mut child, |ui| {
+        let picker = egui::ComboBox::from_id_salt(format!("{id}_cam")).width(VIEW_PICKER_WIDTH).selected_text(shown).show_ui(&mut child, |ui| {
             if ui.selectable_label(current.is_none(), tr(DEFAULT_CAMERA)).clicked() {
                 app.run("camera.select", json!({}));
             }
@@ -585,6 +585,13 @@ fn view_header(app: &mut TextureCraftApp, ui: &mut Ui, rect: Rect, id: &str) {
             if ui.selectable_label(false, tr("Save view as camera")).clicked() {
                 app.run("camera.add", json!({}));
             }
+        });
+
+        // The box shows only the camera's name: it is named for what it picks
+        let enabled = child.is_enabled();
+        picker.response.widget_info(|| egui::WidgetInfo {
+            current_text_value: Some(shown.to_owned()),
+            ..egui::WidgetInfo::labeled(egui::Role::ComboBox, enabled, tr("View camera"))
         });
     }
 

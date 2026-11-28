@@ -262,16 +262,28 @@ pub(crate) fn history(app: &mut TextureCraftApp, ui: &mut Ui) {
     let done_count = done.len() as i64;
     let rows = std::iter::once((tr("Project opened").to_owned(), tokens.text_dim))
         .chain(done.iter().map(|label| (tr_history(label), tokens.text)))
-        .chain(undone.iter().map(|label| (trf("{action} (undone)", &[("action", &tr_history(label))]), tokens.text_dim)));
+        .chain(undone.iter().map(|label| (trf("{action} (undone)", &[("action", &tr_history(label))]), tokens.text_dim)))
+        .collect::<Vec<_>>();
+
+    // Only a change to the steps brings the current one into view: a tool or camera change keeps the user's scroll
+    let shown = Some((done.len(), undone.len(), done.last().cloned()));
+    let follow = app.ui.history_shown != shown;
+    app.ui.history_shown = shown;
 
     // A click on a step goes back (or forward) to it: steps to undo, or to redo when negative
     let mut jump = 0i64;
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        for (row, (name, color)) in rows.enumerate() {
+
+    let area = egui::ScrollArea::vertical().id_salt("history").auto_shrink([false, false]);
+    crate::log_panel::panel_rows(ui, area, HISTORY_ROW_HEIGHT, rows.len(), |ui, range| {
+        if follow {
+            let top = ui.max_rect().top() + (done.len() as f32 - range.start as f32) * HISTORY_ROW_HEIGHT;
+            let current = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=top + HISTORY_ROW_HEIGHT);
+            ui.scroll_to_rect_animation(current, None, egui::style::ScrollAnimation::none());
+        }
+        for (row, (name, color)) in rows.iter().enumerate().skip(range.start).take(range.len()) {
             // Each row is the state after that many steps
             let steps = done_count - row as i64;
-            if history_row(ui, &tokens, &name, color, steps == 0).on_hover_text(tr("Return to this step")).clicked() {
+            if history_row(ui, &tokens, name, *color, steps == 0).on_hover_text(tr("Return to this step")).clicked() {
                 // Point history is consumed before the document rows shown here
                 jump = if steps >= 0 {
                     app.session.history_undo_steps(steps as usize) as i64

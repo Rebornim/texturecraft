@@ -1,7 +1,7 @@
-//! A click on a step of the History panel goes back or forward to it.
+//! The History panel: a click on a step goes back or forward to it, the current step is marked and kept in view
 
 use egui::accesskit::Toggled;
-use egui::{Key, Modifiers};
+use egui::{Event, Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::json;
@@ -27,13 +27,16 @@ fn press(harness: &mut Harness<'_, TextureCraftApp>, key: Key) {
     harness.run_steps(3);
 }
 
-/// The rows the panel shows as the current step: name and top edge
+/// The History rows shown as the current step: name and top edge
 fn current_rows(harness: &Harness<'_, TextureCraftApp>) -> Vec<(String, f32)> {
+    let session = &harness.state().session;
+    let undone = session.redo_labels().into_iter().map(|label| format!("{label} (undone)"));
+    let names: Vec<String> = session.history_labels().into_iter().chain(undone).chain(["Project opened".to_owned()]).collect();
     harness
         .get_all_by_role(egui::accesskit::Role::Button)
         .filter(|node| node.accesskit_node().toggled() == Some(Toggled::True))
         .filter_map(|node| Some((node.accesskit_node().label()?, node.rect().top())))
-        .filter(|(name, _)| name.contains("Rename layer") || name == "Project opened")
+        .filter(|(name, _)| names.contains(name))
         .collect()
 }
 
@@ -232,4 +235,75 @@ fn only_the_current_step_is_marked_selected() {
     harness.get_by_label("Rename layer (undone)").click();
     harness.run_steps(3);
     assert!(harness.state().session.redo_labels().is_empty());
+}
+
+/// A session `steps` renames long, so its History list is taller than the panel
+fn long_session(steps: usize) -> Session {
+    let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
+    for step in 0..steps {
+        execute(&mut session, "layer.rename", &json!({"name": format!("Step {step}")})).unwrap();
+    }
+    session
+}
+
+/// Whether the current step's row named `name` is on screen
+fn current_shown(harness: &Harness<'_, TextureCraftApp>, name: &str) -> bool {
+    let screen = harness.ctx.content_rect();
+    current_rows(harness).iter().any(|(row, top)| row == name && screen.y_range().contains(*top))
+}
+
+/// Scroll the History list back to its first rows with the mouse wheel
+fn scroll_to_top(harness: &mut Harness<'_, TextureCraftApp>) {
+    // Exactly one row is the current step; its top finds the row under the wheel
+    let (_, top) = current_rows(harness)[0];
+    let over = harness.get_all_by_label("Rename layer").find(|node| node.rect().top() == top).unwrap().rect().center();
+    harness.hover_at(over);
+    harness.event(Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, 100_000.0),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Wheel,
+        modifiers: Modifiers::NONE,
+    });
+    harness.run_steps(12);
+}
+
+/// A History list longer than the panel opens at its newest step, not at "Project opened"
+#[test]
+fn a_long_history_shows_the_newest_step() {
+    let harness = history_harness(long_session(100));
+
+    assert!(current_shown(&harness, "Rename layer"));
+    assert!(harness.query_by_label("Project opened").is_none_or(|row| !harness.ctx.content_rect().y_range().contains(row.rect().top())));
+}
+
+/// A list the user scrolled up stays there when a tool changes but the history doesn't
+#[test]
+fn scrolling_up_is_not_pulled_back() {
+    let mut harness = history_harness(long_session(100));
+    scroll_to_top(&mut harness);
+    assert!(!current_shown(&harness, "Rename layer"));
+
+    execute(&mut harness.state_mut().session, "tool.select", &json!({"tool": "path"})).unwrap();
+    harness.run_steps(4);
+
+    assert!(!current_shown(&harness, "Rename layer"));
+}
+
+/// Once the history is full, a new step keeps the step count; its new name still brings it into view
+#[test]
+fn the_newest_step_shows_past_the_history_cap() {
+    let steps = texturecraft_engine::session::MAX_HISTORY + 60;
+    let mut harness = history_harness(long_session(steps));
+    let capped = harness.state().session.history_labels().len();
+    assert!(capped < steps, "the history is full");
+    scroll_to_top(&mut harness);
+    assert!(!current_shown(&harness, "Rename layer"));
+
+    execute(&mut harness.state_mut().session, "layer.add.paint", &json!({})).unwrap();
+    harness.run_steps(4);
+
+    let newest = harness.state().session.history_labels().last().cloned().unwrap();
+    assert_eq!(harness.state().session.history_labels().len(), capped);
+    assert!(current_shown(&harness, &newest));
 }

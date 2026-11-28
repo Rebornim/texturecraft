@@ -596,6 +596,9 @@ impl TextureCraftApp {
                 }
             }
 
+            // The desktop launcher can supply an already-open autosave copy
+            app.detach_autosave_copy();
+
             // An export folder still at the default follows the data folder
             if app.ui.export.dir == data_folder("").join("export").display().to_string() {
                 app.ui.export.dir = user_dir("export").display().to_string();
@@ -676,6 +679,9 @@ impl TextureCraftApp {
                     Some(_) => self.camera_glide = None,
                     None => self.settle_camera_glide(id, before),
                 }
+
+                #[cfg(not(target_arch = "wasm32"))]
+                let value = self.recover_file_open(id, value);
 
                 Some(value)
             }

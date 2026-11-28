@@ -6180,6 +6180,7 @@ dependencies = [
  "raw-window-handle",
  "rayon",
  "rfd",
+ "same-file",
  "serde",
  "serde_json",
  "skera",

@@ -295,7 +295,7 @@ impl SourceRef {
         match self {
             SourceRef::Channel { channel, .. } => channel.kind() == ChannelKind::NormalMap,
             SourceRef::Virtual { map, .. } => matches!(map, VirtualMap::NormalOpenGl | VirtualMap::NormalDirectX | VirtualMap::HeightNormal),
-            SourceRef::Baked { map, .. } => *map == BakedMap::Normal,
+            SourceRef::Baked { map, .. } => matches!(map, BakedMap::Normal | BakedMap::BentNormal),
             SourceRef::Constant(_) => false,
         }
     }

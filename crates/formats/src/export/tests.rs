@@ -1331,15 +1331,19 @@ fn padding_past_a_seam_takes_the_far_island_except_for_normals() {
     let left = texturecraft_geom::UvSeamSide { start: at(12.0, 0.0), end: at(12.0, 64.0), interior: at(4.0, 0.0) };
     let right = texturecraft_geom::UvSeamSide { start: at(20.0, 0.0), end: at(20.0, 64.0), interior: at(28.0, 0.0) };
     let seams = [UvSeam { sides: [left, right] }];
+    let bent: Vec<f32> = (0..RES * RES).flat_map(|i| if i % RES < 16 { [0.3, 0.5, 0.9] } else { [0.7, 0.5, 0.9] }).collect();
+    fx.baked = BakedMaps { resolution: RES, maps: [(BakedMap::BentNormal, std::sync::Arc::new(bent))].into() };
+    fx.project.texture_sets[0].baked.insert(BakedMap::BentNormal);
     let normal_x = SourceRef::Channel { channel: Channel::Normal, component: 0 };
-    let mut options = one_map(FileFormat::Png, 16, vec![(Dest::R, roughness()[0].1.clone()), (Dest::G, normal_x), (Dest::B, SourceRef::Constant(0.0))]);
+    let bent_x = SourceRef::Baked { map: BakedMap::BentNormal, component: 0 };
+    let mut options = one_map(FileFormat::Png, 16, vec![(Dest::R, roughness()[0].1.clone()), (Dest::G, normal_x), (Dest::B, bent_x)]);
     options.padding = Padding::Dilation(4);
     let render = |fx: &Fx| decode(&render_maps(&ExportInput { seams: &seams, ..fx.input() }, &options).unwrap()[0]).to_rgb16();
 
-    // Just right of the left island: roughness continues from the right island, the normal stays the left island's
+    // Just right of the left island: roughness continues from the right island, the normal and bent normal stay the left island's
     let space_3d = render(&fx);
     let (outside, near, far) = (space_3d.get_pixel(13, 30), space_3d.get_pixel(8, 30), space_3d.get_pixel(24, 30));
-    assert_eq!((outside[0], outside[1]), (far[0], near[1]));
+    assert_eq!((outside[0], outside[1], outside[2]), (far[0], near[1], near[2]));
 
     fx.project.texture_sets[0].uv_padding = UvPaddingMode::Space2d;
     let space_2d = render(&fx);

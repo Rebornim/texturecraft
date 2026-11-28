@@ -1,7 +1,9 @@
 //! A click on a step of the History panel goes back or forward to it.
 
+use egui::accesskit::Toggled;
+use egui::{Key, Modifiers};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::json;
 use texturecraft_engine::geom::glam::Vec3;
 use texturecraft_engine::{Session, execute};
@@ -17,6 +19,22 @@ fn history_harness(session: Session) -> Harness<'static, TextureCraftApp> {
     harness.state_mut().ui.dock.focus(Panel::History);
     harness.run_steps(4);
     harness
+}
+
+/// Undo or redo one step from the keyboard, as the Edit menu's shortcuts do
+fn press(harness: &mut Harness<'_, TextureCraftApp>, key: Key) {
+    harness.key_press_modifiers(Modifiers::COMMAND, key);
+    harness.run_steps(3);
+}
+
+/// The rows the panel shows as the current step: name and top edge
+fn current_rows(harness: &Harness<'_, TextureCraftApp>) -> Vec<(String, f32)> {
+    harness
+        .get_all_by_role(egui::accesskit::Role::Button)
+        .filter(|node| node.accesskit_node().toggled() == Some(Toggled::True))
+        .filter_map(|node| Some((node.accesskit_node().label()?, node.rect().top())))
+        .filter(|(name, _)| name.contains("Rename layer") || name == "Project opened")
+        .collect()
 }
 
 /// Three document rows provide an intermediate target that detects both short and excessive jumps
@@ -49,6 +67,7 @@ fn history_jump_accounts_for_drafts_with_and_without_an_empty_checkpoint() {
         session.path_checkpoint();
         let mut harness = history_harness(session);
 
+        // The list runs oldest first, so the first "Rename layer" row is the oldest step
         harness.get_all_by_label("Rename layer").next().unwrap().click();
         harness.run_steps(3);
 
@@ -60,7 +79,7 @@ fn history_jump_accounts_for_drafts_with_and_without_an_empty_checkpoint() {
     }
 }
 
-/// A row jump traverses point history, while the Undo and Redo buttons still take one point step
+/// A row jump traverses point history, while Ctrl+Z and Ctrl+Y still take one point step
 #[test]
 fn history_jump_accounts_for_stored_point_edits_without_changing_single_steps() {
     let mut session = renamed_session();
@@ -77,12 +96,10 @@ fn history_jump_accounts_for_stored_point_edits_without_changing_single_steps() 
     let done = session.history_labels().len();
     let mut harness = history_harness(session);
 
-    harness.get_by_label(&format!("{} Undo", egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE)).click();
-    harness.run_steps(3);
+    press(&mut harness, Key::Z);
     assert_eq!(harness.state().session.tool.path.points, moved);
     assert_eq!(harness.state().session.history_labels().len(), done);
-    harness.get_by_label(&format!("{} Redo", egui_phosphor::regular::ARROW_CLOCKWISE)).click();
-    harness.run_steps(3);
+    press(&mut harness, Key::Y);
     assert_eq!(harness.state().session.tool.path.points, original);
     assert_eq!(harness.state().session.history_labels().len(), done);
 
@@ -91,6 +108,7 @@ fn history_jump_accounts_for_stored_point_edits_without_changing_single_steps() 
     assert_eq!(harness.state().session.tool.path.points, original);
     assert_eq!(harness.state().session.history_labels().len(), done);
 
+    // The list runs oldest first, so the first "Rename layer" row is the oldest step
     harness.get_all_by_label("Rename layer").next().unwrap().click();
     harness.run_steps(3);
 
@@ -126,15 +144,14 @@ fn history_redo_jump_accounts_for_point_steps_without_changing_single_steps() {
     assert_eq!(session.redo_labels().len(), 3);
     let mut harness = history_harness(session);
 
-    harness.get_by_label(&format!("{} Redo", egui_phosphor::regular::ARROW_CLOCKWISE)).click();
-    harness.run_steps(3);
+    press(&mut harness, Key::Y);
     assert_eq!(harness.state().session.tool.path.points.len(), 2);
     assert_eq!(harness.state().session.history_labels().len(), done - 3);
-    harness.get_by_label(&format!("{} Undo", egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE)).click();
-    harness.run_steps(3);
+    press(&mut harness, Key::Z);
     assert_eq!(harness.state().session.tool.path.points, original);
     assert_eq!(harness.state().session.history_labels().len(), done - 3);
 
+    // The last undone row is the newest step, so clicking it redoes up to the end
     harness.get_all_by_label("Rename layer (undone)").last().unwrap().click();
     harness.run_steps(3);
 
@@ -192,4 +209,27 @@ fn clicking_a_history_step_returns_to_it() {
     h.run_steps(3);
     assert_eq!(name(&h), "Step C");
     assert!(!h.state().session.can_redo());
+}
+
+/// The panel has no Undo and Redo buttons; exactly one row reads as the current step, it moves with Ctrl+Z, and undone rows stay clickable
+#[test]
+fn only_the_current_step_is_marked_selected() {
+    let mut harness = history_harness(renamed_session());
+
+    // Undo and redo live in the Edit menu and on their shortcuts, not in a button row under the list
+    assert!(harness.query_by_label(&format!("{} Undo", egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE)).is_none());
+    assert!(harness.query_by_label(&format!("{} Redo", egui_phosphor::regular::ARROW_CLOCKWISE)).is_none());
+
+    let before = current_rows(&harness);
+    assert_eq!(before.len(), 1);
+    assert_eq!(before[0].0, "Rename layer");
+
+    press(&mut harness, Key::Z);
+    let after = current_rows(&harness);
+    assert_eq!(after.len(), 1);
+    assert!(after[0].1 < before[0].1, "the outline moves up a row");
+
+    harness.get_by_label("Rename layer (undone)").click();
+    harness.run_steps(3);
+    assert!(harness.state().session.redo_labels().is_empty());
 }

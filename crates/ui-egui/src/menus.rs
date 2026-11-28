@@ -526,8 +526,8 @@ pub fn shortcuts(app: &mut TextureCraftApp, ctx: &egui::Context) {
             app.ui.export.rename_key = true;
         }
 
-        // Give the hovered texture set list first use of its rename and menu keys
-        if over_set_list {
+        // Give the hovered texture set list first use of its rename and menu keys, as Escape, never under a dialog
+        if over_set_list && !modal_open {
             let menu = input.consume_key(Modifiers::SHIFT, Key::F10) || input.consume_key(Modifiers::NONE, Key::Menu);
             set_list_keys = (input.consume_key(Modifiers::NONE, Key::F2), menu);
         }

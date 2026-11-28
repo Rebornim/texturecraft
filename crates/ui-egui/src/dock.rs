@@ -2097,17 +2097,19 @@ fn brush_preview(app: &TextureCraftApp, ui: &mut Ui) {
     painter.rect_filled(rect, BRUSH_PREVIEW_CORNER_RADIUS, tokens.viewport);
     let half_width = rect.width() * 0.5;
     let stroke_rect = Rect::from_min_size(rect.min, vec2(half_width, rect.height()));
-    let brush = &app.session.tool.brush;
+    let tool = &app.session.tool;
+    let brush = &tool.brush;
     let image = brush.alpha_image.as_ref().and_then(|name| app.session.images.get(name));
-    let value = |channel: Channel| app.session.tool.values.get(&channel).copied();
+
     if content {
-        let srgb = value(Channel::BaseColor).unwrap_or(PREVIEW_FALLBACK_BASE_COLOR).map(|linear| (linear_to_srgb(linear) * 255.0 + 0.5) as u8);
+        let channel_value = |channel| if tool.enabled.contains(&channel) { tool.values.get(&channel).copied() } else { None };
+        let base_color = channel_value(Channel::BaseColor).unwrap_or(PREVIEW_FALLBACK_BASE_COLOR);
+        let srgb = base_color.map(|linear| (linear_to_srgb(linear) * 255.0 + 0.5) as u8);
         BrushStrokePreview::paint(ui.ctx(), painter, stroke_rect, brush, image, |_| srgb);
 
         // The sphere sits in the middle of the preview's right half
-        let metallic = value(Channel::Metallic).map_or(crate::thumbs::SPHERE_DEFAULT_METALLIC, |metallic| metallic[0]);
-        let roughness = value(Channel::Roughness).map_or(crate::thumbs::SPHERE_DEFAULT_ROUGHNESS, |roughness| roughness[0]);
-        let base_color = value(Channel::BaseColor).unwrap_or(PREVIEW_FALLBACK_BASE_COLOR);
+        let metallic = channel_value(Channel::Metallic).map_or(crate::thumbs::SPHERE_DEFAULT_METALLIC, |metallic| metallic[0]);
+        let roughness = channel_value(Channel::Roughness).map_or(crate::thumbs::SPHERE_DEFAULT_ROUGHNESS, |roughness| roughness[0]);
         let center = pos2(rect.left() + half_width * 1.5, rect.center().y);
         crate::thumbs::paint_material_sphere(painter, center, PREVIEW_SPHERE_RADIUS, base_color, metallic, roughness);
     } else {

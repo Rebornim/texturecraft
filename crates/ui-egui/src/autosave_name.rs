@@ -1,5 +1,5 @@
-//! Where a project's autosave copy goes. Each project has a file of its own, `<stem>-copy-<suffix>.tcraft`: a project's
-//! name comes from its mesh file, so the name alone would let projects made from one mesh overwrite each other's copy
+//! Where a project's autosave copy goes. Each project has a file of its own, `<stem>-copy-<suffix>.tcraft`,
+//! even if several projects share a name or a project is renamed.
 
 use std::path::{Path, PathBuf};
 
@@ -45,19 +45,20 @@ impl TextureCraftApp {
     }
 
     /// The open project's autosave file in `folder`. A saved project's copy is named after its file and stays the
-    /// same across restarts; an unsaved project gets one that no other open project or running instance shares
+    /// same across restarts; an unsaved project's copy keeps its first autosave name until the project is saved
     pub(crate) fn autosave_path(&mut self, folder: &Path) -> PathBuf {
         let Some(saved) = self.session.path.as_deref() else {
             let project = self.session.project_id;
-            let suffix = match self.unsaved_autosave_suffix {
-                Some((owner, suffix)) if owner == project => suffix,
-                _ => {
-                    let suffix = new_suffix(project);
-                    self.unsaved_autosave_suffix = Some((project, suffix));
-                    suffix
-                }
-            };
-            return folder.join(file_name(&self.session.doc.project.name, suffix));
+            if let Some((owner, name)) = &self.unsaved_autosave_file
+                && *owner == project
+            {
+                return folder.join(name);
+            }
+
+            let name = file_name(&self.session.doc.project.name, new_suffix(project));
+            let path = folder.join(&name);
+            self.unsaved_autosave_file = Some((project, name));
+            return path;
         };
 
         let saved = absolute(Path::new(saved));
@@ -176,6 +177,23 @@ mod tests {
 
         first.session.switch_to(project("hero"));
         assert_ne!(first.autosave_path(folder), one, "a new project of the same name starts its own copy");
+    }
+
+    #[test]
+    fn renaming_an_unsaved_project_keeps_its_autosave_copy() {
+        let folder = Path::new("autosave");
+        let mut app = app(project("hero"));
+        let copy = app.autosave_path(folder);
+
+        for name in ["Knight", "Knight final"] {
+            texturecraft_engine::execute(&mut app.session, "project.rename", &serde_json::json!({"name": name})).unwrap();
+
+            assert_eq!(app.autosave_path(folder), copy);
+        }
+
+        app.session.switch_to(project("Knight"));
+
+        assert_ne!(app.autosave_path(folder), copy);
     }
 
     #[test]

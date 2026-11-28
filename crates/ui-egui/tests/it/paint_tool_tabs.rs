@@ -94,3 +94,42 @@ fn the_brush_preview_keeps_its_picture_until_the_paint_colour_changes() {
     assert_eq!(recoloured.len(), 1, "the old picture is released");
     assert_ne!(recoloured, first, "a new colour draws a new picture");
 }
+
+#[test]
+fn the_brush_preview_ignores_values_of_disabled_channels() {
+    let mut harness = paint_harness("paint");
+    let preview_meshes = |harness: &Harness<'_, TextureCraftApp>| {
+        let preview = harness.get_by_role_and_label(Role::Image, "Brush preview").rect();
+        let mut meshes = harness.output().shapes.iter().filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Mesh(mesh) if preview.contains_rect(mesh.calc_bounds()) => Some(mesh),
+            _ => None,
+        });
+        let stroke = meshes.find(|mesh| mesh.calc_bounds().right() <= preview.center().x).unwrap();
+        let sphere = meshes.find(|mesh| mesh.calc_bounds().left() >= preview.center().x).unwrap();
+        (stroke.texture_id, sphere.vertices.iter().map(|vertex| vertex.color).collect::<Vec<_>>())
+    };
+
+    for (channel, material) in [
+        ("baseColor", json!({"channel": "baseColor", "color": [0.0, 0.0, 1.0]})),
+        ("metallic", json!({"channel": "metallic", "value": 1.0})),
+        ("roughness", json!({"channel": "roughness", "value": 0.0})),
+    ] {
+        execute(&mut harness.state_mut().session, "tool.material", &material).unwrap();
+        harness.run_steps(1);
+        let enabled = preview_meshes(&harness);
+
+        execute(&mut harness.state_mut().session, "tool.material", &json!({"channel": channel, "enabled": false})).unwrap();
+        harness.run_steps(1);
+        let disabled = preview_meshes(&harness);
+
+        assert!(disabled.1 != enabled.1, "disabling {channel} changes the sphere shading");
+        if channel == "baseColor" {
+            assert_ne!(disabled.0, enabled.0, "disabling base color redraws the tinted stroke");
+        }
+
+        execute(&mut harness.state_mut().session, "tool.material", &json!({"channel": channel, "enabled": true})).unwrap();
+        harness.run_steps(1);
+
+        assert!(preview_meshes(&harness).1 == enabled.1, "re-enabling {channel} restores its stored value in the sphere");
+    }
+}

@@ -779,9 +779,6 @@ fn plan_outputs(project: &Project, ts: usize, mesh_name: &str, opts: &ExportOpti
 
     // Bucket layers in tile order to move their names into the corresponding PSD
     let mut psd_layers = Vec::new();
-
-    // A PSD map scaled past the largest side fails only the set's PSDs, as their other planning failures do
-    let mut psd_too_large = None;
     let project_stem = project.name.replace('/', "_");
     let mesh_stem = mesh_name.replace('/', "_");
     let set_stem = set.name.replace('/', "_");
@@ -795,17 +792,8 @@ fn plan_outputs(project: &Project, ts: usize, mesh_name: &str, opts: &ExportOpti
         let own = opts.maps.get(&map_index);
         let (format, bit_depth, dither) = opts.map_file_type(map_index, map);
         let enabled = own.is_none_or(|o| o.enabled);
-        if enabled && let Err(error) = check_scaled_block(set, (block_width, block_height), opts.map_size(map_index)) {
-            if format != FileFormat::Psd {
-                return Err(error);
-            }
-
-            if psd_too_large.is_none() {
-                psd_too_large = Some(match error {
-                    FormatError::Invalid(reason) => reason,
-                    other => other.to_string(),
-                });
-            }
+        if enabled {
+            check_scaled_block(set, (block_width, block_height), opts.map_size(map_index))?;
         }
 
         let space = opts.space_for_map(map, format, bit_depth);
@@ -938,10 +926,6 @@ fn plan_outputs(project: &Project, ts: usize, mesh_name: &str, opts: &ExportOpti
             (untiled_psd_stem(project, mesh_name, ts, set, opts.atlas), None)
         };
         let (name, renamed) = unique_name(&mut used, &stem, ext, &mut warnings);
-        if let Some(reason) = &psd_too_large {
-            psd_failures.push((name, FormatError::Invalid(reason.clone())));
-            continue;
-        }
         if let Err(error) = layered_psd::preflight(set, opts, tile, bit_depth, layers.iter(), budget.working_bytes) {
             psd_failures.push((name, error));
             continue;
